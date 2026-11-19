@@ -507,6 +507,10 @@ fn spawn_decide(
             AgentProvider::Claude,
             computer,
             &run,
+            runtime
+                .allowances
+                .current_claim(&run.id)
+                .unwrap_or_default(),
             &project,
             &tool,
             &input,

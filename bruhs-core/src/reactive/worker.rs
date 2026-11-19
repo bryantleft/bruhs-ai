@@ -46,7 +46,9 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
                             halted.store(true, std::sync::atomic::Ordering::Release);
                         }
                         // The run has left Running: its steps can't be sent.
-                        runtime.allowances.forget_run(&claim.run.id);
+                        runtime
+                            .allowances
+                            .forget_run(&claim.run.id, claim.generation);
                         runtime.changed();
                     });
                 }
@@ -296,6 +298,7 @@ async fn execute(
                             provider,
                             computer_on(bruh.computer, &bruh.access, provider),
                             &effective_run,
+                            claim.generation,
                             &effective_agent.project_path,
                             &tool,
                             &input,

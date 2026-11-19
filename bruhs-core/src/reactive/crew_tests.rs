@@ -1159,6 +1159,10 @@ fn spawn_decide(
             bruhs_models::agent::AgentProvider::Claude,
             false,
             &run,
+            runtime
+                .allowances
+                .current_claim(&run.id)
+                .unwrap_or_default(),
             &project_path,
             &tool,
             &input,

@@ -49,41 +49,82 @@ pub struct BrowserAllowance {
     pub command: Value,
     /// The page the gate saw it act on, when known.
     pub page_url: Option<String>,
+    /// The attempt at the run that was allowed it ([`Allowances::claim`]).
+    claim: u64,
     expires: Instant,
 }
 
 /// The browser steps allowed and not yet sent, one entry per allowed call,
-/// so identical calls in parallel each run once.
+/// so identical calls in parallel each run once. Each belongs to one claim
+/// of its run: a retry keeps the run's id, so an old attempt's worker that
+/// hasn't noticed its cancel yet can neither leave a step for the new
+/// attempt nor clear the new attempt's steps.
 #[derive(Debug, Default)]
-pub(super) struct Allowances(Mutex<Vec<BrowserAllowance>>);
+pub(super) struct Allowances(Mutex<AllowanceState>);
+
+#[derive(Debug, Default)]
+struct AllowanceState {
+    list: Vec<BrowserAllowance>,
+    /// Each running run's current claim.
+    claims: std::collections::HashMap<String, u64>,
+    last_claim: u64,
+}
 
 impl Allowances {
-    fn list(&self) -> std::sync::MutexGuard<'_, Vec<BrowserAllowance>> {
+    fn state(&self) -> std::sync::MutexGuard<'_, AllowanceState> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// A new claim of `run_id`: earlier attempts' allowances go, and only
+    /// this claim may record from now on.
+    pub(super) fn claim(&self, run_id: &str) -> u64 {
+        let mut state = self.state();
+        state.last_claim = state.last_claim.wrapping_add(1);
+        let claim = state.last_claim;
+        state.claims.insert(run_id.to_owned(), claim);
+        state.list.retain(|kept| kept.run_id != run_id);
+        claim
+    }
+
+    /// The run's current claim, if it has one.
+    #[cfg(test)]
+    pub(super) fn current_claim(&self, run_id: &str) -> Option<u64> {
+        self.state().claims.get(run_id).copied()
+    }
+
+    /// Keep `allowance`, unless its claim is no longer its run's current one.
     fn record(&self, allowance: BrowserAllowance) {
-        let mut list = self.list();
+        let mut state = self.state();
+        if state.claims.get(&allowance.run_id) != Some(&allowance.claim) {
+            return;
+        }
         let now = Instant::now();
-        list.retain(|kept| kept.expires > now);
-        list.push(allowance);
+        state.list.retain(|kept| kept.expires > now);
+        state.list.push(allowance);
     }
 
     /// Take the newest allowance for `agent_id`'s exact `command` that is
-    /// still good at `now`. Expired ones go.
+    /// still good at `now`, from its run's current claim. Expired ones go.
     fn take(&self, agent_id: &str, command: &Value, now: Instant) -> Option<BrowserAllowance> {
-        let mut list = self.list();
-        list.retain(|kept| kept.expires > now);
+        let mut state = self.state();
+        let AllowanceState { list, claims, .. } = &mut *state;
+        list.retain(|kept| kept.expires > now && claims.get(&kept.run_id) == Some(&kept.claim));
         let index = list
             .iter()
             .rposition(|kept| kept.agent_id == agent_id && &kept.command == command)?;
         Some(list.remove(index))
     }
 
-    /// Drop every allowance of `run_id`'s attempts so far. A claim calls it
-    /// as the run starts (again), since a retry keeps the run's id.
-    pub(super) fn forget_run(&self, run_id: &str) {
-        self.list().retain(|kept| kept.run_id != run_id);
+    /// Claim `claim` of `run_id` has ended: its allowances go, and the run
+    /// has no current claim unless a newer one took over.
+    pub(super) fn forget_run(&self, run_id: &str, claim: u64) {
+        let mut state = self.state();
+        state
+            .list
+            .retain(|kept| kept.run_id != run_id || kept.claim != claim);
+        if state.claims.get(run_id) == Some(&claim) {
+            state.claims.remove(run_id);
+        }
     }
 }
 
@@ -136,23 +177,27 @@ impl ReactiveRuntime {
         command: Value,
         page_url: Option<String>,
     ) {
+        let Some(claim) = self.allowances.state().claims.get(&run.id).copied() else {
+            return;
+        };
         self.allowances.record(BrowserAllowance {
             agent_id: run.agent_id.clone(),
             run_id: run.id.clone(),
             command,
             page_url,
+            claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         });
     }
 
-    /// Claim the next queued run, forgetting the allowances its earlier
-    /// attempts left, under the same database lock.
+    /// Claim the next queued run as a new attempt, forgetting the
+    /// allowances its earlier attempts left, under the same database lock.
     pub(super) async fn claim_next(&self) -> Result<Option<store::Claim>, ReactiveError> {
         let allowances = Arc::clone(&self.allowances);
         self.call(move |connection| {
-            let claim = store::claim_next(connection)?;
-            if let Some(claim) = &claim {
-                allowances.forget_run(&claim.run.id);
+            let mut claim = store::claim_next(connection)?;
+            if let Some(claim) = &mut claim {
+                claim.generation = allowances.claim(&claim.run.id);
             }
             Ok(claim)
         })
@@ -344,7 +389,8 @@ enum Opened {
 /// The answer to one tool call of an unattended bruh run: the gate's own
 /// answer, a late approval's one-shot grant, or the owner's answer to a new
 /// approval. Every call first waits while the owner has the bruh's
-/// computer. `None` means the run stopped while it waited.
+/// computer. `None` means the run stopped while it waited. `claim` is the
+/// worker's attempt at `run`, which an allowed browser step belongs to.
 ///
 /// The owner's hold and the approval are separate waits, each bounded by
 /// `timeout`, so one call waits at most twice `timeout`: an approval asked
@@ -359,6 +405,7 @@ pub(super) async fn decide(
     provider: AgentProvider,
     computer: bool,
     run: &ReactiveRun,
+    claim: u64,
     project_path: &str,
     tool: &str,
     input: &Value,
@@ -402,6 +449,7 @@ pub(super) async fn decide(
                 run_id: run.id.clone(),
                 command: input["command"].clone(),
                 page_url: input["page_url"].as_str().map(str::to_owned),
+                claim,
                 expires: Instant::now() + ALLOWANCE_TTL,
             });
         }
@@ -541,11 +589,13 @@ mod tests {
     fn an_allowance_lasts_until_the_helpers_deadline() {
         let allowances = Allowances::default();
         let command = serde_json::json!({"action": "snapshot"});
+        let claim = allowances.claim("r");
         let allowance = |expires| BrowserAllowance {
             agent_id: "a".into(),
             run_id: "r".into(),
             command: command.clone(),
             page_url: None,
+            claim,
             expires,
         };
         let now = Instant::now();
@@ -557,6 +607,42 @@ mod tests {
         assert!(allowances.take("a", &command, deadline).is_none());
         // An expired allowance is gone for good.
         assert!(allowances.take("a", &command, just_before).is_none());
+    }
+
+    /// An old attempt's worker, still running after a cancel and a retry
+    /// claimed the run again, can neither leave a step for the new attempt
+    /// nor clear the new attempt's steps when it ends.
+    #[test]
+    fn an_old_attempt_never_records_into_or_forgets_a_new_one() {
+        let allowances = Allowances::default();
+        let command = serde_json::json!({"action": "snapshot"});
+        let allowance = |claim| BrowserAllowance {
+            agent_id: "a".into(),
+            run_id: "r".into(),
+            command: command.clone(),
+            page_url: None,
+            claim,
+            expires: Instant::now() + ALLOWANCE_TTL,
+        };
+        let old = allowances.claim("r");
+        allowances.record(allowance(old));
+        let new = allowances.claim("r");
+        assert!(
+            allowances.take("a", &command, Instant::now()).is_none(),
+            "a claim forgets earlier attempts"
+        );
+        allowances.record(allowance(old));
+        assert!(allowances.take("a", &command, Instant::now()).is_none());
+        allowances.record(allowance(new));
+        allowances.forget_run("r", old);
+        assert_eq!(allowances.current_claim("r"), Some(new));
+        let taken = allowances.take("a", &command, Instant::now()).unwrap();
+        assert_eq!(taken.claim, new);
+        // Once the new attempt ends, nothing records for the run.
+        allowances.forget_run("r", new);
+        assert_eq!(allowances.current_claim("r"), None);
+        allowances.record(allowance(new));
+        assert!(allowances.take("a", &command, Instant::now()).is_none());
     }
 
     /// A name that resolves here is this computer, whatever it reads as;
