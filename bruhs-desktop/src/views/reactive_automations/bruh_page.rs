@@ -11,6 +11,7 @@ use super::create_bruh::{
 };
 use super::face_editor::still_view;
 use super::transcript_list::{transcript_view, TranscriptList};
+use super::vault_grants::{toggle, vault_grants, VaultGrantsState};
 use super::*;
 use crate::views::braille::braille_face;
 use crate::views::chat::{desktop_markdown_style, untrusted_markdown};
@@ -24,9 +25,9 @@ use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
     computer_switch_follows, computer_switch_off, computer_switch_reason, current_settings,
     job_line, line_key, may_have_more, merge_runs, settings_commands_for, status_line, transcript,
-    vault_grants_follow, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus,
-    TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX,
-    SEND_AS_ME_HINT,
+    vault_grants_follow, vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings,
+    BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX,
+    RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -176,8 +177,8 @@ struct SettingsForm {
     send_as_me: bool,
     can_deliver: bool,
     computer: bool,
-    /// Vault grants have no picker yet: they follow the stored grants
-    /// ([`Self::sync_vault`]), so Save never sends SetVault.
+    /// The Vault section's picks. Save sends SetVault only when they
+    /// differ from the stored grants ([`Self::sync_vault`]).
     vault: Vec<String>,
     look: BruhLook,
     invalid: Option<String>,
@@ -311,11 +312,19 @@ impl SettingsForm {
         }
     }
 
-    /// The grants follow the stored ones while the owner hasn't changed
-    /// them since the fill (`vault_grants_follow`). The page has no vault
-    /// section yet, so it is never off.
-    fn sync_vault(&mut self, stored: &[String]) {
-        if let Some(stored) = vault_grants_follow(&self.vault, &self.shown.vault, stored, false) {
+    /// Why the Vault section is off: the model and level first, then the
+    /// service's `reason` (web `vault_block`).
+    fn vault_block(&self, reason: Option<&'static str>, cx: &App) -> Option<&'static str> {
+        let provider = AgentProvider::for_model(&value(&self.model, cx));
+        vault_unavailable(self.level, provider).or(reason)
+    }
+
+    /// The grants follow the stored ones while the section is `off`, while
+    /// the owner hasn't changed them since the fill, and once the picks
+    /// match them (`vault_grants_follow`), so Save never puts back grants
+    /// another app replaced or sends a pick the section no longer offers.
+    fn sync_vault(&mut self, stored: &[String], off: bool) {
+        if let Some(stored) = vault_grants_follow(&self.vault, &self.shown.vault, stored, off) {
             self.vault.clone_from(&stored);
             self.shown.vault = stored;
         }
@@ -354,6 +363,8 @@ pub(super) struct BruhPage {
     computer: Option<Entity<ComputerView>>,
     /// The Computer tab takes control once it can (a smoke scene).
     hold_computer: bool,
+    /// The vault listing behind Settings' Vault section, while it shows.
+    vault: VaultGrantsState,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -379,6 +390,7 @@ impl BruhPage {
             width: Rc::new(Cell::new(0.0)),
             computer: None,
             hold_computer: false,
+            vault: VaultGrantsState::default(),
             _subscriptions: Vec::new(),
         }
     }
@@ -413,9 +425,9 @@ pub(super) fn page_button(
 }
 
 /// Web `Switch`: persimmon track when on, longan with a white/10 ring off.
-fn page_switch(
+pub(super) fn page_switch(
     id: &'static str,
-    text: &'static str,
+    text: impl Into<SharedString>,
     checked: bool,
     disabled: bool,
     cx: &Context<'_, ReactiveAutomations>,
@@ -683,8 +695,9 @@ impl ReactiveAutomations {
 
     /// Keep the open settings' Computer switch and vault grants on the
     /// stored values where the owner can't or didn't change them.
-    pub(super) fn sync_bruh_computer(&mut self, cx: &App) {
+    pub(super) fn sync_bruh_stored(&mut self, cx: &App) {
         let protocol = self.crew.protocol;
+        let vault_reason = self.vault_reason();
         let Some(agent_id) = self.bruh_page_agent() else {
             return;
         };
@@ -696,8 +709,23 @@ impl ReactiveAutomations {
         };
         if let Some(form) = self.bruh_settings_mut() {
             form.sync_computer(stored, protocol, cx);
-            form.sync_vault(&vault);
+            let off = form.vault_block(vault_reason, cx).is_some();
+            form.sync_vault(&vault, off);
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn bruh_vault(&self) -> Option<&VaultGrantsState> {
+        self.bruh.as_ref().map(|page| &page.vault)
+    }
+
+    pub(super) fn bruh_vault_mut(&mut self) -> Option<&mut VaultGrantsState> {
+        self.bruh.as_mut().map(|page| &mut page.vault)
+    }
+
+    /// Grant entry `id` to the open bruh, or take it back, in the form.
+    pub(super) fn toggle_bruh_grant(&mut self, id: &str, on: bool, cx: &mut Context<'_, Self>) {
+        self.edit_bruh_settings(|form| toggle(&mut form.vault, id, on), cx);
     }
 
     fn bruh_state(&self, agent_id: &str) -> Option<&BruhState> {
@@ -804,6 +832,13 @@ impl ReactiveAutomations {
     /// The page's inputs and data, made before it draws. The work runs only
     /// when the snapshot or the runs changed since the last frame.
     pub(super) fn ensure_bruh_page(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        // Settings reads the vault listing as it opens and forgets it as
+        // it closes, as the web's section does.
+        match self.bruh.as_mut() {
+            Some(page) if page.tab != BruhTab::Settings => page.vault.reset(),
+            Some(page) if page.vault.idle() => self.load_bruh_vault(cx),
+            _ => {}
+        }
         let client = self.client.clone();
         let panel = cx.weak_entity();
         let Some(page) = self.bruh.as_mut() else {
@@ -1020,8 +1055,9 @@ impl ReactiveAutomations {
             return;
         };
         form.clamp(cx);
-        // A level the clamp lowered can turn the Computer switch off.
-        self.sync_bruh_computer(cx);
+        // A level the clamp lowered can turn the Computer switch and the
+        // Vault section off.
+        self.sync_bruh_stored(cx);
         let Some(page) = self.bruh.as_mut() else {
             return;
         };
@@ -1854,7 +1890,10 @@ impl ReactiveAutomations {
     }
 
     fn render_bruh_settings(&self, layout: Layout, cx: &Context<'_, Self>) -> Div {
-        let Some(form) = self.bruh.as_ref().and_then(|page| page.settings.as_ref()) else {
+        let Some(page) = self.bruh.as_ref() else {
+            return div();
+        };
+        let Some(form) = page.settings.as_ref() else {
             return div();
         };
         let saved = self
@@ -1932,6 +1971,7 @@ impl ReactiveAutomations {
         let full = form.level == AccessLevel::Full;
         let (computer_reason, computer_off) =
             form.computer_block(self.crew.protocol, self.computer_unsupported(), cx);
+        let vault_block = form.vault_block(self.vault_reason(), cx);
         let access = section("What it may do")
             .child(
                 div()
@@ -2100,7 +2140,14 @@ impl ReactiveAutomations {
                             this.edit_bruh_settings(|form| form.computer = !form.computer, cx)
                         },
                     )),
-            );
+            )
+            .child(vault_grants(
+                &page.vault,
+                &page.agent_id,
+                &form.vault,
+                vault_block,
+                cx,
+            ));
         let face = section("Face").child(self.render_face_editor(&form.look, cx));
         div()
             .debug_selector(|| "desktop-bruh-settings-form".to_string())
@@ -2485,6 +2532,285 @@ mod tests {
                 agent_id: "a".into(),
                 on: false
             })
+        );
+    }
+
+    fn vault_entry(
+        id: &str,
+        name: &str,
+        scope: bruhs_models::vault::CredentialScope,
+        kind: bruhs_models::vault::VaultKind,
+    ) -> bruhs_models::vault::VaultEntry {
+        bruhs_models::vault::VaultEntry {
+            id: id.into(),
+            name: name.into(),
+            scope,
+            kind,
+            state: bruhs_models::secrets::SavedCredentialState::Saved,
+            attention: None,
+        }
+    }
+
+    /// Two shared entries, one of Ada's own and one of another bruh's.
+    fn vault_listing() -> bruhs_models::vault::VaultListing {
+        use bruhs_models::vault::{CredentialScope, LoginFields, LoginMeta, VaultKind};
+        let login = VaultKind::Login(LoginMeta {
+            url: "https://github.com/login".into(),
+            fields: LoginFields::Saved {
+                username: "me".into(),
+                totp: false,
+            },
+        });
+        let own = |agent_id: &str| CredentialScope::Bruh {
+            agent_id: agent_id.into(),
+        };
+        bruhs_models::vault::VaultListing {
+            entries: vec![
+                vault_entry("v1-g", "GitHub", CredentialScope::Global, login),
+                vault_entry("v1-k", "Deploy", CredentialScope::Global, VaultKind::Value),
+                vault_entry("v1-s", "Shop", own("a"), VaultKind::Value),
+                vault_entry("v1-o", "Other", own("b"), VaultKind::Value),
+            ],
+            ..bruhs_models::vault::VaultListing::default()
+        }
+    }
+
+    fn vault_snapshot(level: AccessLevel, protocol: u32, grants: &[&str]) -> ReactiveSnapshot {
+        let mut snapshot = computer_snapshot(level, protocol, false);
+        snapshot.bruhs[0].vault = grants.iter().map(|id| (*id).to_string()).collect();
+        snapshot
+    }
+
+    fn answer_vault(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+        result: Result<bruhs_models::vault::VaultListing, crate::server_client::ServerError>,
+    ) {
+        panel.update(cx, |panel, cx| panel.answer_bruh_vault_for_test(result, cx));
+        cx.run_until_parked();
+    }
+
+    fn refused(code: reqwest::StatusCode) -> crate::server_client::ServerError {
+        crate::server_client::ServerError::Status {
+            request: "GET /api/vault".into(),
+            code,
+            body: String::new(),
+        }
+    }
+
+    /// The picks as the form has them, and why the section is off.
+    fn vault_picks(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+    ) -> (Vec<String>, Option<&'static str>) {
+        panel.update(cx, |panel, cx| {
+            let service = panel.vault_reason();
+            let form = panel.bruh_settings_mut().unwrap();
+            (form.vault.clone(), form.vault_block(service, cx))
+        })
+    }
+
+    fn set_vault_count(sent: &[ReactiveCommand]) -> usize {
+        sent.iter()
+            .filter(|command| matches!(command, ReactiveCommand::SetVault { .. }))
+            .count()
+    }
+
+    #[gpui::test]
+    fn vault_grants_follow_the_store_and_save_once(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.bruh_vault_requests_for_test()),
+            vec!["GET /api/vault".to_string()],
+            "Settings asks for the listing once"
+        );
+        assert!(cx.debug_bounds("desktop-bruh-vault-loading").is_some());
+        answer_vault(&panel, cx, Ok(vault_listing()));
+        assert!(cx.debug_bounds("desktop-bruh-vault").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-vault-reason").is_none());
+        // Its own entry is a line; shared ones are switches; another bruh's
+        // entry is never offered.
+        assert!(cx.debug_bounds("desktop-bruh-vault-own-v1-s").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-vault-grant-v1-s").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-own-v1-o").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-grant-v1-o").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-none").is_none());
+        // By name, one control row apart plus the 4px gap.
+        let deploy = cx.debug_bounds("desktop-bruh-vault-grant-v1-k").unwrap();
+        let github = cx.debug_bounds("desktop-bruh-vault-grant-v1-g").unwrap();
+        assert_eq!(
+            github.center().y - deploy.center().y,
+            gpui::px(theme::CONTROL_PX + 4.0)
+        );
+        assert_eq!(vault_picks(&panel, cx), (Vec::new(), None));
+
+        click(cx, "desktop-bruh-vault-grant-v1-g");
+        assert_eq!(vault_picks(&panel, cx).0, vec!["v1-g".to_string()]);
+        // A snapshot that changes another field leaves the picks alone.
+        let mut other = vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[]);
+        other.bruhs[0].access.send_as_me = true;
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(other, cx);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(vault_picks(&panel, cx).0, vec!["v1-g".to_string()]);
+        click(cx, "desktop-bruh-save");
+        let sent_now = sent(&panel, cx);
+        assert_eq!(
+            sent_now.last(),
+            Some(&ReactiveCommand::SetVault {
+                agent_id: "a".into(),
+                entries: vec!["v1-g".into()],
+            }),
+            "{sent_now:?}"
+        );
+        assert_eq!(set_vault_count(&sent_now), 1);
+
+        // Stored; then another app replaces the grants while the form is
+        // untouched: the picks follow.
+        for grants in [&["v1-g"], &["v1-k"]] {
+            panel.update(cx, |panel, cx| {
+                panel.set_snapshot(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, grants), cx);
+                cx.notify();
+            });
+            cx.run_until_parked();
+        }
+        assert_eq!(vault_picks(&panel, cx).0, vec!["v1-k".to_string()]);
+        // With only the face edited, replaced grants follow too, and Save
+        // doesn't put the older ones back.
+        click(cx, "desktop-bruh-face-swatch-Pandan");
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(
+                vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &["v1-g", "v1-k"]),
+                cx,
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            vault_picks(&panel, cx).0,
+            vec!["v1-g".to_string(), "v1-k".to_string()]
+        );
+        click(cx, "desktop-bruh-save");
+        let sent_now = sent(&panel, cx);
+        assert_eq!(set_vault_count(&sent_now), 1, "{sent_now:?}");
+        assert!(
+            matches!(sent_now.last(), Some(ReactiveCommand::SetBruh { look, .. }) if look.face == BruhColor::Pandan),
+            "{sent_now:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn an_older_service_disables_the_vault_section(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, 3, &[])),
+            BruhTab::Settings,
+        );
+        // A listing from somewhere still draws its switches, all off.
+        answer_vault(&panel, cx, Ok(vault_listing()));
+        let reason = bruhs_models::crew::vault_reason(Some(3));
+        assert!(reason.is_some());
+        assert_eq!(vault_picks(&panel, cx), (Vec::new(), reason));
+        assert!(cx.debug_bounds("desktop-bruh-vault-reason").is_some());
+        click(cx, "desktop-bruh-vault-grant-v1-g");
+        assert_eq!(vault_picks(&panel, cx).0, Vec::<String>::new());
+        // A pick made before the section went off snaps back.
+        panel.update(cx, |panel, cx| {
+            panel.bruh_settings_mut().unwrap().vault = vec!["v1-g".into()];
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(vault_picks(&panel, cx).0, Vec::<String>::new());
+        click(cx, "desktop-bruh-face-swatch-Pandan");
+        panel.update(cx, |panel, _| {
+            panel.bruh_settings_mut().unwrap().vault = vec!["v1-g".into()];
+        });
+        click(cx, "desktop-bruh-save");
+        let sent_now = sent(&panel, cx);
+        assert_eq!(set_vault_count(&sent_now), 0, "{sent_now:?}");
+        assert!(
+            matches!(&sent_now[..], [ReactiveCommand::SetBruh { .. }]),
+            "{sent_now:?}"
+        );
+        // The older server has no listing; the reason already says why.
+        answer_vault(&panel, cx, Err(refused(reqwest::StatusCode::NOT_FOUND)));
+        assert!(cx.debug_bounds("desktop-bruh-vault-notice").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-reason").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-vault-grant-v1-g").is_none());
+    }
+
+    #[gpui::test]
+    fn a_blocked_vault_section_snaps_back_to_the_stored_grants(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &["v1-k"])),
+            BruhTab::Settings,
+        );
+        answer_vault(&panel, cx, Ok(vault_listing()));
+        click(cx, "desktop-bruh-vault-grant-v1-g");
+        assert_eq!(
+            vault_picks(&panel, cx).0,
+            vec!["v1-g".to_string(), "v1-k".to_string()]
+        );
+        click(cx, "desktop-bruh-access-read-only");
+        assert_eq!(
+            vault_picks(&panel, cx),
+            (
+                vec!["v1-k".to_string()],
+                Some(bruhs_models::crew::VAULT_NEEDS_ASK_OR_FULL)
+            )
+        );
+        assert!(cx.debug_bounds("desktop-bruh-vault-reason").is_some());
+        click(cx, "desktop-bruh-save");
+        let sent_now = sent(&panel, cx);
+        assert_eq!(set_vault_count(&sent_now), 0, "{sent_now:?}");
+    }
+
+    #[gpui::test]
+    fn the_vault_section_shows_why_it_has_no_list(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        // Only the owner's own app may list the vault (ruling F26).
+        answer_vault(&panel, cx, Err(refused(reqwest::StatusCode::FORBIDDEN)));
+        assert!(cx.debug_bounds("desktop-bruh-vault-notice").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-vault-grant-v1-g").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-refresh").is_none());
+        // Any other failure offers Refresh, which asks again.
+        answer_vault(
+            &panel,
+            cx,
+            Err(refused(reqwest::StatusCode::INTERNAL_SERVER_ERROR)),
+        );
+        assert!(cx.debug_bounds("desktop-bruh-vault-notice").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-vault-error").is_some());
+        click(cx, "desktop-bruh-vault-refresh");
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.bruh_vault_requests_for_test()),
+            vec!["GET /api/vault".to_string(), "GET /api/vault".to_string()]
+        );
+        assert!(cx.debug_bounds("desktop-bruh-vault-loading").is_some());
+        // No shared entries yet.
+        answer_vault(&panel, cx, Ok(bruhs_models::vault::VaultListing::default()));
+        assert!(cx.debug_bounds("desktop-bruh-vault-none").is_some());
+        // Leaving Settings forgets the listing; coming back asks again.
+        panel.update(cx, |panel, cx| panel.set_bruh_tab(BruhTab::Chat, cx));
+        cx.run_until_parked();
+        panel.update(cx, |panel, cx| panel.set_bruh_tab(BruhTab::Settings, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            panel
+                .read_with(cx, |panel, _| panel.bruh_vault_requests_for_test())
+                .len(),
+            3
         );
     }
 

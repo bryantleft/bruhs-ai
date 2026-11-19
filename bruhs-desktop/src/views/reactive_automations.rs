@@ -27,6 +27,7 @@ mod runs;
 mod setup;
 mod transcript_list;
 mod updates;
+mod vault_grants;
 mod weekly_reports;
 pub(crate) use bruh_page::ReactiveOpenAutomations;
 use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
@@ -1594,6 +1595,20 @@ impl ReactiveAutomations {
     pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
         bruhs_models::crew::room::rooms_reason(self.crew.protocol)
     }
+    /// Whether the service keeps vault grants. Unknown counts as not yet.
+    pub(crate) fn vault_ready(&self) -> bool {
+        self.crew
+            .protocol
+            .is_some_and(bruhs_models::crew::vault_ready)
+    }
+    /// Why vault grants are off, once the service is known to be older.
+    /// Empty while they work.
+    pub(crate) fn vault_reason(&self) -> Option<&'static str> {
+        if self.vault_ready() {
+            return None;
+        }
+        bruhs_models::crew::vault_reason(self.crew.protocol)
+    }
     /// Whether the service runs bruh Computers. Unknown counts as not yet.
     pub(crate) fn computer_ready(&self) -> bool {
         self.crew
@@ -2040,7 +2055,7 @@ impl Render for ReactiveAutomations {
         }
         if let Some(agent_id) = self.bruh_page_agent().map(str::to_string) {
             self.ensure_bruh_page(_window, cx);
-            self.sync_bruh_computer(cx);
+            self.sync_bruh_stored(cx);
             return self
                 .render_bruh_page(&agent_id, _window, cx)
                 .into_any_element();
