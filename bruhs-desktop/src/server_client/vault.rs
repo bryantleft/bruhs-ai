@@ -5,18 +5,16 @@
 //! A native client sends no `Origin`, which the owner-only routes allow.
 use super::{ServerClient, ServerError};
 use bruhs_models::vault::{
-    VaultCheck, VaultCreate, VaultEntry, VaultListing, VaultUpdate, VAULT_FAILED, VAULT_UNREACHABLE,
+    vault_failure_message, VaultCheck, VaultCreate, VaultEntry, VaultFailure, VaultListing,
+    VaultUpdate, VAULT_CALL_TIMEOUT_MS,
 };
 use serde::Serialize;
 use std::time::Duration;
 
 const VAULT_PATH: &str = "/api/vault";
-/// A vault change or check can wait on a keychain or 1Password prompt: the
-/// server bounds a read by 30 seconds and `op` by 25, so the page waits
-/// longer than both before it gives up.
-const VAULT_TIMEOUT: Duration = Duration::from_secs(75);
-/// The longest server message shown; longer bodies aren't messages.
-const MAX_MESSAGE_LEN: usize = 512;
+/// The web's limit too ([`VAULT_CALL_TIMEOUT_MS`]): a keychain or
+/// 1Password prompt can hold the server, so the page outwaits its bounds.
+const VAULT_TIMEOUT: Duration = Duration::from_millis(VAULT_CALL_TIMEOUT_MS as u64);
 
 /// `/api/vault/{id}`, the id percent-encoded as one path segment.
 pub(crate) fn vault_entry_path(id: &str) -> String {
@@ -38,34 +36,28 @@ pub(crate) fn vault_check_path(id: &str) -> String {
 }
 
 impl ServerError {
-    /// What the vault page shows for a failed call. A refusal (4xx) or an
-    /// unavailable keychain or 1Password (503) carries the vault routes'
-    /// own sentence, which is fixed copy from `bruhs_models::vault` and core's
-    /// vault errors and never holds a value (`bruhs-server`
-    /// `routes/vault.rs`). Anything else, a 500 or a body that isn't the
-    /// server's `{"error": …}`, shows fixed copy, as does no answer at all.
+    /// What the vault page shows for a failed call, by the rule both apps
+    /// share (`bruhs_models::vault::vault_failure_message`): a refusal's or
+    /// an unavailable store's own sentence from the server's
+    /// `{"error": …}`, else fixed copy. No answer in time, a timeout
+    /// included, says the service couldn't be reached.
     pub(crate) fn vault_message(&self) -> String {
-        let fixed = match self {
-            Self::Transport { .. } => VAULT_UNREACHABLE,
-            _ => VAULT_FAILED,
+        let json = match self {
+            Self::Status { body, .. } => serde_json::from_str::<serde_json::Value>(body).ok(),
+            _ => None,
         };
-        let Self::Status { code, body, .. } = self else {
-            return fixed.into();
+        let failure = match self {
+            Self::Transport { .. } => VaultFailure::NoAnswer,
+            Self::Status { code, .. } => VaultFailure::Status {
+                code: code.as_u16(),
+                error: json
+                    .as_ref()
+                    .and_then(|value| value.get("error"))
+                    .and_then(serde_json::Value::as_str),
+            },
+            Self::Decode { .. } | Self::Invalid(_) | Self::Client(_) => VaultFailure::Other,
         };
-        if !(code.is_client_error() || *code == reqwest::StatusCode::SERVICE_UNAVAILABLE) {
-            return fixed.into();
-        }
-        serde_json::from_str::<serde_json::Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("error")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|detail| !detail.is_empty() && detail.len() <= MAX_MESSAGE_LEN)
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| fixed.into())
+        vault_failure_message(failure).into()
     }
 }
 

@@ -208,7 +208,7 @@ export class Page {
     try {
       if (url.origin === this.origin) { await this.send('Fetch.continueRequest', { requestId }); return; }
       if (loopback(url.hostname) && url.pathname.startsWith('/api/')) {
-        const answer = this.api && (request.method === 'OPTIONS' ? { status: 204, body: null } : this.api({ method: request.method, url, body: request.postData ?? null }));
+        const answer = this.api && (request.method === 'OPTIONS' ? { status: 204, body: null } : await this.api({ method: request.method, url, body: request.postData ?? null }));
         if (answer === 'stream') {
           await this.send('Fetch.continueRequest', { requestId, url: `${this.origin}/__qa_stream` });
           return;
@@ -235,7 +235,8 @@ export class Page {
   /**
    * `api`, if given, answers loopback /api requests: it gets
    * `{ method, url, body }` and returns `{ status, body }` (JSON), the string
-   * 'stream' for a quiet event stream, or nothing to refuse the request.
+   * 'stream' for a quiet event stream, or nothing to refuse the request; or
+   * a promise of one, to answer late (or, never settling, not at all).
    */
   async init({ width = 1280, height = 800, touch = false, initScripts = [], timezone = undefined, api = undefined } = {}) {
     this.api = api;

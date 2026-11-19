@@ -95,6 +95,45 @@ pub const VAULT_UNREACHABLE: &str =
     "Bruhs couldn't reach its service. Check that it's running, then refresh.";
 /// A vault call the service failed in a way that has no fixed copy.
 pub const VAULT_FAILED: &str = "The vault couldn't do that. Refresh and try again.";
+/// How long either app waits for one vault call. A change or a check can
+/// wait on a keychain or 1Password prompt: the server bounds a read by 30
+/// seconds and `op` by 25, so the page waits longer than both before it
+/// gives up with [`VAULT_UNREACHABLE`] and its buttons come back.
+pub const VAULT_CALL_TIMEOUT_MS: u32 = 75_000;
+/// The longest service sentence a vault page shows; a longer body isn't
+/// one of the routes' messages.
+const MAX_VAULT_MESSAGE_LEN: usize = 512;
+
+/// Why a vault call failed, as either app saw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultFailure<'a> {
+    /// No answer in time: the service is down, unreachable or stuck.
+    NoAnswer,
+    /// The service answered `code`, with `error` its `{"error": …}`
+    /// sentence when it sent one.
+    Status { code: u16, error: Option<&'a str> },
+    /// An answer the app couldn't read, or a call it couldn't send.
+    Other,
+}
+
+/// What a vault page shows for a failed call, on both apps. A refusal
+/// (4xx) or an unavailable keychain or 1Password (503) shows the vault
+/// routes' own sentence, which is fixed copy from this module and core's
+/// vault errors and never holds a value (`bruhs-server` `routes/vault.rs`).
+/// Anything else, a 500 or a body that isn't a short sentence, shows
+/// [`VAULT_FAILED`], and no answer at all [`VAULT_UNREACHABLE`].
+#[must_use]
+pub fn vault_failure_message(failure: VaultFailure<'_>) -> &str {
+    match failure {
+        VaultFailure::NoAnswer => VAULT_UNREACHABLE,
+        VaultFailure::Other => VAULT_FAILED,
+        VaultFailure::Status { code, error } => error
+            .map(str::trim)
+            .filter(|_| (400..500).contains(&code) || code == 503)
+            .filter(|error| !error.is_empty() && error.len() <= MAX_VAULT_MESSAGE_LEN)
+            .unwrap_or(VAULT_FAILED),
+    }
+}
 
 // Route copy (D22).
 /// A vault request body that isn't an entry. Never repeats the body.
@@ -825,6 +864,39 @@ pub fn same_origin(page_url: Option<&str>, origin: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Both apps show a failed vault call this way (V Task 14 minor): only
+    /// a refusal's or an unavailable store's own sentence, else fixed copy.
+    #[test]
+    fn a_failed_vault_call_shows_only_the_services_fixed_sentence() {
+        let status = |code, error| vault_failure_message(VaultFailure::Status { code, error });
+        assert_eq!(status(409, Some(DUPLICATE_NAME)), DUPLICATE_NAME);
+        assert_eq!(status(403, Some(OWNER_ONLY)), OWNER_ONLY);
+        let keychain = "Could not access the OS credential store. Unlock it and retry.";
+        assert_eq!(status(503, Some(keychain)), keychain);
+        assert_eq!(status(400, Some(" padded ")), "padded");
+        // A 500 or a 502 can carry any internal text; it never shows.
+        assert_eq!(
+            status(500, Some("snapshot failed: /private/path")),
+            VAULT_FAILED
+        );
+        assert_eq!(status(502, Some("proxy")), VAULT_FAILED);
+        for unreadable in [None, Some(""), Some("   ")] {
+            assert_eq!(status(400, unreadable), VAULT_FAILED);
+        }
+        let long = "x".repeat(513);
+        assert_eq!(status(400, Some(&long)), VAULT_FAILED);
+        assert_eq!(status(400, Some(&long[..512])), &long[..512]);
+        // No answer in time says so the same way on both apps.
+        assert_eq!(
+            vault_failure_message(VaultFailure::NoAnswer),
+            VAULT_UNREACHABLE
+        );
+        assert_eq!(vault_failure_message(VaultFailure::Other), VAULT_FAILED);
+        // The page outwaits the server's own bounds: a 30 s keychain read
+        // and a 25 s `op` call.
+        assert_eq!(VAULT_CALL_TIMEOUT_MS, 75_000);
+    }
 
     /// Compiles only while `T` implements neither `Debug` nor `Clone`: with
     /// either, the trait call below has two candidate impls and is ambiguous.

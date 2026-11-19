@@ -47,6 +47,29 @@ fn unique_id(prefix: &str) -> String {
     format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
+/// Whether focus is on the Vault page, or on nothing at all (a pressed
+/// button that waits is disabled, which can drop its focus to the body).
+/// A late answer moves focus only then, as the desktop's does (BC M1): by
+/// the time a keychain prompt is answered the owner may be in another
+/// Settings section or elsewhere in the app.
+fn focus_on_page(page: NodeRef<html::Div>) -> bool {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return false;
+    };
+    let Some(active) = document.active_element() else {
+        return true;
+    };
+    if document
+        .body()
+        .is_some_and(|body| AsRef::<web_sys::Element>::as_ref(&body) == &active)
+    {
+        return true;
+    }
+    page.try_get_untracked()
+        .flatten()
+        .is_some_and(|page| page.contains(Some(active.as_ref())))
+}
+
 /// Focus `target` once the view has drawn it.
 fn focus_after_render(target: NodeRef<html::Button>) {
     request_animation_frame(move || {
@@ -85,6 +108,7 @@ pub fn VaultSettings() -> impl IntoView {
     let open = RwSignal::new(Open::None);
     let notice = RwSignal::new(None::<&'static str>);
     let new_ref = NodeRef::<html::Button>::new();
+    let page_ref = NodeRef::<html::Div>::new();
     let wait =
         Signal::derive(move || load.with(|load| wait_reason(busy.get(), *load == Load::Loading)));
     // New entry also waits for a listing it can add to.
@@ -104,7 +128,10 @@ pub fn VaultSettings() -> impl IntoView {
                 Ok(next) => (next, Load::Ready),
                 Err(error) if error.is_status(404) => (VaultListing::default(), Load::ServingOld),
                 Err(error) if error.is_status(403) => (VaultListing::default(), Load::OwnerOnly),
-                Err(error) => (VaultListing::default(), Load::Failed(error.to_string())),
+                Err(error) => (
+                    VaultListing::default(),
+                    Load::Failed(crate::api::vault_message(&error)),
+                ),
             };
             listing.try_set(next);
             generation.try_update(|generation| *generation = generation.wrapping_add(1));
@@ -122,9 +149,13 @@ pub fn VaultSettings() -> impl IntoView {
         });
         notice.try_set(Some(ENTRY_UPDATED));
     });
+    // Cancel runs from inside the form; a Save's answer can land anywhere.
     let close_new = Callback::new(move |_: ()| {
+        let held = focus_on_page(page_ref);
         open.try_set(Open::None);
-        focus_after_render(new_ref);
+        if held {
+            focus_after_render(new_ref);
+        }
     });
     let bruhs = Signal::derive(move || listing.with(|listing| listing.bruhs.clone()));
     let visible = move || {
@@ -140,7 +171,7 @@ pub fn VaultSettings() -> impl IntoView {
         })
     };
     view! {
-        <div class="p-4 text-body-sm text-rambutan-200">
+        <div node_ref=page_ref class="p-4 text-body-sm text-rambutan-200">
             <super::service_connections::ServiceConnections />
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input type="search" aria-label=SEARCH_PLACEHOLDER placeholder=SEARCH_PLACEHOLDER autocomplete="off" spellcheck="false" class="bruhs-control min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400 sm:flex-1" on:input=move |event| query.set(event_target_value(&event)) />
@@ -170,7 +201,7 @@ pub fn VaultSettings() -> impl IntoView {
                 <For
                     each=visible
                     key=|key| key.clone()
-                    children=move |(_, id)| view! { <VaultRowView id=id listing=listing busy=busy wait=wait open=open notice=notice on_saved=saved new_ref=new_ref /> }
+                    children=move |(_, id)| view! { <VaultRowView id=id listing=listing busy=busy wait=wait open=open notice=notice on_saved=saved new_ref=new_ref page_ref=page_ref /> }
                 />
                 {move || (!listing.with(|listing| listing.entries.is_empty()) && visible().is_empty()).then(|| view! { <p role="status" class="py-3 text-label-sm text-rambutan-400">{NO_MATCH}</p> })}
             </div>
@@ -188,6 +219,8 @@ fn VaultRowView(
     notice: RwSignal<Option<&'static str>>,
     on_saved: Callback<VaultEntry>,
     new_ref: NodeRef<html::Button>,
+    /// The whole page, for the late-answer focus guard.
+    page_ref: NodeRef<html::Div>,
 ) -> impl IntoView {
     let id = StoredValue::new(id);
     let entry = Memo::new(move |_| {
@@ -230,13 +263,16 @@ fn VaultRowView(
         let Some(id) = id.try_get_value() else {
             return;
         };
+        let held = focus_on_page(page_ref);
         open.try_update(|open| {
             if matches!(open, Open::Entry(open) if *open == id) {
                 *open = Open::None;
             }
         });
         listing.try_update(|listing| listing.entries.retain(|entry| entry.id != id));
-        focus_after_render(new_ref);
+        if held {
+            focus_after_render(new_ref);
+        }
     };
     let check = move |_| {
         if busy.get_untracked() != Busy::Idle {
@@ -263,7 +299,7 @@ fn VaultRowView(
                 }
                 Err(err) if err.is_status(404) => forget(),
                 Err(err) => {
-                    error.try_set(Some(err.to_string()));
+                    error.try_set(Some(crate::api::vault_message(&err)));
                 }
             }
             busy.try_set(Busy::Idle);
@@ -282,7 +318,7 @@ fn VaultRowView(
                 Ok(()) => forget(),
                 Err(err) if err.is_status(404) => forget(),
                 Err(err) => {
-                    error.try_set(Some(err.to_string()));
+                    error.try_set(Some(crate::api::vault_message(&err)));
                 }
             }
             busy.try_set(Busy::Idle);
@@ -296,9 +332,12 @@ fn VaultRowView(
     // row (a search can filter it out mid-save). Closing drops what an
     // earlier Check said, so the row shows the entry's own state.
     let close = Callback::new(move |_: ()| {
+        let held = focus_on_page(page_ref);
         checked.try_set(None);
         open.try_set(Open::None);
-        focus_after_render(edit_ref);
+        if held {
+            focus_after_render(edit_ref);
+        }
     });
     let disabled = move || wait.get().is_some();
     view! {
@@ -581,7 +620,7 @@ fn VaultFormView(
                     on_close.try_run(());
                 }
                 Err(err) => {
-                    error.try_set(Some(err.to_string()));
+                    error.try_set(Some(crate::api::vault_message(&err)));
                 }
             }
         });
