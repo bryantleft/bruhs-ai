@@ -23,13 +23,12 @@ mod reactive;
 #[path = "server_client/rich_response_io.rs"]
 mod rich_response_io;
 #[path = "server_client/vault.rs"]
-mod vault;
+pub(crate) mod vault;
 #[path = "server_client/workbench.rs"]
 mod workbench;
 pub use computer::Screencast;
 pub use computer::ScreencastEvent;
 pub use reactive::ReactiveHookToken;
-pub(crate) use vault::{vault_check_path, vault_entry_path};
 
 use std::sync::Arc;
 use std::time::Duration;
