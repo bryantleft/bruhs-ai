@@ -31,6 +31,9 @@ pub(crate) struct WindowsDispatcher {
     main_thread_id: ThreadId,
     pub(crate) platform_window_handle: SafeHwnd,
     validation_number: usize,
+    // Background tasks can finish after the hidden dispatcher window is gone.
+    // Serialize each posted wake with retiring that HWND on the main thread.
+    window_open: parking_lot::RwLock<bool>,
 }
 
 impl WindowsDispatcher {
@@ -48,7 +51,12 @@ impl WindowsDispatcher {
             platform_window_handle,
             validation_number,
             wake_posted: AtomicBool::new(false),
+            window_open: parking_lot::RwLock::new(true),
         }
+    }
+
+    pub(crate) fn close_window(&self) {
+        *self.window_open.write() = false;
     }
 
     fn dispatch_on_threadpool(&self, priority: TP_CALLBACK_PRIORITY, runnable: RunnableVariant) {
@@ -119,6 +127,11 @@ impl PlatformDispatcher for WindowsDispatcher {
         match self.main_sender.send(priority, runnable) {
             Ok(_) => {
                 if !self.wake_posted.swap(true, Ordering::AcqRel) {
+                    let open = self.window_open.read();
+                    if !*open {
+                        return;
+                    }
+                    // SAFETY: close_window waits for this read guard before destroying the HWND.
                     unsafe {
                         PostMessageW(
                             Some(self.platform_window_handle.as_raw()),

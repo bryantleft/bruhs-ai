@@ -290,7 +290,11 @@ async fn list_directory(root: &Path, query: &str) -> Result<Vec<FileEntry>, File
         let Ok(relative) = entry.path().strip_prefix(root).map(Path::to_path_buf) else {
             continue;
         };
-        let relative = relative.to_string_lossy().into_owned();
+        let relative = relative
+            .iter()
+            .map(|part| part.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
         let is_directory = entry
             .file_type()
             .await

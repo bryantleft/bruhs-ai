@@ -31,7 +31,7 @@ const surfaces = [
 
 <Base
   title="bruhs: one window for your whole day"
-  description="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS."
+  description="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS, Windows and Linux."
   ogDescription="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine."
   path="/"
   current="home"
@@ -42,14 +42,11 @@ const surfaces = [
       <div class="wrap hero-stack">
         <canvas class="bruh bruh-hero" data-bruh="hero" aria-hidden="true"></canvas>
         <h1 class="display">One window for your whole day.</h1>
-        <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. On your Mac, not our cloud.</p>
+        <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. Your work stays on your machine.</p>
         <div class="get-row">
           <GetButton />
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
         </div>
-        <p class="os-note for-phone">bruhs is a Mac app. Send yourself the link and download it there.</p>
-        <p class="os-note for-pc">The app is for Macs with Apple silicon. On Windows and Linux, bruhs runs from source in your browser.</p>
-        <p class="os-note for-intel">The app needs a Mac with Apple silicon, and this one looks like Intel. Run bruhs from source in your browser, or <a href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg">download it anyway</a>.</p>
       </div>
     </section>
 
@@ -138,11 +135,11 @@ const surfaces = [
         </details>
         <details>
           <summary>Does a bot join my calls?</summary>
-          <p>No. bruhs records your microphone and your Mac's audio, so it works with Zoom, Meet, Teams or anything else that makes sound, and nobody sees a bot. It doesn't tell anyone you're recording, so ask first; some places require everyone's consent.</p>
+          <p>No. On macOS, bruhs records your microphone and system audio for calls in Zoom, Meet, Teams and other apps. Windows and Linux capture the microphone. Ask participants before recording.</p>
         </details>
         <details>
-          <summary>What leaves my Mac?</summary>
-          <p>Prompts and files you send to remote models go through your selected runtime and provider. A meeting's transcript goes to Claude when it summarizes it. Google Calendar, if you connect it. Update checks, which you can turn off. Recordings stay on your Mac unless you point transcription at your own server.</p>
+          <summary>What leaves my device?</summary>
+          <p>Prompts and files you send to remote models go through your selected runtime and provider. A meeting's transcript goes to Claude when it summarizes it. Google Calendar, if you connect it. Update checks, which you can turn off. Recordings stay on your device unless you point transcription at your own server.</p>
         </details>
         <details>
           <summary>Does it work with my calendar?</summary>
@@ -150,11 +147,11 @@ const surfaces = [
         </details>
         <details>
           <summary>Does it sync between my devices?</summary>
-          <p>No. There's no bruhs server to sync through, so your data stays on the Mac it's on.</p>
+          <p>No. There's no bruhs server to sync through, so your data stays on this device.</p>
         </details>
         <details>
           <summary>What do I need to run it?</summary>
-          <p>A Mac on Apple silicon with macOS 13 or later. On Windows and Linux there's no download yet: bruhs runs from source in the browser, and meetings record the microphone only.</p>
+          <p>See the <a href="/download">download page</a> for platform requirements and the latest desktop builds.</p>
         </details>
       </div>
     </section>

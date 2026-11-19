@@ -97,11 +97,11 @@ and the evidence needed to verify equivalent behavior and appearance.
 
 ## Install
 
-Download **Bruhs** for macOS (13 or later, Apple silicon) from the
-[latest release](https://github.com/bryantleft/bruhs-ai/releases/latest):
-open `Bruhs-macOS-arm64.dmg` and drag Bruhs to Applications. It is signed
-with a Developer ID and notarized, and it updates itself. What changed in each
-release: [CHANGELOG.md](CHANGELOG.md) or [bruhs.ai/changelog](https://bruhs.ai/changelog).
+Choose a build on the [download page](https://bruhs.ai/download).
+
+- **macOS 13 or later, Apple silicon** — Open the signed and notarized disk image and drag Bruhs to Applications. Installed copies update from Settings.
+- **Windows x64** — Extract the ZIP and open `bruhs-desktop.exe`. Install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) if needed.
+- **Ubuntu 24.04 x64** — Run `sudo apt install ./Bruhs-Linux-x64.deb` from the download directory and launch Bruhs from Applications.
 
 The app starts its own server (which also serves the web app on
 `http://127.0.0.1:3001`) and capture daemon. Sign in to Claude Code

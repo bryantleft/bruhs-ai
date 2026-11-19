@@ -9,6 +9,7 @@ mod motion;
 mod native_performance;
 mod paths;
 mod server_client;
+#[cfg(target_os = "macos")]
 mod shell_path;
 #[cfg(debug_assertions)]
 mod smoke;
@@ -194,6 +195,7 @@ fn main() {
     webview_platform::configure_startup();
     // Bruhs.app opened from Finder has launchd's bare PATH; adopt the login
     // shell's so providers, git and the helpers resolve. Before any thread.
+    #[cfg(target_os = "macos")]
     if bruhs_core::updates::release::current_app_bundle().is_some() {
         shell_path::adopt_login_path();
     }

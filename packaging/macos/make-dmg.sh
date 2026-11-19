@@ -57,6 +57,10 @@ app_name=$(basename "$app")
 # The path bar is hidden here since it would cover the art's bottom edge.
 osascript <<EOF
 tell application "Finder"
+  repeat 100 times
+    if exists disk "$volname" then exit repeat
+    delay 0.2
+  end repeat
   tell disk "$volname"
     open
     set current view of container window to icon view

@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(in crate::views::workspace) use bruhs_models::workspace_bridge::RollbackReview;
 
 impl WorkspaceBridge {
@@ -8,7 +8,7 @@ impl WorkspaceBridge {
         self.reviews.finish_rollback_review(id);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(in crate::views::workspace) fn rollback_pending(&self, id: &str) -> bool {
         self.reviews.rollback_pending(id)
     }

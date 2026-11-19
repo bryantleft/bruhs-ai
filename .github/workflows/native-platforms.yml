@@ -57,10 +57,6 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a cargo test -p bruhs-desktop --bin bruhs-desktop --locked
 
-      - name: Windows desktop tests
-        if: runner.os == 'Windows'
-        run: cargo test -p bruhs-desktop --bin bruhs-desktop --locked
-
       - name: Prepare Microsoft WebView2 for the native GUI check
         if: runner.os == 'Windows'
         shell: pwsh
@@ -75,6 +71,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/windows-rich-smoke.ps1
+
+      - name: Windows desktop tests
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo test -p bruhs-desktop --bin bruhs-desktop --locked -- --nocapture --test-threads=1
+
+      - name: Exercise daylight saving transitions with Windows system time zones
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $original = (Get-TimeZone).Id
+          try {
+            foreach ($zone in @('Pacific Standard Time', 'UTC', 'Tokyo Standard Time')) {
+              Set-TimeZone -Id $zone
+              $iana = @{ 'Pacific Standard Time' = 'America/Los_Angeles'; 'UTC' = 'UTC'; 'Tokyo Standard Time' = 'Asia/Tokyo' }[$zone]
+              $env:BRUHS_CALENDAR_ZONE_TEST_CHILD = $iana
+              cargo test -p bruhs-desktop --bin bruhs-desktop --locked -- calendar_zones::
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+              if ($zone -ne 'Tokyo Standard Time') {
+                $env:BRUHS_PLANNING_CLOCK_TEST_CHILD = $iana
+                cargo test -p bruhs-desktop --bin bruhs-desktop --locked -- native_workday_preserves_local_hours
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
+              }
+            }
+          } finally { Set-TimeZone -Id $original }
 
       - name: Preserve Windows GUI screenshots and diagnostics
         if: always() && runner.os == 'Windows'

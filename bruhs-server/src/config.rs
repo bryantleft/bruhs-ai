@@ -91,7 +91,12 @@ impl Config {
 /// directory it is started from.
 fn default_spa_dir() -> PathBuf {
     let bundled = std::env::current_exe().ok().and_then(|exe| {
-        let web = exe.parent()?.parent()?.join("Resources").join("web");
+        let dir = exe.parent()?;
+        let web = if cfg!(target_os = "macos") {
+            dir.parent()?.join("Resources/web")
+        } else {
+            dir.join("web")
+        };
         web.is_dir().then_some(web)
     });
     if let Some(web) = bundled {

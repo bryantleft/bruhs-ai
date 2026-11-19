@@ -52,7 +52,7 @@ mod test_fixture;
 mod transcript_view_tests;
 #[cfg(all(test, unix))]
 mod workflow_performance_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use rollback_review::RollbackReview;
 #[cfg(all(test, unix))]
 mod tests;

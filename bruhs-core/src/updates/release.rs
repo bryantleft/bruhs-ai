@@ -113,7 +113,9 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
             } else {
                 AppUpdateState::UpToDate
             };
-            if app.state == AppUpdateState::Behind && (latest.zip_url.is_none() || sha256.is_none())
+            if app.state == AppUpdateState::Behind
+                && cfg!(target_os = "macos")
+                && (latest.zip_url.is_none() || sha256.is_none())
             {
                 app.error = Some(format!(
                     "v{} has no {} update for this Mac yet; download it from the release page.",
@@ -125,7 +127,11 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
                 current_version: version.to_string(),
                 latest_version: Some(latest.version),
                 release_url: Some(latest.html_url),
-                download_url: latest.zip_url,
+                download_url: if cfg!(target_os = "macos") {
+                    latest.zip_url
+                } else {
+                    None
+                },
                 sha256,
             });
         }

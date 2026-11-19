@@ -208,7 +208,11 @@ fn conversation_page_lays_out_like_web(cx: &mut gpui::TestAppContext) {
     });
     cx.run_until_parked();
     cx.simulate_input("Thanks, see you Thursday");
-    cx.simulate_keystrokes("cmd-enter");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-enter"
+    } else {
+        "ctrl-enter"
+    });
     cx.run_until_parked();
     workspace.read_with(cx, |workspace, cx| {
         let logged = workspace.inbox_conversations[0].messages.last().unwrap();

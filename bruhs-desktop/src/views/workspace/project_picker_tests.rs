@@ -21,7 +21,7 @@ fn listing_a_directory_does_not_block_the_ui_thread(cx: &mut TestAppContext) {
     });
     let workspace = captured.borrow().clone().expect("workspace");
     cx.run_until_parked();
-    let home = std::fs::canonicalize(std::env::var_os("HOME").expect("HOME in tests"))
+    let home = std::fs::canonicalize(std::env::home_dir().expect("user profile in tests"))
         .expect("home resolves");
 
     workspace.update(cx, |workspace, cx| {
