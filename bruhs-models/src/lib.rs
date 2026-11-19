@@ -43,6 +43,7 @@ pub mod thread_link;
 pub mod time;
 mod unknown_variant;
 pub mod updates;
+pub mod vault;
 pub mod weekly_reports;
 pub mod whiteboard;
 pub mod workbench_handoff;
