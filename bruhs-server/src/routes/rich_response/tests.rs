@@ -203,3 +203,61 @@ async fn media_shell_cannot_execute_an_interactive_html_fragment() {
         .unwrap()
         .contains("frame-src about:;"));
 }
+
+/// `/api/agent/media` is exempt from the guard's inert policy (it is a
+/// framed rich-response route), yet it serves files an agent wrote. Its own
+/// sandbox is all that keeps an SVG opened from it off the server's origin,
+/// where it would pass the vault's owner check (ruling F26).
+#[tokio::test]
+async fn agent_written_svg_from_media_stays_sandboxed_behind_the_guard() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("chart.svg"),
+        br#"<svg xmlns="http://www.w3.org/2000/svg"><script>fetch('/api/vault')</script></svg>"#,
+    )
+    .unwrap();
+    let app = Router::new()
+        .route("/api/agent/media", axum::routing::get(get_media))
+        .layer(axum::middleware::from_fn_with_state(
+            crate::local_access::Policy::default(),
+            crate::local_access::guard,
+        ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let response = client
+        .get(format!("{base}/api/agent/media"))
+        .query(&[
+            ("path", "chart.svg"),
+            ("project", directory.path().to_str().unwrap()),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    let policies: Vec<_> = response
+        .headers()
+        .get_all(header::CONTENT_SECURITY_POLICY)
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        policies.iter().any(|policy| policy
+            .split(';')
+            .any(|directive| directive.trim() == "sandbox")),
+        "{policies:?}"
+    );
+    assert!(
+        policies
+            .iter()
+            .all(|policy| !policy.contains("allow-same-origin")),
+        "{policies:?}"
+    );
+    assert_eq!(
+        response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+        "nosniff"
+    );
+    server.abort();
+}
