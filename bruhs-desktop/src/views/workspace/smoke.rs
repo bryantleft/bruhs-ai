@@ -536,6 +536,17 @@ impl Workspace {
                     .vault_settings
                     .update(cx, |vault, cx| vault.smoke_open_new(source, window, cx));
             }
+            // `settings-scroll:<px>`: Settings scrolled down by `px` from where
+            // it is, after a section scene has settled (same-size captures).
+            scene if scene.starts_with("settings-scroll:") => {
+                let Ok(down) = scene.trim_start_matches("settings-scroll:").parse::<f32>() else {
+                    return false;
+                };
+                let at = self.settings_scroll.offset();
+                self.settings_scroll
+                    .set_offset(point(at.x, at.y - px(down)));
+                cx.notify();
+            }
             scene if scene.starts_with("settings-") => {
                 let Some(section) = scene
                     .strip_prefix("settings-")

@@ -1020,7 +1020,10 @@ fn field(
     if let Some(content) = content {
         element = element.content_type(content);
     }
+    // The web's FIELD fill (`bg-longan-950`), not the kit's white tint,
+    // which reads lighter than the form panel it sits on.
     Styled::h(element, px(theme::CONTROL_PX))
+        .bg(theme::longan_950())
         .px(px(FIELD_X_PADDING_PX))
         .font_family(theme::CODE_FONT_FAMILY)
         .text_size(px(FIELD_TEXT_PX))
