@@ -11,9 +11,9 @@ use bruhs_models::{
     agent::AgentProvider,
     crew::{
         approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
-        ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED,
+        ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED,
         LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL,
-        VAULT_FILE_DENIAL,
+        VAULT_COMMAND_RUNNING, VAULT_FILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -93,6 +93,11 @@ impl Allowances {
         self.state().claims.get(run_id).copied()
     }
 
+    /// Whether `claim` is still `run_id`'s current attempt.
+    fn is_current(&self, run_id: &str, claim: u64) -> bool {
+        self.state().claims.get(run_id) == Some(&claim)
+    }
+
     /// Keep `allowance`, unless its claim is no longer its run's current one.
     fn record(&self, allowance: BrowserAllowance) {
         let mut state = self.state();
@@ -162,6 +167,40 @@ impl ReactiveRuntime {
             Ok(None)
         })
         .await
+    }
+
+    /// Whether outbox item `id` asks to use a vault key
+    /// ([`BRUH_SECRET_TOOL`]), whose answer only the owner's own app may
+    /// give. An unknown item is not one.
+    pub async fn is_vault_key_approval(&self, id: &str) -> Result<bool, ReactiveError> {
+        let id = id.to_owned();
+        self.call(
+            move |connection| match store::crew::approval(connection, &id) {
+                Ok(item) => Ok(item
+                    .approval
+                    .is_some_and(|request| request.tool == BRUH_SECRET_TOOL)),
+                Err(ReactiveError::NotFound(_)) => Ok(false),
+                Err(error) => Err(error),
+            },
+        )
+        .await
+    }
+
+    /// Open an approval of `tool` with card `input` for running `run`, as
+    /// the gate does. For route tests outside this crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn open_approval_for_tests(
+        &self,
+        run: &ReactiveRun,
+        tool: &str,
+        input: &Value,
+    ) -> Result<String, ReactiveError> {
+        match open(self, run, tool, input, false).await? {
+            Opened::Waiting(id) => Ok(id),
+            Opened::Stopped | Opened::Granted => {
+                Err(ReactiveError::Conflict("The run is not running.".into()))
+            }
+        }
     }
 
     /// Claim the next queued run as a worker would, without running it.
@@ -241,10 +280,12 @@ impl ReactiveRuntime {
     }
 }
 
-/// How a wait for the owner to hand the bruh's computer back ended.
+/// How a wait ended: for the owner to hand the bruh's computer back, or
+/// for the run's vault command to end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ComputerWait {
-    /// The bruh has its computer, or no longer has one to wait for.
+    /// The bruh has its computer (no vault command runs), or no longer has
+    /// one to wait for.
     Free,
     /// The run is no longer running (Stop, cancel or a restart).
     Stopped,
@@ -441,16 +482,121 @@ enum Opened {
     Waiting(String),
 }
 
+/// Open an approval of `tool` with card `input` for `run`, in one
+/// transaction: none for a run no longer running, and none when `grants`
+/// lets a late approval's one-shot grant answer it.
+async fn open(
+    runtime: &ReactiveRuntime,
+    run: &ReactiveRun,
+    tool: &str,
+    input: &Value,
+    grants: bool,
+) -> Result<Opened, ReactiveError> {
+    let fingerprint = approval_fingerprint(tool, input);
+    let (opening, tool, card) = (run.clone(), tool.to_owned(), input.clone());
+    runtime
+        .call(move |connection| {
+            store::transaction(connection, |connection| {
+                if store::run_record(connection, &opening.id)?.status != RunStatus::Running {
+                    return Ok(Opened::Stopped);
+                }
+                if grants && store::crew::take_grant(connection, &opening.agent_id, &fingerprint)? {
+                    return Ok(Opened::Granted);
+                }
+                store::crew::open_approval(connection, &opening, &tool, &card).map(Opened::Waiting)
+            })
+        })
+        .await
+}
+
+/// Ask the owner about one use of `tool` (card `input`) by attempt
+/// `claim` of `run`, every time: no grant answers it, before or after
+/// (D18). `Some(true)` approved, `Some(false)` denied or expired, `None`
+/// when the run stopped or a newer attempt took it over.
+pub(super) async fn ask_owner(
+    runtime: &ReactiveRuntime,
+    run: &ReactiveRun,
+    claim: u64,
+    tool: &str,
+    input: &Value,
+    timeout: Duration,
+) -> Result<Option<bool>, ReactiveError> {
+    if !runtime.allowances.is_current(&run.id, claim) {
+        return Ok(None);
+    }
+    let item_id = match open(runtime, run, tool, input, false).await? {
+        Opened::Waiting(id) => id,
+        // Without grants, only a stopped run opens nothing.
+        Opened::Stopped | Opened::Granted => return Ok(None),
+    };
+    runtime.changed();
+    Ok(match wait(runtime, &run.id, &item_id, timeout).await? {
+        ApprovalWait::Approved => Some(true),
+        ApprovalWait::Denied { .. } | ApprovalWait::Expired => Some(false),
+        ApprovalWait::Stopped => None,
+    })
+}
+
+/// Wait while the run's turn runs an approved vault command: the
+/// command's environment holds a key's value, which no other gated call
+/// of the run may reach meanwhile (D18). Bounded by `timeout`, after which
+/// the call is refused (F30a). Processes the bruh started earlier are not
+/// held (F30c).
+async fn wait_for_vault_command(
+    runtime: &ReactiveRuntime,
+    run: &ReactiveRun,
+    timeout: Duration,
+) -> Result<ComputerWait, ReactiveError> {
+    let Some(mut running) = runtime
+        .vault()
+        .and_then(|vault| vault.running_in(&run.thread_id))
+    else {
+        return Ok(ComputerWait::Free);
+    };
+    if !*running.borrow_and_update() {
+        return Ok(ComputerWait::Free);
+    }
+    let deadline = Instant::now() + timeout;
+    // Subscribed before the first read, so a Stop can't slip between them.
+    let mut changes = runtime.watch_changes();
+    loop {
+        let id = run.id.clone();
+        let status = runtime
+            .call(move |connection| store::run_record(connection, &id).map(|run| run.status))
+            .await?;
+        if status != RunStatus::Running {
+            return Ok(ComputerWait::Stopped);
+        }
+        if !*running.borrow_and_update() {
+            return Ok(ComputerWait::Free);
+        }
+        tokio::select! {
+            changed = running.changed() => {
+                // The turn's scope is gone, and its command with it.
+                if changed.is_err() {
+                    return Ok(ComputerWait::Free);
+                }
+            }
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return Ok(ComputerWait::Stopped);
+                }
+            }
+            () = tokio::time::sleep_until(deadline) => return Ok(ComputerWait::StillHeld),
+        }
+    }
+}
+
 /// The answer to one tool call of an unattended bruh run: the gate's own
 /// answer, a late approval's one-shot grant, or the owner's answer to a new
-/// approval. Every call first waits while the owner has the bruh's
-/// computer. `None` means the run stopped while it waited. `claim` is the
+/// approval. Every call first waits while an approved vault command of the
+/// run runs, then while the owner has the bruh's computer. `None` means the run stopped while it waited. `claim` is the
 /// worker's attempt at `run`, which an allowed browser step belongs to.
 ///
-/// The owner's hold and the approval are separate waits, each bounded by
-/// `timeout`, and an approved browser step waits for the hold once more,
-/// so one call waits at most three times `timeout`: an approval asked
-/// after a long hold still gets its whole time.
+/// The vault command, the owner's hold and the approval are separate
+/// waits, each bounded by `timeout`, and an approved browser step waits for
+/// the hold once more, so one call waits at most four times `timeout`: an
+/// approval asked after a long hold still gets its whole time.
 ///
 /// A file tool call is refused first when it reaches a vault folder or a
 /// browser profile by another name (`private_file_refusal`). Claude itself
@@ -472,6 +618,11 @@ pub(super) async fn decide(
     input: &Value,
     timeout: Duration,
 ) -> Result<Option<PermissionDecision>, ReactiveError> {
+    match wait_for_vault_command(runtime, run, timeout).await? {
+        ComputerWait::Free => {}
+        ComputerWait::Stopped => return Ok(None),
+        ComputerWait::StillHeld => return Ok(Some(deny(VAULT_COMMAND_RUNNING))),
+    }
     match wait_for_computer(runtime, run, timeout).await? {
         ComputerWait::Free => {}
         ComputerWait::Stopped => return Ok(None),
@@ -565,22 +716,7 @@ pub(super) async fn decide(
         Gate::Deny(reason) => return Ok(Some(deny(reason))),
         Gate::Approve => {}
     }
-    let fingerprint = approval_fingerprint(tool, &input);
-    let (opening, tool, card) = (run.clone(), tool.to_owned(), input.clone());
-    let opened = runtime
-        .call(move |connection| {
-            store::transaction(connection, |connection| {
-                if store::run_record(connection, &opening.id)?.status != RunStatus::Running {
-                    return Ok(Opened::Stopped);
-                }
-                if store::crew::take_grant(connection, &opening.agent_id, &fingerprint)? {
-                    return Ok(Opened::Granted);
-                }
-                store::crew::open_approval(connection, &opening, &tool, &card).map(Opened::Waiting)
-            })
-        })
-        .await?;
-    let item_id = match opened {
+    let item_id = match open(runtime, run, tool, &input, true).await? {
         Opened::Stopped => return Ok(None),
         // The grant was made for this page, so it needs no second look.
         Opened::Granted => return Ok(allow(&input)),

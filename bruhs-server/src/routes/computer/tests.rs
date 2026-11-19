@@ -934,6 +934,59 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
     }
 }
 
+/// Only the owner's own app answers a bruh's ask to use a vault key; any
+/// loopback page still answers its other approvals.
+#[tokio::test]
+async fn a_vault_key_approval_is_answered_only_from_bruhs_own_pages() {
+    use reqwest::Method;
+    let fixture = Fixture::new().await;
+    let run = fixture.running().await;
+    let use_key =
+        json!({"name": "DEPLOY_KEY", "reason": "Ship.", "env_var": "K", "command": ["deploy"]});
+    let key = fixture
+        .runtime
+        .open_approval_for_tests(&run, bruhs_models::crew::BRUH_SECRET_TOOL, &use_key)
+        .await
+        .unwrap();
+    let edit = fixture
+        .runtime
+        .open_approval_for_tests(&run, "Bash", &json!({"command": "make"}))
+        .await
+        .unwrap();
+    let decide = |id: &str| json!({"action": "decide_approval", "id": id, "approve": true});
+    for origin in [APP_ORIGIN, "http://localhost:8080"] {
+        let (status, text) = fixture
+            .send(
+                Method::POST,
+                "/api/reactive/commands",
+                Some(decide(&key)),
+                Some(origin),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{origin}: {text}");
+        assert!(text.contains(OWNER_ONLY));
+    }
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(decide(&edit)),
+            Some(APP_ORIGIN),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let own = fixture.base.clone();
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(decide(&key)),
+            Some(&own),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+}
+
 fn unavailable(result: Result<ToolReply, AppError>) -> String {
     match result {
         Err(AppError::Unavailable(message)) => message,

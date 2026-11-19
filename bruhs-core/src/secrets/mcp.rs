@@ -8,18 +8,52 @@ pub fn is_mcp_helper() -> bool {
     std::env::args_os().any(|arg| arg == "--secret-mcp")
 }
 
+/// A bruh turn's helper finds its broker in this file, never in its
+/// command line or environment, which the bruh's shell could read (F27).
+const BRUH_BROKER_FILE_ENV: &str = "BRUHS_SECRET_BRUH_BROKER";
+
+/// The Claude tool a bruh must never get: service connections are for
+/// threads (F27).
+pub(crate) const BRUH_CONNECTION_TOOL: &str = "mcp__bruhs_secrets__request_connection";
+
+/// Which tools a helper offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Offer {
+    /// A thread turn's: credentials and service connections.
+    Thread,
+    /// A bruh turn's: `request_secret` with a vault key's name, only.
+    BruhKeys,
+}
+
 pub async fn run_mcp_helper() -> std::io::Result<()> {
-    let connection: Connection = std::env::var(BROKER_ENV)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .ok_or_else(|| std::io::Error::other("Credential broker is unavailable."))?;
-    serve(tokio::io::stdin(), &mut tokio::io::stdout(), &connection).await
+    let unavailable = || std::io::Error::other("Credential broker is unavailable.");
+    let (connection, offer) = match std::env::var_os(BRUH_BROKER_FILE_ENV) {
+        Some(path) => (
+            serde_json::from_slice(&std::fs::read(path)?).map_err(|_| unavailable())?,
+            Offer::BruhKeys,
+        ),
+        None => (
+            std::env::var(BROKER_ENV)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .ok_or_else(unavailable)?,
+            Offer::Thread,
+        ),
+    };
+    serve(
+        tokio::io::stdin(),
+        &mut tokio::io::stdout(),
+        &connection,
+        offer,
+    )
+    .await
 }
 
 async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     input: R,
     output: &mut W,
     connection: &Connection,
+    offer: Offer,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(input);
     let mut frame = Vec::new();
@@ -42,9 +76,9 @@ async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                         send_response(output, &error(request["id"].clone(), -32600, "Only one private operation may be pending at a time.")).await?;
                     } else {
                         let connection = connection.clone();
-                        active = Some(ActiveCall { id: request["id"].clone(), task: tokio::spawn(async move { handle(&frame, &connection).await }) });
+                        active = Some(ActiveCall { id: request["id"].clone(), task: tokio::spawn(async move { handle(&frame, &connection, offer).await }) });
                     }
-                } else if let Some(response) = handle(&frame, connection).await {
+                } else if let Some(response) = handle(&frame, connection, offer).await {
                     send_response(output, &response).await?;
                 }
             }
@@ -96,7 +130,25 @@ async fn send_response<W: AsyncWrite + Unpin>(
     output.flush().await
 }
 
-async fn handle(frame: &[u8], connection: &Connection) -> Option<Value> {
+/// The one tool a bruh's helper lists.
+fn bruh_key_tool() -> Value {
+    json!({
+        "name": "request_secret",
+        "description": "Run this exact command with one of your vault keys in an environment variable. The owner approves every use. No value or command output returns to you; only exit status. Command runs in your working folder. Shell expansion requires explicit shell argv.",
+        "inputSchema": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "reason", "env_var", "command"],
+            "properties": {
+                "name": {"type": "string", "description": "The vault key's exact name, from the list in your instructions."},
+                "reason": {"type": "string", "description": "Explain what this command needs the key for."},
+                "env_var": {"type": "string", "description": "Environment variable that receives the key, e.g. DEPLOY_TOKEN."},
+                "command": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Executable followed by exact literal arguments. No credential values."}
+            }
+        }
+    })
+}
+
+async fn handle(frame: &[u8], connection: &Connection, offer: Offer) -> Option<Value> {
     let request = match serde_json::from_slice::<Value>(frame) {
         Ok(value) => value,
         Err(_) => return Some(error(Value::Null, -32700, "Invalid JSON.")),
@@ -113,12 +165,18 @@ async fn handle(frame: &[u8], connection: &Connection) -> Option<Value> {
         return None;
     }
     let result = match method {
+        // A bruh's run preamble says which keys it has (SECRET_PREAMBLE).
+        Some("initialize") if offer == Offer::BruhKeys => json!({
+            "protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
+            "serverInfo": {"name": "bruhs-secrets", "version": env!("CARGO_PKG_VERSION")},
+        }),
         Some("initialize") => json!({
             "protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
             "serverInfo": {"name": "bruhs-secrets", "version": env!("CARGO_PKG_VERSION")},
             "instructions": INSTRUCTIONS,
         }),
         Some("ping") => json!({}),
+        Some("tools/list") if offer == Offer::BruhKeys => json!({"tools": [bruh_key_tool()]}),
         Some("tools/list") => json!({"tools": [{
             "name": "request_secret",
             "description": "Request private credential input and approval to run this exact command. The user can supply once or save in the OS keychain. No credential values or command output return to the model; only exit status. Never ask for credentials in chat. Command runs in this turn's working directory. Shell expansion requires explicit shell argv. Every invocation requires user approval.",
@@ -154,7 +212,7 @@ async fn handle(frame: &[u8], connection: &Connection) -> Option<Value> {
                     ),
                     None,
                 )
-            } else if request["params"]["name"] == "request_connection" {
+            } else if request["params"]["name"] == "request_connection" && offer == Offer::Thread {
                 match serde_json::from_value::<bruhs_models::connections::ServiceOperation>(
                     request["params"]["arguments"].clone(),
                 ) {
@@ -191,7 +249,7 @@ pub(super) async fn call(
     call_from(connection, operation, None).await
 }
 
-async fn call_from(
+pub(super) async fn call_from(
     connection: &Connection,
     operation: SecretOperation,
     provider: Option<bruhs_models::connections::ServiceProvider>,
@@ -219,7 +277,92 @@ pub(crate) fn append_claude_instructions(options: &mut claude_sdk_rs::QueryOptio
     instructions.push_str(INSTRUCTIONS);
 }
 
+/// A bruh broker's connection, in a file only its helper reads. Removed
+/// when dropped, with its broker.
+pub(crate) struct BrokerFile(std::path::PathBuf);
+
+impl Drop for BrokerFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl BrokerFile {
+    /// Write `connection` to a new file in `folder` that only this account
+    /// can read.
+    fn write(folder: &std::path::Path, connection: &Connection) -> std::io::Result<Self> {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(folder)?;
+        let path = folder.join(format!("broker-{}.json", uuid::Uuid::new_v4().simple()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = Self(path);
+        std::io::Write::write_all(
+            &mut options.open(&file.0)?,
+            &serde_json::to_vec(connection).map_err(std::io::Error::other)?,
+        )?;
+        Ok(file)
+    }
+}
+
 impl SecretBroker {
+    /// Give a bruh's Claude turn this broker for its vault keys (D18,
+    /// ruling F27): `bruhs_secrets` joins the turn's other servers (its
+    /// browser), only `request_secret` is pre-approved, and no thread
+    /// instructions are added. The token stays off every command line: the
+    /// helper reads it from a file in `folder`, which the bruh can't read.
+    pub(crate) fn configure_bruh(
+        &mut self,
+        options: &mut crate::agent::ProviderQueryOptions,
+        folder: &std::path::Path,
+    ) -> std::io::Result<()> {
+        let crate::agent::ProviderQueryOptions::Claude(options) = options else {
+            return Err(std::io::Error::other(bruhs_models::crew::NEEDS_CLAUDE));
+        };
+        let executable = std::env::current_exe()?.to_string_lossy().into_owned();
+        let file = BrokerFile::write(folder, &self.connection)?;
+        let mut config = options
+            .mcp_config
+            .as_deref()
+            .map(serde_json::from_str::<Value>)
+            .transpose()
+            .map_err(std::io::Error::other)?
+            .unwrap_or_else(|| json!({}));
+        if config.get("mcpServers").is_none() {
+            config["mcpServers"] = json!({});
+        }
+        config["mcpServers"]
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("MCP servers must be an object."))?
+            .insert(
+                "bruhs_secrets".into(),
+                json!({
+                    "command": executable, "args": ["--secret-mcp"],
+                    "env": {BRUH_BROKER_FILE_ENV: file.0.to_string_lossy()},
+                }),
+            );
+        options.mcp_config = Some(config.to_string());
+        options.strict_mcp_config = true;
+        let tool = bruhs_models::crew::BRUH_SECRET_TOOL;
+        match &mut options.tools {
+            claude_sdk_rs::Tools::Allow(tools) if !tools.iter().any(|name| name == tool) => {
+                tools.push(tool.into());
+            }
+            claude_sdk_rs::Tools::CliDefault => {
+                options.tools = claude_sdk_rs::Tools::Allow(vec![tool.into()]);
+            }
+            // A read only or tool-free turn gets no key tool.
+            _ => {}
+        }
+        self.file = Some(file);
+        Ok(())
+    }
+
     pub(crate) fn configure(
         &self,
         options: &mut crate::agent::ProviderQueryOptions,
@@ -305,7 +448,7 @@ mod tests {
     ) {
         let manager = SecretManager::new(SecretStore::in_memory());
         let (tx, _) = mpsc::channel(1);
-        let scope = manager.turn(ThreadId::new_v4(), PathBuf::from("/tmp"), tx);
+        let scope = manager.turn(ThreadId::new_v4(), PathBuf::from("/tmp"), tx, false);
         let broker = scope.start().await.unwrap();
         let mut options =
             crate::agent::ProviderQueryOptions::Claude(claude_sdk_rs::QueryOptions::new("hello"));
@@ -353,7 +496,12 @@ mod tests {
             let manager = SecretManager::new(SecretStore::in_memory());
             let directory = tempfile::tempdir().unwrap();
             let (tx, mut events) = mpsc::channel(16);
-            let scope = manager.turn(ThreadId::new_v4(), directory.path().into(), tx.clone());
+            let scope = manager.turn(
+                ThreadId::new_v4(),
+                directory.path().into(),
+                tx.clone(),
+                false,
+            );
             let broker = scope.start().await.unwrap();
             let connection = broker.connection.clone();
             let (client, server) = tokio::io::duplex(MAX_FRAME_BYTES);
@@ -361,7 +509,7 @@ mod tests {
             let mut responses = BufReader::new(client_read);
             let helper = tokio::spawn(async move {
                 let (input, mut output) = tokio::io::split(server);
-                serve(input, &mut output, &connection).await
+                serve(input, &mut output, &connection, Offer::Thread).await
             });
             client_write.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"request_secret\",\"arguments\":{\"name\":\"key\",\"reason\":\"test\",\"env_var\":\"KEY\",\"command\":[\"true\"]}}}\n").await.unwrap();
             let request = loop {
@@ -420,6 +568,95 @@ mod tests {
         }
     }
 
+    /// Ruling F27: a bruh's broker joins the turn's servers (its browser),
+    /// pre-approves only `request_secret`, adds no thread instructions and
+    /// keeps its token off Claude's command line; its helper offers only
+    /// `request_secret`.
+    #[tokio::test]
+    async fn a_bruh_broker_joins_the_turns_servers_and_keeps_its_token_off_the_command_line() {
+        let manager = SecretManager::new(SecretStore::in_memory());
+        let (tx, _) = mpsc::channel(1);
+        let scope = manager.turn(ThreadId::new_v4(), PathBuf::from("/tmp"), tx, true);
+        let mut broker = scope.start().await.unwrap();
+        let token = broker.connection.token.clone();
+        let home = tempfile::tempdir().unwrap();
+        let folder = home.path().join("credentials").join("brokers");
+        let mut claude = claude_sdk_rs::QueryOptions::new("hello");
+        claude.tools = claude_sdk_rs::Tools::Allow(vec!["Read".into()]);
+        claude.mcp_config =
+            Some(json!({"mcpServers": {"bruhs_workbench": {"command": "browser"}}}).to_string());
+        let mut options = crate::agent::ProviderQueryOptions::Claude(claude);
+        broker.configure_bruh(&mut options, &folder).unwrap();
+        let crate::agent::ProviderQueryOptions::Claude(options) = options else {
+            panic!("expected Claude");
+        };
+        assert_eq!(
+            options.tools,
+            claude_sdk_rs::Tools::Allow(vec![
+                "Read".into(),
+                bruhs_models::crew::BRUH_SECRET_TOOL.into()
+            ])
+        );
+        assert_eq!(options.append_system_prompt, None);
+        assert!(options.strict_mcp_config);
+        let text = options.mcp_config.unwrap();
+        assert!(
+            !text.contains(&token),
+            "the token rides on the command line"
+        );
+        let config: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            config["mcpServers"]["bruhs_workbench"]["command"],
+            "browser"
+        );
+        let secrets = &config["mcpServers"]["bruhs_secrets"];
+        assert_eq!(secrets["args"], json!(["--secret-mcp"]));
+        assert!(secrets["env"].get(BROKER_ENV).is_none());
+        let file = PathBuf::from(secrets["env"][BRUH_BROKER_FILE_ENV].as_str().unwrap());
+        assert_eq!(file.parent(), Some(folder.as_path()));
+        let stored: Connection = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(stored.token, token);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+            };
+            assert_eq!((mode(&file), mode(&folder)), (0o600, 0o700));
+        }
+        drop(broker);
+        assert!(!file.exists(), "the file outlived its broker");
+
+        let ask = |method: &str, params: Value| {
+            let frame = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+            let connection = stored.clone();
+            async move {
+                handle(
+                    &serde_json::to_vec(&frame).unwrap(),
+                    &connection,
+                    Offer::BruhKeys,
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let list = ask("tools/list", json!({})).await;
+        let tools = list["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "request_secret");
+        let init = ask("initialize", json!({})).await;
+        assert!(init["result"].get("instructions").is_none());
+        let connect = ask(
+            "tools/call",
+            json!({"name": "request_connection", "arguments": {
+                "provider": "github", "reason": "r", "env_var": "GH_TOKEN", "command": ["gh"],
+            }}),
+        )
+        .await;
+        assert_eq!(connect["error"]["code"], -32602);
+        scope.revoke();
+    }
+
     #[tokio::test]
     async fn mcp_exposes_only_the_private_operation_and_rejects_secret_arguments() {
         let connection = Connection {
@@ -429,11 +666,12 @@ mod tests {
         let list = handle(
             br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
             &connection,
+            Offer::Thread,
         )
         .await
         .unwrap();
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 2);
-        let response = handle(br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_secret","arguments":{"name":"key","reason":"test","env_var":"KEY","command":["true"],"value":"synthetic-private-value"}}}"#, &connection).await.unwrap();
+        let response = handle(br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_secret","arguments":{"name":"key","reason":"test","env_var":"KEY","command":["true"],"value":"synthetic-private-value"}}}"#, &connection, Offer::Thread).await.unwrap();
         assert_eq!(response["result"]["isError"], true);
         assert!(!response.to_string().contains("synthetic-private-value"));
     }

@@ -254,18 +254,23 @@ impl ReactiveRuntime {
     }
 
     /// What a run's turn needs from the vault: the folders no run may
-    /// reach, and whether the preamble tells a bruh whose Computer is on
-    /// about its logins.
-    pub(super) async fn turn_vault(&self, agent_id: &str, computer: bool) -> TurnVault {
+    /// reach, whether the preamble tells a bruh whose Computer is on about
+    /// its logins, and, for a run that may have the key tool (`keys`), the
+    /// keys it may use.
+    pub(super) async fn turn_vault(&self, agent_id: &str, computer: bool, keys: bool) -> TurnVault {
         TurnVault {
             private: self.private_rule_folders().to_vec(),
             logins: computer && self.has_usable_logins(agent_id).await,
+            keys: if keys {
+                self.usable_keys(agent_id).await
+            } else {
+                Vec::new()
+            },
         }
     }
 
     /// The names of the keys bruh `agent_id` may use (Value and 1Password
     /// entries, never logins), sorted, at most 20, each made safe to show.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 11"))]
     pub(super) async fn usable_keys(&self, agent_id: &str) -> Vec<String> {
         let mut names: Vec<String> = self
             .usable_entries(agent_id)
@@ -283,7 +288,6 @@ impl ReactiveRuntime {
 
     /// The id of the key named exactly `name` that bruh `agent_id` may use:
     /// its own entry before a granted Global one. Logins never match.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 11"))]
     pub(super) async fn usable_value(&self, agent_id: &str, name: &str) -> Option<String> {
         let usable = self.usable_entries(agent_id).await.ok()?;
         let keys = || {

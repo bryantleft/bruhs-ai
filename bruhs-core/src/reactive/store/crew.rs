@@ -389,6 +389,8 @@ pub(in crate::reactive) fn decide_approval(
         ));
     }
     let (summary, fingerprint) = (request.summary.clone(), request.fingerprint.clone());
+    // A vault key's use asks every time: its late approval leaves no grant.
+    let grants = request.tool != bruhs_models::crew::BRUH_SECRET_TOOL;
     let live = run_waits_on(connection, &item)?;
     if let Some(request) = item.approval.as_mut() {
         request.state = decided;
@@ -418,7 +420,7 @@ pub(in crate::reactive) fn decide_approval(
             outbox_id: item.id.clone(),
         }));
         save_run(connection, &run)?;
-        if approve {
+        if approve && grants {
             connection.execute(
                 "INSERT INTO reactive_approval_grants(agent_id,fingerprint,created) VALUES(?1,?2,?3) ON CONFLICT(agent_id,fingerprint) DO UPDATE SET created=excluded.created",
                 params![item.agent_id, fingerprint, now.as_millis()],

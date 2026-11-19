@@ -7,6 +7,7 @@ use sha2::{Digest as _, Sha256};
 use super::computer::{browser_detail, browser_summary, VAULT_PREAMBLE};
 use super::{AccessLevel, BruhAccess, BRUH_BROWSER_TOOL};
 use crate::agent::AgentProvider;
+use crate::secrets::review_text;
 
 /// How long a run waits for the owner to answer an approval.
 pub const APPROVAL_WAIT_MS: u64 = 15 * 60 * 1000;
@@ -48,6 +49,18 @@ pub const VAULT_COMMAND_DENIAL: &str =
 /// A file tool call whose path, once resolved, is in a folder that holds
 /// the owner's saved logins: the vault catalog, the keychains or 1Password's.
 pub const VAULT_FILE_DENIAL: &str = "That path holds the owner's saved logins. Leave it alone.";
+
+/// The one credential tool a Claude bruh at Ask or Full gets when it has a
+/// usable vault key (D18): run one exact command with a key's value in its
+/// environment. Every use asks the owner, at every level.
+pub const BRUH_SECRET_TOOL: &str = "mcp__bruhs_secrets__request_secret";
+/// The run preamble's line after the key names, when [`BRUH_SECRET_TOOL`]
+/// is offered (D26, ruling F28).
+pub const SECRET_PREAMBLE: &str =
+    "For a command that needs one, use request_secret with the key's name; the owner approves each use.";
+/// A tool call that came while an approved vault command still ran, after
+/// the approval wait: its environment holds a key's value.
+pub const VAULT_COMMAND_RUNNING: &str = "A vault command is still running. Try again when it ends.";
 
 /// Claude `--disallowedTools` rules every bruh run gets. `Bash(op:*)` is a
 /// word prefix, the same as `Bash(op *)`: it matches `op` and `op read`,
@@ -144,6 +157,13 @@ pub fn permission_gate(
 ) -> Gate {
     let level = effective_level(access.level, provider);
     if tool.starts_with("mcp__") {
+        // Every use still asks the owner, in the worker, not here.
+        if tool == BRUH_SECRET_TOOL
+            && provider == AgentProvider::Claude
+            && level != AccessLevel::ReadOnly
+        {
+            return Gate::Allow;
+        }
         return Gate::Deny(if level == AccessLevel::ReadOnly {
             READ_ONLY_DENIAL
         } else {
@@ -934,6 +954,18 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
         ),
         "WebFetch" => (input["url"].as_str().map(|url| format!("Fetch {url}")), 0),
         BRUH_BROWSER_TOOL => (browser_summary(input), 0),
+        BRUH_SECRET_TOOL => match (input["name"].as_str(), secret_argv(input)) {
+            (Some(name), Some(argv)) => {
+                let joined = argv.join(" ");
+                let mut lines = joined.lines();
+                let first = review_text(lines.next().unwrap_or_default());
+                (
+                    Some(format!("Use {}: {first}", review_text(name))),
+                    lines.count(),
+                )
+            }
+            _ => (None, 0),
+        },
         _ => (None, 0),
     };
     let summary = summary.unwrap_or_else(|| tool.to_string());
@@ -974,6 +1006,11 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
         }
         "SandboxNetworkAccess" => return None,
         BRUH_BROWSER_TOOL => browser_detail(input, SUMMARY_MAX_CHARS)?,
+        BRUH_SECRET_TOOL => secret_argv(input)?
+            .into_iter()
+            .map(review_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]
@@ -990,6 +1027,15 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
         },
     };
     Some(bounded(text))
+}
+
+/// A vault key request's command, when every argument is text.
+fn secret_argv(input: &Value) -> Option<Vec<&str>> {
+    input["command"]
+        .as_array()?
+        .iter()
+        .map(Value::as_str)
+        .collect()
 }
 
 fn edit_text(edit: &Value) -> String {
@@ -1018,7 +1064,9 @@ pub fn approval_fingerprint(tool: &str, input: &Value) -> String {
 
 /// The opening lines of every bruh run: its name, what it may do and, when
 /// its Computer is on, its browser and, with a usable login
-/// (`vault_logins`), how it fills vault logins.
+/// (`vault_logins`), how it fills vault logins. `vault_keys` names the keys
+/// it may use through [`BRUH_SECRET_TOOL`], empty when the tool isn't
+/// offered.
 #[must_use]
 pub fn run_preamble(
     name: &str,
@@ -1026,6 +1074,7 @@ pub fn run_preamble(
     level: AccessLevel,
     computer: bool,
     vault_logins: bool,
+    vault_keys: &[String],
 ) -> String {
     let access_line = match level {
         AccessLevel::ReadOnly => "Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.",
@@ -1038,6 +1087,12 @@ pub fn run_preamble(
         if vault_logins {
             lines.push(VAULT_PREAMBLE.to_string());
         }
+    }
+    if !vault_keys.is_empty() {
+        lines.push(format!(
+            "Vault keys you may use: {}. {SECRET_PREAMBLE}",
+            vault_keys.join(", ")
+        ));
     }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
@@ -1768,18 +1823,18 @@ mod tests {
 
     #[test]
     fn the_preamble_names_the_bruh_and_its_access() {
-        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false, false);
+        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false, false, &[]);
         assert!(text.starts_with("Your name is Penny."));
         assert!(
             text.contains("without asking")
                 && text.contains("Never push, merge or open pull requests.")
         );
         assert!(
-            !run_preamble("Penny", &full(true), AccessLevel::Full, false, false)
+            !run_preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
                 .contains("Never push")
         );
         assert_eq!(
-            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false, false),
+            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false, false, &[]),
             "Your name is Penny.\n\
              Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.\n\
              Never push, merge or open pull requests.\n\
@@ -1795,10 +1850,11 @@ mod tests {
             AccessLevel::Ask,
             false,
             false,
+            &[],
         );
         assert!(ask.contains("Access: ask first.") && ask.contains("Never push"));
         assert!(
-            run_preamble("Penny", &full(true), AccessLevel::Full, false, false)
+            run_preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
                 .ends_with("Never send messages in the owner's name.")
         );
     }
@@ -1826,7 +1882,7 @@ mod tests {
             level: AccessLevel::Full,
             ..Default::default()
         };
-        let on = run_preamble("Ada", &full, AccessLevel::Full, true, false);
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]);
         assert!(on.contains("the local_browser tool"));
         let lines: Vec<&str> = on.lines().collect();
         assert!(lines[1].starts_with("Access: full."), "{on}");
@@ -1835,7 +1891,8 @@ mod tests {
             "You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back."
         );
         assert!(
-            !run_preamble("Ada", &full, AccessLevel::Full, false, false).contains("local_browser")
+            !run_preamble("Ada", &full, AccessLevel::Full, false, false, &[])
+                .contains("local_browser")
         );
     }
 
@@ -1845,11 +1902,118 @@ mod tests {
             level: AccessLevel::Full,
             ..Default::default()
         };
-        let on = run_preamble("Ada", &full, AccessLevel::Full, true, true);
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true, true, &[]);
         assert!(on.contains("You never see the values."), "{on}");
         assert!(on.contains(VAULT_PREAMBLE), "{on}");
-        assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false).contains("vault"));
-        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true).contains("vault"));
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]).contains("vault"));
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true, &[]).contains("vault"));
+    }
+
+    #[test]
+    fn the_vault_key_tool_passes_the_gate_and_its_card_shows_the_command() {
+        let none = serde_json::json!({});
+        for (access, level) in [
+            (full(false), AccessLevel::Full),
+            (full(false), AccessLevel::Ask),
+        ] {
+            let access = BruhAccess { level, ..access };
+            assert_eq!(
+                permission_gate(
+                    &access,
+                    AgentProvider::Claude,
+                    BRUH_SECRET_TOOL,
+                    &none,
+                    "/w",
+                    false
+                ),
+                Gate::Allow,
+                "{level:?}"
+            );
+            assert_eq!(
+                permission_gate(
+                    &access,
+                    AgentProvider::Claude,
+                    "mcp__bruhs_secrets__request_connection",
+                    &none,
+                    "/w",
+                    false
+                ),
+                Gate::Deny(APP_TOOL_DENIAL),
+                "{level:?}"
+            );
+        }
+        // Read only, and every runtime but Claude, gets no vault key.
+        assert_eq!(
+            permission_gate(
+                &BruhAccess::default(),
+                AgentProvider::Claude,
+                BRUH_SECRET_TOOL,
+                &none,
+                "/w",
+                false
+            ),
+            Gate::Deny(READ_ONLY_DENIAL)
+        );
+        assert_eq!(
+            permission_gate(
+                &full(false),
+                AgentProvider::Codex,
+                BRUH_SECRET_TOOL,
+                &none,
+                "/w",
+                false
+            ),
+            Gate::Deny(APP_TOOL_DENIAL)
+        );
+
+        let call = serde_json::json!({
+            "name": "K", "reason": "Ship it.", "env_var": "K", "command": ["deploy", "--prod"],
+        });
+        assert_eq!(
+            approval_summary(BRUH_SECRET_TOOL, &call),
+            "Use K: deploy --prod"
+        );
+        assert_eq!(
+            approval_detail(BRUH_SECRET_TOOL, &call).as_deref(),
+            Some("deploy\n--prod")
+        );
+        // A line break or control character in an argument can't hide the
+        // rest of the command on the card.
+        let tricky = serde_json::json!({
+            "name": "K\u{1b}", "command": ["sh", "-c", "true\nrm -rf /"],
+        });
+        assert_eq!(
+            approval_summary(BRUH_SECRET_TOOL, &tricky),
+            "Use K\\u{1b}: sh -c true (+1 more line)"
+        );
+        assert_eq!(
+            approval_detail(BRUH_SECRET_TOOL, &tricky).as_deref(),
+            Some("sh\n-c\ntrue\\nrm -rf /")
+        );
+    }
+
+    #[test]
+    fn the_preamble_names_vault_keys_only_when_offered() {
+        let full = BruhAccess {
+            level: AccessLevel::Full,
+            ..Default::default()
+        };
+        let keys = ["API_KEY".to_owned(), "DEPLOY_KEY".to_owned()];
+        let on = run_preamble("Ada", &full, AccessLevel::Full, false, false, &keys);
+        assert!(
+            on.contains(&format!(
+                "Vault keys you may use: API_KEY, DEPLOY_KEY. {SECRET_PREAMBLE}"
+            )),
+            "{on}"
+        );
+        assert_eq!(
+            SECRET_PREAMBLE,
+            "For a command that needs one, use request_secret with the key's name; the owner approves each use."
+        );
+        assert!(
+            !run_preamble("Ada", &full, AccessLevel::Full, false, false, &[])
+                .contains("request_secret")
+        );
     }
 
     /// A program word of many stars can't stall the gate: the glob match

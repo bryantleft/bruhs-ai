@@ -15,6 +15,7 @@ use bruhs_models::agent::AgentProvider;
 use bruhs_models::crew::*;
 use bruhs_models::local_tools::SecretRef;
 use bruhs_models::reactive::*;
+use bruhs_models::secrets::SecretDecision;
 use bruhs_models::vault::{
     CredentialScope, LoginInput, SecretField, TotpInput, VaultAttention, VaultCreate,
     VaultSecretInput,
@@ -545,13 +546,13 @@ async fn the_preamble_mentions_logins_only_when_usable() {
         )
         .prompt
     };
-    let without = runtime.turn_vault("a", true).await;
+    let without = runtime.turn_vault("a", true, false).await;
     assert!(!prompt(&without).contains(VAULT_PREAMBLE));
     runtime.command(set_vault("a", &[&login.id])).await.unwrap();
-    let with = runtime.turn_vault("a", true).await;
+    let with = runtime.turn_vault("a", true, false).await;
     assert!(prompt(&with).contains(VAULT_PREAMBLE));
     // Computer off: no vault read, no paragraph.
-    assert!(!runtime.turn_vault("a", false).await.logins);
+    assert!(!runtime.turn_vault("a", false, false).await.logins);
 }
 
 fn key(name: &str, scope: CredentialScope) -> VaultCreate {
@@ -818,4 +819,385 @@ async fn forgetting_an_entry_drops_it_from_every_grant_and_keeps_a_revoke() {
         );
         assert!(!now.contains(&"x".to_owned()));
     }
+}
+
+// A bruh's vault keys (D18): the worker's answer to its `request_secret`,
+// driven through a real broker for the run's thread, as `secrets/tests.rs`
+// drives one, with no `claude` (ruling F29).
+
+fn full() -> BruhAccess {
+    BruhAccess {
+        level: AccessLevel::Full,
+        ..BruhAccess::default()
+    }
+}
+
+/// Full Claude bruh `a` (and `b`, without keys) with its own key
+/// `DEPLOY_KEY`, a running chat of `a`, and a broker for that run's thread
+/// like the one its turn starts.
+struct Keys {
+    _dir: tempfile::TempDir,
+    runtime: ReactiveRuntime,
+    app: Arc<crate::AppState>,
+    claim: super::store::Claim,
+    broker: Arc<crate::secrets::SecretBroker>,
+    events: tokio::sync::mpsc::Receiver<crate::OrchestratorEvent>,
+    _sender: tokio::sync::mpsc::Sender<crate::OrchestratorEvent>,
+    scope: Option<crate::secrets::SecretGuard>,
+    work: tempfile::TempDir,
+    value: String,
+}
+
+impl Keys {
+    async fn new() -> Self {
+        let (dir, runtime) = runtime_with(&[full_claude("a"), full_claude("b")]).await;
+        for id in ["a", "b"] {
+            runtime
+                .command(ReactiveCommand::SetBruh {
+                    agent_id: id.into(),
+                    look: BruhLook::default(),
+                    access: full(),
+                    effort: None,
+                })
+                .await
+                .unwrap();
+        }
+        let app = Arc::new(
+            crate::AppState::builder()
+                .secret_store(SecretStore::in_memory())
+                .connections(crate::connections::Connections::in_memory())
+                .build(),
+        );
+        let value = canary("deploy");
+        app.secrets()
+            .vault_create(VaultCreate {
+                name: "DEPLOY_KEY".into(),
+                scope: bruh("a"),
+                secret: VaultSecretInput::Value {
+                    value: Some(value.clone()),
+                },
+            })
+            .await
+            .unwrap();
+        runtime.attach_vault(app.secrets().clone()).unwrap();
+        runtime
+            .command(ReactiveCommand::Chat {
+                agent_id: "a".into(),
+                message: "Deploy.".into(),
+                run_id: None,
+            })
+            .await
+            .unwrap();
+        let claim = claim_one(&runtime).await.unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let (sender, events) = tokio::sync::mpsc::channel(32);
+        let scope = app.secrets().turn(
+            claim.run.thread_id.clone(),
+            work.path().into(),
+            sender.clone(),
+            true,
+        );
+        let broker = Arc::new(scope.start().await.unwrap());
+        Self {
+            _dir: dir,
+            runtime,
+            app,
+            claim,
+            broker,
+            events,
+            _sender: sender,
+            scope: Some(scope.guard()),
+            work,
+            value,
+        }
+    }
+
+    /// The bruh calls `request_secret` for `name`, running `script` with
+    /// the key in `$DEPLOY_KEY`.
+    fn call(
+        &self,
+        name: &str,
+        script: &str,
+        provider: Option<bruhs_models::connections::ServiceProvider>,
+    ) -> tokio::task::JoinHandle<(String, Option<i32>)> {
+        let broker = self.broker.clone();
+        let operation = bruhs_models::secrets::SecretOperation {
+            name: name.into(),
+            reason: "Ship the release.".into(),
+            env_var: "DEPLOY_KEY".into(),
+            command: vec!["/bin/sh".into(), "-c".into(), script.into()],
+        };
+        tokio::spawn(async move {
+            broker
+                .request_for_tests(operation, provider)
+                .await
+                .unwrap_or_else(|_| ("disconnected".into(), None))
+        })
+    }
+
+    async fn request(&mut self) -> bruhs_models::secrets::SecretRequest {
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(5), self.events.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let crate::OrchestratorEvent::Query(crate::QueryEvent::SecretRequest(request)) =
+                event
+            {
+                return request;
+            }
+        }
+    }
+
+    /// The worker's answer to `request`, on its own task.
+    fn answer(
+        &self,
+        request: bruhs_models::secrets::SecretRequest,
+    ) -> tokio::task::JoinHandle<worker::SecretAnswer> {
+        let (runtime, app, run, claim) = (
+            self.runtime.clone(),
+            self.app.clone(),
+            self.claim.run.clone(),
+            self.claim.generation,
+        );
+        tokio::spawn(async move {
+            worker::answer_secret_request(&runtime, &app, &run, claim, &request)
+                .await
+                .unwrap()
+        })
+    }
+
+    /// `a`'s approval still waiting for the owner, once it is open.
+    async fn approval(&self) -> OutboxItem {
+        let waiting = || async {
+            approvals(&self.runtime, "a")
+                .await
+                .into_iter()
+                .find(|item| {
+                    item.approval
+                        .as_ref()
+                        .is_some_and(|request| request.state == ApprovalState::Waiting)
+                })
+        };
+        eventually(|| async { waiting().await.is_some() }).await;
+        waiting().await.unwrap()
+    }
+
+    async fn decide(&self, id: &str, approve: bool) {
+        self.runtime
+            .command(ReactiveCommand::DecideApproval {
+                id: id.into(),
+                approve,
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn run_status(&self) -> RunStatus {
+        self.runtime
+            .snapshot()
+            .await
+            .unwrap()
+            .runs
+            .into_iter()
+            .find(|run| run.id == self.claim.run.id)
+            .unwrap()
+            .status
+    }
+
+    /// The gate's answer to a Bash call of the run, at Full.
+    async fn bash(&self, timeout: Duration) -> Option<PermissionDecision> {
+        decide(
+            &self.runtime,
+            &full(),
+            AgentProvider::Claude,
+            false,
+            &self.claim.run,
+            self.claim.generation,
+            &self.work.path().to_string_lossy(),
+            "Bash",
+            &json!({"command": "ps eww"}),
+            timeout,
+        )
+        .await
+        .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn every_vault_key_use_asks_even_at_full() {
+    let mut keys = Keys::new().await;
+    let out = keys.work.path().join("out");
+    let script = format!("printf %s \"$DEPLOY_KEY\" > '{}'", out.display());
+    let call = keys.call("DEPLOY_KEY", &script, None);
+    let request = keys.request().await;
+    let answer = keys.answer(request);
+    let card = keys.approval().await;
+    let approval = card.approval.clone().unwrap();
+    assert_eq!(approval.tool, BRUH_SECRET_TOOL);
+    assert_eq!(card.message, format!("Use DEPLOY_KEY: /bin/sh -c {script}"));
+    assert!(!call.is_finished(), "the command waits for the owner");
+    keys.decide(&card.id, true).await;
+    assert_eq!(call.await.unwrap(), ("completed".into(), Some(0)));
+    assert_eq!(answer.await.unwrap(), worker::SecretAnswer::Answered);
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), keys.value);
+    // The value reached only the command: never the card or the outbox.
+    let snapshot = serde_json::to_string(&keys.runtime.snapshot().await.unwrap()).unwrap();
+    assert!(!snapshot.contains(&keys.value));
+
+    // The same request again asks again: no grant stands for a key.
+    let call = keys.call("DEPLOY_KEY", &script, None);
+    let request = keys.request().await;
+    let answer = keys.answer(request);
+    let second = keys.approval().await;
+    assert_ne!(second.id, card.id);
+    assert_eq!(approvals(&keys.runtime, "a").await.len(), 2);
+    keys.decide(&second.id, false).await;
+    assert_eq!(call.await.unwrap(), ("declined".into(), None));
+    assert_eq!(answer.await.unwrap(), worker::SecretAnswer::Answered);
+    assert_eq!(keys.run_status().await, RunStatus::Running);
+}
+
+#[tokio::test]
+async fn an_unknown_or_ungranted_key_is_declined_without_a_card() {
+    let mut keys = Keys::new().await;
+    // `b`'s own key is not `a`'s to use.
+    keys.app
+        .secrets()
+        .vault_create(key("B_KEY", bruh("b")))
+        .await
+        .unwrap();
+    for name in ["OTHER", "B_KEY", "deploy_key"] {
+        let call = keys.call(name, "true", None);
+        let request = keys.request().await;
+        // No form answer runs a bruh's request: only its approval does.
+        for decision in [
+            SecretDecision::UseSaved,
+            SecretDecision::Provide {
+                value: canary("typed"),
+                save: false,
+            },
+        ] {
+            assert!(keys
+                .app
+                .secrets()
+                .resolve(&request.thread_id, &request.id, decision)
+                .await
+                .is_err());
+        }
+        assert_eq!(
+            keys.answer(request).await.unwrap(),
+            worker::SecretAnswer::Answered
+        );
+        assert_eq!(call.await.unwrap(), ("not_granted".into(), None), "{name}");
+    }
+    // A service connection is never a bruh's, whatever the name (F27).
+    let call = keys.call(
+        "DEPLOY_KEY",
+        "true",
+        Some(bruhs_models::connections::ServiceProvider::Github),
+    );
+    let request = keys.request().await;
+    assert!(request.connection.is_some());
+    keys.answer(request).await.unwrap();
+    assert_eq!(call.await.unwrap(), ("not_granted".into(), None));
+    assert!(approvals(&keys.runtime, "a").await.is_empty());
+    assert_eq!(keys.run_status().await, RunStatus::Running);
+}
+
+#[tokio::test]
+async fn other_calls_wait_while_a_vault_command_runs() {
+    let mut keys = Keys::new().await;
+    let marker = keys.work.path().join("done");
+    let call = keys.call(
+        "DEPLOY_KEY",
+        &format!("sleep 0.3; echo done > '{}'", marker.display()),
+        None,
+    );
+    let request = keys.request().await;
+    let answer = keys.answer(request);
+    let card = keys.approval().await;
+    keys.decide(&card.id, true).await;
+    // Once the worker has answered, the command runs: the next call waits
+    // for it to exit.
+    answer.await.unwrap();
+    assert_eq!(keys.bash(LONG_WAIT).await, Some(PermissionDecision::Allow));
+    assert!(marker.exists(), "the call went while the command ran");
+    assert_eq!(call.await.unwrap(), ("completed".into(), Some(0)));
+    // Nothing runs now: a call goes at once.
+    let started = std::time::Instant::now();
+    assert_eq!(keys.bash(LONG_WAIT).await, Some(PermissionDecision::Allow));
+    assert!(started.elapsed() < Duration::from_secs(1));
+
+    // A command that outlasts the wait refuses the call (F30a).
+    let call = keys.call("DEPLOY_KEY", "sleep 30", None);
+    let request = keys.request().await;
+    let answer = keys.answer(request);
+    let card = keys.approval().await;
+    keys.decide(&card.id, true).await;
+    answer.await.unwrap();
+    assert_eq!(
+        keys.bash(Duration::from_millis(200)).await,
+        deny(VAULT_COMMAND_RUNNING)
+    );
+    // Ending the turn stops the command, and nothing waits on it.
+    keys.scope.take();
+    assert_eq!(call.await.unwrap(), ("disconnected".into(), None));
+    assert_eq!(keys.bash(LONG_WAIT).await, Some(PermissionDecision::Allow));
+}
+
+#[tokio::test]
+async fn read_only_and_codex_bruhs_get_no_broker() {
+    let keys = Keys::new().await;
+    let run = &keys.claim.run;
+    let turn = |agent: &ReactiveAgent, level: AccessLevel, vault: &worker::TurnVault| {
+        let profile = BruhProfile {
+            access: BruhAccess {
+                level,
+                ..BruhAccess::default()
+            },
+            ..BruhProfile::default()
+        };
+        worker::turn(agent, &profile, run, "", Path::new("/home"), vault)
+    };
+    let claude = full_claude("a");
+    let codex = ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..full_claude("a")
+    };
+    let keyed = keys.runtime.turn_vault("a", false, true).await;
+    assert_eq!(keyed.keys, ["DEPLOY_KEY"]);
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        let offered = turn(&claude, level, &keyed);
+        assert!(offered.bruh_secrets, "{level:?}");
+        assert!(crate::agent::bruh_secret_tools(&offered), "{level:?}");
+        assert!(
+            offered.prompt.contains(&format!(
+                "Vault keys you may use: DEPLOY_KEY. {SECRET_PREAMBLE}"
+            )),
+            "{level:?}"
+        );
+    }
+    for (agent, level) in [
+        (&claude, AccessLevel::ReadOnly),
+        (&codex, AccessLevel::Full),
+        (&codex, AccessLevel::Ask),
+    ] {
+        let refused = turn(agent, level, &keyed);
+        assert!(!refused.bruh_secrets, "{} {level:?}", agent.model);
+        assert!(!crate::agent::bruh_secret_tools(&refused));
+        assert!(!refused.prompt.contains("request_secret"));
+    }
+    // A bruh with no usable key gets none either, and a run that can't
+    // have the tool doesn't read the vault for it.
+    let none = keys.runtime.turn_vault("b", false, true).await;
+    assert!(none.keys.is_empty());
+    let unkeyed = turn(&full_claude("b"), AccessLevel::Full, &none);
+    assert!(!unkeyed.bruh_secrets && !crate::agent::bruh_secret_tools(&unkeyed));
+    assert!(keys
+        .runtime
+        .turn_vault("a", false, false)
+        .await
+        .keys
+        .is_empty());
 }

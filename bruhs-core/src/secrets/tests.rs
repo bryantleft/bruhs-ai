@@ -295,7 +295,12 @@ impl Fixture {
     async fn with_manager(manager: SecretManager) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let (tx, events) = mpsc::channel(32);
-        let scope = manager.turn(ThreadId::new_v4(), directory.path().into(), tx.clone());
+        let scope = manager.turn(
+            ThreadId::new_v4(),
+            directory.path().into(),
+            tx.clone(),
+            false,
+        );
         let broker = scope.start().await.unwrap();
         Self {
             manager,
@@ -518,7 +523,7 @@ async fn storage_failure_keeps_the_request_retryable_and_use_once_still_works() 
 async fn secret_scope_does_not_keep_a_finished_turns_event_stream_alive() {
     let manager = SecretManager::new(SecretStore::in_memory());
     let (tx, mut rx) = mpsc::channel(1);
-    let scope = manager.turn(ThreadId::new_v4(), PathBuf::from("/tmp"), tx);
+    let scope = manager.turn(ThreadId::new_v4(), PathBuf::from("/tmp"), tx, false);
     let _guard = scope.guard();
     assert!(rx.recv().await.is_none());
 }

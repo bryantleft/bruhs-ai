@@ -2,9 +2,12 @@ use super::{sources, store, ReactiveError, ReactiveRuntime};
 use crate::{AgentTurn, AppState, OrchestratorEvent, PermissionDecision, QueryEvent};
 use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
-    crew::{computer_on, effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
+    crew::{
+        computer_on, effective_level, run_preamble, AccessLevel, BruhProfile, APPROVAL_WAIT_MS,
+        BRUH_SECRET_TOOL,
+    },
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
-    secrets::SecretDecision,
+    secrets::{SecretDecision, SecretRequest},
     thread_link::ThreadAccess,
 };
 use std::{
@@ -104,6 +107,20 @@ pub(super) struct TurnVault {
     /// Whether the bruh has a vault login it may fill, which the preamble
     /// then tells it about (D26).
     pub(super) logins: bool,
+    /// The names of the vault keys the bruh may use through
+    /// `request_secret` (D18, ruling F28). Empty when the run can't have
+    /// the tool.
+    pub(super) keys: Vec<String>,
+}
+
+/// Whether a run on `provider` at `level` (the bruh's chosen level) may
+/// have the vault key tool: Claude at Ask or Full (D18).
+pub(super) fn keys_possible(level: AccessLevel, provider: AgentProvider) -> bool {
+    provider == AgentProvider::Claude
+        && matches!(
+            effective_level(level, provider),
+            AccessLevel::Ask | AccessLevel::Full
+        )
 }
 
 /// One run's turn. The bruh's name and access ride in the run's own message,
@@ -122,12 +139,18 @@ pub(super) fn turn(
     // the name, access, memory and history that change ride in the run's
     // own message.
     let computer = computer_on(bruh.computer, &bruh.access, provider);
+    let keys: &[String] = if keys_possible(bruh.access.level, provider) {
+        &vault.keys
+    } else {
+        &[]
+    };
     let mut prompt = run_preamble(
         &agent.name,
         &bruh.access,
         effective_level(bruh.access.level, provider),
         computer,
         computer && vault.logins,
+        keys,
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {
@@ -149,6 +172,7 @@ pub(super) fn turn(
     .effort(bruh.effort.as_deref())
     .unattended_with(bruh.access.clone())
     .computer(computer.then(|| agent.id.clone()))
+    .bruh_secrets(!keys.is_empty())
     // Every run, Computer on or off: the profile outlives Computer off. The
     // keychains folder stays out of the rules (`deny_rule_may_name`).
     .hide_folders(
@@ -251,6 +275,7 @@ async fn execute(
         .turn_vault(
             &effective_agent.id,
             computer_on(bruh.computer, &bruh.access, provider),
+            keys_possible(bruh.access.level, provider),
         )
         .await;
     let mut stream = match app
@@ -364,8 +389,14 @@ async fn execute(
                         }
                     }
                     OrchestratorEvent::Query(QueryEvent::SecretRequest(request)) => {
-                        let _ = app.secrets().resolve(&run.thread_id, &request.id, SecretDecision::Decline).await;
-                        failure = Some("This reactive run requested private credentials. Use an interactive thread to authorize that operation.".into());
+                        let answer = answer_secret_request(runtime, app, &effective_run, claim.generation, &request).await?;
+                        if answer == SecretAnswer::Stopped {
+                            let id = run.id.clone();
+                            let partial = result.take().unwrap_or_else(|| std::mem::take(&mut output));
+                            runtime.call(move |connection| store::cancelled_output(connection, &id, partial)).await?;
+                            runtime.changed();
+                            return Ok(());
+                        }
                     }
                     _ => {}
                 }
@@ -403,4 +434,74 @@ async fn execute(
             )
         })
         .await
+}
+
+/// How the worker left a bruh's vault key request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SecretAnswer {
+    /// Answered; the run goes on.
+    Answered,
+    /// The run stopped while the owner was asked; the request was declined.
+    Stopped,
+}
+
+/// Answer a bruh's `request_secret` (D18): a key it may use runs the
+/// command once the owner approves this one use, at every level; anything
+/// else is `not_granted` with no card. A service connection is never a
+/// bruh's (F27). The value goes only into the approved command's
+/// environment, through the broker, never into the run.
+pub(super) async fn answer_secret_request(
+    runtime: &ReactiveRuntime,
+    app: &AppState,
+    run: &ReactiveRun,
+    claim: u64,
+    request: &SecretRequest,
+) -> Result<SecretAnswer, ReactiveError> {
+    let secrets = app.secrets();
+    let (thread, id) = (&run.thread_id, request.id.as_str());
+    let name = &request.operation.name;
+    let entry = match request.connection {
+        Some(_) => None,
+        None => runtime.usable_value(&run.agent_id, name).await,
+    };
+    let Some(entry) = entry else {
+        if let Err(error) = secrets.resolve_not_granted(thread, id).await {
+            tracing::debug!(%error, "A refused vault key request was already gone");
+        }
+        return Ok(SecretAnswer::Answered);
+    };
+    let card = serde_json::to_value(&request.operation).unwrap_or_default();
+    let approved = super::approval::ask_owner(
+        runtime,
+        run,
+        claim,
+        BRUH_SECRET_TOOL,
+        &card,
+        Duration::from_millis(APPROVAL_WAIT_MS),
+    )
+    .await?;
+    // The grant is checked again: it may have gone during the wait.
+    let entry = match approved {
+        Some(true) => runtime
+            .usable_value(&run.agent_id, name)
+            .await
+            .filter(|now| now == &entry),
+        _ => None,
+    };
+    let resolved = match entry {
+        Some(entry) => secrets.resolve_from_vault(thread, id, &entry).await,
+        None if approved == Some(true) => secrets.resolve_not_granted(thread, id).await,
+        None => secrets.resolve(thread, id, SecretDecision::Decline).await,
+    };
+    if let Err(error) = resolved {
+        // A read that failed leaves the request open: decline it, so the
+        // tool call ends. The error is fixed copy, never a value.
+        tracing::warn!(%error, "A bruh's vault key request could not run");
+        let _ = secrets.resolve(thread, id, SecretDecision::Decline).await;
+    }
+    Ok(if approved.is_none() {
+        SecretAnswer::Stopped
+    } else {
+        SecretAnswer::Answered
+    })
 }

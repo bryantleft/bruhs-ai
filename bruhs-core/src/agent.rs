@@ -94,6 +94,10 @@ pub struct AgentTurn {
     /// tool or its sandboxed shell: the bruhs' browser profiles (see
     /// [`AgentTurn::hide_folders`]).
     pub hidden_folders: Vec<std::path::PathBuf>,
+    /// The bruh has a vault key it may use, so an unattended Claude turn at
+    /// Ask or Full gets the `request_secret` tool (see
+    /// [`AgentTurn::bruh_secrets`]).
+    pub bruh_secrets: bool,
 }
 
 impl AgentTurn {
@@ -125,6 +129,7 @@ impl AgentTurn {
             unattended_access: BruhAccess::default(),
             computer: None,
             hidden_folders: Vec::new(),
+            bruh_secrets: false,
         }
     }
 
@@ -182,6 +187,15 @@ impl AgentTurn {
         self
     }
 
+    /// Offer an unattended Claude turn at Ask or Full the bruh's vault keys
+    /// through `request_secret` (D18): each use asks the owner, and only
+    /// the approved command's environment gets the value. The caller
+    /// decides with the bruh's usable keys; other turns ignore it.
+    pub fn bruh_secrets(mut self, on: bool) -> Self {
+        self.bruh_secrets = on;
+        self
+    }
+
     /// The user's setting for messages between threads.
     pub fn thread_access(mut self, access: ThreadAccess) -> Self {
         self.thread_access = access;
@@ -229,6 +243,19 @@ impl AgentTurn {
         self.session_id = None;
         self
     }
+}
+
+/// Whether `turn` runs with the bruh's vault key tool and its broker: an
+/// unattended Claude turn at Ask or Full whose bruh has a usable key. Codex
+/// and every other runtime get nothing (D18).
+pub(crate) fn bruh_secret_tools(turn: &AgentTurn) -> bool {
+    turn.unattended
+        && turn.bruh_secrets
+        && turn.provider == AgentProvider::Claude
+        && matches!(
+            turn.unattended_access.level,
+            AccessLevel::Ask | AccessLevel::Full
+        )
 }
 
 /// Why a turn was not started.
@@ -677,6 +704,7 @@ impl AgentOrchestrator {
         turn: AgentTurn,
         system_prompt: Option<&str>,
     ) -> Result<OrchestratorEventStream, SendMessageError> {
+        let bruh_keys = bruh_secret_tools(&turn);
         let AgentTurn {
             thread_id,
             prompt,
@@ -695,6 +723,7 @@ impl AgentOrchestrator {
             unattended_access,
             computer,
             hidden_folders,
+            bruh_secrets: _,
         } = turn;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -779,6 +808,7 @@ impl AgentOrchestrator {
                 &unattended_access,
                 computer.is_some(),
                 &hidden_folders,
+                bruh_keys,
             );
         }
         let bruh_browser = computer
@@ -786,9 +816,12 @@ impl AgentOrchestrator {
 
         let artifact_project = project_path.clone();
         let (tx, rx) = mpsc::channel::<OrchestratorEvent>(256);
-        let secrets = self
-            .secrets
-            .turn(thread_id.clone(), project_path.into(), tx.clone());
+        let secrets = self.secrets.turn(
+            thread_id.clone(),
+            project_path.into(),
+            tx.clone(),
+            unattended,
+        );
         let consumer_secrets = secrets.guard();
         let producer_secrets = secrets.guard();
         let threads = self.thread_links.turn(
@@ -832,10 +865,12 @@ impl AgentOrchestrator {
                 return;
             }
             let app_tools = query_options.supports_mcp();
-            let broker = match if unattended || !app_tools {
-                Ok(None)
-            } else {
+            // A bruh's broker starts after its browser server is in place,
+            // and joins it (`configure_bruh`).
+            let mut broker = match if bruh_keys || (!unattended && app_tools) {
                 secrets.start().await.map(Some)
+            } else {
+                Ok(None)
             } {
                 Ok(broker) => broker,
                 Err(_) => {
@@ -846,7 +881,20 @@ impl AgentOrchestrator {
                     return;
                 }
             };
-            if !unattended && permission_mode == PermissionMode::Plan {
+            if bruh_keys {
+                let configured = match broker.as_mut() {
+                    Some(broker) => crate::secrets::broker_folder()
+                        .and_then(|folder| broker.configure_bruh(&mut query_options, &folder)),
+                    None => Err(std::io::Error::other("no broker")),
+                };
+                if configured.is_err() {
+                    turn.send_start_error(
+                        "Could not configure private credential tools. Retry the turn.".into(),
+                    )
+                    .await;
+                    return;
+                }
+            } else if !unattended && permission_mode == PermissionMode::Plan {
                 if let ProviderQueryOptions::Claude(options) = &mut query_options {
                     crate::secrets::mcp::append_claude_instructions(options);
                 }
@@ -1091,14 +1139,21 @@ fn unattended_claude_settings(
     files: &[serde_json::Value],
     computer: bool,
     hidden: &[std::path::PathBuf],
+    secrets: bool,
 ) -> serde_json::Value {
-    // With its Computer on, the bruh's one MCP server is its browser (see
-    // `workbench_tools::configure_bruh`), and each call reaches the gate.
-    let mut deny = if computer {
+    // With its Computer on, the bruh's MCP servers are its browser (see
+    // `workbench_tools::configure_bruh`) and, with `secrets`, its vault
+    // keys' broker (`SecretBroker::configure_bruh`); each call reaches the
+    // gate, which refuses every other app tool. Service connections are
+    // never a bruh's (F27).
+    let mut deny = if computer || secrets {
         Vec::new()
     } else {
         vec![serde_json::json!("mcp__*")]
     };
+    if secrets {
+        deny.push(serde_json::json!(crate::secrets::mcp::BRUH_CONNECTION_TOOL));
+    }
     for file in files {
         deny.extend(
             file["permissions"]["deny"]
@@ -1196,12 +1251,14 @@ pub(crate) fn unattended_environment(
 /// its provider): a filtered environment, no settings files, hooks or MCP
 /// servers, and the tools, permission mode and sandbox for the level.
 /// `computer` lets app tools through the deny rules, for the bruh browser
-/// server `workbench_tools::configure_bruh` adds next.
+/// server `workbench_tools::configure_bruh` adds next; `secrets` does too,
+/// for the vault key broker, but never its connection tool.
 fn restrict_unattended(
     options: &mut ProviderQueryOptions,
     access: &BruhAccess,
     computer: bool,
     hidden: &[std::path::PathBuf],
+    secrets: bool,
 ) {
     // Event content must not gain access to the daemon's integration tokens
     // through a shell's environment. Provider logins remain on disk.
@@ -1235,13 +1292,19 @@ fn restrict_unattended(
             options.permission_mode = Some(mode);
             options.setting_sources = Some(Vec::new());
             options.settings = Some(
-                unattended_claude_settings(access, &user_claude_settings(), computer, hidden)
-                    .to_string(),
+                unattended_claude_settings(
+                    access,
+                    &user_claude_settings(),
+                    computer,
+                    hidden,
+                    secrets,
+                )
+                .to_string(),
             );
             // Start no MCP servers: not the user's, claude.ai connectors, or a
             // `.mcp.json` a Full bruh wrote into its folder, whose command
             // would run outside the shell sandbox. The bruh's browser server
-            // is the only one `configure_bruh` may add after this.
+            // and its vault key broker are the only ones added after this.
             options.mcp_config = None;
             options.strict_mcp_config = true;
         }
@@ -2069,7 +2132,7 @@ mod tests {
                 None,
                 None,
             );
-            restrict_unattended(&mut options, &BruhAccess::default(), false, &[]);
+            restrict_unattended(&mut options, &BruhAccess::default(), false, &[], false);
             let environment = match &options {
                 ProviderQueryOptions::Claude(options) => &options.env,
                 ProviderQueryOptions::Codex(options) => &options.env,
@@ -2137,7 +2200,7 @@ mod tests {
             PermissionMode::BypassPermissions,
             None,
         );
-        restrict_unattended(&mut options, access, false, &[]);
+        restrict_unattended(&mut options, access, false, &[], false);
         let options = claude(options);
         let settings = serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
         (options, settings)
@@ -2326,7 +2389,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &access, true, &[]);
+            restrict_unattended(&mut options, &access, true, &[], false);
             // A server already there is replaced, not merged.
             if let ProviderQueryOptions::Claude(o) = &mut options {
                 o.mcp_config = Some(
@@ -2371,7 +2434,7 @@ mod tests {
             PermissionMode::BypassPermissions,
             None,
         );
-        restrict_unattended(&mut codex, &full, true, &[]);
+        restrict_unattended(&mut codex, &full, true, &[], false);
         let error = crate::workbench_tools::configure_bruh(&mut codex, "a").unwrap_err();
         assert_eq!(error.to_string(), bruhs_models::crew::NEEDS_CLAUDE);
         assert!(codex_mcp_servers(&codex).is_empty());
@@ -2407,7 +2470,13 @@ mod tests {
                     PermissionMode::BypassPermissions,
                     None,
                 );
-                restrict_unattended(&mut options, &bruh_access(level, true), computer, &hidden);
+                restrict_unattended(
+                    &mut options,
+                    &bruh_access(level, true),
+                    computer,
+                    &hidden,
+                    false,
+                );
                 let options = claude(options);
                 let settings: serde_json::Value =
                     serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
@@ -2448,6 +2517,7 @@ mod tests {
                     &bruh_access(level, can_deliver),
                     false,
                     &hidden,
+                    false,
                 );
                 let options = claude(options);
                 let settings: serde_json::Value =
@@ -2480,7 +2550,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &bruh_access(level, true), false, &[]);
+            restrict_unattended(&mut options, &bruh_access(level, true), false, &[], false);
             let options = claude(options);
             assert!(options.mcp_config.is_none(), "{level:?}");
             assert!(options.strict_mcp_config, "{level:?}");
@@ -2494,6 +2564,95 @@ mod tests {
                 "{level:?}"
             );
         }
+    }
+
+    /// D18 and ruling F27: a bruh with a vault key keeps its connection
+    /// tool denied; with Computer off, every other app tool is left to the
+    /// gate instead of the blanket rule, so `request_secret` can run.
+    #[test]
+    fn a_bruh_with_vault_keys_denies_only_the_connection_tool() {
+        let deny = |computer: bool, secrets: bool| {
+            let mut options = options(
+                AgentProvider::Claude,
+                PermissionMode::BypassPermissions,
+                None,
+            );
+            restrict_unattended(
+                &mut options,
+                &bruh_access(AccessLevel::Full, true),
+                computer,
+                &[],
+                secrets,
+            );
+            let settings: serde_json::Value =
+                serde_json::from_str(claude(options).settings.as_deref().unwrap()).unwrap();
+            settings["permissions"]["deny"].as_array().unwrap().clone()
+        };
+        let connection = serde_json::json!("mcp__bruhs_secrets__request_connection");
+        let blanket = serde_json::json!("mcp__*");
+        let proc_rule = serde_json::json!("Read(//proc/**)");
+        for computer in [false, true] {
+            let with = deny(computer, true);
+            assert!(with.contains(&connection), "{computer}");
+            assert!(!with.contains(&blanket), "{computer}");
+            assert!(with.contains(&proc_rule), "{computer}");
+            let without = deny(computer, false);
+            assert!(!without.contains(&connection), "{computer}");
+            assert_eq!(without.contains(&blanket), !computer);
+            // Without keys the settings are what they were.
+            let mut expected = without.clone();
+            expected.retain(|rule| rule != &blanket);
+            let mut keyed = with.clone();
+            keyed.retain(|rule| rule != &connection);
+            assert_eq!(keyed, expected, "{computer}");
+        }
+    }
+
+    /// Only an unattended Claude turn at Ask or Full whose bruh has a key
+    /// gets the broker.
+    #[test]
+    fn only_a_keyed_claude_bruh_at_ask_or_full_gets_the_key_tool() {
+        let turn = |provider: AgentProvider, level: AccessLevel, keys: bool| {
+            AgentTurn::new(
+                ThreadId::new_v4(),
+                "go",
+                "/tmp",
+                "model",
+                provider,
+                PermissionMode::Plan,
+            )
+            .unattended_with(bruh_access(level, false))
+            .bruh_secrets(keys)
+        };
+        for level in [AccessLevel::Ask, AccessLevel::Full] {
+            assert!(bruh_secret_tools(&turn(AgentProvider::Claude, level, true)));
+            assert!(!bruh_secret_tools(&turn(
+                AgentProvider::Claude,
+                level,
+                false
+            )));
+        }
+        assert!(!bruh_secret_tools(&turn(
+            AgentProvider::Claude,
+            AccessLevel::ReadOnly,
+            true
+        )));
+        assert!(!bruh_secret_tools(&turn(
+            AgentProvider::Codex,
+            AccessLevel::Full,
+            true
+        )));
+        // An attended turn never gets a bruh's keys.
+        let attended = AgentTurn::new(
+            ThreadId::new_v4(),
+            "go",
+            "/tmp",
+            "model",
+            AgentProvider::Claude,
+            PermissionMode::Default,
+        )
+        .bruh_secrets(true);
+        assert!(!bruh_secret_tools(&attended));
     }
 
     #[test]
@@ -2546,7 +2705,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &bruh_access(level, true), false, &[]);
+            restrict_unattended(&mut options, &bruh_access(level, true), false, &[], false);
             codex(options).access
         };
         assert_eq!(

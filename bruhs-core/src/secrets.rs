@@ -18,6 +18,15 @@ pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use one_password::{OnePassword, OnePasswordError};
 pub use storage::SecretStore;
 
+/// Where a bruh turn's broker connection file goes: the credentials
+/// folder, which every bruh run is kept out of (D19), so the bruh's shell
+/// can't read the broker's token there, and `ps` shows only the path.
+pub(crate) fn broker_folder() -> std::io::Result<PathBuf> {
+    storage::catalog_directory()
+        .map(|directory| directory.join("brokers"))
+        .map_err(std::io::Error::other)
+}
+
 /// Drop a vault create the caller refused before it reached the store,
 /// wiping its values as the store wipes a refused one.
 pub fn discard(create: bruhs_models::vault::VaultCreate) {
@@ -101,7 +110,9 @@ struct Pending {
     /// The vault entry Use saved reads (D17), as matched when the form was
     /// last shown; `request.saved_source` says which kind it is.
     entry: Option<String>,
-    reply: oneshot::Sender<Approved>,
+    /// The answer, and for an approved command the mark that its scope runs
+    /// one, made before the answer leaves so nothing slips in between.
+    reply: oneshot::Sender<(Approved, Option<Running>)>,
     busy: bool,
     login_cancel: watch::Sender<bool>,
 }
@@ -125,7 +136,30 @@ enum Approved {
     Run(Zeroizing<String>),
     Connected(Zeroizing<String>, oneshot::Sender<()>),
     Decline,
+    /// A bruh asked for a key it may not use (D18): no card was shown.
+    NotGranted,
 }
+
+/// Marks a scope as running an approved command until dropped: from the
+/// approval, through the spawn, until the command and its process group
+/// are gone. A bruh's other gated calls wait while it is set (D18).
+struct Running(Arc<watch::Sender<bool>>);
+
+impl Running {
+    fn start(flag: &Arc<watch::Sender<bool>>) -> Self {
+        flag.send_replace(true);
+        Self(flag.clone())
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.send_replace(false);
+    }
+}
+
+/// Each live scope's [`Running`] flag, by its thread.
+type RunningFlags = Arc<Mutex<HashMap<ThreadId, Arc<watch::Sender<bool>>>>>;
 
 #[derive(Clone)]
 pub struct SecretManager {
@@ -143,6 +177,7 @@ pub struct SecretManager {
     /// (F13).
     reading: Flights,
     read_wait: Duration,
+    running: RunningFlags,
 }
 
 /// Where one value of an entry comes from.
@@ -332,7 +367,10 @@ impl SecretManager {
             .lock()
             .iter()
             .filter(|(_, item)| {
-                item.request.connection.is_none() && item.request.operation.name == name
+                // A bruh's request is matched by the worker, never here (F30b).
+                !item.scope.bruh
+                    && item.request.connection.is_none()
+                    && item.request.operation.name == name
             })
             .map(|(id, item)| (id.clone(), item.request.cwd.clone()))
             .collect();
@@ -378,6 +416,7 @@ impl SecretManager {
             attention: Arc::default(),
             reading: Arc::default(),
             read_wait: VAULT_READ_WAIT,
+            running: Arc::default(),
         }
     }
 
@@ -664,23 +703,136 @@ impl SecretManager {
         self.pending.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The credential scope of one turn. A `bruh` turn's requests are
+    /// matched against the vault by the reactive worker, not here (F30b).
     pub(crate) fn turn(
         &self,
         thread_id: ThreadId,
         cwd: PathBuf,
         tx: mpsc::Sender<OrchestratorEvent>,
+        bruh: bool,
     ) -> Arc<SecretScope> {
         let (cancel, _) = watch::channel(false);
+        let running = Arc::new(watch::channel(false).0);
+        self.running_flags()
+            .insert(thread_id.clone(), running.clone());
         Arc::new(SecretScope {
             id: uuid::Uuid::new_v4().to_string(),
             thread_id,
             cwd,
+            bruh,
             active: AtomicBool::new(true),
             execution: Mutex::new(()),
             cancel,
+            running,
             tx: tx.downgrade(),
             manager: self.clone(),
         })
+    }
+
+    fn running_flags(&self) -> MutexGuard<'_, HashMap<ThreadId, Arc<watch::Sender<bool>>>> {
+        self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether the live turn of `thread_id` is running an approved command,
+    /// and each change of that. `None` when the thread has no live turn.
+    pub(crate) fn running_in(&self, thread_id: &ThreadId) -> Option<watch::Receiver<bool>> {
+        self.running_flags()
+            .get(thread_id)
+            .map(|flag| flag.subscribe())
+    }
+
+    /// Take a pending request of `thread_id` for one answer: busy until the
+    /// returned claim drops, unless the answer removed it.
+    fn claim_pending(&self, thread_id: &ThreadId, id: &str) -> Result<Claimed, SecretError> {
+        let mut pending = self.lock();
+        let item = pending
+            .get_mut(id)
+            .filter(|p| &p.scope.thread_id == thread_id && p.scope.active.load(Ordering::Acquire))
+            .ok_or(SecretError::NotPending)?;
+        if item.busy {
+            return Err(SecretError::Busy);
+        }
+        item.busy = true;
+        let claimed = Claimed {
+            scope: item.scope.clone(),
+            entry: item.entry.clone(),
+            request: item.request.clone(),
+            claim: SubmissionClaim {
+                manager: self.clone(),
+                id: id.to_string(),
+            },
+        };
+        drop(pending);
+        Ok(claimed)
+    }
+
+    /// Hand `approved` to the waiting request, once: rechecked and removed
+    /// under the lock. An approved command marks its scope running first.
+    fn hand_over(
+        &self,
+        scope: &Arc<SecretScope>,
+        id: &str,
+        approved: Approved,
+    ) -> Result<(), SecretError> {
+        let item = {
+            let mut pending = self.lock();
+            if !scope.active.load(Ordering::Acquire) {
+                return Err(SecretError::NotPending);
+            }
+            pending.remove(id).ok_or(SecretError::NotPending)?
+        };
+        let running = matches!(approved, Approved::Run(_) | Approved::Connected(..))
+            .then(|| Running::start(&scope.running));
+        item.reply
+            .send((approved, running))
+            .map_err(|_| SecretError::NotPending)
+    }
+
+    /// Run a bruh's pending request with vault entry `entry_id`, after the
+    /// owner approved this one use (D18). Only the reactive worker calls
+    /// this; no route or tool reaches it. When it returns, the scope is
+    /// already marked running.
+    pub(crate) async fn resolve_from_vault(
+        &self,
+        thread_id: &ThreadId,
+        id: &str,
+        entry_id: &str,
+    ) -> Result<bool, SecretError> {
+        let Claimed {
+            scope,
+            request,
+            claim,
+            ..
+        } = self.claim_pending(thread_id, id)?;
+        if request.connection.is_some() {
+            return Err(SecretError::Invalid(
+                "This request does not use a vault key.",
+            ));
+        }
+        let value = self.resolve_value(entry_id).await?;
+        self.hand_over(&scope, id, Approved::Run(value))?;
+        drop(claim);
+        scope
+            .emit(QueryEvent::SecretResolved { id: id.to_string() })
+            .await;
+        Ok(true)
+    }
+
+    /// Answer a bruh's pending request `not_granted`: it named no key the
+    /// bruh may use, or asked for a service connection. No card was shown.
+    pub(crate) async fn resolve_not_granted(
+        &self,
+        thread_id: &ThreadId,
+        id: &str,
+    ) -> Result<bool, SecretError> {
+        let Claimed { scope, claim, .. } = self.claim_pending(thread_id, id)?;
+        self.hand_over(&scope, id, Approved::NotGranted)?;
+        drop(claim);
+        scope
+            .emit(QueryEvent::SecretResolved { id: id.to_string() })
+            .await;
+        Ok(true)
     }
 
     /// Only the app UI calls this. Neither MCP nor provider tools can submit values.
@@ -694,26 +846,19 @@ impl SecretManager {
         id: &str,
         decision: SecretDecision,
     ) -> Result<bool, SecretError> {
-        let (scope, entry, request) = {
-            let mut pending = self.lock();
-            let item = pending
-                .get_mut(id)
-                .filter(|p| {
-                    &p.scope.thread_id == thread_id && p.scope.active.load(Ordering::Acquire)
-                })
-                .ok_or(SecretError::NotPending)?;
-            if item.busy {
-                return Err(SecretError::Busy);
-            }
-            item.busy = true;
-            let claimed = (item.scope.clone(), item.entry.clone(), item.request.clone());
-            drop(pending);
-            claimed
-        };
-        let claim = SubmissionClaim {
-            manager: self.clone(),
-            id: id.to_string(),
-        };
+        let Claimed {
+            scope,
+            entry,
+            request,
+            claim,
+        } = self.claim_pending(thread_id, id)?;
+        // A bruh's request runs only through the owner's approval of that
+        // use (`resolve_from_vault`); a form answer may only decline it.
+        if scope.bruh && !matches!(decision, SecretDecision::Decline) {
+            return Err(SecretError::Invalid(
+                "A bruh's request is answered by its approval.",
+            ));
+        }
         if request.connection.is_some()
             && !matches!(
                 decision,
@@ -799,16 +944,7 @@ impl SecretManager {
             SecretDecision::Decline => Approved::Decline,
         };
         // Recheck after keychain I/O. Removing under the same lock makes approval one-shot.
-        let item = {
-            let mut pending = self.lock();
-            if !scope.active.load(Ordering::Acquire) {
-                return Err(SecretError::NotPending);
-            }
-            pending.remove(id).ok_or(SecretError::NotPending)?
-        };
-        item.reply
-            .send(approved)
-            .map_err(|_| SecretError::NotPending)?;
+        self.hand_over(&scope, id, approved)?;
         // The service lease fences disconnect until this approved spawn is attempted.
         let started = match spawned {
             Some(spawned) => spawned.await.is_ok(),
@@ -824,6 +960,14 @@ impl SecretManager {
             .await;
         Ok(true)
     }
+}
+
+/// A pending request taken for one answer.
+struct Claimed {
+    scope: Arc<SecretScope>,
+    entry: Option<String>,
+    request: SecretRequest,
+    claim: SubmissionClaim,
 }
 
 /// Resets a failed or cancelled submission so the form can retry.
@@ -843,9 +987,13 @@ pub(crate) struct SecretScope {
     id: String,
     thread_id: ThreadId,
     cwd: PathBuf,
+    /// A bruh's turn: its requests skip `request_match` (F30b).
+    bruh: bool,
     active: AtomicBool,
     execution: Mutex<()>,
     cancel: watch::Sender<bool>,
+    /// Set while an approved command runs ([`Running`]).
+    running: Arc<watch::Sender<bool>>,
     tx: mpsc::WeakSender<OrchestratorEvent>,
     manager: SecretManager,
 }
@@ -860,6 +1008,9 @@ impl Drop for SecretGuard {
 pub(crate) struct SecretBroker {
     connection: Connection,
     task: JoinHandle<()>,
+    /// A bruh's connection file (`SecretBroker::configure_bruh`), removed
+    /// with the broker.
+    file: Option<mcp::BrokerFile>,
 }
 impl Drop for SecretBroker {
     fn drop(&mut self) {
@@ -897,6 +1048,22 @@ impl OperationResult {
     }
 }
 
+impl SecretBroker {
+    /// Ask this broker for `operation`, with a service connection when
+    /// `provider` names one, as the helper does: the status and exit code
+    /// it answers.
+    #[cfg(test)]
+    pub(crate) async fn request_for_tests(
+        &self,
+        operation: SecretOperation,
+        provider: Option<bruhs_models::connections::ServiceProvider>,
+    ) -> std::io::Result<(String, Option<i32>)> {
+        mcp::call_from(&self.connection, operation, provider)
+            .await
+            .map(|result| (result.status, result.exit_code))
+    }
+}
+
 impl SecretScope {
     pub(crate) fn guard(self: &Arc<Self>) -> SecretGuard {
         SecretGuard(self.clone())
@@ -912,6 +1079,13 @@ impl SecretScope {
         self.manager
             .lock()
             .retain(|_, item| item.scope.id != self.id);
+        let mut running = self.manager.running_flags();
+        if running
+            .get(&self.thread_id)
+            .is_some_and(|flag| Arc::ptr_eq(flag, &self.running))
+        {
+            running.remove(&self.thread_id);
+        }
     }
 
     async fn emit(&self, event: QueryEvent) {
@@ -949,7 +1123,11 @@ impl SecretScope {
                 }
             }
         });
-        Ok(SecretBroker { connection, task })
+        Ok(SecretBroker {
+            connection,
+            task,
+            file: None,
+        })
     }
 
     async fn serve_connection(
@@ -987,7 +1165,9 @@ impl SecretScope {
         let Some(project) = cwd.to_str() else {
             return OperationResult::status("working_directory_unavailable");
         };
-        let matched = if provider.is_some() {
+        // A bruh's key is the worker's to find; this lookup could wait on
+        // the keychain under the catalog lock (F30b).
+        let matched = if provider.is_some() || self.bruh {
             Ok(None)
         } else {
             // Use-once still works; the form explicitly reports unavailable saved credentials.
@@ -1040,10 +1220,12 @@ impl SecretScope {
             id: request.id.clone(),
         };
         self.emit(QueryEvent::SecretRequest(request.clone())).await;
-        let (value, spawned) = match receive.await {
-            Ok(Approved::Run(value)) => (value, None),
-            Ok(Approved::Connected(value, spawned)) => (value, Some(spawned)),
-            Ok(Approved::Decline) => return OperationResult::status("declined"),
+        // Dropped last, after the command's process group is gone.
+        let (value, spawned, _running) = match receive.await {
+            Ok((Approved::Run(value), running)) => (value, None, running),
+            Ok((Approved::Connected(value, spawned), running)) => (value, Some(spawned), running),
+            Ok((Approved::Decline, _)) => return OperationResult::status("declined"),
+            Ok((Approved::NotGranted, _)) => return OperationResult::status("not_granted"),
             Err(_) => return OperationResult::status("cancelled"),
         };
         let mut command = tokio::process::Command::new(&request.operation.command[0]);
