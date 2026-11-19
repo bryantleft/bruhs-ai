@@ -791,7 +791,7 @@ mod tests {
         // A newer service's control: the tab still reads, and offers Close.
         let newer = ComputerState {
             control: Control::Other,
-            ..running.clone()
+            ..running
         };
         assert_eq!(
             computer_controls(Some(&newer), true, true, true),

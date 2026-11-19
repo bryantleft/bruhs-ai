@@ -1544,6 +1544,7 @@ mod fake {
         }
 
         /// A fake host on a system where no bruh browser opens.
+        #[cfg(test)]
         pub(in crate::local_tools) fn with_fake_pages_refusing(
             refusal: &'static str,
         ) -> (Arc<Self>, FakePages) {

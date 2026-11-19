@@ -109,10 +109,12 @@ impl Allowances {
         let mut state = self.state();
         let AllowanceState { list, claims, .. } = &mut *state;
         list.retain(|kept| kept.expires > now && claims.get(&kept.run_id) == Some(&kept.claim));
-        let index = list
+        let taken = list
             .iter()
-            .rposition(|kept| kept.agent_id == agent_id && &kept.command == command)?;
-        Some(list.remove(index))
+            .rposition(|kept| kept.agent_id == agent_id && &kept.command == command)
+            .map(|index| list.remove(index));
+        drop(state);
+        taken
     }
 
     /// Claim `claim` of `run_id` has ended: its allowances go, and the run
