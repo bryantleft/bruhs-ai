@@ -640,6 +640,36 @@ async fn fake_page_answering(
     (cdp, server)
 }
 
+/// A snapshot is a read: it gives the page no user activation, which would
+/// let it open a popup or start a download. Input still does.
+#[tokio::test]
+async fn a_snapshot_gives_the_page_no_user_gesture() {
+    use serde_json::json;
+    let (mut cdp, server) = fake_page(vec![json!({"title":"t"}), json!({"filled":true})]).await;
+    browser::act(&mut cdp, BrowserAction::Snapshot, COMPUTER_VIEWPORT)
+        .await
+        .unwrap();
+    browser::act(
+        &mut cdp,
+        BrowserAction::Fill {
+            selector: "#q".into(),
+            text: "hi".into(),
+        },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    drop(cdp);
+    let gestures: Vec<_> = server
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|(method, _)| method == "Runtime.evaluate")
+        .map(|(_, params)| params["userGesture"].clone())
+        .collect();
+    assert_eq!(gestures, [json!(false), json!(true)]);
+}
+
 #[tokio::test]
 async fn real_clicks_press_and_release_at_the_element_centre() {
     use serde_json::json;

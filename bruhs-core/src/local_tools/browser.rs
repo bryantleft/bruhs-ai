@@ -783,13 +783,13 @@ pub(super) async fn act(
             validate_browser_url(&url).map_err(|error| ToolError::Invalid(error.into()))?;
             cdp.navigate(&url).await?
         }
-        BrowserAction::Snapshot => cdp.evaluate(SNAPSHOT_EXPRESSION).await?,
-        BrowserAction::Evaluate { expression } => cdp.evaluate(&expression).await?,
+        BrowserAction::Snapshot => cdp.evaluate(SNAPSHOT_EXPRESSION, false).await?,
+        BrowserAction::Evaluate { expression } => cdp.evaluate(&expression, true).await?,
         BrowserAction::Click { selector } => click(cdp, &selector, viewport).await?,
         BrowserAction::Fill { selector, text } => {
             let element = one_element(&selector)?;
             let text = serde_json::to_string(&text)?;
-            cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled||e.readOnly)throw new Error('Element is not editable');const p=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLInputElement?HTMLInputElement.prototype:null;if(!p)throw new Error('Choose an input or textarea');Object.getOwnPropertyDescriptor(p,'value').set.call(e,{text});e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return {{filled:true}}}})()"#)).await?
+            cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled||e.readOnly)throw new Error('Element is not editable');const p=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLInputElement?HTMLInputElement.prototype:null;if(!p)throw new Error('Choose an input or textarea');Object.getOwnPropertyDescriptor(p,'value').set.call(e,{text});e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return {{filled:true}}}})()"#), true).await?
         }
         BrowserAction::Screenshot => {
             let value = cdp
@@ -827,7 +827,7 @@ pub(super) async fn act(
         BrowserAction::Type { text, selector } => {
             if let Some(selector) = selector {
                 let element = one_element(&selector)?;
-                cdp.evaluate(&format!(r#"(()=>{{{element}if(!(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement||e.isContentEditable))throw new Error('Choose an input, textarea or editable element');if(e.disabled||e.readOnly)throw new Error('Element is not editable');e.focus();const a=document.activeElement;if(a!==e&&!(a&&a.isContentEditable&&a.contains(e)))throw new Error('Element did not take focus');return true}})()"#)).await?;
+                cdp.evaluate(&format!(r#"(()=>{{{element}if(!(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement||e.isContentEditable))throw new Error('Choose an input, textarea or editable element');if(e.disabled||e.readOnly)throw new Error('Element is not editable');e.focus();const a=document.activeElement;if(a!==e&&!(a&&a.isContentEditable&&a.contains(e)))throw new Error('Element did not take focus');return true}})()"#), true).await?;
             }
             cdp.call(TEXT, json!({"text":text})).await?;
             json!({"typed":text.chars().count()})
@@ -863,7 +863,7 @@ fn one_element(selector: &str) -> Result<String, ToolError> {
 /// script click when it has no box or something else covers its centre.
 async fn click(cdp: &mut Cdp, selector: &str, viewport: Viewport) -> Result<Value, ToolError> {
     let element = one_element(selector)?;
-    let located = cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,t=document.elementFromPoint(x,y);return {{x,y,w:r.width,h:r.height,hit:!!t&&(t===e||e.contains(t))}}}})()"#)).await?;
+    let located = cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,t=document.elementFromPoint(x,y);return {{x,y,w:r.width,h:r.height,hit:!!t&&(t===e||e.contains(t))}}}})()"#), true).await?;
     let centre = || {
         let (x, y) = (located["x"].as_f64()?, located["y"].as_f64()?);
         let boxed = located["w"].as_f64()? > 0.0 && located["h"].as_f64()? > 0.0;
@@ -877,7 +877,7 @@ async fn click(cdp: &mut Cdp, selector: &str, viewport: Viewport) -> Result<Valu
         }
         return Ok(json!({"clicked":true,"via":"input","x":x,"y":y}));
     }
-    cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.click();return true}})()"#)).await?;
+    cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.click();return true}})()"#), true).await?;
     Ok(json!({"clicked":true,"via":"script"}))
 }
 
@@ -951,11 +951,14 @@ impl Cdp {
         Ok(result)
     }
 
-    async fn evaluate(&mut self, expression: &str) -> Result<Value, ToolError> {
+    /// Run `expression` in the page. `gesture` gives the page a user
+    /// activation, as a click would: only input actions pass true, so a
+    /// read can't let a page open popups or start a download.
+    async fn evaluate(&mut self, expression: &str, gesture: bool) -> Result<Value, ToolError> {
         let result = self
             .call(
                 "Runtime.evaluate",
-                json!({"expression":expression,"returnByValue":true,"awaitPromise":true,"userGesture":true}),
+                json!({"expression":expression,"returnByValue":true,"awaitPromise":true,"userGesture":gesture}),
             )
             .await?;
         if let Some(exception) = result.get("exceptionDetails") {
