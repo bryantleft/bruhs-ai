@@ -3,6 +3,11 @@
 #
 #   scripts/release.sh 0.2.0 <native-workflow-run-id>
 #
+# Windows signing requires Java, Azure CLI, and a logged-in user with the
+# Artifact Signing Certificate Profile Signer role on the release profile.
+# Export BRUHS_SIGNING_ENDPOINT (e.g. eus.codesigning.azure.net),
+# BRUHS_SIGNING_ACCOUNT, and BRUHS_SIGNING_PROFILE before running.
+#
 # Runs from a clean checkout of `origin/main` (on `main` or detached) that
 # the gate passed on. CHANGELOG.md must have a dated `## [<version>]` section:
 # it becomes the release notes, and bruhs.ai/changelog shows the same entry

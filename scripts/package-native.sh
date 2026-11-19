@@ -25,6 +25,7 @@ for platform in Linux Windows; do
   for name in bruhs-desktop bruhs-server bruhs-capture; do install -m755 "$bin/$name$ext" "$dest/"; done
   cp -R "$resources/web" "$resources/THIRD_PARTY_LICENSES" LICENSE "$dest/"
 done
+scripts/sign-windows.sh "$work/windows/Bruhs"
 target="$PWD/dist/Bruhs-Windows-x64.zip"
 (cd "$work/windows" && zip -qr "$target" Bruhs)
 deb="$work/deb"
