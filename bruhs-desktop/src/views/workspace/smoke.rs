@@ -524,6 +524,22 @@ impl Workspace {
                     .unwrap_or(0.0);
                 self.settings_scroll.set_offset(point(px(0.0), px(-down)));
             }
+            // `chat-send:<text>`: a new project-less chat sends `text` (live
+            // checks with a stand-in CLI), and `secret-use-saved` presses
+            // Use saved on its credential form.
+            scene if scene.starts_with("chat-send:") => {
+                let text = scene.trim_start_matches("chat-send:").to_string();
+                let Some(chat) = self.smoke_new_chat(window, cx) else {
+                    return false;
+                };
+                chat.update(cx, |chat, cx| chat.smoke_enter(&text, window, cx));
+            }
+            "secret-use-saved" => {
+                let Some(chat) = self.smoke_active_chat() else {
+                    return false;
+                };
+                return chat.update(cx, |chat, cx| chat.smoke_use_saved(window, cx));
+            }
             // Settings, Vault with New entry open on a Saved or a 1Password
             // login (run after `settings-vault`, once the listing is in).
             "vault-new" | "vault-new-1password" => {

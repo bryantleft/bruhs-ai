@@ -27,6 +27,21 @@ impl ChatView {
         self.secret_prompt = None;
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=secret-use-saved`: the open credential
+    /// form's Use saved, as its button does. False when no form is open.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_use_saved(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let Some(prompt) = self.secret_prompt.clone() else {
+            return false;
+        };
+        prompt.update(cx, |prompt, cx| prompt.respond("saved", window, cx));
+        true
+    }
+
     pub(super) fn render_secret_prompt(
         &mut self,
         window: &mut Window,
@@ -320,6 +335,53 @@ mod tests {
                 "{label}"
             );
         }
+    }
+
+    #[gpui::test]
+    fn the_smoke_scene_presses_use_saved_only_on_an_open_form(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let captured = Rc::new(RefCell::new(None));
+        let output = captured.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let chat = cx.new(|cx| ChatView::new(window, cx));
+            *output.borrow_mut() = Some(chat.clone());
+            bruhs_ui::Root::new(chat, window, cx)
+        });
+        let chat = captured.borrow().clone().unwrap();
+        let thread = ThreadId::new_v4();
+        chat.update(cx, |chat, cx| {
+            chat.start_thread(thread.as_str(), "Credential fixture", cx)
+        });
+        let pressed =
+            cx.update(|window, cx| chat.update(cx, |chat, cx| chat.smoke_use_saved(window, cx)));
+        assert!(!pressed, "no form is open");
+        chat.update(cx, |chat, cx| {
+            chat.pending_secret = Some(SecretRequest {
+                id: "smoke-saved".into(),
+                thread_id: thread.clone(),
+                operation: bruhs_models::secrets::SecretOperation {
+                    name: "DEPLOY_KEY".into(),
+                    reason: "Deploy".into(),
+                    env_var: "DEPLOY_KEY".into(),
+                    command: vec!["deploy".into()],
+                },
+                cwd: "/tmp/x".into(),
+                saved_available: true,
+                storage_unavailable: false,
+                connection: None,
+                saved_source: Some(SavedSource::Global),
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("secret-saved").is_some());
+        let pressed =
+            cx.update(|window, cx| chat.update(cx, |chat, cx| chat.smoke_use_saved(window, cx)));
+        assert!(pressed, "the open form's Use saved is pressed");
     }
 
     #[gpui::test]
