@@ -11,6 +11,16 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use crate::error::AppError;
 
 const OAUTH_CALLBACK: &str = "/api/calendar/google/oauth/callback";
+/// The policy of every API response that brings none of its own: opened as
+/// a document (an uploaded SVG, an HTML file, an error page) it runs no
+/// script and loads nothing, and its sandbox gives it an opaque origin, so
+/// it can't call this API as the app's own page. Inline styles keep the
+/// app's plain HTML pages (the OAuth return) readable. `<img>`, media and
+/// `fetch` from the app ignore a subresource's policy.
+const INERT_CSP: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+/// App-owned pages that run their own script against this API, besides
+/// the framed ones in `inline_response`.
+const APP_PAGES: [&str; 1] = ["/api/worktrees/ui"];
 
 #[derive(Debug, Clone, Default)]
 pub struct Policy {
@@ -226,6 +236,7 @@ pub async fn guard(
     // The browser returns here from Google without Origin. The handler still
     // validates its one-use, expiring OAuth state before exchanging any code.
     let oauth_return = request.method() == Method::GET && request.uri().path() == OAUTH_CALLBACK;
+    let app_page = inline_response || APP_PAGES.contains(&request.uri().path());
     if headers.get_all(header::HOST).iter().count() != 1
         || !headers
             .get(header::HOST)
@@ -252,6 +263,18 @@ pub async fn guard(
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        // Same-origin active content would pass as the app's own page
+        // (ruling F26's owner check), so nothing else served here runs.
+        if !app_page
+            && !response
+                .headers()
+                .contains_key(header::CONTENT_SECURITY_POLICY)
+        {
+            response.headers_mut().insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(INERT_CSP),
+            );
+        }
     }
     if scoped_asset {
         // A capability intentionally allows this inert file to be displayed

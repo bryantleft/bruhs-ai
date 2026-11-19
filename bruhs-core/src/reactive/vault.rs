@@ -227,6 +227,24 @@ impl ReactiveRuntime {
         })
     }
 
+    /// Take a deleted vault entry's id out of every bruh's grants, under
+    /// one database transaction, so a grant change made at the same time
+    /// is neither lost nor brought back. The count of bruhs it changed.
+    ///
+    /// # Errors
+    ///
+    /// A store failure; no grant changed.
+    pub async fn forget_vault_entry(&self, id: &str) -> Result<usize, ReactiveError> {
+        let id = id.to_owned();
+        let changed = self
+            .call(move |connection| store::crew::forget_vault_entry(connection, &id))
+            .await?;
+        if changed > 0 {
+            self.changed();
+        }
+        Ok(changed)
+    }
+
     /// Whether bruh `agent_id` has a login it may fill. False when the
     /// vault can't say.
     pub(super) async fn has_usable_logins(&self, agent_id: &str) -> bool {

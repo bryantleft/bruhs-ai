@@ -31,13 +31,12 @@ use bruhs_core::local_tools::{ComputerWatch, LocalToolsHost};
 use bruhs_core::reactive::{ReactiveRuntime, VaultRefusal};
 use bruhs_core::secrets::VAULT_READ_WAIT;
 use bruhs_models::crew::{
-    ACTION_TIMED_OUT, LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED,
-    LIVE_VIEW_UNREADABLE, STEP_FROM_A_PAGE, STEP_NOT_APPROVED, UNKNOWN_BROWSER_ACTION,
-    VAULT_READ_FAILED,
+    LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED, LIVE_VIEW_UNREADABLE,
+    STEP_FROM_A_PAGE, STEP_NOT_APPROVED, UNKNOWN_BROWSER_ACTION, VAULT_READ_FAILED,
 };
 use bruhs_models::local_tools::{
     BrowserAction, BruhBrowserCommand, ComputerInput, ComputerRequest, ComputerState,
-    ScreencastClientMessage, ScreencastMessage, ToolReply, FRAME_ACK,
+    ScreencastClientMessage, ScreencastMessage, SecretRef, ToolReply, FRAME_ACK,
 };
 use futures_util::SinkExt;
 use serde_json::{json, Value};
@@ -56,9 +55,10 @@ const INPUT_QUEUE: usize = 64;
 /// request deadline (`capture_client::REQUEST_TIMEOUT`, 60 s), so a fill
 /// never types after the bruh gave up on it and retried (ruling F24).
 const FILL_BUDGET: Duration = Duration::from_secs(55);
-/// How long a fill's value read may take: the vault's read wait, the
-/// one-time code wait inside it, and the checks around it, so a read the
-/// keychain or 1Password left waiting still answers with its own copy.
+/// How long a fill's value read may take: the vault's read wait plus 2 s,
+/// one more than `fill_value`'s own read backstop, so a read the keychain
+/// or 1Password left waiting usually ends with its own copy first. A slow
+/// catalog lookup before or after the read gets [`VAULT_READ_FAILED`].
 const READ_BUDGET: Duration = VAULT_READ_WAIT.saturating_add(Duration::from_secs(2));
 
 #[cfg(test)]
@@ -129,22 +129,47 @@ pub async fn command(
             .map(Json)
             .map_err(error);
     };
-    // The value for the page the gate let the fill through on, never the
-    // live address or anything the request names. The read and then the
-    // fill each get part of a budget the helper's own request outlasts.
+    let budget = FillBudget {
+        read: READ_BUDGET,
+        total: FILL_BUDGET,
+    };
+    vault_fill(&runtime, &host, &id, action, &secret, page_url, budget)
+        .await
+        .map(Json)
+}
+
+/// How long a vault fill's read, and the whole fill, may take.
+#[derive(Clone, Copy)]
+struct FillBudget {
+    read: Duration,
+    total: Duration,
+}
+
+/// The value for `secret` on `page_url`, the page the gate let the fill
+/// through on (never the live address or anything the request names),
+/// typed by the host. The read gets `budget.read`; the host bounds the
+/// typing by what is left of `budget.total`: a fill that never began to
+/// type in time says so, and one cut off while typing says it may have
+/// run, so the bruh doesn't sign in twice.
+async fn vault_fill(
+    runtime: &ReactiveRuntime,
+    host: &LocalToolsHost,
+    id: &str,
+    action: BrowserAction,
+    secret: &SecretRef,
+    page_url: Option<&str>,
+    budget: FillBudget,
+) -> Result<ToolReply, AppError> {
     let started = Instant::now();
-    let value = tokio::time::timeout(READ_BUDGET, runtime.fill_value(&id, &secret, page_url))
+    let value = tokio::time::timeout(budget.read, runtime.fill_value(id, secret, page_url))
         .await
         .map_err(|_| AppError::Unavailable(VAULT_READ_FAILED.into()))?
         .map_err(|refusal| match refusal {
             VaultRefusal::Refused(message) => AppError::Forbidden(message.into()),
             VaultRefusal::Unavailable(message) => AppError::Unavailable(message.into()),
         })?;
-    let left = FILL_BUDGET.saturating_sub(started.elapsed());
-    tokio::time::timeout(left, host.bruh_fill_on(&id, action, value, page_url))
+    host.bruh_fill_on(id, action, value, page_url, started + budget.total)
         .await
-        .map_err(|_| AppError::Unavailable(ACTION_TIMED_OUT.into()))?
-        .map(Json)
         .map_err(error)
 }
 

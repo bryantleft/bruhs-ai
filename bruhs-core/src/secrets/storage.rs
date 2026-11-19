@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, LockResult, Mutex, MutexGuard, PoisonError},
 };
 use vault::VaultCatalog;
-pub(super) use vault::{StoredTotp, VaultSecret};
+pub(super) use vault::{scrub, StoredTotp, VaultSecret};
 use zeroize::Zeroizing;
 
 mod vault;

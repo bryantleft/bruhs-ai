@@ -19,9 +19,10 @@ use bruhs_models::{
         handed_back_note, same_page_host, selector_reads_values, ACTION_STOPPED, ACTION_TIMED_OUT,
         BROWSER_PAGE_CLOSED_DURING_STEP, BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
         COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, FILL_FAILED,
-        LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, MAX_COMPUTERS, NOT_FOR_BRUHS,
-        OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL,
-        TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW, VAULT_FOR_BRUHS,
+        FILL_MAY_HAVE_RUN, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, MAX_COMPUTERS,
+        NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL,
+        SELECTOR_AFTER_FILL, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        VAULT_FOR_BRUHS,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -756,7 +757,7 @@ impl LocalToolsHost {
         agent_id: &str,
         action: BrowserAction,
     ) -> Result<ToolReply, ToolError> {
-        self.bruh_step(agent_id, action, StepPage::Unchecked, None)
+        self.bruh_step(agent_id, action, StepPage::Unchecked, None, None)
             .await
     }
 
@@ -771,8 +772,14 @@ impl LocalToolsHost {
         action: BrowserAction,
         allowed_on: Option<&str>,
     ) -> Result<ToolReply, ToolError> {
-        self.bruh_step(agent_id, action, StepPage::AllowedOn(allowed_on), None)
-            .await
+        self.bruh_step(
+            agent_id,
+            action,
+            StepPage::AllowedOn(allowed_on),
+            None,
+            None,
+        )
+        .await
     }
 
     /// A vault fill from a bruh's own browser tool, which the gate allowed
@@ -782,18 +789,25 @@ impl LocalToolsHost {
     /// again in the page as it writes; otherwise [`LOGIN_WRONG_ORIGIN`],
     /// and nothing is typed. The reply never holds the value, which is
     /// zeroed when this returns.
+    ///
+    /// The fill must start typing by `deadline` and finish by it (or the
+    /// host's own step timeout, if sooner). One that never reached the page
+    /// in time is [`ACTION_TIMED_OUT`]; one cut off while typing may have
+    /// typed or submitted, so it is [`FILL_MAY_HAVE_RUN`], never a retry.
     pub async fn bruh_fill_on(
         &self,
         agent_id: &str,
         action: BrowserAction,
         value: FillValue,
         allowed_on: Option<&str>,
+        deadline: Instant,
     ) -> Result<ToolReply, ToolError> {
         self.bruh_step(
             agent_id,
             action,
             StepPage::AllowedOn(allowed_on),
             Some(value),
+            Some(deadline),
         )
         .await
     }
@@ -804,6 +818,7 @@ impl LocalToolsHost {
         action: BrowserAction,
         page_check: StepPage<'_>,
         secret: Option<FillValue>,
+        deadline: Option<Instant>,
     ) -> Result<ToolReply, ToolError> {
         let slot = self.checked_slot(agent_id, &action)?;
         // A vault fill goes only with its value, and the value only with
@@ -826,8 +841,14 @@ impl LocalToolsHost {
         if *revoked.borrow_and_update() {
             return Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into()));
         }
+        let timed_out = || ToolError::Unavailable(ACTION_TIMED_OUT.into());
         let work = async {
-            let mut page = slot.page.lock().await;
+            let mut page = match deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, slot.page.lock())
+                    .await
+                    .map_err(|_| timed_out())?,
+                None => slot.page.lock().await,
+            };
             // The owner may have taken control while this waited.
             if slot.control() == Control::Owner {
                 return Err(ToolError::Refused(OWNER_HAS_COMPUTER.into()));
@@ -890,6 +911,14 @@ impl LocalToolsHost {
             let screenshot = matches!(action, BrowserAction::Screenshot);
             let reply = match (fill, &secret) {
                 (Some((selector, field, submit)), Some(value)) => {
+                    // Nothing is typed yet: past the deadline, it never is.
+                    let now = Instant::now();
+                    let until = deadline.map_or(now + self.policy.timeout, |deadline| {
+                        deadline.min(now + self.policy.timeout)
+                    });
+                    if until <= now {
+                        return Err(timed_out());
+                    }
                     let OpenPage { page, filled, .. } = &mut *open;
                     let typed = page.fill_secret(
                         &selector,
@@ -899,11 +928,11 @@ impl LocalToolsHost {
                         submit,
                         filled,
                     );
-                    // A fill cut off here may have typed; its documents
-                    // are marked already.
-                    tokio::time::timeout(self.policy.timeout, typed)
+                    // A fill cut off here may have typed or submitted; its
+                    // documents are marked already.
+                    tokio::time::timeout_at(until, typed)
                         .await
-                        .unwrap_or_else(|_| Err(ToolError::Invalid(FILL_FAILED.into())))
+                        .unwrap_or_else(|_| Err(ToolError::Unavailable(FILL_MAY_HAVE_RUN.into())))
                 }
                 _ => tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await

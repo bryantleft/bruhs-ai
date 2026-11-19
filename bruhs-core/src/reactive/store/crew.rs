@@ -150,6 +150,33 @@ pub(in crate::reactive) fn set_vault(
     save(connection, agent_id, &BruhProfile { vault, ..old })
 }
 
+/// Take vault entry `id` out of every bruh's grants, in one transaction:
+/// the count of bruhs whose grants changed. Grants are rewritten from the
+/// stored profiles, so a change made just before can't be undone.
+pub(in crate::reactive) fn forget_vault_entry(
+    connection: &mut Connection,
+    id: &str,
+) -> Result<usize, ReactiveError> {
+    let transaction = connection.transaction()?;
+    let profiles: Vec<(String, String)> = {
+        let mut statement = transaction.prepare("SELECT agent_id,payload FROM reactive_bruhs")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut changed = 0;
+    for (agent_id, payload) in profiles {
+        let mut profile: BruhProfile = decode(payload)?;
+        if !profile.vault.iter().any(|granted| granted == id) {
+            continue;
+        }
+        profile.vault.retain(|granted| granted != id);
+        save(&transaction, &agent_id, &profile)?;
+        changed += 1;
+    }
+    transaction.commit()?;
+    Ok(changed)
+}
+
 /// The bruhs whose Computer is on (switched on, and available at their
 /// access and model), with their profile under `home`. Disabled agents and
 /// report agents have none.

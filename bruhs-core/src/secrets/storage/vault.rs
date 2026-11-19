@@ -814,7 +814,7 @@ async fn saved_login_change(
 
 /// Move a refused input's values into `Zeroizing`, so dropping them wipes
 /// them.
-fn scrub(secret: VaultSecretInput) {
+pub(in crate::secrets) fn scrub(secret: VaultSecretInput) {
     match secret {
         VaultSecretInput::Value { value } => drop(value.map(Zeroizing::new)),
         VaultSecretInput::Login {

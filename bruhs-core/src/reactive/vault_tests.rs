@@ -767,3 +767,55 @@ async fn a_grant_revoked_or_login_deleted_during_the_read_types_nothing() {
         Some(VaultRefusal::Refused(LOGIN_NOT_GRANTED))
     );
 }
+
+/// The grants of `agent_id` as the snapshot shows them.
+async fn grants(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<String> {
+    runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .bruhs
+        .into_iter()
+        .find(|bruh| bruh.agent_id == agent_id)
+        .map(|bruh| bruh.vault)
+        .unwrap_or_default()
+}
+
+/// Ruling V Task 10 I2: a deleted entry leaves every bruh's grants in one
+/// transaction, so a revoke at the same moment is never undone.
+#[tokio::test]
+async fn forgetting_an_entry_drops_it_from_every_grant_and_keeps_a_revoke() {
+    let (_dir, runtime) = runtime_with(&[full_claude("a"), full_claude("b")]).await;
+    runtime.command(set_vault("a", &["d", "x"])).await.unwrap();
+    runtime.command(set_vault("b", &["d", "y"])).await.unwrap();
+    let mut changes = runtime.watch_changes();
+    changes.borrow_and_update();
+    assert_eq!(runtime.forget_vault_entry("d").await.unwrap(), 2);
+    assert!(changes.has_changed().unwrap(), "the change is published");
+    assert_eq!(grants(&runtime, "a").await, ["x"]);
+    assert_eq!(grants(&runtime, "b").await, ["y"]);
+    changes.borrow_and_update();
+    assert_eq!(runtime.forget_vault_entry("d").await.unwrap(), 0);
+    assert!(
+        !changes.has_changed().unwrap(),
+        "nothing changed, nothing sent"
+    );
+
+    // The owner revokes `x` while `d` is deleted, in either order: `x`
+    // never comes back.
+    for _ in 0..50 {
+        runtime.command(set_vault("a", &["d", "x"])).await.unwrap();
+        let (revoked, forgotten) = tokio::join!(
+            runtime.command(set_vault("a", &["d"])),
+            runtime.forget_vault_entry("d"),
+        );
+        revoked.unwrap();
+        forgotten.unwrap();
+        let now = grants(&runtime, "a").await;
+        assert!(
+            now.is_empty() || now == ["d"],
+            "a revoked grant came back: {now:?}"
+        );
+        assert!(!now.contains(&"x".to_owned()));
+    }
+}

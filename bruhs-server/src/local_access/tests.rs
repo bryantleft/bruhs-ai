@@ -298,3 +298,138 @@ async fn merged_workbench_services_preserve_the_local_origin_boundary() {
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 }
+
+fn headers(pairs: &[(&'static str, &str)]) -> axum::http::HeaderMap {
+    let mut headers = axum::http::HeaderMap::new();
+    for (name, value) in pairs {
+        headers.append(*name, value.parse().unwrap());
+    }
+    headers
+}
+
+/// Ruling F26 and the V Task 10 minors: only no `Origin`, the request's own
+/// `http` Host origin, or a configured one is the owner's app.
+#[test]
+fn owner_requests_are_the_native_client_the_own_page_or_a_configured_origin() {
+    let policy = Policy::from_config(None, Some("https://bruhs.localhost")).unwrap();
+    let host = ("host", "127.0.0.1:3001");
+    for allowed in [
+        headers(&[host]),
+        headers(&[host, ("origin", "http://127.0.0.1:3001")]),
+        headers(&[
+            ("host", "LOCALHOST:3001"),
+            ("origin", "http://localhost:3001"),
+        ]),
+        headers(&[host, ("origin", "https://bruhs.localhost")]),
+    ] {
+        assert!(policy.owner_request(&allowed), "{allowed:?}");
+    }
+    for refused in [
+        // A sandboxed or no-referrer page.
+        headers(&[host, ("origin", "null")]),
+        headers(&[
+            host,
+            ("origin", "http://127.0.0.1:3001"),
+            ("origin", "http://127.0.0.1:3001"),
+        ]),
+        headers(&[host, ("origin", "https://127.0.0.1:3001")]),
+        // Another port of the same host is another page.
+        headers(&[host, ("origin", "http://127.0.0.1:5173")]),
+        headers(&[
+            ("host", "127.0.0.1:5173"),
+            ("origin", "http://127.0.0.1:3001"),
+        ]),
+        headers(&[("host", "127.0.0.1"), ("origin", "http://127.0.0.1:3001")]),
+        headers(&[host, ("origin", "http://localhost:3001")]),
+        headers(&[host, ("origin", "http://127.0.0.1:3001/")]),
+        headers(&[("origin", "http://127.0.0.1:3001")]),
+        headers(&[host, host, ("origin", "http://127.0.0.1:3001")]),
+        headers(&[host, ("origin", "https://other.localhost")]),
+    ] {
+        assert!(!policy.owner_request(&refused), "{refused:?}");
+    }
+}
+
+/// Ruling V Task 10 C1: a file the API serves can't run as the app's own
+/// page. An uploaded SVG opened directly is sandboxed with no script.
+#[tokio::test]
+async fn files_and_api_responses_served_as_documents_are_inert() {
+    let directory = tempfile::tempdir().unwrap();
+    let svg = directory.path().join("x.svg");
+    std::fs::write(
+        &svg,
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><script>fetch('/api/vault')</script></svg>"#,
+    )
+    .unwrap();
+    let config = crate::config::Config::from_settings(crate::config::Settings {
+        port: Some("0"),
+        web_dist: directory.path().join("missing").to_str(),
+        ..Default::default()
+    })
+    .unwrap();
+    let app = crate::router(crate::config::ServerState {
+        app: std::sync::Arc::new(
+            bruhs_core::AppState::builder()
+                .secret_store(bruhs_core::secrets::SecretStore::in_memory())
+                .connections(bruhs_core::connections::Connections::in_memory())
+                .build(),
+        ),
+        config: std::sync::Arc::new(config),
+        updates: bruhs_core::updates::UpdateChecker::new(bruhs_core::updates::BuildInfo::new(
+            "", "", "unused",
+        )),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+    let open = client
+        .get(format!("{base}/api/agent/uploads/open"))
+        .query(&[("path", svg.to_str().unwrap())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(open.status(), StatusCode::OK);
+    assert_eq!(open.headers()["content-type"], "image/svg+xml");
+    assert_eq!(open.headers()["content-security-policy"], INERT_CSP);
+    assert!(INERT_CSP.starts_with("sandbox;") && INERT_CSP.contains("default-src 'none'"));
+    assert!(!INERT_CSP.contains("script"));
+    assert_eq!(open.headers()["x-content-type-options"], "nosniff");
+    // JSON, errors and the OAuth return page get it too.
+    for path in [
+        "/api/health",
+        "/api/no-such-route",
+        "/api/calendar/google/oauth/callback?error=x",
+    ] {
+        let response = client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(
+            response.headers()["content-security-policy"],
+            INERT_CSP,
+            "{path}"
+        );
+    }
+    // App pages keep their own scripts; a route's own policy stays.
+    let workbench = client
+        .get(format!("{base}/api/workbench/ui"))
+        .send()
+        .await
+        .unwrap();
+    let policies: Vec<_> = workbench
+        .headers()
+        .get_all("content-security-policy")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        policies.iter().all(|policy| !policy.contains("sandbox")),
+        "{policies:?}"
+    );
+    let worktrees = client
+        .get(format!("{base}/api/worktrees/ui"))
+        .send()
+        .await
+        .unwrap();
+    assert!(!worktrees.headers().contains_key("content-security-policy"));
+    server.abort();
+}

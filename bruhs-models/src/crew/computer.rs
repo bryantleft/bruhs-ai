@@ -105,8 +105,13 @@ pub const KEYCHAIN_NEEDS_OWNER: &str =
     "The keychain needs the owner to allow access on this computer. Stop here and say so.";
 pub const VAULT_READ_FAILED: &str =
     "Bruhs couldn't read that vault login. Stop here and tell the owner.";
-/// A browser step, or a vault fill with its read, that outlasted its time.
+/// A browser step that outlasted its time, or a vault fill that did before
+/// it began to type: nothing of it ran.
 pub const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and retry.";
+/// A vault fill cut off while it typed: the login may be in the page, or
+/// submitted. Not a retry, which would sign in again.
+pub const FILL_MAY_HAVE_RUN: &str =
+    "The login may have been typed. Take a snapshot before trying again.";
 /// The run preamble's paragraph for a bruh whose Computer is on and that
 /// has a usable login.
 pub const VAULT_PREAMBLE: &str = "Your browser can sign in with vault logins. `logins` lists the ones you may use; `fill` with `secret: {login_id, field}` types one into a field on that login's own site, and `submit: true` presses Enter. You never see the values. If a fill says the owner is needed, stop and say so.";

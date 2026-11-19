@@ -9,9 +9,9 @@
 //! - `POST /api/vault/{id}/check`: whether one read worked
 //!   ([`VaultCheck`]).
 //!
-//! Every route sits behind the shared loopback guard. The changes also
-//! need a request from the owner's own app ([`Policy::owner_request`]):
-//! other loopback pages may read the listing but not change it. Bodies
+//! Every route sits behind the shared loopback guard, and each also needs
+//! a request from the owner's own app ([`Policy::owner_request`]): other
+//! loopback pages may neither read the vault nor change it. Bodies
 //! that aren't entries get [`INVALID_ENTRY`], never serde's text, which
 //! can quote a value; errors are fixed copy, and no handler logs a body.
 
@@ -23,7 +23,6 @@ use axum::{
     Extension, Json,
 };
 use bruhs_core::{reactive::ReactiveRuntime, secrets::SecretError, AppState};
-use bruhs_models::reactive::ReactiveCommand;
 use bruhs_models::vault::{
     CredentialScope, VaultBruh, VaultCheck, VaultCreate, VaultEntry, VaultListing, VaultUpdate,
     BRUH_MISSING, ENTRY_CHANGED, ENTRY_GONE, INVALID_ENTRY, OWNER_ONLY, PROJECT_MISSING,
@@ -87,14 +86,22 @@ async fn bruhs(runtime: &ReactiveRuntime) -> Result<Vec<VaultBruh>, AppError> {
         .collect())
 }
 
-/// `GET /api/vault`.
+/// `GET /api/vault`. Owner-only like the changes: usernames, sign-in
+/// pages, `op://` references and project folders are the owner's to see.
+/// Bruh names the runtime can't give leave `bruhs` empty, not the page.
 pub async fn list(
     State(state): State<Arc<AppState>>,
+    State(config): State<Arc<Config>>,
     runtime: Option<Extension<ReactiveRuntime>>,
+    headers: HeaderMap,
 ) -> Result<Json<VaultListing>, AppError> {
+    owner_only(&config.access, &headers)?;
     let mut listing = state.secrets().vault_listing().await.map_err(vault_error)?;
     if let Some(Extension(runtime)) = runtime {
-        listing.bruhs = bruhs(&runtime).await?;
+        listing.bruhs = bruhs(&runtime).await.unwrap_or_else(|error| {
+            tracing::warn!(%error, "The vault listing has no bruh names");
+            Vec::new()
+        });
     }
     Ok(Json(listing))
 }
@@ -110,9 +117,26 @@ pub async fn create(
 ) -> Result<Json<VaultEntry>, AppError> {
     owner_only(&config.access, &headers)?;
     let mut create = body(create)?;
-    match &mut create.scope {
-        CredentialScope::Global => {}
-        // An empty folder or bruh is the store's own copy.
+    if let Err(refused) = scope_checked(&mut create.scope, runtime).await {
+        // Its values are wiped as the store wipes a create it refuses.
+        bruhs_core::secrets::discard(create);
+        return Err(refused);
+    }
+    state
+        .secrets()
+        .vault_create(create)
+        .await
+        .map(Json)
+        .map_err(vault_error)
+}
+
+/// A Project folder made canonical, or a Bruh scope's bruh found in the
+/// runtime. An empty folder or bruh is left for the store's own copy.
+async fn scope_checked(
+    scope: &mut CredentialScope,
+    runtime: Option<Extension<ReactiveRuntime>>,
+) -> Result<(), AppError> {
+    match scope {
         CredentialScope::Project { path } if !path.trim().is_empty() => {
             *path = project_folder(path).await?;
         }
@@ -126,14 +150,11 @@ pub async fn create(
                 return Err(AppError::BadRequest(BRUH_MISSING.into()));
             }
         }
-        CredentialScope::Project { .. } | CredentialScope::Bruh { .. } => {}
+        CredentialScope::Global
+        | CredentialScope::Project { .. }
+        | CredentialScope::Bruh { .. } => {}
     }
-    state
-        .secrets()
-        .vault_create(create)
-        .await
-        .map(Json)
-        .map_err(vault_error)
+    Ok(())
 }
 
 /// `path` as the canonical folder thread requests match against, or
@@ -193,28 +214,13 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Take a deleted entry's id out of every bruh's grants, so it doesn't
-/// count toward their limit. A grant of a deleted entry grants nothing, so
-/// a failure here is only logged.
+/// Take a deleted entry's id out of every bruh's grants in one store
+/// transaction, so it doesn't count toward their limit and a grant change
+/// made meanwhile stays. A grant of a deleted entry grants nothing, so a
+/// failure here is only logged.
 async fn forget_grants(runtime: &ReactiveRuntime, id: &str) {
-    let bruhs = match runtime.snapshot().await {
-        Ok(snapshot) => snapshot.bruhs,
-        Err(error) => {
-            tracing::warn!(%error, "A deleted vault entry's grants could not be read");
-            return;
-        }
-    };
-    for bruh in bruhs {
-        if !bruh.vault.iter().any(|granted| granted == id) {
-            continue;
-        }
-        let command = ReactiveCommand::SetVault {
-            agent_id: bruh.agent_id,
-            entries: bruh.vault.into_iter().filter(|kept| kept != id).collect(),
-        };
-        if let Err(error) = runtime.command(command).await {
-            tracing::warn!(%error, "A deleted vault entry's grant could not be removed");
-        }
+    if let Err(error) = runtime.forget_vault_entry(id).await {
+        tracing::warn!(%error, "A deleted vault entry's grants could not be removed");
     }
 }
 

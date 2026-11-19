@@ -18,6 +18,12 @@ pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use one_password::{OnePassword, OnePasswordError};
 pub use storage::SecretStore;
 
+/// Drop a vault create the caller refused before it reached the store,
+/// wiping its values as the store wipes a refused one.
+pub fn discard(create: bruhs_models::vault::VaultCreate) {
+    storage::scrub(create.secret);
+}
+
 use crate::{OrchestratorEvent, QueryEvent};
 use bruhs_models::{
     ids::ThreadId,

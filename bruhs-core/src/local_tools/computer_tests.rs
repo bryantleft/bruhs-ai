@@ -1,10 +1,11 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use bruhs_models::crew::{
-    handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
-    FILL_FAILED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, NOT_FOR_BRUHS,
-    OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL,
-    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW, VAULT_FOR_BRUHS,
+    handed_back_note, ACTION_STOPPED, ACTION_TIMED_OUT, CLOSED_BY_OWNER, COMPUTERS_FULL,
+    COMPUTER_OFF_DENIAL, FILL_FAILED, FILL_MAY_HAVE_RUN, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
+    LOGIN_WRONG_ORIGIN, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN,
+    SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
+    USE_THE_WINDOW, VAULT_FOR_BRUHS,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
@@ -1334,6 +1335,11 @@ fn vault_fill(selector: &str, field: SecretField, submit: bool) -> BrowserAction
     }
 }
 
+/// A fill deadline no test reaches.
+fn later() -> tokio::time::Instant {
+    tokio::time::Instant::now() + Duration::from_secs(60)
+}
+
 /// A random value no test output may hold.
 fn canary() -> String {
     format!("pw-{}", uuid::Uuid::new_v4().simple())
@@ -1376,6 +1382,7 @@ async fn a_login_fills_on_its_origin_and_the_reply_has_no_value() {
             vault_fill("#pw", SecretField::Password, true),
             fill_value("https://shop.test", SecretField::Password, &value),
             Some("https://shop.test/in"),
+            later(),
         )
         .await
         .unwrap();
@@ -1396,6 +1403,83 @@ async fn a_login_fills_on_its_origin_and_the_reply_has_no_value() {
         .all(|action| !matches!(action, BrowserAction::Fill { .. })));
 }
 
+fn unavailable_with(result: Result<ToolReply, ToolError>, expected: &str) -> bool {
+    matches!(result, Err(ToolError::Unavailable(message)) if message == expected)
+}
+
+/// Ruling V Task 10 I1: a fill cut off while it types may have typed or
+/// submitted, so the bruh hears that, not "retry".
+#[tokio::test(start_paused = true)]
+async fn a_fill_cut_off_while_typing_says_it_may_have_run() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let value = canary();
+    let fill = |deadline| {
+        host.bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, true),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            Some("https://shop.test/in"),
+            deadline,
+        )
+    };
+    let typing = fake.hold_next_action("a");
+    let started = tokio::time::Instant::now();
+    let result = fill(started + Duration::from_secs(5)).await;
+    assert!(
+        unavailable_with(result, FILL_MAY_HAVE_RUN),
+        "a fill cut off while typing may have run"
+    );
+    assert_eq!(
+        started.elapsed(),
+        Duration::from_secs(5),
+        "cut at the deadline"
+    );
+    assert!(fake.secret_fills("a").is_empty());
+    drop(typing);
+    // The page is free again: the next fill types.
+    fill(later()).await.unwrap();
+    assert_eq!(fake.secret_fills("a").len(), 1);
+}
+
+/// A fill still waiting for the page at its deadline never types.
+#[tokio::test(start_paused = true)]
+async fn a_fill_that_never_reached_the_page_in_time_types_nothing() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let value = canary();
+    let held = fake.hold_next_action("a");
+    let busy = {
+        let host = Arc::clone(&host);
+        tokio::spawn(async move { host.bruh_command("a", BrowserAction::Snapshot).await })
+    };
+    while !fake.hold_reached("a") {
+        tokio::task::yield_now().await;
+    }
+    let result = host
+        .bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, false),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            Some("https://shop.test/in"),
+            tokio::time::Instant::now() + Duration::from_secs(5),
+        )
+        .await;
+    assert!(unavailable_with(result, ACTION_TIMED_OUT));
+    held.notify_one();
+    busy.await.unwrap().unwrap();
+    // A deadline already past types nothing either.
+    let result = host
+        .bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, false),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            Some("https://shop.test/in"),
+            tokio::time::Instant::now(),
+        )
+        .await;
+    assert!(unavailable_with(result, ACTION_TIMED_OUT));
+    assert!(fake.secret_fills("a").is_empty());
+}
+
 #[tokio::test]
 async fn a_fill_never_types_on_another_origin_after_the_gate() {
     let (_home, host, fake) = bruh_on("https://shop.test/in").await;
@@ -1409,6 +1493,7 @@ async fn a_fill_never_types_on_another_origin_after_the_gate() {
                 vault_fill("#pw", SecretField::Password, false),
                 fill_value("https://shop.test", SecretField::Password, &value),
                 allowed_on,
+                later(),
             )
             .await
         }
@@ -1450,6 +1535,7 @@ async fn screenshots_stay_off_on_a_filled_document() {
         vault_fill("#pw", SecretField::Password, false),
         fill_value("https://shop.test", SecretField::Password, &canary()),
         Some("https://shop.test/in"),
+        later(),
     )
     .await
     .unwrap();
@@ -1502,6 +1588,7 @@ async fn value_probing_selectors_are_refused_on_a_filled_document() {
         vault_fill("#pw", SecretField::Password, false),
         fill_value("https://shop.test", SecretField::Password, &canary()),
         Some("https://shop.test/in"),
+        later(),
     )
     .await
     .unwrap();
@@ -1537,6 +1624,7 @@ async fn value_probing_selectors_are_refused_on_a_filled_document() {
                 vault_fill(&selector, SecretField::Username, false),
                 fill_value("https://shop.test", SecretField::Username, "owner"),
                 Some("https://shop.test/in"),
+                later(),
             )
             .await
         }
@@ -1574,6 +1662,7 @@ async fn a_fill_waits_for_the_owner_and_obeys_stop() {
                 vault_fill("#pw", SecretField::Password, true),
                 fill_value("https://shop.test", SecretField::Password, &canary()),
                 Some("https://shop.test/in"),
+                later(),
             )
             .await
         }
@@ -1617,6 +1706,7 @@ async fn a_screenshot_that_lands_on_a_filled_document_is_dropped() {
         vault_fill("#pw", SecretField::Password, false),
         fill_value("https://shop.test", SecretField::Password, &canary()),
         Some("https://shop.test/in"),
+        later(),
     )
     .await
     .unwrap();
@@ -1639,6 +1729,7 @@ async fn a_relaunched_browser_starts_with_no_filled_documents() {
         vault_fill("#pw", SecretField::Password, false),
         fill_value("https://shop.test", SecretField::Password, &canary()),
         Some("https://shop.test/in"),
+        later(),
     )
     .await
     .unwrap();
@@ -1688,6 +1779,7 @@ async fn a_mismatched_field_or_plain_action_is_refused() {
             vault_fill("#pw", SecretField::Password, false),
             other_login,
             Some("https://shop.test/in"),
+            later(),
         )
         .await,
         FILL_FAILED
@@ -1698,6 +1790,7 @@ async fn a_mismatched_field_or_plain_action_is_refused() {
             vault_fill("#pw", SecretField::Password, false),
             fill_value("https://shop.test", SecretField::Username, &value),
             Some("https://shop.test/in"),
+            later(),
         )
         .await,
         FILL_FAILED
@@ -1714,6 +1807,7 @@ async fn a_mismatched_field_or_plain_action_is_refused() {
             text,
             fill_value("https://shop.test", SecretField::Password, &value),
             Some("https://shop.test/in"),
+            later(),
         )
         .await,
         FILL_FAILED
@@ -1880,6 +1974,7 @@ async fn live_a_filled_page_takes_no_screenshot_or_probe_even_after_back() {
             vault_fill("#p", SecretField::Password, false),
             fill_value("http://shop.test", SecretField::Password, &value),
             Some(login),
+            later(),
         )
         .await
         .unwrap();

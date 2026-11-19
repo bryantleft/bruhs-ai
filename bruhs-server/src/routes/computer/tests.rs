@@ -9,12 +9,16 @@ use bruhs_models::crew::{
     MAX_VIEWERS, NOT_FOR_BRUHS, PAGE_CHANGED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED,
     TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, VIEWERS_FULL,
 };
+use bruhs_models::crew::{FILL_MAY_HAVE_RUN, VAULT_READ_FAILED};
 use bruhs_models::local_tools::{
     screencast_path, ComputerInput, ComputerState, Control, MouseButton, MouseKind,
     ScreencastMessage, FRAME_ACK,
 };
+use bruhs_models::local_tools::{BrowserAction, ToolReply};
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun};
 use bruhs_models::vault::{SecretField, OWNER_ONLY};
+
+use crate::error::AppError;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest, Message};
@@ -29,6 +33,7 @@ const SHOP: &str = "https://shop.test/in";
 
 struct Fixture {
     runtime: ReactiveRuntime,
+    host: Arc<LocalToolsHost>,
     fake: FakePages,
     base: String,
     client: reqwest::Client,
@@ -52,13 +57,18 @@ impl Fixture {
             .unwrap();
         let (host, fake) = LocalToolsHost::with_fake_pages();
         runtime.attach_computers(Arc::clone(&host)).unwrap();
-        // The keychain is in memory, and no `op` is ever found.
+        // The keychain is in memory, and `op` a stand-in that answers
+        // every reference after 5 s.
+        let op = directory.path().join("op");
+        std::fs::write(&op, "#!/bin/sh\n/bin/sleep 5\nprintf 'op-value'\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&op, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let state = Arc::new(
             bruhs_core::AppState::builder()
                 .secret_store(bruhs_core::secrets::SecretStore::in_memory())
                 .one_password(bruhs_core::secrets::OnePassword::at(
-                    directory.path().join("no-op"),
-                    Duration::from_secs(1),
+                    op,
+                    Duration::from_secs(10),
                 ))
                 .connections(bruhs_core::connections::Connections::in_memory())
                 .build(),
@@ -79,7 +89,7 @@ impl Fixture {
             )),
         })
         .layer(Extension(runtime.clone()))
-        .layer(Extension(host));
+        .layer(Extension(Arc::clone(&host)));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
@@ -92,6 +102,7 @@ impl Fixture {
             .unwrap();
         let fixture = Self {
             runtime,
+            host,
             fake,
             base,
             client,
@@ -840,13 +851,26 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
         let entry: Value = serde_json::from_str(&body).unwrap();
         ids.push(entry["id"].as_str().unwrap().to_owned());
     }
-    // Reading is the shared guard's: any loopback page.
-    let (status, body) = fixture
-        .send(Method::GET, "/api/vault", None, Some(APP_ORIGIN))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    let listing: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(listing["entries"].as_array().unwrap().len(), 3);
+    // Reading is the owner's too (ruling V Task 10 I3).
+    for origin in foreign {
+        let (status, body) = fixture
+            .send(Method::GET, "/api/vault", None, Some(origin))
+            .await;
+        assert_eq!(
+            (status, body.as_str()),
+            (
+                StatusCode::FORBIDDEN,
+                &*format!("{{\"error\":\"{OWNER_ONLY}\"}}")
+            )
+        );
+    }
+    for origin in [None, Some(own.as_str()), Some(CONFIGURED_ORIGIN)] {
+        let (status, body) = fixture.send(Method::GET, "/api/vault", None, origin).await;
+        assert_eq!(status, StatusCode::OK, "{origin:?}: {body}");
+        assert!(!body.contains(&value));
+        let listing: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(listing["entries"].as_array().unwrap().len(), 3);
+    }
 
     let path = format!("/api/vault/{}", ids[0]);
     let update = json!({"secret": {"kind": "value", "value": canary("new")}});
@@ -908,4 +932,105 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
         let (status, text) = fixture.send(method.clone(), &path, body, Some(&own)).await;
         assert_eq!(status, expected, "{method} {path}: {text}");
     }
+}
+
+fn unavailable(result: Result<ToolReply, AppError>) -> String {
+    match result {
+        Err(AppError::Unavailable(message)) => message,
+        Err(other) => panic!("expected 503, got {other}"),
+        Ok(reply) => panic!("expected 503, got {:?}", reply.value),
+    }
+}
+
+/// A read past its budget and a fill cut off while typing each answer with
+/// copy that doesn't invite a retry, within the budget (ruling F24, V Task
+/// 10 I1). The budgets are short here; the route uses 32 s and 55 s.
+#[tokio::test]
+async fn a_fill_past_its_budget_never_asks_for_a_retry() {
+    let fixture = Fixture::new().await;
+    let (status, body) = fixture
+        .post(
+            "/api/vault",
+            json!({
+                "name": "Shop 1Password",
+                "scope": {"type": "global"},
+                "secret": {"kind": "login", "url": SHOP, "fields": {
+                    "source": "one_password",
+                    "username": "op://P/Shop/username",
+                    "password": "op://P/Shop/password",
+                }},
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let slow = body["id"].as_str().unwrap().to_owned();
+    let password = canary("pw");
+    let saved = fixture.granted_login(&password).await;
+    fixture
+        .command(ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: vec![slow.clone(), saved.clone()],
+        })
+        .await;
+    fixture.computer_on().await;
+    fixture.open().await;
+    fixture.fake.set_url("a", SHOP);
+    let fill = |login: &str| {
+        let action: BrowserAction = serde_json::from_value(fill_password(login)).unwrap();
+        let secret = action.secret_fill().unwrap().1.clone();
+        (action, secret)
+    };
+    let short = |read_ms, total_ms| super::FillBudget {
+        read: Duration::from_millis(read_ms),
+        total: Duration::from_millis(total_ms),
+    };
+
+    // 1Password is slow to answer: the read's budget ends the fill.
+    let (action, secret) = fill(&slow);
+    let started = std::time::Instant::now();
+    let result = super::vault_fill(
+        &fixture.runtime,
+        &fixture.host,
+        "a",
+        action,
+        &secret,
+        Some(SHOP),
+        short(200, 55_000),
+    )
+    .await;
+    assert_eq!(unavailable(result), VAULT_READ_FAILED);
+    assert!(started.elapsed() < Duration::from_secs(3));
+
+    // The page takes the keystrokes and never answers: the fill may have
+    // run, so it isn't one to retry.
+    let typing = fixture.fake.hold_next_action("a");
+    let (action, secret) = fill(&saved);
+    let started = std::time::Instant::now();
+    let result = super::vault_fill(
+        &fixture.runtime,
+        &fixture.host,
+        "a",
+        action,
+        &secret,
+        Some(SHOP),
+        short(5_000, 500),
+    )
+    .await;
+    assert_eq!(unavailable(result), FILL_MAY_HAVE_RUN);
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(fixture.fake.secret_fills("a").is_empty());
+    drop(typing);
+    let (action, secret) = fill(&saved);
+    super::vault_fill(
+        &fixture.runtime,
+        &fixture.host,
+        "a",
+        action,
+        &secret,
+        Some(SHOP),
+        short(5_000, 5_000),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fixture.fake.secret_fills("a").len(), 1, "one fill typed");
 }
