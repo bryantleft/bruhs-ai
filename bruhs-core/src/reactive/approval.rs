@@ -193,6 +193,39 @@ impl ReactiveRuntime {
         });
     }
 
+    /// The gate's answer to one call of `run`'s browser tool (`input` is
+    /// the tool input, `{"command": …}`) for a Claude bruh at `access`
+    /// whose Computer is on, as the worker asks it: an allowed step leaves
+    /// its allowance. For route tests outside this crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn gate_browser_step_for_tests(
+        &self,
+        run: &ReactiveRun,
+        access: &BruhAccess,
+        input: &Value,
+    ) -> Result<Option<PermissionDecision>, ReactiveError> {
+        let claim = self
+            .allowances
+            .state()
+            .claims
+            .get(&run.id)
+            .copied()
+            .unwrap_or_default();
+        decide(
+            self,
+            access,
+            AgentProvider::Claude,
+            true,
+            run,
+            claim,
+            "",
+            BRUH_BROWSER_TOOL,
+            input,
+            Duration::from_secs(5),
+        )
+        .await
+    }
+
     /// Claim the next queued run as a new attempt, forgetting the
     /// allowances its earlier attempts left, under the same database lock.
     pub(super) async fn claim_next(&self) -> Result<Option<store::Claim>, ReactiveError> {

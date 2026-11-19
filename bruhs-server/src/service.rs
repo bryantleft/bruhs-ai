@@ -24,8 +24,10 @@ use std::{
 
 const LABEL: &str = "dev.bruhs.server";
 const UNIT: &str = "bruhs-server.service";
-/// Settings that describe this process's own lifetime, not the service's.
-const SKIPPED_ENV: [&str; 1] = ["BRUHS_EXIT_WITH_PARENT"];
+/// Settings that describe this process's own lifetime, not the service's,
+/// and the acceptance script's in-memory secrets: a service installed from
+/// such a server would start with an empty vault and keep nothing.
+const SKIPPED_ENV: [&str; 2] = ["BRUHS_EXIT_WITH_PARENT", "BRUHS_SECRET_STORE"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -58,13 +60,14 @@ fn definition_path() -> Result<PathBuf, ServiceError> {
     }
 }
 
+/// Whether the installer copies variable `key` into the service.
+fn carried(key: &str) -> bool {
+    (key.starts_with("BRUHS_") && !SKIPPED_ENV.contains(&key)) || key == "PATH"
+}
+
 /// Environment carried into the service, sorted for a stable definition.
 fn environment(web_dist: &Path) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = std::env::vars()
-        .filter(|(key, _)| {
-            (key.starts_with("BRUHS_") && !SKIPPED_ENV.contains(&key.as_str())) || key == "PATH"
-        })
-        .collect();
+    let mut env: Vec<(String, String)> = std::env::vars().filter(|(key, _)| carried(key)).collect();
     env.retain(|(key, _)| key != "BRUHS_WEB_DIST");
     env.push(("BRUHS_WEB_DIST".into(), web_dist.display().to_string()));
     env.sort();
@@ -3024,5 +3027,14 @@ mod tests {
         assert!(env
             .iter()
             .any(|(key, value)| key == "BRUHS_WEB_DIST" && value == "/web"));
+    }
+
+    #[test]
+    fn the_installer_never_carries_in_memory_secrets() {
+        assert!(!carried("BRUHS_SECRET_STORE"));
+        assert!(!carried("BRUHS_EXIT_WITH_PARENT"));
+        assert!(carried("BRUHS_WEB_ORIGIN"));
+        assert!(carried("PATH"));
+        assert!(!carried("HOME"));
     }
 }

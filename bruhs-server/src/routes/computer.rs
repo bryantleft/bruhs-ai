@@ -11,7 +11,9 @@
 //! run can't take its own computer, read its session id or open the live
 //! view. The command route answers only the helper: a request with an
 //! `Origin` comes from a web page and is refused, and each step must use up
-//! the one-shot allowance the gate left for it.
+//! the one-shot allowance the gate left for it. `logins` is answered from
+//! the vault without the page; a vault fill's value is read for the page
+//! the allowance names and handed to the host, and never comes back.
 
 use std::{sync::Arc, time::Duration};
 
@@ -26,17 +28,19 @@ use axum::{
     Extension, Json,
 };
 use bruhs_core::local_tools::{ComputerWatch, LocalToolsHost};
-use bruhs_core::reactive::ReactiveRuntime;
+use bruhs_core::reactive::{ReactiveRuntime, VaultRefusal};
+use bruhs_core::secrets::VAULT_READ_WAIT;
 use bruhs_models::crew::{
-    LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED, LIVE_VIEW_UNREADABLE,
-    STEP_FROM_A_PAGE, STEP_NOT_APPROVED, UNKNOWN_BROWSER_ACTION,
+    ACTION_TIMED_OUT, LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED,
+    LIVE_VIEW_UNREADABLE, STEP_FROM_A_PAGE, STEP_NOT_APPROVED, UNKNOWN_BROWSER_ACTION,
+    VAULT_READ_FAILED,
 };
 use bruhs_models::local_tools::{
-    BruhBrowserCommand, ComputerInput, ComputerRequest, ComputerState, ScreencastClientMessage,
-    ScreencastMessage, ToolReply, FRAME_ACK,
+    BrowserAction, BruhBrowserCommand, ComputerInput, ComputerRequest, ComputerState,
+    ScreencastClientMessage, ScreencastMessage, ToolReply, FRAME_ACK,
 };
 use futures_util::SinkExt;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::{sync::mpsc, time::Instant};
 
 use super::local_tools::error;
@@ -48,6 +52,14 @@ use crate::error::AppError;
 const MAX_MESSAGE_BYTES: usize = 64 << 10;
 /// Owner inputs waiting for the page, and refusals waiting for the socket.
 const INPUT_QUEUE: usize = 64;
+/// How long a vault fill's route may take in all: under the helper's own
+/// request deadline (`capture_client::REQUEST_TIMEOUT`, 60 s), so a fill
+/// never types after the bruh gave up on it and retried (ruling F24).
+const FILL_BUDGET: Duration = Duration::from_secs(55);
+/// How long a fill's value read may take: the vault's read wait, the
+/// one-time code wait inside it, and the checks around it, so a read the
+/// keychain or 1Password left waiting still answers with its own copy.
+const READ_BUDGET: Duration = VAULT_READ_WAIT.saturating_add(Duration::from_secs(2));
 
 #[cfg(test)]
 mod tests;
@@ -97,8 +109,41 @@ pub async fn command(
     // The host's own refusals say why a step can't run, approved or not.
     host.check_bruh_command(&id, &action).map_err(error)?;
     let allowance = allowance.ok_or_else(|| AppError::Forbidden(STEP_NOT_APPROVED.into()))?;
-    host.bruh_command_on(&id, action, allowance.page_url.as_deref())
+    let page_url = allowance.page_url.as_deref();
+    if action == BrowserAction::Logins {
+        // Names, sign-in pages and fields only, from the vault: the page
+        // isn't needed, and the browser stays as it is.
+        let logins = runtime
+            .logins(&id)
+            .await
+            .map_err(|_| AppError::Unavailable(VAULT_READ_FAILED.into()))?;
+        return Ok(Json(ToolReply {
+            value: json!({ "logins": logins }),
+            image: None,
+        }));
+    }
+    let Some(secret) = action.secret_fill().map(|(_, secret, _)| secret.clone()) else {
+        return host
+            .bruh_command_on(&id, action, page_url)
+            .await
+            .map(Json)
+            .map_err(error);
+    };
+    // The value for the page the gate let the fill through on, never the
+    // live address or anything the request names. The read and then the
+    // fill each get part of a budget the helper's own request outlasts.
+    let started = Instant::now();
+    let value = tokio::time::timeout(READ_BUDGET, runtime.fill_value(&id, &secret, page_url))
         .await
+        .map_err(|_| AppError::Unavailable(VAULT_READ_FAILED.into()))?
+        .map_err(|refusal| match refusal {
+            VaultRefusal::Refused(message) => AppError::Forbidden(message.into()),
+            VaultRefusal::Unavailable(message) => AppError::Unavailable(message.into()),
+        })?;
+    let left = FILL_BUDGET.saturating_sub(started.elapsed());
+    tokio::time::timeout(left, host.bruh_fill_on(&id, action, value, page_url))
+        .await
+        .map_err(|_| AppError::Unavailable(ACTION_TIMED_OUT.into()))?
         .map(Json)
         .map_err(error)
 }

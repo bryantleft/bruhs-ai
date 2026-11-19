@@ -1,7 +1,9 @@
 //! Local control plane and separately authenticated event ingress.
 
+use std::sync::Arc;
+
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     Extension, Json,
 };
@@ -9,6 +11,7 @@ use bruhs_core::reactive::{ReactiveError, ReactiveRuntime};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveEvent, ReactiveSnapshot, MAX_PAYLOAD_BYTES};
 use serde_json::{json, Value};
 
+use crate::config::Config;
 use crate::error::AppError;
 
 pub(super) fn runtime(
@@ -45,10 +48,17 @@ pub async fn snapshot(
     ))
 }
 
+/// `POST /api/reactive/commands`. A bruh's vault grants change only from
+/// the owner's own app, as the vault does (ruling F26).
 pub async fn command(
     value: Option<Extension<ReactiveRuntime>>,
+    State(config): State<Arc<Config>>,
+    headers: HeaderMap,
     Json(command): Json<ReactiveCommand>,
 ) -> Result<Json<ReactiveSnapshot>, AppError> {
+    if matches!(command, ReactiveCommand::SetVault { .. }) {
+        super::vault::owner_only(&config.access, &headers)?;
+    }
     Ok(Json(runtime(value)?.command(command).await?))
 }
 

@@ -2,7 +2,7 @@
 //! This is a loopback browser boundary, not authentication against local code.
 use axum::{
     extract::{Request, State},
-    http::{header, HeaderValue, Method, Uri},
+    http::{header, HeaderMap, HeaderValue, Method, Uri},
     middleware::Next,
     response::Response,
 };
@@ -74,6 +74,34 @@ impl Policy {
                 loopback_literal(&authority) || self.configured_origins.contains(value)
             })
         })
+    }
+
+    /// Whether a request may change owner-only state, the vault and a
+    /// bruh's grants (ruling F26), which the shared guard's every-loopback
+    /// trust is too wide for: no `Origin` (the desktop's native client), an
+    /// `http` `Origin` naming this request's own `Host` (the web app this
+    /// server serves), or one of the configured origins.
+    pub fn owner_request(&self, headers: &HeaderMap) -> bool {
+        let mut origins = headers.get_all(header::ORIGIN).iter();
+        let Some(origin) = origins.next() else {
+            return true;
+        };
+        if origins.next().is_some() {
+            return false;
+        }
+        if self.configured_origins.contains(origin) {
+            return true;
+        }
+        let mut hosts = headers.get_all(header::HOST).iter();
+        let (Some(host), None) = (hosts.next(), hosts.next()) else {
+            return false;
+        };
+        let (Ok(origin), Ok(host)) = (origin.to_str(), host.to_str()) else {
+            return false;
+        };
+        origin.starts_with("http://")
+            && origin_authority(origin)
+                .is_some_and(|authority| authority.as_str().eq_ignore_ascii_case(host))
     }
 
     pub fn cors(&self) -> CorsLayer {

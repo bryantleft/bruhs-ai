@@ -3,16 +3,18 @@ use std::{sync::Arc, time::Duration};
 use axum::{http::StatusCode, Extension};
 use bruhs_core::local_tools::{FakePages, LocalToolsHost};
 use bruhs_core::reactive::ReactiveRuntime;
+use bruhs_core::PermissionDecision;
 use bruhs_models::crew::{
-    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, LIVE_VIEW_ENDED, MAX_VIEWERS, NOT_FOR_BRUHS,
-    PAGE_CHANGED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
-    VIEWERS_FULL,
+    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, LIVE_VIEW_ENDED, LOGIN_WRONG_ORIGIN,
+    MAX_VIEWERS, NOT_FOR_BRUHS, PAGE_CHANGED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED,
+    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, VIEWERS_FULL,
 };
 use bruhs_models::local_tools::{
     screencast_path, ComputerInput, ComputerState, Control, MouseButton, MouseKind,
     ScreencastMessage, FRAME_ACK,
 };
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun};
+use bruhs_models::vault::{SecretField, OWNER_ONLY};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest, Message};
@@ -21,6 +23,9 @@ type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 const APP_ORIGIN: &str = "http://127.0.0.1:3001";
+/// The web app's origin as `BRUHS_WEB_ORIGIN` names it.
+const CONFIGURED_ORIGIN: &str = "https://bruhs.localhost";
+const SHOP: &str = "https://shop.test/in";
 
 struct Fixture {
     runtime: ReactiveRuntime,
@@ -47,19 +52,27 @@ impl Fixture {
             .unwrap();
         let (host, fake) = LocalToolsHost::with_fake_pages();
         runtime.attach_computers(Arc::clone(&host)).unwrap();
+        // The keychain is in memory, and no `op` is ever found.
+        let state = Arc::new(
+            bruhs_core::AppState::builder()
+                .secret_store(bruhs_core::secrets::SecretStore::in_memory())
+                .one_password(bruhs_core::secrets::OnePassword::at(
+                    directory.path().join("no-op"),
+                    Duration::from_secs(1),
+                ))
+                .connections(bruhs_core::connections::Connections::in_memory())
+                .build(),
+        );
+        runtime.attach_vault(state.secrets().clone()).unwrap();
         let config = crate::config::Config::from_settings(crate::config::Settings {
             port: Some("0"),
+            web_origin: Some(CONFIGURED_ORIGIN),
             web_dist: directory.path().join("missing").to_str(),
             ..Default::default()
         })
         .unwrap();
         let app = crate::router(crate::config::ServerState {
-            app: Arc::new(
-                bruhs_core::AppState::builder()
-                    .secret_store(bruhs_core::secrets::SecretStore::in_memory())
-                    .connections(bruhs_core::connections::Connections::in_memory())
-                    .build(),
-            ),
+            app: state,
             config: Arc::new(config),
             updates: bruhs_core::updates::UpdateChecker::new(bruhs_core::updates::BuildInfo::new(
                 "", "", "unused",
@@ -175,6 +188,61 @@ impl Fixture {
         (response.status(), response.json().await.unwrap())
     }
 
+    /// `method path` with `body`, from a page at `origin` (none: the
+    /// desktop's native client): the status and the raw body.
+    async fn send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+        origin: Option<&str>,
+    ) -> (StatusCode, String) {
+        let mut request = self.client.request(method, format!("{}{path}", self.base));
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let response = request.send().await.unwrap();
+        (response.status(), response.text().await.unwrap())
+    }
+
+    /// A Global Saved login for [`SHOP`] with `password`, granted to `a`:
+    /// its id.
+    async fn granted_login(&self, password: &str) -> String {
+        let (status, body) = self
+            .post(
+                "/api/vault",
+                json!({
+                    "name": "Shop",
+                    "scope": {"type": "global"},
+                    "secret": {"kind": "login", "url": SHOP, "fields": {
+                        "source": "saved",
+                        "username": "owner@shop.test",
+                        "password": password,
+                    }},
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let id = body["id"].as_str().unwrap().to_owned();
+        self.command(ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: vec![id.clone()],
+        })
+        .await;
+        id
+    }
+
+    /// The gate's answer to `command` from `run`, as the worker asks it.
+    async fn gate(&self, run: &ReactiveRun, command: &Value) -> Option<PermissionDecision> {
+        self.runtime
+            .gate_browser_step_for_tests(run, &full(), &json!({ "command": command }))
+            .await
+            .unwrap()
+    }
+
     /// Opens `a`'s browser and returns its state.
     async fn open(&self) -> ComputerState {
         let (status, body) = self
@@ -249,6 +317,26 @@ async fn next_text(socket: &mut Socket) -> ScreencastMessage {
 async fn quiet(socket: &mut Socket) {
     let message = tokio::time::timeout(Duration::from_millis(300), socket.next()).await;
     assert!(message.is_err(), "unexpected message: {message:?}");
+}
+
+fn full() -> BruhAccess {
+    BruhAccess {
+        level: AccessLevel::Full,
+        ..BruhAccess::default()
+    }
+}
+
+/// A random value no response may hold.
+fn canary(label: &str) -> String {
+    format!("{label}-{}", uuid::Uuid::new_v4().simple())
+}
+
+fn fill_password(login_id: &str) -> Value {
+    json!({
+        "action": "fill",
+        "selector": "#password",
+        "secret": {"login_id": login_id, "field": "password"},
+    })
 }
 
 fn press() -> ComputerInput {
@@ -566,4 +654,258 @@ async fn bruh_principals_get_no_grant_from_the_verification_route() {
         (status, body["error"].as_str()),
         (StatusCode::BAD_REQUEST, Some(TURN_ON_IN_SETTINGS))
     );
+}
+
+#[tokio::test]
+async fn a_granted_fill_reaches_the_page_through_the_allowance() {
+    let fixture = Fixture::new().await;
+    let password = canary("pw");
+    let login = fixture.granted_login(&password).await;
+    fixture.computer_on().await;
+    fixture.open().await;
+    fixture.fake.set_url("a", SHOP);
+    let run = fixture.running().await;
+    let fill = fill_password(&login);
+    assert_eq!(
+        fixture.gate(&run, &fill).await,
+        Some(PermissionDecision::Allow)
+    );
+    let (status, body) = fixture.step(fill.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["value"],
+        json!({"filled": "password", "submitted": false})
+    );
+    assert!(!body.to_string().contains(&password));
+    assert_eq!(
+        fixture.fake.secret_fills("a"),
+        [(
+            "#password".to_owned(),
+            SecretField::Password,
+            false,
+            password
+        )]
+    );
+    // The allowance is used up.
+    let (status, body) = fixture.step(fill).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some(STEP_NOT_APPROVED))
+    );
+    assert_eq!(fixture.fake.secret_fills("a").len(), 1);
+}
+
+#[tokio::test]
+async fn a_fill_after_the_page_moved_is_refused_and_types_nothing() {
+    let fixture = Fixture::new().await;
+    let password = canary("pw");
+    let login = fixture.granted_login(&password).await;
+    fixture.computer_on().await;
+    fixture.open().await;
+    fixture.fake.set_url("a", SHOP);
+    let run = fixture.running().await;
+    let fill = fill_password(&login);
+    assert_eq!(
+        fixture.gate(&run, &fill).await,
+        Some(PermissionDecision::Allow)
+    );
+    fixture.fake.set_url("a", "https://evil.test/");
+    let (status, body) = fixture.step(fill).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some(LOGIN_WRONG_ORIGIN))
+    );
+    assert!(!body.to_string().contains(&password));
+    assert!(fixture.fake.secret_fills("a").is_empty());
+}
+
+#[tokio::test]
+async fn logins_answer_without_the_page() {
+    let fixture = Fixture::new().await;
+    let password = canary("pw");
+    let login = fixture.granted_login(&password).await;
+    fixture.computer_on().await;
+    let run = fixture.running().await;
+    let logins = json!({"action": "logins"});
+    // Never answered without the gate.
+    let (status, body) = fixture.step(logins.clone()).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some(STEP_NOT_APPROVED))
+    );
+    assert_eq!(
+        fixture.gate(&run, &logins).await,
+        Some(PermissionDecision::Allow)
+    );
+    let (status, body) = fixture.step(logins).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["value"],
+        json!({"logins": [{
+            "login_id": login,
+            "name": "Shop",
+            "url": SHOP,
+            "origin": "https://shop.test",
+            "fields": ["username", "password"],
+        }]})
+    );
+    let text = body.to_string();
+    assert!(!text.contains(&password) && !text.contains("owner@shop.test"));
+    assert!(
+        fixture.fake.launches().is_empty(),
+        "the browser stays closed"
+    );
+}
+
+#[tokio::test]
+async fn a_request_with_an_origin_never_fills() {
+    let fixture = Fixture::new().await;
+    let password = canary("pw");
+    let login = fixture.granted_login(&password).await;
+    fixture.computer_on().await;
+    fixture.open().await;
+    fixture.fake.set_url("a", SHOP);
+    let run = fixture.running().await;
+    let fill = fill_password(&login);
+    assert_eq!(
+        fixture.gate(&run, &fill).await,
+        Some(PermissionDecision::Allow)
+    );
+    for origin in [APP_ORIGIN, fixture.base.as_str()] {
+        let (status, body) = fixture
+            .post_with(
+                "/api/reactive/agents/a/computer/command",
+                json!({ "command": fill }),
+                Some(origin),
+            )
+            .await;
+        assert_eq!(
+            (status, body["error"].as_str()),
+            (StatusCode::FORBIDDEN, Some(STEP_FROM_A_PAGE))
+        );
+    }
+    assert!(fixture.fake.secret_fills("a").is_empty());
+    // Nothing was used up: the helper's own request still fills.
+    let (status, body) = fixture.step(fill).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(fixture.fake.secret_fills("a").len(), 1);
+}
+
+/// Ruling F26: only the desktop's native client (no `Origin`), the page
+/// this server serves (its own `Host`) and the configured origins change
+/// the vault or a bruh's grants. Other loopback pages may still read the
+/// listing and send other commands.
+#[tokio::test]
+async fn vault_changes_come_only_from_bruhs_own_pages() {
+    use reqwest::Method;
+    let fixture = Fixture::new().await;
+    let own = fixture.base.clone();
+    let key = |name: &str, value: &str| {
+        json!({
+            "name": name,
+            "scope": {"type": "global"},
+            "secret": {"kind": "value", "value": value},
+        })
+    };
+    let foreign = [APP_ORIGIN, "http://localhost:8080", "http://[::1]:5173"];
+    let value = canary("key");
+    for origin in foreign {
+        let (status, body) = fixture
+            .send(
+                Method::POST,
+                "/api/vault",
+                Some(key("Other", &value)),
+                Some(origin),
+            )
+            .await;
+        assert_eq!(
+            (status, body.as_str()),
+            (
+                StatusCode::FORBIDDEN,
+                &*format!("{{\"error\":\"{OWNER_ONLY}\"}}")
+            )
+        );
+    }
+    let mut ids = Vec::new();
+    for (name, origin) in [
+        ("Native", None),
+        ("Own page", Some(own.as_str())),
+        ("Configured", Some(CONFIGURED_ORIGIN)),
+    ] {
+        let (status, body) = fixture
+            .send(Method::POST, "/api/vault", Some(key(name, &value)), origin)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{name}: {body}");
+        assert!(!body.contains(&value));
+        let entry: Value = serde_json::from_str(&body).unwrap();
+        ids.push(entry["id"].as_str().unwrap().to_owned());
+    }
+    // Reading is the shared guard's: any loopback page.
+    let (status, body) = fixture
+        .send(Method::GET, "/api/vault", None, Some(APP_ORIGIN))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listing: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(listing["entries"].as_array().unwrap().len(), 3);
+
+    let path = format!("/api/vault/{}", ids[0]);
+    let update = json!({"secret": {"kind": "value", "value": canary("new")}});
+    for (method, path, body) in [
+        (Method::PUT, path.clone(), Some(update.clone())),
+        (Method::DELETE, path.clone(), None),
+        (Method::POST, format!("{path}/check"), None),
+    ] {
+        let (status, text) = fixture
+            .send(method.clone(), &path, body, Some(APP_ORIGIN))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
+        assert!(text.contains(OWNER_ONLY));
+    }
+    let set_vault =
+        |entries: &[String]| json!({"action": "set_vault", "agent_id": "a", "entries": entries});
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(set_vault(&ids)),
+            Some(APP_ORIGIN),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{text}");
+    assert!(text.contains(OWNER_ONLY));
+    let granted = |snapshot: &Value| snapshot["bruhs"][0]["vault"].clone();
+    let (_, snapshot) = fixture.get("/api/reactive").await;
+    assert_eq!(granted(&snapshot), json!([]));
+    // Other commands still come from any loopback page.
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(json!({"action": "set_computer", "agent_id": "a", "on": true})),
+            Some(APP_ORIGIN),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    for origin in [None, Some(own.as_str()), Some(CONFIGURED_ORIGIN)] {
+        let (status, text) = fixture
+            .send(
+                Method::POST,
+                "/api/reactive/commands",
+                Some(set_vault(&ids[..1])),
+                origin,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{origin:?}: {text}");
+    }
+    let (_, snapshot) = fixture.get("/api/reactive").await;
+    assert_eq!(granted(&snapshot), json!([ids[0]]));
+
+    for (method, path, body, expected) in [
+        (Method::PUT, path.clone(), Some(update), StatusCode::OK),
+        (Method::POST, format!("{path}/check"), None, StatusCode::OK),
+        (Method::DELETE, path.clone(), None, StatusCode::NO_CONTENT),
+    ] {
+        let (status, text) = fixture.send(method.clone(), &path, body, Some(&own)).await;
+        assert_eq!(status, expected, "{method} {path}: {text}");
+    }
 }

@@ -70,6 +70,7 @@ pub struct SourceEmission {
 
 pub use approval::BrowserAllowance;
 pub use notify::{system_notifier, Notifier};
+pub use vault::VaultRefusal;
 
 #[derive(Clone)]
 pub struct ReactiveRuntime {

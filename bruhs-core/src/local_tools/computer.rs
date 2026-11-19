@@ -16,7 +16,7 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        handed_back_note, same_page_host, selector_reads_values, ACTION_STOPPED,
+        handed_back_note, same_page_host, selector_reads_values, ACTION_STOPPED, ACTION_TIMED_OUT,
         BROWSER_PAGE_CLOSED_DURING_STEP, BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
         COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, FILL_FAILED,
         LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, MAX_COMPUTERS, NOT_FOR_BRUHS,
@@ -50,7 +50,6 @@ mod tests;
 const REAP_EVERY: Duration = Duration::from_secs(30);
 /// How long asking an open page for its address may take.
 const PAGE_URL_WAIT: Duration = Duration::from_secs(2);
-const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and retry.";
 /// Why no bruh browser opens on this system: none on Unix. Elsewhere the
 /// network guard can't read this computer's addresses and a crashed
 /// browser's profile isn't recovered yet.

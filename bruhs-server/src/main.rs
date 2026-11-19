@@ -94,13 +94,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store =
         bruhs_core::SqliteMeetingStore::open(bruhs_core::SqliteMeetingStore::default_path()?)
             .await?;
+    let memory = memory_secrets(std::env::var("BRUHS_SECRET_STORE").ok().as_deref());
+    let secret_store = || {
+        if memory {
+            bruhs_core::secrets::SecretStore::in_memory()
+        } else {
+            bruhs_core::secrets::SecretStore::os()
+        }
+    };
     // The web runs threads side by side, so an agent may wait for another
     // thread's reply inside one tool call.
     let state = AppState::builder()
         .thread_waits(true)
-        .meetings(Arc::new(store))
-        .build();
-    let state = Arc::new(state);
+        .meetings(Arc::new(store));
+    let state = if memory {
+        state
+            .secret_store(secret_store())
+            .connections(bruhs_core::connections::Connections::in_memory())
+    } else {
+        state
+    };
+    let state = Arc::new(state.build());
     let reactive = bruhs_core::reactive::ReactiveRuntime::open(
         bruhs_core::reactive::ReactiveRuntime::default_path()?,
     )
@@ -119,6 +133,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the worker can run one of their steps.
     let tools = bruhs_core::local_tools::LocalToolsHost::new()?;
     reactive.attach_computers(Arc::clone(&tools))?;
+    // Before the worker starts, so the first run's preamble and gate see
+    // the vault.
+    reactive.attach_vault(state.secrets().clone())?;
     let _reactive_worker = reactive.start(Arc::clone(&state))?;
     let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
@@ -180,11 +197,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let board_links = bruhs_core::coordination::BoardLinks::new(delivery.clone());
     let databases = bruhs_core::database::DatabaseHost::open(
         bruhs_core::database::DatabaseHost::default_path()?,
-        bruhs_core::secrets::SecretStore::os(),
+        secret_store(),
     )
     .await?;
     let api_client = bruhs_core::api_client::ApiClientHost::with_origins(
-        bruhs_core::secrets::SecretStore::os(),
+        secret_store(),
         std::iter::once(listener.local_addr()?.port())
             .chain(
                 reqwest::Url::parse(bruhs_core::capture_client::daemon_base_url())
@@ -251,6 +268,27 @@ fn workbench_services(
             policy,
             local_access::guard,
         ))
+}
+
+/// Whether `BRUHS_SECRET_STORE` (`value`) asks for in-memory keychain and
+/// connection stores, for the acceptance script (D25). Only a debug build
+/// honors it; a release build warns and keeps the OS stores.
+fn memory_secrets(value: Option<&str>) -> bool {
+    match value {
+        None => false,
+        Some("memory") if cfg!(debug_assertions) => {
+            tracing::warn!("BRUHS_SECRET_STORE=memory: secrets live in memory and go on exit");
+            true
+        }
+        Some("memory") => {
+            tracing::warn!("BRUHS_SECRET_STORE is ignored in a release build");
+            false
+        }
+        Some(_) => {
+            tracing::warn!("BRUHS_SECRET_STORE accepts only memory; ignoring it");
+            false
+        }
+    }
 }
 
 /// `RUST_LOG` as `target=level` directives (e.g. `info,tower_http=debug`),
@@ -578,6 +616,19 @@ fn router_with_capture_daemon(
             post(routes::agent::post_thread_reply),
         )
         .route("/api/credentials", get(routes::secrets::list))
+        .route(
+            "/api/vault",
+            get(routes::vault::list)
+                .post(routes::vault::create)
+                .layer(DefaultBodyLimit::max(routes::vault::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/vault/{id}",
+            axum::routing::put(routes::vault::update)
+                .delete(routes::vault::delete)
+                .layer(DefaultBodyLimit::max(routes::vault::MAX_BODY_BYTES)),
+        )
+        .route("/api/vault/{id}/check", post(routes::vault::check))
         .route("/api/connections", get(routes::connections::list))
         .route(
             "/api/connections/{provider}/start",
@@ -894,4 +945,18 @@ fn router_with_capture_daemon(
         ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_a_debug_build_keeps_secrets_in_memory() {
+        assert!(!super::memory_secrets(None));
+        assert_eq!(
+            super::memory_secrets(Some("memory")),
+            cfg!(debug_assertions)
+        );
+        assert!(!super::memory_secrets(Some("os")));
+        assert!(!super::memory_secrets(Some("Memory")));
+    }
 }

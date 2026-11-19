@@ -76,6 +76,17 @@ pub const NO_MATCH: &str = "Nothing in the vault matches your search.";
 pub const CHECK_OK: &str = "Ready.";
 pub const ENTRY_UPDATED: &str = "Saved.";
 
+// Route copy (D22).
+/// A vault request body that isn't an entry. Never repeats the body.
+pub const INVALID_ENTRY: &str = "Invalid vault entry.";
+/// An entry another save or another window deleted.
+pub const ENTRY_GONE: &str = "That entry is gone. Refresh the vault.";
+pub const PROJECT_MISSING: &str = "That project folder doesn't exist.";
+pub const BRUH_MISSING: &str = "That bruh doesn't exist.";
+/// A vault change, or a bruh's grants, sent from a page other than this
+/// server's own or a configured one (ruling F26).
+pub const OWNER_ONLY: &str = "Open Bruhs from its own address to change the vault.";
+
 // Validation copy.
 pub const DUPLICATE_NAME: &str = "Another entry used there has that name.";
 /// Two saves of one entry crossed; the later one changed nothing.

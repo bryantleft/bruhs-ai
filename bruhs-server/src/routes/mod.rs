@@ -45,5 +45,6 @@ pub mod terminal;
 pub mod updates;
 pub mod uploads;
 pub mod validate_path;
+pub mod vault;
 pub mod whiteboard;
 pub mod worktrees;
