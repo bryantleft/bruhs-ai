@@ -518,7 +518,7 @@ fn active_settings_section_is_last_above_fold_like_web() {
             "general",
             "updates",
             "beta",
-            "credentials",
+            "vault",
             "calendar",
             "recording",
             "transcription",

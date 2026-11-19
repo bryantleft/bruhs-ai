@@ -58,7 +58,7 @@ impl SettingsSection {
         Self::General,
         Self::Updates,
         Self::Beta,
-        Self::Credentials,
+        Self::Vault,
         Self::Calendar,
         Self::Recording,
         Self::Transcription,
@@ -75,7 +75,7 @@ impl SettingsSection {
     /// Web section ids (`SECTIONS[i].0`).
     pub(super) fn id(self) -> &'static str {
         match self {
-            Self::Credentials => "credentials",
+            Self::Vault => "vault",
             Self::General => "general",
             Self::Updates => "updates",
             Self::Beta => "beta",
@@ -98,7 +98,7 @@ impl SettingsSection {
     /// users · book-open · keyboard · help-circle.
     pub(super) fn icon_path(self) -> &'static str {
         match self {
-            Self::Credentials => "icons/shield.svg",
+            Self::Vault => "icons/shield.svg",
             Self::General => "icons/settings.svg",
             Self::Updates => assets::DOWNLOAD_ICON_PATH,
             Self::Beta => assets::ACTIVITY_ICON_PATH,
@@ -114,7 +114,7 @@ impl SettingsSection {
 
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Credentials => "Credentials",
+            Self::Vault => bruhs_models::vault::VAULT_TITLE,
             Self::General => "General",
             Self::Updates => "Updates",
             Self::Beta => "Beta",
@@ -131,13 +131,17 @@ impl SettingsSection {
     /// Web `SettingsSection` descriptions under each card title.
     pub(super) fn description(self) -> &'static str {
         match self {
-            Self::Credentials => "Saved credentials stay in your OS keychain. Agents still need approval for every use.",
+            Self::Vault => bruhs_models::vault::VAULT_DESCRIPTION,
             Self::General => "Defaults for new turns.",
             Self::Updates => "Provider CLIs and this build of bruhs.",
             Self::Beta => "Sidebar sections that are still settling in.",
-            Self::Calendar => "Google Calendar sync for the calendar view and automatic meeting recording.",
+            Self::Calendar => {
+                "Google Calendar sync for the calendar view and automatic meeting recording."
+            }
             Self::Recording => "When bruhs starts recording meetings on its own.",
-            Self::Transcription => "Provider and model for the final transcript, plus a live preview on this device.",
+            Self::Transcription => {
+                "Provider and model for the final transcript, plus a live preview on this device."
+            }
             Self::Speakers => "Telling voices apart and remembering them across meetings.",
             Self::People => "What meeting summaries record about each person.",
             Self::Keyboard => "Customize shortcuts and when they apply.",
@@ -147,7 +151,7 @@ impl SettingsSection {
 
     pub(super) fn selector(self) -> &'static str {
         match self {
-            Self::Credentials => "desktop-settings-nav-credentials",
+            Self::Vault => "desktop-settings-nav-vault",
             Self::General => "desktop-settings-nav-general",
             Self::Updates => "desktop-settings-nav-updates",
             Self::Beta => "desktop-settings-nav-beta",
@@ -326,8 +330,8 @@ impl Workspace {
         self.open_overlay(Overlay::Settings {
             open_dropdown: None,
         });
-        self.credential_settings
-            .update(cx, |view, cx| view.refresh(cx));
+        self.vault_settings
+            .update(cx, |view, cx| view.refresh(window, cx));
         // A page on the web: nothing inside is focused until the first Tab.
         self.focus_modal_dialog(window, cx);
         cx.notify();
@@ -1140,9 +1144,9 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let rows = match section {
-            SettingsSection::Credentials => vec![div()
-                .child(self.credential_settings.clone())
-                .into_any_element()],
+            SettingsSection::Vault => {
+                vec![div().child(self.vault_settings.clone()).into_any_element()]
+            }
             SettingsSection::General => {
                 // Web order: roles and task models sit above the two title
                 // instruction rows, which close the section.

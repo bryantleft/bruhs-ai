@@ -74,7 +74,6 @@ mod capture_ui;
 #[cfg(test)]
 mod chat_events_tests;
 mod connected_inbox;
-mod credential_settings;
 mod crew_ui;
 mod date_picker_ui;
 mod event_dialog_ui;
@@ -84,6 +83,7 @@ mod import_ui;
 #[cfg(test)]
 mod keyboard_tests;
 mod mail_compose;
+mod vault_settings;
 #[cfg(test)]
 mod zoom_tests;
 pub(crate) use import_ui::portable_messages;
@@ -686,7 +686,7 @@ enum SettingsSection {
     General,
     Updates,
     Beta,
-    Credentials,
+    Vault,
     Calendar,
     Recording,
     Transcription,
@@ -1243,7 +1243,7 @@ pub struct Workspace {
     )]
     local_servers_generation: u64,
     settings_section: SettingsSection,
-    credential_settings: Entity<credential_settings::CredentialSettings>,
+    vault_settings: Entity<vault_settings::VaultSettings>,
     /// Provider CLI and app update checks (Settings → Updates, sidebar button).
     updates: Entity<updates_ui::DesktopUpdates>,
     /// Scroll position of the stacked settings sections.
@@ -1619,7 +1619,7 @@ impl Workspace {
                     connected_inbox::InboxEvent::ShowImports => this.inbox_mail_visible = false,
                     connected_inbox::InboxEvent::OpenConnections => {
                         this.open_settings(&OpenSettings, window, cx);
-                        this.set_settings_section(SettingsSection::Credentials, cx);
+                        this.set_settings_section(SettingsSection::Vault, cx);
                     }
                 }
                 cx.notify();
@@ -1994,8 +1994,8 @@ impl Workspace {
             local_servers_loading: false,
             local_servers_generation: 0,
             settings_section: SettingsSection::General,
-            credential_settings: cx
-                .new(|cx| credential_settings::CredentialSettings::new(window, cx)),
+            vault_settings: cx
+                .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx)),
             updates: {
                 let enabled = persisted
                     .as_ref()
@@ -2909,9 +2909,9 @@ impl Render for Workspace {
         {
             self.calendar_timegrid_autoscroll.set(true);
         }
-        if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
-            self.credential_settings
-                .update(cx, |view, _| view.clear_editor());
+        if !self.settings_visible() && self.vault_settings.read(cx).has_editor() {
+            self.vault_settings
+                .update(cx, |view, cx| view.clear_editor(window, cx));
         }
         for thread in &self.threads {
             let visible = self.active_view == AppView::Chat
