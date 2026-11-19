@@ -11,17 +11,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
-    delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for, form_update,
-    kind_label, matches_search, option_for, option_key, vault_row, wait_reason, FormField,
-    FormScope, LoginFields, LoginMeta, VaultBruh, VaultBusy as Busy, VaultCreate, VaultEntry,
-    VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT,
-    EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF,
-    FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
-    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT,
-    KEEP, KEEP_HINT, KIND_OPTIONS as KINDS, LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH,
-    OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT, REFERENCE_HINT, REFRESH, SAVE_ENTRY,
-    SCOPE_OPTIONS as SCOPES, SEARCH_PLACEHOLDER, SOURCE_OPTIONS as SOURCES, STATE_NEEDS_ATTENTION,
-    TOTP_HINT,
+    bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
+    form_update, kind_label, matches_search, option_for, option_key, row_label, vault_row,
+    wait_reason, FormField, FormScope, LoginFields, LoginMeta, VaultBruh, VaultBusy as Busy,
+    VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK,
+    CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME,
+    FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP,
+    FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME,
+    FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS as KINDS, LOADING,
+    LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
+    REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS as SCOPES, SEARCH_PLACEHOLDER,
+    SOURCE_OPTIONS as SOURCES, STATE_NEEDS_ATTENTION, TOTP_HINT,
 };
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
@@ -206,8 +206,13 @@ fn VaultRowView(
             entry.with(|entry| entry.as_ref().map(|e| vault_row(e, &listing.bruhs)))
         })
     });
-    let name =
-        row.with_untracked(|row| row.as_ref().map(|row| row.name.clone()).unwrap_or_default());
+    // The stored name: the models helpers make it safe to show.
+    let name = entry.with_untracked(|entry| {
+        entry
+            .as_ref()
+            .map(|entry| entry.name.clone())
+            .unwrap_or_default()
+    });
     let editing = Signal::derive(move || {
         open.with(|open| id.with_value(|id| matches!(open, Open::Entry(open) if open == id)))
     });
@@ -218,7 +223,7 @@ fn VaultRowView(
     let delete_ref = NodeRef::<html::Button>::new();
     let keep_ref = NodeRef::<html::Button>::new();
     let question_id = unique_id("vault-delete-question");
-    let label = format!("Vault entry: {name}");
+    let label = row_label(&name);
     let confirm = delete_entry_confirm(&name);
     let forget = move || {
         // Runs after an await: the row may be gone by now.
@@ -415,15 +420,21 @@ fn select_field<T: Copy + PartialEq + Default + Send + Sync + 'static>(
 /// What an edit shows in a fixed field: the stored kind, name, scope line
 /// or sign-in page (ruling F3), or `None` for a field the owner can change.
 fn fixed_text(field: FormField, start: &VaultForm, scope_line: &str) -> Option<String> {
-    if !field.fixed_on_edit() {
-        return None;
+    match field {
+        FormField::Kind => Some(kind_label(start.kind).into()),
+        FormField::Name => Some(start.name.clone()),
+        FormField::UsedBy => Some(scope_line.into()),
+        FormField::SignIn => Some(start.url.clone()),
+        FormField::StoredIn
+        | FormField::Username
+        | FormField::Password
+        | FormField::Totp
+        | FormField::UsernameRef
+        | FormField::PasswordRef
+        | FormField::TotpRef
+        | FormField::Value
+        | FormField::Reference => None,
     }
-    Some(match field {
-        FormField::Kind => kind_label(start.kind).into(),
-        FormField::Name => start.name.clone(),
-        FormField::UsedBy => scope_line.into(),
-        _ => start.url.clone(),
-    })
 }
 
 /// The inline form: a new entry's when `entry` is `None`, else that entry's
@@ -599,12 +610,7 @@ fn VaultFormView(
             // Kind, Name, Used by and a login's Sign-in page are fixed once
             // the entry exists (D2, ruling F3); the hint follows the last.
             field if editing && field.fixed_on_edit() => {
-                let label = match field {
-                    FormField::Kind => FIELD_KIND,
-                    FormField::Name => FIELD_NAME,
-                    FormField::UsedBy => FIELD_USED_BY,
-                    _ => FIELD_SIGN_IN,
-                };
+                let label = field.label();
                 let text = fixed_texts
                     .iter()
                     .find(|(fixed, _)| *fixed == field)
@@ -644,8 +650,8 @@ fn VaultFormView(
                                 <label for=bruh_id.clone() class=LABEL>{FIELD_BRUH}</label>
                                 <select id=bruh_id.clone() class=FIELD prop:value=move || bruh.get() on:change=move |event| bruh.set(event_target_value(&event))>
                                     <option value="" selected=move || bruh.with(String::is_empty)>{CHOOSE_BRUH}</option>
-                                    {move || bruhs.get().into_iter().map(|choice| { let id = choice.agent_id.clone(); view! {
-                                        <option value=choice.agent_id selected=move || bruh.with(|bruh| *bruh == id)>{choice.name}</option>
+                                    {move || bruhs.get().into_iter().map(|choice| { let id = choice.agent_id.clone(); let label = bruh_choice_label(&choice); view! {
+                                        <option value=choice.agent_id selected=move || bruh.with(|bruh| *bruh == id)>{label}</option>
                                     } }).collect_view()}
                                 </select>
                             </div>
@@ -748,6 +754,14 @@ mod tests {
             Some(FormField::SignIn)
         );
         assert_eq!(fixed_text(FormField::Username, &start, ""), None);
+        // Exactly the fields models fixes on an edit have a fixed text.
+        for field in FormField::ALL {
+            assert_eq!(
+                fixed_text(field, &start, "").is_some(),
+                field.fixed_on_edit(),
+                "{field:?}"
+            );
+        }
         // Whatever the page holds, the update keeps the stored page.
         let mut edited = form_for(&entry);
         edited.url = "https://elsewhere.test/in".into();

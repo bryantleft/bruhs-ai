@@ -345,8 +345,10 @@ impl SecretManager {
             .map(|entry| entry.name)
     }
 
-    /// Drop the last failure of entries that are gone.
-    fn forget_attention<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
+    /// Drop the last failure of entries that are gone. Public for a process
+    /// whose vault changed through another one: the desktop, after a delete
+    /// made through bruhs-server.
+    pub fn forget_attention<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
         let mut attention = self
             .attention
             .lock()
@@ -360,7 +362,12 @@ impl SecretManager {
     /// change, and show each one what it now offers. A failed match says
     /// saved entries couldn't be checked; one that outlasts the read wait
     /// leaves the form as it was. Use saved reads its entry again either way.
-    async fn refresh_saved_requests(&self, name: &str) {
+    ///
+    /// The manager's own vault changes call this. It is public for a
+    /// process whose vault changed through another one: the desktop's
+    /// Settings, Vault changes it through bruhs-server, so it calls this on
+    /// its own manager after each create, update and delete (D20).
+    pub async fn refresh_saved_requests(&self, name: &str) {
         let open: Vec<(String, String)> = self
             .lock()
             .iter()

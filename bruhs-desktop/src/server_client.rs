@@ -85,7 +85,8 @@ pub enum ServerError {
         source: reqwest::Error,
     },
     /// The server answered with a failure status. The body is kept for the
-    /// log only; it is never shown to the user.
+    /// log; it is never shown to the user, except the vault routes' fixed
+    /// refusal sentence (`ServerError::vault_message`).
     #[error("{request} → {}", .code.as_u16())]
     Status {
         request: String,

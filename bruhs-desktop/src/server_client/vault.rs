@@ -4,7 +4,9 @@
 //! create and update bodies and never come back: every answer is metadata.
 //! A native client sends no `Origin`, which the owner-only routes allow.
 use super::{ServerClient, ServerError};
-use bruhs_models::vault::{VaultCheck, VaultCreate, VaultEntry, VaultListing, VaultUpdate};
+use bruhs_models::vault::{
+    VaultCheck, VaultCreate, VaultEntry, VaultListing, VaultUpdate, VAULT_FAILED, VAULT_UNREACHABLE,
+};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -36,23 +38,34 @@ pub(crate) fn vault_check_path(id: &str) -> String {
 }
 
 impl ServerError {
-    /// What the vault page shows for a failed call: the server's own
-    /// sentence (fixed copy that never holds a value), or this error.
+    /// What the vault page shows for a failed call. A refusal (4xx) or an
+    /// unavailable keychain or 1Password (503) carries the vault routes'
+    /// own sentence, which is fixed copy from `bruhs_models::vault` and core's
+    /// vault errors and never holds a value (`bruhs-server`
+    /// `routes/vault.rs`). Anything else, a 500 or a body that isn't the
+    /// server's `{"error": …}`, shows fixed copy, as does no answer at all.
     pub(crate) fn vault_message(&self) -> String {
-        let detail = match self {
-            Self::Status { body, .. } => serde_json::from_str::<serde_json::Value>(body)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("error")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .filter(|detail| !detail.is_empty() && detail.len() <= MAX_MESSAGE_LEN)
-                        .map(str::to_owned)
-                }),
-            _ => None,
+        let fixed = match self {
+            Self::Transport { .. } => VAULT_UNREACHABLE,
+            _ => VAULT_FAILED,
         };
-        detail.unwrap_or_else(|| self.to_string())
+        let Self::Status { code, body, .. } = self else {
+            return fixed.into();
+        };
+        if !(code.is_client_error() || *code == reqwest::StatusCode::SERVICE_UNAVAILABLE) {
+            return fixed.into();
+        }
+        serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("error")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|detail| !detail.is_empty() && detail.len() <= MAX_MESSAGE_LEN)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| fixed.into())
     }
 }
 
@@ -125,7 +138,10 @@ impl ServerClient {
 #[cfg(test)]
 mod tests {
     use super::{vault_check_path, vault_entry_path, ServerClient};
-    use bruhs_models::vault::{CredentialScope, VaultCreate, VaultSecretInput, DUPLICATE_NAME};
+    use bruhs_models::vault::{
+        CredentialScope, VaultCreate, VaultSecretInput, DUPLICATE_NAME, VAULT_FAILED,
+        VAULT_UNREACHABLE,
+    };
 
     /// Serve one canned reply per connection and hand back each request.
     async fn serve(
@@ -202,7 +218,7 @@ mod tests {
             assert!(!format!("{error} {error:?}").contains(&canary));
             client.delete_vault_entry("v1-a b").await.unwrap();
             let error = client.check_vault_entry("v1-a").await.unwrap_err();
-            assert_eq!(error.vault_message(), "POST /api/vault/v1-a/check → 500");
+            assert_eq!(error.vault_message(), VAULT_FAILED);
             server.await.unwrap()
         });
         assert!(
@@ -213,5 +229,36 @@ mod tests {
         assert!(!requests[0].to_lowercase().contains("\r\norigin:"));
         assert!(requests[1].starts_with("DELETE /api/vault/v1-a%20b HTTP/1.1"));
         assert!(requests[2].starts_with("POST /api/vault/v1-a/check HTTP/1.1"));
+    }
+
+    #[test]
+    fn only_the_vault_routes_fixed_refusals_are_shown() {
+        let status = |code: u16, body: &str| super::ServerError::Status {
+            request: "GET /api/vault".into(),
+            code: reqwest::StatusCode::from_u16(code).unwrap(),
+            body: body.into(),
+        };
+        let sentence = |text: &str| serde_json::json!({ "error": text }).to_string();
+        assert_eq!(
+            status(409, &sentence(DUPLICATE_NAME)).vault_message(),
+            DUPLICATE_NAME
+        );
+        let keychain = "Could not access the OS credential store. Unlock it and retry.";
+        assert_eq!(status(503, &sentence(keychain)).vault_message(), keychain);
+        // A 500 can carry any internal text; it never reaches the page.
+        assert_eq!(
+            status(500, &sentence("snapshot failed: /private/path")).vault_message(),
+            VAULT_FAILED
+        );
+        assert_eq!(
+            status(413, "length limit exceeded").vault_message(),
+            VAULT_FAILED
+        );
+        runtime().block_on(async {
+            let client = ServerClient::new("http://127.0.0.1:9", "http://127.0.0.1:9").unwrap();
+            let error = client.vault_listing().await.unwrap_err();
+            assert!(error.is_transport());
+            assert_eq!(error.vault_message(), VAULT_UNREACHABLE);
+        });
     }
 }

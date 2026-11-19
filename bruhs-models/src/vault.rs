@@ -90,6 +90,12 @@ pub const NO_BRUHS: &str = "Make a bruh first to give it an entry of its own.";
 pub const OPEN_FROM_OWN_ADDRESS: &str =
     "Open Bruhs from its own address to see and change the vault.";
 
+/// A vault call that got no answer: the service isn't reachable.
+pub const VAULT_UNREACHABLE: &str =
+    "Bruhs couldn't reach its service. Check that it's running, then refresh.";
+/// A vault call the service failed in a way that has no fixed copy.
+pub const VAULT_FAILED: &str = "The vault couldn't do that. Refresh and try again.";
+
 // Route copy (D22).
 /// A vault request body that isn't an entry. Never repeats the body.
 pub const INVALID_ENTRY: &str = "Invalid vault entry.";

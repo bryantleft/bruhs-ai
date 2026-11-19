@@ -13,18 +13,18 @@ use super::*;
 use crate::app_state::spawn_tokio;
 use crate::server_client::ServerError;
 use bruhs_models::crew::ServiceNotice;
-use bruhs_models::secrets::review_text;
 use bruhs_models::vault::{
-    delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for, form_update,
-    kind_label, matches_search, option_for, option_key, vault_row, wait_reason, FormField,
-    FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultBusy, VaultCreate, VaultEntry,
-    VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT,
-    EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF,
-    FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
-    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT,
-    KEEP, KEEP_HINT, KIND_OPTIONS, LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH,
-    OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT, REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS,
-    SEARCH_PLACEHOLDER, SOURCE_OPTIONS, STATE_NEEDS_ATTENTION, TOTP_HINT,
+    bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
+    form_update, kind_label, matches_search, option_for, option_key, row_label, vault_row,
+    wait_reason, FormField, FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultBusy,
+    VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK,
+    CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME,
+    FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP,
+    FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME,
+    FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS, LOADING,
+    LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
+    REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS, SEARCH_PLACEHOLDER, SOURCE_OPTIONS,
+    STATE_NEEDS_ATTENTION, TOTP_HINT,
 };
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::InputContentType;
@@ -214,12 +214,20 @@ pub(super) struct VaultSettings {
     /// A row's failed Check or Delete.
     row_errors: HashMap<String, String>,
     pub(super) new_focus: FocusHandle,
+    /// Focus anywhere on the page, so an answer knows it may move it.
+    page_focus: FocusHandle,
     pub(super) rows_focus: HashMap<String, RowFocus>,
     next_serial: u64,
     task: Option<Task<()>>,
     /// Every request, as `METHOD path`; tests never reach a server.
     #[cfg(test)]
     vault_requests: Vec<String>,
+    /// Every name the desktop's own thread forms were matched again for.
+    #[cfg(test)]
+    rematched: Vec<String>,
+    /// The last create or update the page would send, held for a test.
+    #[cfg(test)]
+    last_request: Option<Request>,
 }
 
 impl VaultSettings {
@@ -250,11 +258,16 @@ impl VaultSettings {
             checked: HashMap::new(),
             row_errors: HashMap::new(),
             new_focus: cx.focus_handle().tab_stop(true),
+            page_focus: cx.focus_handle(),
             rows_focus: HashMap::new(),
             next_serial: 0,
             task: None,
             #[cfg(test)]
             vault_requests: Vec::new(),
+            #[cfg(test)]
+            rematched: Vec::new(),
+            #[cfg(test)]
+            last_request: None,
         }
     }
 
@@ -277,6 +290,16 @@ impl VaultSettings {
         drop(request);
     }
 
+    /// A press that starts a wait disables its own button, whose focus
+    /// would then point at nothing and leave every key dead. Focus on the
+    /// page moves to the page itself (no Tab stop; Tab goes on from it), and
+    /// a text field keeps it.
+    fn hold_focus_on_page(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.page_focus.contains_focused(window, cx) && !window.has_focused_input(cx) {
+            self.page_focus.focus(window, cx);
+        }
+    }
+
     /// Ask the server for the listing again. Closes any form, as the web
     /// does, and waits while a change runs.
     pub(super) fn refresh(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -291,6 +314,7 @@ impl VaultSettings {
         self.row_errors.clear();
         self.load = Load::Loading;
         self.busy = VaultBusy::Changing;
+        self.hold_focus_on_page(window, cx);
         self.record("GET /api/vault".into());
         cx.notify();
         if cfg!(test) {
@@ -639,15 +663,37 @@ impl VaultSettings {
         form.dropdown = None;
         self.busy = VaultBusy::Changing;
         self.notice = None;
+        self.hold_focus_on_page(window, cx);
         self.record(match &request {
             Request::Create(_) => "POST /api/vault".into(),
             Request::Update(id, _) => format!("PUT {}", crate::server_client::vault_entry_path(id)),
         });
         cx.notify();
         if cfg!(test) {
-            drop(request);
+            self.hold_for_test(request);
             return;
         }
+        self.send(request, serial, window, cx);
+    }
+
+    /// Tests never send: they keep the request to look at.
+    fn hold_for_test(&mut self, request: Request) {
+        #[cfg(test)]
+        {
+            self.last_request = Some(request);
+        }
+        #[cfg(not(test))]
+        drop(request);
+    }
+
+    /// Send a create or update; its answer comes back to `saved`.
+    fn send(
+        &mut self,
+        request: Request,
+        serial: u64,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         let client = self.client.clone();
         let operation = spawn_tokio(cx, async move {
             let result = match &request {
@@ -678,9 +724,13 @@ impl VaultSettings {
             .form
             .as_ref()
             .filter(|(_, form)| form.serial == serial)
-            .map(|(open, form)| (open.clone(), form.focus.contains_focused(window, cx)));
+            .map(|(open, _)| open.clone());
+        // Focus moves only from inside the page: the answer can land after
+        // Settings closed.
+        let held = self.page_focus.contains_focused(window, cx);
         match result {
             Ok(entry) => {
+                let entry_name = entry.name.clone();
                 match self
                     .listing
                     .entries
@@ -690,13 +740,14 @@ impl VaultSettings {
                     Some(row) => *row = entry,
                     None => self.listing.entries.push(entry),
                 }
+                self.rematch(entry_name, None, cx);
                 self.notice = Some(ENTRY_UPDATED);
-                if let Some((open, focused)) = this_form {
+                if let Some(open) = this_form {
                     if let Open::Entry(id) = &open {
                         self.checked.remove(id);
                     }
                     self.close_form(window, cx);
-                    if focused || window.focused(cx).is_none() {
+                    if held {
                         self.focus_after_close(&open, window, cx);
                     }
                 }
@@ -742,6 +793,7 @@ impl VaultSettings {
         self.busy = VaultBusy::Changing;
         self.notice = None;
         self.row_errors.remove(&id);
+        self.hold_focus_on_page(window, cx);
         self.record(format!(
             "DELETE {}",
             crate::server_client::vault_entry_path(&id)
@@ -755,23 +807,44 @@ impl VaultSettings {
         let operation = spawn_tokio(cx, async move { client.delete_vault_entry(&target).await });
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = VaultBusy::Idle;
-                match result {
-                    Ok(()) => this.forget(&id, window, cx),
-                    Err(error) if error.is_not_found() => this.forget(&id, window, cx),
-                    Err(error) => {
-                        this.row_errors.insert(id, error.vault_message());
-                    }
-                }
-                cx.notify();
-            });
+            let _ = this.update_in(cx, |this, window, cx| this.deleted(id, result, window, cx));
         }));
     }
 
-    /// An entry is gone: its row, its form and its question go, and focus
-    /// goes to New entry.
+    /// The server answered a Delete. Gone either way on a 404.
+    fn deleted(
+        &mut self,
+        id: String,
+        result: Result<(), ServerError>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.busy = VaultBusy::Idle;
+        match result {
+            Ok(()) => self.forget(&id, window, cx),
+            Err(error) if error.is_not_found() => self.forget(&id, window, cx),
+            Err(error) => {
+                self.row_errors.insert(id, error.vault_message());
+            }
+        }
+        cx.notify();
+    }
+
+    /// An entry is gone: its row, its form and its question go, the
+    /// desktop's own thread forms match again, and focus goes to New entry
+    /// if it was on the page. The answer can land after Settings closed,
+    /// and focus elsewhere stays where it is.
     fn forget(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let held = self.page_focus.contains_focused(window, cx);
+        if let Some(name) = self
+            .listing
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.name.clone())
+        {
+            self.rematch(name, Some(id.to_owned()), cx);
+        }
         if matches!(&self.form, Some((Open::Entry(open), _)) if open == id) {
             self.close_form(window, cx);
         }
@@ -782,7 +855,29 @@ impl VaultSettings {
         self.checked.remove(id);
         self.row_errors.remove(id);
         self.rows_focus.remove(id);
-        self.new_focus.focus(window, cx);
+        if held {
+            self.new_focus.focus(window, cx);
+        }
+    }
+
+    /// The vault changed through the server, another process: match the
+    /// desktop's own open thread forms for `name` again, as the server's
+    /// manager does for its own (D20). `deleted` names an entry that is
+    /// gone, whose last failure is dropped.
+    fn rematch(&mut self, name: String, deleted: Option<String>, cx: &mut Context<'_, Self>) {
+        #[cfg(test)]
+        self.rematched.push(name.clone());
+        let Some(state) = cx.try_global::<DesktopState>() else {
+            return;
+        };
+        let manager = state.app.secrets().clone();
+        spawn_tokio(cx, async move {
+            if let Some(id) = &deleted {
+                manager.forget_attention([id.as_str()]);
+            }
+            manager.refresh_saved_requests(&name).await;
+        })
+        .detach();
     }
 
     fn check(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -793,6 +888,7 @@ impl VaultSettings {
         self.notice = None;
         self.checked.remove(&id);
         self.row_errors.remove(&id);
+        self.hold_focus_on_page(window, cx);
         self.record(format!(
             "POST {}",
             crate::server_client::vault_check_path(&id)
@@ -807,26 +903,37 @@ impl VaultSettings {
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = VaultBusy::Idle;
-                match result {
-                    Ok(check) => {
-                        if check.ok {
-                            if let Some(entry) =
-                                this.listing.entries.iter_mut().find(|entry| entry.id == id)
-                            {
-                                entry.attention = None;
-                            }
-                        }
-                        this.checked.insert(id, (check.ok, check.message));
-                    }
-                    Err(error) if error.is_not_found() => this.forget(&id, window, cx),
-                    Err(error) => {
-                        this.row_errors.insert(id, error.vault_message());
-                    }
-                }
-                cx.notify();
+                this.check_answered(id, result, window, cx);
             });
         }));
+    }
+
+    /// The server answered a Check.
+    fn check_answered(
+        &mut self,
+        id: String,
+        result: Result<bruhs_models::vault::VaultCheck, ServerError>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.busy = VaultBusy::Idle;
+        match result {
+            Ok(check) => {
+                if check.ok {
+                    if let Some(entry) =
+                        self.listing.entries.iter_mut().find(|entry| entry.id == id)
+                    {
+                        entry.attention = None;
+                    }
+                }
+                self.checked.insert(id, (check.ok, check.message));
+            }
+            Err(error) if error.is_not_found() => self.forget(&id, window, cx),
+            Err(error) => {
+                self.row_errors.insert(id, error.vault_message());
+            }
+        }
+        cx.notify();
     }
 
     #[cfg(test)]
@@ -1062,7 +1169,7 @@ impl VaultSettings {
                 })
                 .chain(self.listing.bruhs.iter().map(|bruh| DropdownOption {
                     value: bruh_value(&bruh.agent_id),
-                    label: review_text(&bruh.name),
+                    label: bruh_choice_label(bruh),
                     description: None,
                 }))
                 .collect();
@@ -1156,18 +1263,23 @@ impl VaultSettings {
                                 .flex()
                                 .items_center()
                                 .child(
-                                    Checkbox::new("desktop-vault-remove-totp")
-                                        .label(FIELD_REMOVE_TOTP)
-                                        .checked(remove)
-                                        .on_click(move |checked, _, cx| {
-                                            let checked = *checked;
-                                            let _ = entity.update(cx, |this, cx| {
-                                                if let Some((_, form)) = this.form.as_mut() {
-                                                    form.remove_totp = checked;
-                                                }
-                                                cx.notify();
-                                            });
-                                        }),
+                                    div()
+                                        .debug_selector(|| "desktop-vault-remove-totp".into())
+                                        .child(
+                                            Checkbox::new("desktop-vault-remove-totp")
+                                                .label(FIELD_REMOVE_TOTP)
+                                                .checked(remove)
+                                                .on_click(move |checked, _, cx| {
+                                                    let checked = *checked;
+                                                    let _ = entity.update(cx, |this, cx| {
+                                                        if let Some((_, form)) = this.form.as_mut()
+                                                        {
+                                                            form.remove_totp = checked;
+                                                        }
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        ),
                                 ),
                         )
                     })
@@ -1427,7 +1539,7 @@ impl VaultSettings {
                 move || selector
             })
             .role(Role::Group)
-            .aria_label(format!("Vault entry: {}", row.name))
+            .aria_label(row_label(&entry.name))
             .min_w_0()
             .py_3()
             .border_b_1()
@@ -1544,6 +1656,7 @@ impl Render for VaultSettings {
         );
         div()
             .id("desktop-vault")
+            .track_focus(&self.page_focus)
             .p_4()
             .min_w_0()
             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -1610,14 +1723,15 @@ impl Render for VaultSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{Open, VaultFormState, VaultSettings};
+    use super::{Open, Request, VaultFormState, VaultSettings};
     use crate::server_client::{ServerClient, ServerError};
     use crate::{app_state::DesktopState, theme};
     use bruhs_models::crew::ServiceNotice;
     use bruhs_models::secrets::SavedCredentialState;
     use bruhs_models::vault::{
-        delete_entry_confirm, vault_row, CredentialScope, LoginFields, LoginMeta, VaultAttention,
-        VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing, ENTRY_UPDATED,
+        delete_entry_confirm, vault_row, CredentialScope, LoginFields, LoginInput, LoginMeta,
+        TotpInput, VaultAttention, VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing,
+        VaultSecretInput, VaultUpdate, ENTRY_UPDATED, OPEN_FROM_OWN_ADDRESS,
     };
     use gpui::{
         AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, TestAppContext,
@@ -1874,6 +1988,8 @@ mod tests {
         click(cx, "desktop-vault-cancel");
         assert!(cx.update(|_, cx| password.read(cx).value().is_empty()));
         assert!(!rendered(cx, "desktop-vault-form"));
+        let edit = view.read_with(cx, |view, _| view.rows_focus["v1-shop"].edit.clone());
+        assert_eq!(focused(cx), Some(edit), "Cancel returns to the row's Edit");
         assert!(!requests(&view, cx)
             .iter()
             .any(|line| line.starts_with("PUT")));
@@ -1892,6 +2008,8 @@ mod tests {
         assert_eq!(focused(cx), Some(keep), "Keep, the safe choice, has focus");
         click(cx, "desktop-vault-keep");
         assert!(!rendered(cx, "desktop-vault-confirm"));
+        let delete = view.read_with(cx, |view, _| view.rows_focus["v1-deploy"].delete.clone());
+        assert_eq!(focused(cx), Some(delete), "Keep returns to Delete");
         assert_eq!(
             requests(&view, cx),
             ["GET /api/vault"],
@@ -1980,5 +2098,154 @@ mod tests {
             assert_eq!(view.notice, Some(ENTRY_UPDATED));
             assert_eq!(view.listing.entries[1], saved);
         });
+    }
+
+    fn deleted_answer(
+        view: &Entity<VaultSettings>,
+        cx: &mut VisualTestContext,
+        id: &str,
+        result: Result<(), ServerError>,
+    ) {
+        let id = id.to_owned();
+        cx.update(|window, cx| view.update(cx, |view, cx| view.deleted(id, result, window, cx)));
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn a_page_on_another_address_shows_why(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, None);
+        let forbidden = ServerError::Status {
+            request: "GET /api/vault".into(),
+            code: reqwest::StatusCode::FORBIDDEN,
+            body: String::new(),
+        };
+        view.update(cx, |view, cx| {
+            view.answer_listing_for_test(Err(forbidden), cx)
+        });
+        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-vault-notice"));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.status_line()),
+            Some(OPEN_FROM_OWN_ADDRESS.to_string())
+        );
+        click(cx, "desktop-vault-new");
+        assert!(!rendered(cx, "desktop-vault-form"), "New entry stays off");
+    }
+
+    #[gpui::test]
+    fn a_kind_change_empties_the_values_it_hides(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        click(cx, "desktop-vault-new");
+        let password = form_input(&view, cx, |form| &form.password);
+        let handle = cx.update(|_, cx| password.focus_handle(cx));
+        cx.update(|window, cx| window.focus(&handle, cx));
+        cx.simulate_input("hidden-canary");
+        click(cx, "desktop-vault-kind");
+        click(cx, "desktop-vault-kind-option-value");
+        assert!(
+            cx.update(|_, cx| password.read(cx).value().is_empty()),
+            "a Key has no password field, so its text goes"
+        );
+        // The Key's own Value field is drawn and empty.
+        let value = form_input(&view, cx, |form| &form.value);
+        assert!(cx.update(|_, cx| value.read(cx).value().is_empty()));
+    }
+
+    #[gpui::test]
+    fn remove_one_time_code_reaches_the_update(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        click(cx, "desktop-vault-edit-v1-shop");
+        click(cx, "desktop-vault-remove-totp");
+        click(cx, "desktop-vault-save");
+        assert_eq!(
+            requests(&view, cx).last().map(String::as_str),
+            Some("PUT /api/vault/v1-shop")
+        );
+        view.read_with(cx, |view, _| {
+            assert!(matches!(
+                &view.last_request,
+                Some(Request::Update(
+                    id,
+                    VaultUpdate {
+                        secret: VaultSecretInput::Login {
+                            url,
+                            fields: LoginInput::Saved {
+                                password: None,
+                                totp: TotpInput::Remove,
+                                ..
+                            },
+                        },
+                    },
+                )) if id == "v1-shop" && url == "https://shop.test/in"
+            ));
+        });
+    }
+
+    /// D20: the desktop's own thread forms match again after a change made
+    /// through the server.
+    #[gpui::test]
+    fn changes_match_the_desktops_thread_forms_again(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        let saved = listing().entries.remove(1);
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| view.saved(0, Ok(saved), window, cx));
+        });
+        click(cx, "desktop-vault-delete-v1-token");
+        click(cx, "desktop-vault-confirm");
+        // The pressed Confirm turns off; focus holds on the page meanwhile.
+        let page_focus = view.read_with(cx, |view, _| view.page_focus.clone());
+        assert_eq!(focused(cx), Some(page_focus));
+        deleted_answer(&view, cx, "v1-token", Ok(()));
+        let gone = ServerError::Status {
+            request: "POST /api/vault/v1-shop/check".into(),
+            code: reqwest::StatusCode::NOT_FOUND,
+            body: String::new(),
+        };
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.check_answered("v1-shop".into(), Err(gone), window, cx);
+            });
+        });
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.rematched, ["DEPLOY_KEY", "Token", "Shop"]);
+            assert!(view
+                .listing
+                .entries
+                .iter()
+                .all(|entry| entry.id == "v1-deploy"));
+        });
+    }
+
+    /// An answer that lands after Settings closed leaves focus alone.
+    #[gpui::test]
+    fn a_late_delete_answer_leaves_focus_where_it_is(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        click(cx, "desktop-vault-delete-v1-deploy");
+        click(cx, "desktop-vault-confirm");
+        // Settings closes and focus leaves the page (the test window has
+        // nothing else to hold it, so it holds none).
+        cx.update(|window, cx| view.update(cx, |view, cx| view.clear_editor(window, cx)));
+        cx.update(|window, cx| {
+            let elsewhere = cx.focus_handle();
+            window.focus(&elsewhere, cx);
+        });
+        cx.run_until_parked();
+        let before = focused(cx);
+        let new_entry = view.read_with(cx, |view, _| view.new_focus.clone());
+        deleted_answer(&view, cx, "v1-deploy", Ok(()));
+        assert_eq!(focused(cx), before, "focus stays where the owner left it");
+        assert_ne!(focused(cx), Some(new_entry.clone()));
+        view.read_with(cx, |view, _| {
+            assert!(!view
+                .listing
+                .entries
+                .iter()
+                .any(|entry| entry.id == "v1-deploy"));
+        });
+        // On the page, the same answer moves focus to New entry.
+        click(cx, "desktop-vault-delete-v1-token");
+        click(cx, "desktop-vault-confirm");
+        deleted_answer(&view, cx, "v1-token", Ok(()));
+        assert_eq!(focused(cx), Some(new_entry));
     }
 }

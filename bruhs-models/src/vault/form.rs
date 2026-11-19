@@ -3,9 +3,12 @@
 
 use super::{
     CredentialScope, LoginFields, LoginInput, LoginMeta, TotpInput, VaultBruh, VaultCreate,
-    VaultEntry, VaultKind, VaultSecretInput, VaultUpdate, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD,
-    LOADING, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT, SOURCE_ONE_PASSWORD, SOURCE_SAVED,
-    STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+    VaultEntry, VaultKind, VaultSecretInput, VaultUpdate, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD,
+    FIELD_PASSWORD_REF, FIELD_REFERENCE, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
+    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, KIND_KEY,
+    KIND_LOGIN, KIND_ONE_PASSWORD, LOADING, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT,
+    SOURCE_ONE_PASSWORD, SOURCE_SAVED, STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED,
+    WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
 };
 use crate::secrets::{review_text, SavedCredentialState};
 
@@ -114,6 +117,26 @@ impl FormField {
     #[must_use]
     pub fn fixed_on_edit(self) -> bool {
         matches!(self, Self::Kind | Self::Name | Self::UsedBy | Self::SignIn)
+    }
+
+    /// The field's label.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Kind => FIELD_KIND,
+            Self::Name => FIELD_NAME,
+            Self::UsedBy => FIELD_USED_BY,
+            Self::SignIn => FIELD_SIGN_IN,
+            Self::StoredIn => FIELD_STORED_IN,
+            Self::Username => FIELD_USERNAME,
+            Self::Password => FIELD_PASSWORD,
+            Self::Totp => FIELD_TOTP,
+            Self::UsernameRef => FIELD_USERNAME_REF,
+            Self::PasswordRef => FIELD_PASSWORD_REF,
+            Self::TotpRef => FIELD_TOTP_REF,
+            Self::Value => FIELD_VALUE,
+            Self::Reference => FIELD_REFERENCE,
+        }
     }
 
     /// Holds a value: masked, never filled, emptied on submit and close.
@@ -438,6 +461,18 @@ pub fn matches_search(entry: &VaultEntry, bruhs: &[VaultBruh], query: &str) -> b
             CredentialScope::Project { path } => found(path),
             CredentialScope::Bruh { agent_id } => bruh_name(bruhs, agent_id).is_some_and(found),
         }
+}
+
+/// A row's accessible name.
+#[must_use]
+pub fn row_label(name: &str) -> String {
+    format!("Vault entry: {}", review_text(name))
+}
+
+/// A bruh as the One bruh picker lists it.
+#[must_use]
+pub fn bruh_choice_label(bruh: &VaultBruh) -> String {
+    review_text(&bruh.name)
 }
 
 #[must_use]
@@ -887,6 +922,35 @@ mod tests {
             fixed_hint_after(&form_fields(FormKind::Value, FormSource::Saved)),
             Some(FormField::UsedBy)
         );
+    }
+
+    #[test]
+    fn fields_rows_and_bruhs_read_plainly() {
+        assert_eq!(
+            FormField::ALL.map(FormField::label),
+            [
+                FIELD_KIND,
+                FIELD_NAME,
+                FIELD_USED_BY,
+                FIELD_SIGN_IN,
+                FIELD_STORED_IN,
+                FIELD_USERNAME,
+                FIELD_PASSWORD,
+                FIELD_TOTP,
+                FIELD_USERNAME_REF,
+                FIELD_PASSWORD_REF,
+                FIELD_TOTP_REF,
+                FIELD_VALUE,
+                FIELD_REFERENCE
+            ]
+        );
+        assert_eq!(row_label("Shop"), "Vault entry: Shop");
+        assert_eq!(row_label("a\u{202e}b"), "Vault entry: a\\u{202e}b");
+        let bruh = VaultBruh {
+            agent_id: "a".into(),
+            name: "Ash\u{202e}".into(),
+        };
+        assert_eq!(bruh_choice_label(&bruh), "Ash\\u{202e}");
     }
 
     #[test]

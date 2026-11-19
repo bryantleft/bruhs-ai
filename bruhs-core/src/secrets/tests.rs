@@ -919,6 +919,55 @@ esac
         }
     }
 
+    /// The desktop changes the vault through bruhs-server, another process
+    /// with its own manager over the same store. Its own open thread forms
+    /// hear of the change only when the page tells its manager (D20).
+    #[tokio::test]
+    async fn a_change_made_by_another_process_refreshes_forms_once_told() {
+        let op = tempfile::tempdir().unwrap();
+        let store = SecretStore::in_memory();
+        let mut desktop = Fixture::with_manager(
+            SecretManager::new(store.clone())
+                .with_connections(crate::connections::Connections::in_memory())
+                .with_one_password(OnePassword::at(
+                    stand_in(op.path()),
+                    std::time::Duration::from_secs(10),
+                )),
+        )
+        .await;
+        let server = SecretManager::new(store);
+        let mut seen = Vec::new();
+        let shared = server
+            .vault_create(entry(
+                "KEY",
+                CredentialScope::Global,
+                value(&canary("shared")),
+            ))
+            .await
+            .unwrap();
+        let call = desktop.call_for("KEY");
+        let request = desktop.shown(&mut seen).await;
+        assert_eq!(request.saved_source, Some(SavedSource::Global));
+        // The server deletes it; the desktop's form still offers it until
+        // the desktop's manager matches again.
+        server.vault_delete(&shared.id).await.unwrap();
+        assert!(
+            desktop.events.try_recv().is_err(),
+            "no refresh across processes"
+        );
+        desktop.manager.forget_attention([shared.id.as_str()]);
+        desktop.manager.refresh_saved_requests("KEY").await;
+        let refreshed = desktop.shown(&mut seen).await;
+        assert_eq!(refreshed.id, request.id);
+        assert!(!refreshed.saved_available);
+        assert_eq!(refreshed.saved_source, None);
+        desktop
+            .decide(&refreshed, SecretDecision::Decline)
+            .await
+            .unwrap();
+        assert_eq!(call.await.unwrap().unwrap().status, "declined");
+    }
+
     #[tokio::test]
     async fn a_project_key_is_its_own_and_forgetting_it_falls_back_to_the_shared_one() {
         let op = tempfile::tempdir().unwrap();
