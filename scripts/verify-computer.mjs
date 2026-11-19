@@ -559,9 +559,10 @@ try {
   };
   // Click the centre of the first element matching `selector` (optionally
   // the one whose text is `text`), or of the button holding it, after
-  // checking nothing covers it.
+  // checking nothing covers it. Controls that follow the Computer's state
+  // appear once the tab has read it, so it waits up to 3 s for one.
   const click = async (selector, text) => {
-    const point = await evaluate(`(() => {
+    const find = () => evaluate(`(() => {
       const all = [...document.querySelectorAll(${js(selector)})];
       const found = ${text === undefined ? 'all[0]' : `all.find((node) => node.textContent.trim() === ${js(text)})`};
       const element = found?.closest('button') ?? found;
@@ -573,6 +574,11 @@ try {
       const covered = !(hit && (hit === element || element.contains(hit)));
       return { x, y, covered, by: covered && hit ? hit.tagName + '.' + [...hit.classList].join('.') + ' ' + hit.textContent.trim().slice(0, 40) : null, disabled: !!element.disabled };
     })()`);
+    let point = await find();
+    for (const deadline = Date.now() + 3000; (!point || point.covered || point.disabled) && Date.now() < deadline;) {
+      await sleep(100);
+      point = await find();
+    }
     const label = `${selector}${text === undefined ? '' : ` "${text}"`}`;
     if (!point) throw new Error(`Nothing matches ${label}`);
     if (point.covered) throw new Error(`${label} is covered by ${point.by}`);
