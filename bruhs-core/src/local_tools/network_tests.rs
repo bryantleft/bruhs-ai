@@ -515,6 +515,16 @@ async fn no_proxy_hosts_skip_the_upstream() {
     assert!(heads.lock().unwrap().is_empty());
 }
 
+/// Off Unix there is no interface list yet, so the guard refuses to start
+/// rather than leave this computer's LAN and VPN addresses open.
+#[cfg(not(unix))]
+#[tokio::test]
+async fn off_unix_the_guard_refuses_to_start() {
+    let refused = NetworkGuard::start(Upstream::default()).err().unwrap();
+    assert_eq!(refused.to_string(), NO_ADDRESSES);
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn the_guard_is_not_a_web_server_and_bounds_request_heads() {
     let guard = NetworkGuard::start(Upstream::default()).unwrap();

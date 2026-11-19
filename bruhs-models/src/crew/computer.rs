@@ -90,6 +90,10 @@ pub const LIVE_VIEW_NEEDS_HTTP: &str = "The live view needs an http:// server ad
 /// The live view's socket couldn't be opened.
 pub const LIVE_VIEW_UNREACHABLE: &str = "The live view can't reach the server. Try again.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
+/// This system lacks what a bruh's browser needs: the network guard's read
+/// of this computer's addresses and the recovery of a crashed browser's
+/// profile. Both exist only on macOS and Linux so far.
+pub const COMPUTER_UNSUPPORTED: &str = "Computer works only on macOS and Linux for now.";
 /// A launch whose traffic didn't reach the network guard: a Chrome policy
 /// (an organization's proxy settings) wins over the guard's proxy flag.
 pub const PROXY_POLICY_OVERRIDE: &str =

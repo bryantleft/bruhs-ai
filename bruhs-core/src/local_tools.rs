@@ -89,14 +89,22 @@ impl LocalToolsHost {
             .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
             .build()?;
         let launcher = computer::browser_launcher(client.clone(), policy);
-        Self::with_parts(policy, client, launcher, network::Upstream::from_env)
+        Self::with_parts(
+            policy,
+            client,
+            launcher,
+            network::Upstream::from_env,
+            computer::platform_refusal(),
+        )
     }
 
+    /// `refusal` says why no bruh browser opens on this system, if none does.
     fn with_parts(
         policy: ProcessPolicy,
         client: reqwest::Client,
         launcher: computer::Launcher,
         network: fn() -> Result<network::Upstream, ToolError>,
+        refusal: Option<&'static str>,
     ) -> Result<Arc<Self>, ToolError> {
         if policy.timeout.is_zero() || policy.max_output_bytes == 0 {
             return Err(ToolError::Invalid(
@@ -108,7 +116,7 @@ impl LocalToolsHost {
             browsers: tokio::sync::Mutex::new(HashMap::new()),
             opening: Mutex::new(HashSet::new()),
             video: Mutex::new(HashSet::new()),
-            computers: computer::Computers::default(),
+            computers: computer::Computers::new(refusal),
             launcher,
             network,
             client,

@@ -128,8 +128,13 @@ pub(super) fn interface_addresses() -> io::Result<Vec<IpAddr>> {
     Ok(addresses)
 }
 
-/// No interface list off Unix: only the loopback and unspecified rule applies.
+/// No interface list off Unix yet. An empty one would leave this
+/// computer's LAN and VPN addresses open, so the read fails and the guard
+/// doesn't start.
 #[cfg(not(unix))]
 pub(super) fn interface_addresses() -> io::Result<Vec<IpAddr>> {
-    Ok(Vec::new())
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "this computer's interface addresses can't be read here yet",
+    ))
 }

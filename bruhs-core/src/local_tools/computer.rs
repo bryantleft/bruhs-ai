@@ -17,9 +17,9 @@ use async_trait::async_trait;
 use bruhs_models::{
     crew::{
         handed_back_note, same_page_host, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
-        COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
-        MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, TAKE_CONTROL_FIRST,
-        TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED,
+        LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER,
+        PAGE_CHANGED, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -47,6 +47,12 @@ const REAP_EVERY: Duration = Duration::from_secs(30);
 /// How long asking an open page for its address may take.
 const PAGE_URL_WAIT: Duration = Duration::from_secs(2);
 const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and retry.";
+/// Why no bruh browser opens on this system: none on Unix. Elsewhere the
+/// network guard can't read this computer's addresses and a crashed
+/// browser's profile isn't recovered yet.
+pub(super) fn platform_refusal() -> Option<&'static str> {
+    (!cfg!(unix)).then_some(COMPUTER_UNSUPPORTED)
+}
 
 /// A bruh whose Computer is on, as the reactive store lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +182,18 @@ pub(super) struct Computers {
     slots: Mutex<HashMap<String, Arc<Slot>>>,
     /// Grant ids of launching and open pages, at most [`MAX_COMPUTERS`].
     seats: Arc<Mutex<HashSet<String>>>,
+    /// Why no bruh browser opens on this system, if none does
+    /// ([`platform_refusal`]).
+    refusal: Option<&'static str>,
+}
+
+impl Computers {
+    pub(super) fn new(refusal: Option<&'static str>) -> Self {
+        Self {
+            refusal,
+            ..Self::default()
+        }
+    }
 }
 
 struct Slot {
@@ -268,15 +286,19 @@ impl Drop for Seat {
 
 impl Slot {
     /// `budget` is the largest live view frame, in bytes.
-    fn new(computer: BruhComputer, budget: usize) -> Self {
+    /// `refusal` says why no browser opens on this system, if none does.
+    fn new(computer: BruhComputer, budget: usize, refusal: Option<&'static str>) -> Self {
         let grant = ToolGrant {
             id: Uuid::new_v4().to_string(),
             principal: Principal::Bruh(computer.agent_id.clone()).wire(),
             scope: ToolScope::Browser,
         };
         let (revoked, _) = watch::channel(false);
+        // Where no browser can open, the state says so from the start.
+        let error = refusal.map(str::to_owned);
         let (state, _) = watch::channel(ComputerState {
             agent_id: computer.agent_id.clone(),
+            error: error.clone(),
             ..ComputerState::default()
         });
         Self {
@@ -292,7 +314,10 @@ impl Slot {
             interrupt: watch::channel(0).0,
             state,
             hub: ScreencastHub::new(budget),
-            page: tokio::sync::Mutex::new(PageSlot::default()),
+            page: tokio::sync::Mutex::new(PageSlot {
+                error,
+                ..PageSlot::default()
+            }),
         }
     }
 
@@ -482,7 +507,11 @@ impl LocalToolsHost {
             match slots.get(&computer.agent_id) {
                 Some(slot) => slot.update(&computer),
                 None => {
-                    let slot = Slot::new(computer, self.policy.max_output_bytes);
+                    let slot = Slot::new(
+                        computer,
+                        self.policy.max_output_bytes,
+                        self.computers.refusal,
+                    );
                     slots.insert(slot.agent_id.clone(), Arc::new(slot));
                 }
             }
@@ -1075,6 +1104,9 @@ impl LocalToolsHost {
         headless: bool,
         seat: Option<Seat>,
     ) -> Result<OpenPage, ToolError> {
+        if let Some(reason) = self.computers.refusal {
+            return Err(ToolError::Unavailable(reason.into()));
+        }
         let seat = match seat {
             Some(seat) => seat,
             None => Seat::take(&self.computers.seats, &slot.grant.grant.id)?,
@@ -1420,11 +1452,30 @@ mod fake {
         pub(in crate::local_tools) fn with_fake_pages_and_network(
             network: fn() -> Result<Upstream, ToolError>,
         ) -> (Arc<Self>, FakePages) {
+            Self::with_fake_parts(network, None)
+        }
+
+        /// A fake host on a system where no bruh browser opens.
+        pub(in crate::local_tools) fn with_fake_pages_refusing(
+            refusal: &'static str,
+        ) -> (Arc<Self>, FakePages) {
+            Self::with_fake_parts(|| Ok(Upstream::default()), Some(refusal))
+        }
+
+        fn with_fake_parts(
+            network: fn() -> Result<Upstream, ToolError>,
+            refusal: Option<&'static str>,
+        ) -> (Arc<Self>, FakePages) {
             let pages = FakePages::default();
             let client = reqwest::Client::new();
-            let host =
-                Self::with_parts(ProcessPolicy::default(), client, pages.launcher(), network)
-                    .unwrap_or_else(|error| panic!("the fake host has a valid policy: {error}"));
+            let host = Self::with_parts(
+                ProcessPolicy::default(),
+                client,
+                pages.launcher(),
+                network,
+                refusal,
+            )
+            .unwrap_or_else(|error| panic!("the fake host has a valid policy: {error}"));
             let _ = pages.host.set(Arc::downgrade(&host));
             (host, pages)
         }

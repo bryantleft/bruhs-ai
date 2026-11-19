@@ -76,6 +76,39 @@ async fn sync_turns_computers_on_and_off() {
     ));
 }
 
+/// Where the guard can't read this computer's addresses or recover a
+/// crashed profile (off Unix), a Computer says so and never launches.
+#[tokio::test]
+async fn a_system_without_the_guard_opens_no_bruh_browser() {
+    use bruhs_models::crew::COMPUTER_UNSUPPORTED;
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages_refusing(COMPUTER_UNSUPPORTED);
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    let state = host.computer_state("a").await.unwrap();
+    assert_eq!(state.error.as_deref(), Some(COMPUTER_UNSUPPORTED));
+    assert!(matches!(
+        host.open_computer("a").await,
+        Err(ToolError::Unavailable(message)) if message == COMPUTER_UNSUPPORTED
+    ));
+    assert_eq!(
+        host.bruh_command("a", BrowserAction::Snapshot)
+            .await
+            .unwrap_err()
+            .to_string(),
+        COMPUTER_UNSUPPORTED
+    );
+    assert!(fake.launches().is_empty());
+    assert_eq!(
+        host.computer_state("a").await.unwrap().error.as_deref(),
+        Some(COMPUTER_UNSUPPORTED)
+    );
+    // The production host refuses exactly off Unix.
+    assert_eq!(
+        super::platform_refusal(),
+        (!cfg!(unix)).then_some(COMPUTER_UNSUPPORTED)
+    );
+}
+
 #[tokio::test]
 async fn a_bruh_browser_starts_on_first_use_and_reopens_at_its_last_url() {
     let home = tempfile::tempdir().unwrap();
