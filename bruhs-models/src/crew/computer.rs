@@ -105,6 +105,9 @@ pub const KEYCHAIN_NEEDS_OWNER: &str =
     "The keychain needs the owner to allow access on this computer. Stop here and say so.";
 pub const VAULT_READ_FAILED: &str =
     "Bruhs couldn't read that vault login. Stop here and tell the owner.";
+/// `logins` couldn't list the bruh's logins (ruling BC M6).
+pub const LOGINS_LIST_FAILED: &str =
+    "Bruhs couldn't list the vault logins. Stop here and tell the owner.";
 /// A browser step that outlasted its time, or a vault fill that did before
 /// it began to type: nothing of it ran.
 pub const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and retry.";
@@ -161,6 +164,9 @@ pub const LIVE_VIEW_ENDED: &str = "This live view has ended. Open the browser ag
 pub const LIVE_VIEW_STALLED: &str = "The live view stopped showing frames. Open it again.";
 /// A page from another site asked for a live view.
 pub const LIVE_VIEW_FOREIGN_PAGE: &str = "This page can't open the live view.";
+/// A request to open, take, hand back or close a bruh's Computer from a
+/// page that isn't the owner's own app (ruling BC I1).
+pub const COMPUTER_OWNER_ONLY: &str = "Open Bruhs from its own address to use a bruh's Computer.";
 /// The live view sent something other than an acknowledgement or input.
 pub const LIVE_VIEW_UNREADABLE: &str = "The live view sent a message the server can't read.";
 /// The desktop's live view speaks plain `ws://` to a local server only.

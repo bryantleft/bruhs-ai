@@ -595,6 +595,37 @@ pub(super) fn vault_grants(
     Ok(Some(crew::profile(connection, agent_id)?.vault))
 }
 
+/// Whether an entry just made for bruh `agent_id`'s own may stay: true
+/// while the bruh exists. A bruh deleted while the entry was made gets its
+/// deletion record again, so the forget pass deletes that entry too
+/// (ruling A1 M8).
+pub(super) fn keep_bruh_entry(
+    connection: &mut Connection,
+    agent_id: &str,
+) -> Result<bool, ReactiveError> {
+    transaction(connection, |connection| {
+        if get::<ReactiveAgent>(connection, "reactive_agents", agent_id)?.is_some() {
+            return Ok(true);
+        }
+        connection.execute(
+            "INSERT OR IGNORE INTO reactive_vault_forget(agent_id) VALUES(?1)",
+            [agent_id],
+        )?;
+        Ok(false)
+    })
+}
+
+/// Whether proposal `id` deletes an agent. An unknown proposal doesn't.
+pub(super) fn proposal_deletes_agent(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, ReactiveError> {
+    Ok(
+        get::<ReactiveProposal>(connection, "reactive_proposals", id)?
+            .is_some_and(|proposal| matches!(proposal.change, ReactiveChange::DeleteAgent { .. })),
+    )
+}
+
 /// The deleted bruhs whose own vault entries are still to be deleted.
 pub(super) fn vault_forgets(connection: &Connection) -> Result<HashSet<String>, ReactiveError> {
     let mut statement = connection.prepare("SELECT agent_id FROM reactive_vault_forget")?;

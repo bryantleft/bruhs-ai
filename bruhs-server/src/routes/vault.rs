@@ -117,31 +117,43 @@ pub async fn create(
 ) -> Result<Json<VaultEntry>, AppError> {
     owner_only(&config.access, &headers)?;
     let mut create = body(create)?;
-    if let Err(refused) = scope_checked(&mut create.scope, runtime).await {
+    if let Err(refused) = scope_checked(&mut create.scope, runtime.as_ref()).await {
         // Its values are wiped as the store wipes a create it refuses.
         bruhs_core::secrets::discard(create);
         return Err(refused);
     }
-    state
+    let entry = state
         .secrets()
         .vault_create(create)
         .await
-        .map(Json)
-        .map_err(vault_error)
+        .map_err(vault_error)?;
+    // The bruh may have been deleted while this was made: then the entry
+    // goes with its others (ruling A1 M8).
+    if let (CredentialScope::Bruh { agent_id }, Some(Extension(runtime))) = (&entry.scope, &runtime)
+    {
+        match runtime.keep_bruh_entry(agent_id).await {
+            Ok(true) => {}
+            Ok(false) => return Err(AppError::BadRequest(BRUH_MISSING.into())),
+            Err(error) => {
+                tracing::warn!(%error, "A new bruh entry's bruh could not be checked again");
+            }
+        }
+    }
+    Ok(Json(entry))
 }
 
 /// A Project folder made canonical, or a Bruh scope's bruh found in the
 /// runtime. An empty folder or bruh is left for the store's own copy.
 async fn scope_checked(
     scope: &mut CredentialScope,
-    runtime: Option<Extension<ReactiveRuntime>>,
+    runtime: Option<&Extension<ReactiveRuntime>>,
 ) -> Result<(), AppError> {
     match scope {
         CredentialScope::Project { path } if !path.trim().is_empty() => {
             *path = project_folder(path).await?;
         }
         CredentialScope::Bruh { agent_id } if !agent_id.trim().is_empty() => {
-            let runtime = super::reactive::runtime(runtime)?;
+            let runtime = super::reactive::runtime(runtime.cloned())?;
             if !bruhs(&runtime)
                 .await?
                 .iter()

@@ -48,22 +48,20 @@ pub async fn snapshot(
     ))
 }
 
-/// `POST /api/reactive/commands`. A bruh's vault grants change, and its
-/// asks to use a vault key are answered, only from the owner's own app, as
-/// the vault does (ruling F26).
+/// `POST /api/reactive/commands`. A bruh's vault grants change, its asks
+/// to use a vault key are answered, and an agent is deleted (with a bruh's
+/// own vault entries) only from the owner's own app, as the vault does
+/// (rulings F26 and BC I2).
 pub async fn command(
     value: Option<Extension<ReactiveRuntime>>,
     State(config): State<Arc<Config>>,
     headers: HeaderMap,
     Json(command): Json<ReactiveCommand>,
 ) -> Result<Json<ReactiveSnapshot>, AppError> {
-    if matches!(command, ReactiveCommand::SetVault { .. }) {
-        super::vault::owner_only(&config.access, &headers)?;
-    }
     let runtime = runtime(value)?;
-    if let ReactiveCommand::DecideApproval { id, .. } = &command {
-        if runtime.is_vault_key_approval(id).await? {
-            super::vault::owner_only(&config.access, &headers)?;
+    if !config.access.owner_request(&headers) {
+        if let Some(refusal) = runtime.owner_only_refusal(&command).await? {
+            return Err(AppError::Forbidden(refusal.into()));
         }
     }
     Ok(Json(runtime.command(command).await?))

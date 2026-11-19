@@ -106,6 +106,11 @@ pub const BRUH_MISSING: &str = "That bruh doesn't exist.";
 /// A vault change, or a bruh's grants, sent from a page other than this
 /// server's own or a configured one (ruling F26).
 pub const OWNER_ONLY: &str = "Open Bruhs from its own address to change the vault.";
+/// An answer to a bruh's ask to use a vault key from such a page.
+pub const OWNER_ONLY_CARD: &str = "Open Bruhs from its own address to answer this card.";
+/// Deleting a bruh, which deletes its own vault entries, from such a page
+/// (ruling BC I2).
+pub const OWNER_ONLY_DELETE_BRUH: &str = "Open Bruhs from its own address to delete a bruh.";
 
 // Validation copy.
 pub const DUPLICATE_NAME: &str = "Another entry used there has that name.";

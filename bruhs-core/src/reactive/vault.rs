@@ -19,8 +19,12 @@ use bruhs_models::{
         VAULT_READ_FAILED,
     },
     local_tools::SecretRef,
+    reactive::{ReactiveChange, ReactiveCommand},
     secrets::review_text,
-    vault::{same_origin, LoginFields, VaultEntry, VaultKind},
+    vault::{
+        same_origin, LoginFields, VaultEntry, VaultKind, OWNER_ONLY, OWNER_ONLY_CARD,
+        OWNER_ONLY_DELETE_BRUH,
+    },
 };
 use std::{future::Future, time::Duration};
 
@@ -243,6 +247,57 @@ impl ReactiveRuntime {
             self.changed();
         }
         Ok(changed)
+    }
+
+    /// Why `command` takes the owner's own app, as its refusal's copy, or
+    /// `None` when any allowed page may send it (rulings F26 and BC I2): a
+    /// bruh's vault grants, an answer to its ask to use a vault key, and
+    /// deleting an agent, which deletes a bruh's own vault entries, applied
+    /// or approved as a proposal.
+    ///
+    /// # Errors
+    ///
+    /// A store failure reading the card or the proposal.
+    pub async fn owner_only_refusal(
+        &self,
+        command: &ReactiveCommand,
+    ) -> Result<Option<&'static str>, ReactiveError> {
+        Ok(match command {
+            ReactiveCommand::SetVault { .. } => Some(OWNER_ONLY),
+            ReactiveCommand::Apply {
+                change: ReactiveChange::DeleteAgent { .. },
+            } => Some(OWNER_ONLY_DELETE_BRUH),
+            ReactiveCommand::DecideProposal { id, approve: true } => {
+                let id = id.clone();
+                self.call(move |connection| store::proposal_deletes_agent(connection, &id))
+                    .await?
+                    .then_some(OWNER_ONLY_DELETE_BRUH)
+            }
+            ReactiveCommand::DecideApproval { id, .. } => self
+                .is_vault_key_approval(id)
+                .await?
+                .then_some(OWNER_ONLY_CARD),
+            _ => None,
+        })
+    }
+
+    /// After an entry of bruh `agent_id`'s own was made: whether that bruh
+    /// still exists. One deleted meanwhile gets its deletion record again
+    /// and the forget pass runs at once, so the entry goes with the bruh's
+    /// others (ruling A1 M8).
+    ///
+    /// # Errors
+    ///
+    /// A store failure; the entry stays until a later pass or a delete.
+    pub async fn keep_bruh_entry(&self, agent_id: &str) -> Result<bool, ReactiveError> {
+        let id = agent_id.to_owned();
+        let kept = self
+            .call(move |connection| store::keep_bruh_entry(connection, &id))
+            .await?;
+        if !kept {
+            self.forget_deleted_bruhs().await;
+        }
+        Ok(kept)
     }
 
     /// Whether bruh `agent_id` has a login it may fill. False when the

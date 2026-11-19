@@ -520,6 +520,144 @@ async fn deleting_a_bruh_deletes_its_own_vault_entries() {
     eventually(|| async { runtime.vault_forgets_for_tests().await.is_empty() }).await;
 }
 
+/// Ruling A1 M8: an entry of a bruh's own made while the bruh was deleted
+/// (after its forget pass) gets the deletion record again and goes; one
+/// of a bruh that still exists stays.
+#[tokio::test]
+async fn an_own_entry_made_while_its_bruh_was_deleted_goes_too() {
+    let folder = tempfile::tempdir().unwrap();
+    let vault = manager(folder.path(), 0);
+    let (_dir, runtime, _host, _fake) = vault_runtime(vault.clone(), None).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteAgent { id: "a".into() },
+        })
+        .await
+        .unwrap();
+    eventually(|| async { runtime.vault_forgets_for_tests().await.is_empty() }).await;
+    // The route had checked `a` before the delete; its create lands now.
+    let late = vault
+        .vault_create(saved_login("Late", bruh("a"), &canary("pw")))
+        .await
+        .unwrap();
+    let kept = vault
+        .vault_create(saved_login("Kept", bruh("b"), &canary("pw")))
+        .await
+        .unwrap();
+    assert!(!runtime.keep_bruh_entry("a").await.unwrap());
+    assert!(runtime.keep_bruh_entry("b").await.unwrap());
+    eventually(|| async { vault.vault_entries().await.unwrap().len() == 1 }).await;
+    let ids: Vec<String> = vault
+        .vault_entries()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, [kept.id]);
+    assert_ne!(ids, [late.id]);
+    eventually(|| async { runtime.vault_forgets_for_tests().await.is_empty() }).await;
+}
+
+/// Rulings F26 and BC I2: what only the owner's own app may send.
+#[tokio::test]
+async fn grants_key_cards_and_deleting_an_agent_are_the_owners() {
+    let (_dir, runtime) = runtime_with(&[full_claude("a"), full_claude("b")]).await;
+    let delete = || ReactiveChange::DeleteAgent { id: "a".into() };
+    let snapshot = runtime
+        .command(ReactiveCommand::Propose { change: delete() })
+        .await
+        .unwrap();
+    let deletes = snapshot.proposals[0].id.clone();
+    let snapshot = runtime
+        .command(ReactiveCommand::Propose {
+            change: ReactiveChange::SetMemory {
+                agent_id: "b".into(),
+                memory: "Likes tea.".into(),
+            },
+        })
+        .await
+        .unwrap();
+    let remembers = snapshot
+        .proposals
+        .iter()
+        .find(|proposal| proposal.id != deletes)
+        .unwrap()
+        .id
+        .clone();
+    use bruhs_models::vault::{OWNER_ONLY, OWNER_ONLY_CARD, OWNER_ONLY_DELETE_BRUH};
+    for (command, expected) in [
+        (set_vault("a", &[]), Some(OWNER_ONLY)),
+        (
+            ReactiveCommand::Apply { change: delete() },
+            Some(OWNER_ONLY_DELETE_BRUH),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: deletes.clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_DELETE_BRUH),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: deletes.clone(),
+                approve: false,
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: remembers,
+                approve: true,
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: "unknown".into(),
+                approve: true,
+            },
+            None,
+        ),
+        (ReactiveCommand::Propose { change: delete() }, None),
+        (set_computer("a", true), None),
+    ] {
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+    let run = {
+        runtime
+            .command(ReactiveCommand::Chat {
+                agent_id: "a".into(),
+                message: "Deploy.".into(),
+                run_id: None,
+            })
+            .await
+            .unwrap();
+        claim_one(&runtime).await.unwrap().run
+    };
+    let card = runtime
+        .open_approval_for_tests(
+            &run,
+            BRUH_SECRET_TOOL,
+            &json!({"name": "K", "reason": "r", "env_var": "K", "command": ["true"]}),
+        )
+        .await
+        .unwrap();
+    let other = runtime
+        .open_approval_for_tests(&run, "Bash", &json!({"command": "make"}))
+        .await
+        .unwrap();
+    for (id, expected) in [(card, Some(OWNER_ONLY_CARD)), (other, None)] {
+        let decide = ReactiveCommand::DecideApproval { id, approve: false };
+        assert_eq!(runtime.owner_only_refusal(&decide).await.unwrap(), expected);
+    }
+}
+
 #[tokio::test]
 async fn the_preamble_mentions_logins_only_when_usable() {
     let folder = tempfile::tempdir().unwrap();

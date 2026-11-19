@@ -7,7 +7,9 @@
 //! - `GET /api/local-tools/browser/{session}/screencast`: the live view.
 //!
 //! The owner routes and the live view sit behind the shared loopback and
-//! origin guard. A Full bruh's sandboxed shell is denied loopback, so its
+//! origin guard. Opening, taking or handing back a Computer and watching
+//! its live view also take only the owner's own app (`owner_request`), as
+//! the vault does: the view can show a filled password. A Full bruh's sandboxed shell is denied loopback, so its
 //! run can't take its own computer, read its session id or open the live
 //! view. The command route answers only the helper: a request with an
 //! `Origin` comes from a web page and is refused, and each step must use up
@@ -31,8 +33,9 @@ use bruhs_core::local_tools::{ComputerWatch, LocalToolsHost};
 use bruhs_core::reactive::{ReactiveRuntime, VaultRefusal};
 use bruhs_core::secrets::VAULT_READ_WAIT;
 use bruhs_models::crew::{
-    LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED, LIVE_VIEW_UNREADABLE,
-    STEP_FROM_A_PAGE, STEP_NOT_APPROVED, UNKNOWN_BROWSER_ACTION, VAULT_READ_FAILED,
+    COMPUTER_OWNER_ONLY, LIVE_VIEW_ENDED, LIVE_VIEW_FOREIGN_PAGE, LIVE_VIEW_STALLED,
+    LIVE_VIEW_UNREADABLE, LOGINS_LIST_FAILED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED,
+    UNKNOWN_BROWSER_ACTION, VAULT_READ_FAILED,
 };
 use bruhs_models::local_tools::{
     BrowserAction, BruhBrowserCommand, ComputerInput, ComputerRequest, ComputerState,
@@ -73,12 +76,18 @@ pub async fn state(
 }
 
 /// `POST /api/reactive/agents/{id}/computer`: open, close, take control,
-/// hand back or open in a window.
+/// hand back or open in a window. Only from the owner's own app (ruling
+/// BC I1): a page that could take control could reveal a filled password.
 pub async fn request(
     Extension(host): Extension<Arc<LocalToolsHost>>,
+    State(config): State<Arc<Config>>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Json(request): Json<ComputerRequest>,
 ) -> Result<Json<ComputerState>, AppError> {
+    if !config.access.owner_request(&headers) {
+        return Err(AppError::Forbidden(COMPUTER_OWNER_ONLY.into()));
+    }
     host.computer_request(&id, request)
         .await
         .map(Json)
@@ -113,10 +122,7 @@ pub async fn command(
     if action == BrowserAction::Logins {
         // Names, sign-in pages and fields only, from the vault: the page
         // isn't needed, and the browser stays as it is.
-        let logins = runtime
-            .logins(&id)
-            .await
-            .map_err(|_| AppError::Unavailable(VAULT_READ_FAILED.into()))?;
+        let logins = runtime.logins(&id).await.map_err(logins_failed)?;
         return Ok(Json(ToolReply {
             value: json!({ "logins": logins }),
             image: None,
@@ -173,6 +179,11 @@ async fn vault_fill(
         .map_err(error)
 }
 
+/// A `logins` listing that failed: fixed copy, never the store's error.
+fn logins_failed(_: bruhs_core::reactive::ReactiveError) -> AppError {
+    AppError::Unavailable(LOGINS_LIST_FAILED.into())
+}
+
 /// `GET /api/local-tools/browser/{session}/screencast`: the live view of
 /// the bruh browser `session` names.
 pub async fn screencast(
@@ -183,12 +194,11 @@ pub async fn screencast(
     Extension(host): Extension<Arc<LocalToolsHost>>,
 ) -> Result<Response, AppError> {
     // WebSockets skip CORS, so a page's Origin is checked here as well as
-    // in the guard. The desktop's native client sends none.
-    if let Some(origin) = headers.get(ORIGIN) {
-        let origin = origin.to_str().ok();
-        if !super::terminal::origin_allowed(origin, &config.access) {
-            return Err(AppError::Forbidden(LIVE_VIEW_FOREIGN_PAGE.into()));
-        }
+    // in the guard, and only the owner's own app may watch (ruling BC I1):
+    // the view may show a filled password. The desktop's native client
+    // sends no Origin.
+    if !config.access.owner_request(&headers) {
+        return Err(AppError::Forbidden(LIVE_VIEW_FOREIGN_PAGE.into()));
     }
     // A refusal (an unknown or closed browser, four viewers) still opens
     // the socket, to say why: a browser can't read a refused upgrade.

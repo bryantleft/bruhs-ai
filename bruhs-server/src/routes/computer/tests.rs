@@ -5,18 +5,18 @@ use bruhs_core::local_tools::{FakePages, LocalToolsHost};
 use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::PermissionDecision;
 use bruhs_models::crew::{
-    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, LIVE_VIEW_ENDED, LOGIN_WRONG_ORIGIN,
-    MAX_VIEWERS, NOT_FOR_BRUHS, PAGE_CHANGED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED,
-    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, VIEWERS_FULL,
+    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, COMPUTER_OWNER_ONLY, LIVE_VIEW_ENDED,
+    LOGIN_WRONG_ORIGIN, MAX_VIEWERS, NOT_FOR_BRUHS, PAGE_CHANGED, STEP_FROM_A_PAGE,
+    STEP_NOT_APPROVED, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, VIEWERS_FULL,
 };
-use bruhs_models::crew::{FILL_MAY_HAVE_RUN, VAULT_READ_FAILED};
+use bruhs_models::crew::{FILL_MAY_HAVE_RUN, LOGINS_LIST_FAILED, VAULT_READ_FAILED};
 use bruhs_models::local_tools::{
     screencast_path, ComputerInput, ComputerState, Control, MouseButton, MouseKind,
     ScreencastMessage, FRAME_ACK,
 };
 use bruhs_models::local_tools::{BrowserAction, ToolReply};
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun};
-use bruhs_models::vault::{SecretField, OWNER_ONLY};
+use bruhs_models::vault::{SecretField, OWNER_ONLY, OWNER_ONLY_CARD, OWNER_ONLY_DELETE_BRUH};
 
 use crate::error::AppError;
 use futures_util::{SinkExt, StreamExt};
@@ -517,12 +517,56 @@ async fn foreign_pages_and_the_bruh_browser_cannot_open_a_live_view() {
             .unwrap_err(),
         StatusCode::FORBIDDEN
     );
+    // Ruling BC I1: another loopback page can't watch a bruh's browser,
+    // which may show a filled password.
+    for origin in [APP_ORIGIN, "http://localhost:8080"] {
+        assert_eq!(
+            fixture
+                .connect(&session, &[("origin", origin)])
+                .await
+                .unwrap_err(),
+            StatusCode::FORBIDDEN,
+            "{origin}"
+        );
+    }
     assert!(fixture
-        .connect(&session, &[("origin", APP_ORIGIN)])
+        .connect(&session, &[("origin", fixture.base.as_str())])
         .await
         .is_ok());
     // The desktop's native client sends no Origin.
     assert!(fixture.connect(&session, &[]).await.is_ok());
+}
+
+/// Ruling BC I1: only the owner's own app opens, takes or hands back a
+/// bruh's Computer.
+#[tokio::test]
+async fn the_computer_answers_only_bruhs_own_pages() {
+    let fixture = Fixture::new().await;
+    fixture.computer_on().await;
+    let path = "/api/reactive/agents/a/computer";
+    for action in ["open", "take_control", "hand_back", "close"] {
+        for origin in [APP_ORIGIN, "http://localhost:8080"] {
+            let (status, body) = fixture
+                .post_with(path, json!({ "action": action }), Some(origin))
+                .await;
+            assert_eq!(
+                (status, body["error"].as_str()),
+                (StatusCode::FORBIDDEN, Some(COMPUTER_OWNER_ONLY)),
+                "{action} from {origin}"
+            );
+        }
+    }
+    let (_, state) = fixture.get(path).await;
+    assert_eq!(state["session_id"], Value::Null);
+    let own = fixture.base.clone();
+    for origin in [None, Some(own.as_str()), Some(CONFIGURED_ORIGIN)] {
+        for action in ["open", "take_control", "hand_back"] {
+            let (status, body) = fixture
+                .post_with(path, json!({ "action": action }), origin)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{action} from {origin:?}: {body}");
+        }
+    }
 }
 
 /// A live view the service refuses opens, says why with the shared copy,
@@ -537,7 +581,7 @@ async fn a_refused_live_view_says_why_then_closes() {
         other => panic!("expected the live view to close, got {other:?}"),
     };
     let mut unknown = fixture
-        .connect("not-a-session", &[("origin", APP_ORIGIN)])
+        .connect("not-a-session", &[("origin", fixture.base.as_str())])
         .await
         .expect("an unknown session still opens");
     assert_eq!(
@@ -563,7 +607,7 @@ async fn a_refused_live_view_says_why_then_closes() {
         watching.push(socket);
     }
     let mut fifth = fixture
-        .connect(&session, &[("origin", APP_ORIGIN)])
+        .connect(&session, &[("origin", fixture.base.as_str())])
         .await
         .expect("a fifth viewer still opens");
     assert_eq!(
@@ -586,7 +630,7 @@ async fn the_live_view_sends_state_then_one_frame_at_a_time() {
     fixture.computer_on().await;
     let session = fixture.open().await.session_id.unwrap();
     let mut socket = fixture
-        .connect(&session, &[("origin", APP_ORIGIN)])
+        .connect(&session, &[("origin", fixture.base.as_str())])
         .await
         .unwrap();
     match next_text(&mut socket).await {
@@ -964,7 +1008,8 @@ async fn a_vault_key_approval_is_answered_only_from_bruhs_own_pages() {
             )
             .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{origin}: {text}");
-        assert!(text.contains(OWNER_ONLY));
+        // Ruling BC M6: the copy says what was refused.
+        assert!(text.contains(OWNER_ONLY_CARD), "{text}");
     }
     let (status, text) = fixture
         .send(
@@ -985,6 +1030,65 @@ async fn a_vault_key_approval_is_answered_only_from_bruhs_own_pages() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{text}");
+}
+
+/// Ruling BC I2: deleting a bruh, which deletes its own vault entries,
+/// takes the owner's own app, applied or approved as a proposal.
+#[tokio::test]
+async fn a_bruh_is_deleted_only_from_bruhs_own_pages() {
+    use reqwest::Method;
+    let fixture = Fixture::new().await;
+    let commands = "/api/reactive/commands";
+    let delete = json!({"action": "apply", "change": {"type": "delete_agent", "id": "a"}});
+    let propose = json!({"action": "propose", "change": {"type": "delete_agent", "id": "a"}});
+    // Proposing changes nothing, so any loopback page may.
+    let (status, text) = fixture
+        .send(Method::POST, commands, Some(propose), Some(APP_ORIGIN))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let snapshot: Value = serde_json::from_str(&text).unwrap();
+    let proposal = snapshot["proposals"][0]["id"].as_str().unwrap().to_owned();
+    let decide =
+        |approve: bool| json!({"action": "decide_proposal", "id": proposal, "approve": approve});
+    for origin in [APP_ORIGIN, "http://localhost:8080"] {
+        for body in [delete.clone(), decide(true)] {
+            let (status, text) = fixture
+                .send(Method::POST, commands, Some(body.clone()), Some(origin))
+                .await;
+            assert_eq!(
+                (status, text.as_str()),
+                (
+                    StatusCode::FORBIDDEN,
+                    &*format!("{{\"error\":\"{OWNER_ONLY_DELETE_BRUH}\"}}")
+                ),
+                "{body} from {origin}"
+            );
+        }
+    }
+    let (_, snapshot) = fixture.get("/api/reactive").await;
+    assert_eq!(snapshot["agents"].as_array().unwrap().len(), 1);
+    // The owner's own app deletes it, and rejecting a delete is anyone's.
+    let own = fixture.base.clone();
+    let (status, text) = fixture
+        .send(Method::POST, commands, Some(decide(true)), Some(&own))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let (_, snapshot) = fixture.get("/api/reactive").await;
+    assert_eq!(snapshot["agents"], json!([]));
+    let (status, text) = fixture
+        .send(Method::POST, commands, Some(delete), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{text}");
+}
+
+/// Ruling BC M6: a failed `logins` says the listing failed, not a read.
+#[test]
+fn a_failed_logins_listing_says_so() {
+    let refusal = super::logins_failed(bruhs_core::reactive::ReactiveError::Storage(
+        "The vault could not be read.".into(),
+    ));
+    assert_eq!(refusal.to_string(), LOGINS_LIST_FAILED);
+    assert!(matches!(refusal, AppError::Unavailable(_)));
 }
 
 fn unavailable(result: Result<ToolReply, AppError>) -> String {

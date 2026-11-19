@@ -172,7 +172,7 @@ impl ReactiveRuntime {
     /// Whether outbox item `id` asks to use a vault key
     /// ([`BRUH_SECRET_TOOL`]), whose answer only the owner's own app may
     /// give. An unknown item is not one.
-    pub async fn is_vault_key_approval(&self, id: &str) -> Result<bool, ReactiveError> {
+    pub(super) async fn is_vault_key_approval(&self, id: &str) -> Result<bool, ReactiveError> {
         let id = id.to_owned();
         self.call(
             move |connection| match store::crew::approval(connection, &id) {
