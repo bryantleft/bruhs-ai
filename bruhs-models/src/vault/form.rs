@@ -4,7 +4,8 @@
 use super::{
     CredentialScope, LoginFields, LoginInput, LoginMeta, TotpInput, VaultBruh, VaultCreate,
     VaultEntry, VaultKind, VaultSecretInput, VaultUpdate, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD,
-    SCOPE_GLOBAL, STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED,
+    LOADING, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT, SOURCE_ONE_PASSWORD, SOURCE_SAVED,
+    STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
 };
 use crate::secrets::{review_text, SavedCredentialState};
 
@@ -29,6 +30,151 @@ pub enum FormSource {
     #[default]
     Saved,
     OnePassword,
+}
+
+/// The Kind choices, in page order: the choice, its option key and its
+/// label.
+pub const KIND_OPTIONS: [(FormKind, &str, &str); 3] = [
+    (FormKind::Login, "login", KIND_LOGIN),
+    (FormKind::Value, "value", KIND_KEY),
+    (FormKind::OnePassword, "one_password", KIND_ONE_PASSWORD),
+];
+/// The Used by choices, in page order.
+pub const SCOPE_OPTIONS: [(FormScope, &str, &str); 3] = [
+    (FormScope::Global, "global", SCOPE_GLOBAL),
+    (FormScope::Project, "project", SCOPE_PROJECT),
+    (FormScope::Bruh, "bruh", SCOPE_BRUH),
+];
+/// The Stored in choices, in page order.
+pub const SOURCE_OPTIONS: [(FormSource, &str, &str); 2] = [
+    (FormSource::Saved, "saved", SOURCE_SAVED),
+    (FormSource::OnePassword, "one_password", SOURCE_ONE_PASSWORD),
+];
+
+/// The option key for `choice` in `options`.
+#[must_use]
+pub fn option_key<T: PartialEq + Copy>(
+    options: &[(T, &'static str, &'static str)],
+    choice: T,
+) -> &'static str {
+    options
+        .iter()
+        .find(|(option, ..)| *option == choice)
+        .map_or("", |(_, key, _)| key)
+}
+
+/// The choice for an option key; an unknown key is the default choice.
+#[must_use]
+pub fn option_for<T: Copy + Default>(options: &[(T, &str, &str)], key: &str) -> T {
+    options
+        .iter()
+        .find(|(_, option, _)| *option == key)
+        .map_or_else(T::default, |(choice, ..)| *choice)
+}
+
+/// One field of the Vault form, in page order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormField {
+    Kind,
+    Name,
+    UsedBy,
+    SignIn,
+    StoredIn,
+    Username,
+    Password,
+    Totp,
+    UsernameRef,
+    PasswordRef,
+    TotpRef,
+    Value,
+    Reference,
+}
+
+impl FormField {
+    pub const ALL: [Self; 13] = [
+        Self::Kind,
+        Self::Name,
+        Self::UsedBy,
+        Self::SignIn,
+        Self::StoredIn,
+        Self::Username,
+        Self::Password,
+        Self::Totp,
+        Self::UsernameRef,
+        Self::PasswordRef,
+        Self::TotpRef,
+        Self::Value,
+        Self::Reference,
+    ];
+
+    /// Fixed once the entry exists, so an edit draws it read only beside
+    /// [`super::FIXED_HINT`]: the name, kind and scope (D2), and a login's
+    /// sign-in page, whose origin is where its password may be filled
+    /// (ruling F3).
+    #[must_use]
+    pub fn fixed_on_edit(self) -> bool {
+        matches!(self, Self::Kind | Self::Name | Self::UsedBy | Self::SignIn)
+    }
+
+    /// Holds a value: masked, never filled, emptied on submit and close.
+    #[must_use]
+    pub fn holds_value(self) -> bool {
+        matches!(self, Self::Password | Self::Totp | Self::Value)
+    }
+}
+
+/// The fields a form for `kind` shows, in page order. An edit shows the
+/// same ones, with the [`FormField::fixed_on_edit`] ones read only.
+#[must_use]
+pub fn form_fields(kind: FormKind, source: FormSource) -> Vec<FormField> {
+    use FormField::{
+        Kind, Name, Password, PasswordRef, Reference, SignIn, StoredIn, Totp, TotpRef, UsedBy,
+        Username, UsernameRef, Value,
+    };
+    let mut fields = vec![Kind, Name, UsedBy];
+    match (kind, source) {
+        (FormKind::Login, FormSource::Saved) => {
+            fields.extend([SignIn, StoredIn, Username, Password, Totp]);
+        }
+        (FormKind::Login, FormSource::OnePassword) => {
+            fields.extend([SignIn, StoredIn, UsernameRef, PasswordRef, TotpRef]);
+        }
+        (FormKind::Value, _) => fields.push(Value),
+        (FormKind::OnePassword, _) => fields.push(Reference),
+    }
+    fields
+}
+
+/// The fixed field an edit draws [`super::FIXED_HINT`] under: the last
+/// one the form shows.
+#[must_use]
+pub fn fixed_hint_after(fields: &[FormField]) -> Option<FormField> {
+    fields
+        .iter()
+        .rev()
+        .copied()
+        .find(|field| field.fixed_on_edit())
+}
+
+/// What the Vault page is waiting on, if anything.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VaultBusy {
+    #[default]
+    Idle,
+    Changing,
+    Checking,
+}
+
+/// Why the page's buttons are disabled right now, if they are: the
+/// listing loading, a check, or a change.
+#[must_use]
+pub fn wait_reason(busy: VaultBusy, loading: bool) -> Option<&'static str> {
+    match busy {
+        VaultBusy::Idle => None,
+        _ if loading => Some(LOADING),
+        VaultBusy::Checking => Some(WAIT_FOR_CHECK),
+        VaultBusy::Changing => Some(WAIT_FOR_CHANGE),
+    }
 }
 
 /// What the owner typed. Holds values: deliberately no `Debug` or `Clone`.
@@ -85,11 +231,17 @@ pub fn form_create(form: &VaultForm) -> Result<VaultCreate, &'static str> {
 
 /// A change to `existing` from the form, checked against its kind
 /// ([`VaultUpdate::validate`]). An empty value or password keeps the stored
-/// one, as does an empty setup key unless Remove one-time code is on.
+/// one, as does an empty setup key unless Remove one-time code is on. A
+/// login keeps its stored sign-in page (ruling F3): the form draws it read
+/// only, and the body never carries another.
 pub fn form_update(form: &VaultForm, existing: &VaultEntry) -> Result<VaultUpdate, &'static str> {
-    let update = VaultUpdate {
-        secret: form_secret(form, true),
-    };
+    let mut secret = form_secret(form, true);
+    if let (VaultSecretInput::Login { url, .. }, VaultKind::Login(LoginMeta { url: stored, .. })) =
+        (&mut secret, &existing.kind)
+    {
+        url.clone_from(stored);
+    }
+    let update = VaultUpdate { secret };
     update.validate(&existing.kind)?;
     Ok(update)
 }
@@ -590,8 +742,26 @@ mod tests {
                 ..
             }
         ));
+        // Ruling F3: the sign-in page is fixed on an edit. Whatever the form
+        // holds, the body carries the stored page, so no update moves where
+        // the password is filled; the store still refuses one that does.
         edit.url = "https://other.test/in".into();
-        assert_eq!(form_update(&edit, &stored).err(), Some(ORIGIN_FIXED));
+        let update = form_update(&edit, &stored).unwrap();
+        assert!(matches!(
+            &update.secret,
+            VaultSecretInput::Login { url, .. } if url == "https://shop.test/in"
+        ));
+        let moved = VaultUpdate {
+            secret: VaultSecretInput::Login {
+                url: "https://other.test/in".into(),
+                fields: LoginInput::Saved {
+                    username: "me".into(),
+                    password: None,
+                    totp: TotpInput::Keep,
+                },
+            },
+        };
+        assert_eq!(moved.validate(&stored.kind).err(), Some(ORIGIN_FIXED));
 
         let referenced = entry(
             CredentialScope::Global,
@@ -638,6 +808,124 @@ mod tests {
             ),
             (FormKind::OnePassword, FormScope::Bruh, "a", "op://P/A/b")
         );
+    }
+
+    #[test]
+    fn the_form_shows_the_fields_its_kind_needs() {
+        use FormField::*;
+        assert_eq!(
+            form_fields(FormKind::Login, FormSource::Saved),
+            [Kind, Name, UsedBy, SignIn, StoredIn, Username, Password, Totp]
+        );
+        assert_eq!(
+            form_fields(FormKind::Login, FormSource::OnePassword),
+            [
+                Kind,
+                Name,
+                UsedBy,
+                SignIn,
+                StoredIn,
+                UsernameRef,
+                PasswordRef,
+                TotpRef
+            ]
+        );
+        for source in [FormSource::Saved, FormSource::OnePassword] {
+            assert_eq!(
+                form_fields(FormKind::Value, source),
+                [Kind, Name, UsedBy, Value]
+            );
+            assert_eq!(
+                form_fields(FormKind::OnePassword, source),
+                [Kind, Name, UsedBy, Reference]
+            );
+        }
+        // Every field the form can draw is in page order in ALL.
+        for (kind, source) in [
+            (FormKind::Login, FormSource::Saved),
+            (FormKind::Login, FormSource::OnePassword),
+            (FormKind::Value, FormSource::Saved),
+            (FormKind::OnePassword, FormSource::Saved),
+        ] {
+            let order: Vec<_> = FormField::ALL
+                .into_iter()
+                .filter(|field| form_fields(kind, source).contains(field))
+                .collect();
+            assert_eq!(order, form_fields(kind, source));
+        }
+    }
+
+    #[test]
+    fn edits_fix_the_name_kind_scope_and_sign_in_page() {
+        let fixed: Vec<_> = form_fields(FormKind::Login, FormSource::Saved)
+            .into_iter()
+            .filter(|field| field.fixed_on_edit())
+            .collect();
+        assert_eq!(
+            fixed,
+            [
+                FormField::Kind,
+                FormField::Name,
+                FormField::UsedBy,
+                FormField::SignIn
+            ]
+        );
+        let values: Vec<_> = FormField::ALL
+            .into_iter()
+            .filter(|field| field.holds_value())
+            .collect();
+        assert_eq!(
+            values,
+            [FormField::Password, FormField::Totp, FormField::Value]
+        );
+        assert!(!values.iter().any(|field| field.fixed_on_edit()));
+        assert_eq!(
+            fixed_hint_after(&form_fields(FormKind::Login, FormSource::OnePassword)),
+            Some(FormField::SignIn)
+        );
+        assert_eq!(
+            fixed_hint_after(&form_fields(FormKind::Value, FormSource::Saved)),
+            Some(FormField::UsedBy)
+        );
+    }
+
+    #[test]
+    fn select_options_round_trip_and_unknown_keys_fall_back() {
+        for (choice, key, label) in KIND_OPTIONS {
+            assert_eq!(
+                option_for(&KIND_OPTIONS, option_key(&KIND_OPTIONS, choice)),
+                choice
+            );
+            assert!(!key.is_empty());
+            assert_eq!(label, kind_label(choice));
+        }
+        for (choice, ..) in SCOPE_OPTIONS {
+            assert_eq!(
+                option_for(&SCOPE_OPTIONS, option_key(&SCOPE_OPTIONS, choice)),
+                choice
+            );
+        }
+        assert_eq!(option_for(&SCOPE_OPTIONS, "bruh"), FormScope::Bruh);
+        assert_eq!(option_for(&SOURCE_OPTIONS, "nope"), FormSource::Saved);
+        assert_eq!(
+            SOURCE_OPTIONS.map(|(_, _, label)| label),
+            [SOURCE_SAVED, SOURCE_ONE_PASSWORD]
+        );
+    }
+
+    #[test]
+    fn buttons_say_why_they_wait() {
+        assert_eq!(wait_reason(VaultBusy::Changing, true), Some(LOADING));
+        assert_eq!(
+            wait_reason(VaultBusy::Changing, false),
+            Some(WAIT_FOR_CHANGE)
+        );
+        assert_eq!(
+            wait_reason(VaultBusy::Checking, false),
+            Some(WAIT_FOR_CHECK)
+        );
+        assert_eq!(wait_reason(VaultBusy::Idle, true), None);
+        assert_eq!(wait_reason(VaultBusy::Idle, false), None);
     }
 
     #[test]

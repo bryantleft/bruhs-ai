@@ -11,17 +11,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
-    delete_entry_confirm, form_create, form_for, form_update, kind_label, matches_search,
-    vault_row, FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultBruh, VaultCreate,
-    VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH,
-    DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD,
-    FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP, FIELD_SIGN_IN,
-    FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF,
-    FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD, LOADING,
-    LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
-    REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT,
-    SEARCH_PLACEHOLDER, SOURCE_ONE_PASSWORD, SOURCE_SAVED, STATE_NEEDS_ATTENTION, TOTP_HINT,
-    WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+    delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for, form_update,
+    kind_label, matches_search, option_for, option_key, vault_row, wait_reason, FormField,
+    FormScope, LoginFields, LoginMeta, VaultBruh, VaultBusy as Busy, VaultCreate, VaultEntry,
+    VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT,
+    EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF,
+    FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
+    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT,
+    KEEP, KEEP_HINT, KIND_OPTIONS as KINDS, LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH,
+    OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT, REFERENCE_HINT, REFRESH, SAVE_ENTRY,
+    SCOPE_OPTIONS as SCOPES, SEARCH_PLACEHOLDER, SOURCE_OPTIONS as SOURCES, STATE_NEEDS_ATTENTION,
+    TOTP_HINT,
 };
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
@@ -40,90 +40,6 @@ const KEEP_HINT_ID: &str = "vault-keep-hint";
 /// Why a disabled button waits: the listing's state or a running change.
 const STATUS_ID: &str = "vault-status";
 const WAIT_ID: &str = "vault-wait";
-
-const KINDS: [(FormKind, &str, &str); 3] = [
-    (FormKind::Login, "login", KIND_LOGIN),
-    (FormKind::Value, "value", KIND_KEY),
-    (FormKind::OnePassword, "one_password", KIND_ONE_PASSWORD),
-];
-const SCOPES: [(FormScope, &str, &str); 3] = [
-    (FormScope::Global, "global", SCOPE_GLOBAL),
-    (FormScope::Project, "project", SCOPE_PROJECT),
-    (FormScope::Bruh, "bruh", SCOPE_BRUH),
-];
-const SOURCES: [(FormSource, &str, &str); 2] = [
-    (FormSource::Saved, "saved", SOURCE_SAVED),
-    (FormSource::OnePassword, "one_password", SOURCE_ONE_PASSWORD),
-];
-
-/// The option key for `choice`, and the choice for a key.
-fn option_key<T: PartialEq + Copy>(options: &[(T, &'static str, &str)], choice: T) -> &'static str {
-    options
-        .iter()
-        .find(|(option, ..)| *option == choice)
-        .map_or("", |(_, key, _)| key)
-}
-fn option_for<T: Copy + Default>(options: &[(T, &str, &str)], key: &str) -> T {
-    options
-        .iter()
-        .find(|(_, option, _)| *option == key)
-        .map_or_else(T::default, |(choice, ..)| *choice)
-}
-
-/// One field of the form, in page order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FormField {
-    Kind,
-    Name,
-    UsedBy,
-    SignIn,
-    StoredIn,
-    Username,
-    Password,
-    Totp,
-    UsernameRef,
-    PasswordRef,
-    TotpRef,
-    Value,
-    Reference,
-}
-
-impl FormField {
-    const ALL: [Self; 13] = [
-        Self::Kind,
-        Self::Name,
-        Self::UsedBy,
-        Self::SignIn,
-        Self::StoredIn,
-        Self::Username,
-        Self::Password,
-        Self::Totp,
-        Self::UsernameRef,
-        Self::PasswordRef,
-        Self::TotpRef,
-        Self::Value,
-        Self::Reference,
-    ];
-}
-
-/// The fields a form for `kind` shows, in page order. An edit shows the
-/// same ones: Kind, Name and Used by turn read only (`FIXED_HINT`) and an
-/// empty value keeps the stored one, which is the page's to draw.
-fn form_fields(kind: FormKind, source: FormSource, _editing: bool) -> Vec<FormField> {
-    use FormField::*;
-    let mut fields = vec![Kind, Name, UsedBy];
-    match (kind, source) {
-        (FormKind::Login, FormSource::Saved) => {
-            fields.extend([SignIn, StoredIn, Username, Password, Totp]);
-        }
-        (FormKind::Login, FormSource::OnePassword) => {
-            fields.extend([SignIn, StoredIn, UsernameRef, PasswordRef, TotpRef]);
-        }
-        (FormKind::Value, _) => fields.push(Value),
-        (FormKind::OnePassword, _) => fields.push(Reference),
-    }
-    fields
-}
 
 /// A DOM id prefix no other row or form on the page uses.
 fn unique_id(prefix: &str) -> String {
@@ -159,24 +75,6 @@ enum Open {
     Entry(String),
 }
 
-/// What the page is waiting on, if anything.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Busy {
-    Idle,
-    Changing,
-    Checking,
-}
-
-/// Why the buttons are disabled right now, if they are.
-fn wait_reason(busy: Busy, load: &Load) -> Option<&'static str> {
-    match (busy, load) {
-        (Busy::Idle, _) => None,
-        (_, Load::Loading) => Some(LOADING),
-        (Busy::Checking, _) => Some(WAIT_FOR_CHECK),
-        (Busy::Changing, _) => Some(WAIT_FOR_CHANGE),
-    }
-}
-
 #[component]
 pub fn VaultSettings() -> impl IntoView {
     let listing = RwSignal::new(VaultListing::default());
@@ -187,7 +85,8 @@ pub fn VaultSettings() -> impl IntoView {
     let open = RwSignal::new(Open::None);
     let notice = RwSignal::new(None::<&'static str>);
     let new_ref = NodeRef::<html::Button>::new();
-    let wait = Signal::derive(move || load.with(|load| wait_reason(busy.get(), load)));
+    let wait =
+        Signal::derive(move || load.with(|load| wait_reason(busy.get(), *load == Load::Loading)));
     // New entry also waits for a listing it can add to.
     let new_blocked = Signal::derive(move || {
         wait.get().is_some() || load.with(|load| !matches!(load, Load::Ready))
@@ -513,6 +412,20 @@ fn select_field<T: Copy + PartialEq + Default + Send + Sync + 'static>(
     }
 }
 
+/// What an edit shows in a fixed field: the stored kind, name, scope line
+/// or sign-in page (ruling F3), or `None` for a field the owner can change.
+fn fixed_text(field: FormField, start: &VaultForm, scope_line: &str) -> Option<String> {
+    if !field.fixed_on_edit() {
+        return None;
+    }
+    Some(match field {
+        FormField::Kind => kind_label(start.kind).into(),
+        FormField::Name => start.name.clone(),
+        FormField::UsedBy => scope_line.into(),
+        _ => start.url.clone(),
+    })
+}
+
 /// The inline form: a new entry's when `entry` is `None`, else that entry's
 /// edit, with its metadata filled in and every value empty.
 #[component]
@@ -553,6 +466,15 @@ fn VaultFormView(
     let password_ref = RwSignal::new(start.password_ref.clone());
     let totp_ref = RwSignal::new(start.totp_ref.clone());
     let reference = RwSignal::new(start.reference.clone());
+    // What an edit shows read only, beside FIXED_HINT.
+    let fixed_texts: Vec<(FormField, String)> = if editing {
+        FormField::ALL
+            .into_iter()
+            .filter_map(|field| fixed_text(field, &start, &scope_text).map(|text| (field, text)))
+            .collect()
+    } else {
+        Vec::new()
+    };
     drop(start);
     let remove_totp = RwSignal::new(false);
     let existing = StoredValue::new(entry);
@@ -570,7 +492,7 @@ fn VaultFormView(
     let scope_id = format!("{prefix}-scope");
     let bruh_id = format!("{prefix}-bruh-choice");
     let source_id = format!("{prefix}-source");
-    let fields = Memo::new(move |_| form_fields(kind.get(), source.get(), editing));
+    let fields = Memo::new(move |_| form_fields(kind.get(), source.get()));
     // Reads a value field and empties it in one step.
     let take = |node: NodeRef<html::Input>| {
         node.get_untracked()
@@ -674,16 +596,30 @@ fn VaultFormView(
     };
     let field_view = move |field: FormField| -> AnyView {
         match field {
-            FormField::Kind if editing => fixed(FIELD_KIND, kind_label(kind.get_untracked()).into()).into_any(),
+            // Kind, Name, Used by and a login's Sign-in page are fixed once
+            // the entry exists (D2, ruling F3); the hint follows the last.
+            field if editing && field.fixed_on_edit() => {
+                let label = match field {
+                    FormField::Kind => FIELD_KIND,
+                    FormField::Name => FIELD_NAME,
+                    FormField::UsedBy => FIELD_USED_BY,
+                    _ => FIELD_SIGN_IN,
+                };
+                let text = fixed_texts
+                    .iter()
+                    .find(|(fixed, _)| *fixed == field)
+                    .map(|(_, text)| text.clone())
+                    .unwrap_or_default();
+                let hint_id = fixed_id.clone();
+                view! {
+                    <div>
+                        {fixed(label, text)}
+                        {move || (fields.with(|fields| fixed_hint_after(fields)) == Some(field)).then(|| view! { <p id=hint_id.clone() class=HINT>{FIXED_HINT}</p> })}
+                    </div>
+                }.into_any()
+            }
             FormField::Kind => select_field(FIELD_KIND, kind_id.clone(), &KINDS, kind).into_any(),
-            FormField::Name if editing => fixed(FIELD_NAME, name.get_untracked()).into_any(),
             FormField::Name => text_field(FIELD_NAME, name, None, "text").into_any(),
-            FormField::UsedBy if editing => view! {
-                <div>
-                    {fixed(FIELD_USED_BY, scope_text.clone())}
-                    <p id=fixed_id.clone() class=HINT>{FIXED_HINT}</p>
-                </div>
-            }.into_any(),
             FormField::UsedBy => {
                 let described = bruh_hint_id.clone();
                 let hint_id = bruh_hint_id.clone();
@@ -772,60 +708,53 @@ fn VaultFormView(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bruhs_models::secrets::SavedCredentialState;
+    use bruhs_models::vault::{CredentialScope, FormKind, FormSource};
 
+    /// Ruling F3: an edit draws a login's sign-in page read only, with the
+    /// stored page, and the hint after it.
     #[test]
-    fn the_form_shows_the_fields_its_kind_needs() {
-        use FormField::*;
+    fn an_edit_shows_the_sign_in_page_fixed() {
+        let entry = VaultEntry {
+            id: "v1-a".into(),
+            name: "Shop".into(),
+            scope: CredentialScope::Global,
+            kind: VaultKind::Login(LoginMeta {
+                url: "https://shop.test/in".into(),
+                fields: LoginFields::Saved {
+                    username: "me".into(),
+                    totp: false,
+                },
+            }),
+            state: SavedCredentialState::Saved,
+            attention: None,
+        };
+        let start = form_for(&entry);
+        let fixed: Vec<_> = form_fields(start.kind, start.source)
+            .into_iter()
+            .filter_map(|field| fixed_text(field, &start, "All projects").map(|text| (field, text)))
+            .collect();
         assert_eq!(
-            form_fields(FormKind::Login, FormSource::Saved, false),
-            [Kind, Name, UsedBy, SignIn, StoredIn, Username, Password, Totp]
-        );
-        assert_eq!(
-            form_fields(FormKind::Login, FormSource::OnePassword, true),
+            fixed,
             [
-                Kind,
-                Name,
-                UsedBy,
-                SignIn,
-                StoredIn,
-                UsernameRef,
-                PasswordRef,
-                TotpRef
+                (FormField::Kind, "Login".to_owned()),
+                (FormField::Name, "Shop".to_owned()),
+                (FormField::UsedBy, "All projects".to_owned()),
+                (FormField::SignIn, "https://shop.test/in".to_owned()),
             ]
         );
-        for source in [FormSource::Saved, FormSource::OnePassword] {
-            assert_eq!(
-                form_fields(FormKind::Value, source, false),
-                [Kind, Name, UsedBy, Value]
-            );
-            assert_eq!(
-                form_fields(FormKind::OnePassword, source, true),
-                [Kind, Name, UsedBy, Reference]
-            );
-        }
-    }
-
-    #[test]
-    fn select_options_round_trip_and_unknown_keys_fall_back() {
-        for (choice, key, _) in KINDS {
-            assert_eq!(option_for(&KINDS, option_key(&KINDS, choice)), choice);
-            assert!(!key.is_empty());
-        }
-        assert_eq!(option_for(&SCOPES, "bruh"), FormScope::Bruh);
-        assert_eq!(option_for(&SOURCES, "nope"), FormSource::Saved);
-    }
-
-    #[test]
-    fn buttons_say_why_they_wait() {
-        assert_eq!(wait_reason(Busy::Changing, &Load::Loading), Some(LOADING));
         assert_eq!(
-            wait_reason(Busy::Changing, &Load::Ready),
-            Some(WAIT_FOR_CHANGE)
+            fixed_hint_after(&form_fields(FormKind::Login, FormSource::OnePassword)),
+            Some(FormField::SignIn)
         );
-        assert_eq!(
-            wait_reason(Busy::Checking, &Load::Ready),
-            Some(WAIT_FOR_CHECK)
-        );
-        assert_eq!(wait_reason(Busy::Idle, &Load::OwnerOnly), None);
+        assert_eq!(fixed_text(FormField::Username, &start, ""), None);
+        // Whatever the page holds, the update keeps the stored page.
+        let mut edited = form_for(&entry);
+        edited.url = "https://elsewhere.test/in".into();
+        let update = form_update(&edited, &entry).unwrap();
+        assert!(matches!(
+            &update.secret,
+            bruhs_models::vault::VaultSecretInput::Login { url, .. } if url == "https://shop.test/in"
+        ));
     }
 }

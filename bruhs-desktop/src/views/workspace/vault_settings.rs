@@ -15,16 +15,16 @@ use crate::server_client::ServerError;
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::secrets::review_text;
 use bruhs_models::vault::{
-    delete_entry_confirm, form_create, form_for, form_update, kind_label, matches_search,
-    vault_row, FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultCreate, VaultEntry,
+    delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for, form_update,
+    kind_label, matches_search, option_for, option_key, vault_row, wait_reason, FormField,
+    FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultBusy, VaultCreate, VaultEntry,
     VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT,
     EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF,
     FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
     FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT,
-    KEEP, KEEP_HINT, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD, LOADING, LOAD_RETRY, NEW_ENTRY,
-    NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT, REFERENCE_HINT, REFRESH,
-    SAVE_ENTRY, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT, SEARCH_PLACEHOLDER, SOURCE_ONE_PASSWORD,
-    SOURCE_SAVED, STATE_NEEDS_ATTENTION, TOTP_HINT, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+    KEEP, KEEP_HINT, KIND_OPTIONS, LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH,
+    OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT, REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS,
+    SEARCH_PLACEHOLDER, SOURCE_OPTIONS, STATE_NEEDS_ATTENTION, TOTP_HINT,
 };
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::InputContentType;
@@ -46,35 +46,6 @@ const SCOPE_DROPDOWN: &str = "desktop-vault-used-by";
 const BRUH_DROPDOWN: &str = "desktop-vault-bruh";
 const SOURCE_DROPDOWN: &str = "desktop-vault-stored-in";
 
-const KINDS: [(FormKind, &str, &str); 3] = [
-    (FormKind::Login, "login", KIND_LOGIN),
-    (FormKind::Value, "value", KIND_KEY),
-    (FormKind::OnePassword, "one_password", KIND_ONE_PASSWORD),
-];
-const SCOPES: [(FormScope, &str, &str); 3] = [
-    (FormScope::Global, "global", SCOPE_GLOBAL),
-    (FormScope::Project, "project", SCOPE_PROJECT),
-    (FormScope::Bruh, "bruh", SCOPE_BRUH),
-];
-const SOURCES: [(FormSource, &str, &str); 2] = [
-    (FormSource::Saved, "saved", SOURCE_SAVED),
-    (FormSource::OnePassword, "one_password", SOURCE_ONE_PASSWORD),
-];
-
-/// The option key for `choice`, and the choice for a key.
-fn option_key<T: PartialEq + Copy>(options: &[(T, &'static str, &str)], choice: T) -> &'static str {
-    options
-        .iter()
-        .find(|(option, ..)| *option == choice)
-        .map_or("", |(_, key, _)| key)
-}
-fn option_for<T: Copy + Default>(options: &[(T, &str, &str)], key: &str) -> T {
-    options
-        .iter()
-        .find(|(_, option, _)| *option == key)
-        .map_or_else(T::default, |(choice, ..)| *choice)
-}
-
 /// The dropdown takes `'static` values; each bruh id is kept once for the
 /// life of the app, so the set grows only with the crew.
 fn bruh_value(id: &str) -> &'static str {
@@ -92,42 +63,6 @@ fn bruh_value(id: &str) -> &'static str {
     let value: &'static str = Box::leak(id.to_owned().into_boxed_str());
     values.insert(value);
     value
-}
-
-/// One field of the form, in page order (web `FormField`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FormField {
-    Kind,
-    Name,
-    UsedBy,
-    SignIn,
-    StoredIn,
-    Username,
-    Password,
-    Totp,
-    UsernameRef,
-    PasswordRef,
-    TotpRef,
-    Value,
-    Reference,
-}
-
-/// The fields a form for `kind` shows, in page order, as on the web. An
-/// edit shows the same ones; Kind, Name and Used by turn read only.
-fn form_fields(kind: FormKind, source: FormSource) -> Vec<FormField> {
-    use FormField::*;
-    let mut fields = vec![Kind, Name, UsedBy];
-    match (kind, source) {
-        (FormKind::Login, FormSource::Saved) => {
-            fields.extend([SignIn, StoredIn, Username, Password, Totp]);
-        }
-        (FormKind::Login, FormSource::OnePassword) => {
-            fields.extend([SignIn, StoredIn, UsernameRef, PasswordRef, TotpRef]);
-        }
-        (FormKind::Value, _) => fields.push(Value),
-        (FormKind::OnePassword, _) => fields.push(Reference),
-    }
-    fields
 }
 
 #[derive(Clone, PartialEq)]
@@ -148,24 +83,6 @@ enum Load {
 pub(super) enum Open {
     New,
     Entry(String),
-}
-
-/// What the page is waiting on, if anything.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Busy {
-    Idle,
-    Changing,
-    Checking,
-}
-
-/// Why the buttons are disabled right now, if they are (web `wait_reason`).
-fn wait_reason(busy: Busy, load: &Load) -> Option<&'static str> {
-    match (busy, load) {
-        (Busy::Idle, _) => None,
-        (_, Load::Loading) => Some(LOADING),
-        (Busy::Checking, _) => Some(WAIT_FOR_CHECK),
-        (Busy::Changing, _) => Some(WAIT_FOR_CHANGE),
-    }
 }
 
 /// A create or an update, ready to send. Holds values: neither is `Clone`.
@@ -250,28 +167,33 @@ impl VaultFormState {
         [&self.value, &self.password, &self.totp]
     }
 
-    /// The value field `field` draws, if it is one.
-    fn secret_for(&self, field: FormField) -> Option<&Entity<InputState>> {
-        match field {
-            FormField::Value => Some(&self.value),
-            FormField::Password => Some(&self.password),
-            FormField::Totp => Some(&self.totp),
-            _ => None,
-        }
+    /// The text field `field` draws, if it is one (the rest are
+    /// dropdowns).
+    fn input_for(&self, field: FormField) -> Option<&Entity<InputState>> {
+        Some(match field {
+            FormField::Kind | FormField::UsedBy | FormField::StoredIn => return None,
+            FormField::Name => &self.name,
+            FormField::SignIn => &self.url,
+            FormField::Username => &self.username,
+            FormField::Password => &self.password,
+            FormField::Totp => &self.totp,
+            FormField::UsernameRef => &self.username_ref,
+            FormField::PasswordRef => &self.password_ref,
+            FormField::TotpRef => &self.totp_ref,
+            FormField::Value => &self.value,
+            FormField::Reference => &self.reference,
+        })
     }
 
-    /// The first field the owner can change: Name on a new entry (the
-    /// dropdowns keep their own focus), else the entry's first value or
-    /// sign-in field.
+    /// The first text field the owner can change. The dropdowns keep
+    /// their own focus, so a new entry starts on Name, not Kind.
     fn first_field(&self) -> &Entity<InputState> {
-        if !self.editing() {
-            return &self.name;
-        }
-        match self.kind {
-            FormKind::Login => &self.url,
-            FormKind::Value => &self.value,
-            FormKind::OnePassword => &self.reference,
-        }
+        let editing = self.editing();
+        self.fields()
+            .into_iter()
+            .filter(|field| !(editing && field.fixed_on_edit()))
+            .find_map(|field| self.input_for(field))
+            .unwrap_or(&self.name)
     }
 }
 
@@ -280,7 +202,7 @@ pub(super) struct VaultSettings {
     connections: Entity<crate::views::service_connections::ServiceConnections>,
     listing: VaultListing,
     load: Load,
-    busy: Busy,
+    busy: VaultBusy,
     notice: Option<&'static str>,
     search: Entity<InputState>,
     _search_subscription: Subscription,
@@ -319,7 +241,7 @@ impl VaultSettings {
             }),
             listing: VaultListing::default(),
             load: Load::Idle,
-            busy: Busy::Idle,
+            busy: VaultBusy::Idle,
             notice: None,
             search,
             _search_subscription: subscription,
@@ -358,7 +280,7 @@ impl VaultSettings {
     /// Ask the server for the listing again. Closes any form, as the web
     /// does, and waits while a change runs.
     pub(super) fn refresh(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy != Busy::Idle {
+        if self.busy != VaultBusy::Idle {
             return;
         }
         self.connections
@@ -368,7 +290,7 @@ impl VaultSettings {
         self.checked.clear();
         self.row_errors.clear();
         self.load = Load::Loading;
-        self.busy = Busy::Changing;
+        self.busy = VaultBusy::Changing;
         self.record("GET /api/vault".into());
         cx.notify();
         if cfg!(test) {
@@ -396,7 +318,7 @@ impl VaultSettings {
         };
         self.listing = listing;
         self.load = load;
-        self.busy = Busy::Idle;
+        self.busy = VaultBusy::Idle;
         cx.notify();
     }
 
@@ -413,7 +335,7 @@ impl VaultSettings {
     }
 
     fn wait(&self) -> Option<&'static str> {
-        wait_reason(self.busy, &self.load)
+        wait_reason(self.busy, self.load == Load::Loading)
     }
 
     /// New entry also waits for a listing it can add to.
@@ -611,7 +533,7 @@ impl VaultSettings {
     /// Cancel: empty the values and close, with focus back where the form
     /// was opened from. A running save keeps the form.
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy != Busy::Idle {
+        if self.busy != VaultBusy::Idle {
             return;
         }
         let Some((open, _)) = &self.form else {
@@ -642,10 +564,10 @@ impl VaultSettings {
             return;
         };
         let fields = form.fields();
-        let hidden: Vec<_> = [FormField::Value, FormField::Password, FormField::Totp]
+        let hidden: Vec<_> = FormField::ALL
             .into_iter()
-            .filter(|field| !fields.contains(field))
-            .filter_map(|field| form.secret_for(field).cloned())
+            .filter(|field| field.holds_value() && !fields.contains(field))
+            .filter_map(|field| form.input_for(field).cloned())
             .collect();
         for input in hidden {
             input.update(cx, |input, cx| input.set_value("", window, cx));
@@ -653,7 +575,7 @@ impl VaultSettings {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy != Busy::Idle {
+        if self.busy != VaultBusy::Idle {
             return;
         }
         let Some((_, form)) = &self.form else {
@@ -715,7 +637,7 @@ impl VaultSettings {
         };
         form.error = None;
         form.dropdown = None;
-        self.busy = Busy::Changing;
+        self.busy = VaultBusy::Changing;
         self.notice = None;
         self.record(match &request {
             Request::Create(_) => "POST /api/vault".into(),
@@ -751,7 +673,7 @@ impl VaultSettings {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.busy = Busy::Idle;
+        self.busy = VaultBusy::Idle;
         let this_form = self
             .form
             .as_ref()
@@ -811,13 +733,13 @@ impl VaultSettings {
     }
 
     fn delete(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy != Busy::Idle {
+        if self.busy != VaultBusy::Idle {
             return;
         }
         let Some(id) = self.asking.clone() else {
             return;
         };
-        self.busy = Busy::Changing;
+        self.busy = VaultBusy::Changing;
         self.notice = None;
         self.row_errors.remove(&id);
         self.record(format!(
@@ -834,7 +756,7 @@ impl VaultSettings {
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = Busy::Idle;
+                this.busy = VaultBusy::Idle;
                 match result {
                     Ok(()) => this.forget(&id, window, cx),
                     Err(error) if error.is_not_found() => this.forget(&id, window, cx),
@@ -864,10 +786,10 @@ impl VaultSettings {
     }
 
     fn check(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.busy != Busy::Idle {
+        if self.busy != VaultBusy::Idle {
             return;
         }
-        self.busy = Busy::Checking;
+        self.busy = VaultBusy::Checking;
         self.notice = None;
         self.checked.remove(&id);
         self.row_errors.remove(&id);
@@ -885,7 +807,7 @@ impl VaultSettings {
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = Busy::Idle;
+                this.busy = VaultBusy::Idle;
                 match result {
                     Ok(check) => {
                         if check.ok {
@@ -1071,16 +993,16 @@ impl VaultSettings {
         };
         form.dropdown = None;
         match which {
-            FormDropdown::Kind => form.kind = option_for(&KINDS, choice),
+            FormDropdown::Kind => form.kind = option_for(&KIND_OPTIONS, choice),
             FormDropdown::UsedBy => {
-                let scope = option_for(&SCOPES, choice);
+                let scope = option_for(&SCOPE_OPTIONS, choice);
                 // One bruh needs a bruh to choose (web: the option is off).
                 if !(scope == FormScope::Bruh && no_bruhs) {
                     form.scope = scope;
                 }
             }
             FormDropdown::Bruh => form.bruh = choice.to_owned(),
-            FormDropdown::StoredIn => form.source = option_for(&SOURCES, choice),
+            FormDropdown::StoredIn => form.source = option_for(&SOURCE_OPTIONS, choice),
         }
         self.reshaped(window, cx);
         cx.notify();
@@ -1111,28 +1033,20 @@ impl VaultSettings {
             }
             FormField::Kind => self.render_dropdown(
                 FormDropdown::Kind,
-                option_key(&KINDS, form.kind),
-                Self::options(&KINDS),
+                option_key(&KIND_OPTIONS, form.kind),
+                Self::options(&KIND_OPTIONS),
                 cx,
             ),
             FormField::Name => labelled(FIELD_NAME, field(&form.name, FIELD_NAME, editing, None))
                 .into_any_element(),
-            FormField::UsedBy if editing => div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(labelled(
-                    FIELD_USED_BY,
-                    field(&form.scope_text, FIELD_USED_BY, true, None),
-                ))
-                .child(
-                    small(FIXED_HINT, theme::rambutan_500())
-                        .debug_selector(|| "desktop-vault-fixed-hint".into()),
-                )
-                .into_any_element(),
+            FormField::UsedBy if editing => labelled(
+                FIELD_USED_BY,
+                field(&form.scope_text, FIELD_USED_BY, true, None),
+            )
+            .into_any_element(),
             FormField::UsedBy => {
                 let no_bruhs = self.listing.bruhs.is_empty();
-                let scopes = SCOPES
+                let scopes = SCOPE_OPTIONS
                     .iter()
                     .map(|(scope, key, text)| DropdownOption {
                         value: key,
@@ -1158,7 +1072,7 @@ impl VaultSettings {
                     .gap_3()
                     .child(self.render_dropdown(
                         FormDropdown::UsedBy,
-                        option_key(&SCOPES, form.scope),
+                        option_key(&SCOPE_OPTIONS, form.scope),
                         scopes,
                         cx,
                     ))
@@ -1183,13 +1097,19 @@ impl VaultSettings {
             }
             FormField::SignIn => labelled(
                 FIELD_SIGN_IN,
-                field(&form.url, FIELD_SIGN_IN, false, Some(InputContentType::Url)),
+                // Ruling F3: a login's site is fixed once it exists.
+                field(
+                    &form.url,
+                    FIELD_SIGN_IN,
+                    editing,
+                    Some(InputContentType::Url),
+                ),
             )
             .into_any_element(),
             FormField::StoredIn => self.render_dropdown(
                 FormDropdown::StoredIn,
-                option_key(&SOURCES, form.source),
-                Self::options(&SOURCES),
+                option_key(&SOURCE_OPTIONS, form.source),
+                Self::options(&SOURCE_OPTIONS),
                 cx,
             ),
             FormField::Username => labelled(
@@ -1306,11 +1226,27 @@ impl VaultSettings {
             .on_action(cx.listener(|this, _: &CloseOverlays, window, cx| {
                 this.cancel(window, cx);
             }))
-            .children(
-                form.fields()
-                    .into_iter()
-                    .map(|which| self.render_field(form, which, cx)),
-            )
+            .children({
+                let fields = form.fields();
+                let hint_after = fixed_hint_after(&fields).filter(|_| form.editing());
+                fields.into_iter().map(move |which| {
+                    let drawn = self.render_field(form, which, cx);
+                    if hint_after == Some(which) {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(drawn)
+                            .child(
+                                small(FIXED_HINT, theme::rambutan_500())
+                                    .debug_selector(|| "desktop-vault-fixed-hint".into()),
+                            )
+                            .into_any_element()
+                    } else {
+                        drawn
+                    }
+                })
+            })
             .when_some(form.error.clone(), |el, message| {
                 el.child(
                     small(message, theme::lychee_300())
@@ -1674,17 +1610,14 @@ impl Render for VaultSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        form_fields, wait_reason, Busy, FormField, Load, Open, VaultFormState, VaultSettings,
-    };
+    use super::{Open, VaultFormState, VaultSettings};
     use crate::server_client::{ServerClient, ServerError};
     use crate::{app_state::DesktopState, theme};
     use bruhs_models::crew::ServiceNotice;
     use bruhs_models::secrets::SavedCredentialState;
     use bruhs_models::vault::{
-        delete_entry_confirm, vault_row, CredentialScope, FormKind, FormSource, LoginFields,
-        LoginMeta, VaultAttention, VaultBruh, VaultEntry, VaultKind, VaultListing, ENTRY_UPDATED,
-        LOADING, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+        delete_entry_confirm, vault_row, CredentialScope, LoginFields, LoginMeta, VaultAttention,
+        VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing, ENTRY_UPDATED,
     };
     use gpui::{
         AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, TestAppContext,
@@ -1919,14 +1852,21 @@ mod tests {
             assert!(password.read(cx).value().is_empty(), "no prefill");
             assert_eq!(url.read(cx).value().as_ref(), "https://shop.test/in");
         });
-        // The first field the owner can change takes focus.
-        let url_focus = cx.update(|_, cx| url.focus_handle(cx));
-        assert_eq!(focused(cx), Some(url_focus));
-        // Name is read only: typing into it changes nothing.
-        cx.update(|window, cx| name.update(cx, |name, cx| name.focus(window, cx)));
-        cx.run_until_parked();
-        cx.simulate_input("x");
-        assert_eq!(cx.update(|_, cx| name.read(cx).value().to_string()), "Shop");
+        // The first field the owner can change takes focus: Sign-in page is
+        // fixed too (ruling F3), so Username.
+        let username = view.read_with(cx, |view, _| view.form.as_ref().unwrap().1.username.clone());
+        let username_focus = cx.update(|_, cx| username.focus_handle(cx));
+        assert_eq!(focused(cx), Some(username_focus));
+        // Name and Sign-in page are read only: typing changes nothing.
+        for (input, stored) in [(&name, "Shop"), (&url, "https://shop.test/in")] {
+            cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+            cx.run_until_parked();
+            cx.simulate_input("x");
+            assert_eq!(
+                cx.update(|_, cx| input.read(cx).value().to_string()),
+                stored
+            );
+        }
         // Cancel clears what was typed and closes the form.
         let password_focus = cx.update(|_, cx| password.focus_handle(cx));
         cx.update(|window, cx| window.focus(&password_focus, cx));
@@ -2036,55 +1976,9 @@ mod tests {
         cx.run_until_parked();
         view.read_with(cx, |view, _| {
             assert!(view.form.is_none());
-            assert!(view.busy == Busy::Idle);
+            assert!(view.busy == VaultBusy::Idle);
             assert_eq!(view.notice, Some(ENTRY_UPDATED));
             assert_eq!(view.listing.entries[1], saved);
         });
-    }
-
-    #[test]
-    fn the_form_shows_the_fields_its_kind_needs_like_the_web() {
-        use FormField::*;
-        assert_eq!(
-            form_fields(FormKind::Login, FormSource::Saved),
-            [Kind, Name, UsedBy, SignIn, StoredIn, Username, Password, Totp]
-        );
-        assert_eq!(
-            form_fields(FormKind::Login, FormSource::OnePassword),
-            [
-                Kind,
-                Name,
-                UsedBy,
-                SignIn,
-                StoredIn,
-                UsernameRef,
-                PasswordRef,
-                TotpRef
-            ]
-        );
-        for source in [FormSource::Saved, FormSource::OnePassword] {
-            assert_eq!(
-                form_fields(FormKind::Value, source),
-                [Kind, Name, UsedBy, Value]
-            );
-            assert_eq!(
-                form_fields(FormKind::OnePassword, source),
-                [Kind, Name, UsedBy, Reference]
-            );
-        }
-    }
-
-    #[test]
-    fn buttons_say_why_they_wait() {
-        assert_eq!(wait_reason(Busy::Changing, &Load::Loading), Some(LOADING));
-        assert_eq!(
-            wait_reason(Busy::Changing, &Load::Ready),
-            Some(WAIT_FOR_CHANGE)
-        );
-        assert_eq!(
-            wait_reason(Busy::Checking, &Load::Ready),
-            Some(WAIT_FOR_CHECK)
-        );
-        assert_eq!(wait_reason(Busy::Idle, &Load::OwnerOnly), None);
     }
 }
