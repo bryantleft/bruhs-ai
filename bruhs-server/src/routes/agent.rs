@@ -68,9 +68,15 @@ pub struct AgentRequest {
 /// Convert a `QueryEvent` into a `serde_json::Value`.
 fn query_event_to_json(event: &QueryEvent) -> Value {
     match event {
-        QueryEvent::SecretRequest(request) => {
-            json!({"type": "secret_request", "id": request.id, "thread_id": request.thread_id, "operation": request.operation, "cwd": request.cwd, "saved_available": request.saved_available, "storage_unavailable": request.storage_unavailable, "saved_source": request.saved_source})
-        }
+        // The request's own fields, so none is left out by hand (a
+        // `request_connection` needs its `connection`).
+        QueryEvent::SecretRequest(request) => match serde_json::to_value(request) {
+            Ok(Value::Object(mut fields)) => {
+                fields.insert("type".into(), json!("secret_request"));
+                Value::Object(fields)
+            }
+            _ => json!({"type": "secret_request", "id": request.id}),
+        },
         QueryEvent::SecretResolved { id } => json!({"type": "secret_resolved", "id": id}),
         QueryEvent::ThreadRequest(request) => json!({
             "type": "thread_request",
@@ -627,6 +633,36 @@ mod tests {
                     storage_unavailable: false,
                     connection: None,
                     saved_source: Some(bruhs_models::vault::SavedSource::Global),
+                };
+                (
+                    QueryEvent::SecretRequest(request.clone()),
+                    Typed::SecretRequest(request),
+                )
+            },
+            {
+                // A `request_connection` carries its connection, so the
+                // web shows the connect form rather than a key form.
+                let request = bruhs_models::secrets::SecretRequest {
+                    id: "private-3".into(),
+                    thread_id: bruhs_models::ids::ThreadId::new_v4(),
+                    operation: bruhs_models::secrets::SecretOperation {
+                        name: "GitHub".into(),
+                        reason: "Open the pull request".into(),
+                        env_var: "GH_TOKEN".into(),
+                        command: vec!["gh".into(), "pr".into(), "create".into()],
+                    },
+                    cwd: "/tmp/project".into(),
+                    saved_available: false,
+                    storage_unavailable: true,
+                    connection: Some(Box::new(bruhs_models::connections::ServiceConnection {
+                        id: Some("conn-1".into()),
+                        provider: bruhs_models::connections::ServiceProvider::Github,
+                        configured: true,
+                        account: Some("octocat".into()),
+                        scopes: vec!["repo".into()],
+                        state: bruhs_models::connections::ConnectionState::Connected,
+                    })),
+                    saved_source: None,
                 };
                 (
                     QueryEvent::SecretRequest(request.clone()),
