@@ -90,10 +90,7 @@ impl Policy {
     /// bruh's grants (ruling F26), which the shared guard's every-loopback
     /// trust is too wide for: no `Origin` (the desktop's native client), an
     /// `http` `Origin` naming this request's own `Host` (the web app this
-    /// server serves), or one of the configured origins. A loopback name
-    /// (`localhost`, `127.0.0.1`, `[::1]`) of the same port as a loopback
-    /// `Host` counts as that Host (ruling BC M5): the app opened as
-    /// `localhost:3001` calls `127.0.0.1:3001`.
+    /// server serves), or one of the configured origins.
     pub fn owner_request(&self, headers: &HeaderMap) -> bool {
         let mut origins = headers.get_all(header::ORIGIN).iter();
         let Some(origin) = origins.next() else {
@@ -112,22 +109,9 @@ impl Policy {
         let (Ok(origin), Ok(host)) = (origin.to_str(), host.to_str()) else {
             return false;
         };
-        let Some(origin) = origin
-            .starts_with("http://")
-            .then(|| origin_authority(origin))
-            .flatten()
-        else {
-            return false;
-        };
-        if origin.as_str().eq_ignore_ascii_case(host) {
-            return true;
-        }
-        host.parse::<axum::http::uri::Authority>()
-            .is_ok_and(|host| {
-                loopback_name(&origin)
-                    && loopback_name(&host)
-                    && origin.port_u16() == host.port_u16()
-            })
+        origin.starts_with("http://")
+            && origin_authority(origin)
+                .is_some_and(|authority| authority.as_str().eq_ignore_ascii_case(host))
     }
 
     pub fn cors(&self) -> CorsLayer {
@@ -198,14 +182,6 @@ fn loopback_authority(authority: &axum::http::uri::Authority) -> bool {
 /// loopback names.
 fn loopback_literal(authority: &axum::http::uri::Authority) -> bool {
     valid_port_form(authority) && matches!(authority.host(), "127.0.0.1" | "localhost" | "[::1]")
-}
-
-/// One of the loopback literals in any letter case, with a valid port form.
-fn loopback_name(authority: &axum::http::uri::Authority) -> bool {
-    valid_port_form(authority)
-        && ["127.0.0.1", "localhost", "[::1]"]
-            .iter()
-            .any(|name| authority.host().eq_ignore_ascii_case(name))
 }
 
 fn valid_port_form(authority: &axum::http::uri::Authority) -> bool {

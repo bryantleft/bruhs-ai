@@ -321,15 +321,6 @@ fn owner_requests_are_the_native_client_the_own_page_or_a_configured_origin() {
             ("origin", "http://localhost:3001"),
         ]),
         headers(&[host, ("origin", "https://bruhs.localhost")]),
-        // Ruling BC M5: the loopback names of this server's own port are
-        // its own page, whichever one the browser opened.
-        headers(&[host, ("origin", "http://localhost:3001")]),
-        headers(&[host, ("origin", "http://[::1]:3001")]),
-        headers(&[
-            ("host", "localhost:3001"),
-            ("origin", "http://127.0.0.1:3001"),
-        ]),
-        headers(&[("host", "[::1]:3001"), ("origin", "http://LOCALHOST:3001")]),
     ] {
         assert!(policy.owner_request(&allowed), "{allowed:?}");
     }
@@ -349,13 +340,22 @@ fn owner_requests_are_the_native_client_the_own_page_or_a_configured_origin() {
             ("origin", "http://127.0.0.1:3001"),
         ]),
         headers(&[("host", "127.0.0.1"), ("origin", "http://127.0.0.1:3001")]),
+        // Rereview I1: another loopback name of the same port isn't this
+        // server's page. The server binds only 127.0.0.1, so another
+        // process can hold `[::1]:3001`, which `localhost` resolves to first.
+        headers(&[host, ("origin", "http://localhost:3001")]),
+        headers(&[host, ("origin", "http://[::1]:3001")]),
+        headers(&[
+            ("host", "localhost:3001"),
+            ("origin", "http://127.0.0.1:3001"),
+        ]),
+        headers(&[("host", "[::1]:3001"), ("origin", "http://localhost:3001")]),
         // Another port is another page under every loopback name.
         headers(&[host, ("origin", "http://localhost:5173")]),
         headers(&[host, ("origin", "http://[::1]:8080")]),
         headers(&[host, ("origin", "http://localhost")]),
         headers(&[("host", "localhost"), ("origin", "http://localhost:3001")]),
         headers(&[host, ("origin", "https://localhost:3001")]),
-        // An alias is only for a loopback Host and a loopback Origin.
         headers(&[
             ("host", "bruhs.localhost:3001"),
             ("origin", "http://localhost:3001"),
