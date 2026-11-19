@@ -1158,6 +1158,12 @@ impl SecretScope {
         if operation.validate().is_err() {
             return OperationResult::status("invalid_operation");
         }
+        // A service connection is never a bruh's (F27): refused before the
+        // connection's account is looked up or a request is shown (ruling
+        // A1 M7). Only a caller holding the broker's token gets here.
+        if self.bruh && provider.is_some() {
+            return OperationResult::status(NOT_GRANTED);
+        }
         let Ok(cwd) = tokio::fs::canonicalize(&self.cwd).await else {
             return OperationResult::status("working_directory_unavailable");
         };

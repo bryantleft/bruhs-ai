@@ -1245,16 +1245,31 @@ async fn an_unknown_or_ungranted_key_is_declined_without_a_card() {
     let request = keys.request().await;
     keys.answer(request).await.unwrap();
     assert_eq!(call.await.unwrap(), (VAULT_KEY_TOO_LONG.into(), None));
-    // A service connection is never a bruh's, whatever the name (F27).
+    // A service connection is never a bruh's, whatever the name (F27):
+    // the broker refuses it at once, before any connection lookup or
+    // request (ruling A1 M7).
+    while keys.events.try_recv().is_ok() {}
     let call = keys.call(
         "DEPLOY_KEY",
         "true",
         Some(bruhs_models::connections::ServiceProvider::Github),
     );
-    let request = keys.request().await;
-    assert!(request.connection.is_some());
-    keys.answer(request).await.unwrap();
-    assert_eq!(call.await.unwrap(), ("not_granted".into(), None));
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), call)
+            .await
+            .expect("refused without an answer")
+            .unwrap(),
+        ("not_granted".into(), None)
+    );
+    while let Ok(event) = keys.events.try_recv() {
+        assert!(
+            !matches!(
+                event,
+                crate::OrchestratorEvent::Query(crate::QueryEvent::SecretRequest(_))
+            ),
+            "no request was shown"
+        );
+    }
     assert!(approvals(&keys.runtime, "a").await.is_empty());
     assert_eq!(keys.run_status().await, RunStatus::Running);
 }
