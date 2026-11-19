@@ -34,5 +34,6 @@ AGENTS.md
 # Release bundles (scripts/bundle-macos.sh)
 /dist/
 
-# Full performance provenance stays under ignored target/performance-evidence-private/.
-# docs/performance-action-evidence.json is the compact public index.
+# Local documentation and pull request recordings
+/docs/
+/.bruhs/pr-media/
