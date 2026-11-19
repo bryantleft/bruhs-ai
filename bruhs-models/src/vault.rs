@@ -1,7 +1,7 @@
 //! The vault: logins, keys and 1Password references the owner keeps for
 //! threads and bruhs. Entries, scopes and kinds, their validation, sign-in
-//! origins, one-time code setup ([`totp`]) and the forms and rows both apps
-//! show ([`form`]).
+//! origins, one-time code setup (`totp`) and the forms and rows both apps
+//! show (`form`).
 //!
 //! Only metadata lives in these types: names, scopes, sign-in pages,
 //! usernames and `op://` references. A value (key, password, one-time code
@@ -97,6 +97,8 @@ pub const SIGN_IN_SCHEME: &str = "Use an http or https sign-in page.";
 pub const SIGN_IN_LOCAL: &str =
     "Use a sign-in page on another computer. Bruh browsers can't reach this one.";
 pub const SIGN_IN_ENCODED: &str = "Use the site's plain address, not an encoded one.";
+pub const SIGN_IN_ADDRESS: &str =
+    "Use a sign-in page without a username, password or spaces in its address.";
 
 /// Most bytes a key value may hold (16 KiB).
 pub const MAX_VALUE_BYTES: usize = 16 * 1024;
@@ -189,15 +191,20 @@ impl LoginMeta {
         login_origin(&self.url).ok()
     }
 
-    /// The fields a bruh can fill: username and password always, the
+    /// The fields a bruh can fill: the password always, the username unless
+    /// a Saved login has none (a fill never types an empty one), and the
     /// one-time code when the login has one.
     #[must_use]
     pub fn fields(&self) -> Vec<SecretField> {
-        let totp = match &self.fields {
-            LoginFields::Saved { totp, .. } => *totp,
-            LoginFields::OnePassword { totp, .. } => totp.is_some(),
+        let (username, totp) = match &self.fields {
+            LoginFields::Saved { username, totp } => (!username.is_empty(), *totp),
+            LoginFields::OnePassword { totp, .. } => (true, totp.is_some()),
         };
-        let mut fields = vec![SecretField::Username, SecretField::Password];
+        let mut fields = Vec::with_capacity(3);
+        if username {
+            fields.push(SecretField::Username);
+        }
+        fields.push(SecretField::Password);
         if totp {
             fields.push(SecretField::Totp);
         }
@@ -342,9 +349,16 @@ pub enum LoginInput {
     },
 }
 
-/// What to do with a Saved login's one-time code setup key.
+/// What to do with a Saved login's one-time code setup key. It is read
+/// through a private strict wire form, so `{"action": "keep", "setup": …}`
+/// is refused rather than dropping the key.
 #[derive(Serialize, Deserialize, Default)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(
+    tag = "action",
+    rename_all = "snake_case",
+    deny_unknown_fields,
+    from = "TotpWire"
+)]
 pub enum TotpInput {
     #[default]
     Keep,
@@ -354,10 +368,37 @@ pub enum TotpInput {
     },
 }
 
+/// `TotpInput` on the wire. Serde ignores extra fields on an internally
+/// tagged unit variant even under `deny_unknown_fields`, so the field-free
+/// actions are empty structs here. Holds a value: no `Debug` or `Clone`.
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum TotpWire {
+    Keep {},
+    Remove {},
+    Set { setup: String },
+}
+
+impl From<TotpWire> for TotpInput {
+    fn from(wire: TotpWire) -> Self {
+        match wire {
+            TotpWire::Keep {} => Self::Keep,
+            TotpWire::Remove {} => Self::Remove,
+            TotpWire::Set { setup } => Self::Set { setup },
+        }
+    }
+}
+
 impl VaultCreate {
     /// A new entry's checks (D6), apart from uniqueness, the project folder
     /// existing and the bruh existing, which the store and server check.
-    pub fn validate(&self) -> Result<(), &'static str> {
+    /// Trims the name in place first, so a body's `" GitHub "` is stored
+    /// (and compared for [`DUPLICATE_NAME`]) as `"GitHub"`.
+    pub fn validate(&mut self) -> Result<(), &'static str> {
+        let trimmed = self.name.trim();
+        if trimmed.len() != self.name.len() {
+            self.name = trimmed.to_owned();
+        }
         validate_entry_name(&self.name)?;
         match &self.scope {
             CredentialScope::Global => {}
@@ -543,11 +584,12 @@ pub fn validate_entry_name(name: &str) -> Result<(), &'static str> {
 }
 
 /// A 1Password secret reference: `op://<vault>/<item>/<field>` or
-/// `op://<vault>/<item>/<section>/<field>`, no empty segment, no control or
-/// formatting characters, at most 512 bytes, and an optional
-/// `?attribute=<word>`.
+/// `op://<vault>/<item>/<section>/<field>`, at most 512 bytes, and an
+/// optional `?attribute=<word>`. Each part is 1Password's own syntax:
+/// letters, digits, spaces, `-`, `_` and `.`, not blank (other names are
+/// written by their ids). So no shell metacharacter or lookalike passes.
 pub fn validate_op_reference(reference: &str) -> Result<(), &'static str> {
-    if reference.len() > MAX_REFERENCE_BYTES || has_hidden_characters(reference) {
+    if reference.len() > MAX_REFERENCE_BYTES {
         return Err(REFERENCE_SHAPE);
     }
     let rest = reference.strip_prefix("op://").ok_or(REFERENCE_SHAPE)?;
@@ -555,8 +597,13 @@ pub fn validate_op_reference(reference: &str) -> Result<(), &'static str> {
         Some((path, query)) => (path, Some(query)),
         None => (rest, None),
     };
+    let segment = |s: &&str| {
+        !s.trim().is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-'))
+    };
     let segments: Vec<&str> = path.split('/').collect();
-    if !(3..=4).contains(&segments.len()) || segments.iter().any(|s| s.trim().is_empty()) {
+    if !(3..=4).contains(&segments.len()) || !segments.iter().all(segment) {
         return Err(REFERENCE_SHAPE);
     }
     if let Some(query) = query {
@@ -568,27 +615,37 @@ pub fn validate_op_reference(reference: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// A sign-in page's exact origin (D7): `scheme://host[:port]`, scheme and
-/// host lowercased, the default port dropped. The page must pass the
-/// browser URL rules, use http or https, have a plain ASCII host without
-/// `%` (Chrome decodes and maps those before it resolves them) and not be
-/// this computer, which bruh browsers can't reach.
+/// A sign-in page's exact origin (D7): `scheme://host[:port]` as Chrome's
+/// `location.origin` shows it. Scheme and host are lowercased, the default
+/// port is dropped and an IP host is written canonically (`3232235780` and
+/// `192.168.001.004` read `192.168.1.4`), so the origin a fill compares
+/// with is the one the page reports. The page must use http or https, have
+/// no username, password or spaces in its address, a plain ASCII host
+/// without `%` (Chrome decodes and maps those before it resolves them), and
+/// not be this computer, which bruh browsers can't reach.
 pub fn login_origin(url: &str) -> Result<String, &'static str> {
     let (scheme, rest) = url.split_once("://").ok_or(SIGN_IN_SCHEME)?;
     let scheme = scheme.to_ascii_lowercase();
     if scheme != "http" && scheme != "https" {
         return Err(SIGN_IN_SCHEME);
     }
-    crate::local_tools::validate_browser_url(&format!("{scheme}://{rest}"))?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err(SIGN_IN_SCHEME);
+    }
+    crate::local_tools::validate_browser_url(&format!("{scheme}://{rest}"))
+        .map_err(|_| SIGN_IN_ADDRESS)?;
     if authority.contains('%') || !authority.is_ascii() {
         return Err(SIGN_IN_ENCODED);
     }
     if crate::crew::is_local_host(authority) {
         return Err(SIGN_IN_LOCAL);
     }
-    let authority = authority.to_ascii_lowercase();
-    let (host, port) = split_authority(&authority).ok_or(SIGN_IN_SCHEME)?;
+    let (host, port) = split_authority(&authority.to_ascii_lowercase()).ok_or(SIGN_IN_SCHEME)?;
+    // Checked again in canonical form, whatever spelling reached it.
+    if crate::crew::is_local_host(&host) {
+        return Err(SIGN_IN_LOCAL);
+    }
     let default_port = if scheme == "http" { 80 } else { 443 };
     Ok(match port {
         Some(port) if port != default_port => format!("{scheme}://{host}:{port}"),
@@ -596,22 +653,17 @@ pub fn login_origin(url: &str) -> Result<String, &'static str> {
     })
 }
 
-/// A lowercased authority's host and port, or `None` when either is
-/// malformed.
-fn split_authority(authority: &str) -> Option<(&str, Option<u16>)> {
-    let (host, port) = if authority.starts_with('[') {
-        let end = authority.find(']')?;
-        let (host, after) = authority.split_at(end + 1);
-        let valid = host[1..end]
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.');
-        if !valid || end == 1 {
-            return None;
-        }
-        match after {
-            "" => (host, None),
-            _ => (host, Some(after.strip_prefix(':')?)),
-        }
+/// A lowercased authority's canonical host and port, or `None` when either
+/// is malformed.
+fn split_authority(authority: &str) -> Option<(String, Option<u16>)> {
+    let (host, port) = if let Some(inner) = authority.strip_prefix('[') {
+        let (address, after) = inner.split_once(']')?;
+        let address = address.parse::<std::net::Ipv6Addr>().ok()?;
+        let port = match after {
+            "" => None,
+            _ => Some(after.strip_prefix(':')?),
+        };
+        (format!("[{}]", ipv6_origin_text(address)), port)
     } else {
         let (host, port) = match authority.split_once(':') {
             Some((host, port)) => (host, Some(port)),
@@ -623,6 +675,11 @@ fn split_authority(authority: &str) -> Option<(&str, Option<u16>)> {
         if host.is_empty() || !valid {
             return None;
         }
+        let host = if ends_in_number(host) {
+            ipv4_host(host)?.to_string()
+        } else {
+            host.to_owned()
+        };
         (host, port)
     };
     let port = match port {
@@ -635,6 +692,87 @@ fn split_authority(authority: &str) -> Option<(&str, Option<u16>)> {
         }
     };
     Some((host, port))
+}
+
+/// The URL standard's "ends in a number": a host whose last label (a
+/// trailing dot aside) is decimal digits or `0x` hex is parsed as IPv4, and
+/// fails to load when that parse fails.
+fn ends_in_number(host: &str) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let last = host.rsplit('.').next().unwrap_or_default();
+    (!last.is_empty() && last.bytes().all(|b| b.is_ascii_digit()))
+        || last
+            .strip_prefix("0x")
+            .is_some_and(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The URL standard's IPv4 parser: one to four parts, each decimal, octal
+/// (a leading `0`) or hex (`0x`), the last filling the remaining bytes, and
+/// one trailing dot allowed.
+fn ipv4_host(host: &str) -> Option<std::net::Ipv4Addr> {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let number = |part: &str| -> Option<u64> {
+        if let Some(hex) = part.strip_prefix("0x") {
+            if hex.is_empty() {
+                Some(0)
+            } else {
+                u64::from_str_radix(hex, 16).ok()
+            }
+        } else if part.len() > 1 && part.starts_with('0') {
+            u64::from_str_radix(&part[1..], 8).ok()
+        } else if !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()) {
+            part.parse().ok()
+        } else {
+            None
+        }
+    };
+    let parts = host.split('.').map(number).collect::<Option<Vec<u64>>>()?;
+    let (last, head) = parts.split_last()?;
+    if head.len() > 3 || head.iter().any(|part| *part > 255) {
+        return None;
+    }
+    let room = 8 * (4 - u32::try_from(head.len()).ok()?);
+    if *last >= 1u64 << room {
+        return None;
+    }
+    let value = head
+        .iter()
+        .zip([24u32, 16, 8])
+        .fold(*last, |value, (part, shift)| value | part << shift);
+    u32::try_from(value).ok().map(std::net::Ipv4Addr::from)
+}
+
+/// An IPv6 address as the URL standard writes it: lowercase hex pieces,
+/// the first longest run of two or more zero pieces as `::`, and never a
+/// dotted IPv4 tail (unlike `Ipv6Addr`'s `Display`).
+fn ipv6_origin_text(address: std::net::Ipv6Addr) -> String {
+    let pieces = address.segments();
+    let mut best: Option<(usize, usize)> = None;
+    let mut start = 0;
+    while start < pieces.len() {
+        if pieces[start] != 0 {
+            start += 1;
+            continue;
+        }
+        let end = (start..pieces.len())
+            .find(|&index| pieces[index] != 0)
+            .unwrap_or(pieces.len());
+        if end - start > 1 && best.is_none_or(|(s, e)| end - start > e - s) {
+            best = Some((start, end));
+        }
+        start = end;
+    }
+    let hex = |range: &[u16]| {
+        range
+            .iter()
+            .map(|piece| format!("{piece:x}"))
+            .collect::<Vec<_>>()
+            .join(":")
+    };
+    match best {
+        Some((start, end)) => format!("{}::{}", hex(&pieces[..start]), hex(&pieces[end..])),
+        None => hex(&pieces),
+    }
 }
 
 /// Whether a page is on exactly this origin. An unknown page never is.
@@ -772,13 +910,72 @@ mod tests {
             "https://a.test:x/",
             "https://:443/",
             "https://a*b.test/",
+            "https:///in",
+            "https://[2001:db8::g]/",
+            "https://[2001:db8::1]x/",
         ] {
             assert_eq!(login_origin(bad), Err(SIGN_IN_SCHEME), "{bad}");
         }
-        assert!(login_origin("https://me:pw@a.test/").is_err());
-        assert!(login_origin("https://a.test/ x").is_err());
+        for bad in [
+            "https://me:pw@a.test/",
+            "https://me@a.test/",
+            "https://a.test/ x",
+            "https://a.test\\@b.test/",
+        ] {
+            assert_eq!(login_origin(bad), Err(SIGN_IN_ADDRESS), "{bad}");
+        }
         assert!(!same_origin(Some("https://a.test:8443/"), "https://a.test"));
         assert!(same_origin(Some("HTTPS://A.TEST:443/"), "https://a.test"));
+    }
+
+    #[test]
+    fn ip_hosts_read_as_chrome_reports_them() {
+        for (url, origin) in [
+            ("http://192.168.001.004/", "http://192.168.1.4"),
+            ("http://3232235780/", "http://192.168.1.4"),
+            ("http://0xC0A80104:8080/", "http://192.168.1.4:8080"),
+            ("http://192.168.260/", "http://192.168.1.4"),
+            ("http://010.0.0.1/", "http://8.0.0.1"),
+            ("http://8.8.8.8./", "http://8.8.8.8"),
+            ("https://[2001:db8:0:0::1]/", "https://[2001:db8::1]"),
+            (
+                "https://[2001:DB8:0000:0000:0000:0000:0000:0001]/",
+                "https://[2001:db8::1]",
+            ),
+            (
+                "https://[2001:db8:0:1:0:0:0:1]/",
+                "https://[2001:db8:0:1::1]",
+            ),
+            ("https://[2001:0:0:1:0:0:1:1]/", "https://[2001::1:0:0:1:1]"),
+            (
+                "https://[2001:db8:1:1:1:1:0:1]/",
+                "https://[2001:db8:1:1:1:1:0:1]",
+            ),
+            ("https://[::ffff:8.8.8.8]/", "https://[::ffff:808:808]"),
+        ] {
+            assert_eq!(login_origin(url).as_deref(), Ok(origin), "{url}");
+            assert!(same_origin(Some(url), origin), "{url}");
+        }
+        assert!(same_origin(
+            Some("http://192.168.1.4/x"),
+            "http://192.168.1.4"
+        ));
+        for local in [
+            "http://0177.0.0.1/",
+            "http://2130706433/",
+            "https://[0:0:0:0:0:0:0:1]/",
+        ] {
+            assert_eq!(login_origin(local), Err(SIGN_IN_LOCAL), "{local}");
+        }
+        for bad in [
+            "http://1.2.3.256/",
+            "http://a.123/",
+            "http://1.2.3.4.5/",
+            "http://09.1.1.1/",
+        ] {
+            assert_eq!(login_origin(bad), Err(SIGN_IN_SCHEME), "{bad}");
+        }
+        assert_eq!(login_origin("http://a1.test/"), Ok("http://a1.test".into()));
     }
 
     #[test]
@@ -810,6 +1007,16 @@ mod tests {
             "op://a/b/c?attribute=",
             "op://a/b/c?attribute=o t p",
             "op://a/b/\u{200b}c",
+            "op://a/b/$(id)",
+            "op://a/b/`id`",
+            "op://a/b/c;rm x",
+            "op://a/b/c|d",
+            "op://a/b/\"c\"",
+            "op://a/b/'c'",
+            "op://a/b/<c>",
+            "op://a/b/c&d",
+            "op://Priv\u{0430}te/b/c",
+            "op://a/ /c",
         ] {
             assert_eq!(validate_op_reference(bad), Err(REFERENCE_SHAPE), "{bad}");
         }
@@ -1025,6 +1232,12 @@ mod tests {
         let mut bad_name = create(global(), value("v"));
         bad_name.name = " ".into();
         assert_eq!(bad_name.validate(), Err(ENTER_NAME));
+        // A body's name is stored trimmed.
+        let mut padded: VaultCreate = serde_json::from_value(json!({"name": " GitHub ",
+            "scope": {"type": "global"}, "secret": {"kind": "value", "value": "v"}}))
+        .unwrap();
+        assert!(padded.validate().is_ok());
+        assert_eq!(padded.name, "GitHub");
     }
 
     #[test]
@@ -1108,13 +1321,19 @@ mod tests {
                 },
             }))
         );
-        let VaultKind::Login(meta) = saved(Some("pw")).kind_meta().unwrap() else {
+        let VaultKind::Login(mut meta) = saved(Some("pw")).kind_meta().unwrap() else {
             panic!()
         };
         assert_eq!(
             meta.fields(),
             [SecretField::Username, SecretField::Password]
         );
+        // A Saved login without a username offers no username to fill.
+        meta.fields = LoginFields::Saved {
+            username: String::new(),
+            totp: true,
+        };
+        assert_eq!(meta.fields(), [SecretField::Password, SecretField::Totp]);
         assert_eq!(meta.origin().as_deref(), Some("https://github.com"));
     }
 
@@ -1131,7 +1350,8 @@ mod tests {
             VaultUpdate,
             VaultSecretInput,
             LoginInput,
-            TotpInput
+            TotpInput,
+            TotpWire
         );
         let (password, setup_word, value) = (canary(), canary(), canary());
         let login = VaultSecretInput::Login {
@@ -1169,14 +1389,14 @@ mod tests {
             );
         }
         // Validation answers with fixed copy, never the input.
-        let create = VaultCreate {
+        let mut create = VaultCreate {
             name: "N".into(),
             scope: CredentialScope::Global,
             secret: login,
         };
         let error = create.validate().unwrap_err();
         assert!(!error.contains(&setup_word));
-        let nul = VaultCreate {
+        let mut nul = VaultCreate {
             name: "N".into(),
             scope: CredentialScope::Global,
             secret: VaultSecretInput::Value {
@@ -1220,6 +1440,27 @@ mod tests {
         assert!(serde_json::from_value::<VaultUpdate>(
             json!({"secret": {"kind": "value"}, "name": "renamed"})
         )
+        .is_err());
+        // Every action reads back what a client sends.
+        for input in [
+            TotpInput::Keep,
+            TotpInput::Remove,
+            TotpInput::Set {
+                setup: "GEZDGNBVGY3TQOJQ".into(),
+            },
+        ] {
+            let wire = serde_json::to_value(&input).unwrap();
+            let back: TotpInput = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&back).unwrap(), wire);
+        }
+        assert_eq!(
+            serde_json::to_value(TotpInput::Remove).unwrap(),
+            json!({"action": "remove"})
+        );
+        // A setup key beside Keep is refused, not dropped.
+        assert!(body(json!({"kind": "login", "url": "https://a.test",
+            "fields": {"source": "saved", "username": "me", "password": "pw",
+                "totp": {"action": "keep", "setup": "GEZDGNBVGY3TQOJQ"}}}))
         .is_err());
     }
 }

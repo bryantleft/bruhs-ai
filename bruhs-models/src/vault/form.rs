@@ -74,7 +74,7 @@ pub fn form_create(form: &VaultForm) -> Result<VaultCreate, &'static str> {
             agent_id: form.bruh.trim().into(),
         },
     };
-    let create = VaultCreate {
+    let mut create = VaultCreate {
         name: form.name.trim().into(),
         scope,
         secret: form_secret(form, false),
