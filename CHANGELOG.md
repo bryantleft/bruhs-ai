@@ -9,7 +9,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 ### Added
+
+- Windows x64 portable ZIP and Ubuntu 24.04 x64 desktop package. Both include the local server, web app and capture helper. System audio capture remains macOS-only.
+- Agents can read public websites from a conversation.
 
 - Always-on agents are now a crew of bruhs. Each has a face you can turn
   and recolour that shows when it is asleep, working, paused, off or needs
@@ -522,6 +527,7 @@ signed Mac app and a web app that both run on your machine.
   when you choose Restart to update.
 - Editable keyboard shortcuts for every action, and a command bar (⌘K).
 
-[Unreleased]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/bryantleft/bruhs-ai/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bryantleft/bruhs-ai/releases/tag/v0.1.0
