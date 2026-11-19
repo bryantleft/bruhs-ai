@@ -258,7 +258,7 @@ impl Render for SecretPrompt {
                 .when_some(self.request.saved_source.filter(|_| self.request.saved_available), |row, source| row.child(div().id("secret-saved-source").debug_selector(move || format!("secret-source-{}", saved_source_label(source))).flex().items_center().min_h(px(theme::CONTROL_PX)).text_color(theme::rambutan_400()).child(saved_source_label(source))))
                 .when(forget_offered(&self.request), |row| row.child(self.action_button("forget", "Forget saved", cx)))
                 .child(self.action_button("decline", "Decline", cx)))
-            .child(div().text_color(theme::rambutan_400()).child(if self.busy { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." })).into_any_element()
+            .child(div().text_color(theme::rambutan_400()).child(if self.busy { "Submitting privately…" } else { bruhs_models::secrets::SECRET_FORM_FOOTER })).into_any_element()
     }
 }
 

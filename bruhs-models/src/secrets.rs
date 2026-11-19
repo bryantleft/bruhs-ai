@@ -121,6 +121,11 @@ pub fn saved_source_label(source: SavedSource) -> &'static str {
     }
 }
 
+/// The thread form's last line while nothing is sent. It describes Save
+/// securely, so it reads true beside any saved source (V Task 7 minor).
+pub const SECRET_FORM_FOOTER: &str =
+    "Save securely keeps it in your OS keychain for this project. Every use needs approval.";
+
 /// Forget saved is offered only for a project's own saved value. A request
 /// from an older service has no source and is a project's own.
 pub fn forget_offered(request: &SecretRequest) -> bool {
@@ -202,6 +207,8 @@ mod tests {
             saved_source_label(SavedSource::OnePassword),
             "From 1Password"
         );
+        // The footer speaks for Save securely, not for a shared source.
+        assert!(SECRET_FORM_FOOTER.starts_with("Save securely"));
         assert!(forget_offered(&request(true, Some(SavedSource::Project))));
         assert!(forget_offered(&request(true, None)));
         assert!(!forget_offered(&request(true, Some(SavedSource::Global))));

@@ -172,7 +172,7 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                     </Show>
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("decline")>"Decline"</button>
                 </div>
-                <p aria-live="polite" class="mt-2 text-label-sm text-rambutan-400">{move || if busy.get() { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." }}</p>
+                <p aria-live="polite" class="mt-2 text-label-sm text-rambutan-400">{move || if busy.get() { "Submitting privately…" } else { bruhs_models::secrets::SECRET_FORM_FOOTER }}</p>
             </form>
         </section>
     }.into_any()
