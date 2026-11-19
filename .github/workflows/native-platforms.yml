@@ -57,10 +57,6 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a cargo test -p bruhs-desktop --bin bruhs-desktop --locked
 
-      - name: Windows desktop tests
-        if: runner.os == 'Windows'
-        run: cargo test -p bruhs-desktop --bin bruhs-desktop --locked
-
       - name: Prepare Microsoft WebView2 for the native GUI check
         if: runner.os == 'Windows'
         shell: pwsh
@@ -75,6 +71,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/windows-rich-smoke.ps1
+
+      - name: Windows desktop tests
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo test -p bruhs-desktop --bin bruhs-desktop --locked -- --nocapture --test-threads=1
 
       - name: Preserve Windows GUI screenshots and diagnostics
         if: always() && runner.os == 'Windows'
