@@ -48,7 +48,7 @@ Version: $version
 Architecture: amd64
 Maintainer: Bruhs <hello@bruhs.ai>
 Description: Bruhs desktop workspace
-Depends: $depends, libxkbcommon-x11-0, libvulkan1
+Depends: $depends, libvulkan1
 CONTROL
 dpkg-deb --root-owner-group -Zxz --build "$deb" dist/Bruhs-Linux-x64.deb
 (cd dist && shasum -a 256 Bruhs-Windows-x64.zip Bruhs-Linux-x64.deb >> SHA256SUMS && shasum -c SHA256SUMS)

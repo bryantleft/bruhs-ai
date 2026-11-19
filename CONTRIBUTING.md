@@ -109,15 +109,10 @@ To cut a release:
 1. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
    add a fresh empty `## [Unreleased]`, and update the links at the bottom.
 2. Commit and push `main`.
-3. Run `scripts/release.sh <version>`.
+3. Run `gh workflow run release-native.yml --ref main -f version=<version>`. Wait for the Windows and Ubuntu jobs and note the workflow run ID.
+4. From a clean checkout of the same commit on the signing Mac, run `scripts/release.sh <version> <run-id>`. The packaging step needs `dpkg-deb` (Homebrew package `dpkg`).
 
-`scripts/release.sh <version>` publishes a release from a clean checkout of
-`origin/main` and uses the version's `CHANGELOG.md` section as its notes. It builds with
-`scripts/bundle-macos.sh <version> --sign --notarize`, uploads
-`Bruhs-macOS-<arch>.dmg`, `Bruhs-macOS-<arch>.zip` (what installed apps
-update from) and `SHA256SUMS` to a draft release, then publishes it, which
-tags `v<version>`. Asset names carry no version, so
-`releases/latest/download/Bruhs-macOS-arm64.dmg` always points at the newest.
+The release script checks the native binaries' commit and version, bundles the web app and license notices, and signs and notarizes the Mac app. It stages the Mac disk image and updater ZIP, Windows portable ZIP, Ubuntu package, and SHA-256 checksums in a draft before publishing the tag. Release notes come from the dated changelog section.
 
 - `scripts/bundle-macos.sh <version>` alone builds an ad-hoc-signed
   `dist/Bruhs.app` to try locally; `--sign` adds the Developer ID signature
