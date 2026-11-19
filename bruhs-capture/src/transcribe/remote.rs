@@ -86,7 +86,7 @@ impl RemoteProvider {
                 model: model.trim().to_owned(),
             }),
             Ok(None) => Err(RemoteError::Configuration(
-                "Set BRUHS_TRANSCRIPTION_BASE_URL and BRUHS_TRANSCRIPTION_TIMEOUT_SECS in the capture daemon environment, then restart it. See docs/transcription-providers.md.",
+                "Set BRUHS_TRANSCRIPTION_BASE_URL and BRUHS_TRANSCRIPTION_TIMEOUT_SECS in the capture daemon environment, then restart it.",
             )),
             Err(message) => Err(RemoteError::Configuration(message)),
         }
