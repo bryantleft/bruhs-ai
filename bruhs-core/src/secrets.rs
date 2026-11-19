@@ -65,6 +65,22 @@ const BROKER_ENV: &str = "BRUHS_SECRET_BROKER";
 pub const VAULT_READ_WAIT: Duration = Duration::from_secs(30);
 const INSTRUCTIONS: &str = "When you need a password, token, or API key, use the bruhs_secrets request_secret tool. Never ask the user to paste credentials into chat. Supply the exact command as an argv array and the credential environment variable. The user reviews that operation in a private form. The harness runs it in this turn's working directory and returns ONLY exit status; stdout/stderr are discarded. Never print, persist, or exfiltrate credentials, or request them as ordinary tool arguments. A shell must be explicit in argv. Saved credentials still require approval. Do not claim success on cancellation or nonzero exit. For Google Workspace, Microsoft 365, and GitHub service access, use request_connection with the provider, reason, exact argv, and access-token variable. The private form offers browser SSO using the user's existing session; connecting an account does not approve its operation. Never ask for SSO passwords, browser cookies, or refresh tokens.";
 
+/// [`SecretManager::broker_folder`] for a store that is `isolated` (a test
+/// build's in-memory store) and the credentials folder `catalog`.
+fn broker_folder_in(
+    isolated: bool,
+    catalog: Result<PathBuf, SecretError>,
+) -> std::io::Result<PathBuf> {
+    if isolated {
+        return Ok(
+            std::env::temp_dir().join(format!("bruhs-secret-brokers-{}", std::process::id()))
+        );
+    }
+    catalog
+        .map(|directory| directory.join("brokers"))
+        .map_err(std::io::Error::other)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
     #[error("{0}")]
@@ -412,20 +428,16 @@ impl SecretManager {
         self.store.hold_for_tests()
     }
 
-    /// Where a bruh turn's broker connection file goes. For the keychain,
-    /// the credentials folder, which every bruh run is kept out of (D19),
-    /// so the bruh's shell can't read the broker's token there and `ps`
-    /// shows only the path. An in-memory store (tests and the acceptance
-    /// server) keeps them in a temporary folder of this process instead.
+    /// Where a bruh turn's broker connection file goes: the credentials
+    /// folder, which every bruh run is kept out of (D19), so the bruh's
+    /// shell can't read the broker's token there and `ps` shows only the
+    /// path. An in-memory store does the same (the acceptance server runs
+    /// real bruhs with one, ruling A1 M9); only a test build's keeps them
+    /// in a temporary folder of this process, so tests never write the
+    /// owner's credentials folder.
     pub(crate) fn broker_folder(&self) -> std::io::Result<PathBuf> {
-        if self.store.is_memory() {
-            return Ok(
-                std::env::temp_dir().join(format!("bruhs-secret-brokers-{}", std::process::id()))
-            );
-        }
-        storage::catalog_directory()
-            .map(|directory| directory.join("brokers"))
-            .map_err(std::io::Error::other)
+        let isolated = self.store.is_memory() && cfg!(any(test, feature = "test-support"));
+        broker_folder_in(isolated, storage::catalog_directory())
     }
 
     /// Read 1Password references with this `op` (tests use a stand-in).

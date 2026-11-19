@@ -1100,3 +1100,25 @@ esac
         assert!(fixture.manager.attention.lock().unwrap().is_empty());
     }
 }
+
+/// Ruling A1 M9: broker files go under the credentials folder, which bruh
+/// runs are denied, for an in-memory store too; only a test build's stays
+/// in this process's temporary folder.
+#[test]
+fn broker_files_go_under_the_credentials_folder() {
+    let catalog = || Ok(std::path::PathBuf::from("/data/credentials"));
+    assert_eq!(
+        super::broker_folder_in(false, catalog()).unwrap(),
+        std::path::Path::new("/data/credentials/brokers")
+    );
+    assert!(super::broker_folder_in(true, catalog())
+        .unwrap()
+        .starts_with(std::env::temp_dir()));
+    assert!(super::broker_folder_in(false, Err(SecretError::Catalog)).is_err());
+    // This test build's in-memory store is isolated.
+    let manager = SecretManager::new(SecretStore::in_memory());
+    assert!(manager
+        .broker_folder()
+        .unwrap()
+        .starts_with(std::env::temp_dir()));
+}
