@@ -329,7 +329,7 @@ struct WeakRuntime {
     computers: Weak<OnceLock<Arc<LocalToolsHost>>>,
     syncing: Weak<std::sync::atomic::AtomicBool>,
     allowances: Weak<super::approval::Allowances>,
-    private_roots: Weak<Vec<PathBuf>>,
+    private_roots: Weak<super::PrivateRoots>,
 }
 
 impl WeakRuntime {

@@ -1343,6 +1343,38 @@ async fn network_calls_to_this_computer_are_denied_without_asking() {
     assert!(approvals(&runtime, "a").await.is_empty());
 }
 
+/// A vault folder reached through a symlink is named both ways in the deny
+/// rules (Claude may match the named path, its sandbox the real one), and
+/// checked by its real path; a canonical folder is named once.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_deny_rules_name_a_vault_folder_by_both_paths() {
+    let (dir, runtime) = runtime_with(&[agent("a")]).await;
+    let real_home = std::fs::canonicalize(dir.path()).unwrap().join("real");
+    std::fs::create_dir_all(real_home.join("credentials")).unwrap();
+    std::os::unix::fs::symlink(&real_home, dir.path().join("home")).unwrap();
+    let linked = dir.path().join("home").join("credentials");
+    let canonical = real_home.join("keyrings");
+    let runtime = runtime.with_private_roots([linked.clone(), canonical.clone()]);
+    let real = real_home.join("credentials");
+    assert_eq!(runtime.private_roots(), [real.clone(), canonical.clone()]);
+    assert_eq!(runtime.private_rule_folders(), [real, linked, canonical]);
+    let vault = worker::TurnVault {
+        private: runtime.private_rule_folders().to_vec(),
+    };
+    let turn = worker::turn(
+        &agent("a"),
+        &profile(AccessLevel::Full, None),
+        &queued_run("Look it up."),
+        "",
+        dir.path(),
+        &vault,
+    );
+    for folder in runtime.private_rule_folders() {
+        assert!(turn.hidden_folders.contains(folder), "{folder:?}");
+    }
+}
+
 /// A file tool call whose real path is in a folder that holds the owner's
 /// saved logins is denied at every level before any approval opens:
 /// directly, through a symlink in the bruh's folder, in other letter case,

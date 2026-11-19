@@ -83,19 +83,40 @@ pub struct ReactiveRuntime {
     syncing: Arc<AtomicBool>,
     /// Browser steps the gate let through, until the command route runs them.
     allowances: Arc<approval::Allowances>,
-    /// The folders that hold the owner's saved logins, resolved, which no
-    /// bruh run may reach (`secrets::private`).
-    private_roots: Arc<Vec<PathBuf>>,
+    /// The folders that hold the owner's saved logins, which no bruh run
+    /// may reach (`secrets::private`).
+    private_roots: Arc<PrivateRoots>,
 }
 
-/// Each folder resolved as a file tool's path is (symlinks followed; for a
-/// folder that doesn't exist yet, its nearest existing ancestor), so the
-/// resolved-path check compares like with like.
-fn resolved_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
-    roots
-        .into_iter()
-        .map(|root| approval::resolve(&root, 0).unwrap_or(root))
-        .collect()
+/// The folders that hold the owner's saved logins, in the two forms the
+/// checks need.
+#[derive(Debug, Default)]
+pub(super) struct PrivateRoots {
+    /// Each folder resolved as a file tool's path is (symlinks followed;
+    /// for a folder that doesn't exist yet, its nearest existing ancestor),
+    /// so the resolved-path check compares like with like.
+    resolved: Vec<PathBuf>,
+    /// Each resolved folder, and also its path as named when that differs
+    /// (a home or data folder reached through a symlink): Claude's deny
+    /// rules may match the path a tool names, its sandbox the real one.
+    named: Vec<PathBuf>,
+}
+
+impl PrivateRoots {
+    fn new(roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        let mut private = Self::default();
+        for root in roots {
+            let resolved = approval::resolve(&root, 0).unwrap_or_else(|| root.clone());
+            if !private.named.contains(&resolved) {
+                private.named.push(resolved.clone());
+            }
+            if !private.named.contains(&root) {
+                private.named.push(root);
+            }
+            private.resolved.push(resolved);
+        }
+        private
+    }
 }
 
 /// A bruh's work folder and the directories this call created for it.
@@ -211,7 +232,7 @@ impl ReactiveRuntime {
                 .ok_or_else(|| {
                     ReactiveError::Storage("Could not resolve the database folder.".into())
                 })?;
-            let private_roots = resolved_roots(crate::secrets::private::vault_private_folders());
+            let private_roots = PrivateRoots::new(crate::secrets::private::vault_private_folders());
             Ok::<_, ReactiveError>((connection, lock, home, private_roots))
         })
         .await
@@ -232,16 +253,22 @@ impl ReactiveRuntime {
     }
 
     /// The folders that hold the owner's saved logins, resolved: every bruh
-    /// run is kept out of them by deny rules and the resolved-path check.
+    /// run is kept out of them by the resolved-path check.
     pub fn private_roots(&self) -> &[PathBuf] {
-        &self.private_roots
+        &self.private_roots.resolved
+    }
+
+    /// The folders a bruh run's deny rules name: each of
+    /// [`Self::private_roots`], and its unresolved path when that differs.
+    pub(super) fn private_rule_folders(&self) -> &[PathBuf] {
+        &self.private_roots.named
     }
 
     /// This runtime with `roots` in place of the owner's login folders.
     #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_private_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
-        self.private_roots = Arc::new(resolved_roots(roots));
+        self.private_roots = Arc::new(PrivateRoots::new(roots));
         self
     }
 

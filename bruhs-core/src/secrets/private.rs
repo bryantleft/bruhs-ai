@@ -57,8 +57,9 @@ pub(crate) fn vault_private_folders() -> Vec<PathBuf> {
 /// Whether Claude's deny rules may name `folder`. Its bash sandbox reads
 /// them too, and the Security framework reads the keychains folder in
 /// process, so denying it would break git and gh logins in a Full bruh's
-/// shell. That folder keeps only the resolved-path check; its files are
-/// encrypted, and `security` asks the owner.
+/// shell. That folder keeps only the resolved-path check. Its files are
+/// encrypted, and `security` asks the owner before it reads an item Bruhs
+/// saved (other apps' items may not ask).
 pub(crate) fn deny_rule_may_name(folder: &Path) -> bool {
     let mut tail = folder.components().rev().take(2);
     let last = tail.next().map(|part| part.as_os_str().to_string_lossy());

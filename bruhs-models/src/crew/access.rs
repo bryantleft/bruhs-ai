@@ -286,59 +286,334 @@ pub fn is_forge_command(command: &str) -> bool {
 }
 
 /// Whether a shell line runs the keychain's `security` tool or 1Password's
-/// `op`: the program of any command in the line (split at `&`, `|`, `;`,
-/// newlines, parentheses and backticks, so `$(…)`, `<(…)` and pipelines
-/// count), compared without case, its quotes and backslashes dropped and
-/// its folder taken off (`/usr/bin/security`, `'op'`, `\op`). A program
-/// with `*` or `?` counts when it could expand to one of them. The program
-/// is found behind `NAME=value` words and the wrappers `sudo`, `doas`,
-/// `env`, `command`, `builtin`, `exec`, `eval`, `nohup`, `noglob`, `time`,
-/// `nice`, `timeout`, `stdbuf` and `xargs` (with their flags), shell words
-/// such as `if` and `!`, and inside `sh`, `bash`, `zsh`, `dash` or `ksh`
-/// with `-c`. Only the program position counts: `echo security` doesn't.
+/// `op`: the program of any command in it, compared without case and with
+/// its folder taken off (`/usr/bin/security`). A program with `*`, `?` or
+/// `[…]` counts when it could expand to one of them.
+///
+/// The line is read the way a shell reads it ([`shell_lines`]): quoted text
+/// and quoted here-documents are words, never commands, so a commit
+/// message or a search pattern that names `security` stays allowed, while
+/// `$(…)`, backticks, `<(…)` and `>(…)` (also inside double quotes and
+/// unquoted here-documents), subshells and pipelines are commands. The
+/// program is found behind `NAME=value` words, redirections, shell words
+/// such as `if` and `!`, and the wrappers `sudo`, `doas`, `env`, `command`,
+/// `builtin`, `exec`, `nohup`, `noglob`, `time`, `nice`, `timeout`,
+/// `stdbuf` and `xargs` with their flags. The string of `sh`, `bash`,
+/// `zsh`, `dash` or `ksh -c`, of `eval` and of `env -S` is read as a line
+/// of its own. A line nested deeper than [`SHELL_NESTING`] is refused.
 ///
 /// Like [`is_forge_command`], a speed bump, not a boundary: a variable
 /// (`$tool`), a name built by a substitution, a script file, a line piped
 /// into a shell, an interpreter (`python -c`), a function or alias, brace
-/// expansion, `find -exec` or `ssh` gets past it. The line is split inside
-/// quotes too, so a pattern such as `grep 'a|op'` is refused.
+/// expansion, `find -exec` or `ssh` gets past it.
 #[must_use]
 pub fn is_vault_command(command: &str) -> bool {
-    shell_commands(command).any(|words| {
-        command_program(&words).is_some_and(|program| {
-            ["security", "op"]
-                .iter()
-                .any(|name| glob_matches(program.as_bytes(), name.as_bytes()))
-        })
+    runs_vault(command, 0)
+}
+
+/// How deep substitutions and `sh -c` strings may nest in a line the vault
+/// check reads; a deeper line is refused.
+const SHELL_NESTING: usize = 16;
+
+fn runs_vault(line: &str, depth: usize) -> bool {
+    let Some(commands) = shell_lines(line, depth) else {
+        return true;
+    };
+    commands.iter().any(|words| match command_program(words) {
+        Runs::Program(program) => ["security", "op"]
+            .iter()
+            .any(|name| glob_matches(program.as_bytes(), name.as_bytes())),
+        Runs::Script(script) => runs_vault(&script, depth + 1),
+        Runs::Nothing => false,
     })
 }
 
-/// The lowercased program a command's words run, behind wrappers and
-/// assignments; `None` for no program or a `command -v` lookup.
-fn command_program(words: &[&str]) -> Option<String> {
+/// What a command runs.
+enum Runs {
+    /// A program, lowercased, its folder taken off.
+    Program(String),
+    /// A line a shell reads again: `sh -c`, `eval` or `env -S`.
+    Script(String),
+    Nothing,
+}
+
+/// Every command a shell line runs, as its words with quotes and escapes
+/// resolved, including the commands inside substitutions. A word that held
+/// a substitution keeps a `$` in its place. `None` when the line nests
+/// deeper than [`SHELL_NESTING`].
+fn shell_lines(line: &str, depth: usize) -> Option<Vec<Vec<String>>> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut lexer = Lexer {
+        chars: &chars,
+        pos: 0,
+        commands: Vec::new(),
+    };
+    lexer.commands_until(None, depth)?;
+    Some(lexer.commands)
+}
+
+struct Lexer<'a> {
+    chars: &'a [char],
+    pos: usize,
+    commands: Vec<Vec<String>>,
+}
+
+/// A here-document waiting for its body after the line's next newline.
+struct HereDoc {
+    delimiter: String,
+    /// A quoted delimiter makes the body literal; otherwise its
+    /// substitutions run.
+    literal: bool,
+    strip_tabs: bool,
+}
+
+impl Lexer<'_> {
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let c = self.peek()?;
+        self.pos += 1;
+        Some(c)
+    }
+
+    /// Read commands until `end` (a substitution's `)` or backtick) or
+    /// the end of the line.
+    fn commands_until(&mut self, end: Option<char>, depth: usize) -> Option<()> {
+        if depth > SHELL_NESTING {
+            return None;
+        }
+        let mut command: Vec<String> = Vec::new();
+        let mut word = String::new();
+        let mut in_word = false;
+        let mut heredocs: Vec<HereDoc> = Vec::new();
+        let end_word = |command: &mut Vec<String>, word: &mut String, in_word: &mut bool| {
+            if *in_word || !word.is_empty() {
+                command.push(std::mem::take(word));
+            }
+            *in_word = false;
+        };
+        while let Some(c) = self.next() {
+            if Some(c) == end {
+                break;
+            }
+            match c {
+                ' ' | '\t' => end_word(&mut command, &mut word, &mut in_word),
+                '\n' | ';' | '|' | ')' => {
+                    end_word(&mut command, &mut word, &mut in_word);
+                    self.end_command(&mut command);
+                    if c == '\n' {
+                        for heredoc in heredocs.drain(..) {
+                            self.here_body(&heredoc, depth)?;
+                        }
+                    }
+                }
+                // `2>&1` and `<&3` keep their `&`.
+                '&' if word.ends_with(['<', '>']) => word.push('&'),
+                '&' => {
+                    end_word(&mut command, &mut word, &mut in_word);
+                    self.end_command(&mut command);
+                }
+                '(' if word.ends_with(['$', '<', '>']) => {
+                    self.commands_until(Some(')'), depth + 1)?;
+                    word.push('$');
+                }
+                // A subshell or a function's parentheses.
+                '(' => {
+                    end_word(&mut command, &mut word, &mut in_word);
+                    self.end_command(&mut command);
+                }
+                '`' => {
+                    self.commands_until(Some('`'), depth + 1)?;
+                    word.push('$');
+                }
+                '\'' => {
+                    in_word = true;
+                    while let Some(quoted) = self.next() {
+                        if quoted == '\'' {
+                            break;
+                        }
+                        word.push(quoted);
+                    }
+                }
+                '"' => {
+                    in_word = true;
+                    self.double_quoted(&mut word, depth)?;
+                }
+                '\\' => match self.next() {
+                    Some('\n') | None => {}
+                    Some(escaped) => {
+                        word.push(escaped);
+                        in_word = true;
+                    }
+                },
+                '#' if !in_word && word.is_empty() => {
+                    while self.peek().is_some_and(|c| c != '\n') {
+                        self.pos += 1;
+                    }
+                }
+                // A here-string: its word is data.
+                '<' if self.peek() == Some('<') && self.chars.get(self.pos + 1) == Some(&'<') => {
+                    self.pos += 2;
+                    word.push_str("<<<");
+                    in_word = true;
+                }
+                '<' if self.peek() == Some('<') => {
+                    self.pos += 1;
+                    end_word(&mut command, &mut word, &mut in_word);
+                    heredocs.push(self.here_delimiter());
+                }
+                other => {
+                    word.push(other);
+                    in_word = true;
+                }
+            }
+        }
+        end_word(&mut command, &mut word, &mut in_word);
+        self.end_command(&mut command);
+        Some(())
+    }
+
+    fn end_command(&mut self, command: &mut Vec<String>) {
+        if !command.is_empty() {
+            self.commands.push(std::mem::take(command));
+        }
+    }
+
+    /// The rest of a double-quoted word: only `$(…)` and backticks run.
+    fn double_quoted(&mut self, word: &mut String, depth: usize) -> Option<()> {
+        while let Some(c) = self.next() {
+            match c {
+                '"' => break,
+                '\\' => match self.peek() {
+                    Some(escaped @ ('$' | '`' | '"' | '\\')) => {
+                        self.pos += 1;
+                        word.push(escaped);
+                    }
+                    Some('\n') => self.pos += 1,
+                    _ => word.push('\\'),
+                },
+                '`' => {
+                    self.commands_until(Some('`'), depth + 1)?;
+                    word.push('$');
+                }
+                '$' if self.peek() == Some('(') => {
+                    self.pos += 1;
+                    self.commands_until(Some(')'), depth + 1)?;
+                    word.push('$');
+                }
+                other => word.push(other),
+            }
+        }
+        Some(())
+    }
+
+    /// The delimiter after `<<` or `<<-`, quotes removed.
+    fn here_delimiter(&mut self) -> HereDoc {
+        let strip_tabs = self.peek() == Some('-');
+        if strip_tabs {
+            self.pos += 1;
+        }
+        while self.peek().is_some_and(|c| c == ' ' || c == '\t') {
+            self.pos += 1;
+        }
+        let (mut delimiter, mut literal) = (String::new(), false);
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() || matches!(c, ';' | '|' | '&' | '<' | '>' | '(' | ')') {
+                break;
+            }
+            self.pos += 1;
+            match c {
+                '\'' | '"' => literal = true,
+                '\\' => literal = true,
+                other => delimiter.push(other),
+            }
+        }
+        HereDoc {
+            delimiter,
+            literal,
+            strip_tabs,
+        }
+    }
+
+    /// A here-document's body, up to its delimiter line: the commands of
+    /// its substitutions unless it is literal.
+    fn here_body(&mut self, heredoc: &HereDoc, depth: usize) -> Option<()> {
+        while self.pos < self.chars.len() {
+            let start = self.pos;
+            while self.peek().is_some_and(|c| c != '\n') {
+                self.pos += 1;
+            }
+            let line = &self.chars[start..self.pos];
+            self.pos += 1;
+            let text: String = line.iter().collect();
+            let text = if heredoc.strip_tabs {
+                text.trim_start_matches('\t')
+            } else {
+                &text
+            };
+            if text == heredoc.delimiter {
+                break;
+            }
+            if !heredoc.literal {
+                let mut body = Lexer {
+                    chars: line,
+                    pos: 0,
+                    commands: Vec::new(),
+                };
+                body.substitutions(depth)?;
+                self.commands.append(&mut body.commands);
+            }
+        }
+        Some(())
+    }
+
+    /// The commands of the substitutions in text that is otherwise literal.
+    fn substitutions(&mut self, depth: usize) -> Option<()> {
+        while let Some(c) = self.next() {
+            match c {
+                '\\' => self.pos += 1,
+                '`' => self.commands_until(Some('`'), depth + 1)?,
+                '$' if self.peek() == Some('(') => {
+                    self.pos += 1;
+                    self.commands_until(Some(')'), depth + 1)?;
+                }
+                _ => {}
+            }
+        }
+        Some(())
+    }
+}
+
+/// What a command's words run, behind wrappers, assignments and
+/// redirections; nothing for no program or a `command -v` lookup.
+fn command_program(words: &[String]) -> Runs {
     let mut rest = words;
     loop {
-        let (first, tail) = rest.split_first()?;
-        let word: String = first
-            .chars()
-            .filter(|c| !matches!(c, '"' | '\'' | '\\'))
-            .collect();
+        let Some((word, tail)) = rest.split_first() else {
+            return Runs::Nothing;
+        };
         let redirect = word.trim_start_matches(|c: char| c.is_ascii_digit());
         if redirect.starts_with(['<', '>']) {
             // A redirection: its target is the next word when not attached.
             let bare = redirect.trim_start_matches(['<', '>', '&']).is_empty();
-            rest = if bare { tail.get(1..)? } else { tail };
+            rest = if bare {
+                tail.get(1..).unwrap_or_default()
+            } else {
+                tail
+            };
             continue;
         }
-        if word.is_empty() || is_env_assignment(&word) {
+        if word.is_empty() || is_env_assignment(word) {
             rest = tail;
             continue;
         }
-        let program = word
-            .rsplit('/')
-            .next()
-            .unwrap_or(&word)
-            .to_ascii_lowercase();
+        let program = word.rsplit('/').next().unwrap_or(word).to_ascii_lowercase();
+        let flags_and_rest = |with_value: &[&str]| {
+            let after = skip_flags(tail, with_value);
+            (&tail[..tail.len() - after.len()], after)
+        };
         rest = match program.as_str() {
             "sudo" | "doas" => skip_flags(
                 tail,
@@ -346,14 +621,28 @@ fn command_program(words: &[&str]) -> Option<String> {
                     "-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t",
                 ],
             ),
-            "env" => skip_flags(tail, &["-u", "-C", "-P", "--unset", "--chdir"]),
-            "command" => {
-                let after = skip_flags(tail, &[]);
-                let lookup = tail[..tail.len() - after.len()]
+            "env" => {
+                let (flags, after) = flags_and_rest(&[
+                    "-u",
+                    "-C",
+                    "-P",
+                    "-S",
+                    "--unset",
+                    "--chdir",
+                    "--split-string",
+                ]);
+                let split = flags
                     .iter()
-                    .any(|flag| flag.starts_with('-') && flag.contains(['v', 'V']));
-                if lookup {
-                    return None;
+                    .position(|flag| flag == "-S" || flag == "--split-string");
+                if let Some(script) = split.and_then(|index| flags.get(index + 1)) {
+                    return Runs::Script(script.clone());
+                }
+                after
+            }
+            "command" => {
+                let (flags, after) = flags_and_rest(&[]);
+                if flags.iter().any(|flag| flag.contains(['v', 'V'])) {
+                    return Runs::Nothing;
                 }
                 after
             }
@@ -367,37 +656,40 @@ fn command_program(words: &[&str]) -> Option<String> {
                 ],
             ),
             // Its duration comes before the command.
-            "timeout" => skip_flags(tail, &["-s", "-k", "--signal", "--kill-after"]).get(1..)?,
+            "timeout" => skip_flags(tail, &["-s", "-k", "--signal", "--kill-after"])
+                .get(1..)
+                .unwrap_or_default(),
             "sh" | "bash" | "zsh" | "dash" | "ksh" => {
-                let after = skip_flags(tail, &["-o", "+o"]);
-                let string = tail[..tail.len() - after.len()].iter().any(|flag| {
+                let (flags, after) = flags_and_rest(&["-o", "+o"]);
+                let reads_string = flags.iter().any(|flag| {
                     flag.starts_with('-') && !flag.starts_with("--") && flag.contains('c')
                 });
-                if !string {
-                    return Some(program);
-                }
-                after
+                return match after.first() {
+                    Some(script) if reads_string => Runs::Script(script.clone()),
+                    _ if reads_string => Runs::Nothing,
+                    _ => Runs::Program(program),
+                };
             }
-            "builtin" | "eval" | "nohup" | "noglob" | "time" | "!" | "{" | "if" | "then"
-            | "else" | "elif" | "do" | "while" | "until" => skip_flags(tail, &[]),
-            _ => return Some(program),
+            "eval" => return Runs::Script(tail.join(" ")),
+            "builtin" | "nohup" | "noglob" | "time" | "!" | "{" | "if" | "then" | "else"
+            | "elif" | "do" | "while" | "until" => skip_flags(tail, &[]),
+            _ => return Runs::Program(program),
         };
     }
 }
 
 /// `words` after leading flags (`-x`, and the value of each flag in
 /// `with_value`), and after a `--` that ends them.
-fn skip_flags<'a, 'b>(words: &'a [&'b str], with_value: &[&str]) -> &'a [&'b str] {
+fn skip_flags<'a>(words: &'a [String], with_value: &[&str]) -> &'a [String] {
     let mut rest = words;
     while let Some((flag, tail)) = rest.split_first() {
-        let flag = flag.trim_matches(['"', '\'']);
         if flag == "--" {
             return tail;
         }
         if !(flag.starts_with('-') || flag.starts_with('+')) || flag.len() < 2 {
             return rest;
         }
-        rest = if with_value.contains(&flag) {
+        rest = if with_value.contains(&flag.as_str()) {
             tail.get(1..).unwrap_or_default()
         } else {
             tail
@@ -406,19 +698,64 @@ fn skip_flags<'a, 'b>(words: &'a [&'b str], with_value: &[&str]) -> &'a [&'b str
     rest
 }
 
+/// One piece of a shell glob.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GlobToken {
+    Literal(u8),
+    /// `?`, or a `[…]` class taken as any one character.
+    One,
+    Any,
+}
+
 /// Whether a shell glob (`*`, `?`, and `[…]` taken as any one character)
-/// could expand to `name`. A word without them must equal it.
+/// could expand to `name`. A word without them must equal it. Iterative,
+/// O(pattern × name): the pattern is the model's.
 fn glob_matches(pattern: &[u8], name: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => name.is_empty(),
-        Some((b'*', rest)) => (0..=name.len()).any(|skip| glob_matches(rest, &name[skip..])),
-        Some((b'?', rest)) => !name.is_empty() && glob_matches(rest, &name[1..]),
-        Some((b'[', rest)) => match rest.iter().position(|&byte| byte == b']') {
-            Some(close) => !name.is_empty() && glob_matches(&rest[close + 1..], &name[1..]),
-            None => name.first() == Some(&b'[') && glob_matches(rest, &name[1..]),
-        },
-        Some((&byte, rest)) => name.first() == Some(&byte) && glob_matches(rest, &name[1..]),
+    let mut tokens = Vec::with_capacity(pattern.len());
+    let mut index = 0;
+    while let Some(&byte) = pattern.get(index) {
+        index += 1;
+        tokens.push(match byte {
+            b'*' => GlobToken::Any,
+            b'?' => GlobToken::One,
+            b'[' => match pattern[index..].iter().position(|&byte| byte == b']') {
+                Some(close) => {
+                    index += close + 1;
+                    GlobToken::One
+                }
+                None => GlobToken::Literal(b'['),
+            },
+            other => GlobToken::Literal(other),
+        });
     }
+    let (mut token, mut at) = (0, 0);
+    // The last `*` and the name position it was tried at.
+    let mut star: Option<(usize, usize)> = None;
+    while at < name.len() {
+        match tokens.get(token) {
+            Some(GlobToken::One) => {
+                token += 1;
+                at += 1;
+            }
+            Some(GlobToken::Literal(byte)) if *byte == name[at] => {
+                token += 1;
+                at += 1;
+            }
+            Some(GlobToken::Any) => {
+                star = Some((token, at));
+                token += 1;
+            }
+            _ => match star {
+                Some((star_token, star_at)) => {
+                    star = Some((star_token, star_at + 1));
+                    token = star_token + 1;
+                    at = star_at + 1;
+                }
+                None => return false,
+            },
+        }
+    }
+    tokens[token..].iter().all(|token| *token == GlobToken::Any)
 }
 
 /// Whether a host a bruh asks to reach is this computer: loopback, the
@@ -1515,8 +1852,31 @@ mod tests {
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true).contains("vault"));
     }
 
+    /// A program word of many stars can't stall the gate: the glob match
+    /// is iterative, not a search over every split.
+    #[test]
+    fn a_word_of_many_stars_is_checked_quickly() {
+        let started = std::time::Instant::now();
+        for stars in [40, 200, 5000] {
+            let word = format!("{}x", "*".repeat(stars));
+            assert!(!is_vault_command(&word), "{stars}");
+            assert!(is_vault_command(
+                &format!("{}y", "*".repeat(stars)).replace('y', "op")
+            ));
+        }
+        assert!(glob_matches(b"s*c?r[iI]t*", b"security"));
+        assert!(!glob_matches(b"s*c?r[iI]t*x", b"security"));
+        assert!(glob_matches(b"*", b"op") && !glob_matches(b"o", b"op"));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_millis(200),
+            "{elapsed:?}"
+        );
+    }
+
     #[test]
     fn vault_commands_and_folders_are_refused_at_every_level() {
+        let deep = format!("{}ls", "$(".repeat(40));
         let refused = [
             "security find-generic-password -s bruhs-ai-secrets -w",
             "/usr/bin/security dump-keychain",
@@ -1550,6 +1910,22 @@ mod tests {
             "eval \"op read x\"",
             "/usr/bin/secur* dump-keychain",
             ">out security dump-keychain",
+            // Quote-aware: these still run the program.
+            "bash -c 'x && security find-generic-password'",
+            "sh -c \"op read op://a/b/c\"",
+            "echo \"$(security find-generic-password -w)\"",
+            "echo \"`op read x`\"",
+            "(cd /tmp; security dump-keychain)",
+            "env -S \"op read x\"",
+            "sudo sh -c \"eval 'security dump-keychain'\"",
+            "cat <<EOF\n$(security dump-keychain)\nEOF",
+            "cat <<-EOF\n\t`op read x`\n\tEOF\nls",
+            "cat <<'EOF'\nliteral\nEOF\nsecurity dump-keychain",
+            "ls 2>&1 | op read x",
+            "f() { security dump-keychain; }",
+            "x=1; op read x",
+            // Nested deeper than anyone writes by hand.
+            &deep,
         ];
         for line in refused {
             assert!(is_vault_command(line), "{line}");
@@ -1587,6 +1963,17 @@ mod tests {
             "cargo test security",
             "command -v security",
             "sh scripts/op.sh",
+            // Quoted text is data, never a command.
+            "git commit -m \"fix(security): patch xss\"",
+            "git commit -m \"feat(op): read references\"",
+            "git commit -m \"$(cat <<'EOF'\nfeat(vault): keep bruhs out\n\nSecurity: op read is refused; security too\nEOF\n)\"",
+            "git commit -F - <<EOF\nSecurity fixes | op\nEOF",
+            "gh pr create --title \"Vault\" --body \"Keeps bruhs out; op is refused | security too\"",
+            "git log --grep='(security)'",
+            "grep 'a|op' notes.txt",
+            "echo done # security dump-keychain",
+            "cat <<< \"security dump-keychain\"",
+            "bash -c 'echo security'",
         ] {
             assert!(!is_vault_command(line), "{line}");
         }

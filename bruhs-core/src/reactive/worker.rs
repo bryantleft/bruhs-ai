@@ -98,8 +98,8 @@ pub(super) fn instructions_stamp(agent: &ReactiveAgent) -> String {
 /// each run.
 #[derive(Debug, Clone, Default)]
 pub(super) struct TurnVault {
-    /// The folders that hold the owner's saved logins
-    /// ([`ReactiveRuntime::private_roots`]).
+    /// The folders that hold the owner's saved logins, as the deny rules
+    /// name them (`ReactiveRuntime::private_rule_folders`).
     pub(super) private: Vec<PathBuf>,
 }
 
@@ -251,7 +251,7 @@ async fn execute(
             &context,
             &runtime.home,
             &TurnVault {
-                private: runtime.private_roots().to_vec(),
+                private: runtime.private_rule_folders().to_vec(),
             },
         ))
         .await
