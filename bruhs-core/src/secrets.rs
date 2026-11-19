@@ -106,6 +106,36 @@ impl SecretManager {
         Ok(())
     }
 
+    /// Every vault entry, value free, sorted by scope then name.
+    pub async fn vault_entries(&self) -> Result<Vec<bruhs_models::vault::VaultEntry>, SecretError> {
+        self.store.vault_list().await
+    }
+
+    pub async fn vault_entry(
+        &self,
+        id: &str,
+    ) -> Result<Option<bruhs_models::vault::VaultEntry>, SecretError> {
+        self.store.vault_entry(id).await
+    }
+
+    /// Create a vault entry. The caller has canonicalized a project path
+    /// and checked that a bruh exists.
+    pub async fn vault_create(
+        &self,
+        mut create: bruhs_models::vault::VaultCreate,
+    ) -> Result<bruhs_models::vault::VaultEntry, SecretError> {
+        create.validate().map_err(SecretError::Invalid)?;
+        self.store.vault_create(create).await
+    }
+
+    /// Forget the own entries of the bruhs in `gone`, which were deleted.
+    pub async fn forget_bruh_entries(
+        &self,
+        gone: &std::collections::HashSet<String>,
+    ) -> Result<usize, SecretError> {
+        self.store.forget_bruh_entries(gone).await
+    }
+
     fn refresh_saved_requests(&self, key: &str, available: bool) {
         let updates: Vec<_> = self
             .lock()

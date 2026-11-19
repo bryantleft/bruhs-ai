@@ -1,4 +1,7 @@
 //! OS values and a private, value-free catalog. Mutations hold a cross-process lock.
+//!
+//! `catalog.json` keeps project keys in the format older binaries read;
+//! every other vault entry lives in `vault.json` beside it (see [`vault`]).
 use super::{storage_key, SecretError};
 use bruhs_models::secrets::{SavedCredential, SavedCredentialState};
 use serde::{Deserialize, Serialize};
@@ -7,11 +10,96 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, LockResult, Mutex, MutexGuard, PoisonError},
 };
+use vault::VaultCatalog;
 use zeroize::Zeroizing;
 
-type MemoryKeys = Arc<Mutex<HashMap<String, Zeroizing<String>>>>;
+mod vault;
+
+/// The keychain account service every Bruhs secret is stored under.
+const KEYCHAIN_SERVICE: &str = "bruhs-ai-secrets";
+
+type MemoryKeys = Arc<KeyMap>;
+
+/// In-memory keychain items for the memory store and tests.
+#[derive(Default)]
+struct KeyMap {
+    values: Mutex<HashMap<String, Zeroizing<String>>>,
+    #[cfg(test)]
+    hooks: KeyHooks,
+}
+
+/// Test-only faults: refused writes and reads that wait like an unanswered
+/// keychain prompt.
+#[cfg(test)]
+#[derive(Default)]
+struct KeyHooks {
+    writes_left: Mutex<Option<usize>>,
+    reads_held: (Mutex<bool>, std::sync::Condvar),
+}
+
+impl KeyMap {
+    fn lock(&self) -> LockResult<MutexGuard<'_, HashMap<String, Zeroizing<String>>>> {
+        self.values.lock()
+    }
+
+    fn read(&self, account: &str) -> Option<Zeroizing<String>> {
+        #[cfg(test)]
+        {
+            let (held, open) = &self.hooks.reads_held;
+            drop(
+                open.wait_while(
+                    held.lock().unwrap_or_else(PoisonError::into_inner),
+                    |held| *held,
+                )
+                .unwrap_or_else(PoisonError::into_inner),
+            );
+        }
+        self.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(account)
+            .cloned()
+    }
+
+    fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
+        #[cfg(test)]
+        if let Some(left) = self
+            .hooks
+            .writes_left
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            if *left == 0 {
+                return Err(SecretError::Storage);
+            }
+            *left -= 1;
+        }
+        self.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(account.to_owned(), Zeroizing::new(value.to_owned()));
+        Ok(())
+    }
+
+    /// Let `count` more writes succeed, then refuse every later one.
+    #[cfg(test)]
+    fn refuse_writes_after(&self, count: usize) {
+        *self
+            .hooks
+            .writes_left
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(count);
+    }
+
+    /// While held, every read waits, like a keychain prompt nobody answers.
+    #[cfg(test)]
+    fn hold_reads(&self, hold: bool) {
+        let (held, open) = &self.hooks.reads_held;
+        *held.lock().unwrap_or_else(PoisonError::into_inner) = hold;
+        open.notify_all();
+    }
+}
 
 #[derive(Clone)]
 pub struct SecretStore(Backend);
@@ -26,7 +114,7 @@ enum Backend {
     FileTest(PathBuf, MemoryKeys),
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Catalog {
     entries: BTreeMap<String, SavedCredential>,
@@ -41,8 +129,69 @@ enum Keys {
 
 struct Vault {
     catalog: Catalog,
+    vault: VaultCatalog,
     keys: Keys,
     directory: Option<PathBuf>,
+}
+
+impl Keys {
+    /// Another handle on the same items, for a read made without the lock.
+    fn handle(&self) -> Self {
+        match self {
+            Self::Os => Self::Os,
+            Self::Memory(keys) => Self::Memory(keys.clone()),
+            #[cfg(test)]
+            Self::Unavailable => Self::Unavailable,
+        }
+    }
+
+    fn read(&self, account: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
+        match self {
+            #[cfg(test)]
+            Self::Unavailable => Err(SecretError::Storage),
+            Self::Memory(keys) => Ok(keys.read(account)),
+            Self::Os => match keyring::Entry::new(KEYCHAIN_SERVICE, account)
+                .map_err(|_| SecretError::Storage)?
+                .get_password()
+            {
+                Ok(value) => Ok(Some(Zeroizing::new(value))),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(_) => Err(SecretError::Storage),
+            },
+        }
+    }
+
+    fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
+        match self {
+            #[cfg(test)]
+            Self::Unavailable => Err(SecretError::Storage),
+            Self::Memory(keys) => keys.write(account, value),
+            Self::Os => keyring::Entry::new(KEYCHAIN_SERVICE, account)
+                .and_then(|entry| entry.set_password(value))
+                .map_err(|_| SecretError::Storage),
+        }
+    }
+
+    /// Remove an item. A missing one is already removed.
+    fn remove(&self, account: &str) -> Result<(), SecretError> {
+        match self {
+            #[cfg(test)]
+            Self::Unavailable => Err(SecretError::Storage),
+            Self::Memory(keys) => {
+                keys.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(account);
+                Ok(())
+            }
+            Self::Os => match keyring::Entry::new(KEYCHAIN_SERVICE, account)
+                .map_err(|_| SecretError::Storage)?
+                .delete_credential()
+            {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(_) => Err(SecretError::Storage),
+            },
+        }
+    }
 }
 
 impl SecretStore {
@@ -54,6 +203,7 @@ impl SecretStore {
     pub fn in_memory() -> Self {
         Self(Backend::Memory(Arc::new(Mutex::new(Vault {
             catalog: Catalog::default(),
+            vault: VaultCatalog::default(),
             keys: Keys::Memory(Arc::default()),
             directory: None,
         }))))
@@ -120,9 +270,30 @@ impl SecretStore {
         .map_err(|_| SecretError::Catalog)?
     }
 
+    /// A legacy value by id. Reads the keychain without the catalog lock,
+    /// so an unanswered keychain prompt never stops a save elsewhere.
     pub(super) async fn get(&self, key: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
         let key = key.to_owned();
-        self.access(move |vault| vault.get(&key)).await
+        let keys = self.keys().await?;
+        tokio::task::spawn_blocking(move || keys.read(&key))
+            .await
+            .map_err(|_| SecretError::Catalog)?
+    }
+
+    /// A handle on this store's keychain items, taken without the catalog lock.
+    async fn keys(&self) -> Result<Keys, SecretError> {
+        Ok(match &self.0 {
+            Backend::Os => Keys::Os,
+            Backend::Memory(vault) => vault
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .keys
+                .handle(),
+            #[cfg(test)]
+            Backend::Unavailable => return Err(SecretError::Storage),
+            #[cfg(test)]
+            Backend::FileTest(_, keys) => Keys::Memory(keys.clone()),
+        })
     }
 
     /// Register a value saved by the first, unindexed implementation when its name is known.
@@ -203,56 +374,24 @@ impl SecretStore {
     /// Delete the saved copy. Already-running commands keep their own process environment.
     pub async fn delete_saved(&self, id: &str) -> Result<(), SecretError> {
         let id = id.to_owned();
-        self.access(move |vault| {
-            if !vault.catalog.entries.contains_key(&id) {
-                return Err(SecretError::NotSaved);
-            }
-            if let Some(entry) = vault.catalog.entries.get_mut(&id) {
-                entry.state = SavedCredentialState::NeedsAttention;
-            }
-            vault.persist()?;
-            match &vault.keys {
-                #[cfg(test)]
-                Keys::Unavailable => return Err(SecretError::Storage),
-                Keys::Memory(keys) => {
-                    keys.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .remove(&id);
-                }
-                Keys::Os => match keyring::Entry::new("bruhs-ai-secrets", &id)
-                    .map_err(|_| SecretError::Storage)?
-                    .delete_credential()
-                {
-                    Ok(()) | Err(keyring::Error::NoEntry) => {}
-                    Err(_) => return Err(SecretError::Storage),
-                },
-            }
-            vault.catalog.entries.remove(&id);
-            vault.persist()
-        })
-        .await
+        self.access(move |vault| vault.delete_saved(&id)).await
     }
 }
 
 impl Vault {
     fn get(&self, key: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
-        match &self.keys {
-            #[cfg(test)]
-            Keys::Unavailable => Err(SecretError::Storage),
-            Keys::Memory(values) => Ok(values
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get(key)
-                .cloned()),
-            Keys::Os => match keyring::Entry::new("bruhs-ai-secrets", key)
-                .map_err(|_| SecretError::Storage)?
-                .get_password()
-            {
-                Ok(value) => Ok(Some(Zeroizing::new(value))),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(_) => Err(SecretError::Storage),
-            },
-        }
+        self.keys.read(key)
+    }
+
+    fn delete_saved(&mut self, id: &str) -> Result<(), SecretError> {
+        let Some(entry) = self.catalog.entries.get_mut(id) else {
+            return Err(SecretError::NotSaved);
+        };
+        entry.state = SavedCredentialState::NeedsAttention;
+        self.persist()?;
+        self.keys.remove(id)?;
+        self.catalog.entries.remove(id);
+        self.persist()
     }
 
     fn save(
@@ -265,18 +404,7 @@ impl Vault {
         let id = entry.id.clone();
         self.catalog.entries.insert(id.clone(), entry);
         self.persist()?;
-        match &self.keys {
-            #[cfg(test)]
-            Keys::Unavailable => return Err(SecretError::Storage),
-            Keys::Memory(keys) => {
-                keys.lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .insert(id.clone(), value.clone());
-            }
-            Keys::Os => keyring::Entry::new("bruhs-ai-secrets", &id)
-                .and_then(|entry| entry.set_password(value))
-                .map_err(|_| SecretError::Storage)?,
-        }
+        self.keys.write(&id, value)?;
         if let Some(entry) = self.catalog.entries.get_mut(&id) {
             entry.state = SavedCredentialState::Saved;
         }
@@ -284,23 +412,33 @@ impl Vault {
     }
 
     fn persist(&self) -> Result<(), SecretError> {
-        let Some(directory) = &self.directory else {
-            return Ok(());
-        };
-        let mut file =
-            tempfile::NamedTempFile::new_in(directory).map_err(|_| SecretError::Catalog)?;
-        serde_json::to_writer(&mut file, &self.catalog).map_err(|_| SecretError::Catalog)?;
-        file.flush()
-            .and_then(|()| file.as_file().sync_all())
-            .map_err(|_| SecretError::Catalog)?;
-        file.persist(directory.join("catalog.json"))
-            .map_err(|_| SecretError::Catalog)?;
-        #[cfg(unix)]
-        File::open(directory)
-            .and_then(|file| file.sync_all())
-            .map_err(|_| SecretError::Catalog)?;
-        Ok(())
+        match &self.directory {
+            Some(directory) => write_atomically(directory, "catalog.json", &self.catalog),
+            None => Ok(()),
+        }
     }
+}
+
+/// Replace `directory/name` with `value`'s JSON: a private temp file,
+/// fsync, rename, then a directory fsync. Readers see the old or the new
+/// file, never a partial one.
+fn write_atomically(
+    directory: &Path,
+    name: &str,
+    value: &impl Serialize,
+) -> Result<(), SecretError> {
+    let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|_| SecretError::Catalog)?;
+    serde_json::to_writer(&mut file, value).map_err(|_| SecretError::Catalog)?;
+    file.flush()
+        .and_then(|()| file.as_file().sync_all())
+        .map_err(|_| SecretError::Catalog)?;
+    file.persist(directory.join(name))
+        .map_err(|_| SecretError::Catalog)?;
+    #[cfg(unix)]
+    File::open(directory)
+        .and_then(|file| file.sync_all())
+        .map_err(|_| SecretError::Catalog)?;
+    Ok(())
 }
 
 fn with_catalog<T>(
@@ -327,8 +465,10 @@ fn with_catalog<T>(
         .map_err(|_| SecretError::Catalog)?;
     lock.lock().map_err(|_| SecretError::Catalog)?;
     let catalog = read_catalog(directory)?;
+    let vault = vault::read_vault_catalog(directory)?;
     let result = operation(&mut Vault {
         catalog,
+        vault,
         keys,
         directory: Some(directory.into()),
     });
@@ -361,3 +501,5 @@ fn read_catalog(directory: &Path) -> Result<Catalog, SecretError> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vault_tests;
