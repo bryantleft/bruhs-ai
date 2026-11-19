@@ -33,3 +33,7 @@ AGENTS.md
 
 # Release bundles (scripts/bundle-macos.sh)
 /dist/
+
+# Local documentation and pull request recordings
+/docs/
+/.bruhs/pr-media/
