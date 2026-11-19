@@ -318,7 +318,7 @@ pub fn is_forge_command(command: &str) -> bool {
 /// its folder taken off (`/usr/bin/security`). A program with `*`, `?` or
 /// `[…]` counts when it could expand to one of them.
 ///
-/// The line is read the way a shell reads it ([`shell_lines`]): quoted text
+/// The line is read the way a shell reads it (`shell_lines`): quoted text
 /// and quoted here-documents are words, never commands, so a commit
 /// message or a search pattern that names `security` stays allowed, while
 /// `$(…)`, backticks, `<(…)` and `>(…)` (also inside double quotes and
@@ -328,7 +328,7 @@ pub fn is_forge_command(command: &str) -> bool {
 /// `builtin`, `exec`, `nohup`, `noglob`, `time`, `nice`, `timeout`,
 /// `stdbuf` and `xargs` with their flags. The string of `sh`, `bash`,
 /// `zsh`, `dash` or `ksh -c`, of `eval` and of `env -S` is read as a line
-/// of its own. A line nested deeper than [`SHELL_NESTING`] is refused.
+/// of its own. A line nested deeper than `SHELL_NESTING` is refused.
 ///
 /// Like [`is_forge_command`], a speed bump, not a boundary: a variable
 /// (`$tool`), a name built by a substitution, a script file, a line piped

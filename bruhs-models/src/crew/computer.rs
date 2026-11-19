@@ -530,7 +530,7 @@ const SAFE_ATTRIBUTES: [&str; 10] = [
 
 /// Whether a selector's match count could tell what a filled field holds:
 /// a value state, an attribute selector outside the exact-match allowlist
-/// ([`safe_attribute`]), or an escape, comment or quote outside one that
+/// (`safe_attribute`), or an escape, comment or quote outside one that
 /// could spell either. Refused with [`SELECTOR_AFTER_FILL`] on a document a
 /// vault fill touched. Anything that doesn't parse is refused.
 #[must_use]
