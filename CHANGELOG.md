@@ -9,6 +9,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ## [Unreleased]
 
+### Added
+
+- Vault: Settings, Vault (formerly Credentials) now creates logins with one-time codes, keys and 1Password references. Grant a login to a bruh and it signs in on that site in its own browser without seeing the password. Keys still ask each time. See `docs/secure-credential-requests.md`.
+
 ## [0.2.0] - 2026-11-18
 
 ### Added

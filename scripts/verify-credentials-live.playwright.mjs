@@ -69,7 +69,10 @@ const api = async (path, options = {}) => {
 };
 const card = () => page.getByRole('region', { name: 'Private credential request', exact: true });
 const stop = () => page.getByRole('button', { name: /^(Stop generation|Interrupt)$/ });
-const entry = name => page.locator('#credentials').getByRole('article', { name: `Saved credential: ${name}`, exact: true });
+const entry = name => page.locator('#vault').getByRole('article', { name: `Vault entry: ${name}`, exact: true });
+// A thread's Save securely keeps a project key in the legacy catalog, so its
+// vault entry has that catalog's id and a project scope.
+const projectKey = (id, name) => ({ id, name, scope: { type: 'project', path: project }, kind: { kind: 'value' }, state: 'saved', attention: null });
 async function walk(directory) {
   const files = [];
   for (const item of await readdir(directory, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
@@ -108,8 +111,10 @@ async function privacy() {
     return result;
   });
   for (const text of [JSON.stringify(stored), await page.locator('body').innerText(), serverLog]) assert(!privateValues.some(value => text.includes(value)), 'Canary appeared outside a private credential field/request');
-  const catalog = await readFile(join(testHome, 'Library/Application Support/dev.bruhs.bruhs-ai/credentials/catalog.json'), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
-  assert(!privateValues.some(value => catalog.includes(value)), 'Catalog contains a credential value');
+  for (const file of ['catalog.json', 'vault.json']) {
+    const catalog = await readFile(join(testHome, 'Library/Application Support/dev.bruhs.bruhs-ai/credentials', file), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
+    assert(!privateValues.some(value => catalog.includes(value)), `${file} contains a credential value`);
+  }
   assert.equal(report.leaks.length, 0, 'Private value crossed the credential transport boundary');
   for (const file of await walk(testHome)) {
     const bytes = await readFile(file);
@@ -118,8 +123,8 @@ async function privacy() {
 }
 async function openSettings() {
   await page.goto(origin + '/#/settings');
-  await page.locator('#credentials').getByRole('heading', { name: 'Credentials', exact: true }).waitFor({ timeout: 45000 });
-  await page.getByRole('navigation', { name: 'Settings sections', exact: true }).getByRole('button', { name: 'Credentials', exact: true }).click();
+  await page.locator('#vault').getByRole('heading', { name: 'Vault', exact: true }).waitFor({ timeout: 45000 });
+  await page.getByRole('navigation', { name: 'Settings sections', exact: true }).getByRole('button', { name: 'Vault', exact: true }).click();
 }
 async function start(provider, name, expected, label) {
   phase = `${provider}-${label}`;
@@ -192,8 +197,8 @@ try {
   for (const id of ids) { assert.equal(keychainStatus(id), 44, 'A generated test account unexpectedly already exists'); ownedIds.add(id); }
   server = spawn(join(root, 'target/debug/bruhs-server'), [], { env, cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', value => { serverLog += value; }); server.stderr.on('data', value => { serverLog += value; });
-  await waitFor(async () => { if (server.exitCode !== null) throw new Error('Isolated server exited'); return fetch(origin + '/api/credentials').then(r => r.ok).catch(() => false); }, 'isolated server', 20000);
-  const initial = await api('/api/credentials'); assert.deepEqual(initial.body, [], 'Isolated catalog was not empty');
+  await waitFor(async () => { if (server.exitCode !== null) throw new Error('Isolated server exited'); return fetch(origin + '/api/vault').then(r => r.ok).catch(() => false); }, 'isolated server', 20000);
+  const initial = await api('/api/vault'); assert.deepEqual(initial.body.entries, [], 'Isolated vault was not empty');
   for (const provider of providers) {
     const auth = await api(`/api/agent/auth/${provider}`); assert(auth.body.authenticated, `${provider} is not authenticated in isolated app`);
     report.checks.push({ phase: `${provider}-authenticated`, passed: true });
@@ -228,7 +233,7 @@ try {
   });
   context.on('request', request => {
     const path = new URL(request.url()).pathname, body = request.postData() || '';
-    if (privateValues.some(value => body.includes(value)) && path !== '/api/agent/secret' && !(request.method() === 'PUT' && path.startsWith('/api/credentials/'))) report.leaks.push({ phase, boundary: path });
+    if (privateValues.some(value => body.includes(value)) && path !== '/api/agent/secret' && !(request.method() === 'PUT' && path.startsWith('/api/vault/'))) report.leaks.push({ phase, boundary: path });
   });
   page = await context.newPage(); page.on('pageerror', error => report.pageErrors.push({ phase, message: sanitize(error.stack || error) }));
   for (const [i, provider] of providers.entries()) {
@@ -253,21 +258,23 @@ try {
     await privacy();
     await card().getByRole('button', { name: 'Save securely and use', exact: true }).click();
     await finish(); assert.equal(keychainStatus(id), 0, 'Save did not create an actual Keychain item');
-    const listed = (await api('/api/credentials')).body;
-    assert.deepEqual(listed, [{ id, name, project_path: project, state: 'saved' }], 'Saved metadata did not match the isolated entry');
+    const listed = (await api('/api/vault')).body.entries;
+    assert.deepEqual(listed, [projectKey(id, name)], 'Saved metadata did not match the isolated entry');
     await openSettings(); await entry(name).waitFor();
     await page.screenshot({ path: join(artifacts, `${provider}-saved-settings.png`) });
-    await entry(name).getByRole('button', { name: 'Replace', exact: true }).click();
-    const replacement = entry(name).getByLabel('New credential value', { exact: true }); assert.equal(await replacement.getAttribute('type'), 'password');
+    await entry(name).getByRole('button', { name: 'Edit', exact: true }).click();
+    const replacement = entry(name).getByLabel('Value', { exact: true }); assert.equal(await replacement.getAttribute('type'), 'password');
     await replacement.fill(replacements[i]); await privacy();
-    const replaced = page.waitForResponse(response => response.url() === `${origin}/api/credentials/${id}` && response.request().method() === 'PUT');
-    await entry(name).getByRole('button', { name: 'Save replacement', exact: true }).click(); assert.equal((await replaced).status(), 204);
+    const replaced = page.waitForResponse(response => response.url() === `${origin}/api/vault/${id}` && response.request().method() === 'PUT');
+    await entry(name).getByRole('button', { name: 'Save entry', exact: true }).click();
+    const answer = await replaced; assert.equal(answer.status(), 200);
+    assert.deepEqual(await answer.json(), projectKey(id, name), 'Replacing the value changed its metadata');
     const reused = await start(provider, name, replacements[i], 'reuse-replacement'); assert(reused.saved_available);
     await card().getByRole('button', { name: 'Use saved', exact: true }).click(); await finish();
     await openSettings(); await entry(name).getByRole('button', { name: 'Delete', exact: true }).click();
-    const deleted = page.waitForResponse(response => response.url() === `${origin}/api/credentials/${id}` && response.request().method() === 'DELETE');
-    await entry(name).getByRole('button', { name: 'Delete credential', exact: true }).click(); assert.equal((await deleted).status(), 204);
-    assert.equal(keychainStatus(id), 44, 'Delete left the actual Keychain item behind'); assert.deepEqual((await api('/api/credentials')).body, []);
+    const deleted = page.waitForResponse(response => response.url() === `${origin}/api/vault/${id}` && response.request().method() === 'DELETE');
+    await entry(name).getByRole('group').getByRole('button', { name: 'Delete', exact: true }).click(); assert.equal((await deleted).status(), 204);
+    assert.equal(keychainStatus(id), 44, 'Delete left the actual Keychain item behind'); assert.deepEqual((await api('/api/vault')).body.entries, []);
     const absent = await start(provider, name, replacements[i], 'deleted-decline'); assert(!absent.saved_available);
     await card().getByRole('button', { name: 'Decline', exact: true }).click(); await finish('declined');
     const cancelled = await start(provider, name, originals[i], 'cancel-pending');
@@ -283,9 +290,9 @@ try {
   for (const [i, id] of ids.entries()) {
     if (!ownedIds.has(id)) continue;
     try {
-      const rows = (await api('/api/credentials')).body;
+      const rows = (await api('/api/vault')).body.entries;
       const row = rows.find(row => row.id === id);
-      if (row) { assert.equal(row.project_path, project); assert.equal(row.name, names[i]); await api(`/api/credentials/${id}`, { method: 'DELETE' }); }
+      if (row) { assert.equal(row.scope.path, project); assert.equal(row.name, names[i]); await api(`/api/vault/${id}`, { method: 'DELETE' }); }
     } catch (error) { report.cleanupApiError = sanitize(error.message); }
     // The API may have crashed. Only accounts proven absent before this test
     // are eligible for the exact-account OS fallback.

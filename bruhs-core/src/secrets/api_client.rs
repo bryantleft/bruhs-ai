@@ -36,7 +36,7 @@ impl SecretStore {
         for key in needed {
             let name = &environment.secrets[&key];
             let value=self.find(&execution.project_path,name).await.map_err(|_|ApiClientError::Storage("Could not unlock this request's saved credential. Unlock the OS keychain and retry with a new approval.".into()))?
-                .filter(|value|!value.is_empty()).ok_or_else(||ApiClientError::Storage(format!("Save credential {name} for this working folder in Settings → Credentials, then retry with a new approval.")))?;
+                .filter(|value|!value.is_empty()).ok_or_else(||ApiClientError::Storage(format!("Save credential {name} for this working folder in Settings, Vault, then retry with a new approval.")))?;
             secrets.insert(key, value);
         }
         let interpolate = |text: &str| -> ApiResult<Zeroizing<String>> {
