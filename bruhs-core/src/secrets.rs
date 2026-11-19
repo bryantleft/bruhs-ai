@@ -3,6 +3,7 @@
 mod api_client;
 mod database;
 pub(crate) mod mcp;
+pub(crate) mod private;
 mod storage;
 #[cfg(test)]
 mod tests;

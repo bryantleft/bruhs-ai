@@ -42,6 +42,21 @@ pub const PROFILE_DENIAL: &str =
 pub const LINKED_FILE_DENIAL: &str =
     "That file is also linked somewhere else, so it could be a private file. Bruhs doesn't open linked files in a bruh's folder.";
 
+/// A shell line that runs `security` or `op`, at any level.
+pub const VAULT_COMMAND_DENIAL: &str =
+    "Bruhs can't read the keychain or 1Password from a shell. Fill a vault login in your browser instead.";
+/// A file tool call whose path, once resolved, is in a folder that holds
+/// the owner's saved logins: the vault catalog, the keychains or 1Password's.
+pub const VAULT_FILE_DENIAL: &str = "That path holds the owner's saved logins. Leave it alone.";
+
+/// Claude `--disallowedTools` rules every bruh run gets. `Bash(op:*)` is a
+/// word prefix, the same as `Bash(op *)`: it matches `op` and `op read`,
+/// never `open` or `openssl`. Claude matches them after splitting a line at
+/// `&&`, `|` and `;` and stripping plain wrappers such as `timeout` or
+/// `nohup`, not behind `sh -c` or a full path; [`is_vault_command`] covers
+/// those. `/proc` holds other processes' environments and memory.
+pub const VAULT_DENY_RULES: [&str; 3] = ["Bash(security:*)", "Bash(op:*)", "Read(//proc/**)"];
+
 /// Forge hosts a shell command can act on as the owner. Plain `gh`, `glab`
 /// and commands naming one of these ask first at Full; see
 /// [`is_forge_command`] for what the check misses.
@@ -142,6 +157,10 @@ pub fn permission_gate(
     // read the bruh's own live view session or approve its own steps.
     if tool == "WebFetch" && input["url"].as_str().is_some_and(is_local_url) {
         return Gate::Deny(LOCAL_HOST_DENIAL);
+    }
+    // At every level: a vault read would hand the bruh a value.
+    if tool == "Bash" && input["command"].as_str().is_some_and(is_vault_command) {
+        return Gate::Deny(VAULT_COMMAND_DENIAL);
     }
     if level == AccessLevel::ReadOnly {
         return Gate::Deny(READ_ONLY_DENIAL);
@@ -266,6 +285,142 @@ pub fn is_forge_command(command: &str) -> bool {
     })
 }
 
+/// Whether a shell line runs the keychain's `security` tool or 1Password's
+/// `op`: the program of any command in the line (split at `&`, `|`, `;`,
+/// newlines, parentheses and backticks, so `$(…)`, `<(…)` and pipelines
+/// count), compared without case, its quotes and backslashes dropped and
+/// its folder taken off (`/usr/bin/security`, `'op'`, `\op`). A program
+/// with `*` or `?` counts when it could expand to one of them. The program
+/// is found behind `NAME=value` words and the wrappers `sudo`, `doas`,
+/// `env`, `command`, `builtin`, `exec`, `eval`, `nohup`, `noglob`, `time`,
+/// `nice`, `timeout`, `stdbuf` and `xargs` (with their flags), shell words
+/// such as `if` and `!`, and inside `sh`, `bash`, `zsh`, `dash` or `ksh`
+/// with `-c`. Only the program position counts: `echo security` doesn't.
+///
+/// Like [`is_forge_command`], a speed bump, not a boundary: a variable
+/// (`$tool`), a name built by a substitution, a script file, a line piped
+/// into a shell, an interpreter (`python -c`), a function or alias, brace
+/// expansion, `find -exec` or `ssh` gets past it. The line is split inside
+/// quotes too, so a pattern such as `grep 'a|op'` is refused.
+#[must_use]
+pub fn is_vault_command(command: &str) -> bool {
+    shell_commands(command).any(|words| {
+        command_program(&words).is_some_and(|program| {
+            ["security", "op"]
+                .iter()
+                .any(|name| glob_matches(program.as_bytes(), name.as_bytes()))
+        })
+    })
+}
+
+/// The lowercased program a command's words run, behind wrappers and
+/// assignments; `None` for no program or a `command -v` lookup.
+fn command_program(words: &[&str]) -> Option<String> {
+    let mut rest = words;
+    loop {
+        let (first, tail) = rest.split_first()?;
+        let word: String = first
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\'' | '\\'))
+            .collect();
+        let redirect = word.trim_start_matches(|c: char| c.is_ascii_digit());
+        if redirect.starts_with(['<', '>']) {
+            // A redirection: its target is the next word when not attached.
+            let bare = redirect.trim_start_matches(['<', '>', '&']).is_empty();
+            rest = if bare { tail.get(1..)? } else { tail };
+            continue;
+        }
+        if word.is_empty() || is_env_assignment(&word) {
+            rest = tail;
+            continue;
+        }
+        let program = word
+            .rsplit('/')
+            .next()
+            .unwrap_or(&word)
+            .to_ascii_lowercase();
+        rest = match program.as_str() {
+            "sudo" | "doas" => skip_flags(
+                tail,
+                &[
+                    "-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t",
+                ],
+            ),
+            "env" => skip_flags(tail, &["-u", "-C", "-P", "--unset", "--chdir"]),
+            "command" => {
+                let after = skip_flags(tail, &[]);
+                let lookup = tail[..tail.len() - after.len()]
+                    .iter()
+                    .any(|flag| flag.starts_with('-') && flag.contains(['v', 'V']));
+                if lookup {
+                    return None;
+                }
+                after
+            }
+            "exec" => skip_flags(tail, &["-a"]),
+            "nice" => skip_flags(tail, &["-n", "--adjustment"]),
+            "stdbuf" => skip_flags(tail, &["-i", "-o", "-e"]),
+            "xargs" => skip_flags(
+                tail,
+                &[
+                    "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "-a",
+                ],
+            ),
+            // Its duration comes before the command.
+            "timeout" => skip_flags(tail, &["-s", "-k", "--signal", "--kill-after"]).get(1..)?,
+            "sh" | "bash" | "zsh" | "dash" | "ksh" => {
+                let after = skip_flags(tail, &["-o", "+o"]);
+                let string = tail[..tail.len() - after.len()].iter().any(|flag| {
+                    flag.starts_with('-') && !flag.starts_with("--") && flag.contains('c')
+                });
+                if !string {
+                    return Some(program);
+                }
+                after
+            }
+            "builtin" | "eval" | "nohup" | "noglob" | "time" | "!" | "{" | "if" | "then"
+            | "else" | "elif" | "do" | "while" | "until" => skip_flags(tail, &[]),
+            _ => return Some(program),
+        };
+    }
+}
+
+/// `words` after leading flags (`-x`, and the value of each flag in
+/// `with_value`), and after a `--` that ends them.
+fn skip_flags<'a, 'b>(words: &'a [&'b str], with_value: &[&str]) -> &'a [&'b str] {
+    let mut rest = words;
+    while let Some((flag, tail)) = rest.split_first() {
+        let flag = flag.trim_matches(['"', '\'']);
+        if flag == "--" {
+            return tail;
+        }
+        if !(flag.starts_with('-') || flag.starts_with('+')) || flag.len() < 2 {
+            return rest;
+        }
+        rest = if with_value.contains(&flag) {
+            tail.get(1..).unwrap_or_default()
+        } else {
+            tail
+        };
+    }
+    rest
+}
+
+/// Whether a shell glob (`*`, `?`, and `[…]` taken as any one character)
+/// could expand to `name`. A word without them must equal it.
+fn glob_matches(pattern: &[u8], name: &[u8]) -> bool {
+    match pattern.split_first() {
+        None => name.is_empty(),
+        Some((b'*', rest)) => (0..=name.len()).any(|skip| glob_matches(rest, &name[skip..])),
+        Some((b'?', rest)) => !name.is_empty() && glob_matches(rest, &name[1..]),
+        Some((b'[', rest)) => match rest.iter().position(|&byte| byte == b']') {
+            Some(close) => !name.is_empty() && glob_matches(&rest[close + 1..], &name[1..]),
+            None => name.first() == Some(&b'[') && glob_matches(rest, &name[1..]),
+        },
+        Some((&byte, rest)) => name.first() == Some(&byte) && glob_matches(rest, &name[1..]),
+    }
+}
+
 /// Whether a host a bruh asks to reach is this computer: loopback, the
 /// unspecified address, `localhost` or a `.localhost` name, in any form a
 /// resolver accepts (`127.1`, `0x7f000001`, `[::1]:3001`). A bruh that
@@ -375,14 +530,16 @@ fn git_subcommand<'a>(words: &[&'a str]) -> Option<&'a str> {
     None
 }
 
-/// Claude deny rules for a run: delivery stays off unless the gate allows it.
+/// Claude deny rules for a run: delivery stays off unless the gate allows
+/// it, and the vault rules ([`VAULT_DENY_RULES`]) always hold.
 #[must_use]
 pub fn claude_deny_rules(access: &BruhAccess, level: AccessLevel) -> Vec<&'static str> {
-    if gate(access, level, GatedAction::Delivery) == Gate::Allow {
-        Vec::new()
+    let delivery = if gate(access, level, GatedAction::Delivery) == Gate::Allow {
+        &[][..]
     } else {
-        DELIVERY_DENY_RULES.to_vec()
-    }
+        &DELIVERY_DENY_RULES[..]
+    };
+    [delivery, &VAULT_DENY_RULES[..]].concat()
 }
 
 /// Absolute path components with `.` and empty parts dropped; `None` for a
@@ -1154,11 +1311,11 @@ mod tests {
         );
         assert_eq!(
             claude_deny_rules(&full(true), AccessLevel::Full),
-            Vec::<&str>::new()
+            VAULT_DENY_RULES.to_vec()
         );
         assert_eq!(
             claude_deny_rules(&full(false), AccessLevel::Full),
-            DELIVERY_DENY_RULES.to_vec()
+            [DELIVERY_DENY_RULES.as_slice(), VAULT_DENY_RULES.as_slice()].concat()
         );
     }
 
@@ -1356,5 +1513,89 @@ mod tests {
         assert!(on.contains(VAULT_PREAMBLE), "{on}");
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false).contains("vault"));
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true).contains("vault"));
+    }
+
+    #[test]
+    fn vault_commands_and_folders_are_refused_at_every_level() {
+        let refused = [
+            "security find-generic-password -s bruhs-ai-secrets -w",
+            "/usr/bin/security dump-keychain",
+            "sh -c \"op read op://P/I/password\"",
+            "FOO=1 env op item get x",
+            "ls && sudo security export",
+            // Wrappers, quoting, substitution and pipelines.
+            "env -i PATH=/usr/bin security list-keychains",
+            "sudo -u root -E /usr/bin/security find-internet-password",
+            "command security dump-keychain",
+            "exec op read op://P/I/password",
+            "nohup op signin",
+            "time nice -n 5 security find-generic-password",
+            "echo x | xargs -n 1 op read",
+            "printf x | xargs op read",
+            "bash -c 'cd /tmp && security dump-keychain'",
+            "zsh -lc \"op whoami\"",
+            "'security' dump-keychain",
+            "\"/usr/bin/security\" dump-keychain",
+            "s\"ecur\"ity dump-keychain",
+            "\\op read x",
+            "SECURITY dump-keychain",
+            "echo $(security find-generic-password -w)",
+            "x=`op read op://P/I/password`",
+            "cat <(op read op://P/I/password)",
+            "op read x | pbcopy",
+            "cat file | /opt/homebrew/bin/op inject",
+            "timeout 5 security dump-keychain",
+            "if security dump-keychain; then echo y; fi",
+            "! op whoami",
+            "eval \"op read x\"",
+            "/usr/bin/secur* dump-keychain",
+            ">out security dump-keychain",
+        ];
+        for line in refused {
+            assert!(is_vault_command(line), "{line}");
+            for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+                for can_deliver in [false, true] {
+                    let access = BruhAccess {
+                        level,
+                        can_deliver,
+                        ..Default::default()
+                    };
+                    assert_eq!(
+                        permission_gate(
+                            &access,
+                            AgentProvider::Claude,
+                            "Bash",
+                            &serde_json::json!({"command": line}),
+                            "/w",
+                            true
+                        ),
+                        Gate::Deny(VAULT_COMMAND_DENIAL),
+                        "{line} {level:?}"
+                    );
+                }
+            }
+        }
+        for line in [
+            "echo security",
+            "git log --oneline",
+            "cat opinions.txt",
+            "./op-tool",
+            "grep op src/main.rs",
+            "open https://example.com",
+            "openssl rand -hex 16",
+            "opam install dune",
+            "cargo test security",
+            "command -v security",
+            "sh scripts/op.sh",
+        ] {
+            assert!(!is_vault_command(line), "{line}");
+        }
+        for access in [full(true), full(false), BruhAccess::default()] {
+            let rules = claude_deny_rules(&access, access.level);
+            assert!(
+                VAULT_DENY_RULES.iter().all(|rule| rules.contains(rule)),
+                "{access:?}"
+            );
+        }
     }
 }

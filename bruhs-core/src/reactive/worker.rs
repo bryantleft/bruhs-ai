@@ -7,7 +7,11 @@ use bruhs_models::{
     secrets::SecretDecision,
     thread_link::ThreadAccess,
 };
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio_stream::StreamExt;
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
@@ -90,6 +94,15 @@ pub(super) fn instructions_stamp(agent: &ReactiveAgent) -> String {
         .collect()
 }
 
+/// What a run's turn needs from the vault, built from the runtime before
+/// each run.
+#[derive(Debug, Clone, Default)]
+pub(super) struct TurnVault {
+    /// The folders that hold the owner's saved logins
+    /// ([`ReactiveRuntime::private_roots`]).
+    pub(super) private: Vec<PathBuf>,
+}
+
 /// One run's turn. The bruh's name and access ride in the run's own message,
 /// so renaming a bruh or changing its access keeps the provider session.
 pub(super) fn turn(
@@ -98,6 +111,7 @@ pub(super) fn turn(
     run: &ReactiveRun,
     context: &str,
     home: &Path,
+    vault: &TurnVault,
 ) -> AgentTurn {
     let instructions = system_instructions(agent);
     let provider = AgentProvider::for_model(&agent.model);
@@ -132,8 +146,20 @@ pub(super) fn turn(
     .effort(bruh.effort.as_deref())
     .unattended_with(bruh.access.clone())
     .computer(computer.then(|| agent.id.clone()))
-    // Every run, Computer on or off: the profile outlives Computer off.
-    .hide_folders(super::computers::hidden_folders(home, &agent.id));
+    // Every run, Computer on or off: the profile outlives Computer off. The
+    // keychains folder stays out of the rules (`deny_rule_may_name`).
+    .hide_folders(
+        super::computers::hidden_folders(home, &agent.id)
+            .into_iter()
+            .chain(
+                vault
+                    .private
+                    .iter()
+                    .filter(|folder| crate::secrets::private::deny_rule_may_name(folder))
+                    .cloned(),
+            )
+            .collect(),
+    );
     // `resume(None)` otherwise falls back to the orchestrator's in-memory session.
     if run.session_id.is_none() {
         turn.fresh()
@@ -224,6 +250,9 @@ async fn execute(
             &effective_run,
             &context,
             &runtime.home,
+            &TurnVault {
+                private: runtime.private_roots().to_vec(),
+            },
         ))
         .await
     {

@@ -436,6 +436,7 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
         &run,
         "",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert_eq!(turn.permission_mode, PermissionMode::Plan);
     assert_eq!(
@@ -473,7 +474,8 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
             &BruhProfile::default(),
             &run,
             "",
-            std::path::Path::new("/home")
+            std::path::Path::new("/home"),
+            &worker::TurnVault::default()
         )
         .permission_mode,
         PermissionMode::Plan
@@ -717,6 +719,7 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         &run,
         "",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert!(run.session_id.is_none() && turn.fresh_session);
     assert!(turn.instructions.unwrap().contains("Prefer a table."));

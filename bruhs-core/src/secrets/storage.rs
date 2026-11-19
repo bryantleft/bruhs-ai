@@ -336,7 +336,7 @@ fn with_catalog<T>(
     result
 }
 
-fn catalog_directory() -> Result<PathBuf, SecretError> {
+pub(super) fn catalog_directory() -> Result<PathBuf, SecretError> {
     Ok(directories::ProjectDirs::from("dev", "bruhs", "bruhs-ai")
         .ok_or(SecretError::Catalog)?
         .data_local_dir()

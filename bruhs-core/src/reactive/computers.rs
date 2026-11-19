@@ -329,6 +329,7 @@ struct WeakRuntime {
     computers: Weak<OnceLock<Arc<LocalToolsHost>>>,
     syncing: Weak<std::sync::atomic::AtomicBool>,
     allowances: Weak<super::approval::Allowances>,
+    private_roots: Weak<Vec<PathBuf>>,
 }
 
 impl WeakRuntime {
@@ -343,6 +344,7 @@ impl WeakRuntime {
             computers: Arc::downgrade(&runtime.computers),
             syncing: Arc::downgrade(&runtime.syncing),
             allowances: Arc::downgrade(&runtime.allowances),
+            private_roots: Arc::downgrade(&runtime.private_roots),
         }
     }
 
@@ -357,6 +359,7 @@ impl WeakRuntime {
             computers: self.computers.upgrade()?,
             syncing: self.syncing.upgrade()?,
             allowances: self.allowances.upgrade()?,
+            private_roots: self.private_roots.upgrade()?,
         })
     }
 }

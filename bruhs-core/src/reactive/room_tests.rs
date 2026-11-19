@@ -566,6 +566,7 @@ async fn a_room_run_shares_the_bruhs_session_and_names_the_room() {
         &claim.run,
         &claim.context,
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert!(turn.prompt.starts_with("Your name is Agent a.\n"));
     assert!(turn.prompt.contains("[Room \"Launch\" with "));

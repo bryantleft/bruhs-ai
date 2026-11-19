@@ -13,6 +13,7 @@ use bruhs_models::{
         approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
         ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED,
         LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL,
+        VAULT_FILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -410,10 +411,10 @@ enum Opened {
 /// so one call waits at most three times `timeout`: an approval asked
 /// after a long hold still gets its whole time.
 ///
-/// A file tool call is refused first when it reaches a browser profile by
-/// another name (`private_file_refusal`). Claude itself allows Read,
-/// Grep and Glob at Ask and Full, so only the calls it asks about reach
-/// this check.
+/// A file tool call is refused first when it reaches a vault folder or a
+/// browser profile by another name (`private_file_refusal`). Claude itself
+/// allows Read, Grep and Glob at Ask and Full, so only the calls it asks
+/// about reach this check.
 #[expect(
     clippy::too_many_arguments,
     reason = "one call site in the worker passes the run's fixed context"
@@ -470,7 +471,13 @@ pub(super) async fn decide(
                 return Ok(Some(deny(LOCAL_HOST_DENIAL)));
             }
         }
-        if let Some(reason) = private_file_refusal(&runtime.home, project_path, tool, input) {
+        if let Some(reason) = private_file_refusal(
+            &runtime.home,
+            runtime.private_roots(),
+            project_path,
+            tool,
+            input,
+        ) {
             return Ok(Some(deny(reason)));
         }
         let (input, resolved) = resolved_input(input);
@@ -604,12 +611,16 @@ const FILE_TOOLS: [&str; 8] = [
 const OPENING_TOOLS: [&str; 5] = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 /// Why a file tool call must not reach its target. The provider's deny
-/// rules (`computers::hidden_folders`) match a path by name, so this looks
-/// at what the path really is:
+/// rules (`computers::hidden_folders`, the vault folders) match a path by
+/// name, so this looks at what the path really is:
 ///
 /// - Resolved (symlinks followed, a relative path taken from `project`),
-///   a path in any `<home>/bruhs/*/browser*` folder, compared without case
-///   as case-insensitive volumes do, gets [`PROFILE_DENIAL`].
+///   a path in one of `roots` (the folders that hold the owner's saved
+///   logins, already resolved), compared by component without case, gets
+///   [`VAULT_FILE_DENIAL`].
+/// - Resolved the same way, a path in any `<home>/bruhs/*/browser*`
+///   folder, compared without case as case-insensitive volumes do, gets
+///   [`PROFILE_DENIAL`].
 /// - A tool that opens one file gets [`LINKED_FILE_DENIAL`] for a regular
 ///   file under `<home>/bruhs` with more than one name: a hard link to a
 ///   profile file can sit anywhere in a bruh's folder.
@@ -617,6 +628,7 @@ const OPENING_TOOLS: [&str; 5] = ["Read", "Edit", "Write", "MultiEdit", "Noteboo
 /// A path that can't be resolved is left to the gate and the provider.
 fn private_file_refusal(
     home: &Path,
+    roots: &[PathBuf],
     project: &str,
     tool: &str,
     input: &Value,
@@ -637,6 +649,9 @@ fn private_file_refusal(
         let Some(real) = resolve(&named, 0) else {
             continue;
         };
+        if roots.iter().any(|root| below(root, &real).is_some()) {
+            return Some(VAULT_FILE_DENIAL);
+        }
         let Some(mut inside) = below(&trees, &real) else {
             continue;
         };
@@ -711,7 +726,7 @@ fn resolved_input(input: &Value) -> (Value, bool) {
 
 /// The real path `path` names: symlinks resolved, including dangling ones,
 /// and for a path that doesn't exist yet its nearest existing ancestor.
-fn resolve(path: &Path, links: u8) -> Option<PathBuf> {
+pub(super) fn resolve(path: &Path, links: u8) -> Option<PathBuf> {
     if links > MAX_LINKS {
         return None;
     }

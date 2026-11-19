@@ -2422,6 +2422,51 @@ mod tests {
         }
     }
 
+    /// Every bruh turn, at every level, is denied reading and editing the
+    /// vault folders it is given (a path with spaces kept whole) and running
+    /// `security` or `op`, and reading `/proc`.
+    #[test]
+    fn every_bruh_turn_denies_the_vault_folders() {
+        let hidden = [
+            std::path::PathBuf::from("/Users/a/Library/Application Support/bruhs-ai/credentials"),
+            std::path::PathBuf::from("/Users/a/.config/op"),
+        ];
+        for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+            for can_deliver in [false, true] {
+                let mut options = options(
+                    AgentProvider::Claude,
+                    PermissionMode::BypassPermissions,
+                    None,
+                );
+                restrict_unattended(
+                    &mut options,
+                    &bruh_access(level, can_deliver),
+                    false,
+                    &hidden,
+                );
+                let options = claude(options);
+                let settings: serde_json::Value =
+                    serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+                let deny = settings["permissions"]["deny"].as_array().unwrap();
+                let rules = [
+                    "Read(//Users/a/Library/Application Support/bruhs-ai/credentials/**)",
+                    "Edit(//Users/a/Library/Application Support/bruhs-ai/credentials/**)",
+                    "Read(//Users/a/.config/op/**)",
+                    "Edit(//Users/a/.config/op/**)",
+                ];
+                for rule in rules
+                    .into_iter()
+                    .chain(bruhs_models::crew::VAULT_DENY_RULES)
+                {
+                    assert!(
+                        deny.contains(&serde_json::json!(rule)),
+                        "{level:?} can_deliver={can_deliver}: {rule}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn without_computer_a_bruh_turn_starts_no_servers_and_denies_app_tools() {
         for level in [AccessLevel::Ask, AccessLevel::Full] {

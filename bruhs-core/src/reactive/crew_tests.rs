@@ -1002,6 +1002,7 @@ fn each_run_names_the_bruh_and_its_access() {
         &run,
         "ctx",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert!(full.prompt.starts_with("Your name is Agent a.\n"));
     assert!(full.prompt.contains("Access: full."));
@@ -1020,6 +1021,7 @@ fn each_run_names_the_bruh_and_its_access() {
         &run,
         "",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert!(no_context.prompt.ends_with("without asking.\nNever push, merge or open pull requests.\nNever send messages in the owner's name.\n\nDo the thing."));
     assert!(!no_context.prompt.contains("---"));
@@ -1030,6 +1032,7 @@ fn each_run_names_the_bruh_and_its_access() {
         &run,
         "",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert_eq!(ask.permission_mode, PermissionMode::Default);
     assert!(ask.prompt.contains("Access: ask first."));
@@ -1045,6 +1048,7 @@ fn each_run_names_the_bruh_and_its_access() {
         &run,
         "",
         std::path::Path::new("/home"),
+        &worker::TurnVault::default(),
     );
     assert_eq!(codex_ask.permission_mode, PermissionMode::Plan);
     assert!(codex_ask.prompt.contains("Access: read only."));
@@ -1052,16 +1056,21 @@ fn each_run_names_the_bruh_and_its_access() {
 }
 
 /// Every bruh run, with its Computer on or off, is kept out of every
-/// bruh's browser profile and cache, and by name its own.
+/// bruh's browser profile and cache, by name its own, and the folders that
+/// hold the owner's saved logins.
 #[test]
 fn every_bruh_run_hides_the_browser_profiles() {
     let run = queued_run("Look it up.");
     let home = std::path::Path::new("/data");
+    let vault = worker::TurnVault {
+        private: vec!["/data/credentials".into()],
+    };
     let expected: Vec<std::path::PathBuf> = [
         "/data/bruhs/a/browser",
         "/data/bruhs/a/browser-cache",
         "/data/bruhs/*/browser",
         "/data/bruhs/*/browser-cache",
+        "/data/credentials",
     ]
     .map(std::path::PathBuf::from)
     .to_vec();
@@ -1071,9 +1080,33 @@ fn every_bruh_run_hides_the_browser_profiles() {
                 computer: on,
                 ..profile(level, None)
             };
-            let turn = worker::turn(&agent("a"), &bruh, &run, "", home);
+            let turn = worker::turn(&agent("a"), &bruh, &run, "", home, &vault);
             assert_eq!(turn.hidden_folders, expected, "{level:?} computer={on}");
         }
+    }
+}
+
+/// Every bruh run's deny rules name the vault catalog and the login stores
+/// at every level, but not the keychains folder: the sandbox reads the
+/// rules, and git and gh read their logins from the keychain in process.
+#[test]
+fn every_bruh_run_hides_the_vault_folders() {
+    let run = queued_run("Look it up.");
+    let home = std::path::Path::new("/Users/a");
+    let private = crate::secrets::private::private_folders(
+        home,
+        std::path::Path::new("/Users/a/Library/Application Support/bruhs-ai/credentials"),
+    );
+    let vault = worker::TurnVault {
+        private: private.clone(),
+    };
+    let keychains = std::path::PathBuf::from("/Users/a/Library/Keychains");
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        let turn = worker::turn(&agent("a"), &profile(level, None), &run, "", home, &vault);
+        for folder in private.iter().filter(|folder| **folder != keychains) {
+            assert!(turn.hidden_folders.contains(folder), "{level:?} {folder:?}");
+        }
+        assert!(!turn.hidden_folders.contains(&keychains), "{level:?}");
     }
 }
 
@@ -1092,6 +1125,7 @@ fn the_worker_turns_computer_on_only_when_available() {
             &run,
             "",
             std::path::Path::new("/home"),
+            &worker::TurnVault::default(),
         );
         assert_eq!(turn.computer.as_deref(), Some("a"), "{level:?}");
         assert!(turn.prompt.contains(BROWSER_LINE), "{level:?}");
@@ -1105,7 +1139,14 @@ fn the_worker_turns_computer_on_only_when_available() {
         (agent("a"), with_computer(AccessLevel::Full, false)),
         (codex, with_computer(AccessLevel::Full, true)),
     ] {
-        let turn = worker::turn(&agent, &profile, &run, "", std::path::Path::new("/home"));
+        let turn = worker::turn(
+            &agent,
+            &profile,
+            &run,
+            "",
+            std::path::Path::new("/home"),
+            &worker::TurnVault::default(),
+        );
         assert_eq!(
             turn.computer, None,
             "{} {:?}",
@@ -1295,6 +1336,98 @@ async fn network_calls_to_this_computer_are_denied_without_asking() {
             assert_eq!(
                 decided(task).await,
                 deny(bruhs_models::crew::LOCAL_HOST_DENIAL),
+                "{level:?} {tool} {input}"
+            );
+        }
+    }
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
+/// A file tool call whose real path is in a folder that holds the owner's
+/// saved logins is denied at every level before any approval opens:
+/// directly, through a symlink in the bruh's folder, in other letter case,
+/// relative to the bruh's folder, and a search of the folder. A sibling
+/// whose name only starts the same stays open.
+#[cfg(unix)]
+#[tokio::test]
+async fn file_tools_never_reach_the_vault_folders() {
+    let (dir, runtime) = runtime_with(&[agent("a")]).await;
+    // The tempdir path is not canonical on macOS (/var is a symlink): the
+    // roots are resolved when set, like the paths the tools name.
+    let credentials = dir.path().join("credentials");
+    let keychains = dir.path().join("Library").join("Keychains");
+    let runtime = runtime.with_private_roots([credentials.clone(), keychains.clone()]);
+    let run = claimed(&runtime, "a").await;
+    let work = dir.path().join("bruhs").join("a").join("work");
+    let sibling = dir.path().join("credentials-notes");
+    for folder in [&credentials, &keychains, &work, &sibling] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    std::fs::write(credentials.join("vault.json"), "{}").unwrap();
+    std::fs::write(keychains.join("login.keychain-db"), "x").unwrap();
+    std::fs::write(sibling.join("notes.txt"), "notes").unwrap();
+    std::os::unix::fs::symlink(&credentials, work.join("v")).unwrap();
+    let at = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let refused = [
+        (
+            "Read",
+            json!({"file_path": at(&credentials.join("vault.json"))}),
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&work.join("v").join("vault.json"))}),
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&dir.path().join("CREDENTIALS").join("Vault.JSON"))}),
+        ),
+        ("Read", json!({"file_path": "v/vault.json"})),
+        (
+            "Edit",
+            json!({"file_path": at(&work.join("v").join("vault.json")), "old_string": "{", "new_string": "["}),
+        ),
+        (
+            "Write",
+            json!({"file_path": at(&credentials.join("new.json")), "content": "x"}),
+        ),
+        ("Grep", json!({"pattern": ".", "path": at(&keychains)})),
+        ("Glob", json!({"pattern": "**", "path": "v"})),
+        ("LS", json!({"path": at(&credentials)})),
+    ];
+    let open = [
+        ("Read", json!({"file_path": at(&sibling.join("notes.txt"))})),
+        ("Grep", json!({"pattern": ".", "path": at(&work)})),
+    ];
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        for (tool, input) in &refused {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                deny(VAULT_FILE_DENIAL),
+                "{level:?} {tool} {input}"
+            );
+        }
+        for (tool, input) in &open {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                Some(crate::PermissionDecision::Allow),
                 "{level:?} {tool} {input}"
             );
         }

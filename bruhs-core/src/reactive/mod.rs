@@ -83,6 +83,19 @@ pub struct ReactiveRuntime {
     syncing: Arc<AtomicBool>,
     /// Browser steps the gate let through, until the command route runs them.
     allowances: Arc<approval::Allowances>,
+    /// The folders that hold the owner's saved logins, resolved, which no
+    /// bruh run may reach (`secrets::private`).
+    private_roots: Arc<Vec<PathBuf>>,
+}
+
+/// Each folder resolved as a file tool's path is (symlinks followed; for a
+/// folder that doesn't exist yet, its nearest existing ancestor), so the
+/// resolved-path check compares like with like.
+fn resolved_roots(roots: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    roots
+        .into_iter()
+        .map(|root| approval::resolve(&root, 0).unwrap_or(root))
+        .collect()
 }
 
 /// A bruh's work folder and the directories this call created for it.
@@ -190,7 +203,7 @@ impl ReactiveRuntime {
 
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, ReactiveError> {
         let path = path.as_ref().to_owned();
-        let (connection, lock, home) = tokio::task::spawn_blocking(move || {
+        let (connection, lock, home, private_roots) = tokio::task::spawn_blocking(move || {
             let (connection, lock) = store::open(&path)?;
             let home = std::fs::canonicalize(&path)
                 .ok()
@@ -198,7 +211,8 @@ impl ReactiveRuntime {
                 .ok_or_else(|| {
                     ReactiveError::Storage("Could not resolve the database folder.".into())
                 })?;
-            Ok::<_, ReactiveError>((connection, lock, home))
+            let private_roots = resolved_roots(crate::secrets::private::vault_private_folders());
+            Ok::<_, ReactiveError>((connection, lock, home, private_roots))
         })
         .await
         .map_err(|_| ReactiveError::Storage("Database worker stopped during open.".into()))??;
@@ -213,7 +227,22 @@ impl ReactiveRuntime {
             computers: Arc::new(OnceLock::new()),
             syncing: Arc::new(AtomicBool::new(false)),
             allowances: Arc::default(),
+            private_roots: Arc::new(private_roots),
         })
+    }
+
+    /// The folders that hold the owner's saved logins, resolved: every bruh
+    /// run is kept out of them by deny rules and the resolved-path check.
+    pub fn private_roots(&self) -> &[PathBuf] {
+        &self.private_roots
+    }
+
+    /// This runtime with `roots` in place of the owner's login folders.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_private_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.private_roots = Arc::new(resolved_roots(roots));
+        self
     }
 
     /// Run bruh browsers on `host`: it gets every bruh whose Computer is on,
