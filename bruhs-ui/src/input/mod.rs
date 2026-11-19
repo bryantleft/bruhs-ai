@@ -201,4 +201,51 @@ mod tests {
         assert!(!events.borrow().contains(&InputEvent::Change));
         assert!(cx.update(|window, cx| field.read(cx).focus_handle(cx).is_focused(window)));
     }
+
+    /// Right click, then a menu item, as a person would.
+    fn menu_item(cx: &mut VisualTestContext, field: &Entity<InputState>, item: &'static str) {
+        let bounds =
+            cx.update(|_, cx| field.read(cx).drawn.as_ref().map(|drawn| drawn.text_bounds));
+        let at = bounds.expect("the field is drawn").center();
+        cx.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        cx.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+        cx.run_until_parked();
+        let item = cx.debug_bounds(item).expect("the menu shows the item");
+        cx.simulate_click(item.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+    }
+
+    /// The edit menu can't change a read-only field either: Cut and Paste
+    /// are drawn disabled, and the state refuses every edit, whatever asks.
+    #[gpui::test]
+    fn a_read_only_fields_menu_never_cuts_or_pastes(cx: &mut TestAppContext) {
+        let (field, events, cx) = form_with(cx, true);
+        cx.update(|window, cx| field.update(cx, |field, cx| field.set_value("abc", window, cx)));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("pasted".into()));
+        cx.run_until_parked();
+        menu_item(cx, &field, "edit-paste");
+        cx.simulate_keystrokes("cmd-a");
+        menu_item(cx, &field, "edit-cut");
+        assert_eq!(cx.read(|cx| field.read(cx).value()), "abc");
+        // Nor can a caller reach the state's edits around the menu.
+        cx.update(|window, cx| {
+            field.update(cx, |field, cx| {
+                field.paste(&Paste, window, cx);
+                field.cut(&Cut, window, cx);
+                field.replace_text_in_range(None, "x", window, cx);
+                field.replace_and_mark_text_in_range(None, "y", None, window, cx);
+            })
+        });
+        assert_eq!(cx.read(|cx| field.read(cx).value()), "abc");
+        assert!(!events.borrow().contains(&InputEvent::Change));
+    }
+
+    /// The same menu edits an editable field, so the test above reaches it.
+    #[gpui::test]
+    fn an_editable_fields_menu_pastes(cx: &mut TestAppContext) {
+        let (field, _, cx) = form(cx);
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("pasted".into()));
+        menu_item(cx, &field, "edit-paste");
+        assert_eq!(cx.read(|cx| field.read(cx).value()), "pasted");
+    }
 }

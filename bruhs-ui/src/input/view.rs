@@ -346,6 +346,7 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
     let s = state.read(cx);
     let at = s.context_menu?;
     let can_copy = s.can_copy();
+    let editable = !s.readonly;
     let entity = state.entity_id();
     let item = |id: &'static str,
                 label: &'static str,
@@ -364,6 +365,7 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
             .py(css_px(4.0))
             .rounded(css_px(4.0))
             .text_size(css_px(12.0))
+            .debug_selector(move || id.to_string())
             .child(label);
         if !enabled {
             return row.text_color(theme::rambutan_500()).into_any_element();
@@ -396,13 +398,13 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
         .on_mouse_down_out(move |_, _, cx| {
             close.update(cx, |state, cx| state.close_context_menu(cx))
         })
-        .child(item("edit-cut", "Cut", can_copy, |s, w, cx| {
+        .child(item("edit-cut", "Cut", can_copy && editable, |s, w, cx| {
             s.cut(&Cut, w, cx)
         }))
         .child(item("edit-copy", "Copy", can_copy, |s, w, cx| {
             s.copy(&Copy, w, cx)
         }))
-        .child(item("edit-paste", "Paste", true, |s, w, cx| {
+        .child(item("edit-paste", "Paste", editable, |s, w, cx| {
             s.paste(&Paste, w, cx)
         }))
         .child(item("edit-select-all", "Select All", true, |s, w, cx| {
@@ -470,7 +472,8 @@ impl Input {
 
     /// Web `readonly`: the field still takes focus, moves its caret, selects
     /// and copies, but typing, pasting, cutting, deleting and undo do nothing.
-    /// Single-line only: a textarea's Enter would still type a newline.
+    /// The state keeps the flag, so every path that edits refuses, the edit
+    /// menu's Cut and Paste among them, which draw disabled.
     pub fn readonly(mut self, readonly: bool) -> Self {
         self.chrome.readonly = readonly;
         self
@@ -511,9 +514,17 @@ impl Styled for Input {
     }
 }
 
+/// The state learns the component's read-only flag, which its edits obey.
+fn sync_readonly<K: FieldKind>(state: &Entity<EditorState<K>>, readonly: bool, cx: &mut App) {
+    if state.read(cx).readonly != readonly {
+        state.update(cx, |state, _| state.readonly = readonly);
+    }
+}
+
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.clone();
+        sync_readonly(&state, self.chrome.readonly, cx);
         let size = self.chrome.size;
         let text = text_element(&state, &self.chrome, window, cx);
         let editor = EditorElement {
@@ -650,6 +661,7 @@ impl Styled for Textarea {
 impl RenderOnce for Textarea {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.clone();
+        sync_readonly(&state, self.chrome.readonly, cx);
         let size = self.chrome.size;
         let text = text_element(&state, &self.chrome, window, cx);
         let editor = EditorElement {
