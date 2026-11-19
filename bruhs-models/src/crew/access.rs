@@ -2049,7 +2049,10 @@ mod tests {
         // in; Enter otherwise goes through `key`.
         assert!(VAULT_PREAMBLE.contains("sign-in form"), "{VAULT_PREAMBLE}");
         assert!(VAULT_PREAMBLE.contains("`key`"), "{VAULT_PREAMBLE}");
-        assert!(!VAULT_PREAMBLE.contains("presses Enter"), "{VAULT_PREAMBLE}");
+        assert!(
+            !VAULT_PREAMBLE.contains("presses Enter"),
+            "{VAULT_PREAMBLE}"
+        );
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]).contains("vault"));
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true, &[]).contains("vault"));
     }

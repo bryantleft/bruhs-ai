@@ -782,7 +782,10 @@ mod tests {
     fn nav_and_shortcut_tables_are_well_formed() {
         assert_eq!(SECTIONS.len(), 11);
         assert_eq!(SECTIONS[1].0, "updates");
-        assert_eq!(SECTIONS[3], ("vault", "shield", bruhs_models::vault::VAULT_TITLE));
+        assert_eq!(
+            SECTIONS[3],
+            ("vault", "shield", bruhs_models::vault::VAULT_TITLE)
+        );
         assert_eq!(SECTIONS[9].2, "Keybindings");
         let rules = bruhs_models::logic::keybindings::default_keybindings();
         assert!(rules.iter().all(|rule| {
