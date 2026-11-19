@@ -18,14 +18,9 @@ pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use one_password::{OnePassword, OnePasswordError};
 pub use storage::SecretStore;
 
-/// Where a bruh turn's broker connection file goes: the credentials
-/// folder, which every bruh run is kept out of (D19), so the bruh's shell
-/// can't read the broker's token there, and `ps` shows only the path.
-pub(crate) fn broker_folder() -> std::io::Result<PathBuf> {
-    storage::catalog_directory()
-        .map(|directory| directory.join("brokers"))
-        .map_err(std::io::Error::other)
-}
+/// A bruh's request it may not have: a key it can't use, or a service
+/// connection (D18, F27). No card was shown.
+pub(crate) const NOT_GRANTED: &str = "not_granted";
 
 /// Drop a vault create the caller refused before it reached the store,
 /// wiping its values as the store wipes a refused one.
@@ -136,30 +131,33 @@ enum Approved {
     Run(Zeroizing<String>),
     Connected(Zeroizing<String>, oneshot::Sender<()>),
     Decline,
-    /// A bruh asked for a key it may not use (D18): no card was shown.
-    NotGranted,
+    /// A bruh's request refused with this status before any card: not
+    /// granted, or too long to show whole.
+    Refused(&'static str),
 }
 
-/// Marks a scope as running an approved command until dropped: from the
+/// Counts one approved command of a scope until dropped: from the
 /// approval, through the spawn, until the command and its process group
-/// are gone. A bruh's other gated calls wait while it is set (D18).
-struct Running(Arc<watch::Sender<bool>>);
+/// are gone. A bruh's other gated calls wait while the count is above
+/// zero (D18).
+struct Running(Arc<watch::Sender<usize>>);
 
 impl Running {
-    fn start(flag: &Arc<watch::Sender<bool>>) -> Self {
-        flag.send_replace(true);
-        Self(flag.clone())
+    fn start(count: &Arc<watch::Sender<usize>>) -> Self {
+        count.send_modify(|running| *running += 1);
+        Self(count.clone())
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        self.0.send_replace(false);
+        self.0
+            .send_modify(|running| *running = running.saturating_sub(1));
     }
 }
 
-/// Each live scope's [`Running`] flag, by its thread.
-type RunningFlags = Arc<Mutex<HashMap<ThreadId, Arc<watch::Sender<bool>>>>>;
+/// Each live scope's count of [`Running`] commands, by its thread.
+type RunningFlags = Arc<Mutex<HashMap<ThreadId, Arc<watch::Sender<usize>>>>>;
 
 #[derive(Clone)]
 pub struct SecretManager {
@@ -425,6 +423,22 @@ impl SecretManager {
     #[cfg(test)]
     pub(crate) fn hold_store_for_tests(&self) -> Option<impl Sized + '_> {
         self.store.hold_for_tests()
+    }
+
+    /// Where a bruh turn's broker connection file goes. For the keychain,
+    /// the credentials folder, which every bruh run is kept out of (D19),
+    /// so the bruh's shell can't read the broker's token there and `ps`
+    /// shows only the path. An in-memory store (tests and the acceptance
+    /// server) keeps them in a temporary folder of this process instead.
+    pub(crate) fn broker_folder(&self) -> std::io::Result<PathBuf> {
+        if self.store.is_memory() {
+            return Ok(
+                std::env::temp_dir().join(format!("bruhs-secret-brokers-{}", std::process::id()))
+            );
+        }
+        storage::catalog_directory()
+            .map(|directory| directory.join("brokers"))
+            .map_err(std::io::Error::other)
     }
 
     /// Read 1Password references with this `op` (tests use a stand-in).
@@ -713,7 +727,7 @@ impl SecretManager {
         bruh: bool,
     ) -> Arc<SecretScope> {
         let (cancel, _) = watch::channel(false);
-        let running = Arc::new(watch::channel(false).0);
+        let running = Arc::new(watch::channel(0).0);
         self.running_flags()
             .insert(thread_id.clone(), running.clone());
         Arc::new(SecretScope {
@@ -730,13 +744,13 @@ impl SecretManager {
         })
     }
 
-    fn running_flags(&self) -> MutexGuard<'_, HashMap<ThreadId, Arc<watch::Sender<bool>>>> {
+    fn running_flags(&self) -> MutexGuard<'_, HashMap<ThreadId, Arc<watch::Sender<usize>>>> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether the live turn of `thread_id` is running an approved command,
+    /// How many approved commands the live turn of `thread_id` is running,
     /// and each change of that. `None` when the thread has no live turn.
-    pub(crate) fn running_in(&self, thread_id: &ThreadId) -> Option<watch::Receiver<bool>> {
+    pub(crate) fn running_in(&self, thread_id: &ThreadId) -> Option<watch::Receiver<usize>> {
         self.running_flags()
             .get(thread_id)
             .map(|flag| flag.subscribe())
@@ -819,15 +833,17 @@ impl SecretManager {
         Ok(true)
     }
 
-    /// Answer a bruh's pending request `not_granted`: it named no key the
-    /// bruh may use, or asked for a service connection. No card was shown.
-    pub(crate) async fn resolve_not_granted(
+    /// Refuse a bruh's pending request with `status` and no card:
+    /// [`NOT_GRANTED`] when it named no key the bruh may use or asked for a
+    /// service connection, or `VAULT_KEY_TOO_LONG`.
+    pub(crate) async fn resolve_refused(
         &self,
         thread_id: &ThreadId,
         id: &str,
+        status: &'static str,
     ) -> Result<bool, SecretError> {
         let Claimed { scope, claim, .. } = self.claim_pending(thread_id, id)?;
-        self.hand_over(&scope, id, Approved::NotGranted)?;
+        self.hand_over(&scope, id, Approved::Refused(status))?;
         drop(claim);
         scope
             .emit(QueryEvent::SecretResolved { id: id.to_string() })
@@ -992,8 +1008,8 @@ pub(crate) struct SecretScope {
     active: AtomicBool,
     execution: Mutex<()>,
     cancel: watch::Sender<bool>,
-    /// Set while an approved command runs ([`Running`]).
-    running: Arc<watch::Sender<bool>>,
+    /// How many approved commands run now ([`Running`]).
+    running: Arc<watch::Sender<usize>>,
     tx: mpsc::WeakSender<OrchestratorEvent>,
     manager: SecretManager,
 }
@@ -1225,10 +1241,20 @@ impl SecretScope {
             Ok((Approved::Run(value), running)) => (value, None, running),
             Ok((Approved::Connected(value, spawned), running)) => (value, Some(spawned), running),
             Ok((Approved::Decline, _)) => return OperationResult::status("declined"),
-            Ok((Approved::NotGranted, _)) => return OperationResult::status("not_granted"),
+            Ok((Approved::Refused(status), _)) => return OperationResult::status(status),
             Err(_) => return OperationResult::status("cancelled"),
         };
         let mut command = tokio::process::Command::new(&request.operation.command[0]);
+        if self.bruh {
+            // The owner approved one key, not the server's other secrets:
+            // a bruh's command gets the same environment its run does
+            // (ruling V Task 11 I1).
+            command
+                .env_clear()
+                .envs(crate::agent::unattended_environment(|key| {
+                    std::env::var(key).ok()
+                }));
+        }
         crate::connections::protect_command(&mut command);
         command
             .args(&request.operation.command[1..])

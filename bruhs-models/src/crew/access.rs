@@ -58,6 +58,14 @@ pub const BRUH_SECRET_TOOL: &str = "mcp__bruhs_secrets__request_secret";
 /// is offered (D26, ruling F28).
 pub const SECRET_PREAMBLE: &str =
     "For a command that needs one, use request_secret with the key's name; the owner approves each use.";
+/// The first line of a vault key card's detail: an approved command is the
+/// owner's own process (ruling V Task 11 I3).
+pub const VAULT_KEY_RUNS_AS_YOU: &str =
+    "Runs as you, outside the bruh's sandbox. A script the bruh can edit can do anything you can.";
+/// A vault key request whose card detail would be cut at
+/// [`DETAIL_MAX_BYTES`]: refused, so the owner always sees the whole
+/// command.
+pub const VAULT_KEY_TOO_LONG: &str = "command_too_long";
 /// A tool call that came while an approved vault command still ran, after
 /// the approval wait: its environment holds a key's value.
 pub const VAULT_COMMAND_RUNNING: &str = "A vault command is still running. Try again when it ends.";
@@ -954,13 +962,22 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
         ),
         "WebFetch" => (input["url"].as_str().map(|url| format!("Fetch {url}")), 0),
         BRUH_BROWSER_TOOL => (browser_summary(input), 0),
-        BRUH_SECRET_TOOL => match (input["name"].as_str(), secret_argv(input)) {
-            (Some(name), Some(argv)) => {
+        BRUH_SECRET_TOOL => match (
+            input["name"].as_str(),
+            input["env_var"].as_str(),
+            secret_argv(input),
+        ) {
+            (Some(name), Some(env_var), Some(argv)) => {
                 let joined = argv.join(" ");
                 let mut lines = joined.lines();
                 let first = review_text(lines.next().unwrap_or_default());
                 (
-                    Some(format!("Use {}: {first}", review_text(name))),
+                    Some(format!(
+                        "Use {} as ${} in {}: {first}",
+                        review_text(name),
+                        review_text(env_var),
+                        review_text(input["cwd"].as_str().unwrap_or_default()),
+                    )),
                     lines.count(),
                 )
             }
@@ -1006,11 +1023,7 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
         }
         "SandboxNetworkAccess" => return None,
         BRUH_BROWSER_TOOL => browser_detail(input, SUMMARY_MAX_CHARS)?,
-        BRUH_SECRET_TOOL => secret_argv(input)?
-            .into_iter()
-            .map(review_text)
-            .collect::<Vec<_>>()
-            .join("\n"),
+        BRUH_SECRET_TOOL => vault_key_detail(input)?,
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]
@@ -1027,6 +1040,30 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
         },
     };
     Some(bounded(text))
+}
+
+/// A vault key card's whole detail, never cut: what it runs as, the
+/// folder, the variable that gets the key, then the command one argument
+/// per line.
+fn vault_key_detail(input: &Value) -> Option<String> {
+    let argv = secret_argv(input)?
+        .into_iter()
+        .map(review_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!(
+        "{VAULT_KEY_RUNS_AS_YOU}\n\nFolder: {}\nVariable: ${}\nCommand:\n{argv}",
+        review_text(input["cwd"].as_str().unwrap_or_default()),
+        review_text(input["env_var"].as_str()?),
+    ))
+}
+
+/// Whether a vault key card (the request's operation and `cwd`) shows the
+/// whole command: its detail fits in [`DETAIL_MAX_BYTES`]. One that
+/// doesn't is refused ([`VAULT_KEY_TOO_LONG`]), never cut.
+#[must_use]
+pub fn vault_key_card_fits(input: &Value) -> bool {
+    vault_key_detail(input).is_some_and(|detail| detail.len() <= DETAIL_MAX_BYTES)
 }
 
 /// A vault key request's command, when every argument is text.
@@ -1966,30 +2003,47 @@ mod tests {
             Gate::Deny(APP_TOOL_DENIAL)
         );
 
+        // The card names the variable that gets the key and the folder the
+        // command runs in (ruling V Task 11 I2), and says it runs as the
+        // owner (I3).
         let call = serde_json::json!({
-            "name": "K", "reason": "Ship it.", "env_var": "K", "command": ["deploy", "--prod"],
+            "name": "K", "reason": "Ship it.", "env_var": "CARGO_TARGET_DIR",
+            "command": ["cargo", "build"], "cwd": "/work/pix",
         });
         assert_eq!(
             approval_summary(BRUH_SECRET_TOOL, &call),
-            "Use K: deploy --prod"
+            "Use K as $CARGO_TARGET_DIR in /work/pix: cargo build"
         );
         assert_eq!(
             approval_detail(BRUH_SECRET_TOOL, &call).as_deref(),
-            Some("deploy\n--prod")
+            Some(
+                "Runs as you, outside the bruh's sandbox. A script the bruh can edit can do anything you can.\n\n\
+                 Folder: /work/pix\nVariable: $CARGO_TARGET_DIR\nCommand:\ncargo\nbuild"
+            )
         );
+        assert!(vault_key_card_fits(&call));
         // A line break or control character in an argument can't hide the
         // rest of the command on the card.
         let tricky = serde_json::json!({
-            "name": "K\u{1b}", "command": ["sh", "-c", "true\nrm -rf /"],
+            "name": "K\u{1b}", "env_var": "K", "cwd": "/w",
+            "command": ["sh", "-c", "true\nrm -rf /"],
         });
         assert_eq!(
             approval_summary(BRUH_SECRET_TOOL, &tricky),
-            "Use K\\u{1b}: sh -c true (+1 more line)"
+            "Use K\\u{1b} as $K in /w: sh -c true (+1 more line)"
         );
-        assert_eq!(
-            approval_detail(BRUH_SECRET_TOOL, &tricky).as_deref(),
-            Some("sh\n-c\ntrue\\nrm -rf /")
-        );
+        assert!(approval_detail(BRUH_SECRET_TOOL, &tricky)
+            .unwrap()
+            .ends_with("Command:\nsh\n-c\ntrue\\nrm -rf /"));
+        // A command too long to show whole is refused, never cut.
+        let long = serde_json::json!({
+            "name": "K", "env_var": "K", "cwd": "/w",
+            "command": ["echo", "x".repeat(DETAIL_MAX_BYTES)],
+        });
+        assert!(!vault_key_card_fits(&long));
+        assert!(!vault_key_card_fits(
+            &serde_json::json!({"command": ["true"]})
+        ));
     }
 
     #[test]

@@ -1,10 +1,11 @@
 use super::{sources, store, ReactiveError, ReactiveRuntime};
+use crate::secrets::NOT_GRANTED;
 use crate::{AgentTurn, AppState, OrchestratorEvent, PermissionDecision, QueryEvent};
 use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
     crew::{
-        computer_on, effective_level, run_preamble, AccessLevel, BruhProfile, APPROVAL_WAIT_MS,
-        BRUH_SECRET_TOOL,
+        computer_on, effective_level, run_preamble, vault_key_card_fits, AccessLevel, BruhProfile,
+        APPROVAL_WAIT_MS, BRUH_SECRET_TOOL, VAULT_KEY_TOO_LONG,
     },
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
     secrets::{SecretDecision, SecretRequest},
@@ -465,12 +466,24 @@ pub(super) async fn answer_secret_request(
         None => runtime.usable_value(&run.agent_id, name).await,
     };
     let Some(entry) = entry else {
-        if let Err(error) = secrets.resolve_not_granted(thread, id).await {
+        if let Err(error) = secrets.resolve_refused(thread, id, NOT_GRANTED).await {
             tracing::debug!(%error, "A refused vault key request was already gone");
         }
         return Ok(SecretAnswer::Answered);
     };
-    let card = serde_json::to_value(&request.operation).unwrap_or_default();
+    // The card shows the operation and the folder it runs in, whole: a
+    // command too long for that is refused, never cut.
+    let mut card = serde_json::to_value(&request.operation).unwrap_or_default();
+    card["cwd"] = serde_json::Value::from(request.cwd.as_str());
+    if !vault_key_card_fits(&card) {
+        if let Err(error) = secrets
+            .resolve_refused(thread, id, VAULT_KEY_TOO_LONG)
+            .await
+        {
+            tracing::debug!(%error, "A refused vault key request was already gone");
+        }
+        return Ok(SecretAnswer::Answered);
+    }
     let approved = super::approval::ask_owner(
         runtime,
         run,
@@ -490,7 +503,7 @@ pub(super) async fn answer_secret_request(
     };
     let resolved = match entry {
         Some(entry) => secrets.resolve_from_vault(thread, id, &entry).await,
-        None if approved == Some(true) => secrets.resolve_not_granted(thread, id).await,
+        None if approved == Some(true) => secrets.resolve_refused(thread, id, NOT_GRANTED).await,
         None => secrets.resolve(thread, id, SecretDecision::Decline).await,
     };
     if let Err(error) = resolved {

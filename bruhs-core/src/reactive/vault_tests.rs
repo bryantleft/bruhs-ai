@@ -1035,7 +1035,18 @@ async fn every_vault_key_use_asks_even_at_full() {
     let card = keys.approval().await;
     let approval = card.approval.clone().unwrap();
     assert_eq!(approval.tool, BRUH_SECRET_TOOL);
-    assert_eq!(card.message, format!("Use DEPLOY_KEY: /bin/sh -c {script}"));
+    let folder = keys.work.path().canonicalize().unwrap();
+    assert!(
+        card.message.starts_with(&format!(
+            "Use DEPLOY_KEY as $DEPLOY_KEY in {}: /bin/sh -c ",
+            folder.display()
+        )),
+        "{}",
+        card.message
+    );
+    let detail = approval.detail.clone().unwrap();
+    assert!(detail.starts_with(VAULT_KEY_RUNS_AS_YOU), "{detail}");
+    assert!(detail.ends_with(&format!("Command:\n/bin/sh\n-c\n{script}")));
     assert!(!call.is_finished(), "the command waits for the owner");
     keys.decide(&card.id, true).await;
     assert_eq!(call.await.unwrap(), ("completed".into(), Some(0)));
@@ -1091,6 +1102,11 @@ async fn an_unknown_or_ungranted_key_is_declined_without_a_card() {
         );
         assert_eq!(call.await.unwrap(), ("not_granted".into(), None), "{name}");
     }
+    // A command too long to show whole on the card is refused, not cut.
+    let call = keys.call("DEPLOY_KEY", &"x".repeat(DETAIL_MAX_BYTES), None);
+    let request = keys.request().await;
+    keys.answer(request).await.unwrap();
+    assert_eq!(call.await.unwrap(), (VAULT_KEY_TOO_LONG.into(), None));
     // A service connection is never a bruh's, whatever the name (F27).
     let call = keys.call(
         "DEPLOY_KEY",
@@ -1200,4 +1216,46 @@ async fn read_only_and_codex_bruhs_get_no_broker() {
         .await
         .keys
         .is_empty());
+}
+
+/// Ruling V Task 11 I1: the approved command gets the run's environment
+/// and the key, never the server's other variables.
+#[tokio::test]
+async fn a_vault_command_gets_only_the_run_environment_and_the_key() {
+    let mut keys = Keys::new().await;
+    let name = format!("BRUHS_SERVER_CANARY_{}", uuid::Uuid::new_v4().simple());
+    let canary_value = canary("server");
+    // A unique name no other test reads.
+    std::env::set_var(&name, &canary_value);
+    let out = keys.work.path().join("env");
+    let call = keys.call("DEPLOY_KEY", &format!("env > '{}'", out.display()), None);
+    let request = keys.request().await;
+    let answer = keys.answer(request);
+    let card = keys.approval().await;
+    keys.decide(&card.id, true).await;
+    assert_eq!(call.await.unwrap(), ("completed".into(), Some(0)));
+    answer.await.unwrap();
+    std::env::remove_var(&name);
+    let env = std::fs::read_to_string(&out).unwrap();
+    assert!(env.contains(&format!("DEPLOY_KEY={}", keys.value)));
+    assert!(
+        !env.contains(&name) && !env.contains(&canary_value),
+        "{env}"
+    );
+    let allowed: Vec<String> = crate::agent::unattended_environment(|_| Some(String::new()))
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    for line in env.lines() {
+        let Some((key, _)) = line.split_once('=') else {
+            continue;
+        };
+        // The shell adds its own few.
+        assert!(
+            key == "DEPLOY_KEY"
+                || allowed.iter().any(|allowed| allowed == key)
+                || ["PWD", "SHLVL", "_", "OLDPWD"].contains(&key),
+            "{key} reached the command"
+        );
+    }
 }

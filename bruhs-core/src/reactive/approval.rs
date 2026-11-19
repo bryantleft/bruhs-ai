@@ -553,7 +553,7 @@ async fn wait_for_vault_command(
     else {
         return Ok(ComputerWait::Free);
     };
-    if !*running.borrow_and_update() {
+    if *running.borrow_and_update() == 0 {
         return Ok(ComputerWait::Free);
     }
     let deadline = Instant::now() + timeout;
@@ -567,7 +567,7 @@ async fn wait_for_vault_command(
         if status != RunStatus::Running {
             return Ok(ComputerWait::Stopped);
         }
-        if !*running.borrow_and_update() {
+        if *running.borrow_and_update() == 0 {
             return Ok(ComputerWait::Free);
         }
         tokio::select! {
@@ -590,8 +590,9 @@ async fn wait_for_vault_command(
 /// The answer to one tool call of an unattended bruh run: the gate's own
 /// answer, a late approval's one-shot grant, or the owner's answer to a new
 /// approval. Every call first waits while an approved vault command of the
-/// run runs, then while the owner has the bruh's computer. `None` means the run stopped while it waited. `claim` is the
-/// worker's attempt at `run`, which an allowed browser step belongs to.
+/// run runs, then while the owner has the bruh's computer. `None` means
+/// the run stopped while it waited. `claim` is the worker's attempt at
+/// `run`, which an allowed browser step belongs to.
 ///
 /// The vault command, the owner's hold and the approval are separate
 /// waits, each bounded by `timeout`, and an approved browser step waits for

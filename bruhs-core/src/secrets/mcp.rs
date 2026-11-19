@@ -287,16 +287,72 @@ impl Drop for BrokerFile {
     }
 }
 
+/// A broker file's name: the process that wrote it, then a fresh id.
+fn broker_file_name(pid: u32) -> String {
+    format!("broker-{pid}-{}.json", uuid::Uuid::new_v4().simple())
+}
+
+/// The process that wrote broker file `name`, if it is one.
+fn broker_file_pid(name: &str) -> Option<u32> {
+    name.strip_prefix("broker-")?
+        .strip_suffix(".json")?
+        .split_once('-')?
+        .0
+        .parse()
+        .ok()
+}
+
+/// Whether process `pid` still runs.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that `pid` exists and may be signalled;
+    // nothing is sent and no memory is shared.
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    alive || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Only this process's own files can be told apart where liveness can't
+/// be checked: others are kept.
+#[cfg(not(unix))]
+fn process_alive(pid: u32) -> bool {
+    pid != std::process::id()
+}
+
+/// Remove the broker files in `folder` whose process has ended (a crash
+/// leaves them behind). Each names only a dead port and token.
+fn sweep_stale(folder: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let stale = name
+            .to_str()
+            .and_then(broker_file_pid)
+            .is_some_and(|pid| pid != std::process::id() && !process_alive(pid));
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 impl BrokerFile {
     /// Write `connection` to a new file in `folder` that only this account
-    /// can read.
+    /// can read, tightening a folder made earlier with a looser mode, and
+    /// sweep the files crashed processes left.
     fn write(folder: &std::path::Path, connection: &Connection) -> std::io::Result<Self> {
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);
         #[cfg(unix)]
         std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
         builder.create(folder)?;
-        let path = folder.join(format!("broker-{}.json", uuid::Uuid::new_v4().simple()));
+        #[cfg(unix)]
+        std::fs::set_permissions(folder, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+        sweep_stale(folder);
+        let path = folder.join(broker_file_name(std::process::id()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -626,6 +682,31 @@ mod tests {
         }
         drop(broker);
         assert!(!file.exists(), "the file outlived its broker");
+        // Minors: a looser folder is tightened, and a crashed process's file
+        // is swept while a live one's stays.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let mut ended = std::process::Command::new("true").spawn().unwrap();
+            let dead = ended.id();
+            ended.wait().unwrap();
+            let stale = folder.join(broker_file_name(dead));
+            let live = folder.join(broker_file_name(std::process::id()));
+            for path in [&stale, &live] {
+                std::fs::write(path, b"{}").unwrap();
+            }
+            let mut again = scope.start().await.unwrap();
+            let mut options =
+                crate::agent::ProviderQueryOptions::Claude(claude_sdk_rs::QueryOptions::new("hi"));
+            again.configure_bruh(&mut options, &folder).unwrap();
+            let mode = std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+            assert!(!stale.exists() && live.exists());
+            std::fs::remove_file(live).unwrap();
+        }
+        assert_eq!(broker_file_pid("broker-12-abc.json"), Some(12));
+        assert_eq!(broker_file_pid("vault.json"), None);
 
         let ask = |method: &str, params: Value| {
             let frame = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});

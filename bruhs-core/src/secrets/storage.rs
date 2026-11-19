@@ -236,6 +236,11 @@ impl SecretStore {
         }))))
     }
 
+    /// Whether this store keeps nothing on disk.
+    pub(crate) fn is_memory(&self) -> bool {
+        matches!(self.0, Backend::Memory(_))
+    }
+
     /// While the returned guard lives, every read and change of an
     /// in-memory store waits, like a catalog that doesn't answer. `None`
     /// for any other store.

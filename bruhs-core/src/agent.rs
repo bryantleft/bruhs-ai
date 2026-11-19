@@ -822,6 +822,7 @@ impl AgentOrchestrator {
             tx.clone(),
             unattended,
         );
+        let broker_folder = self.secrets.broker_folder();
         let consumer_secrets = secrets.guard();
         let producer_secrets = secrets.guard();
         let threads = self.thread_links.turn(
@@ -883,7 +884,7 @@ impl AgentOrchestrator {
             };
             if bruh_keys {
                 let configured = match broker.as_mut() {
-                    Some(broker) => crate::secrets::broker_folder()
+                    Some(broker) => broker_folder
                         .and_then(|folder| broker.configure_bruh(&mut query_options, &folder)),
                     None => Err(std::io::Error::other("no broker")),
                 };
