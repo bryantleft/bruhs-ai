@@ -175,13 +175,14 @@ fn new_crew_data() -> CrewData {
         }
     });
 
-    // Load now, and again whenever the service reports a change to the crew
-    // or its rooms.
+    // Load now, and again whenever the service reports a change to the crew,
+    // its rooms or a run.
     let updates = use_context::<AgentUpdates>();
     if let Some(updates) = updates {
         Effect::new(move |_| {
             updates.bruhs.track();
             updates.rooms.track();
+            updates.runs_at.track();
             reload.run(());
         });
     } else {

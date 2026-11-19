@@ -245,6 +245,13 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
             |row| row.get(0),
         )
         .optional()?;
+    // When a run last changed: a run that starts and ends between two
+    // frames moves this even though no bruh's state does.
+    let runs_at: Option<i64> = connection.query_row(
+        "SELECT MAX(json_extract(payload,'$.updated_at')) FROM reactive_runs",
+        [],
+        |row| row.get(0),
+    )?;
     Ok(OutboxSignal {
         unread: usize::try_from(unread).unwrap_or_default(),
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
@@ -252,6 +259,7 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
         rooms: super::rooms::room_states(connection)?,
         protocol: bruhs_models::crew::CREW_PROTOCOL,
+        runs_at: runs_at.and_then(|ms| EpochMs::new(ms).ok()),
     })
 }
 

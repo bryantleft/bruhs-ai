@@ -405,6 +405,28 @@ async fn snapshot_and_signal_carry_bruh_states() {
     assert_eq!(snapshot.bruhs[0].status, BruhStatus::Off);
 }
 
+/// A run can start and end between two live frames, leaving every bruh's
+/// state as it was. The signal still changes, so a chat shows the reply.
+#[tokio::test]
+async fn a_run_that_starts_and_ends_between_frames_changes_the_signal() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let first = chat(&runtime, "a", "First").await;
+    claim_one(&runtime).await.unwrap();
+    finish(&runtime, &first.id, "Done").await;
+    let before = runtime.outbox_signal().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let second = chat(&runtime, "a", "Second").await;
+    claim_one(&runtime).await.unwrap();
+    finish(&runtime, &second.id, "Done again").await;
+    let after = runtime.outbox_signal().await.unwrap();
+    assert_eq!(after.bruhs, before.bruhs, "the bruh looks the same");
+    assert_ne!(after, before, "the signal still moved");
+    assert_eq!(
+        after.runs_at,
+        Some(run(&runtime, &second.id).await.updated_at)
+    );
+}
+
 #[tokio::test]
 async fn bruh_states_wake_on_calendar_subscriptions_and_skip_report_presets() {
     let preset = format!("weekly-report-{}", uuid::Uuid::new_v4());

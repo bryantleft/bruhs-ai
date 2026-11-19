@@ -108,6 +108,9 @@ struct CrewState {
     rooms: Vec<bruhs_models::crew::room::RoomState>,
     /// The serving service's crew protocol, once a frame or snapshot says.
     protocol: Option<u32>,
+    /// When a run last changed, as the latest frame says. A run that starts
+    /// and ends between two frames leaves `bruhs` as it was.
+    runs_at: Option<bruhs_models::EpochMs>,
     /// The installed login service's protocol; `None` when none is installed.
     installed_protocol: Option<u32>,
     /// The serving protocol the installed service was last read for.
@@ -1891,8 +1894,12 @@ impl ReactiveAutomations {
             cx.notify();
             changed = true;
         }
-        // A bruh or room page reads the crew again when its bruhs or rooms
-        // change, like the web's.
+        if self.crew.runs_at != signal.runs_at {
+            self.crew.runs_at = signal.runs_at;
+            changed = true;
+        }
+        // A bruh or room page reads the crew again when its bruhs, rooms or
+        // runs change, like the web's.
         if changed && (self.bruh.is_some() || self.room.is_some()) {
             self.refresh_snapshot(cx);
         }

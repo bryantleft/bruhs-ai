@@ -36,6 +36,9 @@ pub struct AgentUpdates {
     pub rooms: RwSignal<Vec<RoomState>>,
     /// The service's crew protocol; `None` until the first frame arrives.
     pub protocol: RwSignal<Option<u32>>,
+    /// When a run last changed. A run that starts and ends between two
+    /// frames leaves `bruhs` as it was, so crew pages read again on this too.
+    pub runs_at: RwSignal<Option<EpochMs>>,
 }
 
 impl AgentUpdates {
@@ -46,9 +49,28 @@ impl AgentUpdates {
             bruhs: RwSignal::new(Vec::new()),
             rooms: RwSignal::new(Vec::new()),
             protocol: RwSignal::new(None),
+            runs_at: RwSignal::new(None),
         });
         if let Some(AutomationStateSignal(automation)) = use_context::<AutomationStateSignal>() {
             reconcile_draft_outcomes(automation);
+        }
+    }
+
+    /// Take a `reactive` frame: each signal changes only when its part of
+    /// the frame does, so pages that track it read the crew again only then.
+    fn apply(&self, signal: &OutboxSignal) {
+        self.unread.set(signal.unread);
+        if self.bruhs.with_untracked(|bruhs| *bruhs != signal.bruhs) {
+            self.bruhs.set(signal.bruhs.clone());
+        }
+        if self.rooms.with_untracked(|rooms| *rooms != signal.rooms) {
+            self.rooms.set(signal.rooms.clone());
+        }
+        if self.protocol.get_untracked() != Some(signal.protocol) {
+            self.protocol.set(Some(signal.protocol));
+        }
+        if self.runs_at.get_untracked() != signal.runs_at {
+            self.runs_at.set(signal.runs_at);
         }
     }
 
@@ -112,16 +134,7 @@ pub fn subscribe(live: &mut LiveEvents) {
                 return;
             }
         };
-        updates.unread.set(signal.unread);
-        if updates.bruhs.with_untracked(|bruhs| *bruhs != signal.bruhs) {
-            updates.bruhs.set(signal.bruhs.clone());
-        }
-        if updates.rooms.with_untracked(|rooms| *rooms != signal.rooms) {
-            updates.rooms.set(signal.rooms.clone());
-        }
-        if updates.protocol.get_untracked() != Some(signal.protocol) {
-            updates.protocol.set(Some(signal.protocol));
-        }
+        updates.apply(&signal);
         let Some(item) = announcer
             .try_update_value(|announcer| announcer.observe(&signal))
             .flatten()
@@ -252,7 +265,46 @@ mod tests {
             bruhs: Vec::new(),
             rooms: Vec::new(),
             protocol: 0,
+            runs_at: None,
         }
+    }
+
+    #[test]
+    fn a_frame_whose_only_change_is_a_run_moves_runs_at() {
+        let owner = Owner::new();
+        owner.with(|| {
+            AgentUpdates::install();
+            let updates = expect_context::<AgentUpdates>();
+            let at = |ms| Some(EpochMs::saturating_from_i64(ms));
+            updates.apply(&OutboxSignal {
+                runs_at: at(10),
+                ..signal(None)
+            });
+            let (bruhs, runs) = (
+                Memo::new(move |count: Option<&u32>| {
+                    updates.bruhs.track();
+                    count.map_or(0, |count| count + 1)
+                }),
+                Memo::new(move |count: Option<&u32>| {
+                    updates.runs_at.track();
+                    count.map_or(0, |count| count + 1)
+                }),
+            );
+            assert_eq!((bruhs.get_untracked(), runs.get_untracked()), (0, 0));
+            // A run started and ended since: the bruhs look the same.
+            updates.apply(&OutboxSignal {
+                runs_at: at(20),
+                ..signal(None)
+            });
+            assert_eq!(updates.runs_at.get_untracked(), at(20));
+            assert_eq!((bruhs.get_untracked(), runs.get_untracked()), (0, 1));
+            // The same frame again changes nothing.
+            updates.apply(&OutboxSignal {
+                runs_at: at(20),
+                ..signal(None)
+            });
+            assert_eq!((bruhs.get_untracked(), runs.get_untracked()), (0, 1));
+        });
     }
 
     #[test]
