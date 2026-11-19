@@ -227,7 +227,8 @@ impl LiveView {
                             self.stream_failed.set_value(true);
                             events.error.run(Some(error));
                         }
-                        Err(_) => {}
+                        // A newer server's message this app doesn't know.
+                        Ok(ScreencastMessage::Other) | Err(_) => {}
                     }
                 } else if let Ok(blob) = payload.dyn_into::<web_sys::Blob>() {
                     let first = self

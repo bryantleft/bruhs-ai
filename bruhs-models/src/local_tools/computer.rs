@@ -33,6 +33,10 @@ pub enum Control {
     #[default]
     Bruh,
     Owner,
+    /// A newer service's control this app doesn't know, so the rest of its
+    /// state still reads.
+    #[serde(other)]
+    Other,
 }
 
 /// What both apps show about a bruh's Computer.
@@ -189,7 +193,12 @@ fn valid_modifiers(modifiers: u8) -> Result<(), &'static str> {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ScreencastMessage {
     State(ComputerState),
-    Error { error: String },
+    Error {
+        error: String,
+    },
+    /// A newer service's message this app doesn't know; clients skip it.
+    #[serde(other)]
+    Other,
 }
 
 /// What a live view sends the server, besides [`FRAME_ACK`].
@@ -506,6 +515,31 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<ScreencastMessage>(wire).unwrap(),
             message
+        );
+    }
+
+    /// A newer service's control or message never stops a state from
+    /// reading: the rest of it still shows.
+    #[test]
+    fn unknown_controls_and_messages_still_read() {
+        let state = serde_json::from_value::<ScreencastMessage>(serde_json::json!({
+            "type": "state",
+            "agent_id": "a",
+            "session_id": "s",
+            "control": "shared",
+        }))
+        .unwrap();
+        let ScreencastMessage::State(state) = state else {
+            panic!("not a state: {state:?}");
+        };
+        assert_eq!(state.control, Control::Other);
+        assert_eq!(state.session_id.as_deref(), Some("s"));
+        assert_eq!(
+            serde_json::from_value::<ScreencastMessage>(
+                serde_json::json!({"type": "cursor", "x": 1})
+            )
+            .unwrap(),
+            ScreencastMessage::Other
         );
     }
 

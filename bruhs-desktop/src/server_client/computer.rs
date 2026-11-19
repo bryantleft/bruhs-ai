@@ -171,6 +171,7 @@ async fn pump(
                             Ok(ScreencastMessage::State(state)) => ScreencastEvent::State(state),
                             Ok(ScreencastMessage::Error { error }) => ScreencastEvent::Error(error),
                             // A newer server's message this app doesn't know.
+                            Ok(ScreencastMessage::Other) => continue,
                             Err(error) => {
                                 tracing::debug!("Live view message skipped: {error}");
                                 continue;

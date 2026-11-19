@@ -347,6 +347,11 @@ pub fn computer_controls(
             window: desktop,
             ..ComputerControls::default()
         },
+        // A newer service's control: only Close is safe to offer.
+        Control::Other => ComputerControls {
+            close: true,
+            ..ComputerControls::default()
+        },
     }
 }
 
@@ -370,6 +375,7 @@ pub fn computer_status_line(state: Option<&ComputerState>, on: bool, name: &str)
         Some(state) => match state.control {
             Control::Bruh => format!("{name} has the browser."),
             Control::Owner => format!("You have control. {name} waits until you hand it back."),
+            Control::Other => format!("{name}'s browser is open."),
         },
     }
 }
@@ -773,6 +779,22 @@ mod tests {
         assert_eq!(
             computer_status_line(Some(&headed), true, "Ada"),
             "The browser is open in a window on this computer. Hand back when you're done."
+        );
+        // A newer service's control: the tab still reads, and offers Close.
+        let newer = ComputerState {
+            control: Control::Other,
+            ..running.clone()
+        };
+        assert_eq!(
+            computer_controls(Some(&newer), true, true, true),
+            ComputerControls {
+                close: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            computer_status_line(Some(&newer), true, "Ada"),
+            "Ada's browser is open."
         );
         let failed = ComputerState {
             agent_id: "a".into(),
