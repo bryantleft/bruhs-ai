@@ -524,6 +524,18 @@ impl Workspace {
                     .unwrap_or(0.0);
                 self.settings_scroll.set_offset(point(px(0.0), px(-down)));
             }
+            // Settings, Vault with New entry open on a Saved or a 1Password
+            // login (run after `settings-vault`, once the listing is in).
+            "vault-new" | "vault-new-1password" => {
+                let source = if scene == "vault-new" {
+                    bruhs_models::vault::FormSource::Saved
+                } else {
+                    bruhs_models::vault::FormSource::OnePassword
+                };
+                return self
+                    .vault_settings
+                    .update(cx, |vault, cx| vault.smoke_open_new(source, window, cx));
+            }
             scene if scene.starts_with("settings-") => {
                 let Some(section) = scene
                     .strip_prefix("settings-")

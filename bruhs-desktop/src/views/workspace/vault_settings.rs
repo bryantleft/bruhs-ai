@@ -434,6 +434,26 @@ impl VaultSettings {
         self.open_form(Open::New, None, window, cx);
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=vault-new` / `vault-new-1password`: New
+    /// entry open on a login stored in the keychain or in 1Password, for
+    /// the same-size comparison with the web. False while the page waits.
+    pub(super) fn smoke_open_new(
+        &mut self,
+        source: FormSource,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        self.open_new(window, cx);
+        let Some((_, form)) = self.form.as_mut() else {
+            return false;
+        };
+        form.kind = FormKind::Login;
+        form.source = source;
+        self.reshaped(window, cx);
+        cx.notify();
+        true
+    }
+
     fn open_edit(&mut self, id: String, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.wait().is_some() {
             return;
@@ -1735,6 +1755,7 @@ mod tests {
         TotpInput, VaultAttention, VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing,
         VaultSecretInput, VaultUpdate, ENTRY_UPDATED, OPEN_FROM_OWN_ADDRESS,
     };
+    use bruhs_models::vault::{FormKind, FormSource};
     use gpui::{
         AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, TestAppContext,
         VisualTestContext,
@@ -1902,6 +1923,23 @@ mod tests {
         assert!(!rendered(cx, "desktop-vault-attention-v1-deploy"));
         assert!(!rendered(cx, "desktop-vault-attention-v1-token"));
         assert!(!rendered(cx, "desktop-vault-form"));
+    }
+
+    #[gpui::test]
+    fn the_smoke_scene_opens_new_entry_stored_where_asked(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        for source in [FormSource::OnePassword, FormSource::Saved] {
+            let opened = cx.update(|window, cx| {
+                view.update(cx, |view, cx| view.smoke_open_new(source, window, cx))
+            });
+            assert!(opened);
+            assert!(rendered(cx, "desktop-vault-form"));
+            view.read_with(cx, |view, _| {
+                let (open, form) = view.form.as_ref().expect("a form is open");
+                assert!(matches!(open, Open::New));
+                assert_eq!((form.kind, form.source), (FormKind::Login, source));
+            });
+        }
     }
 
     #[gpui::test]
