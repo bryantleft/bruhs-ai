@@ -367,6 +367,7 @@ fn refuse_shared_blocks(folder: &Path) -> Result<(), String> {
 
 /// A mountinfo path with its octal escapes (`\\040` space, `\\011` tab,
 /// `\\012` newline, `\\134` backslash) decoded.
+#[cfg(any(unix, test))]
 fn unescape_mount(field: &str) -> String {
     let bytes = field.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -392,6 +393,7 @@ fn unescape_mount(field: &str) -> String {
 
 /// The filesystem type of the mount holding `path`, from
 /// `/proc/self/mountinfo`: the longest mount point that contains it.
+#[cfg(any(unix, test))]
 fn filesystem_of(mountinfo: &str, path: &Path) -> Option<String> {
     mountinfo
         .lines()

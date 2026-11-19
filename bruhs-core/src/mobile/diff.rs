@@ -357,6 +357,13 @@ fn copy_metadata_file(
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK | if follow { 0 } else { libc::O_NOFOLLOW });
     }
+    #[cfg(windows)]
+    if !follow {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open the reparse point itself so the is_file check below rejects links.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
     let input = match options.open(source) {
         Ok(input) => input,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound && missing_ok => return Ok(()),
