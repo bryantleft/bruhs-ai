@@ -8,48 +8,11 @@ use super::bruh_page::{page_button, page_switch, small_text};
 use super::create_bruh::hint;
 use super::*;
 use bruhs_models::crew::{
-    usable_by, vault_choice_label, vault_choices, vault_own_line, VAULT_GRANTS_HINT,
+    vault_grant_rows as grant_rows, VaultGrantRow as GrantRow, VAULT_GRANTS_HINT,
     VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
-use bruhs_models::vault::{
-    vault_row, VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH,
-};
+use bruhs_models::vault::{VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH};
 use std::sync::Mutex;
-
-/// One row of the section: an entry the bruh owns, or a shared one it can
-/// be granted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum GrantRow {
-    Own { id: String, line: String },
-    Shared { id: String, label: String, on: bool },
-}
-
-/// The rows for bruh `agent_id` with `grants` picked: its own entries,
-/// then the shared ones, each in `vault_choices`' order. Names and kinds
-/// read as on the Vault page.
-fn grant_rows(listing: &VaultListing, agent_id: &str, grants: &[String]) -> Vec<GrantRow> {
-    let choices = vault_choices(&listing.entries, agent_id);
-    let own = choices.own.iter().map(|entry| GrantRow::Own {
-        id: entry.id.clone(),
-        line: vault_own_line(&vault_row(entry, &listing.bruhs).name),
-    });
-    let shared = choices.shared.iter().map(|entry| GrantRow::Shared {
-        id: entry.id.clone(),
-        label: vault_choice_label(entry),
-        on: usable_by(entry, agent_id, grants),
-    });
-    own.chain(shared).collect()
-}
-
-/// Adds or removes one grant, keeping the set sorted as the service stores
-/// it, so toggling back to the stored set leaves Save off.
-pub(super) fn toggle(grants: &mut Vec<String>, id: &str, on: bool) {
-    grants.retain(|grant| grant != id);
-    if on {
-        grants.push(id.to_owned());
-        grants.sort();
-    }
-}
 
 /// A switch's id is `'static`; each one is kept once for the life of the
 /// app, so the set grows only with the vault.
@@ -313,90 +276,11 @@ fn grant_row(row: GrantRow, off: bool, cx: &Context<'_, ReactiveAutomations>) ->
 
 #[cfg(test)]
 mod tests {
-    // Not `super::*`: that brings gpui's `test`, which `#[test]` would expand.
-    use super::{grant_rows, grant_selector, toggle, GrantRow};
-    use bruhs_models::secrets::SavedCredentialState;
-    use bruhs_models::vault::{
-        CredentialScope, LoginFields, LoginMeta, VaultEntry, VaultKind, VaultListing,
-    };
-
-    fn entry(id: &str, name: &str, scope: CredentialScope, kind: VaultKind) -> VaultEntry {
-        VaultEntry {
-            id: id.into(),
-            name: name.into(),
-            scope,
-            kind,
-            state: SavedCredentialState::Saved,
-            attention: None,
-        }
-    }
-
-    fn login() -> VaultKind {
-        VaultKind::Login(LoginMeta {
-            url: "https://github.com/login".into(),
-            fields: LoginFields::Saved {
-                username: "me".into(),
-                totp: false,
-            },
-        })
-    }
-
-    fn bruh(agent_id: &str) -> CredentialScope {
-        CredentialScope::Bruh {
-            agent_id: agent_id.into(),
-        }
-    }
-
-    /// The same rows as the web's `grant_rows`.
-    #[test]
-    fn vault_grants_list_own_entries_then_shared_switches() {
-        let listing = VaultListing {
-            entries: vec![
-                entry("v1-g", "GitHub", CredentialScope::Global, login()),
-                entry("v1-s", "Shop", bruh("a"), login()),
-                entry("v1-k", "Deploy", CredentialScope::Global, VaultKind::Value),
-                entry("v1-o", "Other", bruh("b"), VaultKind::Value),
-                entry(
-                    "v1-p",
-                    "Project",
-                    CredentialScope::Project {
-                        path: "/work".into(),
-                    },
-                    VaultKind::Value,
-                ),
-            ],
-            ..VaultListing::default()
-        };
-        assert_eq!(
-            grant_rows(&listing, "a", &["v1-g".into()]),
-            vec![
-                GrantRow::Own {
-                    id: "v1-s".into(),
-                    line: "Shop: its own".into(),
-                },
-                GrantRow::Shared {
-                    id: "v1-k".into(),
-                    label: "Deploy, Key".into(),
-                    on: false,
-                },
-                GrantRow::Shared {
-                    id: "v1-g".into(),
-                    label: "GitHub, Login".into(),
-                    on: true,
-                },
-            ]
-        );
-    }
+    // The rows and the toggle are `bruhs_models::crew`'s, tested there.
+    use super::grant_selector;
 
     #[test]
-    fn vault_grants_toggle_keeps_the_stored_order() {
-        let mut grants = vec!["v1-k".to_string()];
-        toggle(&mut grants, "v1-g", true);
-        assert_eq!(grants, ["v1-g", "v1-k"]);
-        toggle(&mut grants, "v1-g", true);
-        assert_eq!(grants, ["v1-g", "v1-k"]);
-        toggle(&mut grants, "v1-g", false);
-        assert_eq!(grants, ["v1-k"]);
+    fn vault_grant_switches_keep_one_selector_each() {
         assert_eq!(grant_selector("v1-k"), "desktop-bruh-vault-grant-v1-k");
         assert!(std::ptr::eq(grant_selector("v1-k"), grant_selector("v1-k")));
     }

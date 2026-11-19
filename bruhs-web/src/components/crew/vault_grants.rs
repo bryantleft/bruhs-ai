@@ -4,43 +4,16 @@
 //! `settings_commands_for`, and only when they changed.
 
 use bruhs_models::crew::{
-    usable_by, vault_choice_label, vault_choices, vault_own_line, ServiceNotice, VAULT_GRANTS_HINT,
-    VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
+    toggle_vault_grant, vault_grant_rows, ServiceNotice, VaultGrantRow as GrantRow,
+    VAULT_GRANTS_HINT, VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
-use bruhs_models::vault::{
-    vault_row, VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH,
-};
+use bruhs_models::vault::{VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH};
 use leptos::prelude::*;
 
 use crate::ui::{Button, ButtonSize, Switch};
 
 const HINT: &str = "text-label-sm text-rambutan-500";
 const REASON_ID: &str = "bruh-vault-reason";
-
-/// One row of the section: an entry the bruh owns, or a shared one it can
-/// be granted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum GrantRow {
-    Own(String),
-    Shared { id: String, label: String, on: bool },
-}
-
-/// The rows for bruh `agent_id` with `grants` picked: its own entries,
-/// then the shared ones, each in `vault_choices`' order. Names and kinds
-/// read as on the Vault page.
-fn grant_rows(listing: &VaultListing, agent_id: &str, grants: &[String]) -> Vec<GrantRow> {
-    let choices = vault_choices(&listing.entries, agent_id);
-    let own = choices
-        .own
-        .iter()
-        .map(|entry| GrantRow::Own(vault_own_line(&vault_row(entry, &listing.bruhs).name)));
-    let shared = choices.shared.iter().map(|entry| GrantRow::Shared {
-        id: entry.id.clone(),
-        label: vault_choice_label(entry),
-        on: usable_by(entry, agent_id, grants),
-    });
-    own.chain(shared).collect()
-}
 
 #[derive(Clone, PartialEq)]
 enum Load {
@@ -52,15 +25,6 @@ enum Load {
     /// A page on another address: the vault and its grants are the owner's
     /// (ruling F26), so this page can't list them.
     OwnerOnly,
-}
-
-/// Adds or removes one grant, keeping the set sorted as the service stores it.
-fn toggle(grants: &mut Vec<String>, id: &str, on: bool) {
-    grants.retain(|grant| grant != id);
-    if on {
-        grants.push(id.to_owned());
-        grants.sort();
-    }
 }
 
 #[component]
@@ -79,7 +43,7 @@ pub fn VaultGrants(
                 Ok(listing) => Load::Ready(listing),
                 Err(error) if error.is_status(404) => Load::ServingOld,
                 Err(error) if error.is_status(403) => Load::OwnerOnly,
-                Err(error) => Load::Failed(error.to_string()),
+                Err(error) => Load::Failed(crate::api::vault_message(&error)),
             };
             // Settings may have closed while the listing came.
             load.try_set(next);
@@ -89,9 +53,8 @@ pub fn VaultGrants(
 
     let rows = Memo::new(move |_| {
         load.with(|load| match load {
-            Load::Ready(listing) => {
-                agent_id.with_value(|id| grants.with(|grants| grant_rows(listing, id, grants)))
-            }
+            Load::Ready(listing) => agent_id
+                .with_value(|id| grants.with(|grants| vault_grant_rows(listing, id, grants))),
             _ => Vec::new(),
         })
     });
@@ -106,7 +69,7 @@ pub fn VaultGrants(
 
     // Keyed by entry, so a toggle keeps the switch (and its focus) in place.
     let key = |row: &GrantRow| match row {
-        GrantRow::Own(line) => format!("own {line}"),
+        GrantRow::Own { id, .. } => format!("own {id}"),
         GrantRow::Shared { id, .. } => id.clone(),
     };
     let own = |line: String| {
@@ -132,7 +95,7 @@ pub fn VaultGrants(
                         label=label
                         checked=checked
                         disabled=off
-                        on_change=Callback::new(move |on| grants.update(|grants| toggle(grants, &pick, on)))
+                        on_change=Callback::new(move |on| grants.update(|grants| toggle_vault_grant(grants, &pick, on)))
                         attr:data-vault-grant=id
                         attr:title=move || disabled.get()
                         attr:aria-describedby=described
@@ -142,7 +105,7 @@ pub fn VaultGrants(
         }
     };
     let row = move |row: GrantRow| match row {
-        GrantRow::Own(line) => own(line).into_any(),
+        GrantRow::Own { line, .. } => own(line).into_any(),
         GrantRow::Shared { id, label, .. } => shared(id, label).into_any(),
     };
     let ready = Memo::new(move |_| load.with(|load| matches!(load, Load::Ready(_))));
@@ -188,97 +151,5 @@ pub fn VaultGrants(
                 </Show>
             </Show>
         </div>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::secrets::SavedCredentialState;
-    use bruhs_models::vault::{CredentialScope, LoginFields, LoginMeta, VaultEntry, VaultKind};
-
-    fn entry(id: &str, name: &str, scope: CredentialScope, kind: VaultKind) -> VaultEntry {
-        VaultEntry {
-            id: id.into(),
-            name: name.into(),
-            scope,
-            kind,
-            state: SavedCredentialState::Saved,
-            attention: None,
-        }
-    }
-
-    fn login() -> VaultKind {
-        VaultKind::Login(LoginMeta {
-            url: "https://github.com/login".into(),
-            fields: LoginFields::Saved {
-                username: "me".into(),
-                totp: false,
-            },
-        })
-    }
-
-    fn bruh(agent_id: &str) -> CredentialScope {
-        CredentialScope::Bruh {
-            agent_id: agent_id.into(),
-        }
-    }
-
-    #[test]
-    fn grant_rows_list_own_entries_then_shared_switches() {
-        let listing = VaultListing {
-            entries: vec![
-                entry("v1-g", "GitHub", CredentialScope::Global, login()),
-                entry("v1-s", "Shop", bruh("a"), login()),
-                entry("v1-k", "Deploy", CredentialScope::Global, VaultKind::Value),
-                entry("v1-o", "Other", bruh("b"), VaultKind::Value),
-                entry(
-                    "v1-p",
-                    "Project",
-                    CredentialScope::Project {
-                        path: "/work".into(),
-                    },
-                    VaultKind::Value,
-                ),
-            ],
-            ..VaultListing::default()
-        };
-        // Shared entries come in `vault_choices`' order, by name.
-        assert_eq!(
-            grant_rows(&listing, "a", &["v1-g".into()]),
-            vec![
-                GrantRow::Own("Shop: its own".into()),
-                GrantRow::Shared {
-                    id: "v1-k".into(),
-                    label: "Deploy, Key".into(),
-                    on: false,
-                },
-                GrantRow::Shared {
-                    id: "v1-g".into(),
-                    label: "GitHub, Login".into(),
-                    on: true,
-                },
-            ]
-        );
-        // Names show escaped, as on the Vault page.
-        let odd = VaultListing {
-            entries: vec![entry(
-                "v1-x",
-                "Ops\u{202e}",
-                CredentialScope::Global,
-                VaultKind::OnePassword {
-                    reference: "op://Ops/Item/field".into(),
-                },
-            )],
-            ..VaultListing::default()
-        };
-        assert_eq!(
-            grant_rows(&odd, "a", &[]),
-            vec![GrantRow::Shared {
-                id: "v1-x".into(),
-                label: "Ops\\u{202e}, 1Password".into(),
-                on: false,
-            }]
-        );
     }
 }

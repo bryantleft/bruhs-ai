@@ -6,7 +6,8 @@ use super::{service_notice, AccessLevel, VAULT_PROTOCOL};
 use crate::agent::AgentProvider;
 use crate::secrets::review_text;
 use crate::vault::{
-    CredentialScope, VaultEntry, VaultKind, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD,
+    vault_row, CredentialScope, VaultEntry, VaultKind, VaultListing, KIND_KEY, KIND_LOGIN,
+    KIND_ONE_PASSWORD,
 };
 
 /// A bruh holds at most this many grants.
@@ -171,11 +172,151 @@ pub fn vault_own_line(name: &str) -> String {
     format!("{name}: its own")
 }
 
+/// One row of a bruh's Vault section: an entry it owns, as a line, or a
+/// shared one it can be granted, as a switch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VaultGrantRow {
+    Own { id: String, line: String },
+    Shared { id: String, label: String, on: bool },
+}
+
+/// The rows for bruh `agent_id` with `grants` picked: its own entries,
+/// then the shared ones, each in [`vault_choices`]' order. Names and kinds
+/// read as on the Vault page. Both apps draw these.
+#[must_use]
+pub fn vault_grant_rows(
+    listing: &VaultListing,
+    agent_id: &str,
+    grants: &[String],
+) -> Vec<VaultGrantRow> {
+    let choices = vault_choices(&listing.entries, agent_id);
+    let own = choices.own.iter().map(|entry| VaultGrantRow::Own {
+        id: entry.id.clone(),
+        line: vault_own_line(&vault_row(entry, &listing.bruhs).name),
+    });
+    let shared = choices.shared.iter().map(|entry| VaultGrantRow::Shared {
+        id: entry.id.clone(),
+        label: vault_choice_label(entry),
+        on: usable_by(entry, agent_id, grants),
+    });
+    own.chain(shared).collect()
+}
+
+/// Adds or removes one grant, keeping the set sorted as the service stores
+/// it, so toggling back to the stored set leaves Save off.
+pub fn toggle_vault_grant(grants: &mut Vec<String>, id: &str, on: bool) {
+    grants.retain(|grant| grant != id);
+    if on {
+        grants.push(id.to_owned());
+        grants.sort();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::secrets::SavedCredentialState;
-    use crate::vault::VaultKind;
+    use crate::vault::{LoginFields, LoginMeta, VaultKind};
+
+    fn listed(id: &str, name: &str, scope: CredentialScope, kind: VaultKind) -> VaultEntry {
+        VaultEntry {
+            id: id.into(),
+            name: name.into(),
+            scope,
+            kind,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        }
+    }
+
+    fn login() -> VaultKind {
+        VaultKind::Login(LoginMeta {
+            url: "https://github.com/login".into(),
+            fields: LoginFields::Saved {
+                username: "me".into(),
+                totp: false,
+            },
+        })
+    }
+
+    fn owned_by(agent_id: &str) -> CredentialScope {
+        CredentialScope::Bruh {
+            agent_id: agent_id.into(),
+        }
+    }
+
+    /// The rows both apps draw in a bruh's Settings (V Task 15 minor).
+    #[test]
+    fn grant_rows_list_own_entries_then_shared_switches() {
+        let listing = VaultListing {
+            entries: vec![
+                listed("v1-g", "GitHub", CredentialScope::Global, login()),
+                listed("v1-s", "Shop", owned_by("a"), login()),
+                listed("v1-k", "Deploy", CredentialScope::Global, VaultKind::Value),
+                listed("v1-o", "Other", owned_by("b"), VaultKind::Value),
+                listed(
+                    "v1-p",
+                    "Project",
+                    CredentialScope::Project {
+                        path: "/work".into(),
+                    },
+                    VaultKind::Value,
+                ),
+            ],
+            ..VaultListing::default()
+        };
+        // Shared entries come in `vault_choices`' order, by name.
+        assert_eq!(
+            vault_grant_rows(&listing, "a", &["v1-g".into()]),
+            vec![
+                VaultGrantRow::Own {
+                    id: "v1-s".into(),
+                    line: "Shop: its own".into(),
+                },
+                VaultGrantRow::Shared {
+                    id: "v1-k".into(),
+                    label: "Deploy, Key".into(),
+                    on: false,
+                },
+                VaultGrantRow::Shared {
+                    id: "v1-g".into(),
+                    label: "GitHub, Login".into(),
+                    on: true,
+                },
+            ]
+        );
+        // Names show escaped, as on the Vault page.
+        let odd = VaultListing {
+            entries: vec![listed(
+                "v1-x",
+                "Ops\u{202e}",
+                CredentialScope::Global,
+                VaultKind::OnePassword {
+                    reference: "op://Ops/Item/field".into(),
+                },
+            )],
+            ..VaultListing::default()
+        };
+        assert_eq!(
+            vault_grant_rows(&odd, "a", &[]),
+            vec![VaultGrantRow::Shared {
+                id: "v1-x".into(),
+                label: "Ops\\u{202e}, 1Password".into(),
+                on: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_grant_toggle_keeps_the_stored_order() {
+        let mut grants = vec!["v1-k".to_string()];
+        toggle_vault_grant(&mut grants, "v1-g", true);
+        assert_eq!(grants, ["v1-g", "v1-k"]);
+        toggle_vault_grant(&mut grants, "v1-g", true);
+        assert_eq!(grants, ["v1-g", "v1-k"]);
+        toggle_vault_grant(&mut grants, "v1-g", false);
+        assert_eq!(grants, ["v1-k"]);
+    }
 
     #[test]
     fn a_bruh_uses_its_own_entries_and_granted_shared_ones() {

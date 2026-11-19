@@ -11,7 +11,7 @@ use super::create_bruh::{
 };
 use super::face_editor::still_view;
 use super::transcript_list::{transcript_view, TranscriptList};
-use super::vault_grants::{toggle, vault_grants, VaultGrantsState};
+use super::vault_grants::{vault_grants, VaultGrantsState};
 use super::*;
 use crate::views::braille::braille_face;
 use crate::views::chat::{desktop_markdown_style, untrusted_markdown};
@@ -725,7 +725,10 @@ impl ReactiveAutomations {
 
     /// Grant entry `id` to the open bruh, or take it back, in the form.
     pub(super) fn toggle_bruh_grant(&mut self, id: &str, on: bool, cx: &mut Context<'_, Self>) {
-        self.edit_bruh_settings(|form| toggle(&mut form.vault, id, on), cx);
+        self.edit_bruh_settings(
+            |form| bruhs_models::crew::toggle_vault_grant(&mut form.vault, id, on),
+            cx,
+        );
     }
 
     fn bruh_state(&self, agent_id: &str) -> Option<&BruhState> {
