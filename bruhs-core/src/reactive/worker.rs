@@ -7,7 +7,7 @@ use bruhs_models::{
     secrets::SecretDecision,
     thread_link::ThreadAccess,
 };
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
@@ -95,6 +95,7 @@ pub(super) fn turn(
     bruh: &BruhProfile,
     run: &ReactiveRun,
     context: &str,
+    home: &Path,
 ) -> AgentTurn {
     let instructions = system_instructions(agent);
     let provider = AgentProvider::for_model(&agent.model);
@@ -127,7 +128,9 @@ pub(super) fn turn(
     .instructions(Some(instructions))
     .effort(bruh.effort.as_deref())
     .unattended_with(bruh.access.clone())
-    .computer(computer.then(|| agent.id.clone()));
+    .computer(computer.then(|| agent.id.clone()))
+    // Every run, Computer on or off: the profile outlives Computer off.
+    .hide_folders(super::computers::hidden_folders(home, &agent.id));
     // `resume(None)` otherwise falls back to the orchestrator's in-memory session.
     if run.session_id.is_none() {
         turn.fresh()
@@ -212,7 +215,13 @@ async fn execute(
         return Ok(());
     }
     let mut stream = match app
-        .send_message(turn(&effective_agent, &bruh, &effective_run, &context))
+        .send_message(turn(
+            &effective_agent,
+            &bruh,
+            &effective_run,
+            &context,
+            &runtime.home,
+        ))
         .await
     {
         Ok(stream) => stream,

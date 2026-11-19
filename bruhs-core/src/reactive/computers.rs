@@ -26,6 +26,22 @@ const TREES: &str = "bruhs";
 /// A marker larger than this is not one Bruhs wrote.
 const MARKER_LIMIT: u64 = 1024;
 
+/// A bruh tree's browser profile and its cache, which no bruh run may read.
+pub(super) const BROWSER_FOLDERS: [&str; 2] = ["browser", "browser-cache"];
+
+/// The folders every bruh run is kept out of: each bruh's browser profile
+/// and cache under `home`, and by name the bruh `id`'s own. The profile
+/// holds the owner's logins from Open in a window, and the folder's 0700
+/// mode doesn't keep out the bruh's own process.
+pub(super) fn hidden_folders(home: &Path, id: &str) -> Vec<PathBuf> {
+    let own = bruh_tree(home, id).ok();
+    let every = home.join(TREES).join("*");
+    own.into_iter()
+        .chain([every])
+        .flat_map(|tree| BROWSER_FOLDERS.map(|folder| tree.join(folder)))
+        .collect()
+}
+
 /// `<home>/bruhs/<id>`, for an id that can't leave that folder.
 pub(super) fn bruh_tree(home: &Path, id: &str) -> Result<PathBuf, ReactiveError> {
     bruhs_models::ids::validate_id(id).map_err(|_| {

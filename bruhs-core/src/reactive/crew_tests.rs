@@ -996,7 +996,13 @@ fn profile(level: AccessLevel, effort: Option<&str>) -> BruhProfile {
 fn each_run_names_the_bruh_and_its_access() {
     use bruhs_models::agent::PermissionMode;
     let (claude, run) = (agent("a"), queued_run("Do the thing."));
-    let full = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "ctx");
+    let full = worker::turn(
+        &claude,
+        &profile(AccessLevel::Full, None),
+        &run,
+        "ctx",
+        std::path::Path::new("/home"),
+    );
     assert!(full.prompt.starts_with("Your name is Agent a.\n"));
     assert!(full.prompt.contains("Access: full."));
     assert!(full.prompt.contains("\n\nctx\n\n---\n\n"));
@@ -1008,11 +1014,23 @@ fn each_run_names_the_bruh_and_its_access() {
     assert!(!full.fresh_session);
     assert_eq!(full.effort, None);
 
-    let no_context = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "");
+    let no_context = worker::turn(
+        &claude,
+        &profile(AccessLevel::Full, None),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert!(no_context.prompt.ends_with("without asking.\nNever push, merge or open pull requests.\nNever send messages in the owner's name.\n\nDo the thing."));
     assert!(!no_context.prompt.contains("---"));
 
-    let ask = worker::turn(&claude, &profile(AccessLevel::Ask, Some("high")), &run, "");
+    let ask = worker::turn(
+        &claude,
+        &profile(AccessLevel::Ask, Some("high")),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert_eq!(ask.permission_mode, PermissionMode::Default);
     assert!(ask.prompt.contains("Access: ask first."));
     assert_eq!(ask.effort.as_deref(), Some("high"));
@@ -1021,10 +1039,42 @@ fn each_run_names_the_bruh_and_its_access() {
         model: "gpt-5.3-codex".into(),
         ..agent("a")
     };
-    let codex_ask = worker::turn(&codex, &profile(AccessLevel::Ask, None), &run, "");
+    let codex_ask = worker::turn(
+        &codex,
+        &profile(AccessLevel::Ask, None),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert_eq!(codex_ask.permission_mode, PermissionMode::Plan);
     assert!(codex_ask.prompt.contains("Access: read only."));
     assert_eq!(codex_ask.unattended_access.level, AccessLevel::ReadOnly);
+}
+
+/// Every bruh run, with its Computer on or off, is kept out of every
+/// bruh's browser profile and cache, and by name its own.
+#[test]
+fn every_bruh_run_hides_the_browser_profiles() {
+    let run = queued_run("Look it up.");
+    let home = std::path::Path::new("/data");
+    let expected: Vec<std::path::PathBuf> = [
+        "/data/bruhs/a/browser",
+        "/data/bruhs/a/browser-cache",
+        "/data/bruhs/*/browser",
+        "/data/bruhs/*/browser-cache",
+    ]
+    .map(std::path::PathBuf::from)
+    .to_vec();
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        for on in [false, true] {
+            let bruh = BruhProfile {
+                computer: on,
+                ..profile(level, None)
+            };
+            let turn = worker::turn(&agent("a"), &bruh, &run, "", home);
+            assert_eq!(turn.hidden_folders, expected, "{level:?} computer={on}");
+        }
+    }
 }
 
 #[test]
@@ -1036,7 +1086,13 @@ fn the_worker_turns_computer_on_only_when_available() {
         ..profile(level, None)
     };
     for level in [AccessLevel::Ask, AccessLevel::Full] {
-        let turn = worker::turn(&agent("a"), &with_computer(level, true), &run, "");
+        let turn = worker::turn(
+            &agent("a"),
+            &with_computer(level, true),
+            &run,
+            "",
+            std::path::Path::new("/home"),
+        );
         assert_eq!(turn.computer.as_deref(), Some("a"), "{level:?}");
         assert!(turn.prompt.contains(BROWSER_LINE), "{level:?}");
     }
@@ -1049,7 +1105,7 @@ fn the_worker_turns_computer_on_only_when_available() {
         (agent("a"), with_computer(AccessLevel::Full, false)),
         (codex, with_computer(AccessLevel::Full, true)),
     ] {
-        let turn = worker::turn(&agent, &profile, &run, "");
+        let turn = worker::turn(&agent, &profile, &run, "", std::path::Path::new("/home"));
         assert_eq!(
             turn.computer, None,
             "{} {:?}",

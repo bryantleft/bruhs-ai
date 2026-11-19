@@ -90,6 +90,10 @@ pub struct AgentTurn {
     /// The bruh whose own browser this turn may use, by agent id (see
     /// [`AgentTurn::computer`]). Only unattended Claude turns use it.
     pub computer: Option<String>,
+    /// Folders an unattended Claude turn may never read or edit, in any
+    /// tool or its sandboxed shell: the bruhs' browser profiles (see
+    /// [`AgentTurn::hide_folders`]).
+    pub hidden_folders: Vec<std::path::PathBuf>,
 }
 
 impl AgentTurn {
@@ -120,6 +124,7 @@ impl AgentTurn {
             unattended: false,
             unattended_access: BruhAccess::default(),
             computer: None,
+            hidden_folders: Vec::new(),
         }
     }
 
@@ -165,6 +170,15 @@ impl AgentTurn {
     /// else. The caller decides with [`bruhs_models::crew::computer_on`].
     pub fn computer(mut self, agent_id: Option<String>) -> Self {
         self.computer = agent_id;
+        self
+    }
+
+    /// Keep an unattended Claude turn out of `folders` (absolute paths,
+    /// `*` matching one name), whatever its access: Claude's deny rules
+    /// cover its Read, Grep, Glob and edit tools, and its bash sandbox reads
+    /// the same rules. Codex has no such rule.
+    pub fn hide_folders(mut self, folders: Vec<std::path::PathBuf>) -> Self {
+        self.hidden_folders = folders;
         self
     }
 
@@ -675,6 +689,7 @@ impl AgentOrchestrator {
             unattended,
             unattended_access,
             computer,
+            hidden_folders,
         } = turn;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -754,7 +769,12 @@ impl AgentOrchestrator {
         // Only an unattended turn gets a bruh's browser.
         let computer = computer.filter(|_| unattended);
         if unattended {
-            restrict_unattended(&mut query_options, &unattended_access, computer.is_some());
+            restrict_unattended(
+                &mut query_options,
+                &unattended_access,
+                computer.is_some(),
+                &hidden_folders,
+            );
         }
         let bruh_browser = computer
             .map(|agent_id| crate::workbench_tools::configure_bruh(&mut query_options, &agent_id));
@@ -1065,6 +1085,7 @@ fn unattended_claude_settings(
     access: &BruhAccess,
     files: &[serde_json::Value],
     computer: bool,
+    hidden: &[std::path::PathBuf],
 ) -> serde_json::Value {
     // With its Computer on, the bruh's one MCP server is its browser (see
     // `workbench_tools::configure_bruh`), and each call reaches the gate.
@@ -1087,6 +1108,7 @@ fn unattended_claude_settings(
             .into_iter()
             .map(serde_json::Value::from),
     );
+    deny.extend(hidden_folder_rules(hidden).map(serde_json::Value::from));
     let mut settings = serde_json::json!({"permissions": {"deny": deny}});
     if unattended_shell_confined(access, AgentProvider::Claude) {
         // Writes outside the working folder fail and network hosts become
@@ -1108,6 +1130,18 @@ fn unattended_claude_settings(
         });
     }
     settings
+}
+
+/// Deny rules that keep a turn out of each of `folders`. `Read` rules also
+/// cover Grep and Glob, and Claude's sandbox adds `Read` and `Edit` deny
+/// paths to its own read and write blocks. A leading `//` makes a rule's
+/// path absolute.
+fn hidden_folder_rules(folders: &[std::path::PathBuf]) -> impl Iterator<Item = String> + '_ {
+    folders.iter().flat_map(|folder| {
+        let folder = folder.to_string_lossy();
+        let folder = folder.trim_end_matches('/');
+        ["Read", "Edit"].map(|tool| format!("{tool}(/{folder}/**)"))
+    })
 }
 
 /// What an unattended turn's environment keeps, read with `get`: logins,
@@ -1158,7 +1192,12 @@ pub(crate) fn unattended_environment(
 /// servers, and the tools, permission mode and sandbox for the level.
 /// `computer` lets app tools through the deny rules, for the bruh browser
 /// server `workbench_tools::configure_bruh` adds next.
-fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess, computer: bool) {
+fn restrict_unattended(
+    options: &mut ProviderQueryOptions,
+    access: &BruhAccess,
+    computer: bool,
+    hidden: &[std::path::PathBuf],
+) {
     // Event content must not gain access to the daemon's integration tokens
     // through a shell's environment. Provider logins remain on disk.
     let environment = unattended_environment(|key| std::env::var(key).ok());
@@ -1191,7 +1230,8 @@ fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess, 
             options.permission_mode = Some(mode);
             options.setting_sources = Some(Vec::new());
             options.settings = Some(
-                unattended_claude_settings(access, &user_claude_settings(), computer).to_string(),
+                unattended_claude_settings(access, &user_claude_settings(), computer, hidden)
+                    .to_string(),
             );
             // Start no MCP servers: not the user's, claude.ai connectors, or a
             // `.mcp.json` a Full bruh wrote into its folder, whose command
@@ -2024,7 +2064,7 @@ mod tests {
                 None,
                 None,
             );
-            restrict_unattended(&mut options, &BruhAccess::default(), false);
+            restrict_unattended(&mut options, &BruhAccess::default(), false, &[]);
             let environment = match &options {
                 ProviderQueryOptions::Claude(options) => &options.env,
                 ProviderQueryOptions::Codex(options) => &options.env,
@@ -2092,7 +2132,7 @@ mod tests {
             PermissionMode::BypassPermissions,
             None,
         );
-        restrict_unattended(&mut options, access, false);
+        restrict_unattended(&mut options, access, false, &[]);
         let options = claude(options);
         let settings = serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
         (options, settings)
@@ -2281,7 +2321,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &access, true);
+            restrict_unattended(&mut options, &access, true, &[]);
             // A server already there is replaced, not merged.
             if let ProviderQueryOptions::Claude(o) = &mut options {
                 o.mcp_config = Some(
@@ -2326,7 +2366,7 @@ mod tests {
             PermissionMode::BypassPermissions,
             None,
         );
-        restrict_unattended(&mut codex, &full, true);
+        restrict_unattended(&mut codex, &full, true, &[]);
         let error = crate::workbench_tools::configure_bruh(&mut codex, "a").unwrap_err();
         assert_eq!(error.to_string(), bruhs_models::crew::NEEDS_CLAUDE);
         assert!(codex_mcp_servers(&codex).is_empty());
@@ -2345,6 +2385,43 @@ mod tests {
         }
     }
 
+    /// A bruh never reads a browser profile, at any level and with its
+    /// Computer on or off (the profile outlives Computer off): the Read and
+    /// Edit deny rules hold for Read, Grep, Glob and the edit tools, and
+    /// Claude's sandbox adds them to Full's shell.
+    #[test]
+    fn every_bruh_turn_denies_the_hidden_folders() {
+        let hidden = [
+            std::path::PathBuf::from("/data/bruhs/a/browser"),
+            std::path::PathBuf::from("/data/bruhs/*/browser-cache/"),
+        ];
+        for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+            for computer in [false, true] {
+                let mut options = options(
+                    AgentProvider::Claude,
+                    PermissionMode::BypassPermissions,
+                    None,
+                );
+                restrict_unattended(&mut options, &bruh_access(level, true), computer, &hidden);
+                let options = claude(options);
+                let settings: serde_json::Value =
+                    serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+                let deny = settings["permissions"]["deny"].as_array().unwrap();
+                for rule in [
+                    "Read(//data/bruhs/a/browser/**)",
+                    "Edit(//data/bruhs/a/browser/**)",
+                    "Read(//data/bruhs/*/browser-cache/**)",
+                    "Edit(//data/bruhs/*/browser-cache/**)",
+                ] {
+                    assert!(
+                        deny.contains(&serde_json::json!(rule)),
+                        "{level:?} computer={computer}: {rule}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn without_computer_a_bruh_turn_starts_no_servers_and_denies_app_tools() {
         for level in [AccessLevel::Ask, AccessLevel::Full] {
@@ -2353,7 +2430,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &bruh_access(level, true), false);
+            restrict_unattended(&mut options, &bruh_access(level, true), false, &[]);
             let options = claude(options);
             assert!(options.mcp_config.is_none(), "{level:?}");
             assert!(options.strict_mcp_config, "{level:?}");
@@ -2419,7 +2496,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &bruh_access(level, true), false);
+            restrict_unattended(&mut options, &bruh_access(level, true), false, &[]);
             codex(options).access
         };
         assert_eq!(
