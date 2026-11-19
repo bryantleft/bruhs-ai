@@ -42,6 +42,7 @@ pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut Visua
 /// Automations card. That card runs past 1080px since it took the web's
 /// order (PM-48), the Local suggestions card adds its own height (PM-64),
 /// and a control must be on screen to be clicked.
+#[cfg(unix)]
 pub(super) fn workflow_fixture(
     cx: &mut TestAppContext,
 ) -> (Entity<Workspace>, &mut VisualTestContext) {
