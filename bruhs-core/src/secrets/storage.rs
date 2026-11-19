@@ -370,6 +370,11 @@ impl SecretStore {
         }
         let (project, name) = (project.to_owned(), name.to_owned());
         self.access(move |vault| {
+            // A project's 1Password entry of that name answers the thread
+            // already; a saved key beside it would break unique names (D6).
+            if vault.has_project_entry(&project, &name) {
+                return Err(SecretError::Invalid(bruhs_models::vault::DUPLICATE_NAME));
+            }
             let id = storage_key(Path::new(&project), &name);
             vault.save(
                 SavedCredential {

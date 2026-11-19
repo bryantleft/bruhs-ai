@@ -300,6 +300,7 @@ mod tests {
             saved_available: false,
             storage_unavailable: false,
             connection: None,
+            saved_source: None,
         };
         assert!(matches!(
             apply_event(&mut message, &AgentStreamEvent::SecretRequest(request), 0.0),

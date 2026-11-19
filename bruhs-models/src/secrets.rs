@@ -1,6 +1,6 @@
 //! Public metadata and private submissions for a harness credential request.
 
-use crate::ids::ThreadId;
+use crate::{ids::ThreadId, vault::SavedSource};
 use serde::{Deserialize, Serialize};
 
 /// The operation the user must review before supplying a credential.
@@ -103,6 +103,31 @@ pub struct SecretRequest {
     pub storage_unavailable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<Box<crate::connections::ServiceConnection>>,
+    /// Which entry Use saved reads (D17). `None` when nothing matched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_source: Option<SavedSource>,
+}
+
+/// Refused Forget saved on a shared or 1Password entry: forgetting it from
+/// one thread would remove it everywhere.
+pub const FORGET_SHARED: &str = "Manage shared entries in Settings, Vault.";
+
+/// What the form says beside Use saved.
+pub fn saved_source_label(source: SavedSource) -> &'static str {
+    match source {
+        SavedSource::Project => "Saved for this project",
+        SavedSource::Global => "Saved for all projects",
+        SavedSource::OnePassword => "From 1Password",
+    }
+}
+
+/// Forget saved is offered only for a project's own saved value. A request
+/// from an older service has no source and is a project's own.
+pub fn forget_offered(request: &SecretRequest) -> bool {
+    request.saved_available
+        && request
+            .saved_source
+            .is_none_or(|source| source == SavedSource::Project)
 }
 
 /// Sent only to the private submission endpoint, never to the provider.
@@ -151,6 +176,65 @@ pub struct CredentialReplacement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn request(saved_available: bool, saved_source: Option<SavedSource>) -> SecretRequest {
+        SecretRequest {
+            id: "request".into(),
+            thread_id: ThreadId::new_v4(),
+            operation: SecretOperation {
+                name: "DEPLOY_KEY".into(),
+                reason: "Deploy".into(),
+                env_var: "DEPLOY_KEY".into(),
+                command: vec!["deploy".into()],
+            },
+            cwd: "/tmp/x".into(),
+            saved_available,
+            storage_unavailable: false,
+            connection: None,
+            saved_source,
+        }
+    }
+
+    #[test]
+    fn the_saved_source_reads_plainly_and_forget_is_project_only() {
+        assert_eq!(
+            saved_source_label(SavedSource::Project),
+            "Saved for this project"
+        );
+        assert_eq!(
+            saved_source_label(SavedSource::Global),
+            "Saved for all projects"
+        );
+        assert_eq!(
+            saved_source_label(SavedSource::OnePassword),
+            "From 1Password"
+        );
+        assert!(forget_offered(&request(true, Some(SavedSource::Project))));
+        assert!(forget_offered(&request(true, None)));
+        assert!(!forget_offered(&request(true, Some(SavedSource::Global))));
+        assert!(!forget_offered(&request(
+            true,
+            Some(SavedSource::OnePassword)
+        )));
+        assert!(!forget_offered(&request(false, None)));
+        assert!(!forget_offered(&request(false, Some(SavedSource::Project))));
+    }
+
+    #[test]
+    fn a_request_without_a_source_keeps_the_old_wire() {
+        let old = request(false, None);
+        let wire = serde_json::to_value(&old).unwrap();
+        assert!(wire.get("saved_source").is_none());
+        let read: SecretRequest = serde_json::from_value(wire).unwrap();
+        assert_eq!(read, old);
+        let shared = request(true, Some(SavedSource::OnePassword));
+        let wire = serde_json::to_value(&shared).unwrap();
+        assert_eq!(wire["saved_source"], "one_password");
+        assert_eq!(
+            serde_json::from_value::<SecretRequest>(wire).unwrap(),
+            shared
+        );
+    }
 
     #[test]
     fn operation_review_cannot_be_reordered_by_unicode_format_controls() {

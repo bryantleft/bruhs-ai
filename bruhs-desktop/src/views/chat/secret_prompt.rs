@@ -1,7 +1,7 @@
 //! A disposable private input entity, kept out of chat snapshots and drafts.
 
 use super::*;
-use bruhs_models::secrets::{SecretDecision, SecretRequest};
+use bruhs_models::secrets::{forget_offered, saved_source_label, SecretDecision, SecretRequest};
 use bruhs_ui::input::InputContentType;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
@@ -159,7 +159,13 @@ impl SecretPrompt {
             let _ = this.update(cx, |this, cx| {
                 this.busy = false;
                 match result {
-                    Ok(false) => this.request.saved_available = false,
+                    // Forgotten. A refresh that already offers a shared
+                    // entry instead stays.
+                    Ok(false) if forget_offered(&this.request) => {
+                        this.request.saved_available = false;
+                        this.request.saved_source = None;
+                    }
+                    Ok(false) => {}
                     Ok(true) | Err(bruhs_core::secrets::SecretError::NotPending) => {}
                     Err(error) => this.error = Some(error.to_string()),
                 }
@@ -182,6 +188,7 @@ impl SecretPrompt {
             ButtonState::disabled_if(self.busy),
         )
         .min_h(px(theme::CONTROL_PX))
+        .debug_selector(move || format!("secret-{action}"))
         .aria_label(label)
         .child(label)
         .map(|el| {
@@ -232,7 +239,9 @@ impl Render for SecretPrompt {
             .child(div().flex().flex_wrap().gap_2()
                 .child(self.action_button("once", "Use once", cx))
                 .child(self.action_button("save", "Save securely and use", cx))
-                .when(self.request.saved_available, |row| row.child(self.action_button("saved", "Use saved", cx)).child(self.action_button("forget", "Forget saved", cx)))
+                .when(self.request.saved_available, |row| row.child(self.action_button("saved", "Use saved", cx)))
+                .when_some(self.request.saved_source.filter(|_| self.request.saved_available), |row, source| row.child(div().id("secret-saved-source").debug_selector(move || format!("secret-source-{}", saved_source_label(source))).flex().items_center().min_h(px(theme::CONTROL_PX)).text_color(theme::rambutan_400()).child(saved_source_label(source))))
+                .when(forget_offered(&self.request), |row| row.child(self.action_button("forget", "Forget saved", cx)))
                 .child(self.action_button("decline", "Decline", cx)))
             .child(div().text_color(theme::rambutan_400()).child(if self.busy { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." })).into_any_element()
     }
@@ -241,8 +250,77 @@ impl Render for SecretPrompt {
 #[cfg(test)]
 mod tests {
     use super::{theme, AgentUiEvent, ChatView, DesktopState, SecretRequest, ThreadId};
+    use bruhs_models::vault::SavedSource;
     use gpui::{AppContext as _, TestAppContext};
     use std::{cell::RefCell, rc::Rc};
+
+    #[gpui::test]
+    fn the_saved_source_shows_and_forget_is_project_only(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let captured = Rc::new(RefCell::new(None));
+        let output = captured.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let chat = cx.new(|cx| ChatView::new(window, cx));
+            *output.borrow_mut() = Some(chat.clone());
+            bruhs_ui::Root::new(chat, window, cx)
+        });
+        let chat = captured.borrow().clone().unwrap();
+        let thread = ThreadId::new_v4();
+        chat.update(cx, |chat, cx| {
+            chat.start_thread(thread.as_str(), "Credential fixture", cx)
+        });
+        for (source, label, selector, forget) in [
+            (
+                SavedSource::Global,
+                "Saved for all projects",
+                "secret-source-Saved for all projects",
+                false,
+            ),
+            (
+                SavedSource::OnePassword,
+                "From 1Password",
+                "secret-source-From 1Password",
+                false,
+            ),
+            (
+                SavedSource::Project,
+                "Saved for this project",
+                "secret-source-Saved for this project",
+                true,
+            ),
+        ] {
+            chat.update(cx, |chat, cx| {
+                chat.pending_secret = Some(SecretRequest {
+                    id: format!("saved-{label}"),
+                    thread_id: thread.clone(),
+                    operation: bruhs_models::secrets::SecretOperation {
+                        name: "DEPLOY_KEY".into(),
+                        reason: "Deploy".into(),
+                        env_var: "DEPLOY_KEY".into(),
+                        command: vec!["deploy".into()],
+                    },
+                    cwd: "/tmp/x".into(),
+                    saved_available: true,
+                    storage_unavailable: false,
+                    connection: None,
+                    saved_source: Some(source),
+                });
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("secret-saved").is_some(), "{label}");
+            assert!(cx.debug_bounds(selector).is_some(), "{label}");
+            assert_eq!(
+                cx.debug_bounds("secret-forget").is_some(),
+                forget,
+                "{label}"
+            );
+        }
+    }
 
     #[gpui::test]
     fn private_input_is_disposable_and_never_enters_the_composer_or_messages(
@@ -277,6 +355,7 @@ mod tests {
                 saved_available: false,
                 storage_unavailable: false,
                 connection: None,
+                saved_source: None,
             });
             drop(chat.render_secret_prompt(window, cx));
             let prompt = chat.secret_prompt.clone().unwrap();

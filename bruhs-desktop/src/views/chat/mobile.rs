@@ -247,6 +247,7 @@ impl ChatView {
             saved_available: false,
             storage_unavailable: false,
             connection: None,
+            saved_source: None,
         });
         drop(self.render_secret_prompt(window, cx));
         self.secret_prompt

@@ -357,6 +357,21 @@ impl Vault {
         Ok(())
     }
 
+    /// Whether `vault.json` has an entry for this project named `name`
+    /// (compared trimmed): a thread's Save securely must not add a second
+    /// one beside it. A damaged file never blocks a legacy save.
+    pub(super) fn has_project_entry(&mut self, path: &str, name: &str) -> bool {
+        let scope = CredentialScope::Project {
+            path: path.to_owned(),
+        };
+        self.vault().is_ok_and(|vault| {
+            vault
+                .entries
+                .values()
+                .any(|entry| entry.scope == scope && entry.name.trim() == name.trim())
+        })
+    }
+
     /// Store a `vault.json` row, intent first: a row whose item changes is
     /// persisted as needing attention with its revision bumped, the item
     /// is written or removed, then the row is persisted as saved.
@@ -662,7 +677,6 @@ impl SecretStore {
     /// matches (D17): the project's own key, then a 1Password entry for the
     /// project, then a Global key or 1Password entry. Logins never match.
     /// An unindexed legacy value is registered as `find` does.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
     pub(in crate::secrets) async fn request_match(
         &self,
         project: &str,

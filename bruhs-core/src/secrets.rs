@@ -21,16 +21,16 @@ pub use storage::SecretStore;
 use crate::{OrchestratorEvent, QueryEvent};
 use bruhs_models::{
     ids::ThreadId,
-    secrets::{SecretDecision, SecretOperation, SecretRequest},
+    secrets::{SecretDecision, SecretOperation, SecretRequest, FORGET_SHARED},
     vault::{
-        LoginFields, LoginMeta, SecretField, VaultAttention, VaultCheck, VaultEntry, VaultKind,
-        VaultListing, CHECK_OK,
+        CredentialScope, LoginFields, LoginMeta, SavedSource, SecretField, VaultAttention,
+        VaultCheck, VaultEntry, VaultKind, VaultListing, VaultUpdate, CHECK_OK,
     },
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     process::Stdio,
     sync::{
@@ -92,10 +92,27 @@ impl SecretError {
 struct Pending {
     scope: Arc<SecretScope>,
     request: SecretRequest,
-    key: String,
+    /// The vault entry Use saved reads (D17), as matched when the form was
+    /// last shown; `request.saved_source` says which kind it is.
+    entry: Option<String>,
     reply: oneshot::Sender<Approved>,
     busy: bool,
     login_cancel: watch::Sender<bool>,
+}
+
+impl Pending {
+    /// Offer what `request_match` found: an entry and where it comes from,
+    /// nothing, or (on `Err`) that saved entries couldn't be checked.
+    fn show_match(&mut self, matched: Result<Option<(String, SavedSource)>, ()>) {
+        let (entry, storage_unavailable) = match matched {
+            Ok(entry) => (entry, false),
+            Err(()) => (None, true),
+        };
+        self.request.saved_available = entry.is_some();
+        self.request.saved_source = entry.as_ref().map(|(_, source)| *source);
+        self.request.storage_unavailable = storage_unavailable;
+        self.entry = entry.map(|(id, _)| id);
+    }
 }
 
 enum Approved {
@@ -197,13 +214,19 @@ impl SecretManager {
 
     pub async fn replace_credential(&self, id: &str, value: String) -> Result<(), SecretError> {
         self.store.replace(id, value).await?;
-        self.refresh_saved_requests(id, true);
+        if let Some(name) = self.entry_name(id).await {
+            self.refresh_saved_requests(&name).await;
+        }
         Ok(())
     }
 
     pub async fn delete_credential(&self, id: &str) -> Result<(), SecretError> {
+        let name = self.entry_name(id).await;
         self.store.delete_saved(id).await?;
-        self.refresh_saved_requests(id, false);
+        self.forget_attention([id]);
+        if let Some(name) = name {
+            self.refresh_saved_requests(&name).await;
+        }
         Ok(())
     }
 
@@ -226,30 +249,107 @@ impl SecretManager {
         &self,
         create: bruhs_models::vault::VaultCreate,
     ) -> Result<bruhs_models::vault::VaultEntry, SecretError> {
-        self.store.vault_create(create).await
+        let entry = self.store.vault_create(create).await?;
+        self.refresh_saved_requests(&entry.name).await;
+        Ok(entry)
+    }
+
+    /// Update an entry's values. Open thread forms asking for its name
+    /// are matched again.
+    pub async fn vault_update(
+        &self,
+        id: &str,
+        update: VaultUpdate,
+    ) -> Result<VaultEntry, SecretError> {
+        let entry = self.store.vault_update(id, update).await?;
+        self.refresh_saved_requests(&entry.name).await;
+        Ok(entry)
+    }
+
+    /// Delete an entry and its keychain item (D20). Open thread forms that
+    /// offered it are matched again, and its last failure is dropped.
+    pub async fn vault_delete(&self, id: &str) -> Result<(), SecretError> {
+        let name = self.entry_name(id).await;
+        self.store.vault_delete(id).await?;
+        self.forget_attention([id]);
+        if let Some(name) = name {
+            self.refresh_saved_requests(&name).await;
+        }
+        Ok(())
     }
 
     /// Forget the own entries of the bruhs in `gone`, which were deleted.
-    pub async fn forget_bruh_entries(
-        &self,
-        gone: &std::collections::HashSet<String>,
-    ) -> Result<usize, SecretError> {
-        self.store.forget_bruh_entries(gone).await
+    /// No thread form offers a bruh's entry, so none needs a refresh.
+    pub async fn forget_bruh_entries(&self, gone: &HashSet<String>) -> Result<usize, SecretError> {
+        let owned: Vec<String> = self
+            .store
+            .vault_list()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| {
+                matches!(&entry.scope, CredentialScope::Bruh { agent_id } if gone.contains(agent_id))
+            })
+            .map(|entry| entry.id)
+            .collect();
+        let forgotten = self.store.forget_bruh_entries(gone).await?;
+        self.forget_attention(owned.iter().map(String::as_str));
+        Ok(forgotten)
     }
 
-    fn refresh_saved_requests(&self, key: &str, available: bool) {
-        let updates: Vec<_> = self
+    async fn entry_name(&self, id: &str) -> Option<String> {
+        self.store
+            .vault_entry(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|entry| entry.name)
+    }
+
+    /// Drop the last failure of entries that are gone.
+    fn forget_attention<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
+        let mut attention = self
+            .attention
             .lock()
-            .values_mut()
-            .filter(|item| item.key == key)
-            .map(|item| {
-                item.request.saved_available = available;
-                item.request.storage_unavailable = false;
-                (item.scope.clone(), item.request.clone())
+            .unwrap_or_else(PoisonError::into_inner);
+        for id in ids {
+            attention.remove(id);
+        }
+    }
+
+    /// Match every open thread form asking for `name` again, after a vault
+    /// change, and show each one what it now offers. A failed match says
+    /// saved entries couldn't be checked; one that outlasts the read wait
+    /// leaves the form as it was. Use saved reads its entry again either way.
+    async fn refresh_saved_requests(&self, name: &str) {
+        let open: Vec<(String, String)> = self
+            .lock()
+            .iter()
+            .filter(|(_, item)| {
+                item.request.connection.is_none() && item.request.operation.name == name
             })
+            .map(|(id, item)| (id.clone(), item.request.cwd.clone()))
             .collect();
-        for (scope, request) in updates {
-            // UI hints must not delay the mutation. Saved access is rechecked on every submission.
+        let mut matches = HashMap::new();
+        for (id, cwd) in open {
+            if !matches.contains_key(&cwd) {
+                let matched =
+                    tokio::time::timeout(self.read_wait, self.store.request_match(&cwd, name))
+                        .await;
+                let Ok(matched) = matched else {
+                    continue;
+                };
+                matches.insert(cwd.clone(), matched.map_err(drop));
+            }
+            let matched = matches[&cwd].clone();
+            let update = self.lock().get_mut(&id).map(|item| {
+                item.show_match(matched);
+                (item.scope.clone(), item.request.clone())
+            });
+            let Some((scope, request)) = update else {
+                continue;
+            };
+            // UI hints must not delay the mutation.
             if let Some(tx) = scope.tx.upgrade() {
                 if tx
                     .try_send(OrchestratorEvent::Query(QueryEvent::SecretRequest(request)))
@@ -581,7 +681,7 @@ impl SecretManager {
         id: &str,
         decision: SecretDecision,
     ) -> Result<bool, SecretError> {
-        let (scope, key, request) = {
+        let (scope, entry, request) = {
             let mut pending = self.lock();
             let item = pending
                 .get_mut(id)
@@ -593,7 +693,7 @@ impl SecretManager {
                 return Err(SecretError::Busy);
             }
             item.busy = true;
-            let claimed = (item.scope.clone(), item.key.clone(), item.request.clone());
+            let claimed = (item.scope.clone(), item.entry.clone(), item.request.clone());
             drop(pending);
             claimed
         };
@@ -659,23 +759,28 @@ impl SecretManager {
                 }
                 Approved::Run(value)
             }
-            SecretDecision::UseSaved => {
-                Approved::Run(self.store.get(&key).await?.ok_or(SecretError::NotSaved)?)
-            }
+            // A 1Password entry runs `op read` now; a failure leaves the
+            // request pending.
+            SecretDecision::UseSaved => Approved::Run(
+                self.resolve_value(entry.as_deref().ok_or(SecretError::NotSaved)?)
+                    .await?,
+            ),
             SecretDecision::ForgetSaved => {
-                self.store.delete_saved(&key).await?;
-                let request = {
-                    let mut pending = self.lock();
-                    let item = pending
-                        .get_mut(id)
-                        .filter(|p| p.scope.active.load(Ordering::Acquire))
-                        .ok_or(SecretError::NotPending)?;
-                    item.request.saved_available = false;
-                    let request = item.request.clone();
-                    drop(pending);
-                    request
-                };
-                scope.emit(QueryEvent::SecretRequest(request)).await;
+                // Forgetting a shared entry here would remove it from every
+                // project; Settings, Vault manages those.
+                if request
+                    .saved_source
+                    .is_some_and(|source| source != SavedSource::Project)
+                {
+                    return Err(SecretError::Invalid(FORGET_SHARED));
+                }
+                let entry = entry.ok_or(SecretError::NotSaved)?;
+                self.store.delete_saved(&entry).await?;
+                self.forget_attention([entry.as_str()]);
+                self.refresh_saved_requests(&request.operation.name).await;
+                if !scope.active.load(Ordering::Acquire) {
+                    return Err(SecretError::NotPending);
+                }
                 return Ok(false);
             }
             SecretDecision::Decline => Approved::Decline,
@@ -869,15 +974,15 @@ impl SecretScope {
         let Some(project) = cwd.to_str() else {
             return OperationResult::status("working_directory_unavailable");
         };
-        let key = storage_key(&cwd, &operation.name);
-        let (saved_available, storage_unavailable) = if provider.is_some() {
-            (false, false)
+        let matched = if provider.is_some() {
+            Ok(None)
         } else {
-            match self.manager.store.find(project, &operation.name).await {
-                Ok(value) => (value.is_some(), false),
-                // Use-once still works; the form explicitly reports unavailable saved credentials.
-                Err(_) => (false, true),
-            }
+            // Use-once still works; the form explicitly reports unavailable saved credentials.
+            self.manager
+                .store
+                .request_match(project, &operation.name)
+                .await
+                .map_err(drop)
         };
         let connection = if let Some(provider) = provider {
             match self.manager.connections.connection(provider).await {
@@ -890,32 +995,32 @@ impl SecretScope {
         if !self.active.load(Ordering::Acquire) {
             return OperationResult::status("cancelled");
         }
-        let request = SecretRequest {
-            id: uuid::Uuid::new_v4().to_string(),
-            thread_id: self.thread_id.clone(),
-            operation,
-            cwd: project.to_owned(),
-            saved_available,
-            storage_unavailable,
-            connection: connection.map(Box::new),
-        };
         let (reply, receive) = oneshot::channel();
+        let mut item = Pending {
+            scope: self.clone(),
+            request: SecretRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                thread_id: self.thread_id.clone(),
+                operation,
+                cwd: project.to_owned(),
+                saved_available: false,
+                storage_unavailable: false,
+                connection: connection.map(Box::new),
+                saved_source: None,
+            },
+            entry: None,
+            reply,
+            busy: false,
+            login_cancel: watch::channel(false).0,
+        };
+        item.show_match(matched);
+        let request = item.request.clone();
         {
             let mut pending = self.manager.lock();
             if !self.active.load(Ordering::Acquire) {
                 return OperationResult::status("cancelled");
             }
-            pending.insert(
-                request.id.clone(),
-                Pending {
-                    scope: self.clone(),
-                    request: request.clone(),
-                    key,
-                    reply,
-                    busy: false,
-                    login_cancel: watch::channel(false).0,
-                },
-            );
+            pending.insert(request.id.clone(), item);
         }
         let _pending = PendingGuard {
             scope: self.clone(),

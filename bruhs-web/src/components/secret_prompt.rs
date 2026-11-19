@@ -4,7 +4,9 @@ use crate::{
     state::{ActiveThreadId, PendingSecretsSignal},
     ui::Icon,
 };
-use bruhs_models::secrets::{SecretDecision, SecretRequest, SecretSubmission};
+use bruhs_models::secrets::{
+    forget_offered, saved_source_label, SecretDecision, SecretRequest, SecretSubmission,
+};
 use leptos::{html::Input, prelude::*};
 
 #[component]
@@ -33,11 +35,24 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
     let revealed = RwSignal::new(false);
     let id = StoredValue::new(request.id.clone());
     let thread_id = StoredValue::new(request.thread_id);
-    let saved = Signal::derive(move || {
+    // A vault change shows this form again under the same id: read what it
+    // offers now, not what it first offered.
+    let current = move |read: fn(&SecretRequest) -> bool| {
         pending.with(|items| {
             items
                 .iter()
-                .any(|item| item.id == id.get_value() && item.saved_available)
+                .find(|item| item.id == id.get_value())
+                .is_some_and(read)
+        })
+    };
+    let saved = Signal::derive(move || current(|item| item.saved_available));
+    let forget = Signal::derive(move || current(forget_offered));
+    let source = Signal::derive(move || {
+        pending.with(|items| {
+            items
+                .iter()
+                .find(|item| item.id == id.get_value() && item.saved_available)
+                .and_then(|item| item.saved_source)
         })
     });
     on_cleanup(move || {
@@ -84,11 +99,16 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                 Ok(true) => {
                     pending.try_update(|items| items.retain(|item| item.id != body.request_id));
                 }
+                // Forgotten. A refresh that already offers a shared entry
+                // instead stays.
                 Ok(false) => {
                     pending.try_update(|items| {
-                        if let Some(item) = items.iter_mut().find(|item| item.id == body.request_id)
+                        if let Some(item) = items
+                            .iter_mut()
+                            .find(|item| item.id == body.request_id && forget_offered(item))
                         {
                             item.saved_available = false;
+                            item.saved_source = None;
                         }
                     });
                 }
@@ -145,6 +165,9 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("save")>"Save securely and use"</button>
                     <Show when=move || saved.get()>
                         <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("saved")>"Use saved"</button>
+                    </Show>
+                    {move || source.get().map(|source| view! { <span class="text-label-sm text-rambutan-400">{saved_source_label(source)}</span> })}
+                    <Show when=move || forget.get()>
                         <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("forget")>"Forget saved"</button>
                     </Show>
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("decline")>"Decline"</button>

@@ -603,6 +603,7 @@ mod tests {
                     saved_available: false,
                     storage_unavailable: false,
                     connection: None,
+                    saved_source: None,
                 };
                 (
                     QueryEvent::SecretRequest(request.clone()),
