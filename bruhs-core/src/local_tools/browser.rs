@@ -23,13 +23,15 @@ use tokio_tungstenite::{
 };
 
 use super::{
+    computer::FilledDocuments,
     network::{GUARD_PROBE_REPLY, GUARD_PROBE_URL},
     process::{self, ProcessPolicy},
     ToolError,
 };
 use bruhs_models::crew::{
-    FILL_NEEDS_VALUE, PROXY_POLICY_OVERRIDE, SUBMIT_NEEDS_SECRET, VAULT_FOR_BRUHS,
+    FILL_FAILED, FILL_NEEDS_VALUE, PROXY_POLICY_OVERRIDE, SUBMIT_NEEDS_SECRET, VAULT_FOR_BRUHS,
 };
+use bruhs_models::vault::SecretField;
 
 #[path = "browser_guard.rs"]
 mod browser_guard;
@@ -38,6 +40,12 @@ use browser_guard::BrowserGuard;
 #[path = "browser_input.rs"]
 mod browser_input;
 use browser_input::{click_events, key_events, wheel_event, KEY, MOUSE, TEXT};
+
+#[path = "vault_fill.rs"]
+mod vault_fill;
+pub(super) use vault_fill::fill_secret;
+#[cfg(any(test, feature = "test-support"))]
+pub(super) use vault_fill::filled_reply;
 
 /// How a browser launches: where its profile lives, whether it shows a
 /// window, and the proxy its traffic goes through.
@@ -67,6 +75,13 @@ impl LaunchOptions {
     pub fn denies_downloads(&self) -> bool {
         self.profile.is_some()
     }
+
+    /// Only a thread's browser keeps console and network events, which its
+    /// tools read. A bruh never gets them, and a submitted sign-in form's
+    /// body would sit there.
+    pub fn keeps_page_events(&self) -> bool {
+        self.profile.is_none()
+    }
 }
 
 /// Chrome's command line for a launch on `profile`.
@@ -95,6 +110,9 @@ pub(super) fn launch_args(
         // cookies encrypted under one key can't be read under the other, so
         // every launch of a kept profile pins the same key store.
         args.extend(["--use-mock-keychain", "--password-store=basic"].map(String::from));
+        // Back never restores a document a vault fill touched, value and
+        // all, from the back/forward cache.
+        args.push("--disable-features=BackForwardCache".into());
         // Beside the profile, inside the bruh's tree. On macOS Chrome would
         // otherwise move the cache of a profile under Application Support
         // to ~/Library/Caches, where deleting the bruh would leave it.
@@ -271,6 +289,9 @@ impl Browser {
             )
             .await?;
             let mut cdp = Cdp::connect(socket, policy).await?;
+            if !options.keeps_page_events() {
+                cdp.forget_page_events();
+            }
             cdp.call("Page.enable", json!({})).await?;
             cdp.call("Page.setLifecycleEventsEnabled", json!({"enabled":true}))
                 .await?;
@@ -465,6 +486,70 @@ impl Browser {
         .await
         .map_err(|_| unknown())??;
         current_entry_url(&history).ok_or_else(unknown)
+    }
+
+    /// Type a vault value into `selector` on the page's main document while
+    /// it is on `origin` ([`fill_secret`]). Every failure, a timeout or the
+    /// guard's included, reads `FILL_FAILED` but the page's own refusals;
+    /// a broken guard still says so on the next step.
+    pub async fn fill_secret(
+        &mut self,
+        selector: &str,
+        field: SecretField,
+        origin: &str,
+        value: &str,
+        submit: bool,
+        filled: &mut FilledDocuments,
+    ) -> Result<ToolReply, ToolError> {
+        let failed = || ToolError::Invalid(FILL_FAILED.into());
+        self.guard.check().map_err(|_| failed())?;
+        let typed = tokio::time::timeout(
+            self.policy.timeout,
+            fill_secret(
+                &mut self.cdp,
+                selector,
+                field,
+                origin,
+                value,
+                submit,
+                filled,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| Err(failed()));
+        self.guard.check().map_err(|_| failed())?;
+        typed
+    }
+
+    /// The main document's marks: its loader and its history entry.
+    pub async fn document_ids(&mut self) -> Result<Vec<String>, ToolError> {
+        self.guard.check()?;
+        let unknown = || ToolError::Unavailable("Chrome didn't say which page is open.".into());
+        let (_, marks) = tokio::time::timeout(
+            self.policy.timeout,
+            vault_fill::document_marks(&mut self.cdp),
+        )
+        .await
+        .map_err(|_| unknown())?
+        .map_err(|_| unknown())?;
+        Ok(marks)
+    }
+
+    /// [`Self::fill_secret`] with a navigation to `url` between the check
+    /// and the write, as one already in flight could commit there.
+    #[cfg(test)]
+    pub async fn fill_across_a_navigation(
+        &mut self,
+        selector: &str,
+        field: SecretField,
+        origin: &str,
+        value: &str,
+        url: &str,
+        filled: &mut FilledDocuments,
+    ) -> Result<(), ToolError> {
+        let checked = vault_fill::check(&mut self.cdp, selector, field, origin).await?;
+        self.cdp.navigate(url).await?;
+        vault_fill::write(&mut self.cdp, checked, field, origin, value, filled).await
     }
 
     /// Releases a mouse button an interrupted action left pressed.
@@ -964,6 +1049,8 @@ pub(super) struct Cdp {
     /// (Inspector events, which Chrome may send without `Inspector.enable`;
     /// enabling the domain breaks history navigation after a reload).
     closed: bool,
+    /// Whether console and network events are kept for the agent to read.
+    keep_events: bool,
 }
 
 impl Cdp {
@@ -983,7 +1070,23 @@ impl Cdp {
             loaded: None,
             pressed: None,
             closed: false,
+            keep_events: true,
         })
+    }
+
+    /// Keep no console or network events from now on: a bruh's page, which
+    /// never reads them.
+    pub(super) fn forget_page_events(&mut self) {
+        self.keep_events = false;
+        self.console.clear();
+        self.network.clear();
+        self.event_bytes = 0;
+    }
+
+    /// How many console and network events are kept.
+    #[cfg(test)]
+    pub(super) fn buffered_events(&self) -> usize {
+        self.console.len() + self.network.len()
     }
 
     pub async fn navigate(&mut self, url: &str) -> Result<Value, ToolError> {
@@ -1033,10 +1136,7 @@ impl Cdp {
     /// Send a command without waiting for its reply, which arrives through
     /// [`Self::next_message`] under the returned id.
     pub async fn send(&mut self, method: &str, params: Value) -> Result<u64, ToolError> {
-        self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
-            ToolError::Invalid("Browser command sequence exhausted. Start a new browser.".into())
-        })?;
-        let id = self.sequence;
+        let id = self.next_id()?;
         if method == MOUSE {
             match params["type"].as_str() {
                 Some("mousePressed") => self.pressed = Some(params.clone()),
@@ -1055,6 +1155,13 @@ impl Cdp {
         self.closed |= sent.is_err();
         sent?;
         Ok(id)
+    }
+
+    fn next_id(&mut self) -> Result<u64, ToolError> {
+        self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
+            ToolError::Invalid("Browser command sequence exhausted. Start a new browser.".into())
+        })?;
+        Ok(self.sequence)
     }
 
     /// The next frame, marking the connection closed when it ends or fails.
@@ -1088,19 +1195,48 @@ impl Cdp {
     /// live view reads with [`Self::send`] and [`Self::next_message`].
     pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ToolError> {
         let id = self.send(method, params).await?;
+        self.reply(id)
+            .await?
+            .map_err(|error| ToolError::Invalid(format!("Chrome rejected {method}: {error}")))
+    }
+
+    /// [`Self::call`] for params that hold a vault value. The frame is
+    /// written into a buffer of `room` bytes, zeroed once it is sent, and
+    /// Chrome's error, which may quote the params, reads `FILL_FAILED`.
+    pub(super) async fn call_secret<P: serde::Serialize + Sync>(
+        &mut self,
+        method: &str,
+        params: &P,
+        room: usize,
+    ) -> Result<Value, ToolError> {
+        let failed = || ToolError::Invalid(FILL_FAILED.into());
+        let id = self.next_id()?;
+        let frame = vault_fill::secret_frame(id, method, params, room)?;
+        let text = std::str::from_utf8(&frame).map_err(|_| failed())?;
+        let sent = self.socket.send(Message::Text(text.into())).await;
+        self.closed |= sent.is_err();
+        drop(frame);
+        sent.map_err(|_| failed())?;
+        self.reply(id)
+            .await
+            .map_err(|_| failed())?
+            .map_err(|_| failed())
+    }
+
+    /// The reply to command `id`: its result, or Chrome's error. Events read
+    /// meanwhile are observed.
+    async fn reply(&mut self, id: u64) -> Result<Result<Value, Value>, ToolError> {
         while let Some(frame) = self.read().await {
             let frame = frame?;
             let Message::Text(text) = frame else {
                 continue;
             };
-            let value: Value = serde_json::from_str(&text)?;
+            let mut value: Value = serde_json::from_str(&text)?;
             if value["id"] == id {
-                if let Some(error) = value.get("error") {
-                    return Err(ToolError::Invalid(format!(
-                        "Chrome rejected {method}: {error}"
-                    )));
+                if let Some(error) = value.get_mut("error") {
+                    return Ok(Err(error.take()));
                 }
-                return Ok(value["result"].clone());
+                return Ok(Ok(value["result"].take()));
             }
             self.observe(value, text.len());
         }
@@ -1129,6 +1265,9 @@ impl Cdp {
                 self.loaded = value["params"]["loaderId"].as_str().map(str::to_owned);
             }
             let network = method.starts_with("Network.");
+            if !self.keep_events {
+                return;
+            }
             if !network
                 && !method.starts_with("Log.")
                 && method != "Runtime.consoleAPICalled"

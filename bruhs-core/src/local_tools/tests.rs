@@ -363,14 +363,16 @@ fn bruh_launches_use_a_persistent_headless_profile_behind_the_guard() {
         "--use-mock-keychain",
         "--password-store=basic",
         "--user-agent=UA",
+        // Back never restores a page a vault fill touched, value and all.
+        "--disable-features=BackForwardCache",
     ] {
         assert!(args.iter().any(|arg| arg == expected), "{expected}");
     }
     assert_eq!(args.last().map(String::as_str), Some("about:blank"));
     let verification = launch_args(&LaunchOptions::verification(), Path::new("/tmp/x"), "UA");
-    assert!(!verification
-        .iter()
-        .any(|arg| arg.starts_with("--headless") || arg.starts_with("--proxy")));
+    assert!(!verification.iter().any(|arg| arg.starts_with("--headless")
+        || arg.starts_with("--proxy")
+        || arg.starts_with("--disable-features")));
     assert!(verification
         .iter()
         .any(|arg| arg == "--user-data-dir=/tmp/x"));
@@ -688,6 +690,291 @@ async fn fake_page_answering(
         .await
         .unwrap();
     (cdp, server)
+}
+
+/// A fake page target that answers each method from its own queue of
+/// replies (`{"result": …}` or `{"error": …}`), and `{"result": {}}` once a
+/// queue is empty. Records every message's method, params and raw text.
+async fn fake_page_replying(
+    replies: Vec<(&'static str, serde_json::Value)>,
+) -> (
+    browser::Cdp,
+    tokio::task::JoinHandle<Vec<(String, serde_json::Value, String)>>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut replies: std::collections::VecDeque<_> = replies.into();
+        let mut calls = Vec::new();
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let method = request["method"].as_str().unwrap().to_owned();
+            let mut reply = replies
+                .iter()
+                .position(|(name, _)| *name == method)
+                .and_then(|at| replies.remove(at))
+                .map_or_else(|| json!({"result": {}}), |(_, reply)| reply);
+            reply["id"] = request["id"].clone();
+            calls.push((method, request["params"].clone(), text.to_string()));
+            socket
+                .send(Message::Text(reply.to_string().into()))
+                .await
+                .unwrap();
+        }
+        calls
+    });
+    let cdp = browser::Cdp::connect(&format!("ws://{addr}"), ProcessPolicy::default())
+        .await
+        .unwrap();
+    (cdp, server)
+}
+
+/// The replies of a sign-in page at `https://shop.test/in`, whose main
+/// frame `F` has document `L1` on history entry 7.
+fn sign_in_page() -> Vec<(&'static str, serde_json::Value)> {
+    use serde_json::json;
+    let history = json!({"result": {"currentIndex": 0, "entries": [{"id": 7, "url": "https://shop.test/in"}]}});
+    let tree = json!({"result": {"frameTree": {"frame": {"id": "F", "loaderId": "L1"}}}});
+    vec![
+        ("Page.getNavigationHistory", history),
+        ("Page.getFrameTree", tree),
+        (
+            "Page.createIsolatedWorld",
+            json!({"result": {"executionContextId": 9}}),
+        ),
+    ]
+}
+
+fn answer(value: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"result": {"result": {"type": "object", "value": value}}})
+}
+
+fn vault_canary() -> String {
+    format!("pw-{}", uuid::Uuid::new_v4().simple())
+}
+
+#[tokio::test]
+async fn only_the_value_call_carries_the_value() {
+    use bruhs_models::vault::SecretField;
+    use serde_json::json;
+    let value = vault_canary();
+    let mut replies = sign_in_page();
+    replies.push(("Runtime.callFunctionOn", answer(json!({"ok": true}))));
+    replies.push(("Runtime.callFunctionOn", answer(json!({"ok": true}))));
+    let (mut cdp, server) = fake_page_replying(replies).await;
+    let mut filled = computer::FilledDocuments::default();
+    let reply = browser::fill_secret(
+        &mut cdp,
+        "#pw",
+        SecretField::Password,
+        "https://shop.test",
+        &value,
+        true,
+        &mut filled,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reply.value,
+        json!({"filled": "password", "submitted": true})
+    );
+    assert!(filled.holds_any(&["loader:L1".into()]));
+    assert!(filled.holds_any(&["entry:7".into()]));
+    drop(cdp);
+    let calls = server.await.unwrap();
+    let methods: Vec<_> = calls.iter().map(|(method, ..)| method.as_str()).collect();
+    assert_eq!(
+        methods,
+        [
+            "Page.getNavigationHistory",
+            "Page.getFrameTree",
+            "Page.createIsolatedWorld",
+            "Runtime.callFunctionOn",
+            "Runtime.callFunctionOn",
+            "Page.getNavigationHistory",
+            "Page.getFrameTree",
+            "Input.dispatchKeyEvent",
+            "Input.dispatchKeyEvent",
+        ]
+    );
+    assert_eq!(calls[2].1["frameId"], "F");
+    let (check, write) = (&calls[3].1, &calls[4].1);
+    for call in [check, write] {
+        assert_eq!(call["executionContextId"], 9);
+        // Fixed bodies: the value and selector travel only as arguments.
+        assert!(!call["functionDeclaration"]
+            .as_str()
+            .unwrap()
+            .contains("#pw"));
+    }
+    assert_eq!(check["arguments"][0]["value"], "#pw");
+    assert_eq!(check["arguments"][1]["value"], "https://shop.test");
+    assert_eq!(check["arguments"][2]["value"], json!(["password"]));
+    let arguments = write["arguments"].as_array().unwrap();
+    assert_eq!(arguments.last().unwrap()["value"], value.as_str());
+    for (at, (method, _, text)) in calls.iter().enumerate() {
+        assert_eq!(text.contains(&value), at == 4, "{method}");
+    }
+    assert_eq!(calls[7].1["key"], "Enter");
+    assert_eq!(calls[8].1["type"], "keyUp");
+}
+
+#[tokio::test]
+async fn a_field_of_the_wrong_kind_is_refused_before_typing() {
+    use bruhs_models::crew::{FILL_FAILED, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH};
+    use bruhs_models::vault::SecretField;
+    use serde_json::json;
+    for (why, refusal) in [
+        ("kind", ToolError::Invalid(SECRET_FIELD_MISMATCH.into())),
+        ("origin", ToolError::Refused(LOGIN_WRONG_ORIGIN.into())),
+        ("missing", ToolError::Invalid(FILL_FAILED.into())),
+        ("editable", ToolError::Invalid(FILL_FAILED.into())),
+    ] {
+        let value = vault_canary();
+        let mut replies = sign_in_page();
+        replies.push((
+            "Runtime.callFunctionOn",
+            answer(json!({"ok": false, "why": why})),
+        ));
+        let (mut cdp, server) = fake_page_replying(replies).await;
+        let mut filled = computer::FilledDocuments::default();
+        let error = browser::fill_secret(
+            &mut cdp,
+            "#pw",
+            SecretField::Password,
+            "https://shop.test",
+            &value,
+            true,
+            &mut filled,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), refusal.to_string(), "{why}");
+        assert_eq!(
+            std::mem::discriminant(&error),
+            std::mem::discriminant(&refusal)
+        );
+        drop(cdp);
+        let calls = server.await.unwrap();
+        let values = calls
+            .iter()
+            .filter(|(method, ..)| method == "Runtime.callFunctionOn")
+            .count();
+        assert_eq!(values, 1, "{why}: no value call");
+        // Nothing was typed, so the page still takes screenshots.
+        assert!(filled.is_empty(), "{why}");
+        assert!(calls.iter().all(|(.., text)| !text.contains(&value)));
+        assert!(calls
+            .iter()
+            .all(|(method, ..)| method != "Input.dispatchKeyEvent"));
+    }
+}
+
+#[tokio::test]
+async fn chrome_errors_after_typing_never_travel() {
+    use bruhs_models::crew::FILL_FAILED;
+    use bruhs_models::vault::SecretField;
+    use serde_json::json;
+    let value = vault_canary();
+    let failures = [
+        json!({"error": {"code": -32000, "message": format!("Cannot find context for {value}")}}),
+        json!({"result": {"result": {"type": "undefined"}, "exceptionDetails": {"text": format!("Uncaught {value}")}}}),
+        answer(json!({"ok": false, "why": value.clone()})),
+    ];
+    for failure in failures {
+        let mut replies = sign_in_page();
+        replies.push(("Runtime.callFunctionOn", answer(json!({"ok": true}))));
+        replies.push(("Runtime.callFunctionOn", failure));
+        let (mut cdp, _server) = fake_page_replying(replies).await;
+        let mut filled = computer::FilledDocuments::default();
+        let error = browser::fill_secret(
+            &mut cdp,
+            "#pw",
+            SecretField::Password,
+            "https://shop.test",
+            &value,
+            false,
+            &mut filled,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(&error, ToolError::Invalid(message) if message == FILL_FAILED));
+        assert!(!format!("{error} {error:?}").contains(&value));
+        // A failed write may still have typed: the document counts as filled.
+        assert!(filled.holds_any(&["loader:L1".into()]));
+    }
+    // A Chrome error before typing reads the same.
+    let (mut cdp, _server) = fake_page_replying(vec![(
+        "Page.getNavigationHistory",
+        json!({"error": {"code": -32000, "message": "Not attached"}}),
+    )])
+    .await;
+    let error = browser::fill_secret(
+        &mut cdp,
+        "#pw",
+        SecretField::Password,
+        "https://shop.test",
+        &value,
+        false,
+        &mut computer::FilledDocuments::default(),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(&error, ToolError::Invalid(message) if message == FILL_FAILED));
+}
+
+/// A bruh's page keeps no network or console events: a submitted sign-in
+/// form's body would sit in a `Network.requestWillBeSent` event.
+#[tokio::test]
+async fn a_bruh_page_buffers_no_request_bodies() {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message;
+    let value = vault_canary();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = format!("p={value}");
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request: serde_json::Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            for event in [
+                json!({"method":"Network.requestWillBeSent","params":{"request":{"url":"https://shop.test/in","postData":body}}}),
+                json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":body}]}}),
+            ] {
+                socket
+                    .send(Message::Text(event.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+            let reply = json!({"id":request["id"],"result":{}});
+            socket
+                .send(Message::Text(reply.to_string().into()))
+                .await
+                .unwrap();
+        }
+    });
+    let endpoint = format!("ws://{addr}");
+    let mut thread = browser::Cdp::connect(&endpoint, ProcessPolicy::default())
+        .await
+        .unwrap();
+    thread.call("Runtime.enable", json!({})).await.unwrap();
+    assert_eq!(thread.buffered_events(), 2);
+    let mut bruh = browser::Cdp::connect(&endpoint, ProcessPolicy::default())
+        .await
+        .unwrap();
+    bruh.forget_page_events();
+    bruh.call("Runtime.enable", json!({})).await.unwrap();
+    assert_eq!(bruh.buffered_events(), 0);
+    server.await.unwrap();
 }
 
 /// A launch goes ahead only when the guard itself answered its probe: a
@@ -1611,4 +1898,213 @@ fn the_page_address_comes_from_its_navigation_history() {
         Some("https://a.test/2")
     );
     assert_eq!(browser::current_entry_url(&serde_json::json!({})), None);
+}
+
+/// Sites a live browser reaches through this fixture as its proxy, by
+/// host: `shop.test`, a sign-in page whose script copies the password into
+/// its `value` attribute (as React's controlled inputs do), and
+/// `evil.test`, with an autofocused password field. Every request it got
+/// is recorded with its query.
+pub(super) async fn vault_sites() -> (
+    std::net::SocketAddr,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    use axum::{extract::Request, response::Html};
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&seen);
+    let app = axum::Router::new().fallback(move |request: Request| {
+        let log = std::sync::Arc::clone(&log);
+        async move {
+            let host = request
+                .uri()
+                .host()
+                .map(str::to_owned)
+                .or_else(|| {
+                    let header = request.headers().get("host")?;
+                    Some(header.to_str().ok()?.to_owned())
+                })
+                .unwrap_or_default();
+            let path = request
+                .uri()
+                .path_and_query()
+                .map_or_else(String::new, ToString::to_string);
+            log.lock().unwrap().push(format!("{host}{path}"));
+            let page = match (host.as_str(), request.uri().path()) {
+                ("bruhs-guard-probe.invalid", _) => network::GUARD_PROBE_REPLY,
+                ("shop.test", "/login") => concat!(
+                    "<title>Sign in</title><form action=/done>",
+                    "<input id=u name=u><input id=p type=password name=p><input id=c name=c>",
+                    "<button>Sign in</button></form><a id=next href=/other>Next</a><script>",
+                    "const p=document.getElementById('p');",
+                    "p.addEventListener('input',e=>{p.setAttribute('value',p.value);",
+                    "document.body.dataset.trusted=String(e.isTrusted)})</script>"
+                ),
+                ("shop.test", "/other") => {
+                    "<title>Other</title><button id=back onclick=history.back()>Back</button>"
+                }
+                ("shop.test", "/done") => "<title>Done</title>",
+                ("evil.test", _) => "<title>Evil</title><input id=p type=password autofocus>",
+                _ => "<title>Nothing here</title>",
+            };
+            Html(page)
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, seen, server)
+}
+
+/// A real vault fill lands in its field through untrusted events, refuses
+/// the wrong kind of field and another origin in the page itself, and
+/// submits. A navigation to another origin between the check and the write
+/// types nothing anywhere.
+#[tokio::test]
+#[ignore = "launches headless Chrome on a temp profile; run explicitly for local acceptance"]
+async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
+    use browser::{Browser, LaunchOptions};
+    use bruhs_models::crew::{FILL_FAILED, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH};
+    use bruhs_models::vault::SecretField;
+    use serde_json::json;
+    let (sites, seen, server) = vault_sites().await;
+    let home = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let options = LaunchOptions {
+        profile: Some(home.path().join("bruhs").join("a").join("browser")),
+        headless: true,
+        proxy: Some(sites),
+    };
+    let policy = ProcessPolicy::default();
+    let start = BrowserStart {
+        grant_id: "live".into(),
+        url: "http://shop.test/login".into(),
+    };
+    let mut browser = Browser::start(&client, start, policy, &options)
+        .await
+        .unwrap();
+    let evaluate = |expression: String| BrowserAction::Evaluate { expression };
+    let value = vault_canary();
+    let origin = "http://shop.test";
+    let mut filled = computer::FilledDocuments::default();
+    let reply = browser
+        .fill_secret(
+            "#p",
+            SecretField::Password,
+            origin,
+            &value,
+            false,
+            &mut filled,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value,
+        json!({"filled": "password", "submitted": false})
+    );
+    assert!(!filled.is_empty());
+    // It landed, the page mirrored it into the attribute a selector could
+    // probe, and the page saw untrusted events.
+    let landed = browser
+        .command(
+            evaluate(format!(
+                "[document.querySelector('#p').value==='{value}',document.querySelector('#p[value=\"{value}\"]')!==null,document.body.dataset.trusted]"
+            )),
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(landed.value, json!([true, true, "false"]));
+    // The page itself refuses the wrong kind of field and another origin.
+    let refusal = |result: Result<ToolReply, ToolError>| match result {
+        Err(ToolError::Invalid(message) | ToolError::Refused(message)) => message,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    for (selector, field, origin, expected) in [
+        ("#u", SecretField::Password, origin, SECRET_FIELD_MISMATCH),
+        ("#p", SecretField::Username, origin, SECRET_FIELD_MISMATCH),
+        (
+            "#p",
+            SecretField::Password,
+            "http://evil.test",
+            LOGIN_WRONG_ORIGIN,
+        ),
+        ("#nope", SecretField::Password, origin, FILL_FAILED),
+    ] {
+        let other = vault_canary();
+        let result = browser
+            .fill_secret(selector, field, origin, &other, false, &mut filled)
+            .await;
+        assert_eq!(refusal(result), expected, "{selector}");
+    }
+    // A submit presses Enter, and the form goes to its own site.
+    browser
+        .fill_secret(
+            "#p",
+            SecretField::Password,
+            origin,
+            &value,
+            true,
+            &mut filled,
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.starts_with("shop.test/done?") && request.contains(&value))
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the form was submitted with the value");
+    // An in-flight navigation commits between the check and the write.
+    browser
+        .command(
+            BrowserAction::Navigate {
+                url: "http://shop.test/login".into(),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    let moved = vault_canary();
+    let error = browser
+        .fill_across_a_navigation(
+            "#p",
+            SecretField::Password,
+            origin,
+            &moved,
+            "http://evil.test/",
+            &mut filled,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(&error, ToolError::Invalid(message) if message == FILL_FAILED));
+    assert!(!format!("{error} {error:?}").contains(&moved));
+    let evil = browser
+        .command(
+            evaluate("[location.host,document.querySelector('#p').value]".into()),
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(evil.value, json!(["evil.test", ""]));
+    assert!(seen
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| !request.contains(&moved)));
+    browser
+        .close(std::time::Duration::from_millis(
+            bruhs_models::crew::CLOSE_GRACE_MS,
+        ))
+        .await
+        .unwrap();
+    server.abort();
 }

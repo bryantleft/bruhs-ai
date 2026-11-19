@@ -2,15 +2,17 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use bruhs_models::crew::{
     handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
-    LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED,
-    PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+    FILL_FAILED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, NOT_FOR_BRUHS,
+    OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL,
+    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW, VAULT_FOR_BRUHS,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
-    ToolScope,
+    SecretRef, ToolReply, ToolScope,
 };
+use bruhs_models::vault::SecretField;
 
-use super::{BruhComputer, LocalToolsHost};
+use super::{BruhComputer, FakePages, FillValue, LocalToolsHost};
 use crate::local_tools::{screencast::fake_chrome::FakeChrome, ComputerWatch, ToolError};
 
 /// A bruh whose profile is `<home>/bruhs/<id>/browser`.
@@ -1319,6 +1321,317 @@ async fn a_stale_chrome_that_ignores_sigterm_is_killed_after_the_grace() {
     assert!(!pid_file.exists());
 }
 
+/// A vault fill of `field` into `selector`.
+fn vault_fill(selector: &str, field: SecretField, submit: bool) -> BrowserAction {
+    BrowserAction::Fill {
+        selector: selector.into(),
+        text: None,
+        secret: Some(SecretRef {
+            login_id: "v1-login".into(),
+            field,
+        }),
+        submit,
+    }
+}
+
+/// A random value no test output may hold.
+fn canary() -> String {
+    format!("pw-{}", uuid::Uuid::new_v4().simple())
+}
+
+fn fill_value(origin: &str, field: SecretField, value: &str) -> FillValue {
+    FillValue {
+        origin: origin.into(),
+        field,
+        value: zeroize::Zeroizing::new(value.into()),
+    }
+}
+
+fn refused_with(result: Result<ToolReply, ToolError>, expected: &str) -> bool {
+    matches!(result, Err(ToolError::Refused(message)) if message == expected)
+}
+
+fn invalid_with(result: Result<ToolReply, ToolError>, expected: &str) -> bool {
+    matches!(result, Err(ToolError::Invalid(message)) if message == expected)
+}
+
+/// A bruh `a` whose open page is on `url`.
+async fn bruh_on(url: &str) -> (tempfile::TempDir, Arc<LocalToolsHost>, FakePages) {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.open_computer("a").await.unwrap();
+    fake.set_url("a", url);
+    (home, host, fake)
+}
+
+#[tokio::test]
+async fn a_login_fills_on_its_origin_and_the_reply_has_no_value() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let value = canary();
+    let reply = host
+        .bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, true),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            Some("https://shop.test/in"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value,
+        serde_json::json!({"filled": "password", "submitted": true})
+    );
+    assert!(reply.image.is_none());
+    assert!(!serde_json::to_string(&reply).unwrap().contains(&value));
+    assert_eq!(
+        fake.secret_fills("a"),
+        [("#pw".to_string(), SecretField::Password, true, value)]
+    );
+    // The value path never goes through `run`.
+    assert!(fake
+        .actions("a")
+        .iter()
+        .all(|action| !matches!(action, BrowserAction::Fill { .. })));
+}
+
+#[tokio::test]
+async fn a_fill_never_types_on_another_origin_after_the_gate() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let value = canary();
+    let fill = |allowed_on: Option<&'static str>| {
+        let host = Arc::clone(&host);
+        let value = value.clone();
+        async move {
+            host.bruh_fill_on(
+                "a",
+                vault_fill("#pw", SecretField::Password, false),
+                fill_value("https://shop.test", SecretField::Password, &value),
+                allowed_on,
+            )
+            .await
+        }
+    };
+    // The page moved to another origin after the gate saw the sign-in page.
+    fake.set_url("a", "https://sso.evil.test/");
+    assert!(refused_with(
+        fill(Some("https://shop.test/in")).await,
+        LOGIN_WRONG_ORIGIN
+    ));
+    // Same host, another scheme: another origin.
+    fake.set_url("a", "http://shop.test/");
+    assert!(refused_with(
+        fill(Some("https://shop.test/in")).await,
+        LOGIN_WRONG_ORIGIN
+    ));
+    // The gate itself looked at another origin.
+    fake.set_url("a", "https://shop.test/in");
+    assert!(refused_with(
+        fill(Some("https://sso.evil.test/")).await,
+        LOGIN_WRONG_ORIGIN
+    ));
+    // Nobody can say which page it is on.
+    assert!(refused_with(fill(None).await, PAGE_UNKNOWN));
+    fake.close_window("a");
+    assert!(refused_with(
+        fill(Some("https://shop.test/in")).await,
+        PAGE_UNKNOWN
+    ));
+    assert!(fake.secret_fills("a").is_empty());
+}
+
+#[tokio::test]
+async fn screenshots_stay_off_on_a_filled_document() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    fake.set_document("a", "d1");
+    host.bruh_fill_on(
+        "a",
+        vault_fill("#pw", SecretField::Password, false),
+        fill_value("https://shop.test", SecretField::Password, &canary()),
+        Some("https://shop.test/in"),
+    )
+    .await
+    .unwrap();
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    // The next document takes screenshots again.
+    fake.set_document("a", "d2");
+    host.bruh_command("a", BrowserAction::Screenshot)
+        .await
+        .unwrap();
+    // Back to the filled one, as from the back/forward cache: off again.
+    fake.set_document("a", "d1");
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+    // A page that can't say which document it is may be the filled one.
+    fake.set_document("a", "d2");
+    fake.close_window("a");
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+    let screenshots = fake
+        .actions("a")
+        .into_iter()
+        .filter(|action| *action == BrowserAction::Screenshot)
+        .count();
+    assert_eq!(screenshots, 1);
+}
+
+#[tokio::test]
+async fn value_probing_selectors_are_refused_on_a_filled_document() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let click = |selector: &str| BrowserAction::Click {
+        selector: selector.into(),
+    };
+    // Before any fill, attribute selectors are fine.
+    fake.set_document("a", "d1");
+    host.bruh_command("a", click("input[type=password]"))
+        .await
+        .unwrap();
+    host.bruh_fill_on(
+        "a",
+        vault_fill("#pw", SecretField::Password, false),
+        fill_value("https://shop.test", SecretField::Password, &canary()),
+        Some("https://shop.test/in"),
+    )
+    .await
+    .unwrap();
+    for probe in [
+        click("#pw[value^=\"a\"]"),
+        click("#pw:valid"),
+        BrowserAction::Type {
+            text: "x".into(),
+            selector: Some("form:has(#pw:invalid) #q".into()),
+        },
+        BrowserAction::Fill {
+            selector: "#pw[value^=\"b\"], #q".into(),
+            text: Some("x".into()),
+            secret: None,
+            submit: false,
+        },
+    ] {
+        assert!(
+            refused_with(
+                host.bruh_command("a", probe.clone()).await,
+                SELECTOR_AFTER_FILL
+            ),
+            "{probe:?}"
+        );
+    }
+    // A vault fill's own selector too.
+    assert!(refused_with(
+        host.bruh_fill_on(
+            "a",
+            vault_fill("input[type=text]", SecretField::Username, false),
+            fill_value("https://shop.test", SecretField::Username, "owner"),
+            Some("https://shop.test/in"),
+        )
+        .await,
+        SELECTOR_AFTER_FILL
+    ));
+    host.bruh_command("a", click("#go")).await.unwrap();
+    fake.set_document("a", "d2");
+    host.bruh_command("a", click("#pw[value^=\"a\"]"))
+        .await
+        .unwrap();
+    assert_eq!(fake.secret_fills("a").len(), 1);
+}
+
+#[tokio::test]
+async fn a_fill_waits_for_the_owner_and_obeys_stop() {
+    let (home, host, fake) = bruh_on("https://shop.test/in").await;
+    let fill = || {
+        let host = Arc::clone(&host);
+        async move {
+            host.bruh_fill_on(
+                "a",
+                vault_fill("#pw", SecretField::Password, true),
+                fill_value("https://shop.test", SecretField::Password, &canary()),
+                Some("https://shop.test/in"),
+            )
+            .await
+        }
+    };
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    assert!(refused_with(fill().await, OWNER_HAS_COMPUTER));
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    // The bruh reads the hand back note first.
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    fake.set_document("a", "d1");
+    let _held = fake.hold_next_action("a");
+    let pending = tokio::spawn(fill());
+    eventually(|| fake.hold_reached("a")).await;
+    let mut paused = bruh_in(home.path(), "a");
+    paused.paused = true;
+    host.sync_bruhs(vec![paused]).await;
+    assert!(refused_with(pending.await.unwrap(), ACTION_STOPPED));
+    assert!(fake.secret_fills("a").is_empty());
+    // It may have typed before it stopped, so the document counts as filled.
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+}
+
+#[tokio::test]
+async fn a_mismatched_field_or_plain_action_is_refused() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let value = canary();
+    assert!(invalid_with(
+        host.bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, false),
+            fill_value("https://shop.test", SecretField::Username, &value),
+            Some("https://shop.test/in"),
+        )
+        .await,
+        FILL_FAILED
+    ));
+    let text = BrowserAction::Fill {
+        selector: "#q".into(),
+        text: Some("hi".into()),
+        secret: None,
+        submit: false,
+    };
+    assert!(invalid_with(
+        host.bruh_fill_on(
+            "a",
+            text,
+            fill_value("https://shop.test", SecretField::Password, &value),
+            Some("https://shop.test/in"),
+        )
+        .await,
+        FILL_FAILED
+    ));
+    let secret = vault_fill("#pw", SecretField::Password, false);
+    assert!(invalid_with(
+        host.bruh_command("a", secret.clone()).await,
+        VAULT_FOR_BRUHS
+    ));
+    assert!(invalid_with(
+        host.bruh_command_on("a", secret, Some("https://shop.test/in"))
+            .await,
+        VAULT_FOR_BRUHS
+    ));
+    assert!(fake.secret_fills("a").is_empty());
+    assert!(fake.actions("a").is_empty());
+}
+
 #[tokio::test]
 #[ignore = "launches headless Chrome on a temp profile; run explicitly for local acceptance"]
 async fn live_bruh_computer_runs_behind_the_guard_and_closes_cleanly() {
@@ -1352,6 +1665,10 @@ async fn live_bruh_computer_runs_behind_the_guard_and_closes_cleanly() {
         "{command}"
     );
     assert!(command.contains("--headless=new"), "{command}");
+    assert!(
+        command.contains("--disable-features=BackForwardCache"),
+        "{command}"
+    );
     host.sync_bruhs(vec![]).await;
     assert!(!pid_file.exists(), "the pid file goes with the browser");
     #[cfg(unix)]
@@ -1398,4 +1715,113 @@ async fn live_bruh_computer_streams_jpeg_frames_to_its_viewers() {
     assert!(frame.starts_with(&[0xff, 0xd8]), "a JPEG");
     drop((watch, second));
     host.close_all().await;
+}
+
+/// A real bruh page a vault fill touched takes no screenshot and no
+/// value-probing selector, and keeps refusing both after Back from another
+/// page, which reloads it (no back/forward cache) on the same history
+/// entry with its form values restored.
+#[tokio::test]
+#[ignore = "launches headless Chrome on a temp profile; run explicitly for local acceptance"]
+async fn live_a_filled_page_takes_no_screenshot_or_probe_even_after_back() {
+    use super::super::browser::{Browser, LaunchOptions};
+    use super::{ComputerPage, Launcher, PageLaunch};
+    use crate::local_tools::{network::Upstream, tests::vault_sites, ProcessPolicy};
+    use bruhs_models::local_tools::BrowserStart;
+    let (sites, _seen, server) = vault_sites().await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    // A bruh launch, with the fixture sites as its proxy in place of the
+    // guard.
+    let launcher: Launcher = {
+        let client = client.clone();
+        Arc::new(move |launch: PageLaunch| {
+            let client = client.clone();
+            Box::pin(async move {
+                let options = LaunchOptions {
+                    profile: Some(launch.profile_dir),
+                    headless: true,
+                    proxy: Some(sites),
+                };
+                let start = BrowserStart {
+                    grant_id: launch.grant_id,
+                    url: launch.url,
+                };
+                let browser =
+                    Browser::start(&client, start, ProcessPolicy::default(), &options).await?;
+                Ok(Box::new(browser) as Box<dyn ComputerPage>)
+            })
+        })
+    };
+    let host = LocalToolsHost::with_parts(
+        ProcessPolicy::default(),
+        client,
+        launcher,
+        || Ok(Upstream::default()),
+        None,
+    )
+    .unwrap();
+    let home = tempfile::tempdir().unwrap();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    let login = "http://shop.test/login";
+    host.bruh_command("a", navigate(login)).await.unwrap();
+    let screenshot = || async {
+        let reply = host.bruh_command("a", BrowserAction::Screenshot).await;
+        if let Ok(reply) = &reply {
+            let image = reply.image.as_ref().unwrap();
+            std::fs::remove_file(&image.path).unwrap();
+        }
+        reply
+    };
+    screenshot().await.unwrap();
+    let value = canary();
+    let reply = host
+        .bruh_fill_on(
+            "a",
+            vault_fill("#p", SecretField::Password, false),
+            fill_value("http://shop.test", SecretField::Password, &value),
+            Some(login),
+        )
+        .await
+        .unwrap();
+    assert!(!serde_json::to_string(&reply).unwrap().contains(&value));
+    let click = |selector: String| BrowserAction::Click { selector };
+    let probes = || {
+        [
+            click(format!("#p[value^=\"{}\"]", &value[..1])),
+            click("#p[value^=\"#\"]".into()),
+            click("#p:valid".into()),
+        ]
+    };
+    let refused_here = || async {
+        assert!(refused_with(screenshot().await, SCREENSHOT_AFTER_FILL));
+        for probe in probes() {
+            assert!(
+                refused_with(
+                    host.bruh_command("a", probe.clone()).await,
+                    SELECTOR_AFTER_FILL
+                ),
+                "{probe:?}"
+            );
+        }
+    };
+    refused_here().await;
+    let host = &host;
+    let arrived = |path: &'static str| async move {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.page_url("a").await.as_deref() != Some(path) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the page reached {path}"));
+    };
+    host.bruh_command("a", click("#next".into())).await.unwrap();
+    arrived("http://shop.test/other").await;
+    // Another document takes screenshots again.
+    screenshot().await.unwrap();
+    host.bruh_command("a", click("#back".into())).await.unwrap();
+    arrived(login).await;
+    refused_here().await;
+    host.close_all().await;
+    server.abort();
 }

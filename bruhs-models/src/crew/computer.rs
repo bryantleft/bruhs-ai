@@ -89,6 +89,10 @@ pub const SCREENSHOT_AFTER_FILL: &str =
     "Screenshots are off on this page after a vault fill. Take a snapshot, or go on to the next page.";
 pub const FILL_FAILED: &str =
     "The vault value couldn't be typed into that field. Take a snapshot and try again.";
+/// A bruh selector on a document a vault fill touched that could read the
+/// value back ([`selector_reads_values`]).
+pub const SELECTOR_AFTER_FILL: &str =
+    "After a vault fill, pick elements on this page by id, class, tag or position, without [ or value states such as :valid. Take a snapshot to find them.";
 pub const ONE_PASSWORD_NEEDS_OWNER: &str =
     "1Password needs the owner to sign in on this computer. Stop here and say so.";
 pub const ONE_PASSWORD_UNAVAILABLE: &str =
@@ -450,6 +454,43 @@ fn secret_fill_gate(
         return Gate::Deny(LOGIN_WRONG_ORIGIN);
     }
     Gate::Allow
+}
+
+/// The input types a vault fill may type `field` into (D10). An input with
+/// no type, or one Chrome doesn't know, reads as `text`.
+#[must_use]
+pub fn secret_input_types(field: SecretField) -> &'static [&'static str] {
+    match field {
+        SecretField::Password => &["password"],
+        SecretField::Username => &["text", "email", "tel", "search"],
+        SecretField::Totp => &["text", "tel", "number", "password"],
+    }
+}
+
+/// The pseudo-classes whose match depends on what a field holds.
+const VALUE_STATES: [&str; 10] = [
+    ":valid",
+    ":invalid",
+    ":user-valid",
+    ":user-invalid",
+    ":placeholder-shown",
+    ":in-range",
+    ":out-of-range",
+    ":blank",
+    ":autofill",
+    ":-webkit-autofill",
+];
+
+/// Whether a selector's match count could tell what a filled field holds:
+/// an attribute selector (a page may mirror the value into `value`), a
+/// value state, or an escape or comment that could spell either. Refused
+/// with [`SELECTOR_AFTER_FILL`] on a document a vault fill touched.
+#[must_use]
+pub fn selector_reads_values(selector: &str) -> bool {
+    let selector = selector.to_ascii_lowercase();
+    selector.contains(['[', '\\'])
+        || selector.contains("/*")
+        || VALUE_STATES.iter().any(|state| selector.contains(state))
 }
 
 /// An approval card's summary of a browser call, before it is cut to size.
@@ -1688,6 +1729,55 @@ mod tests {
             approval_summary(BRUH_BROWSER_TOOL, &json!({"command": {"action": "logins"}})),
             "List vault logins"
         );
+    }
+
+    /// D10: a password goes only into a password field; a username into a
+    /// plain text kind; a code into text, tel, number or password.
+    #[test]
+    fn each_vault_field_takes_only_its_own_input_types() {
+        assert_eq!(secret_input_types(SecretField::Password), ["password"]);
+        assert_eq!(
+            secret_input_types(SecretField::Username),
+            ["text", "email", "tel", "search"]
+        );
+        assert_eq!(
+            secret_input_types(SecretField::Totp),
+            ["text", "tel", "number", "password"]
+        );
+    }
+
+    /// On a filled document a selector's match count can read the value
+    /// back: through an attribute the page mirrors it into, or a value
+    /// state. Escapes and comments could hide either, so they go too.
+    #[test]
+    fn selectors_that_could_read_a_filled_value_are_named() {
+        for probe in [
+            "#p[value^=\"a\"]",
+            "input[type=password]",
+            "#p:valid",
+            "#p:INVALID",
+            "#p:user-valid",
+            "#p:user-invalid",
+            "form:has(#p:placeholder-shown)",
+            "#c:in-range",
+            "#c:out-of-range",
+            "#p:blank",
+            "#p:autofill",
+            "#p:-webkit-autofill",
+            "#p:v\\61lid",
+            "#p:/**/valid",
+        ] {
+            assert!(selector_reads_values(probe), "{probe}");
+        }
+        for plain in [
+            "#p",
+            "form .password > input",
+            "input:nth-of-type(2)",
+            "#validate",
+        ] {
+            assert!(!selector_reads_values(plain), "{plain}");
+        }
+        assert!(!SELECTOR_AFTER_FILL.is_empty());
     }
 
     #[test]

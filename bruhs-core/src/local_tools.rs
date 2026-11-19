@@ -19,7 +19,7 @@ mod screencast;
 mod tests;
 mod video;
 
-pub use computer::BruhComputer;
+pub use computer::{BruhComputer, FillValue};
 #[cfg(any(test, feature = "test-support"))]
 pub use computer::{FakePages, PageLaunch};
 #[cfg(test)]

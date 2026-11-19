@@ -6,7 +6,7 @@
 //! them and the thread routes can't reach them.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex, PoisonError, Weak},
@@ -16,21 +16,24 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        handed_back_note, same_page_host, ACTION_STOPPED, BROWSER_PAGE_CLOSED_DURING_STEP,
-        BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS,
-        COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
-        MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN,
-        TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        handed_back_note, same_page_host, selector_reads_values, ACTION_STOPPED,
+        BROWSER_PAGE_CLOSED_DURING_STEP, BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
+        COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, FILL_FAILED,
+        LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, MAX_COMPUTERS, NOT_FOR_BRUHS,
+        OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL,
+        TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW, VAULT_FOR_BRUHS,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
         BrowserStart, ComputerInput, ComputerRequest, ComputerState, Control, Principal, ToolGrant,
         ToolReply, ToolScope, Viewport, COMPUTER_VIEWPORT,
     },
+    vault::{same_origin, SecretField},
 };
 use futures_util::future::{join_all, BoxFuture};
 use tokio::{sync::watch, time::Instant};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use super::{
     browser::{Browser, LaunchOptions},
@@ -53,6 +56,49 @@ const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and ret
 /// browser's profile isn't recovered yet.
 pub(super) fn platform_refusal() -> Option<&'static str> {
     (!cfg!(unix)).then_some(COMPUTER_UNSUPPORTED)
+}
+
+/// A vault value the command route resolved for one fill, with the login's
+/// origin and the field it is. Neither `Debug` nor `Clone`; the value is
+/// zeroed when dropped, which is when the step returns.
+pub struct FillValue {
+    /// The login's exact origin ([`bruhs_models::vault::login_origin`]).
+    pub origin: String,
+    pub field: SecretField,
+    pub value: Zeroizing<String>,
+}
+
+/// 32 documents, each marked by its loader and its history entry.
+const MAX_FILLED_MARKS: usize = 64;
+
+/// The documents vault fills touched on one bruh page, by their marks: the
+/// main frame's loader and its history entry, oldest first. A navigation
+/// keeps them, since Back may return to one; they go when the browser
+/// closes.
+#[derive(Default)]
+pub(super) struct FilledDocuments(VecDeque<String>);
+
+impl FilledDocuments {
+    /// A document a fill may type into, marked before it does.
+    pub(super) fn mark(&mut self, marks: impl IntoIterator<Item = String>) {
+        for mark in marks {
+            if !self.0.contains(&mark) {
+                self.0.push_back(mark);
+            }
+        }
+        while self.0.len() > MAX_FILLED_MARKS {
+            self.0.pop_front();
+        }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether a document with these marks is one a fill touched.
+    pub(super) fn holds_any(&self, marks: &[String]) -> bool {
+        marks.iter().any(|mark| self.0.contains(mark))
+    }
 }
 
 /// A bruh whose Computer is on, as the reactive store lists it.
@@ -81,6 +127,21 @@ pub(super) trait ComputerPage: Send {
         policy: ProcessPolicy,
     ) -> Result<ToolReply, ToolError>;
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
+    /// Type a vault value into `selector` on the main document, only while
+    /// it is on `origin`, and press Enter when `submit`. Each document it
+    /// may type into is marked in `filled` before it types.
+    async fn fill_secret(
+        &mut self,
+        selector: &str,
+        field: SecretField,
+        origin: &str,
+        value: &str,
+        submit: bool,
+        filled: &mut FilledDocuments,
+    ) -> Result<ToolReply, ToolError>;
+    /// The main document's marks ([`FilledDocuments`]), or `None` when the
+    /// page doesn't say.
+    async fn document_ids(&mut self) -> Option<Vec<String>>;
     async fn url(&mut self) -> Option<String>;
     /// The page target is gone (crashed, or closed itself) and takes no
     /// command again; Chrome may still run.
@@ -118,6 +179,22 @@ impl ComputerPage for Browser {
 
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
         Browser::owner_input(self, input).await
+    }
+
+    async fn fill_secret(
+        &mut self,
+        selector: &str,
+        field: SecretField,
+        origin: &str,
+        value: &str,
+        submit: bool,
+        filled: &mut FilledDocuments,
+    ) -> Result<ToolReply, ToolError> {
+        Browser::fill_secret(self, selector, field, origin, value, submit, filled).await
+    }
+
+    async fn document_ids(&mut self) -> Option<Vec<String>> {
+        Browser::document_ids(self).await.ok()
     }
 
     async fn url(&mut self) -> Option<String> {
@@ -268,6 +345,9 @@ struct OpenPage {
     /// Streams this page while someone watches. Each launch has its own,
     /// since a relaunched page has a new socket.
     screencast: Option<ScreencastTask>,
+    /// The documents vault fills touched, on which the bruh's screenshots
+    /// and value-probing selectors are refused.
+    filled: FilledDocuments,
 }
 
 struct Seat {
@@ -475,6 +555,38 @@ fn with_note(mut reply: ToolReply, note: String) -> ToolReply {
     reply
 }
 
+/// Why a bruh's step is refused on a document a vault fill touched: a
+/// screenshot, which could show a revealed value, or a selector whose
+/// match count could read it back. A page that can't say which document
+/// it is counts as a filled one.
+async fn after_fill_refusal(open: &mut OpenPage, action: &BrowserAction) -> Option<&'static str> {
+    if open.filled.is_empty() {
+        return None;
+    }
+    let refusal = match action {
+        BrowserAction::Screenshot => SCREENSHOT_AFTER_FILL,
+        BrowserAction::Click { selector }
+        | BrowserAction::Type {
+            selector: Some(selector),
+            ..
+        }
+        | BrowserAction::Fill { selector, .. }
+            if selector_reads_values(selector) =>
+        {
+            SELECTOR_AFTER_FILL
+        }
+        _ => return None,
+    };
+    let marks = tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
+        .await
+        .ok()
+        .flatten();
+    match marks {
+        Some(marks) if !open.filled.holds_any(&marks) => None,
+        _ => Some(refusal),
+    }
+}
+
 /// Validation errors as the host reports them: a host on this computer is
 /// refused, anything else is invalid.
 fn invalid(error: &'static str) -> ToolError {
@@ -643,7 +755,8 @@ impl LocalToolsHost {
         agent_id: &str,
         action: BrowserAction,
     ) -> Result<ToolReply, ToolError> {
-        self.bruh_step(agent_id, action, StepPage::Unchecked).await
+        self.bruh_step(agent_id, action, StepPage::Unchecked, None)
+            .await
     }
 
     /// One action from a bruh's own browser tool, which the gate allowed on
@@ -657,8 +770,31 @@ impl LocalToolsHost {
         action: BrowserAction,
         allowed_on: Option<&str>,
     ) -> Result<ToolReply, ToolError> {
-        self.bruh_step(agent_id, action, StepPage::AllowedOn(allowed_on))
+        self.bruh_step(agent_id, action, StepPage::AllowedOn(allowed_on), None)
             .await
+    }
+
+    /// A vault fill from a bruh's own browser tool, which the gate allowed
+    /// on `allowed_on`, with the value the command route resolved. It types
+    /// only while the live page and `allowed_on` are both on the login's
+    /// exact origin, checked under the page lock right before it types and
+    /// again in the page as it writes; otherwise [`LOGIN_WRONG_ORIGIN`],
+    /// and nothing is typed. The reply never holds the value, which is
+    /// zeroed when this returns.
+    pub async fn bruh_fill_on(
+        &self,
+        agent_id: &str,
+        action: BrowserAction,
+        value: FillValue,
+        allowed_on: Option<&str>,
+    ) -> Result<ToolReply, ToolError> {
+        self.bruh_step(
+            agent_id,
+            action,
+            StepPage::AllowedOn(allowed_on),
+            Some(value),
+        )
+        .await
     }
 
     async fn bruh_step(
@@ -666,8 +802,20 @@ impl LocalToolsHost {
         agent_id: &str,
         action: BrowserAction,
         page_check: StepPage<'_>,
+        secret: Option<FillValue>,
     ) -> Result<ToolReply, ToolError> {
         let slot = self.checked_slot(agent_id, &action)?;
+        // A vault fill goes only with its value, and the value only with
+        // the fill of its own field.
+        let fill = action
+            .secret_fill()
+            .map(|(selector, reference, submit)| (selector.to_owned(), reference.field, submit));
+        match (&fill, &secret) {
+            (Some(_), None) => return Err(ToolError::Invalid(VAULT_FOR_BRUHS.into())),
+            (Some((_, field, _)), Some(value)) if *field == value.field => {}
+            (None, None) => {}
+            _ => return Err(ToolError::Invalid(FILL_FAILED.into())),
+        }
         let mut revoked = slot.grant.revoked.subscribe();
         let mut interrupt = slot.interrupt.subscribe();
         if *revoked.borrow_and_update() {
@@ -697,7 +845,25 @@ impl LocalToolsHost {
                 .open
                 .as_mut()
                 .ok_or_else(|| ToolError::Unavailable("The bruh's browser didn't open.".into()))?;
-            if let StepPage::AllowedOn(allowed_on) = page_check {
+            if let Some(value) = &secret {
+                // The exact origin takes the place of the host check.
+                let allowed_on = match page_check {
+                    StepPage::AllowedOn(allowed_on) => allowed_on,
+                    StepPage::Unchecked => None,
+                };
+                let live = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
+                    .await
+                    .ok()
+                    .flatten();
+                if allowed_on.is_none() || live.is_none() {
+                    return Err(ToolError::Refused(PAGE_UNKNOWN.into()));
+                }
+                if !same_origin(live.as_deref(), &value.origin)
+                    || !same_origin(allowed_on, &value.origin)
+                {
+                    return Err(ToolError::Refused(LOGIN_WRONG_ORIGIN.into()));
+                }
+            } else if let StepPage::AllowedOn(allowed_on) = page_check {
                 if action.kind() == BrowserActionKind::Input {
                     let live = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
                         .await
@@ -711,12 +877,32 @@ impl LocalToolsHost {
                     }
                 }
             }
+            if let Some(refusal) = after_fill_refusal(open, &action).await {
+                return Err(ToolError::Refused(refusal.into()));
+            }
             // Anything but a read may have landed before a page dies.
             let acts = action.kind() != BrowserActionKind::Read;
-            let reply =
-                tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
+            let reply = match (fill, &secret) {
+                (Some((selector, field, submit)), Some(value)) => {
+                    let OpenPage { page, filled, .. } = &mut *open;
+                    let typed = page.fill_secret(
+                        &selector,
+                        field,
+                        &value.origin,
+                        &value.value,
+                        submit,
+                        filled,
+                    );
+                    // A fill cut off here may have typed; its documents
+                    // are marked already.
+                    tokio::time::timeout(self.policy.timeout, typed)
+                        .await
+                        .unwrap_or_else(|_| Err(ToolError::Invalid(FILL_FAILED.into())))
+                }
+                _ => tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await
-                    .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into())));
+                    .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into()))),
+            };
             if open.page.gone() {
                 // The page target ended under Chrome. Close it where it was
                 // last, so the next step reopens it. A read can be tried
@@ -1197,6 +1383,7 @@ impl LocalToolsHost {
             _guard: guard,
             seat,
             screencast: None,
+            filled: FilledDocuments::default(),
         })
     }
 
@@ -1221,13 +1408,20 @@ mod fake {
     };
 
     use async_trait::async_trait;
-    use bruhs_models::local_tools::{
-        BrowserAction, BrowserSession, ComputerInput, ToolReply, Viewport, COMPUTER_VIEWPORT,
+    use bruhs_models::{
+        local_tools::{
+            BrowserAction, BrowserSession, ComputerInput, ToolReply, Viewport, COMPUTER_VIEWPORT,
+        },
+        vault::SecretField,
     };
     use tokio::sync::{watch, Notify};
 
-    use super::{ComputerPage, Launcher, LocalToolsHost, PageLaunch};
-    use crate::local_tools::{network::Upstream, ProcessPolicy, ToolError};
+    use super::{ComputerPage, FilledDocuments, Launcher, LocalToolsHost, PageLaunch};
+    use crate::local_tools::{browser::filled_reply, network::Upstream, ProcessPolicy, ToolError};
+
+    /// A vault fill a fake page took: selector, field, submit and the value,
+    /// kept so tests can compare it.
+    type SecretFill = (String, SecretField, bool, String);
 
     /// What the fake launcher and its pages saw. Clones share it.
     #[derive(Clone, Default)]
@@ -1258,6 +1452,9 @@ mod fake {
         fail_launches: std::collections::HashSet<String>,
         /// The page socket each bruh's next launches report.
         page_sockets: HashMap<String, String>,
+        secret_fills: HashMap<String, Vec<SecretFill>>,
+        /// The document each bruh's page is on; `doc-0` until set.
+        documents: HashMap<String, String>,
     }
 
     impl FakePages {
@@ -1311,6 +1508,26 @@ mod fake {
         /// The page's address, as if it navigated by itself.
         pub fn set_url(&self, agent_id: &str, url: &str) {
             self.seen().urls.insert(agent_id.into(), url.into());
+        }
+
+        /// The vault fills the bruh's pages took, values included.
+        pub fn secret_fills(&self, agent_id: &str) -> Vec<SecretFill> {
+            self.seen()
+                .secret_fills
+                .get(agent_id)
+                .cloned()
+                .unwrap_or_default()
+        }
+
+        /// The page's main document, as if it loaded another (or went
+        /// back to one).
+        pub fn set_document(&self, agent_id: &str, id: &str) {
+            self.seen().documents.insert(agent_id.into(), id.into());
+        }
+
+        /// Whether the bruh's held action has reached its page.
+        pub fn hold_reached(&self, agent_id: &str) -> bool {
+            !self.seen().holds.contains_key(agent_id)
         }
 
         /// The bruh's next action waits until the returned `Notify` is
@@ -1434,6 +1651,15 @@ mod fake {
         fn dead(&self) -> bool {
             self.pages.seen().dead.contains(&self.session.id)
         }
+
+        fn document(&self) -> String {
+            self.pages
+                .seen()
+                .documents
+                .get(&self.agent_id)
+                .cloned()
+                .unwrap_or_else(|| "doc-0".into())
+        }
     }
 
     #[async_trait]
@@ -1502,6 +1728,43 @@ mod fake {
             }
             drop(seen);
             Ok(())
+        }
+
+        async fn fill_secret(
+            &mut self,
+            selector: &str,
+            field: SecretField,
+            _origin: &str,
+            value: &str,
+            submit: bool,
+            filled: &mut FilledDocuments,
+        ) -> Result<ToolReply, ToolError> {
+            // As a real page does, before anything is typed.
+            filled.mark([self.document()]);
+            let hold = self.pages.seen().holds.remove(&self.agent_id);
+            if let Some(hold) = hold {
+                hold.notified().await;
+            }
+            if self.dead() {
+                self.noticed = true;
+                return Err(ToolError::Unavailable(
+                    "Chrome closed the debugging connection. Start another browser.".into(),
+                ));
+            }
+            self.pages
+                .seen()
+                .secret_fills
+                .entry(self.agent_id.clone())
+                .or_default()
+                .push((selector.into(), field, submit, value.into()));
+            Ok(filled_reply(field, submit))
+        }
+
+        async fn document_ids(&mut self) -> Option<Vec<String>> {
+            if self.window_closed() || self.dead() {
+                return None;
+            }
+            Some(vec![self.document()])
         }
 
         async fn url(&mut self) -> Option<String> {
