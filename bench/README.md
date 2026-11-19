@@ -140,7 +140,7 @@ Start the server first (`cargo run -p bruhs-server`, or `scripts/dev.sh`).
 `BRUHS_URL` defaults to `http://127.0.0.1:3001`; if nothing answers there the
 bruhs tools are skipped with a message. The bench talks to the server as a
 native client: no `Origin` header, loopback `Host`, which the local-access
-guard accepts (see `docs/local-server-access.md`). The server only runs turns
+guard accepts. The server only runs turns
 in directories under `$HOME`, which is why workdirs live in
 `~/.cache/bruhs-bench` (set `BENCH_WORK_ROOT` to move them, still under
 `$HOME`). Workdirs are deliberately outside this repo: Claude Code loads every

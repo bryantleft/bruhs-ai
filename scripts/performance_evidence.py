@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 
-PUBLIC_SUMMARY = "docs/performance-action-evidence.json"
+PUBLIC_SUMMARY = "target/performance-action-evidence.json"
 SUMMARY_KIND = "performance_evidence_summary"
 
 
@@ -54,61 +54,3 @@ def load_ledger(root, requested=PUBLIC_SUMMARY, *, required=True):
     if len(raw) != reference.get("bytes") or hashlib.sha256(raw).hexdigest() != reference.get("sha256"):
         raise ValueError("The private evidence archive does not match its recorded size and digest.")
     return archive, _full_ledger(json.loads(raw))
-
-
-def make_summary(root, archive, ledger, counts):
-    """Create a small index; keep raw arrays and machine provenance private."""
-    root = Path(root).resolve()
-    archive = Path(archive).resolve()
-    if not archive.is_relative_to(root / "target"):
-        raise ValueError("Archive the full ledger under target/ before publishing an index.")
-    raw = archive.read_bytes()
-    _full_ledger(ledger)
-    entries = []
-    for entry in ledger["entries"]:
-        entries.append({
-            "evidence_id": entry["evidence_id"],
-            "kind": entry["kind"],
-            "id": entry["id"],
-            "status": entry["status"],
-            "report": entry["report"],
-        })
-    result = {
-        "version": 1,
-        "kind": SUMMARY_KIND,
-        "purpose": "Compact publication index. Complete local provenance and raw arrays remain in the ignored archive.",
-        "semantic_inventory_complete": False,
-        "full_local_ledger": {
-            "path": archive.relative_to(root).as_posix(),
-            "sha256": hashlib.sha256(raw).hexdigest(),
-            "bytes": len(raw),
-            "git_tracked": False,
-        },
-        "public_reports": {
-            "markdown": "docs/performance-action-log.md",
-            "numerical": "docs/performance-action-log.json",
-            "catalogue": "docs/performance-action-catalogue.json",
-        },
-        "counts": {
-            "partial_evidence_records": len(entries),
-            "normalized_timing_groups": counts["normalized_observations"],
-            "request_count_cases": counts["request_count_observations"],
-            "response_body_observations": counts["response_body_byte_observations"],
-            "whole_action_acceptances": counts["whole_action_acceptances"],
-            "matched_t3_acceptances": counts["verified_faster_t3_targets"],
-        },
-        "entry_index": entries,
-        "limits": [
-            "This index is not a complete action inventory or performance acceptance.",
-            "Published numerical records retain their original order, boundary and scope; raw-input hashes name the unchanged private inputs.",
-            "Pass the public index or a full local ledger to --ledger. Regeneration requires the referenced local archive.",
-        ],
-    }
-    # Report references are already relative in retained data. Refuse an
-    # unexpected absolute report instead of silently changing its identity.
-    for entry in entries:
-        report = entry["report"]
-        if not isinstance(report, str) or report.startswith(("/", "\\")):
-            raise ValueError("Public evidence report references must be repo-relative.")
-    assert_publishable(json.dumps(result))
-    return result

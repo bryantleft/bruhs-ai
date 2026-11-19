@@ -54,7 +54,7 @@ fi
 
 mobile_checks() {
   if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    echo 'Native companion checks need Node and npm. Install the version documented in docs/native-mobile-app.md.' >&2
+    echo 'Native companion checks need Node and npm.' >&2
     return 1
   fi
   if [ ! -d bruhs-mobile/node_modules ]; then
