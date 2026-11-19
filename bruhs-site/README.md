@@ -39,10 +39,9 @@ there).
 
 ## Downloads
 
-The Download buttons link to
-`https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg`,
-which GitHub resolves to the newest release. Releases are published with
-`scripts/release.sh` (see the main repo's CONTRIBUTING.md).
+The Download buttons open `/download`. The page checks the latest published
+GitHub release for each platform package. Release files are also available
+on GitHub when the lookup is unavailable.
 
 ## Email
 

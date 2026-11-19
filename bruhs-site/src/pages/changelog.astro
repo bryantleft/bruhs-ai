@@ -22,7 +22,7 @@ if (releases.length === 0) throw new Error("CHANGELOG.md has no released version
       <header class="changelog-head">
         <p class="eyebrow">Changelog</p>
         <h1 class="display">Better with<br><span class="soft">every release.</span></h1>
-        <p class="lede">What changed, and when it shipped. Every entry is one signed release, and the app links here when an update is ready.</p>
+        <p class="lede">What changed, and when it shipped. Every entry is one release, and the app links here when an update is ready.</p>
       </header>
 
       {releases.map((release, index) => {
@@ -50,7 +50,7 @@ if (releases.length === 0) throw new Error("CHANGELOG.md has no released version
                 );
               })}
               <p class="release-links">
-                {index === 0 && <a href="/#get">Download latest</a>}
+                {index === 0 && <a href="/download">Download latest</a>}
                 <a href={`${REPO}/releases/tag/${id}`}><Icon name="github" size={14} />Release details</a>
               </p>
             </div>

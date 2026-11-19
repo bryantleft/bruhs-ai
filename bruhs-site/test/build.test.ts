@@ -10,8 +10,8 @@ const DIST = new URL("../dist/", import.meta.url);
 const pages = readdirSync(DIST).filter((name) => name.endsWith(".html"));
 
 describe("built pages", () => {
-  it("include the home page, changelog and privacy page", () => {
-    assert.deepEqual([...pages].sort(), ["changelog.html", "index.html", "privacy.html"]);
+  it("include the home page, download, changelog and privacy page", () => {
+    assert.deepEqual([...pages].sort(), ["changelog.html", "download.html", "index.html", "privacy.html"]);
   });
 
   for (const page of pages) {

@@ -13,7 +13,7 @@ interface Props {
   /** Font files to preload, by Monaspace family name, e.g. "Krypton". */
   fonts?: readonly string[];
   /** Highlights the matching nav and footer link. */
-  current?: "home" | "changelog" | "privacy";
+  current?: "home" | "download" | "changelog" | "privacy";
   /** The ⌘K button needs the home page's script. */
   palette?: boolean;
 }
@@ -29,7 +29,6 @@ const {
   palette = false,
 } = Astro.props;
 const canonical = new URL(path, "https://bruhs.ai").href;
-const download = current === "home" ? "#get" : "/#get";
 const here = (page: Props["current"]) => (page === current ? "page" : undefined);
 ---
 
@@ -71,7 +70,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
               <kbd><span class="mod">⌘</span>K</kbd>
             </button>
           )}
-          <a class="btn btn-primary" href={download}><span class="for-mac"><Icon name="apple" />Download</span><span class="for-phone for-pc for-intel">Get bruhs</span></a>
+          <a class="btn btn-primary" href="/download" aria-current={here("download")}>Download</a>
         </div>
       </div>
     </header>

@@ -2,7 +2,6 @@
 // between screenshots) and the dot mascot.
 
 import { drawBruh } from "./braille.js";
-import { detectChip } from "./chip.js";
 import { COMMANDS, filterCommands } from "./palette.js";
 
 /** @typedef {import("./palette.js").Command} Command */
@@ -673,7 +672,7 @@ for (const button of document.querySelectorAll("button[data-copy]")) {
   });
 }
 
-// "Send to your Mac" (phones and tablets, see public/os.js): the share sheet
+// "Send to desktop" (phones and tablets, see public/os.js): the share sheet
 // hands the link to AirDrop, Messages or Mail; without one, copy it.
 for (const button of document.querySelectorAll("button[data-share]")) {
   if (!(button instanceof HTMLButtonElement)) continue;
@@ -684,7 +683,7 @@ for (const button of document.querySelectorAll("button[data-share]")) {
   let reset = 0;
   button.addEventListener("click", async () => {
     if (button.getAttribute("aria-disabled") === "true") return;
-    const link = { title: "bruhs", text: "bruhs, one window for your whole day. Download it on your Mac.", url: "https://bruhs.ai" };
+    const link = { title: "bruhs", text: "bruhs, one window for your whole day. Download it on your desktop.", url: "https://bruhs.ai/download" };
     clearTimeout(reset);
     if (label) label.textContent = text;
     if (status) status.textContent = "";
@@ -701,7 +700,7 @@ for (const button of document.querySelectorAll("button[data-share]")) {
       try {
         await navigator.clipboard.writeText(link.url);
         if (label) label.textContent = "Link copied";
-        if (status) status.textContent = "Link copied. Open it on your Mac.";
+        if (status) status.textContent = "Link copied. Open it on your desktop.";
       } catch {
         if (fallback instanceof HTMLInputElement) {
           fallback.hidden = false;
@@ -710,7 +709,7 @@ for (const button of document.querySelectorAll("button[data-share]")) {
             fallback.select();
           }
         }
-        if (status) status.textContent = "Select and copy the link to open it on your Mac.";
+        if (status) status.textContent = "Select and copy the link to open it on your desktop.";
       }
     } finally {
       button.removeAttribute("aria-disabled");
@@ -718,17 +717,5 @@ for (const button of document.querySelectorAll("button[data-share]")) {
     reset = window.setTimeout(() => {
       if (label) label.textContent = text;
     }, 1600);
-  });
-}
-
-// An Intel Mac can't run the Apple silicon build: once the page is idle, ask
-// chip.js and, only when it's sure, offer run-from-source instead. Intel
-// Macs are rare, so the late swap costs everyone else nothing.
-if (document.documentElement.dataset.os === "mac") {
-  const whenIdle = window.requestIdleCallback ?? ((/** @type {() => void} */ run) => setTimeout(run, 300));
-  whenIdle(() => {
-    detectChip().then((chip) => {
-      if (chip === "intel") document.documentElement.dataset.os = "intel";
-    });
   });
 }

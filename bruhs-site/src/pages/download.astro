@@ -1,0 +1,66 @@
+---
+import Base from "../layouts/Base.astro";
+
+const releases = "https://github.com/bryantleft/bruhs-ai/releases/latest";
+const packages = [
+  { os: "mac", name: "macOS", requirement: "Apple silicon · macOS 13 or later", file: "Bruhs-macOS-arm64.dmg", format: "DMG" },
+  { os: "windows", name: "Windows", requirement: "x64 · Microsoft WebView2 Runtime", file: "Bruhs-Windows-x64.zip", format: "ZIP" },
+  { os: "linux", name: "Linux", requirement: "x86_64 · Ubuntu 24.04", file: "Bruhs-Linux-x64.deb", format: "DEB" },
+];
+---
+<Base title="Download bruhs" description="Get bruhs for macOS, Windows or Linux. Choose a desktop build and see the latest release." path="/download" current="download">
+  <main class="downloads wrap" id="main" tabindex="-1">
+    <header class="downloads-head">
+      <div>
+        <h1 class="display">Download bruhs.</h1>
+        <p class="lede">Your agents, tasks and meetings in one desktop app.</p>
+        <div class="get-row">
+          <a class="btn btn-primary" href="#platforms" id="recommended-download">Choose a platform</a>
+          <a class="btn btn-ghost" href="/changelog">Changelog</a>
+        </div>
+        <p class="label" id="release-info"><a href={releases}>Latest release on GitHub</a></p>
+      </div>
+      <img class="download-mark" src="/logo.svg" width="160" height="160" alt="" />
+    </header>
+    <section id="platforms" aria-labelledby="platform-title">
+      <h2 class="h2" id="platform-title">All downloads</h2>
+      <ul class="packages">
+        {packages.map(({ os, name, requirement, file, format }) => (
+          <li data-platform={os} data-package={file}>
+            <h3 class="h3">{name}</h3>
+            <p>{requirement}</p>
+            <span class="package-format">{format}<span data-size></span></span>
+            <a class="btn btn-quiet" href={releases} data-package-link aria-label={`View release files for ${name}`}>View release files</a>
+          </li>
+        ))}
+      </ul>
+      <p class="label">Using a different system? <a href="/#source">Run bruhs from source</a>.</p>
+    </section>
+  </main>
+</Base>
+
+<script>
+  import "../scripts/download";
+</script>
+
+<style>
+  .downloads { padding-block: clamp(3rem, 8vw, 7rem); }
+  .downloads-head { display: flex; align-items: center; justify-content: space-between; gap: 2rem; margin-bottom: clamp(3rem, 7vw, 6rem); }
+  .downloads-head .lede { margin: 1rem 0 1.6rem; }
+  .download-mark { width: clamp(6rem, 17vw, 12rem); height: auto; }
+  .packages { padding: 0; margin: 1.4rem 0; list-style: none; border-top: 1px dotted var(--longan-700); }
+  .packages li { display: grid; grid-template-columns: 1fr 2.8fr 1.2fr minmax(11rem, auto); align-items: center; gap: 1rem; padding: 1.3rem 0; border-bottom: 1px dotted var(--longan-700); }
+  .packages p { margin: 0; color: var(--rambutan-400); font-size: .9rem; }
+  .package-format { font: .8125rem/1.5 var(--argon); color: var(--rambutan-300); }
+  .packages li > :last-child { justify-self: end; }
+  @media (max-width: 780px) {
+    .packages li { grid-template-columns: 1fr auto; gap: .45rem 1rem; }
+    .packages p { grid-row: 2; }
+    .package-format { grid-row: 3; }
+    .packages li > :last-child { grid-column: 2; grid-row: 1 / 4; }
+    .download-mark { display: none; }
+  }
+  @media (max-width: 410px) {
+    .packages li > :last-child { grid-column: 1 / -1; grid-row: auto; justify-self: start; margin-top: .4rem; }
+  }
+</style>

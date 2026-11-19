@@ -86,3 +86,13 @@ describe("changelog.html", () => {
     assert.deepEqual(current, releases.map((_, index) => index === 0));
   });
 });
+
+describe("download.html", () => {
+  const downloads = readFileSync(new URL("download.html", PUBLIC), "utf8");
+
+  it("offers the three supported package formats with a working offline-metadata fallback", () => {
+    const names = [...downloads.matchAll(/data-package="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(names, ["Bruhs-macOS-arm64.dmg", "Bruhs-Windows-x64.zip", "Bruhs-Linux-x64.deb"]);
+    assert.equal(downloads.match(/href="https:\/\/github.com\/bryantleft\/bruhs-ai\/releases\/latest" data-package-link/g)?.length, names.length);
+  });
+});
