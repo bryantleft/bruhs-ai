@@ -280,9 +280,6 @@ impl Browser {
             )
             .await?;
             cdp.call("Log.enable", json!({})).await?;
-            // Says when the page target crashes or detaches; an older Chrome
-            // without it still ends the socket when the target closes.
-            let _ = cdp.call("Inspector.enable", json!({})).await;
             let viewport = if options.headless {
                 cdp.call(
                     "Emulation.setDeviceMetricsOverride",
@@ -636,20 +633,27 @@ pub(super) async fn probe_guard(cdp: &mut Cdp) -> Result<(), ToolError> {
 }
 
 /// Profile prefs every launch of a kept profile starts with, whatever the
-/// owner changed in a window: Chrome saves no passwords and fills no forms,
+/// owner changed in a window. Chrome saves no passwords and fills no forms,
 /// so nothing typed in the window is stored and filled into pages the bruh
-/// drives later.
-const SEALED_PREFS: [(&str, &str); 4] = [
-    ("credentials_enable_service", ""),
-    ("profile", "password_manager_enabled"),
-    ("autofill", "profile_enabled"),
-    ("autofill", "credit_card_enabled"),
-];
+/// drives later. It restores no earlier tabs, from "Continue where you left
+/// off" or after a crash, so no page runs before the guard attaches.
+fn sealed_prefs() -> [(&'static str, &'static str, Value); 7] {
+    [
+        ("credentials_enable_service", "", false.into()),
+        ("profile", "password_manager_enabled", false.into()),
+        ("autofill", "profile_enabled", false.into()),
+        ("autofill", "credit_card_enabled", false.into()),
+        // 5: open the New Tab page, not the last session.
+        ("session", "restore_on_startup", 5.into()),
+        ("profile", "exit_type", "Normal".into()),
+        ("profile", "exited_cleanly", true.into()),
+    ]
+}
 
-/// Write [`SEALED_PREFS`] as false into the kept profile's
-/// `Default/Preferences`, keeping every other pref. Runs while no Chrome
-/// holds the profile, so Chrome reads them as it starts. A file that isn't
-/// a JSON object is replaced, as Chrome itself would reset it.
+/// Write [`sealed_prefs`] into the kept profile's `Default/Preferences`,
+/// keeping every other pref. Runs while no Chrome holds the profile, so
+/// Chrome reads them as it starts. A file that isn't a JSON object is
+/// replaced, as Chrome itself would reset it.
 pub(super) async fn seal_preferences(profile: &Path) -> Result<(), ToolError> {
     let folder = profile.join("Default");
     let mut builder = tokio::fs::DirBuilder::new();
@@ -666,15 +670,15 @@ pub(super) async fn seal_preferences(profile: &Path) -> Result<(), ToolError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
         Err(error) => return Err(error.into()),
     };
-    for (group, key) in SEALED_PREFS {
+    for (group, key, value) in sealed_prefs() {
         if key.is_empty() {
-            prefs[group] = false.into();
+            prefs[group] = value;
             continue;
         }
         if !prefs[group].is_object() {
             prefs[group] = json!({});
         }
-        prefs[group][key] = false.into();
+        prefs[group][key] = value;
     }
     // Written beside it and renamed, so a failed write never leaves half a file.
     let written = folder.join("Preferences.bruhs");
@@ -944,7 +948,9 @@ pub(super) struct Cdp {
     loaded: Option<String>,
     /// The last mouse press not yet released.
     pressed: Option<Value>,
-    /// The connection ended, or Chrome said its target crashed or detached.
+    /// The connection ended, or Chrome said its target crashed or detached
+    /// (Inspector events, which Chrome may send without `Inspector.enable`;
+    /// enabling the domain breaks history navigation after a reload).
     closed: bool,
 }
 

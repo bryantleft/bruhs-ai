@@ -441,6 +441,10 @@ async fn kept_profiles_launch_without_the_password_manager() {
             && prefs["profile"]["password_manager_enabled"] == false
             && prefs["autofill"]["profile_enabled"] == false
             && prefs["autofill"]["credit_card_enabled"] == false
+            // No earlier tabs reopen, by choice or after a crash.
+            && prefs["session"]["restore_on_startup"] == 5
+            && prefs["profile"]["exit_type"] == "Normal"
+            && prefs["profile"]["exited_cleanly"] == true
     };
     let read = || -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(profile.join("Default/Preferences")).unwrap())
@@ -452,14 +456,14 @@ async fn kept_profiles_launch_without_the_password_manager() {
     // The owner turned saving back on in a window; other prefs are kept.
     std::fs::write(
         profile.join("Default/Preferences"),
-        r#"{"credentials_enable_service":true,"profile":{"name":"Bruh","password_manager_enabled":true},"autofill":"odd","session":{"restore_on_startup":1}}"#,
+        r#"{"credentials_enable_service":true,"profile":{"name":"Bruh","password_manager_enabled":true,"exit_type":"Crashed"},"autofill":"odd","session":{"restore_on_startup":1,"startup_urls":["https://a.test/"]}}"#,
     )
     .unwrap();
     browser::seal_preferences(&profile).await.unwrap();
     let prefs = read();
     assert!(sealed(&prefs), "{prefs}");
     assert_eq!(prefs["profile"]["name"], "Bruh");
-    assert_eq!(prefs["session"]["restore_on_startup"], 1);
+    assert_eq!(prefs["session"]["startup_urls"][0], "https://a.test/");
     // A file that isn't JSON is replaced, as Chrome would reset it.
     std::fs::write(profile.join("Default/Preferences"), "not json").unwrap();
     browser::seal_preferences(&profile).await.unwrap();
