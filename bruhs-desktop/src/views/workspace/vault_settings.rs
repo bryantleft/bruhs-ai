@@ -283,6 +283,22 @@ impl VaultSettings {
         cx.notify();
     }
 
+    /// Whether Settings hiding has anything here to drop: a form, a
+    /// question or a search.
+    pub(super) fn holds_visit(&self, cx: &App) -> bool {
+        self.has_editor() || !self.search.read(cx).value().is_empty()
+    }
+
+    /// Settings hid. The form and question close and the search goes, so
+    /// the next visit starts with every row, as the web's page does.
+    pub(super) fn left(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.clear_editor(window, cx);
+        if !self.search.read(cx).value().is_empty() {
+            self.search
+                .update(cx, |search, cx| search.set_value("", window, cx));
+        }
+    }
+
     fn record(&mut self, request: String) {
         #[cfg(test)]
         self.vault_requests.push(request);
@@ -437,6 +453,7 @@ impl VaultSettings {
     /// `BRUHS_DESKTOP_SMOKE_SCENE=vault-new` / `vault-new-1password`: New
     /// entry open on a login stored in the keychain or in 1Password, for
     /// the same-size comparison with the web. False while the page waits.
+    #[cfg(any(test, debug_assertions))]
     pub(super) fn smoke_open_new(
         &mut self,
         source: FormSource,
@@ -1524,9 +1541,12 @@ impl VaultSettings {
             if let Some(focus) = focus {
                 keep = keep.track_focus(&focus.keep);
             }
-            panel()
-                .id("desktop-vault-question")
-                .role(Role::Group)
+            let mut question = panel().id("desktop-vault-question").role(Role::Group);
+            // Named by the question, as the web's group is (BC M4).
+            if let Some(line) = self.confirm_line() {
+                question = question.aria_label(line);
+            }
+            question
                 .on_action(cx.listener(|this, _: &CloseOverlays, window, cx| {
                     this.keep(window, cx);
                 }))
@@ -2260,6 +2280,27 @@ mod tests {
     }
 
     /// An answer that lands after Settings closed leaves focus alone.
+    /// BC M3: as the web's page starts afresh on each visit, leaving
+    /// Settings drops the search, so every row shows next time.
+    #[gpui::test]
+    fn leaving_settings_drops_the_search(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        let search = view.read_with(cx, |view, _| view.search.clone());
+        cx.update(|window, cx| {
+            search.update(cx, |search, cx| search.set_value("shop", window, cx));
+            view.update(cx, |view, cx| view.searched(window, cx));
+        });
+        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-vault-row-v1-shop"));
+        assert!(!rendered(cx, "desktop-vault-row-v1-deploy"));
+        assert!(view.read_with(cx, |view, cx| view.holds_visit(cx)));
+        cx.update(|window, cx| view.update(cx, |view, cx| view.left(window, cx)));
+        cx.run_until_parked();
+        assert!(search.read_with(cx, |search, _| search.value().is_empty()));
+        assert!(rendered(cx, "desktop-vault-row-v1-deploy"));
+        assert!(!view.read_with(cx, |view, cx| view.holds_visit(cx)));
+    }
+
     #[gpui::test]
     fn a_late_delete_answer_leaves_focus_where_it_is(cx: &mut TestAppContext) {
         let (view, cx) = page(cx, Some(listing()));

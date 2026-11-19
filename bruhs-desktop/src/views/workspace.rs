@@ -2909,9 +2909,9 @@ impl Render for Workspace {
         {
             self.calendar_timegrid_autoscroll.set(true);
         }
-        if !self.settings_visible() && self.vault_settings.read(cx).has_editor() {
+        if !self.settings_visible() && self.vault_settings.read(cx).holds_visit(cx) {
             self.vault_settings
-                .update(cx, |view, cx| view.clear_editor(window, cx));
+                .update(cx, |view, cx| view.left(window, cx));
         }
         for thread in &self.threads {
             let visible = self.active_view == AppView::Chat
