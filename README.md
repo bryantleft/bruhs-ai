@@ -42,10 +42,8 @@ Codex CLIs you already have, on your own logins.
   separate read and write grants.
 - **Private credentials.** When an agent needs a secret, it asks through a
   separate form; the value goes to the OS keychain and never into the chat.
-  See [credential requests](docs/secure-credential-requests.md).
 - **MCP.** `bruhs-mcp` exposes the workspace to MCP clients as typed tools
-  that propose changes for you to approve. See
-  [local MCP setup](docs/local-mcp-workspace.md).
+  that propose changes for you to approve.
 
 Every action is reachable from the command bar (`⌘K`), and most are one
 shortcut away.
@@ -129,14 +127,12 @@ through the server's `/api/capture/*` proxy.
   directory, or `BRUHS_MEETING_DB`). Back it up with a SQLite-aware tool.
 - **The local server only answers local pages.** It checks Host and Origin
   before routing and accepts loopback origins plus the ones you configure
-  (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`). See
-  [local server access](docs/local-server-access.md).
+  (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`).
 - **The capture daemon needs a token.** It writes a fresh bearer token at
   every launch (`capture/daemon-token` in the app data directory,
   owner-only); the server and the desktop read it, the browser never does.
 - **The microphone opens only when you ask.** Recording is explicit;
   audio-driven auto-record needs a separate, expiring opt-in each session.
-  See [microphone activity consent](docs/microphone-activity-consent.md).
 - **Update checks are optional.** Settings → Updates → **Check for updates**
   turns off every online lookup.
 
