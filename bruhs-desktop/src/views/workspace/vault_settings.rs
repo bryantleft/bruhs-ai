@@ -666,7 +666,9 @@ impl VaultSettings {
         self.hold_focus_on_page(window, cx);
         self.record(match &request {
             Request::Create(_) => "POST /api/vault".into(),
-            Request::Update(id, _) => format!("PUT {}", crate::server_client::vault::vault_entry_path(id)),
+            Request::Update(id, _) => {
+                format!("PUT {}", crate::server_client::vault::vault_entry_path(id))
+            }
         });
         cx.notify();
         if cfg!(test) {
