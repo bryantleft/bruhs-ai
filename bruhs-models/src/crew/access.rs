@@ -4,7 +4,7 @@
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use super::computer::{browser_detail, browser_summary};
+use super::computer::{browser_detail, browser_summary, VAULT_PREAMBLE};
 use super::{AccessLevel, BruhAccess, BRUH_BROWSER_TOOL};
 use crate::agent::AgentProvider;
 
@@ -523,9 +523,16 @@ pub fn approval_fingerprint(tool: &str, input: &Value) -> String {
 }
 
 /// The opening lines of every bruh run: its name, what it may do and, when
-/// its Computer is on, its browser.
+/// its Computer is on, its browser and, with a usable login
+/// (`vault_logins`), how it fills vault logins.
 #[must_use]
-pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel, computer: bool) -> String {
+pub fn run_preamble(
+    name: &str,
+    access: &BruhAccess,
+    level: AccessLevel,
+    computer: bool,
+    vault_logins: bool,
+) -> String {
     let access_line = match level {
         AccessLevel::ReadOnly => "Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.",
         AccessLevel::Ask => "Access: ask first. You may edit files and run commands in your working folder. Each change waits for the owner's approval; if one is denied, continue without it and say so.",
@@ -534,6 +541,9 @@ pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel, compute
     let mut lines = vec![format!("Your name is {name}."), access_line.to_string()];
     if computer {
         lines.push("You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back.".to_string());
+        if vault_logins {
+            lines.push(VAULT_PREAMBLE.to_string());
+        }
     }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
@@ -1264,17 +1274,18 @@ mod tests {
 
     #[test]
     fn the_preamble_names_the_bruh_and_its_access() {
-        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false);
+        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false, false);
         assert!(text.starts_with("Your name is Penny."));
         assert!(
             text.contains("without asking")
                 && text.contains("Never push, merge or open pull requests.")
         );
         assert!(
-            !run_preamble("Penny", &full(true), AccessLevel::Full, false).contains("Never push")
+            !run_preamble("Penny", &full(true), AccessLevel::Full, false, false)
+                .contains("Never push")
         );
         assert_eq!(
-            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false),
+            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false, false),
             "Your name is Penny.\n\
              Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.\n\
              Never push, merge or open pull requests.\n\
@@ -1289,10 +1300,13 @@ mod tests {
             },
             AccessLevel::Ask,
             false,
+            false,
         );
         assert!(ask.contains("Access: ask first.") && ask.contains("Never push"));
-        assert!(run_preamble("Penny", &full(true), AccessLevel::Full, false)
-            .ends_with("Never send messages in the owner's name."));
+        assert!(
+            run_preamble("Penny", &full(true), AccessLevel::Full, false, false)
+                .ends_with("Never send messages in the owner's name.")
+        );
     }
 
     #[test]
@@ -1318,7 +1332,7 @@ mod tests {
             level: AccessLevel::Full,
             ..Default::default()
         };
-        let on = run_preamble("Ada", &full, AccessLevel::Full, true);
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true, false);
         assert!(on.contains("the local_browser tool"));
         let lines: Vec<&str> = on.lines().collect();
         assert!(lines[1].starts_with("Access: full."), "{on}");
@@ -1326,6 +1340,21 @@ mod tests {
             lines[2],
             "You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back."
         );
-        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false).contains("local_browser"));
+        assert!(
+            !run_preamble("Ada", &full, AccessLevel::Full, false, false).contains("local_browser")
+        );
+    }
+
+    #[test]
+    fn the_preamble_mentions_vault_logins_only_when_usable() {
+        let full = BruhAccess {
+            level: AccessLevel::Full,
+            ..Default::default()
+        };
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true, true);
+        assert!(on.contains("You never see the values."), "{on}");
+        assert!(on.contains(VAULT_PREAMBLE), "{on}");
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false).contains("vault"));
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true).contains("vault"));
     }
 }

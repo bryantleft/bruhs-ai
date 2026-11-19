@@ -1,6 +1,7 @@
 //! Who gets a Computer, how each browser call is gated, and what the
 //! Computer tab offers and says. Shared by both apps and the service.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
@@ -11,9 +12,10 @@ use super::{
 use crate::agent::AgentProvider;
 use crate::local_tools::{
     validate_action, validate_browser_url, BrowserAction, BrowserActionKind, ComputerState,
-    Control, COMPUTER_VIEWPORT,
+    Control, SecretRef, COMPUTER_VIEWPORT,
 };
 use crate::reactive::{ReactiveAgent, ReactiveCommand, ReactiveSnapshot};
+use crate::vault::{same_origin, SecretField};
 
 /// The tool a bruh's browser calls arrive as.
 pub const BRUH_BROWSER_TOOL: &str = "mcp__bruhs_workbench__local_browser";
@@ -40,7 +42,7 @@ pub const COMPUTER_OFF_DENIAL: &str =
     "Your computer is off. The owner can turn it on in your Settings.";
 pub const NOT_FOR_BRUHS: &str =
     "This browser action isn't available to bruhs. Take a snapshot to read the page.";
-pub const UNKNOWN_BROWSER_ACTION: &str = "Use one of the local_browser actions: navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill.";
+pub const UNKNOWN_BROWSER_ACTION: &str = "Use one of the local_browser actions: navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill, logins.";
 pub const OWNER_HAS_COMPUTER: &str =
     "The owner has taken control of your computer. Wait for them to hand it back.";
 pub const CONTROL_WAIT_EXPIRED: &str =
@@ -67,6 +69,50 @@ pub const PAGE_UNKNOWN: &str =
 pub const STEP_NOT_APPROVED: &str = "This browser step wasn't approved.";
 /// The command route got a step from a web page, not the bruh's helper.
 pub const STEP_FROM_A_PAGE: &str = "Only the bruh's own browser tool can send its steps.";
+
+// Model-facing copy for vault fills.
+
+/// A thread browser got a vault fill or `logins`.
+pub const VAULT_FOR_BRUHS: &str = "Vault logins fill only in a bruh's own browser.";
+pub const FILL_TEXT_OR_SECRET: &str = "Fill with text or with a vault secret, not both.";
+pub const FILL_NEEDS_VALUE: &str = "Fill needs text or a vault secret.";
+pub const SUBMIT_NEEDS_SECRET: &str =
+    "submit goes with a vault secret. Press Enter with the key action.";
+pub const LOGIN_NOT_GRANTED: &str =
+    "That vault login isn't granted to you. The owner can grant it in your Settings.";
+pub const LOGIN_NO_FIELD: &str = "That login has no such field. logins lists each login's fields.";
+pub const LOGIN_WRONG_ORIGIN: &str =
+    "That login fills only on its own site. Open its sign-in page first; logins lists it.";
+pub const SECRET_FIELD_MISMATCH: &str =
+    "Fill a password into a password field, and a username or one-time code into a text field.";
+pub const SCREENSHOT_AFTER_FILL: &str =
+    "Screenshots are off on this page after a vault fill. Take a snapshot, or go on to the next page.";
+pub const FILL_FAILED: &str =
+    "The vault value couldn't be typed into that field. Take a snapshot and try again.";
+pub const ONE_PASSWORD_NEEDS_OWNER: &str =
+    "1Password needs the owner to sign in on this computer. Stop here and say so.";
+pub const ONE_PASSWORD_UNAVAILABLE: &str =
+    "1Password isn't set up for that login on this computer. Stop here and tell the owner.";
+pub const KEYCHAIN_NEEDS_OWNER: &str =
+    "The keychain needs the owner to allow access on this computer. Stop here and say so.";
+pub const VAULT_READ_FAILED: &str =
+    "Bruhs couldn't read that vault login. Stop here and tell the owner.";
+/// The run preamble's paragraph for a bruh whose Computer is on and that
+/// has a usable login.
+pub const VAULT_PREAMBLE: &str = "Your browser can sign in with vault logins. `logins` lists the ones you may use; `fill` with `secret: {login_id, field}` types one into a field on that login's own site, and `submit: true` presses Enter. You never see the values. If a fill says the owner is needed, stop and say so.";
+
+/// A vault login a bruh may fill, as `logins` lists it and the gate checks
+/// a fill against it. Never a value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoginTarget {
+    pub login_id: String,
+    pub name: String,
+    /// The sign-in page.
+    pub url: String,
+    /// `scheme://host[:port]`, the only origin it fills on.
+    pub origin: String,
+    pub fields: Vec<SecretField>,
+}
 
 /// What the bruh's next browser call learns after the owner hands back.
 #[must_use]
@@ -325,6 +371,10 @@ pub fn same_page_host(a: Option<&str>, b: Option<&str>) -> bool {
 /// (`{"command": {…}}`); `page_url` is the page the call acts on, if known.
 /// Input on a page whose host is unknown follows the forge rule, since the
 /// page may be GitHub or GitLab; `about:blank` is a known, plain page.
+///
+/// A vault fill is never asked about: it runs when `login` is the usable
+/// login it names, has the field and the page is on its exact origin, and
+/// is refused otherwise. The forge rule doesn't apply to it.
 #[must_use]
 pub fn browser_gate(
     access: &BruhAccess,
@@ -332,6 +382,7 @@ pub fn browser_gate(
     computer: bool,
     input: &Value,
     page_url: Option<&str>,
+    login: Option<&LoginTarget>,
 ) -> Gate {
     let level = effective_level(access.level, provider);
     if let Some(reason) = computer_unavailable(level, provider) {
@@ -348,6 +399,9 @@ pub fn browser_gate(
     }
     if let Err(reason) = validate_action(&action, COMPUTER_VIEWPORT) {
         return Gate::Deny(reason);
+    }
+    if let Some((_, secret, _)) = action.secret_fill() {
+        return secret_fill_gate(secret, page_url, login);
     }
     // A backstop: `validate_action` already refuses these, and more strictly.
     if let BrowserAction::Navigate { url } = &action {
@@ -377,6 +431,27 @@ pub fn browser_gate(
     }
 }
 
+/// Whether a vault fill may run: never asked, only allowed or refused.
+fn secret_fill_gate(
+    secret: &SecretRef,
+    page_url: Option<&str>,
+    login: Option<&LoginTarget>,
+) -> Gate {
+    if page_url.is_none() {
+        return Gate::Deny(PAGE_UNKNOWN);
+    }
+    let Some(login) = login.filter(|login| login.login_id == secret.login_id) else {
+        return Gate::Deny(LOGIN_NOT_GRANTED);
+    };
+    if !login.fields.contains(&secret.field) {
+        return Gate::Deny(LOGIN_NO_FIELD);
+    }
+    if !same_origin(page_url, &login.origin) {
+        return Gate::Deny(LOGIN_WRONG_ORIGIN);
+    }
+    Gate::Allow
+}
+
 /// An approval card's summary of a browser call, before it is cut to size.
 pub(super) fn browser_summary(input: &Value) -> Option<String> {
     let action = serde_json::from_value::<BrowserAction>(input["command"].clone()).ok()?;
@@ -386,7 +461,13 @@ pub(super) fn browser_summary(input: &Value) -> Option<String> {
         BrowserAction::ClickAt { x, y } => format!("Click at {x}, {y}"),
         BrowserAction::Type { .. } => "Type".to_string(),
         BrowserAction::Key { key } => format!("Press {key}"),
+        BrowserAction::Fill {
+            selector,
+            text: None,
+            ..
+        } => format!("Fill {selector} from the vault"),
         BrowserAction::Fill { selector, .. } => format!("Fill {selector}"),
+        BrowserAction::Logins => return Some("List vault logins".to_string()),
         BrowserAction::Scroll { .. } => "Scroll".to_string(),
         BrowserAction::Snapshot => "Read the page".to_string(),
         BrowserAction::Screenshot => "Take a screenshot".to_string(),
@@ -404,7 +485,9 @@ pub(super) fn browser_summary(input: &Value) -> Option<String> {
 /// or a URL to open whose summary is longer than `summary_max` characters.
 pub(super) fn browser_detail(input: &Value, summary_max: usize) -> Option<String> {
     match serde_json::from_value::<BrowserAction>(input["command"].clone()).ok()? {
-        BrowserAction::Type { text, .. } | BrowserAction::Fill { text, .. } => Some(text),
+        BrowserAction::Type { text, .. } => Some(text),
+        // A vault fill has no text, and its value is never on the call.
+        BrowserAction::Fill { text, .. } => text,
         BrowserAction::Navigate { url } => browser_summary(input)
             .is_some_and(|summary| summary.chars().count() > summary_max)
             .then_some(url),
@@ -648,7 +731,8 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "snapshot"})),
-                shop
+                shop,
+                None
             ),
             Gate::Allow
         );
@@ -658,12 +742,13 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "navigate", "url": "https://a.test"})),
+                None,
                 None
             ),
             Gate::Approve
         );
         assert_eq!(
-            browser_gate(&ask, claude, true, &click, shop),
+            browser_gate(&ask, claude, true, &click, shop, None),
             Gate::Approve
         );
         assert_eq!(
@@ -672,13 +757,17 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "navigate", "url": "https://github.com/o/r"})),
+                None,
                 None
             ),
             Gate::Allow
         );
-        assert_eq!(browser_gate(&full, claude, true, &click, shop), Gate::Allow);
         assert_eq!(
-            browser_gate(&full, claude, true, &click, pull),
+            browser_gate(&full, claude, true, &click, shop, None),
+            Gate::Allow
+        );
+        assert_eq!(
+            browser_gate(&full, claude, true, &click, pull, None),
             Gate::Approve
         );
         assert_eq!(
@@ -687,7 +776,8 @@ mod tests {
                 claude,
                 true,
                 &click,
-                Some("https://gist.github.com/x")
+                Some("https://gist.github.com/x"),
+                None
             ),
             Gate::Approve
         );
@@ -697,7 +787,8 @@ mod tests {
                 claude,
                 true,
                 &click,
-                Some("https://gitlab.com/x")
+                Some("https://gitlab.com/x"),
+                None
             ),
             Gate::Allow
         );
@@ -707,6 +798,7 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "navigate", "url": "http://127.1:3001/"})),
+                None,
                 None
             ),
             Gate::Deny(LOCAL_HOST_DENIAL)
@@ -717,6 +809,7 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "navigate", "url": "file:///etc/passwd"})),
+                None,
                 None
             ),
             Gate::Deny(_)
@@ -727,7 +820,8 @@ mod tests {
                 claude,
                 false,
                 &call(json!({"action": "snapshot"})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny(COMPUTER_OFF_DENIAL)
         );
@@ -737,13 +831,21 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "evaluate", "expression": "document.cookie"})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny(NOT_FOR_BRUHS)
         );
         for action in ["console", "network"] {
             assert_eq!(
-                browser_gate(&full, claude, true, &call(json!({"action": action})), shop),
+                browser_gate(
+                    &full,
+                    claude,
+                    true,
+                    &call(json!({"action": action})),
+                    shop,
+                    None
+                ),
                 Gate::Deny(NOT_FOR_BRUHS),
                 "{action}"
             );
@@ -754,7 +856,8 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "teleport"})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny(UNKNOWN_BROWSER_ACTION)
         );
@@ -764,7 +867,8 @@ mod tests {
                 AgentProvider::Codex,
                 true,
                 &call(json!({"action": "snapshot"})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny("Computer needs a Claude model.")
         );
@@ -774,7 +878,8 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "click_at", "x": 9000, "y": 1})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny(_)
         ));
@@ -785,7 +890,8 @@ mod tests {
                 claude,
                 true,
                 &call(json!({"action": "snapshot"})),
-                shop
+                shop,
+                None
             ),
             Gate::Deny("Computer needs Ask first or Full access.")
         );
@@ -796,7 +902,8 @@ mod tests {
                 claude,
                 true,
                 &click,
-                pull
+                pull,
+                None
             ),
             Gate::Approve
         );
@@ -807,7 +914,7 @@ mod tests {
             "https://github.com./o/r",
         ] {
             assert_eq!(
-                browser_gate(&full, claude, true, &click, Some(page)),
+                browser_gate(&full, claude, true, &click, Some(page), None),
                 Gate::Approve,
                 "{page}"
             );
@@ -825,6 +932,7 @@ mod tests {
                 claude,
                 true,
                 &click,
+                None,
                 None
             ),
             Gate::Approve
@@ -835,6 +943,7 @@ mod tests {
                 claude,
                 true,
                 &click,
+                None,
                 None
             ),
             Gate::Allow
@@ -845,7 +954,8 @@ mod tests {
                 claude,
                 true,
                 &click,
-                Some("about:blank")
+                Some("about:blank"),
+                None
             ),
             Gate::Allow
         );
@@ -1360,6 +1470,223 @@ mod tests {
         assert!(
             computer_switch_off(AccessLevel::Full, claude, None),
             "an unknown service counts as not yet"
+        );
+    }
+
+    #[test]
+    fn a_granted_login_fills_on_its_own_origin_without_asking() {
+        use crate::vault::SecretField;
+        use serde_json::json;
+        let target = LoginTarget {
+            login_id: "v1-a".into(),
+            name: "Shop".into(),
+            url: "https://shop.test/in".into(),
+            origin: "https://shop.test".into(),
+            fields: vec![SecretField::Username, SecretField::Password],
+        };
+        let fill = |field: &str| json!({"command": {"action": "fill", "selector": "#f", "secret": {"login_id": "v1-a", "field": field}}});
+        let ask = access(AccessLevel::Ask, false, false);
+        let claude = AgentProvider::Claude;
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &fill("password"),
+                Some("https://shop.test/in"),
+                Some(&target)
+            ),
+            Gate::Allow
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &fill("password"),
+                Some("https://evil.test/in"),
+                Some(&target)
+            ),
+            Gate::Deny(LOGIN_WRONG_ORIGIN)
+        );
+        // Same host, another scheme or port: another origin.
+        for page in ["http://shop.test/in", "https://shop.test:8443/in"] {
+            assert_eq!(
+                browser_gate(
+                    &ask,
+                    claude,
+                    true,
+                    &fill("password"),
+                    Some(page),
+                    Some(&target)
+                ),
+                Gate::Deny(LOGIN_WRONG_ORIGIN),
+                "{page}"
+            );
+        }
+        assert_eq!(
+            browser_gate(&ask, claude, true, &fill("password"), None, Some(&target)),
+            Gate::Deny(PAGE_UNKNOWN)
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &fill("totp"),
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(LOGIN_NO_FIELD)
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &fill("password"),
+                Some("https://shop.test/"),
+                None
+            ),
+            Gate::Deny(LOGIN_NOT_GRANTED)
+        );
+        let other = LoginTarget {
+            login_id: "v1-b".into(),
+            ..target.clone()
+        };
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &fill("password"),
+                Some("https://shop.test/"),
+                Some(&other)
+            ),
+            Gate::Deny(LOGIN_NOT_GRANTED)
+        );
+        // The forge rule doesn't apply to the fill.
+        let github = LoginTarget {
+            origin: "https://github.com".into(),
+            ..target.clone()
+        };
+        assert_eq!(
+            browser_gate(
+                &access(AccessLevel::Full, false, false),
+                claude,
+                true,
+                &fill("password"),
+                Some("https://github.com/login"),
+                Some(&github)
+            ),
+            Gate::Allow
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                false,
+                &fill("password"),
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(COMPUTER_OFF_DENIAL)
+        );
+        // Codex bruhs and read only bruhs get nothing.
+        assert_eq!(
+            browser_gate(
+                &ask,
+                AgentProvider::Codex,
+                true,
+                &fill("password"),
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(NEEDS_CLAUDE)
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                AgentProvider::Codex,
+                true,
+                &json!({"command": {"action": "logins"}}),
+                None,
+                None
+            ),
+            Gate::Deny(NEEDS_CLAUDE)
+        );
+        assert_eq!(
+            browser_gate(
+                &access(AccessLevel::ReadOnly, false, false),
+                claude,
+                true,
+                &fill("password"),
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(NEEDS_ASK_OR_FULL)
+        );
+        // Text with a secret, or submit with text, never reaches the kind rules.
+        let both = json!({"command": {"action": "fill", "selector": "#f", "text": "x",
+            "secret": {"login_id": "v1-a", "field": "password"}}});
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &both,
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(FILL_TEXT_OR_SECRET)
+        );
+        let submit =
+            json!({"command": {"action": "fill", "selector": "#f", "text": "x", "submit": true}});
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &submit,
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Deny(SUBMIT_NEEDS_SECRET)
+        );
+        // A text fill keeps the input rules.
+        let text = json!({"command": {"action": "fill", "selector": "#f", "text": "x"}});
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &text,
+                Some("https://shop.test/"),
+                Some(&target)
+            ),
+            Gate::Approve
+        );
+        assert_eq!(
+            browser_gate(
+                &ask,
+                claude,
+                true,
+                &json!({"command": {"action": "logins"}}),
+                None,
+                None
+            ),
+            Gate::Allow
+        );
+        assert_eq!(approval_detail(BRUH_BROWSER_TOOL, &fill("password")), None);
+        let mut on_shop = fill("password");
+        on_shop["page_url"] = json!("https://shop.test/in");
+        assert_eq!(
+            approval_summary(BRUH_BROWSER_TOOL, &on_shop),
+            "Fill #f from the vault on shop.test"
+        );
+        assert_eq!(
+            approval_summary(BRUH_BROWSER_TOOL, &json!({"command": {"action": "logins"}})),
+            "List vault logins"
         );
     }
 

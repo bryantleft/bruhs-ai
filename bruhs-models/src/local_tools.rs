@@ -1,6 +1,9 @@
 //! Consent-scoped browser and device operations shared by both clients.
 use serde::{Deserialize, Serialize};
 
+use crate::crew::{FILL_NEEDS_VALUE, FILL_TEXT_OR_SECRET, SUBMIT_NEEDS_SECRET};
+use crate::vault::SecretField;
+
 mod computer;
 mod live_input;
 pub use computer::*;
@@ -74,9 +77,16 @@ pub enum BrowserAction {
     Click {
         selector: String,
     },
+    /// Exactly one of `text` or `secret`; `submit` presses Enter after a
+    /// secret and goes with nothing else.
     Fill {
         selector: String,
-        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        secret: Option<SecretRef>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        submit: bool,
     },
     Evaluate {
         expression: String,
@@ -107,6 +117,17 @@ pub enum BrowserAction {
         #[serde(default)]
         dy: f64,
     },
+    /// The vault logins a bruh may fill: names, sign-in pages, origins and
+    /// fields, never values.
+    Logins,
+}
+
+/// A vault login's field a fill types, by reference. The host resolves the
+/// value; the model never holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecretRef {
+    pub login_id: String,
+    pub field: SecretField,
 }
 
 /// What a browser action does to the page, which decides how it is gated.
@@ -126,7 +147,8 @@ impl BrowserAction {
             | BrowserAction::Screenshot
             | BrowserAction::Console
             | BrowserAction::Network
-            | BrowserAction::Scroll { .. } => BrowserActionKind::Read,
+            | BrowserAction::Scroll { .. }
+            | BrowserAction::Logins => BrowserActionKind::Read,
             BrowserAction::Navigate { .. } => BrowserActionKind::Navigate,
             BrowserAction::Click { .. }
             | BrowserAction::ClickAt { .. }
@@ -146,10 +168,25 @@ impl BrowserAction {
             BrowserAction::Evaluate { .. } | BrowserAction::Console | BrowserAction::Network
         )
     }
+
+    /// A fill from the vault: its selector, the secret and whether it
+    /// submits. `None` for every other action, a text fill included.
+    #[must_use]
+    pub fn secret_fill(&self) -> Option<(&str, &SecretRef, bool)> {
+        match self {
+            BrowserAction::Fill {
+                selector,
+                secret: Some(secret),
+                submit,
+                ..
+            } => Some((selector, secret, *submit)),
+            _ => None,
+        }
+    }
 }
 
 /// The browser actions a bruh's Computer offers, by wire name.
-pub const BRUH_BROWSER_ACTIONS: [&str; 9] = [
+pub const BRUH_BROWSER_ACTIONS: [&str; 10] = [
     "navigate",
     "snapshot",
     "screenshot",
@@ -159,6 +196,7 @@ pub const BRUH_BROWSER_ACTIONS: [&str; 9] = [
     "key",
     "scroll",
     "fill",
+    "logins",
 ];
 
 /// The named keys an agent may press with [`BrowserAction::Key`].
@@ -207,7 +245,18 @@ pub fn validate_action(action: &BrowserAction, viewport: Viewport) -> Result<(),
             })
         }
         BrowserAction::Type { text, .. } if !within_type_budget(text) => Err(TOO_MUCH_TEXT),
-        BrowserAction::Fill { text, .. } if !within_type_budget(text) => Err(TOO_MUCH_FILL),
+        BrowserAction::Fill {
+            text,
+            secret,
+            submit,
+            ..
+        } => match (text, secret) {
+            (Some(_), Some(_)) => Err(FILL_TEXT_OR_SECRET),
+            (None, None) => Err(FILL_NEEDS_VALUE),
+            (Some(_), None) if *submit => Err(SUBMIT_NEEDS_SECRET),
+            (Some(text), None) if !within_type_budget(text) => Err(TOO_MUCH_FILL),
+            _ => Ok(()),
+        },
         BrowserAction::Key { key } if !AGENT_KEYS.contains(&key.as_str()) => Err(UNKNOWN_KEY),
         BrowserAction::Scroll { dx, dy } if !within_scroll(*dx, *dy) => Err(SCROLL_TOO_FAR),
         BrowserAction::Navigate { url } => validate_navigation(url),
@@ -510,11 +559,67 @@ mod tests {
         ] {
             assert!(!hidden.for_bruhs());
         }
-        // A login-fill call from a model that guessed project 4's shape doesn't parse.
+        // A secret with no field doesn't parse.
         assert!(serde_json::from_str::<BrowserAction>(
             r##"{"action":"fill","selector":"#p","secret":{"login_id":"x"}}"##
         )
         .is_err());
+    }
+
+    #[test]
+    fn fill_takes_text_or_a_vault_secret() {
+        use crate::vault::SecretField;
+        use serde_json::json;
+        let secret: BrowserAction = serde_json::from_str(
+            r##"{"action":"fill","selector":"#p","secret":{"login_id":"v1-a","field":"password"},"submit":true}"##,
+        )
+        .unwrap();
+        assert_eq!(
+            secret
+                .secret_fill()
+                .map(|(s, r, submit)| (s, r.field, submit)),
+            Some(("#p", SecretField::Password, true))
+        );
+        let text: BrowserAction =
+            serde_json::from_str(r##"{"action":"fill","selector":"#e","text":"a@b.test"}"##)
+                .unwrap();
+        assert_eq!(text.secret_fill(), None);
+        assert_eq!(
+            serde_json::to_value(&text).unwrap(),
+            json!({"action": "fill", "selector": "#e", "text": "a@b.test"})
+        );
+        let v = COMPUTER_VIEWPORT;
+        let fill = |text: Option<&str>, secret: bool, submit: bool| BrowserAction::Fill {
+            selector: "#x".into(),
+            text: text.map(Into::into),
+            secret: secret.then(|| SecretRef {
+                login_id: "v1-a".into(),
+                field: SecretField::Username,
+            }),
+            submit,
+        };
+        assert_eq!(
+            validate_action(&fill(Some("a"), true, false), v),
+            Err(FILL_TEXT_OR_SECRET)
+        );
+        assert_eq!(
+            validate_action(&fill(None, false, false), v),
+            Err(FILL_NEEDS_VALUE)
+        );
+        assert_eq!(
+            validate_action(&fill(Some("a"), false, true), v),
+            Err(SUBMIT_NEEDS_SECRET)
+        );
+        assert!(validate_action(&fill(None, true, true), v).is_ok());
+        assert!(validate_action(&fill(Some("a"), false, false), v).is_ok());
+        let logins = serde_json::from_str::<BrowserAction>(r#"{"action":"logins"}"#).unwrap();
+        assert_eq!(logins.kind(), BrowserActionKind::Read);
+        assert!(logins.for_bruhs());
+        assert_eq!(
+            serde_json::to_value(&logins).unwrap(),
+            json!({"action": "logins"})
+        );
+        assert!(BRUH_BROWSER_ACTIONS.contains(&"logins"));
     }
 
     #[test]
@@ -560,7 +665,9 @@ mod tests {
         let v = COMPUTER_VIEWPORT;
         let fill = |text: String| BrowserAction::Fill {
             selector: "#q".into(),
-            text,
+            text: Some(text),
+            secret: None,
+            submit: false,
         };
         assert!(validate_action(&fill("x".repeat(MAX_TYPE_CHARS)), v).is_ok());
         assert_eq!(

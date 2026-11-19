@@ -444,7 +444,15 @@ pub(super) async fn decide(
                 .computers()
                 .is_some_and(|host| host.has_computer(&run.agent_id));
         let call = browser_call(input, page_url(runtime, &run.agent_id).await);
-        let gate = browser_gate(access, provider, computer, &call, call["page_url"].as_str());
+        // No vault is attached yet, so a vault fill is refused as not granted.
+        let gate = browser_gate(
+            access,
+            provider,
+            computer,
+            &call,
+            call["page_url"].as_str(),
+            None,
+        );
         // Input on a page the browser doesn't name could land anywhere, so
         // nobody is asked about it, and the route couldn't check it: a
         // snapshot names the page first.

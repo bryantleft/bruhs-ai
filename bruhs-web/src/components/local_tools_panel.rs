@@ -205,7 +205,7 @@ pub fn LocalToolsPanel() -> impl IntoView {
             </div>
             <Input aria_label="Browser CSS selector" placeholder="CSS selector" value=Signal::derive(move || selector.get()) on_input=Callback::new(move |value| selector.set(value)) />
             <Input aria_label="Text to fill in browser" placeholder="Text to fill" value=Signal::derive(move || text.get()) on_input=Callback::new(move |value| text.set(value)) />
-            <div class="flex flex-wrap gap-2">{button("Click element",busy,Callback::new(move |_| browser_action.run((click.clone(),BrowserAction::Click{selector:selector.get_untracked()}))))}{button("Fill element",busy,Callback::new(move |_| browser_action.run((fill.clone(),BrowserAction::Fill{selector:selector.get_untracked(),text:text.get_untracked()}))))}</div>
+            <div class="flex flex-wrap gap-2">{button("Click element",busy,Callback::new(move |_| browser_action.run((click.clone(),BrowserAction::Click{selector:selector.get_untracked()}))))}{button("Fill element",busy,Callback::new(move |_| browser_action.run((fill.clone(),BrowserAction::Fill{selector:selector.get_untracked(),text:Some(text.get_untracked()),secret:None,submit:false}))))}</div>
             </div> }
         }).collect_view()}</div>
         <div class="space-y-2">{move || devices.get().diagnostics.into_iter().map(|message| view! { <p class="text-label-sm text-rambutan-400">{message}</p> }).collect_view()}</div>

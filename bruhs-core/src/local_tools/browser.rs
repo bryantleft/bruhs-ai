@@ -27,7 +27,9 @@ use super::{
     process::{self, ProcessPolicy},
     ToolError,
 };
-use bruhs_models::crew::PROXY_POLICY_OVERRIDE;
+use bruhs_models::crew::{
+    FILL_NEEDS_VALUE, PROXY_POLICY_OVERRIDE, SUBMIT_NEEDS_SECRET, VAULT_FOR_BRUHS,
+};
 
 #[path = "browser_guard.rs"]
 mod browser_guard;
@@ -801,7 +803,9 @@ async fn stop_process(pid: libc::pid_t, profile: &Path, policy: ProcessPolicy, g
 pub(super) const SNAPSHOT_EXPRESSION: &str = r#"({url:location.href,title:document.title,text:document.body?.innerText,controls:[...document.querySelectorAll('a,button,input,textarea,select,[role=button]')].map(e=>({tag:e.tagName,text:e.innerText||e.getAttribute('aria-label')||'',id:e.id,name:e.name,type:e.type,href:e.href})),readyState:document.readyState})"#;
 
 /// Run one agent action on a page. Real input actions are checked against
-/// `viewport` and their budgets first.
+/// `viewport` and their budgets first. Vault fills and `logins` are
+/// refused before anything reaches the page: only a bruh's own browser
+/// fills from the vault, through its command route.
 pub(super) async fn act(
     cdp: &mut Cdp,
     action: BrowserAction,
@@ -824,7 +828,15 @@ pub(super) async fn act(
         BrowserAction::Snapshot => cdp.evaluate(SNAPSHOT_EXPRESSION, false).await?,
         BrowserAction::Evaluate { expression } => cdp.evaluate(&expression, true).await?,
         BrowserAction::Click { selector } => click(cdp, &selector, viewport).await?,
-        BrowserAction::Fill { selector, text } => {
+        BrowserAction::Logins
+        | BrowserAction::Fill {
+            secret: Some(_), ..
+        } => return Err(ToolError::Invalid(VAULT_FOR_BRUHS.into())),
+        BrowserAction::Fill { submit: true, .. } => {
+            return Err(ToolError::Invalid(SUBMIT_NEEDS_SECRET.into()))
+        }
+        BrowserAction::Fill { selector, text, .. } => {
+            let text = text.ok_or_else(|| ToolError::Invalid(FILL_NEEDS_VALUE.into()))?;
             let element = one_element(&selector)?;
             let text = serde_json::to_string(&text)?;
             cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled||e.readOnly)throw new Error('Element is not editable');const p=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLInputElement?HTMLInputElement.prototype:null;if(!p)throw new Error('Choose an input or textarea');Object.getOwnPropertyDescriptor(p,'value').set.call(e,{text});e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return {{filled:true}}}})()"#), true).await?

@@ -110,6 +110,7 @@ pub(super) fn turn(
         &bruh.access,
         effective_level(bruh.access.level, provider),
         computer,
+        false,
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {

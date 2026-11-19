@@ -227,17 +227,21 @@ fn catalogue(read_only: bool) -> Value {
 }
 
 /// The model-facing description of a bruh's browser.
-const BRUH_BROWSER_DESCRIPTION: &str = "Use your own browser. It keeps its logins between runs and starts on first use. command.action is one of navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill. Take a snapshot to read the page; screenshots are 1280 by 800 CSS pixels, the coordinates click_at uses. If the owner has taken control, your step waits until they hand it back.";
+const BRUH_BROWSER_DESCRIPTION: &str = "Use your own browser. It keeps its logins between runs and starts on first use. command.action is one of navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill, logins. Take a snapshot to read the page; screenshots are 1280 by 800 CSS pixels, the coordinates click_at uses. If the owner has taken control, your step waits until they hand it back.";
 
 /// What a bruh's helper offers: its own browser, and nothing else. No
 /// evaluate, console or network action, no session or grant.
 fn bruh_catalogue() -> Value {
     let string = json!({"type":"string"});
     let number = json!({"type":"number"});
+    let secret = json!({"type":"object","properties":{
+        "login_id":string,
+        "field":{"type":"string","enum":["username","password","totp"]}
+    },"required":["login_id","field"],"additionalProperties":false});
     let command = json!({"type":"object","properties":{
         "action":{"type":"string","enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
         "url":string,"selector":string,"text":string,"x":number,"y":number,
-        "key":string,"dx":number,"dy":number
+        "key":string,"dx":number,"dy":number,"secret":secret,"submit":{"type":"boolean"}
     },"required":["action"],"additionalProperties":false});
     json!({"tools":[{
         "name":"local_browser",
@@ -738,6 +742,21 @@ mod tests {
             json!(bruhs_models::local_tools::BRUH_BROWSER_ACTIONS)
         );
         assert_eq!(action["type"], "string");
+        // A vault fill names a login and a field, never a value.
+        let secret = &command["properties"]["secret"];
+        assert_eq!(
+            secret["properties"]["field"]["enum"],
+            json!([
+                bruhs_models::vault::SecretField::Username,
+                bruhs_models::vault::SecretField::Password,
+                bruhs_models::vault::SecretField::Totp
+            ])
+        );
+        assert_eq!(secret["required"], json!(["login_id", "field"]));
+        assert_eq!(secret["additionalProperties"], false);
+        let secret_fields: Vec<_> = secret["properties"].as_object().unwrap().keys().collect();
+        assert_eq!(secret_fields, ["field", "login_id"]);
+        assert_eq!(command["properties"]["submit"]["type"], "boolean");
         assert_eq!(command["additionalProperties"], false);
         assert_eq!(schema["additionalProperties"], false);
         // No session, grant or operation: the helper is bound to one bruh.

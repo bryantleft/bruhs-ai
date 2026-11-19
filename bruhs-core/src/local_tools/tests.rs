@@ -254,7 +254,9 @@ async fn live_browser_fills_clicks_and_saves_screenshot_then_revokes() {
     };
     host.browser_command(command(BrowserAction::Fill {
         selector: "#name".into(),
-        text: "Verified locally".into(),
+        text: Some("Verified locally".into()),
+        secret: None,
+        submit: false,
     }))
     .await
     .unwrap();
@@ -717,6 +719,49 @@ async fn a_launch_needs_the_guards_own_reply_to_its_probe() {
     assert!(refused(browser::probe_guard(&mut cdp).await));
 }
 
+/// A thread browser never fills from the vault or lists vault logins, and
+/// refuses them before anything reaches the page.
+#[tokio::test]
+async fn thread_browsers_refuse_vault_fills_and_logins() {
+    use bruhs_models::crew::{FILL_NEEDS_VALUE, SUBMIT_NEEDS_SECRET, VAULT_FOR_BRUHS};
+    use bruhs_models::vault::SecretField;
+    let (mut cdp, server) = fake_page(Vec::new()).await;
+    let secret = BrowserAction::Fill {
+        selector: "#p".into(),
+        text: None,
+        secret: Some(SecretRef {
+            login_id: "v1-a".into(),
+            field: SecretField::Password,
+        }),
+        submit: true,
+    };
+    let text_submit = BrowserAction::Fill {
+        selector: "#p".into(),
+        text: Some("x".into()),
+        secret: None,
+        submit: true,
+    };
+    let empty = BrowserAction::Fill {
+        selector: "#p".into(),
+        text: None,
+        secret: None,
+        submit: false,
+    };
+    for (action, expected) in [
+        (secret, VAULT_FOR_BRUHS),
+        (BrowserAction::Logins, VAULT_FOR_BRUHS),
+        (text_submit, SUBMIT_NEEDS_SECRET),
+        (empty, FILL_NEEDS_VALUE),
+    ] {
+        match browser::act(&mut cdp, action, COMPUTER_VIEWPORT).await {
+            Err(ToolError::Invalid(reason)) => assert_eq!(reason, expected),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+    drop(cdp);
+    assert_eq!(server.await.unwrap(), Vec::new());
+}
+
 /// A snapshot is a read: it gives the page no user activation, which would
 /// let it open a popup or start a download. Input still does.
 #[tokio::test]
@@ -730,7 +775,9 @@ async fn a_snapshot_gives_the_page_no_user_gesture() {
         &mut cdp,
         BrowserAction::Fill {
             selector: "#q".into(),
-            text: "hi".into(),
+            text: Some("hi".into()),
+            secret: None,
+            submit: false,
         },
         COMPUTER_VIEWPORT,
     )
