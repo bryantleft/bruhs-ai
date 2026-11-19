@@ -5,6 +5,7 @@
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
 use bruhs_models::logic::compact::IdleCompact;
 use bruhs_models::logic::editor::EDITORS;
+use bruhs_models::vault::{VAULT_DESCRIPTION, VAULT_TITLE};
 use leptos::html::Div;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -14,6 +15,7 @@ use crate::components::diarize_settings::DiarizeSettingsPanel;
 use crate::components::google_calendar_settings::GoogleCalendarSettings;
 use crate::components::personality_settings::PersonalitySettings as PersonalitySettingsPanel;
 use crate::components::provider::provider_label;
+use crate::components::vault_settings::VaultSettings;
 use crate::components::whisper_model_settings::WhisperModelSettings;
 use crate::state::{
     AppView, ClaudeAutoCompactSignal, CompactIdleSignal, EditorSignal, FollowUpSteerSignal,
@@ -29,7 +31,7 @@ pub const SECTIONS: [(&str, &str, &str); 11] = [
     ("general", "settings", "General"),
     ("updates", "download", "Updates"),
     ("beta", "activity", "Beta"),
-    ("credentials", "shield", "Credentials"),
+    ("vault", "shield", "Vault"),
     ("calendar", "calendar", "Calendar"),
     ("recording", "mic", "Recording"),
     ("transcription", "activity", "Transcription"),
@@ -727,8 +729,8 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="beta" title="Beta" description="Features that are still settling.">
                             <BetaSettings />
                         </SettingsSection>
-                        <SettingsSection id="credentials" title="Credentials" description="Saved credentials stay in your OS keychain. Agents still need approval for every use.">
-                            <crate::components::credential_settings::CredentialSettings />
+                        <SettingsSection id="vault" title=VAULT_TITLE description=VAULT_DESCRIPTION>
+                            <VaultSettings />
                         </SettingsSection>
                         <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and automatic meeting recording.">
                             <GoogleCalendarSettings />
@@ -780,6 +782,7 @@ mod tests {
     fn nav_and_shortcut_tables_are_well_formed() {
         assert_eq!(SECTIONS.len(), 11);
         assert_eq!(SECTIONS[1].0, "updates");
+        assert_eq!(SECTIONS[3], ("vault", "shield", bruhs_models::vault::VAULT_TITLE));
         assert_eq!(SECTIONS[9].2, "Keybindings");
         let rules = bruhs_models::logic::keybindings::default_keybindings();
         assert!(rules.iter().all(|rule| {

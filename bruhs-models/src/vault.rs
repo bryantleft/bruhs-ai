@@ -75,6 +75,18 @@ pub const EMPTY: &str =
 pub const NO_MATCH: &str = "Nothing in the vault matches your search.";
 pub const CHECK_OK: &str = "Ready.";
 pub const ENTRY_UPDATED: &str = "Saved.";
+pub const REFRESH: &str = "Refresh";
+pub const LOADING: &str = "Loading the vault.";
+/// Follows a listing's error.
+pub const LOAD_RETRY: &str = "Refresh to try again.";
+/// Why the page's buttons wait while one change or check runs.
+pub const WAIT_FOR_CHANGE: &str = "Wait for the current change to finish.";
+/// Why One bruh can't be chosen yet.
+pub const NO_BRUHS: &str = "Make a bruh first to give it an entry of its own.";
+/// The listing refused to a page on another address (ruling F26 and its
+/// Task 10 amendment): the page can neither show nor change the vault.
+pub const OPEN_FROM_OWN_ADDRESS: &str =
+    "Open Bruhs from its own address to see and change the vault.";
 
 // Route copy (D22).
 /// A vault request body that isn't an entry. Never repeats the body.

@@ -64,7 +64,7 @@ const server = createServer(async (req, res) => {
     if (req.method !== 'GET') return json(res, 403, { error: 'No agent or capture writes permitted in this fixture' });
     if (path.endsWith('/stream')) { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('event: tasks\ndata: []\n\nevent: calendar\ndata: {"kind":"stream_opened"}\n\nevent: meetings\ndata: {"kind":"stream_opened"}\n\n'); return; }
     const data = {
-      '/api/credentials': [], '/api/calendar/google/state': { connected: false, email: null, calendars: [], last_synced_at: null, last_error: null },
+      '/api/vault': { entries: [], bruhs: [], one_password: false }, '/api/calendar/google/state': { connected: false, email: null, calendars: [], last_synced_at: null, last_error: null },
       '/api/capture/status': { running: false, recording: false, meeting_id: null, started_at_ms: null },
       '/api/people': [], '/api/people/versions': { entries: [], next_after: null }, '/api/meetings': [],
       '/api/calendar/google/calendars': [], '/api/terminal/sessions': { sessions: [] },
@@ -96,7 +96,7 @@ try {
   await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
   const page = await context.newPage(); page.on('pageerror', error => errors.push(String(error)));
   await page.goto(origin + '/#/settings');
-  await page.getByRole('navigation', { name: 'Settings sections', exact: true }).getByRole('button', { name: 'Credentials', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Settings sections', exact: true }).getByRole('button', { name: 'Vault', exact: true }).click();
   for (const provider of providers) {
     await row(provider).getByRole('button', { name: 'Connect', exact: true }).waitFor();
     const popup = page.waitForEvent('popup');

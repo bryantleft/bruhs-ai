@@ -96,7 +96,8 @@ for(const provider of selectedProviders)for(const cell of cells.filter(value=>se
             }
         }
         if(method==='GET'&&url.pathname==='/api/events/stream')return route.continue({url:origin+'/__fixture-stream'});
-        if(method==='GET'&&['/api/terminal/sessions','/api/credentials','/api/people','/api/tasks','/api/threads','/api/meetings','/api/models','/api/skills','/api/calendars','/api/calendar/google/calendars'].includes(url.pathname))return json([]);
+        if(method==='GET'&&url.pathname==='/api/vault')return json({entries:[],bruhs:[],one_password:false});
+        if(method==='GET'&&['/api/terminal/sessions','/api/people','/api/tasks','/api/threads','/api/meetings','/api/models','/api/skills','/api/calendars','/api/calendar/google/calendars'].includes(url.pathname))return json([]);
         if(method==='GET'&&['/api/agent/auth/claude','/api/agent/auth/codex','/api/capture/status','/api/people/versions','/api/updates'].includes(url.pathname))return json({});
         if(method==='GET'&&url.pathname==='/api/calendar/google/state')return json({connected:false,email:null,calendars:[],last_synced_at:null,last_error:null});
         if(method==='GET'&&url.pathname==='/api/reactive')return json({agents:[],sources:[],subscriptions:[],events:[],runs:[],proposals:[],source_statuses:[]});

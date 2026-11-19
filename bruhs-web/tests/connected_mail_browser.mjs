@@ -384,7 +384,8 @@ try {
           type = provider === mailProvider ? 'connection' : 'other-connection';
           value = { id: provider === mailProvider && fixture.connectionState === 'connected' ? fixture.connectionId : null, provider, configured: true, account: provider === mailProvider ? 'synthetic-owner@example.test' : null, scopes: [], state: provider === mailProvider ? fixture.connectionState : 'disconnected' };
         } else if (method === 'GET' && url.pathname === '/api/events/stream') return route.continue({ url: origin + '/__fixture-stream' });
-        else if (method === 'GET' && ['/api/terminal/sessions', '/api/credentials', '/api/people', '/api/tasks', '/api/threads', '/api/meetings', '/api/models', '/api/skills', '/api/calendars', '/api/calendar/google/calendars'].includes(url.pathname)) return json([]);
+        else if (method === 'GET' && url.pathname === '/api/vault') return json({ entries: [], bruhs: [], one_password: false });
+        else if (method === 'GET' && ['/api/terminal/sessions', '/api/people', '/api/tasks', '/api/threads', '/api/meetings', '/api/models', '/api/skills', '/api/calendars', '/api/calendar/google/calendars'].includes(url.pathname)) return json([]);
         else if (method === 'GET' && ['/api/agent/auth/claude', '/api/agent/auth/codex', '/api/capture/status', '/api/people/versions', '/api/updates'].includes(url.pathname)) return json({});
         else if (method === 'GET' && url.pathname === '/api/calendar/google/state') return json({ connected: false, email: null, calendars: [], last_synced_at: null, last_error: null });
         else if (method === 'GET' && url.pathname === '/api/reactive') return json({ agents: [], sources: [], subscriptions: [], events: [], runs: [], proposals: [], source_statuses: [] });
@@ -759,9 +760,9 @@ try {
         await openEmail();
         await header('Connections').click();
         await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor();
-        const credentials = page.locator('#credentials');
-        await credentials.getByRole('heading', { name: 'Connected accounts', exact: true }).scrollIntoViewIfNeeded();
-        check(await credentials.getByRole('heading', { name: 'Connected accounts', exact: true }).isVisible(), 'Connections opens Settings with reachable connected-account controls');
+        const vault = page.locator('#vault');
+        await vault.getByRole('heading', { name: 'Connected accounts', exact: true }).scrollIntoViewIfNeeded();
+        check(await vault.getByRole('heading', { name: 'Connected accounts', exact: true }).isVisible(), 'Connections opens Settings with reachable connected-account controls');
         await screenshot('connections-settings');
       } else if (kind === 'errors-sync-stop-resume') {
         await openEmail();

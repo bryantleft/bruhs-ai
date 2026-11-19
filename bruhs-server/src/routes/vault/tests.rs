@@ -450,3 +450,25 @@ async fn check_reports_ready_or_why() {
         (StatusCode::NOT_FOUND, json!({ "error": ENTRY_GONE }))
     );
 }
+
+/// Ruling F25: the old Credentials routes went with the web page that
+/// called them. Settings, Vault manages every entry through `/api/vault`.
+/// Each answers as a path that was never a route does: the static files'
+/// 404, or their 405 for a method other than GET.
+#[tokio::test]
+async fn credentials_routes_are_gone() {
+    let fixture = Fixture::new().await;
+    let (status, text) = fixture.send(Method::GET, "/api/credentials", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{text}");
+    for method in [Method::GET, Method::PUT, Method::DELETE] {
+        let body = || (method == Method::PUT).then(|| Body::Json(json!({"value": "unused"})));
+        let (status, text) = fixture
+            .send(method.clone(), "/api/credentials/v1-any", body())
+            .await;
+        let (unknown, _) = fixture
+            .send(method.clone(), "/api/never-a-route/v1-any", body())
+            .await;
+        assert!(!status.is_success(), "{method}: {text}");
+        assert_eq!(status, unknown, "{method}: {text}");
+    }
+}

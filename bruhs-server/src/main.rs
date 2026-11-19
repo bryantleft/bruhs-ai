@@ -615,7 +615,6 @@ fn router_with_capture_daemon(
             "/api/agent/thread-reply",
             post(routes::agent::post_thread_reply),
         )
-        .route("/api/credentials", get(routes::secrets::list))
         .route(
             "/api/vault",
             get(routes::vault::list)
@@ -641,10 +640,6 @@ fn router_with_capture_daemon(
         .route(
             "/api/connections/attempts/{id}",
             get(routes::connections::attempt).delete(routes::connections::cancel),
-        )
-        .route(
-            "/api/credentials/{id}",
-            axum::routing::put(routes::secrets::replace).delete(routes::secrets::delete),
         )
         .route(
             "/api/open-in-editor",

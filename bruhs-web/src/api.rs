@@ -23,6 +23,8 @@ pub use mail::{
 };
 mod people_sync;
 mod reactive;
+mod vault;
+pub use vault::*;
 pub use reactive::agent_runs;
 pub use reactive::room_messages;
 pub use reactive::{background_service, set_background_service};
@@ -141,10 +143,6 @@ pub async fn whiteboard_source_fingerprint(project: &str, path: &str) -> Result<
     Ok(value.sha256)
 }
 
-pub async fn saved_credentials() -> Result<Vec<bruhs_models::secrets::SavedCredential>, ApiError> {
-    get_json("/api/credentials").await
-}
-
 pub async fn service_connection(
     provider: bruhs_models::connections::ServiceProvider,
 ) -> Result<bruhs_models::connections::ServiceConnection, ApiError> {
@@ -181,27 +179,6 @@ pub async fn disconnect_service(
     send(
         Method::DELETE,
         &format!("/api/connections/{}", provider.id()),
-        NO_BODY,
-    )
-    .await
-    .map(drop)
-}
-
-pub async fn replace_credential(id: &str, value: String) -> Result<(), ApiError> {
-    let body = bruhs_models::secrets::CredentialReplacement { value };
-    send(
-        Method::PUT,
-        &format!("/api/credentials/{}", segment(id)),
-        Some(&body),
-    )
-    .await
-    .map(drop)
-}
-
-pub async fn delete_credential(id: &str) -> Result<(), ApiError> {
-    send(
-        Method::DELETE,
-        &format!("/api/credentials/{}", segment(id)),
         NO_BODY,
     )
     .await
