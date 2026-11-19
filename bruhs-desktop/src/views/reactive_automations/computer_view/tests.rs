@@ -2,11 +2,13 @@ use super::super::bruh_page::BruhTab;
 use super::input::{dom_key, modifiers};
 use super::{ComputerView, ReactiveAutomations};
 use crate::server_client::ScreencastEvent;
+use crate::server_client::ServerError;
 use crate::theme;
 use crate::views::workspace::StopAll;
 use bruhs_models::crew::{
-    computer_status_line, AccessLevel, BruhAccess, BruhLook, BruhState, BruhStatus, CREW_PROTOCOL,
-    LIVE_VIEW_HINT, USE_THE_WINDOW,
+    computer_status_line, AccessLevel, BruhAccess, BruhLook, BruhState, BruhStatus, ComputerGate,
+    CREW_PROTOCOL, LIVE_VIEW_ENDED, LIVE_VIEW_HINT, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+    VIEWERS_FULL,
 };
 use bruhs_models::local_tools::{
     ComputerInput, ComputerRequest, ComputerState, Control, KeyKind, MouseButton, MouseKind,
@@ -47,6 +49,29 @@ fn snapshot() -> ReactiveSnapshot {
         protocol: CREW_PROTOCOL,
         ..ReactiveSnapshot::default()
     }
+}
+
+/// Ada's Computer, on and working.
+fn gate() -> ComputerGate {
+    ComputerGate {
+        name: "Ada".into(),
+        switched_on: true,
+        ready: true,
+        ..ComputerGate::default()
+    }
+}
+
+/// A refusal as the server answers it, with its reason in the body.
+fn refused(code: u16, reason: &str) -> ServerError {
+    ServerError::Status {
+        request: "Open the live view".into(),
+        code: reqwest::StatusCode::from_u16(code).unwrap(),
+        body: serde_json::json!({ "error": reason }).to_string(),
+    }
+}
+
+fn error(view: &Entity<ComputerView>, cx: &mut VisualTestContext) -> Option<String> {
+    view.read_with(cx, |view, _| view.error.clone())
 }
 
 fn browser(control: Control, headed: bool) -> ComputerState {
@@ -128,7 +153,7 @@ fn jpeg() -> Vec<u8> {
 fn a_closed_browser_offers_open_and_sends_it(cx: &mut gpui::TestAppContext) {
     let (panel, view, cx) = open(cx, 900.0, 1200.0);
     let status = view.read_with(cx, |view, cx| view.status(cx));
-    assert_eq!(status, computer_status_line(None, true, "Ada"));
+    assert_eq!(status, computer_status_line(&gate(), None));
     assert!(shown(cx, "desktop-computer-status"));
     assert!(!shown(cx, "desktop-computer-take"), "no browser to take");
     click(cx, "desktop-computer-open");
@@ -271,6 +296,56 @@ fn owner_keys_go_to_the_page_except_app_shortcuts(cx: &mut gpui::TestAppContext)
     assert_eq!(hint, None, "the hint goes");
 }
 
+/// A modifier pressed alone, and CapsLock, go to the page as their own
+/// keys, as the web's keydown sends them; the app's own modifier stays.
+#[gpui::test]
+fn lone_modifiers_and_caps_lock_go_to_the_page(cx: &mut gpui::TestAppContext) {
+    let (panel, view, cx) = open(cx, 900.0, 1200.0);
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(browser(Control::Owner, false)),
+    );
+    cx.run_until_parked();
+    view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
+    cx.run_until_parked();
+    let key = |kind, key: &str, code: &str, modifiers| ComputerInput::Key {
+        kind,
+        key: key.into(),
+        code: code.into(),
+        modifiers,
+    };
+    cx.simulate_modifiers_change(Modifiers::shift());
+    cx.simulate_modifiers_change(Modifiers::default());
+    assert_eq!(
+        inputs(&panel, cx),
+        [
+            key(KeyKind::Down, "Shift", "ShiftLeft", MODIFIER_SHIFT),
+            key(KeyKind::Up, "Shift", "ShiftLeft", 0)
+        ]
+    );
+    // The app's own modifier key never reaches the page alone.
+    let app = if cfg!(target_os = "macos") {
+        Modifiers::command()
+    } else {
+        Modifiers::control()
+    };
+    cx.simulate_modifiers_change(app);
+    cx.simulate_modifiers_change(Modifiers::default());
+    assert_eq!(inputs(&panel, cx).len(), 2);
+    cx.simulate_event(gpui::ModifiersChangedEvent {
+        modifiers: Modifiers::default(),
+        capslock: gpui::Capslock { on: true },
+    });
+    assert_eq!(
+        inputs(&panel, cx)[2..],
+        [
+            key(KeyKind::Down, "CapsLock", "CapsLock", 0),
+            key(KeyKind::Up, "CapsLock", "CapsLock", 0)
+        ]
+    );
+}
+
 #[gpui::test]
 fn switching_apps_or_losing_input_releases_what_the_owner_holds(cx: &mut gpui::TestAppContext) {
     let (panel, view, cx) = open(cx, 900.0, 1200.0);
@@ -374,6 +449,135 @@ fn a_frame_decoding_when_the_browser_changes_is_dropped(cx: &mut gpui::TestAppCo
         "and never acked on the new socket"
     );
     assert!(!shown(cx, "desktop-computer-frame"));
+}
+
+/// A frame waiting behind one that decodes belongs to the old socket too:
+/// it is never shown or acked on the new one.
+#[gpui::test]
+fn a_frame_waiting_to_decode_when_the_browser_changes_is_dropped(cx: &mut gpui::TestAppContext) {
+    let (_panel, view, cx) = open(cx, 900.0, 1200.0);
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(browser(Control::Bruh, false)),
+    );
+    cx.run_until_parked();
+    apply(&view, cx, ScreencastEvent::Frame(jpeg()));
+    apply(&view, cx, ScreencastEvent::Frame(jpeg()));
+    assert!(view.read_with(cx, |view, _| view.next_frame.is_some()));
+    let mut next = browser(Control::Bruh, false);
+    next.session_id = Some("s2".into());
+    apply(&view, cx, ScreencastEvent::State(next));
+    assert!(
+        view.read_with(cx, |view, _| view.next_frame.is_none()),
+        "the waiting frame goes with its socket"
+    );
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.frame.is_none()));
+    assert_eq!(view.read_with(cx, |view, _| view.acks), 0);
+}
+
+/// A refused live view shows the server's reason, not the request and its
+/// status code; so does a failed state read.
+#[gpui::test]
+fn a_refused_live_view_shows_the_servers_reason(cx: &mut gpui::TestAppContext) {
+    let (_panel, view, cx) = open(cx, 900.0, 1200.0);
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(browser(Control::Bruh, false)),
+    );
+    cx.run_until_parked();
+    view.update_in(cx, |view, _, cx| {
+        let generation = view.live.generation;
+        view.open_failed(generation, refused(403, VIEWERS_FULL), cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(error(&view, cx).as_deref(), Some(VIEWERS_FULL));
+    assert!(shown(cx, "desktop-computer-error"));
+    // The server's own Error message says the same over an open socket.
+    apply(&view, cx, ScreencastEvent::Error(LIVE_VIEW_ENDED.into()));
+    assert_eq!(error(&view, cx).as_deref(), Some(LIVE_VIEW_ENDED));
+    // The browser closed: the state read says so, and the live view's
+    // error no longer holds.
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(ComputerState {
+            agent_id: "a".into(),
+            ..ComputerState::default()
+        }),
+    );
+    cx.run_until_parked();
+    assert_eq!(error(&view, cx), None);
+    assert!(!shown(cx, "desktop-computer-error"));
+
+    view.update(cx, |view, cx| {
+        view.read_failed(refused(404, TURN_ON_IN_SETTINGS));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_eq!(error(&view, cx).as_deref(), Some(TURN_ON_IN_SETTINGS));
+    assert!(shown(cx, "desktop-computer-error"));
+}
+
+/// Once Computer goes off, nothing the tab said about it stays.
+#[gpui::test]
+fn errors_clear_when_the_computer_goes_off(cx: &mut gpui::TestAppContext) {
+    let (panel, view, cx) = open(cx, 900.0, 1200.0);
+    view.update(cx, |view, cx| {
+        view.read_failed(refused(404, TURN_ON_IN_SETTINGS));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(shown(cx, "desktop-computer-error"));
+    let mut off = snapshot();
+    off.bruhs[0].computer = false;
+    panel.update(cx, |panel, cx| {
+        panel.set_snapshot(off, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_eq!(error(&view, cx), None);
+    assert!(!shown(cx, "desktop-computer-error"));
+}
+
+/// Computer is on, but the bruh's level can't have one: the tab says why,
+/// not to turn on the switch that is already on.
+#[gpui::test]
+fn a_blocked_computer_says_why_on_the_tab(cx: &mut gpui::TestAppContext) {
+    let (panel, view, cx) = open(cx, 900.0, 1200.0);
+    let mut read_only = snapshot();
+    read_only.bruhs[0].access.level = AccessLevel::ReadOnly;
+    panel.update(cx, |panel, cx| {
+        panel.set_snapshot(read_only, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let status = view.read_with(cx, |view, cx| view.status(cx));
+    assert_eq!(status, "Computer needs Ask first or Full access.");
+}
+
+/// A system that runs no bruh browser: the state says so, the tab offers
+/// nothing, and Settings learns it.
+#[gpui::test]
+fn an_unsupported_computer_tells_settings(cx: &mut gpui::TestAppContext) {
+    let (panel, view, cx) = open(cx, 900.0, 1200.0);
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(ComputerState {
+            agent_id: "a".into(),
+            error: Some(bruhs_models::crew::COMPUTER_UNSUPPORTED.into()),
+            unsupported: true,
+            ..ComputerState::default()
+        }),
+    );
+    cx.run_until_parked();
+    assert!(panel.read_with(cx, |panel, _| panel.computer_unsupported()));
+    assert!(!shown(cx, "desktop-computer-open"));
+    let status = view.read_with(cx, |view, cx| view.status(cx));
+    assert_eq!(status, bruhs_models::crew::COMPUTER_UNSUPPORTED);
 }
 
 #[gpui::test]
@@ -481,7 +685,7 @@ fn controls_follow_the_state(cx: &mut gpui::TestAppContext) {
     });
     assert_eq!(
         status,
-        computer_status_line(Some(&browser(Control::Owner, true)), true, "Ada")
+        computer_status_line(&gate(), Some(&browser(Control::Owner, true)))
     );
     assert_eq!(hint, Some(USE_THE_WINDOW));
 
@@ -515,12 +719,15 @@ fn gpui_keys_become_dom_keys() {
     assert_eq!(dom("delete"), pair("Delete", "Delete"));
     assert_eq!(dom("f1"), pair("F1", "F1"));
     assert_eq!(dom("f12"), pair("F12", "F12"));
+    assert_eq!(dom("f13"), pair("F13", "F13"));
+    assert_eq!(dom("f24"), pair("F24", "F24"));
+    assert_eq!(dom("insert"), pair("Insert", "Insert"));
     assert_eq!(dom("a"), pair("a", "KeyA"));
     assert_eq!(dom("shift-a"), pair("A", "KeyA"));
     assert_eq!(dom("7"), pair("7", "Digit7"));
     assert_eq!(dom("."), pair(".", "Period"));
     assert_eq!(dom("cmd-v"), pair("v", "KeyV"));
-    assert_eq!(dom("f13"), None, "keys the page view doesn't know stay");
+    assert_eq!(dom("f25"), None, "keys the page view doesn't know stay");
     let all = Modifiers {
         control: true,
         alt: true,

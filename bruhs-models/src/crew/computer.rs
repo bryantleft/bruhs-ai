@@ -4,14 +4,16 @@
 use serde_json::Value;
 
 use super::{
-    computer_ready, effective_level, gate, is_local_host, service_notice, AccessLevel, BruhAccess,
-    Gate, GatedAction, FORGE_COMMAND_HOSTS, LOCAL_HOST_DENIAL,
+    computer_ready, effective_level, gate, is_local_host, service_notice, settings_commands,
+    AccessLevel, BruhAccess, BruhSettings, BruhState, Gate, GatedAction, FORGE_COMMAND_HOSTS,
+    LOCAL_HOST_DENIAL,
 };
 use crate::agent::AgentProvider;
 use crate::local_tools::{
     validate_action, validate_browser_url, BrowserAction, BrowserActionKind, ComputerState,
     Control, COMPUTER_VIEWPORT,
 };
+use crate::reactive::{ReactiveAgent, ReactiveCommand, ReactiveSnapshot};
 
 /// The tool a bruh's browser calls arrive as.
 pub const BRUH_BROWSER_TOOL: &str = "mcp__bruhs_workbench__local_browser";
@@ -28,6 +30,9 @@ pub const SCREENCAST_QUALITY: u8 = 70;
 pub const MIN_FRAME_MS: u64 = 100;
 /// How long a closing browser gets to exit before it is killed, in ms.
 pub const CLOSE_GRACE_MS: u64 = 5_000;
+/// How often the Computer tab reads the state while no live view runs, so
+/// a browser the bruh opens shows up, in ms.
+pub const COMPUTER_POLL_MS: u64 = 5_000;
 
 // Model-facing copy.
 
@@ -139,16 +144,115 @@ pub fn computer_switch_follows(
     (off || switch == filled || switch == stored).then_some(stored)
 }
 
-/// Why the Computer switch in a bruh's Settings is off, if it is: the
-/// model or level first, since the owner can change those there, then an
-/// older service. Both apps show this one reason.
+/// Why the Computer switch in a bruh's Settings can't work, if it can't:
+/// the model or level first, since the owner can change those there, then
+/// an older service, then a system that runs no bruh browser
+/// (`unsupported`, from the last [`ComputerState`] read). Both apps show
+/// this one reason.
 #[must_use]
 pub fn computer_switch_reason(
     level: AccessLevel,
     provider: AgentProvider,
     protocol: Option<u32>,
+    unsupported: bool,
 ) -> Option<&'static str> {
-    computer_unavailable(level, provider).or_else(|| computer_reason(protocol))
+    computer_unavailable(level, provider)
+        .or_else(|| computer_reason(protocol))
+        .or_else(|| unsupported.then_some(COMPUTER_UNSUPPORTED))
+}
+
+/// Whether the Computer switch in a bruh's Settings is off (disabled): the
+/// model or level can't have a Computer, or the service doesn't run one
+/// (an unknown version counts as not yet). An unsupported system leaves
+/// it usable, so a Computer switched on there can still be switched off.
+#[must_use]
+pub fn computer_switch_off(
+    level: AccessLevel,
+    provider: AgentProvider,
+    protocol: Option<u32>,
+) -> bool {
+    computer_unavailable(level, provider).is_some() || !protocol.is_some_and(computer_ready)
+}
+
+/// What Save sends for a bruh's Settings: [`settings_commands`], without
+/// SetComputer for a service that doesn't know it.
+#[must_use]
+pub fn settings_commands_for(
+    protocol: Option<u32>,
+    agent: &ReactiveAgent,
+    state: &BruhState,
+    edited: &BruhSettings,
+) -> Vec<ReactiveCommand> {
+    let computer = protocol.is_some_and(computer_ready);
+    settings_commands(agent, state, edited)
+        .into_iter()
+        .filter(|command| computer || !matches!(command, ReactiveCommand::SetComputer { .. }))
+        .collect()
+}
+
+/// What the Computer tab knows of a bruh's Computer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComputerGate {
+    pub name: String,
+    /// The Settings switch as stored.
+    pub switched_on: bool,
+    /// Why the bruh's model or level keeps a switched-on Computer off.
+    pub blocked: Option<&'static str>,
+    /// The service runs Computers. An unknown version counts as not yet.
+    pub ready: bool,
+    /// Why Computers are off on an older service.
+    pub reason: Option<&'static str>,
+}
+
+impl ComputerGate {
+    /// Switched on, and available to the bruh.
+    #[must_use]
+    pub fn on(&self) -> bool {
+        self.switched_on && self.blocked.is_none()
+    }
+
+    /// On, on a service that runs it: the tab offers it and streams it.
+    #[must_use]
+    pub fn works(&self) -> bool {
+        self.on() && self.ready
+    }
+}
+
+/// Bruh `agent_id`'s Computer as the snapshot and the service's `protocol`
+/// have it. An agent the snapshot doesn't list counts as Claude; a bruh it
+/// doesn't list has no name and its Computer off.
+#[must_use]
+pub fn computer_gate(
+    snapshot: Option<&ReactiveSnapshot>,
+    agent_id: &str,
+    protocol: Option<u32>,
+) -> ComputerGate {
+    let bruh = snapshot.and_then(|snapshot| {
+        let bruh = snapshot
+            .bruhs
+            .iter()
+            .find(|bruh| bruh.agent_id == agent_id)?;
+        let provider = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .map_or(AgentProvider::Claude, |agent| {
+                AgentProvider::for_model(&agent.model)
+            });
+        Some((
+            bruh.name.clone(),
+            bruh.computer,
+            computer_unavailable(effective_level(bruh.access.level, provider), provider),
+        ))
+    });
+    let (name, switched_on, blocked) = bruh.unwrap_or_default();
+    ComputerGate {
+        name,
+        switched_on,
+        blocked,
+        ready: protocol.is_some_and(computer_ready),
+        reason: computer_reason(protocol),
+    }
 }
 
 /// Whether a bruh's Computer is on: switched on, and available to it.
@@ -324,7 +428,8 @@ pub fn computer_controls(
     ready: bool,
     desktop: bool,
 ) -> ComputerControls {
-    if !(on && ready) {
+    // A system that runs no bruh browser: nothing to open.
+    if !(on && ready) || state.is_some_and(|state| state.unsupported) {
         return ComputerControls::default();
     }
     let Some(state) = state.filter(|state| state.session_id.is_some()) else {
@@ -363,12 +468,21 @@ pub fn computer_controls(
     }
 }
 
-/// The line at the top of the Computer tab.
+/// The line at the top of the Computer tab: an older service's notice, a
+/// switch that is off, the reason a switched-on Computer can't work (its
+/// model or level), the browser's error, or what the browser is doing.
 #[must_use]
-pub fn computer_status_line(state: Option<&ComputerState>, on: bool, name: &str) -> String {
-    if !on {
+pub fn computer_status_line(gate: &ComputerGate, state: Option<&ComputerState>) -> String {
+    if !gate.ready {
+        return gate.reason.unwrap_or_default().to_string();
+    }
+    if !gate.switched_on {
         return "Computer is off. Turn it on in Settings.".to_string();
     }
+    if let Some(blocked) = gate.blocked {
+        return blocked.to_string();
+    }
+    let name = gate.name.as_str();
     if let Some(error) = state.and_then(|state| state.error.as_deref()) {
         return error.to_string();
     }
@@ -385,6 +499,26 @@ pub fn computer_status_line(state: Option<&ComputerState>, on: bool, name: &str)
             Control::Owner => format!("You have control. {name} waits until you hand it back."),
             Control::Other => format!("{name}'s browser is open."),
         },
+    }
+}
+
+/// The line under the live view: its keys while the owner's input goes to
+/// a `focused` view, the window while the browser shows in one, or Take
+/// control while the bruh has it.
+#[must_use]
+pub fn computer_hint(
+    controls: ComputerControls,
+    state: Option<&ComputerState>,
+    focused: bool,
+) -> Option<&'static str> {
+    if controls.input {
+        focused.then_some(LIVE_VIEW_HINT)
+    } else if state.is_some_and(|state| state.headed) {
+        Some(USE_THE_WINDOW)
+    } else if controls.take {
+        Some(TAKE_CONTROL_FIRST)
+    } else {
+        None
     }
 }
 
@@ -406,6 +540,16 @@ pub fn delete_agent_line(name: &str) -> String {
     format!("Delete {name}, its subscriptions and its private folder and browser.")
 }
 
+/// How a proposal to delete agent `id` reads: by its name, or by its id
+/// when the app hasn't loaded it.
+#[must_use]
+pub fn delete_agent_line_for(snapshot: Option<&ReactiveSnapshot>, id: &str) -> String {
+    let name = snapshot
+        .and_then(|snapshot| snapshot.agents.iter().find(|agent| agent.id == id))
+        .map_or(id, |agent| agent.name.as_str());
+    delete_agent_line(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +558,7 @@ mod tests {
         approval_detail, approval_summary, AccessLevel, BruhAccess, Gate, LOCAL_HOST_DENIAL,
     };
     use crate::local_tools::{ComputerState, Control};
+    use crate::reactive::{ReactiveAgent, ReactiveSnapshot};
 
     fn access(level: AccessLevel, send_as_me: bool, can_deliver: bool) -> BruhAccess {
         BruhAccess {
@@ -768,24 +913,34 @@ mod tests {
             computer_controls(Some(&running), true, false, true),
             ComputerControls::default()
         );
+        let on = ComputerGate {
+            name: "Ada".into(),
+            switched_on: true,
+            ready: true,
+            ..ComputerGate::default()
+        };
+        let off = ComputerGate {
+            switched_on: false,
+            ..on.clone()
+        };
         assert_eq!(
-            computer_status_line(None, false, "Ada"),
+            computer_status_line(&off, None),
             "Computer is off. Turn it on in Settings."
         );
         assert_eq!(
-            computer_status_line(None, true, "Ada"),
+            computer_status_line(&on, None),
             "The browser is closed. Ada opens it on its next step, or you can open it now."
         );
         assert_eq!(
-            computer_status_line(Some(&running), true, "Ada"),
+            computer_status_line(&on, Some(&running)),
             "Ada has the browser."
         );
         assert_eq!(
-            computer_status_line(Some(&held), true, "Ada"),
+            computer_status_line(&on, Some(&held)),
             "You have control. Ada waits until you hand it back."
         );
         assert_eq!(
-            computer_status_line(Some(&headed), true, "Ada"),
+            computer_status_line(&on, Some(&headed)),
             "The browser is open in a window on this computer. Hand back when you're done."
         );
         // A newer service's control: the tab still reads, and offers Close.
@@ -801,7 +956,7 @@ mod tests {
             }
         );
         assert_eq!(
-            computer_status_line(Some(&newer), true, "Ada"),
+            computer_status_line(&on, Some(&newer)),
             "Ada's browser is open."
         );
         let failed = ComputerState {
@@ -810,7 +965,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            computer_status_line(Some(&failed), true, "Ada"),
+            computer_status_line(&on, Some(&failed)),
             "Install Chrome to give a bruh a browser."
         );
         assert_eq!(
@@ -820,6 +975,181 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    fn crew(level: AccessLevel, model: &str, computer: bool) -> ReactiveSnapshot {
+        use crate::crew::{BruhLook, BruhStatus};
+        ReactiveSnapshot {
+            agents: vec![ReactiveAgent {
+                id: "a".into(),
+                name: "Ada".into(),
+                instructions: String::new(),
+                memory: String::new(),
+                model: model.into(),
+                project_path: String::new(),
+                enabled: true,
+            }],
+            bruhs: vec![BruhState {
+                agent_id: "a".into(),
+                name: "Ada".into(),
+                look: BruhLook::default(),
+                access: access(level, false, false),
+                effort: None,
+                status: BruhStatus::Asleep,
+                next_wake_ms: None,
+                unread: 0,
+                computer,
+            }],
+            ..ReactiveSnapshot::default()
+        }
+    }
+
+    #[test]
+    fn the_gate_reads_the_bruh_and_the_service() {
+        use crate::crew::CREW_PROTOCOL;
+        let current = Some(CREW_PROTOCOL);
+        let full = crew(AccessLevel::Full, "claude-sonnet-4-6", true);
+        let gate = computer_gate(Some(&full), "a", current);
+        assert_eq!(
+            gate,
+            ComputerGate {
+                name: "Ada".into(),
+                switched_on: true,
+                blocked: None,
+                ready: true,
+                reason: None,
+            }
+        );
+        assert!(gate.on() && gate.works());
+        // An agent the snapshot doesn't list counts as Claude.
+        let mut unlisted = full.clone();
+        unlisted.agents.clear();
+        assert!(computer_gate(Some(&unlisted), "a", current).on());
+        let codex = crew(AccessLevel::Full, "gpt-5-codex", true);
+        let gate = computer_gate(Some(&codex), "a", current);
+        assert_eq!(gate.blocked, Some(NEEDS_CLAUDE));
+        assert!(!gate.on());
+        let old = computer_gate(Some(&full), "a", Some(2));
+        assert!(old.on() && !old.works());
+        assert_eq!(old.reason, computer_reason(Some(2)));
+        assert_eq!(
+            computer_gate(None, "a", current),
+            ComputerGate {
+                ready: true,
+                ..ComputerGate::default()
+            }
+        );
+    }
+
+    /// Computer is on, but the bruh's level or model can't have one: the
+    /// tab says why, not to turn on a switch that is already on.
+    #[test]
+    fn a_switched_on_but_blocked_computer_says_why() {
+        use crate::crew::CREW_PROTOCOL;
+        let current = Some(CREW_PROTOCOL);
+        let read_only = crew(AccessLevel::ReadOnly, "claude-sonnet-4-6", true);
+        assert_eq!(
+            computer_status_line(&computer_gate(Some(&read_only), "a", current), None),
+            "Computer needs Ask first or Full access."
+        );
+        let codex = crew(AccessLevel::Full, "gpt-5-codex", true);
+        assert_eq!(
+            computer_status_line(&computer_gate(Some(&codex), "a", current), None),
+            NEEDS_CLAUDE
+        );
+        // Stored off: turn it on in Settings, whatever else blocks it.
+        let off = crew(AccessLevel::ReadOnly, "claude-sonnet-4-6", false);
+        assert_eq!(
+            computer_status_line(&computer_gate(Some(&off), "a", current), None),
+            "Computer is off. Turn it on in Settings."
+        );
+        // An older service's notice comes first.
+        assert_eq!(
+            computer_status_line(&computer_gate(Some(&read_only), "a", Some(2)), None),
+            computer_reason(Some(2)).unwrap()
+        );
+        assert_eq!(
+            computer_status_line(&computer_gate(Some(&read_only), "a", None), None),
+            "",
+            "an unknown service says nothing yet"
+        );
+    }
+
+    #[test]
+    fn the_hint_follows_the_controls_and_focus() {
+        let input = ComputerControls {
+            input: true,
+            ..ComputerControls::default()
+        };
+        let take = ComputerControls {
+            take: true,
+            ..ComputerControls::default()
+        };
+        let headed = ComputerState {
+            headed: true,
+            ..ComputerState::default()
+        };
+        assert_eq!(computer_hint(input, None, true), Some(LIVE_VIEW_HINT));
+        assert_eq!(computer_hint(input, None, false), None);
+        assert_eq!(
+            computer_hint(ComputerControls::default(), Some(&headed), false),
+            Some(USE_THE_WINDOW)
+        );
+        assert_eq!(computer_hint(take, None, false), Some(TAKE_CONTROL_FIRST));
+        assert_eq!(computer_hint(ComputerControls::default(), None, true), None);
+    }
+
+    /// A system that runs no bruh browser offers nothing to open.
+    #[test]
+    fn an_unsupported_computer_offers_nothing() {
+        let unsupported = ComputerState {
+            agent_id: "a".into(),
+            error: Some(COMPUTER_UNSUPPORTED.into()),
+            unsupported: true,
+            ..ComputerState::default()
+        };
+        assert_eq!(
+            computer_controls(Some(&unsupported), true, true, true),
+            ComputerControls::default()
+        );
+        let gate = ComputerGate {
+            name: "Ada".into(),
+            switched_on: true,
+            ready: true,
+            ..ComputerGate::default()
+        };
+        assert_eq!(
+            computer_status_line(&gate, Some(&unsupported)),
+            COMPUTER_UNSUPPORTED
+        );
+    }
+
+    #[test]
+    fn save_drops_set_computer_for_an_older_service() {
+        use crate::crew::{current_settings, CREW_PROTOCOL};
+        let snapshot = crew(AccessLevel::Full, "claude-sonnet-4-6", false);
+        let (agent, state) = (&snapshot.agents[0], &snapshot.bruhs[0]);
+        let mut edited = current_settings(&snapshot, "a").unwrap();
+        edited.computer = true;
+        let current = settings_commands_for(Some(CREW_PROTOCOL), agent, state, &edited);
+        assert_eq!(current, settings_commands(agent, state, &edited));
+        assert!(current
+            .iter()
+            .any(|command| matches!(command, ReactiveCommand::SetComputer { on: true, .. })));
+        for protocol in [Some(2), None] {
+            assert!(settings_commands_for(protocol, agent, state, &edited).is_empty());
+        }
+        edited.name = "Bea".into();
+        assert_eq!(
+            settings_commands_for(Some(2), agent, state, &edited).len(),
+            1,
+            "other edits still go"
+        );
+    }
+
+    #[test]
+    fn the_poll_matches_on_both_apps() {
+        assert_eq!(COMPUTER_POLL_MS, 5_000);
     }
 
     #[test]
@@ -917,6 +1247,13 @@ mod tests {
             delete_agent_line("Ada"),
             "Delete Ada, its subscriptions and its private folder and browser."
         );
+        let snapshot = crew(AccessLevel::Full, "claude-sonnet-4-6", false);
+        assert_eq!(
+            delete_agent_line_for(Some(&snapshot), "a"),
+            delete_agent_line("Ada")
+        );
+        // An agent the app hasn't loaded is named by its id.
+        assert_eq!(delete_agent_line_for(None, "zz"), delete_agent_line("zz"));
         assert_eq!(
             handed_back_note("https://a.test/"),
             "The owner used your computer and handed it back. It is now on https://a.test/. Take a snapshot before you act."
@@ -958,31 +1295,62 @@ mod tests {
         let current = Some(CREW_PROTOCOL);
         let claude = AgentProvider::Claude;
         assert_eq!(
-            computer_switch_reason(AccessLevel::ReadOnly, claude, current),
+            computer_switch_reason(AccessLevel::ReadOnly, claude, current, false),
             Some("Computer needs Ask first or Full access.")
         );
         assert_eq!(
-            computer_switch_reason(AccessLevel::Full, AgentProvider::Codex, current),
+            computer_switch_reason(AccessLevel::Full, AgentProvider::Codex, current, false),
             Some(NEEDS_CLAUDE)
         );
         assert_eq!(
-            computer_switch_reason(AccessLevel::Full, claude, Some(2)),
+            computer_switch_reason(AccessLevel::Full, claude, Some(2), false),
             Some(ServiceNotice::ServingOld.message())
         );
         // The reason the owner can fix in Settings comes first.
         assert_eq!(
-            computer_switch_reason(AccessLevel::ReadOnly, claude, Some(2)),
+            computer_switch_reason(AccessLevel::ReadOnly, claude, Some(2), true),
             Some("Computer needs Ask first or Full access.")
         );
         assert_eq!(
-            computer_switch_reason(AccessLevel::Full, claude, current),
+            computer_switch_reason(AccessLevel::Full, claude, current, false),
             None
         );
         assert_eq!(
-            computer_switch_reason(AccessLevel::Ask, claude, current),
+            computer_switch_reason(AccessLevel::Ask, claude, current, false),
             None
         );
-        assert_eq!(computer_switch_reason(AccessLevel::Ask, claude, None), None);
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Ask, claude, None, false),
+            None
+        );
+        // A system that runs no bruh browser comes last.
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Ask, claude, current, true),
+            Some(COMPUTER_UNSUPPORTED)
+        );
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Full, claude, Some(2), true),
+            Some(ServiceNotice::ServingOld.message())
+        );
+    }
+
+    #[test]
+    fn the_computer_switch_is_off_for_the_model_level_or_service_only() {
+        use crate::crew::CREW_PROTOCOL;
+        let current = Some(CREW_PROTOCOL);
+        let claude = AgentProvider::Claude;
+        assert!(!computer_switch_off(AccessLevel::Full, claude, current));
+        assert!(computer_switch_off(AccessLevel::ReadOnly, claude, current));
+        assert!(computer_switch_off(
+            AccessLevel::Full,
+            AgentProvider::Codex,
+            current
+        ));
+        assert!(computer_switch_off(AccessLevel::Full, claude, Some(2)));
+        assert!(
+            computer_switch_off(AccessLevel::Full, claude, None),
+            "an unknown service counts as not yet"
+        );
     }
 
     #[test]

@@ -12,31 +12,24 @@ mod live;
 
 use std::time::Duration;
 
-use bruhs_models::agent::AgentProvider;
 use bruhs_models::crew::{
-    computer_controls, computer_on, computer_status_line, ADDRESS_LABEL, BACK, CLOSE_BROWSER,
-    HAND_BACK, LIVE_VIEW_HINT, LIVE_VIEW_LABEL, OPEN_BROWSER, RELOAD, TAKE_CONTROL,
-    TAKE_CONTROL_FIRST, USE_THE_WINDOW,
+    computer_controls, computer_gate, computer_hint, computer_status_line, ADDRESS_LABEL, BACK,
+    CLOSE_BROWSER, COMPUTER_POLL_MS, HAND_BACK, LIVE_VIEW_LABEL, OPEN_BROWSER, RELOAD,
+    TAKE_CONTROL,
 };
 use bruhs_models::local_tools::{
-    wheel_input, ComputerInput, ComputerRequest, ComputerState, HeldKeys, KeyAction, MouseButton,
-    MouseKind,
+    modifier_bits, wheel_input, ComputerInput, ComputerRequest, ComputerState, HeldKeys, KeyAction,
+    MouseButton, MouseKind,
 };
 use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
 
-use self::input::{
-    click_count, modifier_bits, pointer_input, pressed_button, wheel_px, with_clicks, Press,
-};
+use self::input::{click_count, pointer_input, pressed_button, wheel_px, with_clicks, Press};
 use self::live::{LiveEvents, LiveView};
 use super::data::use_crew_snapshot;
 use crate::components::shell::host_mod_is_command;
 use crate::ui::{Button, ButtonVariant};
-
-/// How often the tab asks for the state while no live view runs, so a
-/// browser the bruh opens shows up.
-const CLOSED_POLL_MS: u64 = 5_000;
 
 const ADDRESS: &str = "block min-h-control w-full min-w-0 flex-1 basis-48 bruhs-control rounded-grape bg-white/5 px-2.5 py-[5px] text-body text-rambutan-100 inset-ring inset-ring-white/10 read-only:text-rambutan-400 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400";
 const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200";
@@ -67,29 +60,14 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
     let id = StoredValue::new(agent_id);
     let mac = host_mod_is_command();
 
-    // The bruh as the snapshot has it: its name and whether its Computer
-    // is on.
-    let bruh = Memo::new(move |_| {
-        data.snapshot.with(|snapshot| {
-            let snapshot = snapshot.as_ref()?;
-            id.with_value(|id| {
-                let bruh = snapshot.bruhs.iter().find(|bruh| bruh.agent_id == *id)?;
-                let provider = snapshot
-                    .agents
-                    .iter()
-                    .find(|agent| agent.id == *id)
-                    .map_or(AgentProvider::Claude, |agent| {
-                        AgentProvider::for_model(&agent.model)
-                    });
-                Some((
-                    bruh.name.clone(),
-                    computer_on(bruh.computer, &bruh.access, provider),
-                ))
-            })
-        })
+    // The bruh's Computer as the snapshot and the service have it.
+    let gate = Memo::new(move |_| {
+        let protocol = data.protocol();
+        data.snapshot
+            .with(|snapshot| id.with_value(|id| computer_gate(snapshot.as_ref(), id, protocol)))
     });
-    let on = Memo::new(move |_| bruh.with(|bruh| bruh.as_ref().is_some_and(|bruh| bruh.1)));
-    let ready = Memo::new(move |_| data.computer_ready());
+    let on = Memo::new(move |_| gate.with(|gate| gate.on()));
+    let ready = Memo::new(move |_| gate.with(|gate| gate.ready));
 
     let state = RwSignal::new(None::<ComputerState>);
     let error = RwSignal::new(None::<String>);
@@ -124,22 +102,20 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
         })
     });
     let status = Memo::new(move |_| {
-        if !ready.get() {
-            return data.computer_reason().unwrap_or_default().to_string();
-        }
-        let name = bruh.with(|bruh| bruh.as_ref().map(|bruh| bruh.0.clone()).unwrap_or_default());
-        state.with(|state| computer_status_line(state.as_ref(), on.get(), &name))
+        gate.with(|gate| state.with(|state| computer_status_line(gate, state.as_ref())))
     });
     let hint = Memo::new(move |_| {
         let controls = controls.get();
-        if controls.input {
-            focused.get().then_some(LIVE_VIEW_HINT)
-        } else if state.with(|state| state.as_ref().is_some_and(|state| state.headed)) {
-            Some(USE_THE_WINDOW)
-        } else if controls.take {
-            Some(TAKE_CONTROL_FIRST)
-        } else {
-            None
+        let focused = focused.get();
+        state.with(|state| computer_hint(controls, state.as_ref(), focused))
+    });
+    // A system that runs no bruh browser: Settings says so too.
+    Effect::new(move |_| {
+        let unsupported = state.with(|state| state.as_ref().map(|state| state.unsupported));
+        if let Some(unsupported) = unsupported {
+            if data.computer_unsupported.get_untracked() != unsupported {
+                data.computer_unsupported.set(unsupported);
+            }
         }
     });
 
@@ -173,9 +149,15 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             }
         }
     };
+    // Read the state when the Computer works; once it is off, nothing it
+    // said still holds.
     Effect::new(move |_| {
         if ready.get() && on.get() {
             wasm_bindgen_futures::spawn_local(load());
+        } else {
+            fetch_failed.set_value(false);
+            live.forget_error();
+            error.set(None);
         }
     });
 
@@ -226,6 +208,10 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             None => {
                 live.disconnect();
                 live.clear_frame();
+                // No live view: its error no longer holds.
+                if live.take_error() {
+                    error.set(None);
+                }
             }
         }
     });
@@ -242,7 +228,7 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
                 wasm_bindgen_futures::spawn_local(load());
             }
         },
-        Duration::from_millis(CLOSED_POLL_MS),
+        Duration::from_millis(COMPUTER_POLL_MS),
     )
     .ok();
     on_cleanup(move || {
@@ -518,6 +504,30 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
         }
     };
 
+    // Focus never stays on a live view that no longer takes input: it moves
+    // to the address, as on the desktop.
+    let leave_to_address = move || {
+        if let Some(field) = address_field.get_untracked() {
+            let _ = field.focus();
+        }
+    };
+    Effect::new(move |was: Option<bool>| {
+        let input = controls.get().input;
+        if was == Some(true) && !input {
+            let on_view = img.get_untracked().is_some_and(|img| {
+                let img: &web_sys::Element = &img;
+                web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| document.active_element())
+                    .is_some_and(|active| &active == img)
+            });
+            if on_view {
+                leave_to_address();
+            }
+        }
+        input
+    });
+
     // The address shows the page's URL, unless the owner is typing one.
     let address = RwSignal::new(String::new());
     Effect::new(move |_| {
@@ -558,9 +568,13 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             aria-describedby=move || input_on().then_some("bruh-computer-hint")
             class=move || live_view_class(live.has_frame.get(), input_on())
             on:focus=move |_| focused.set(true)
-            on:blur=move |_| {
+            on:blur=move |event: web_sys::FocusEvent| {
                 focused.set(false);
                 release_held();
+                // Input went off under focus, and the browser let it go.
+                if !controls.get_untracked().input && event.related_target().is_none() {
+                    leave_to_address();
+                }
             }
             on:lostpointercapture=move |_| release_pointer()
             on:pointerdown=on_pointer_down

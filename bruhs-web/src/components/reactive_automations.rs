@@ -580,12 +580,7 @@ fn proposal_label(
         ReactiveChange::SaveAgent { agent } => format!("Save agent {} with model {}, working folder {}, enabled {}. Review its instructions and memory below.", agent.name,agent.model,agent.project_path,agent.enabled),
         ReactiveChange::SaveSource { source } => format!("Save {} source {}, enabled {}. Review the complete connection settings below.", source_label(&source.kind),source.name,source.enabled),
         ReactiveChange::SaveSubscription { subscription } => format!("Connect source {} to agent {}. Enabled: {}. Runs automatically: {}.", subscription.source_id,subscription.agent_id,subscription.enabled,subscription.auto_run),
-        ReactiveChange::DeleteAgent { id } => {
-            let name = snapshot
-                .and_then(|s| s.agents.iter().find(|agent| agent.id == *id))
-                .map_or(id.as_str(), |agent| agent.name.as_str());
-            bruhs_models::crew::delete_agent_line(name)
-        }
+        ReactiveChange::DeleteAgent { id } => bruhs_models::crew::delete_agent_line_for(snapshot, id),
         ReactiveChange::DeleteSource { id } => format!("Delete source {id} and its subscriptions."),
         ReactiveChange::DeleteSubscription { id } => format!("Delete subscription {id}."),
         ReactiveChange::SetMemory { agent_id, .. } => format!("Replace the persistent memory of agent {agent_id}. Review the complete replacement below."),

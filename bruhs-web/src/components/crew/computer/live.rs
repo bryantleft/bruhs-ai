@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use bruhs_models::crew::LIVE_VIEW_UNREACHABLE;
 use bruhs_models::local_tools::{
     Backoff, ComputerInput, ComputerState, ScreencastClientMessage, ScreencastMessage,
     BACKOFF_MAX_MS, FRAME_ACK,
@@ -24,6 +25,12 @@ pub(super) struct LiveEvents {
     /// The socket closed and its wait is over: fetch the state again, then
     /// call [`LiveView::retry`] with this token.
     pub closed: Callback<u64>,
+}
+
+/// What a closed socket shows: one that never opened couldn't reach the
+/// server. One that opened has said why itself, if it was refused.
+fn closed_error(opened: bool) -> Option<&'static str> {
+    (!opened).then_some(LIVE_VIEW_UNREACHABLE)
 }
 
 fn revoke(url: &str) {
@@ -69,6 +76,8 @@ pub(super) struct LiveView {
     retry: StoredValue<Option<TimeoutHandle>, LocalStorage>,
     /// The tab's error came from the stream, so a frame clears it.
     stream_failed: StoredValue<bool>,
+    /// The current socket has opened.
+    opened: StoredValue<bool>,
     /// A frame is on screen; until then the view shows nothing.
     pub has_frame: RwSignal<bool>,
     pub connected: RwSignal<bool>,
@@ -87,6 +96,7 @@ impl LiveView {
             backoff: StoredValue::new(Backoff::default()),
             retry: StoredValue::new_local(None),
             stream_failed: StoredValue::new(false),
+            opened: StoredValue::new(false),
             has_frame: RwSignal::new(false),
             connected: RwSignal::new(false),
             reconnect: RwSignal::new(0),
@@ -101,6 +111,40 @@ impl LiveView {
     /// The tab's error no longer comes from the stream.
     pub(super) fn forget_error(self) {
         let _ = self.stream_failed.try_set_value(false);
+    }
+
+    /// Whether the tab's error came from the stream, which no longer
+    /// speaks for it.
+    pub(super) fn take_error(self) -> bool {
+        self.stream_failed
+            .try_update_value(std::mem::take)
+            .unwrap_or(false)
+    }
+
+    /// The stream failed with `error`, which a frame clears.
+    fn fail(self, error: &str, events: LiveEvents) {
+        let _ = self.stream_failed.try_set_value(true);
+        events.error.run(Some(error.to_string()));
+    }
+
+    /// Wait out the backoff, then tell the tab to look again (`mine`, the
+    /// socket's generation, unless the view moved on since).
+    fn wait_to_retry(self, mine: u64, events: LiveEvents) {
+        let wait = self
+            .backoff
+            .try_update_value(Backoff::closed)
+            .unwrap_or(BACKOFF_MAX_MS);
+        let handle = set_timeout_with_handle(
+            move || {
+                if self.generation.try_get_value() == Some(mine) {
+                    events.closed.run(mine);
+                }
+            },
+            Duration::from_millis(wait),
+        );
+        if let Ok(handle) = handle {
+            let _ = self.retry.try_set_value(Some(handle));
+        }
     }
 
     /// Send owner input over the socket.
@@ -203,14 +247,18 @@ impl LiveView {
         self.disconnect();
         // A new socket's first frame resets the wait again.
         self.backoff.update_value(Backoff::new_socket);
+        self.opened.set_value(false);
+        let mine = self.generation.get_value();
         let Ok(socket) = web_sys::WebSocket::new(&crate::api::screencast_url(session)) else {
+            self.fail(LIVE_VIEW_UNREACHABLE, events);
+            self.wait_to_retry(mine, events);
             return;
         };
         socket.set_binary_type(web_sys::BinaryType::Blob);
-        let mine = self.generation.get_value();
         let current = move || self.generation.try_get_value() == Some(mine);
         let open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
             if current() {
+                self.opened.set_value(true);
                 self.connected.set(true);
             }
         });
@@ -223,10 +271,7 @@ impl LiveView {
                 if let Some(text) = payload.as_string() {
                     match serde_json::from_str::<ScreencastMessage>(&text) {
                         Ok(ScreencastMessage::State(next)) => events.state.run(next),
-                        Ok(ScreencastMessage::Error { error }) => {
-                            self.stream_failed.set_value(true);
-                            events.error.run(Some(error));
-                        }
+                        Ok(ScreencastMessage::Error { error }) => self.fail(&error, events),
                         // A newer server's message this app doesn't know.
                         Ok(ScreencastMessage::Other) | Err(_) => {}
                     }
@@ -249,21 +294,10 @@ impl LiveView {
                     return;
                 }
                 self.connected.set(false);
-                let wait = self
-                    .backoff
-                    .try_update_value(Backoff::closed)
-                    .unwrap_or(BACKOFF_MAX_MS);
-                let handle = set_timeout_with_handle(
-                    move || {
-                        if current() {
-                            events.closed.run(mine);
-                        }
-                    },
-                    Duration::from_millis(wait),
-                );
-                if let Ok(handle) = handle {
-                    self.retry.set_value(Some(handle));
+                if let Some(error) = closed_error(self.opened.get_value()) {
+                    self.fail(error, events);
                 }
+                self.wait_to_retry(mine, events);
             });
         socket.set_onopen(Some(open.as_ref().unchecked_ref()));
         socket.set_onmessage(Some(message.as_ref().unchecked_ref()));
@@ -274,5 +308,20 @@ impl LiveView {
             _message: message,
             _close: close,
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closed_error;
+    use bruhs_models::crew::LIVE_VIEW_UNREACHABLE;
+
+    /// A socket that closes before it opens (the server is down, or it
+    /// refused the upgrade) says the live view can't reach the server; one
+    /// that opened has said why itself.
+    #[test]
+    fn a_socket_closed_before_it_opened_says_it_cant_reach_the_server() {
+        assert_eq!(closed_error(false), Some(LIVE_VIEW_UNREACHABLE));
+        assert_eq!(closed_error(true), None);
     }
 }

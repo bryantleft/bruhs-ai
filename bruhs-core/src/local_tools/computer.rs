@@ -314,6 +314,7 @@ impl Slot {
         let (state, _) = watch::channel(ComputerState {
             agent_id: computer.agent_id.clone(),
             error: error.clone(),
+            unsupported: refusal.is_some(),
             ..ComputerState::default()
         });
         Self {

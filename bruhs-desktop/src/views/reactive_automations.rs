@@ -117,6 +117,8 @@ struct CrewState {
     installed_read_for: Option<u32>,
     /// The answering server is a debug build.
     serving_debug: bool,
+    /// The last Computer state read said this system runs no bruh browser.
+    computer_unsupported: bool,
     stream: Option<Task<()>>,
     service_request: Option<Task<()>>,
     updating: bool,
@@ -439,14 +441,6 @@ fn field(label: &'static str, input: &impl TextInput, multiline: bool, disabled:
                 .h(px(if multiline { 96.0 } else { 32.0 }))
                 .text_size(px(14.0)),
         )
-}
-/// How a proposal to delete agent `id` reads: by its name, or by its id
-/// when the app hasn't loaded it.
-fn delete_agent_label(snapshot: Option<&ReactiveSnapshot>, id: &str) -> String {
-    let name = snapshot
-        .and_then(|snapshot| snapshot.agents.iter().find(|agent| agent.id == id))
-        .map_or(id, |agent| agent.name.as_str());
-    bruhs_models::crew::delete_agent_line(name)
 }
 fn reactive_error(error: ServerError) -> String {
     let detail = match &error {
@@ -1606,9 +1600,26 @@ impl ReactiveAutomations {
             .protocol
             .is_some_and(bruhs_models::crew::computer_ready)
     }
-    /// Why Computers are off, once the service is known to be older.
-    pub(crate) fn computer_reason(&self) -> Option<&'static str> {
-        bruhs_models::crew::computer_reason(self.crew.protocol)
+    /// Bruh `agent_id`'s Computer as the snapshot and the service have it.
+    pub(crate) fn computer_gate(&self, agent_id: &str) -> bruhs_models::crew::ComputerGate {
+        bruhs_models::crew::computer_gate(self.snapshot.as_ref(), agent_id, self.crew.protocol)
+    }
+    /// Whether the last Computer state read said this system runs no bruh
+    /// browser.
+    pub(crate) fn computer_unsupported(&self) -> bool {
+        self.crew.computer_unsupported
+    }
+    /// A Computer state was read: Settings learns whether this system runs
+    /// a bruh's browser.
+    pub(crate) fn set_computer_unsupported(
+        &mut self,
+        unsupported: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.crew.computer_unsupported != unsupported {
+            self.crew.computer_unsupported = unsupported;
+            cx.notify();
+        }
     }
     /// Ask for something of `agent_id`'s Computer: open or close its
     /// browser, take or hand back control, or open it in a window. `None`
@@ -2458,7 +2469,7 @@ impl Render for ReactiveAutomations {
                     ),
                     _ => AccessLevel::ReadOnly,
                 };
-                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>delete_agent_label(self.snapshot.as_ref(),id),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
+                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>bruhs_models::crew::delete_agent_line_for(self.snapshot.as_ref(),id),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
                 let payload = serde_json::to_string_pretty(&proposal.change)
                     .unwrap_or_else(|error| format!("Cannot display proposal: {error}"));
                 let mut proposal_card = card()
@@ -2847,7 +2858,7 @@ mod tests {
 
 #[cfg(test)]
 mod computer_tests {
-    use super::{delete_agent_label, ReactiveAutomations};
+    use super::ReactiveAutomations;
     use crate::theme;
     use bruhs_models::crew::{delete_agent_line, delete_bruh_confirm, ServiceNotice};
     use bruhs_models::local_tools::{ComputerInput, ComputerRequest};
@@ -2970,13 +2981,14 @@ mod computer_tests {
 
     #[test]
     fn a_delete_agent_proposal_names_the_agent_and_what_goes_with_it() {
+        use bruhs_models::crew::delete_agent_line_for;
         let snapshot = snapshot(vec![agent("a1", "Ada")], 3);
         assert_eq!(
-            delete_agent_label(Some(&snapshot), "a1"),
+            delete_agent_line_for(Some(&snapshot), "a1"),
             delete_agent_line("Ada")
         );
         // An agent the app hasn't loaded is named by its id.
-        assert_eq!(delete_agent_label(None, "zz"), delete_agent_line("zz"));
+        assert_eq!(delete_agent_line_for(None, "zz"), delete_agent_line("zz"));
     }
 
     /// Computer requests and live view input reach only a service that
@@ -2987,7 +2999,7 @@ mod computer_tests {
         panel.update(cx, |panel, cx| {
             assert!(!panel.computer_ready());
             assert_eq!(
-                panel.computer_reason(),
+                panel.computer_gate("a").reason,
                 Some(ServiceNotice::ServingOld.message())
             );
             assert!(panel
@@ -2996,7 +3008,7 @@ mod computer_tests {
             assert!(panel.computer_requests_for_test().is_empty());
             panel.set_snapshot(snapshot(vec![agent("a", "Ada")], 3), cx);
             assert!(panel.computer_ready());
-            assert_eq!(panel.computer_reason(), None);
+            assert_eq!(panel.computer_gate("a").reason, None);
             assert!(panel
                 .computer_request("a", ComputerRequest::Open, cx)
                 .is_some());

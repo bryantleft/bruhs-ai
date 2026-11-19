@@ -4,14 +4,13 @@
 use super::{ComputerView, MAC};
 use bruhs_models::local_tools::Control;
 use bruhs_models::local_tools::{
-    to_viewport, to_viewport_clamped, wheel_input, ComputerInput, KeyAction, MouseButton,
-    MouseKind, MAX_SCROLL_PX, MODIFIER_ALT, MODIFIER_CTRL, MODIFIER_META, MODIFIER_SHIFT,
-    WHEEL_LINE_PX,
+    modifier_bits, to_viewport, to_viewport_clamped, wheel_input, ComputerInput, KeyAction,
+    KeyKind, MouseButton, MouseKind, MAX_SCROLL_PX, WHEEL_LINE_PX,
 };
 use bruhs_ui::zoom::css_px;
 use gpui::{
-    Context, Focusable as _, KeyUpEvent, Keystroke, Modifiers, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, Window,
+    Context, Focusable as _, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, Window,
 };
 /// The DOM `key` and `code` of a GPUI keystroke, for the page. `None` for
 /// keys the live view doesn't forward.
@@ -32,10 +31,12 @@ pub(crate) fn dom_key(keystroke: &Keystroke) -> Option<(String, String)> {
         "pageup" => named("PageUp", "PageUp"),
         "pagedown" => named("PageDown", "PageDown"),
         "delete" => named("Delete", "Delete"),
+        "insert" => named("Insert", "Insert"),
         key => {
             if let Some(number) = key.strip_prefix('f') {
                 return match number.parse::<u8>() {
-                    Ok(1..=12) => {
+                    // The DOM names F1 to F24.
+                    Ok(1..=24) => {
                         let name = format!("F{number}");
                         Some((name.clone(), name))
                     }
@@ -63,7 +64,9 @@ pub(crate) fn dom_key(keystroke: &Keystroke) -> Option<(String, String)> {
     }
 }
 
-/// The DOM `code` of the physical key that types `key` on a US layout.
+/// The DOM `code` of the physical key that types `key` on a US layout:
+/// GPUI names no physical key, so another layout's code can differ from
+/// the web's.
 fn dom_code(key: char) -> String {
     if key.is_ascii_alphabetic() {
         return format!("Key{}", key.to_ascii_uppercase());
@@ -90,15 +93,18 @@ fn dom_code(key: char) -> String {
 
 /// The `MODIFIER_*` bits of GPUI's modifier keys.
 pub(crate) fn modifiers(held: &Modifiers) -> u8 {
+    modifier_bits(held.alt, held.control, held.platform, held.shift)
+}
+
+/// The modifier keys whose own presses go to the page, with their DOM `key`
+/// and `code`. GPUI doesn't say which side, so each is the left one.
+fn modifier_keys(held: &Modifiers) -> [(bool, &'static str, &'static str); 4] {
     [
-        (held.alt, MODIFIER_ALT),
-        (held.control, MODIFIER_CTRL),
-        (held.platform, MODIFIER_META),
-        (held.shift, MODIFIER_SHIFT),
+        (held.shift, "Shift", "ShiftLeft"),
+        (held.control, "Control", "ControlLeft"),
+        (held.alt, "Alt", "AltLeft"),
+        (held.platform, "Meta", "MetaLeft"),
     ]
-    .into_iter()
-    .filter(|(on, _)| *on)
-    .fold(0, |bits, (_, bit)| bits | bit)
 }
 
 /// The page's button for a GPUI one; back and forward don't map.
@@ -211,6 +217,9 @@ impl ComputerView {
         for input in self.held_keys.release_all() {
             self.send_release(input, cx);
         }
+        // Modifiers still held count from nothing once the view has input
+        // again, so their next change is seen.
+        self.held_modifiers = Default::default();
     }
 
     /// Where window point `position` lands on the live view, and the
@@ -390,6 +399,49 @@ impl ComputerView {
             KeyAction::App => return false,
         }
         true
+    }
+
+    /// A modifier key pressed or released alone, or CapsLock toggled: each
+    /// goes to the page as its own key, as the web's keydown does (the
+    /// app's own ⌘ or Ctrl stays with the app).
+    pub(super) fn modifiers_changed(
+        &mut self,
+        event: &ModifiersChangedEvent,
+        _: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let before = std::mem::replace(
+            &mut self.held_modifiers,
+            (event.modifiers, event.capslock.on),
+        );
+        if !self.controls(cx).input {
+            return;
+        }
+        let held = modifiers(&event.modifiers);
+        let was = modifier_keys(&before.0);
+        for ((down, key, code), (was_down, ..)) in
+            modifier_keys(&event.modifiers).into_iter().zip(was)
+        {
+            if down == was_down {
+                continue;
+            }
+            if let KeyAction::Send(input) = self.held_keys.route(key, code, held, MAC, down) {
+                self.send(input, cx);
+            }
+        }
+        if event.capslock.on != before.1 {
+            for kind in [KeyKind::Down, KeyKind::Up] {
+                self.send(
+                    ComputerInput::Key {
+                        kind,
+                        key: "CapsLock".into(),
+                        code: "CapsLock".into(),
+                        modifiers: held,
+                    },
+                    cx,
+                );
+            }
+        }
     }
 
     /// Key ups come here: bindings never take them. A release whose press

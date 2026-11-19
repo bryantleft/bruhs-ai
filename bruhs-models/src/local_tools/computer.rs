@@ -57,6 +57,10 @@ pub struct ComputerState {
     pub viewport: Viewport,
     #[serde(default)]
     pub error: Option<String>,
+    /// This system can't run a bruh's browser (off macOS and Linux), so
+    /// none ever opens here.
+    #[serde(default)]
+    pub unsupported: bool,
 }
 
 /// What the owner asks of a bruh's Computer.
@@ -250,6 +254,20 @@ pub const MODIFIER_CTRL: u8 = 2;
 pub const MODIFIER_META: u8 = 4;
 pub const MODIFIER_SHIFT: u8 = 8;
 
+/// The `MODIFIER_*` bits of the modifier keys held.
+#[must_use]
+pub fn modifier_bits(alt: bool, ctrl: bool, meta: bool, shift: bool) -> u8 {
+    [
+        (alt, MODIFIER_ALT),
+        (ctrl, MODIFIER_CTRL),
+        (meta, MODIFIER_META),
+        (shift, MODIFIER_SHIFT),
+    ]
+    .into_iter()
+    .filter(|(held, _)| *held)
+    .fold(0, |bits, (_, bit)| bits | bit)
+}
+
 /// The fields CDP's `Input.dispatchKeyEvent` needs for one key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CdpKey {
@@ -341,7 +359,7 @@ fn forwarded_key_code(key: &str) -> u32 {
     if let Some(number) = key
         .strip_prefix('F')
         .and_then(|number| number.parse::<u32>().ok())
-        .filter(|number| (1..=12).contains(number))
+        .filter(|number| (1..=24).contains(number))
     {
         return 111 + number;
     }
@@ -458,6 +476,19 @@ mod tests {
     }
 
     #[test]
+    fn modifier_bits_fold_the_held_keys() {
+        assert_eq!(modifier_bits(false, false, false, false), 0);
+        assert_eq!(
+            modifier_bits(true, true, true, true),
+            MODIFIER_ALT | MODIFIER_CTRL | MODIFIER_META | MODIFIER_SHIFT
+        );
+        assert_eq!(
+            modifier_bits(false, true, false, true),
+            MODIFIER_CTRL | MODIFIER_SHIFT
+        );
+    }
+
+    #[test]
     fn owner_keys_cdp_cannot_map_are_forwarded_without_text() {
         assert_eq!(
             owner_cdp_key("F1", "F1"),
@@ -469,7 +500,9 @@ mod tests {
             }
         );
         assert_eq!(owner_cdp_key("F12", "F12").key_code, 123);
-        assert_eq!(owner_cdp_key("F13", "F13").key_code, 0);
+        assert_eq!(owner_cdp_key("F13", "F13").key_code, 124);
+        assert_eq!(owner_cdp_key("F24", "F24").key_code, 135);
+        assert_eq!(owner_cdp_key("F25", "F25").key_code, 0);
         assert_eq!(owner_cdp_key("Insert", "Insert").key_code, 45);
         let shift = owner_cdp_key("Shift", "ShiftLeft");
         assert_eq!(
@@ -510,12 +543,16 @@ mod tests {
             "headed": false,
             "viewport": {"width": 1280, "height": 800},
             "error": null,
+            "unsupported": false,
         });
         assert_eq!(serde_json::to_value(&message).unwrap(), wire);
         assert_eq!(
             serde_json::from_value::<ScreencastMessage>(wire).unwrap(),
             message
         );
+        // An older service sends no `unsupported`: it reads as supported.
+        let older = serde_json::from_value::<ComputerState>(serde_json::json!({"agent_id": "a"}));
+        assert!(!older.unwrap().unsupported);
     }
 
     /// A newer service's control or message never stops a state from

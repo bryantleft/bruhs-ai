@@ -3,12 +3,11 @@
 
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
-    access_options, clamp_level, computer_switch_follows, computer_switch_reason, current_settings,
-    settings_commands, AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT,
-    COMPUTER_SWITCH, SEND_AS_ME_HINT,
+    access_options, clamp_level, computer_switch_follows, computer_switch_off,
+    computer_switch_reason, current_settings, settings_commands_for, AccessLevel, BruhAccess,
+    BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
-use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
@@ -115,10 +114,16 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             level.get(),
             AgentProvider::for_model(&model.get()),
             data.protocol(),
+            data.computer_unsupported.get(),
         )
     });
-    let computer_off =
-        Signal::derive(move || computer_block.get().is_some() || !data.computer_ready());
+    let computer_off = Signal::derive(move || {
+        computer_switch_off(
+            level.get(),
+            AgentProvider::for_model(&model.get()),
+            data.protocol(),
+        )
+    });
     // It also follows the stored value while the owner hasn't changed it
     // since the fill, even with other edits unsaved, and once the owner's
     // value matches it (`computer_switch_follows`). Tracked, so a change
@@ -166,14 +171,15 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         let commands = id.with_value(|id| {
             let agent = snapshot.agents.iter().find(|agent| agent.id == *id)?;
             let state = snapshot.bruhs.iter().find(|bruh| bruh.agent_id == *id)?;
-            Some(settings_commands(agent, state, &edited))
+            Some(settings_commands_for(
+                data.protocol(),
+                agent,
+                state,
+                &edited,
+            ))
         });
-        // An older service doesn't know SetComputer.
-        let computer_ready = data.computer_ready();
         for command in commands.unwrap_or_default() {
-            if computer_ready || !matches!(command, ReactiveCommand::SetComputer { .. }) {
-                data.send.run(command);
-            }
+            data.send.run(command);
         }
     };
 

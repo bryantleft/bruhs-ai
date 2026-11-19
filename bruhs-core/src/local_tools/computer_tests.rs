@@ -86,6 +86,7 @@ async fn a_system_without_the_guard_opens_no_bruh_browser() {
     host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
     let state = host.computer_state("a").await.unwrap();
     assert_eq!(state.error.as_deref(), Some(COMPUTER_UNSUPPORTED));
+    assert!(state.unsupported, "the apps learn it from the state");
     assert!(matches!(
         host.open_computer("a").await,
         Err(ToolError::Unavailable(message)) if message == COMPUTER_UNSUPPORTED
@@ -98,10 +99,9 @@ async fn a_system_without_the_guard_opens_no_bruh_browser() {
         COMPUTER_UNSUPPORTED
     );
     assert!(fake.launches().is_empty());
-    assert_eq!(
-        host.computer_state("a").await.unwrap().error.as_deref(),
-        Some(COMPUTER_UNSUPPORTED)
-    );
+    let state = host.computer_state("a").await.unwrap();
+    assert_eq!(state.error.as_deref(), Some(COMPUTER_UNSUPPORTED));
+    assert!(state.unsupported);
     // The production host refuses exactly off Unix.
     assert_eq!(
         super::platform_refusal(),
@@ -115,6 +115,7 @@ async fn a_bruh_browser_starts_on_first_use_and_reopens_at_its_last_url() {
     let (host, fake) = LocalToolsHost::with_fake_pages();
     host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
     assert!(fake.launches().is_empty(), "syncing starts no browser");
+    assert!(!host.computer_state("a").await.unwrap().unsupported);
     host.bruh_command("a", navigate("https://a.test/x"))
         .await
         .unwrap();

@@ -4,7 +4,7 @@
 use super::ComputerView;
 #[cfg(not(test))]
 use crate::app_state::spawn_tokio;
-use crate::server_client::{Screencast, ScreencastEvent};
+use crate::server_client::{Screencast, ScreencastEvent, ServerError};
 use bruhs_models::local_tools::Backoff;
 use gpui::{Context, RenderImage, Task};
 use std::{sync::Arc, time::Duration};
@@ -84,14 +84,7 @@ impl ComputerView {
                         events
                     }
                     Err(error) => {
-                        let _ = this.update(cx, |this, cx| {
-                            if this.live.generation == generation {
-                                this.stream_failed = true;
-                                this.error = Some(error.to_string());
-                                this.closed(generation, cx);
-                                cx.notify();
-                            }
-                        });
+                        let _ = this.update(cx, |this, cx| this.open_failed(generation, error, cx));
                         return;
                     }
                 };
@@ -114,6 +107,23 @@ impl ComputerView {
         }
     }
 
+    /// The socket didn't open: say why, as the server put it, then wait
+    /// and try again.
+    pub(super) fn open_failed(
+        &mut self,
+        generation: u64,
+        error: ServerError,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.live.generation != generation {
+            return;
+        }
+        self.stream_failed = true;
+        self.error = Some(super::super::reactive_error(error));
+        self.closed(generation, cx);
+        cx.notify();
+    }
+
     /// Close the socket, if any, and cancel a pending retry.
     pub(super) fn disconnect(&mut self) {
         self.live.generation = self.live.generation.wrapping_add(1);
@@ -123,8 +133,10 @@ impl ComputerView {
         self.live.session = None;
         self.live.connected = false;
         self.live.backoff.new_socket();
-        // A frame of the old socket still decoding is dropped.
+        // A frame of the old socket still decoding is dropped, and so is
+        // the one waiting to decode.
         self.epoch = self.epoch.wrapping_add(1);
+        self.next_frame = None;
         self.held = None;
         self.pending_move = None;
         self.pending_wheel = None;
@@ -165,7 +177,7 @@ impl ComputerView {
         match event {
             ScreencastEvent::State(next) => {
                 self.revision = self.revision.wrapping_add(1);
-                self.state = Some(next);
+                self.set_state(next, cx);
                 self.sync(cx);
             }
             ScreencastEvent::Error(error) => {

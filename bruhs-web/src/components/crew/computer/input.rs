@@ -5,25 +5,12 @@
 
 use bruhs_models::local_tools::{
     to_viewport, to_viewport_clamped, ComputerInput, MouseButton, MouseKind, Viewport,
-    MAX_SCROLL_PX, MODIFIER_ALT, MODIFIER_CTRL, MODIFIER_META, MODIFIER_SHIFT, WHEEL_LINE_PX,
+    MAX_SCROLL_PX, WHEEL_LINE_PX,
 };
 
 /// Two presses this close in time and place count as one double click.
 const MULTI_CLICK_MS: f64 = 500.0;
 const MULTI_CLICK_PX: f64 = 4.0;
-
-/// The `MODIFIER_*` bits for an event's modifier keys.
-pub(super) fn modifier_bits(alt: bool, ctrl: bool, meta: bool, shift: bool) -> u8 {
-    [
-        (alt, MODIFIER_ALT),
-        (ctrl, MODIFIER_CTRL),
-        (meta, MODIFIER_META),
-        (shift, MODIFIER_SHIFT),
-    ]
-    .into_iter()
-    .filter(|(on, _)| *on)
-    .fold(0, |bits, (_, bit)| bits | bit)
-}
 
 /// The button a DOM `button` value presses: 0 left, 1 middle, 2 right.
 pub(super) fn pressed_button(button: i16) -> MouseButton {
@@ -162,7 +149,7 @@ pub(super) fn wheel_px(delta: f64, mode: u32, viewport: Viewport) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bruhs_models::local_tools::COMPUTER_VIEWPORT;
+    use bruhs_models::local_tools::{COMPUTER_VIEWPORT, MODIFIER_SHIFT};
 
     #[test]
     fn pointer_points_map_through_the_letterbox_with_their_buttons() {
@@ -289,14 +276,5 @@ mod tests {
         assert_eq!(wheel_px(1.0, 2, v), 800.0);
         assert_eq!(wheel_px(1e9, 0, v), MAX_SCROLL_PX);
         assert_eq!(wheel_px(f64::NAN, 0, v), 0.0);
-    }
-
-    #[test]
-    fn modifier_keys_become_their_bits() {
-        assert_eq!(
-            modifier_bits(true, false, true, true),
-            MODIFIER_ALT | MODIFIER_META | MODIFIER_SHIFT
-        );
-        assert_eq!(modifier_bits(false, true, false, false), MODIFIER_CTRL);
     }
 }

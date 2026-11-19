@@ -22,10 +22,10 @@ use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
-    computer_switch_follows, computer_switch_reason, current_settings, job_line, line_key,
-    may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel, BruhAccess,
-    BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH,
-    COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    computer_switch_follows, computer_switch_off, computer_switch_reason, current_settings,
+    job_line, line_key, may_have_more, merge_runs, settings_commands_for, status_line, transcript,
+    AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT,
+    COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -276,19 +276,26 @@ impl SettingsForm {
         }
     }
 
-    /// Why the Computer switch is off, and whether it is: the shared reason,
-    /// and off with no reason while the service's version is unknown.
-    fn computer_block(&self, protocol: Option<u32>, cx: &App) -> (Option<&'static str>, bool) {
+    /// Why the Computer switch can't work, and whether it is off: the
+    /// shared reason and rule (`computer_switch_reason`,
+    /// `computer_switch_off`).
+    fn computer_block(
+        &self,
+        protocol: Option<u32>,
+        unsupported: bool,
+        cx: &App,
+    ) -> (Option<&'static str>, bool) {
         let provider = AgentProvider::for_model(&value(&self.model, cx));
-        let reason = computer_switch_reason(self.level, provider, protocol);
-        let ready = protocol.is_some_and(bruhs_models::crew::computer_ready);
-        (reason, reason.is_some() || !ready)
+        (
+            computer_switch_reason(self.level, provider, protocol, unsupported),
+            computer_switch_off(self.level, provider, protocol),
+        )
     }
 
     /// The switch follows the stored value where the owner can't or didn't
     /// change it (`computer_switch_follows`).
     fn sync_computer(&mut self, stored: bool, protocol: Option<u32>, cx: &App) {
-        let (_, off) = self.computer_block(protocol, cx);
+        let (_, off) = self.computer_block(protocol, false, cx);
         if let Some(stored) =
             computer_switch_follows(self.computer, self.shown.computer, stored, off)
         {
@@ -1022,17 +1029,14 @@ impl ReactiveAutomations {
                     .bruhs
                     .iter()
                     .find(|bruh| bruh.agent_id == agent_id)?;
-                Some(settings_commands(agent, state, &edited))
+                Some(settings_commands_for(
+                    self.crew.protocol,
+                    agent,
+                    state,
+                    &edited,
+                ))
             })
             .unwrap_or_default();
-        // An older service doesn't know SetComputer.
-        let computer_ready = self.computer_ready();
-        let commands = commands
-            .into_iter()
-            .filter(|command| {
-                computer_ready || !matches!(command, ReactiveCommand::SetComputer { .. })
-            })
-            .collect();
         self.send_all(commands, Scope::General, cx);
         cx.notify();
     }
@@ -1905,7 +1909,8 @@ impl ReactiveAutomations {
             options.iter().filter_map(|(_, reason)| *reason).collect();
         reasons.dedup();
         let full = form.level == AccessLevel::Full;
-        let (computer_reason, computer_off) = form.computer_block(self.crew.protocol, cx);
+        let (computer_reason, computer_off) =
+            form.computer_block(self.crew.protocol, self.computer_unsupported(), cx);
         let access = section("What it may do")
             .child(
                 div()
@@ -2293,8 +2298,12 @@ mod tests {
     ) -> (bool, Option<&'static str>) {
         panel.update(cx, |panel, cx| {
             let protocol = panel.crew.protocol;
+            let unsupported = panel.computer_unsupported();
             let form = panel.bruh_settings_mut().unwrap();
-            (form.computer, form.computer_block(protocol, cx).0)
+            (
+                form.computer,
+                form.computer_block(protocol, unsupported, cx).0,
+            )
         })
     }
 
@@ -2354,6 +2363,27 @@ mod tests {
         click(cx, "desktop-bruh-save");
         assert_eq!(computer_switch(&panel, cx), (true, old));
         assert_eq!(sent(&panel, cx).len(), before, "nothing is sent");
+    }
+
+    /// A system that runs no bruh browser, as the Computer tab's state read
+    /// said: the switch says so, and still turns off.
+    #[gpui::test]
+    fn an_unsupported_system_says_so_on_the_switch(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, true)),
+            BruhTab::Settings,
+        );
+        assert_eq!(computer_switch(&panel, cx), (true, None));
+        panel.update(cx, |panel, cx| panel.set_computer_unsupported(true, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            computer_switch(&panel, cx),
+            (true, Some(bruhs_models::crew::COMPUTER_UNSUPPORTED))
+        );
+        assert!(cx.debug_bounds("desktop-bruh-computer-reason").is_some());
+        click(cx, "desktop-bruh-computer");
+        assert!(!computer_switch(&panel, cx).0, "it still switches off");
     }
 
     /// Turning the switch on and then picking Read only puts it back to the

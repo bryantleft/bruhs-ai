@@ -18,17 +18,16 @@ use super::bruh_page::{
     alert, small_text, Layout, LABEL_TEXT_PX, PAGE_PADDING_PX, RADIUS_GRAPE_PX, SMALL_TEXT_PX,
 };
 use super::create_bruh::{FIELD_TEXT_PX, FIELD_X_PADDING_PX};
-use super::ReactiveAutomations;
+use super::{reactive_error, ReactiveAutomations};
 #[cfg(not(test))]
 use crate::app_state::spawn_tokio;
-use crate::server_client::ServerClient;
+use crate::server_client::{ServerClient, ServerError};
 use crate::theme;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
-use bruhs_models::agent::AgentProvider;
 use bruhs_models::crew::{
-    computer_controls, computer_on, computer_status_line, ComputerControls, ADDRESS_LABEL, BACK,
-    CLOSE_BROWSER, HAND_BACK, LIVE_VIEW_HINT, LIVE_VIEW_LABEL, OPEN_BROWSER, OPEN_IN_WINDOW,
-    RELOAD, TAKE_CONTROL, TAKE_CONTROL_FIRST, USE_THE_WINDOW,
+    computer_controls, computer_hint, computer_status_line, ComputerControls, ComputerGate,
+    ADDRESS_LABEL, BACK, CLOSE_BROWSER, COMPUTER_POLL_MS, HAND_BACK, LIVE_VIEW_LABEL, OPEN_BROWSER,
+    OPEN_IN_WINDOW, RELOAD, TAKE_CONTROL,
 };
 use bruhs_models::local_tools::{
     ComputerInput, ComputerRequest, ComputerState, HeldKeys, MouseButton, Viewport,
@@ -47,8 +46,8 @@ use gpui::{
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 /// How often the tab asks for the state while no live view runs, so a
-/// browser the bruh opens shows up (web `CLOSED_POLL_MS`).
-const CLOSED_POLL: Duration = Duration::from_secs(5);
+/// browser the bruh opens shows up (the web's poll too).
+const CLOSED_POLL: Duration = Duration::from_millis(COMPUTER_POLL_MS);
 /// Web `max-w-5xl`.
 const COLUMN_MAX_PX: f32 = 1024.0;
 /// Web `max-w-[min(100%,max(20rem,calc((100dvh_-_20rem)*1.6)))]` on the
@@ -62,47 +61,6 @@ const ADDRESS_BASIS_PX: f32 = 192.0;
 const BUSY_OPACITY: f32 = 0.6;
 /// The app's own modifier is ⌘ on a Mac, Ctrl elsewhere.
 const MAC: bool = cfg!(target_os = "macos");
-
-/// What the panel knows of this bruh's Computer.
-#[derive(Debug, Clone, Default)]
-struct Gate {
-    name: String,
-    /// Its Computer is on and its access and model allow it.
-    on: bool,
-    /// The service runs Computers.
-    ready: bool,
-    /// Why Computers are off on an older service.
-    reason: Option<&'static str>,
-}
-
-impl ReactiveAutomations {
-    fn computer_gate(&self, agent_id: &str) -> Gate {
-        let bruh = self.snapshot.as_ref().and_then(|snapshot| {
-            let bruh = snapshot
-                .bruhs
-                .iter()
-                .find(|bruh| bruh.agent_id == agent_id)?;
-            let provider = snapshot
-                .agents
-                .iter()
-                .find(|agent| agent.id == agent_id)
-                .map_or(AgentProvider::Claude, |agent| {
-                    AgentProvider::for_model(&agent.model)
-                });
-            Some((
-                bruh.name.clone(),
-                computer_on(bruh.computer, &bruh.access, provider),
-            ))
-        });
-        let (name, on) = bruh.unwrap_or_default();
-        Gate {
-            name,
-            on,
-            ready: self.computer_ready(),
-            reason: self.computer_reason(),
-        }
-    }
-}
 
 /// A bruh's Computer tab.
 pub(crate) struct ComputerView {
@@ -149,6 +107,9 @@ pub(crate) struct ComputerView {
     /// point it last moved to.
     held: Option<(MouseButton, u8, f64, f64)>,
     held_keys: HeldKeys,
+    /// The modifier keys and CapsLock as last seen, so a change of one
+    /// alone goes to the page as its key.
+    held_modifiers: (gpui::Modifiers, bool),
     /// Moves and wheel turns wait for the next frame, newest move and
     /// summed turns winning; anything else sends them first.
     pending_move: Option<ComputerInput>,
@@ -242,6 +203,7 @@ impl ComputerView {
             width: Rc::new(Cell::new(0.0)),
             held: None,
             held_keys: HeldKeys::default(),
+            held_modifiers: Default::default(),
             pending_move: None,
             pending_wheel: None,
             frame_asked: false,
@@ -259,7 +221,7 @@ impl ComputerView {
         self.hold_when_ready = true;
     }
 
-    fn gate(&self, cx: &App) -> Gate {
+    fn gate(&self, cx: &App) -> ComputerGate {
         self.panel
             .upgrade()
             .map(|panel| panel.read(cx).computer_gate(&self.agent_id))
@@ -268,7 +230,7 @@ impl ComputerView {
 
     fn controls(&self, cx: &App) -> ComputerControls {
         let gate = self.gate(cx);
-        computer_controls(self.state.as_ref(), gate.on, gate.ready, true)
+        computer_controls(self.state.as_ref(), gate.on(), gate.ready, true)
     }
 
     fn viewport(&self) -> Viewport {
@@ -280,25 +242,42 @@ impl ComputerView {
 
     /// The line at the top of the tab.
     pub(super) fn status(&self, cx: &App) -> String {
-        let gate = self.gate(cx);
-        if !gate.ready {
-            return gate.reason.unwrap_or_default().to_string();
-        }
-        computer_status_line(self.state.as_ref(), gate.on, &gate.name)
+        computer_status_line(&self.gate(cx), self.state.as_ref())
     }
 
     /// The line under the live view.
     pub(super) fn hint(&self, window: &Window, cx: &App) -> Option<&'static str> {
-        let controls = self.controls(cx);
-        if controls.input {
-            self.focus.is_focused(window).then_some(LIVE_VIEW_HINT)
-        } else if self.state.as_ref().is_some_and(|state| state.headed) {
-            Some(USE_THE_WINDOW)
-        } else if controls.take {
-            Some(TAKE_CONTROL_FIRST)
-        } else {
-            None
+        computer_hint(
+            self.controls(cx),
+            self.state.as_ref(),
+            self.focus.is_focused(window),
+        )
+    }
+
+    /// The state from the service. Settings learns from it whether this
+    /// system runs a bruh's browser.
+    fn set_state(&mut self, next: ComputerState, cx: &mut Context<'_, Self>) {
+        let unsupported = next.unsupported;
+        self.state = Some(next);
+        if let Some(panel) = self.panel.upgrade() {
+            panel.update(cx, |panel, cx| {
+                panel.set_computer_unsupported(unsupported, cx);
+            });
         }
+    }
+
+    /// Reading the state failed: the server's own reason, which the next
+    /// read clears.
+    pub(super) fn read_failed(&mut self, error: ServerError) {
+        self.fetch_failed = true;
+        self.error = Some(reactive_error(error));
+    }
+
+    /// Nothing the tab said still holds: the Computer went off.
+    fn forget_errors(&mut self) {
+        self.error = None;
+        self.fetch_failed = false;
+        self.stream_failed = false;
     }
 
     #[cfg(test)]
@@ -310,18 +289,20 @@ impl ComputerView {
     /// becomes usable, and watch the browser while it runs.
     fn sync(&mut self, cx: &mut Context<'_, Self>) {
         let gate = self.gate(cx);
-        let seen = (gate.on, gate.ready);
+        let seen = (gate.on(), gate.ready);
         if seen != self.gate_seen {
             self.gate_seen = seen;
-            if gate.on && gate.ready {
+            if gate.works() {
                 self.load(None, cx);
+            } else {
+                self.forget_errors();
             }
         }
         let wanted = self
             .state
             .as_ref()
             .and_then(|state| state.session_id.clone())
-            .filter(|_| gate.on && gate.ready);
+            .filter(|_| gate.works());
         match wanted {
             Some(session) => {
                 if self.live.session.as_deref() != Some(session.as_str()) {
@@ -333,9 +314,13 @@ impl ComputerView {
                     self.disconnect();
                     self.clear_frame();
                 }
+                // No live view: its error no longer holds.
+                if std::mem::take(&mut self.stream_failed) {
+                    self.error = None;
+                }
             }
         }
-        if self.hold_when_ready && gate.on && gate.ready && self.pending.is_none() {
+        if self.hold_when_ready && gate.works() && self.pending.is_none() {
             self.hold_when_ready = false;
             self.request(ComputerRequest::TakeControl, cx);
         }
@@ -345,7 +330,7 @@ impl ComputerView {
     /// request on its way answers for itself.
     fn poll(&mut self, cx: &mut Context<'_, Self>) {
         let gate = self.gate(cx);
-        if gate.on && gate.ready && self.pending.is_none() && self.live.session.is_none() {
+        if gate.works() && self.pending.is_none() && self.live.session.is_none() {
             self.load(None, cx);
         }
     }
@@ -375,12 +360,9 @@ impl ComputerView {
                                     this.fetch_failed = false;
                                     this.error = None;
                                 }
-                                this.state = Some(next);
+                                this.set_state(next, cx);
                             }
-                            Err(error) => {
-                                this.fetch_failed = true;
-                                this.error = Some(error.to_string());
-                            }
+                            Err(error) => this.read_failed(error),
                         }
                     }
                     if reconnect.is_some_and(|generation| generation == this.live.generation) {
@@ -419,7 +401,7 @@ impl ComputerView {
             let _ = this.update(cx, |this, cx| {
                 this.pending = None;
                 match result {
-                    Ok(next) => this.state = Some(next),
+                    Ok(next) => this.set_state(next, cx),
                     Err(error) => this.error = Some(error),
                 }
                 this.sync(cx);
@@ -707,11 +689,10 @@ impl ComputerView {
             });
         // Web: the image's `alt` once a frame shows, and while the owner
         // holds control, its label and the hint as its description.
-        let live = live
-            .role(Role::Image)
-            .when(self.frame.is_some() || controls.input, |live| {
-                live.aria_label(LIVE_VIEW_LABEL)
-            });
+        // With neither, it is decoration, as the web's `alt=""` is.
+        let live = live.when(self.frame.is_some() || controls.input, |live| {
+            live.role(Role::Image).aria_label(LIVE_VIEW_LABEL)
+        });
         if !controls.input {
             return live;
         }
@@ -720,6 +701,7 @@ impl ComputerView {
             .on_any_mouse_down(cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::wheel))
             .on_key_up(cx.listener(Self::key_up))
+            .on_modifiers_changed(cx.listener(Self::modifiers_changed))
     }
 }
 
@@ -730,9 +712,9 @@ impl Render for ComputerView {
         }
         self.sync(cx);
         let gate = self.gate(cx);
-        let controls = computer_controls(self.state.as_ref(), gate.on, gate.ready, true);
+        let controls = computer_controls(self.state.as_ref(), gate.on(), gate.ready, true);
         // The live view, and its frame, draw only while the Computer works.
-        if self.frame.is_some() && gate.on && gate.ready {
+        if self.frame.is_some() && gate.works() {
             self.frame_drawn = true;
         }
         // Focus never stays on a live view that no longer takes it.
@@ -775,7 +757,7 @@ impl Render for ComputerView {
             .when_some(self.error.clone(), |body, message| {
                 body.child(alert("desktop-computer-error", message))
             })
-            .when(gate.on && gate.ready, |body| {
+            .when(gate.works(), |body| {
                 body.child(
                     div()
                         .flex()
