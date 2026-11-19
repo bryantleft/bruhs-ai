@@ -754,7 +754,10 @@ mod tests {
         );
         assert_eq!(secret["required"], json!(["login_id", "field"]));
         assert_eq!(secret["additionalProperties"], false);
-        let secret_fields: Vec<_> = secret["properties"].as_object().unwrap().keys().collect();
+        // Key order depends on serde_json's preserve_order feature, which a
+        // workspace build turns on; compare the set.
+        let mut secret_fields: Vec<_> = secret["properties"].as_object().unwrap().keys().collect();
+        secret_fields.sort();
         assert_eq!(secret_fields, ["field", "login_id"]);
         assert_eq!(command["properties"]["submit"]["type"], "boolean");
         assert_eq!(command["additionalProperties"], false);
