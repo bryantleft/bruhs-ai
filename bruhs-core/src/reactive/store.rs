@@ -326,6 +326,15 @@ fn validate_change(connection: &Connection, change: &ReactiveChange) -> Result<(
                 .parse::<ModelId>()
                 .map_err(|_| ReactiveError::Invalid("The agent model ID is invalid.".into()))?;
             path(&agent.project_path)?;
+            // A new agent never takes the id of a deleted bruh whose own
+            // vault entries are still to go: it would inherit them.
+            if get::<ReactiveAgent>(connection, "reactive_agents", &agent.id)?.is_none()
+                && vault_forget_pending(connection, &agent.id)?
+            {
+                return Err(ReactiveError::Conflict(
+                    bruhs_models::crew::BRUH_ID_PENDING_DELETE.into(),
+                ));
+            }
             check_capacity(connection, "reactive_agents", &agent.id)
         }
         ReactiveChange::SaveSource { source } => {
@@ -591,6 +600,18 @@ pub(super) fn vault_forgets(connection: &Connection) -> Result<HashSet<String>, 
     let mut statement = connection.prepare("SELECT agent_id FROM reactive_vault_forget")?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Whether a deleted bruh with this id still has its deletion record.
+fn vault_forget_pending(connection: &Connection, agent_id: &str) -> Result<bool, ReactiveError> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM reactive_vault_forget WHERE agent_id=?1",
+            [agent_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 /// The deletion records of bruhs whose own vault entries are gone.

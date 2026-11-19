@@ -606,3 +606,164 @@ async fn keys_are_listed_by_name_and_matched_own_first() {
     assert_eq!(runtime.usable_value("b", "DEPLOY_TOKEN").await, None);
     assert_eq!(runtime.usable_keys("b").await, ["B_ONLY"]);
 }
+
+#[tokio::test]
+async fn a_hanging_vault_refuses_the_fill_within_the_wait() {
+    let folder = tempfile::tempdir().unwrap();
+    let vault = manager(folder.path(), 0);
+    let login = vault
+        .vault_create(saved_login("Shop", CredentialScope::Global, &canary("pw")))
+        .await
+        .unwrap();
+    let wait = Duration::from_millis(200);
+    let (_dir, runtime, _host, fake) = vault_runtime(vault.clone(), Some(wait)).await;
+    runtime.command(set_vault("a", &[&login.id])).await.unwrap();
+    fake.set_url("a", SHOP);
+    let run = running(&runtime).await;
+    let input = fill(&login.id, "password");
+    // Reached through the vault while it answers.
+    assert_eq!(
+        gate(&runtime, &run, &input).await,
+        Some(PermissionDecision::Allow)
+    );
+    runtime
+        .consume_browser_allowance("a", &input["command"])
+        .await
+        .unwrap()
+        .unwrap();
+    let held = vault.hold_store_for_tests().unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(gate(&runtime, &run, &input).await, deny(LOGIN_NOT_GRANTED));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        runtime
+            .consume_browser_allowance("a", &input["command"])
+            .await
+            .unwrap(),
+        None
+    );
+    let filled = runtime
+        .fill_value("a", &secret(&login.id, SecretField::Password), Some(SHOP))
+        .await;
+    assert_eq!(
+        filled.err(),
+        Some(VaultRefusal::Unavailable(VAULT_READ_FAILED))
+    );
+    assert!(runtime.logins("a").await.is_err());
+    drop(held);
+    // Once the catalog answers again, so does the gate.
+    assert_eq!(
+        gate(&runtime, &run, &input).await,
+        Some(PermissionDecision::Allow)
+    );
+}
+
+#[tokio::test]
+async fn a_forget_that_fails_keeps_its_record_and_tries_again() {
+    let folder = tempfile::tempdir().unwrap();
+    let vault = manager(folder.path(), 0);
+    vault
+        .vault_create(saved_login("Its own", bruh("a"), &canary("pw")))
+        .await
+        .unwrap();
+    let wait = Duration::from_millis(200);
+    let (_dir, runtime, _host, _fake) = vault_runtime(vault.clone(), Some(wait)).await;
+    let held = vault.hold_store_for_tests().unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteAgent { id: "a".into() },
+        })
+        .await
+        .unwrap();
+    // Past a pass's wait, the record is kept.
+    tokio::time::sleep(wait * 3).await;
+    assert_eq!(
+        runtime.vault_forgets_for_tests().await,
+        std::collections::HashSet::from(["a".to_owned()])
+    );
+    drop(held);
+    // The next pass (any change) deletes the entries and then the record.
+    runtime.command(set_vault("b", &[])).await.unwrap();
+    eventually(|| async { runtime.vault_forgets_for_tests().await.is_empty() }).await;
+    assert!(vault.vault_entries().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_new_agent_cannot_take_a_deleted_bruhs_id_until_its_entries_go() {
+    let (_dir, runtime) = runtime_with(&[full_claude("a"), full_claude("b")]).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteAgent { id: "a".into() },
+        })
+        .await
+        .unwrap();
+    let refused = |result: Result<ReactiveSnapshot, ReactiveError>| matches!(result, Err(ReactiveError::Conflict(message)) if message == BRUH_ID_PENDING_DELETE);
+    let create = || ReactiveCommand::CreateBruh {
+        agent: full_claude("a"),
+        look: BruhLook::default(),
+        access: ask(),
+        effort: None,
+    };
+    let save = || ReactiveCommand::Apply {
+        change: ReactiveChange::SaveAgent {
+            agent: full_claude("a"),
+        },
+    };
+    assert!(refused(runtime.command(create()).await));
+    assert!(refused(runtime.command(save()).await));
+    // An existing agent saves as before.
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAgent {
+                agent: ReactiveAgent {
+                    name: "Renamed".into(),
+                    ..full_claude("b")
+                },
+            },
+        })
+        .await
+        .unwrap();
+    // Once the vault has deleted its entries, the id is free.
+    let folder = tempfile::tempdir().unwrap();
+    runtime.attach_vault(manager(folder.path(), 0)).unwrap();
+    eventually(|| async { runtime.vault_forgets_for_tests().await.is_empty() }).await;
+    runtime.command(create()).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_grant_revoked_or_login_deleted_during_the_read_types_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    let vault = manager(folder.path(), 1);
+    let login = vault.vault_create(op_login("Op shop")).await.unwrap();
+    let (_dir, runtime, _host, _fake) = vault_runtime(vault.clone(), None).await;
+    runtime.command(set_vault("a", &[&login.id])).await.unwrap();
+    let wanted = secret(&login.id, SecretField::Password);
+    let fill_soon = || {
+        let (runtime, wanted) = (runtime.clone(), wanted.clone());
+        tokio::spawn(async move { runtime.fill_value("a", &wanted, Some(SHOP)).await.err() })
+    };
+    // The same slow read, left alone, types its value.
+    let filled = runtime.fill_value("a", &wanted, Some(SHOP)).await;
+    assert!(matches!(filled, Ok(FillValue { value, .. }) if value.as_str() == "password-value"));
+
+    let task = fill_soon();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    runtime.command(set_vault("a", &[])).await.unwrap();
+    assert_eq!(
+        task.await.unwrap(),
+        Some(VaultRefusal::Refused(LOGIN_NOT_GRANTED))
+    );
+
+    runtime.command(set_vault("a", &[&login.id])).await.unwrap();
+    let task = fill_soon();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    vault.vault_delete(&login.id).await.unwrap();
+    assert_eq!(
+        task.await.unwrap(),
+        Some(VaultRefusal::Refused(LOGIN_NOT_GRANTED))
+    );
+}

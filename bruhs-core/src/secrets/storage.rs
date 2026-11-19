@@ -236,6 +236,17 @@ impl SecretStore {
         }))))
     }
 
+    /// While the returned guard lives, every read and change of an
+    /// in-memory store waits, like a catalog that doesn't answer. `None`
+    /// for any other store.
+    #[cfg(test)]
+    pub(crate) fn hold_for_tests(&self) -> Option<impl Sized + '_> {
+        match &self.0 {
+            Backend::Memory(vault) => Some(vault.lock().unwrap_or_else(PoisonError::into_inner)),
+            _ => None,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn unavailable() -> Self {
         Self(Backend::Unavailable)

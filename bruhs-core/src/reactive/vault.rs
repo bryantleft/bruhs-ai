@@ -74,7 +74,7 @@ fn login_target(entry: &VaultEntry) -> Option<LoginTarget> {
     };
     Some(LoginTarget {
         login_id: entry.id.clone(),
-        name: entry.name.clone(),
+        name: review_text(&entry.name),
         url: meta.url.clone(),
         origin: meta.origin()?,
         fields: meta.fields(),
@@ -154,9 +154,19 @@ impl ReactiveRuntime {
             .and_then(login_target))
     }
 
-    /// The value to type for `secret`, on `page_url` (the page the gate let
-    /// the fill through on). The grant, the field and the origin are
-    /// checked again first; the value is read within the vault wait.
+    /// The value to type for `secret`, on `page_url`. The grant, the field
+    /// and the origin are checked before the read and the login again
+    /// after it, so a grant revoked or a login deleted while a slow read
+    /// waited (1Password asking the owner) types nothing.
+    ///
+    /// The caller must first use up the step's allowance
+    /// ([`Self::consume_browser_allowance`]) and pass that allowance's
+    /// `page_url`, the page the gate let the fill through on: never the
+    /// live address or anything the request names.
+    ///
+    /// The listing waits at most the vault wait, the read the vault wait
+    /// plus one second, and the check after it the time left, so a fill
+    /// ends within about 61 s with the default 30 s wait.
     ///
     /// # Errors
     ///
@@ -191,6 +201,7 @@ impl ReactiveRuntime {
         if !same_origin(page_url, &login.origin) {
             return Err(VaultRefusal::Refused(LOGIN_WRONG_ORIGIN));
         }
+        let deadline = tokio::time::Instant::now() + self.vault_wait * 2 + BACKSTOP;
         let read = vault.resolve_login(&login.login_id, secret.field);
         let value = match tokio::time::timeout(self.vault_wait + BACKSTOP, read).await {
             Ok(Ok(value)) => value,
@@ -200,6 +211,14 @@ impl ReactiveRuntime {
             }
             Err(_) => return Err(VaultRefusal::Unavailable(KEYCHAIN_NEEDS_OWNER)),
         };
+        // Checked again now the value is here: dropping it zeroes it.
+        let now = tokio::time::timeout_at(deadline, self.login_target(agent_id, &login.login_id));
+        match now.await {
+            Ok(Ok(Some(still)))
+                if still.origin == login.origin && still.fields.contains(&secret.field) => {}
+            Ok(Ok(_)) => return Err(VaultRefusal::Refused(LOGIN_NOT_GRANTED)),
+            Ok(Err(_)) | Err(_) => return Err(VaultRefusal::Unavailable(VAULT_READ_FAILED)),
+        }
         Ok(FillValue {
             login_id: login.login_id,
             origin: login.origin,

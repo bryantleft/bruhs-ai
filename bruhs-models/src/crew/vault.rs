@@ -14,6 +14,10 @@ pub const VAULT_GRANTS_LABEL: &str = "Vault";
 pub const VAULT_GRANTS_HINT: &str =
     "Logins it may fill on their own sites without asking. A key still asks each time it's used.";
 pub const VAULT_GRANTS_NONE: &str = "No shared logins or keys yet. Add one in Settings, Vault.";
+/// A new agent's id is one a deleted bruh had, and that bruh's own vault
+/// entries aren't deleted yet: the new agent would inherit them.
+pub const BRUH_ID_PENDING_DELETE: &str =
+    "A deleted bruh used this ID and its own vault entries aren't removed yet. Use another ID.";
 const TOO_MANY_GRANTS: &str = "Grant at most 64 vault entries.";
 const NOT_AN_ENTRY: &str = "That isn't a vault entry.";
 
