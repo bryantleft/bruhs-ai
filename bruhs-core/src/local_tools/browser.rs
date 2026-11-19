@@ -186,6 +186,7 @@ impl Browser {
         let profile = Profile::open(options.profile.as_deref()).await?;
         if let Some(kept) = options.profile.as_deref() {
             release_profile(kept, policy).await?;
+            seal_preferences(kept).await?;
         }
         let mut child = Command::new(executable)
             .args(launch_args(options, profile.path(), &user_agent))
@@ -598,6 +599,54 @@ async fn write_pid_file(profile: &Path, child: &Mutex<Child>) -> Option<PathBuf>
             None
         }
     }
+}
+
+/// Profile prefs every launch of a kept profile starts with, whatever the
+/// owner changed in a window: Chrome saves no passwords and fills no forms,
+/// so nothing typed in the window is stored and filled into pages the bruh
+/// drives later.
+const SEALED_PREFS: [(&str, &str); 4] = [
+    ("credentials_enable_service", ""),
+    ("profile", "password_manager_enabled"),
+    ("autofill", "profile_enabled"),
+    ("autofill", "credit_card_enabled"),
+];
+
+/// Write [`SEALED_PREFS`] as false into the kept profile's
+/// `Default/Preferences`, keeping every other pref. Runs while no Chrome
+/// holds the profile, so Chrome reads them as it starts. A file that isn't
+/// a JSON object is replaced, as Chrome itself would reset it.
+pub(super) async fn seal_preferences(profile: &Path) -> Result<(), ToolError> {
+    let folder = profile.join("Default");
+    let mut builder = tokio::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(&folder).await?;
+    let file = folder.join("Preferences");
+    let mut prefs = match tokio::fs::read(&file).await {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({})),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
+        Err(error) => return Err(error.into()),
+    };
+    for (group, key) in SEALED_PREFS {
+        if key.is_empty() {
+            prefs[group] = false.into();
+            continue;
+        }
+        if !prefs[group].is_object() {
+            prefs[group] = json!({});
+        }
+        prefs[group][key] = false.into();
+    }
+    // Written beside it and renamed, so a failed write never leaves half a file.
+    let written = folder.join("Preferences.bruhs");
+    tokio::fs::write(&written, serde_json::to_vec(&prefs)?).await?;
+    tokio::fs::rename(&written, &file).await?;
+    Ok(())
 }
 
 /// Before a kept profile opens. A Chrome that a crashed Bruhs left running on

@@ -386,6 +386,42 @@ fn kept_profiles_keep_their_cache_in_the_bruh_tree() {
         .any(|arg| arg.starts_with("--disk-cache-dir")));
 }
 
+/// A kept profile saves no passwords and fills no forms, whatever an
+/// earlier window set; its other prefs stay.
+#[tokio::test]
+async fn kept_profiles_launch_without_the_password_manager() {
+    let home = tempfile::tempdir().unwrap();
+    let profile = home.path().join("browser");
+    let sealed = |prefs: &serde_json::Value| {
+        prefs["credentials_enable_service"] == false
+            && prefs["profile"]["password_manager_enabled"] == false
+            && prefs["autofill"]["profile_enabled"] == false
+            && prefs["autofill"]["credit_card_enabled"] == false
+    };
+    let read = || -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(profile.join("Default/Preferences")).unwrap())
+            .unwrap()
+    };
+    // A first launch has no Preferences yet.
+    browser::seal_preferences(&profile).await.unwrap();
+    assert!(sealed(&read()), "{}", read());
+    // The owner turned saving back on in a window; other prefs are kept.
+    std::fs::write(
+        profile.join("Default/Preferences"),
+        r#"{"credentials_enable_service":true,"profile":{"name":"Bruh","password_manager_enabled":true},"autofill":"odd","session":{"restore_on_startup":1}}"#,
+    )
+    .unwrap();
+    browser::seal_preferences(&profile).await.unwrap();
+    let prefs = read();
+    assert!(sealed(&prefs), "{prefs}");
+    assert_eq!(prefs["profile"]["name"], "Bruh");
+    assert_eq!(prefs["session"]["restore_on_startup"], 1);
+    // A file that isn't JSON is replaced, as Chrome would reset it.
+    std::fs::write(profile.join("Default/Preferences"), "not json").unwrap();
+    browser::seal_preferences(&profile).await.unwrap();
+    assert!(sealed(&read()));
+}
+
 #[test]
 fn bruh_browsers_deny_downloads_in_a_window_too() {
     use browser::LaunchOptions;
@@ -862,6 +898,12 @@ async fn live_bruh_profile_keeps_a_cookie_across_a_graceful_close() {
         profile.join("Default").exists(),
         "the profile outlives its browser"
     );
+    // Chrome kept the sealed prefs when it wrote the profile.
+    let prefs: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(profile.join("Default/Preferences")).unwrap())
+            .unwrap();
+    assert_eq!(prefs["credentials_enable_service"], false, "{prefs}");
+    assert_eq!(prefs["profile"]["password_manager_enabled"], false);
     let mut second = Browser::start(&client, start("/check"), ProcessPolicy::default(), &options)
         .await
         .unwrap();
