@@ -57,6 +57,9 @@ pub enum SecretError {
     Catalog,
     #[error("The saved credential is unavailable. Enter a new value or decline.")]
     NotSaved,
+    /// Another save changed the entry first; nothing was written.
+    #[error("{}", bruhs_models::vault::ENTRY_CHANGED)]
+    Conflict,
 }
 
 struct Pending {
@@ -119,12 +122,12 @@ impl SecretManager {
     }
 
     /// Create a vault entry. The caller has canonicalized a project path
-    /// and checked that a bruh exists.
+    /// and checked that a bruh exists. The store runs
+    /// `VaultCreate::validate` first and scrubs a refused input's values.
     pub async fn vault_create(
         &self,
-        mut create: bruhs_models::vault::VaultCreate,
+        create: bruhs_models::vault::VaultCreate,
     ) -> Result<bruhs_models::vault::VaultEntry, SecretError> {
-        create.validate().map_err(SecretError::Invalid)?;
         self.store.vault_create(create).await
     }
 

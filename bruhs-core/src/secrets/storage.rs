@@ -30,13 +30,16 @@ struct KeyMap {
     hooks: KeyHooks,
 }
 
-/// Test-only faults: refused writes and reads that wait like an unanswered
-/// keychain prompt.
+/// Test-only faults: refused changes and reads that wait like an
+/// unanswered keychain prompt.
 #[cfg(test)]
 #[derive(Default)]
 struct KeyHooks {
-    writes_left: Mutex<Option<usize>>,
+    /// Writes and removals that succeed before every later one fails.
+    changes_left: Mutex<Option<usize>>,
     reads_held: (Mutex<bool>, std::sync::Condvar),
+    /// Reads waiting on `reads_held` right now.
+    waiting: std::sync::atomic::AtomicUsize,
 }
 
 impl KeyMap {
@@ -47,7 +50,9 @@ impl KeyMap {
     fn read(&self, account: &str) -> Option<Zeroizing<String>> {
         #[cfg(test)]
         {
+            use std::sync::atomic::Ordering;
             let (held, open) = &self.hooks.reads_held;
+            self.hooks.waiting.fetch_add(1, Ordering::SeqCst);
             drop(
                 open.wait_while(
                     held.lock().unwrap_or_else(PoisonError::into_inner),
@@ -55,6 +60,7 @@ impl KeyMap {
                 )
                 .unwrap_or_else(PoisonError::into_inner),
             );
+            self.hooks.waiting.fetch_sub(1, Ordering::SeqCst);
         }
         self.lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -64,9 +70,28 @@ impl KeyMap {
 
     fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
         #[cfg(test)]
+        self.change()?;
+        self.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(account.to_owned(), Zeroizing::new(value.to_owned()));
+        Ok(())
+    }
+
+    fn remove(&self, account: &str) -> Result<(), SecretError> {
+        #[cfg(test)]
+        self.change()?;
+        self.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(account);
+        Ok(())
+    }
+
+    /// Whether a test still lets this write or removal through.
+    #[cfg(test)]
+    fn change(&self) -> Result<(), SecretError> {
         if let Some(left) = self
             .hooks
-            .writes_left
+            .changes_left
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_mut()
@@ -76,20 +101,24 @@ impl KeyMap {
             }
             *left -= 1;
         }
-        self.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(account.to_owned(), Zeroizing::new(value.to_owned()));
         Ok(())
     }
 
-    /// Let `count` more writes succeed, then refuse every later one.
+    /// Let `count` more writes and removals succeed, then refuse every
+    /// later one; `None` lets every one through again.
     #[cfg(test)]
-    fn refuse_writes_after(&self, count: usize) {
+    fn refuse_writes_after(&self, count: Option<usize>) {
         *self
             .hooks
-            .writes_left
+            .changes_left
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(count);
+            .unwrap_or_else(PoisonError::into_inner) = count;
+    }
+
+    /// How many reads are waiting on [`Self::hold_reads`].
+    #[cfg(test)]
+    fn held_reads(&self) -> usize {
+        self.hooks.waiting.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// While held, every read waits, like a keychain prompt nobody answers.
@@ -129,7 +158,9 @@ enum Keys {
 
 struct Vault {
     catalog: Catalog,
-    vault: VaultCatalog,
+    /// `vault.json`, read on first use, so a damaged or newer file stops
+    /// vault operations only, never legacy thread saves and reads.
+    vault: Option<VaultCatalog>,
     keys: Keys,
     directory: Option<PathBuf>,
 }
@@ -177,12 +208,7 @@ impl Keys {
         match self {
             #[cfg(test)]
             Self::Unavailable => Err(SecretError::Storage),
-            Self::Memory(keys) => {
-                keys.lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(account);
-                Ok(())
-            }
+            Self::Memory(keys) => keys.remove(account),
             Self::Os => match keyring::Entry::new(KEYCHAIN_SERVICE, account)
                 .map_err(|_| SecretError::Storage)?
                 .delete_credential()
@@ -203,7 +229,7 @@ impl SecretStore {
     pub fn in_memory() -> Self {
         Self(Backend::Memory(Arc::new(Mutex::new(Vault {
             catalog: Catalog::default(),
-            vault: VaultCatalog::default(),
+            vault: Some(VaultCatalog::default()),
             keys: Keys::Memory(Arc::default()),
             directory: None,
         }))))
@@ -296,17 +322,22 @@ impl SecretStore {
         })
     }
 
-    /// Register a value saved by the first, unindexed implementation when its name is known.
+    /// A project's value by name. Registers a value saved by the first,
+    /// unindexed implementation. The keychain is read without the lock;
+    /// the lock is taken only to add a missing catalog row.
     pub(super) async fn find(
         &self,
         project: &str,
         name: &str,
     ) -> Result<Option<Zeroizing<String>>, SecretError> {
+        let key = storage_key(Path::new(project), name);
+        let value = self.get(&key).await?;
+        if value.is_none() || self.list().await?.iter().any(|entry| entry.id == key) {
+            return Ok(value);
+        }
         let (project, name) = (project.to_owned(), name.to_owned());
         self.access(move |vault| {
-            let key = storage_key(Path::new(&project), &name);
-            let value = vault.get(&key)?;
-            if value.is_some() && !vault.catalog.entries.contains_key(&key) {
+            if !vault.catalog.entries.contains_key(&key) {
                 vault.catalog.entries.insert(
                     key.clone(),
                     SavedCredential {
@@ -318,9 +349,10 @@ impl SecretStore {
                 );
                 vault.persist()?;
             }
-            Ok(value)
+            Ok(())
         })
-        .await
+        .await?;
+        Ok(value)
     }
 
     /// Save an approved project credential. Only names and project paths enter the catalog.
@@ -379,10 +411,6 @@ impl SecretStore {
 }
 
 impl Vault {
-    fn get(&self, key: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
-        self.keys.read(key)
-    }
-
     fn delete_saved(&mut self, id: &str) -> Result<(), SecretError> {
         let Some(entry) = self.catalog.entries.get_mut(id) else {
             return Err(SecretError::NotSaved);
@@ -465,10 +493,9 @@ fn with_catalog<T>(
         .map_err(|_| SecretError::Catalog)?;
     lock.lock().map_err(|_| SecretError::Catalog)?;
     let catalog = read_catalog(directory)?;
-    let vault = vault::read_vault_catalog(directory)?;
     let result = operation(&mut Vault {
         catalog,
-        vault,
+        vault: None,
         keys,
         directory: Some(directory.into()),
     });

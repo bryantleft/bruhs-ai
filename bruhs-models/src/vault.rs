@@ -78,6 +78,8 @@ pub const ENTRY_UPDATED: &str = "Saved.";
 
 // Validation copy.
 pub const DUPLICATE_NAME: &str = "Another entry used there has that name.";
+/// Two saves of one entry crossed; the later one changed nothing.
+pub const ENTRY_CHANGED: &str = "This entry changed while you were saving. Try again.";
 pub const ENTER_NAME: &str = "Enter a name.";
 pub const NAME_CHARACTERS: &str = "Names can't contain control or formatting characters.";
 pub const NAME_TOO_LONG: &str = "Keep names under 80 characters.";

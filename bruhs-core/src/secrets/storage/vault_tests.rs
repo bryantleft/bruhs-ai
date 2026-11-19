@@ -181,8 +181,25 @@ async fn entries_of_every_scope_and_kind_round_trip_without_values() {
     assert_eq!((totp.digits, totp.period), (6, 30));
     assert_eq!(totp.algorithm, bruhs_models::vault::TotpAlgorithm::Sha1);
     assert!(store.vault_secret(&reference.id).await.unwrap().is_none());
-    assert!(store.vault_secret("v1-unknown").await.unwrap().is_none());
     assert_eq!(accounts(&store).len(), 2);
+    assert!(matches!(
+        store.vault_secret("v1-unknown").await,
+        Err(SecretError::NotSaved)
+    ));
+    // A key or Saved login whose item went missing is NotSaved, never None.
+    for (entry, account) in [
+        (&global, format!("vault:global:{}", global.id)),
+        (&login, format!("vault:bruh:a:{}", login.id)),
+    ] {
+        memory_keys(&store)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&account);
+        assert!(matches!(
+            store.vault_secret(&entry.id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
 }
 
 #[tokio::test]
@@ -510,13 +527,15 @@ async fn older_readers_still_parse_the_catalog_after_vault_entries() {
 }
 
 #[tokio::test]
-async fn a_damaged_vault_file_fails_closed() {
+async fn a_damaged_vault_file_fails_closed_for_vault_operations_only() {
     let directory = tempfile::tempdir().unwrap();
     let store = SecretStore(Backend::FileTest(directory.path().into(), Arc::default()));
+    let legacy = canary("legacy");
     store
-        .save("/p", "KEY", Zeroizing::new(canary("legacy")))
+        .save("/p", "KEY", Zeroizing::new(legacy.clone()))
         .await
         .unwrap();
+    let id = storage_key(Path::new("/p"), "KEY");
     for damaged in [
         "broken",
         r#"{"version":1,"entries":{},"extra":true}"#,
@@ -534,13 +553,48 @@ async fn a_damaged_vault_file_fails_closed() {
                 .await,
             Err(SecretError::Catalog)
         ));
+        // Thread saves and reads of project keys never need vault.json.
+        let other = canary("other");
+        store
+            .save("/p", "OTHER", Zeroizing::new(other.clone()))
+            .await
+            .unwrap();
+        store.replace(&id, legacy.clone()).await.unwrap();
+        assert_eq!(
+            store
+                .find("/p", "OTHER")
+                .await
+                .unwrap()
+                .as_deref()
+                .map(String::as_str),
+            Some(&*other)
+        );
+        assert_eq!(
+            store.get(&id).await.unwrap().as_deref().map(String::as_str),
+            Some(&*legacy)
+        );
+        assert_eq!(
+            store.request_match("/p", "KEY").await.unwrap(),
+            Some((id.clone(), SavedSource::Project))
+        );
+        assert_eq!(
+            store
+                .vault_entry(&id)
+                .await
+                .unwrap()
+                .map(|entry| entry.name),
+            Some("KEY".to_owned())
+        );
+        store
+            .delete_saved(&storage_key(Path::new("/p"), "OTHER"))
+            .await
+            .unwrap();
+        assert_eq!(store.list().await.unwrap().len(), 1);
         assert_eq!(
             fs::read_to_string(directory.path().join("vault.json")).unwrap(),
             damaged
         );
     }
-    // Today's listing reads catalog.json only.
-    assert_eq!(store.list().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -615,7 +669,7 @@ async fn a_failed_keychain_write_leaves_needs_attention() {
     ));
     let directory = tempfile::tempdir().unwrap();
     let keys: MemoryKeys = Arc::default();
-    keys.refuse_writes_after(1);
+    keys.refuse_writes_after(Some(1));
     let store = SecretStore(Backend::FileTest(directory.path().into(), keys));
     let first = store
         .vault_create(key("KEY", CredentialScope::Global, &canary("value")))
@@ -657,21 +711,26 @@ async fn a_blocked_keychain_read_never_holds_the_catalog_lock() {
         .vault_create(key("KEY", CredentialScope::Global, &canary("value")))
         .await
         .unwrap();
-    /// Opens held reads even when an assertion fails, so the runtime's
-    /// blocking pool can shut down.
-    struct Release(MemoryKeys);
-    impl Drop for Release {
-        fn drop(&mut self) {
-            self.0.hold_reads(false);
-        }
-    }
-    keys.hold_reads(true);
-    let release = Release(keys.clone());
-    let reader = {
+    store
+        .save("/p", "KEY", Zeroizing::new(canary("legacy")))
+        .await
+        .unwrap();
+    let release = Release::hold(&keys);
+    let secret = {
         let store = store.clone();
         let id = global.id.clone();
         tokio::spawn(async move { store.vault_secret(&id).await.map(|found| found.is_some()) })
     };
+    let legacy = {
+        let store = store.clone();
+        let id = storage_key(Path::new("/p"), "KEY");
+        tokio::spawn(async move { store.get(&id).await.map(|found| found.is_some()) })
+    };
+    let found = {
+        let store = store.clone();
+        tokio::spawn(async move { store.find("/p", "KEY").await.map(|found| found.is_some()) })
+    };
+    held_reads(&keys, 3).await;
     let created = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         store.vault_create(key("OTHER", CredentialScope::Global, &canary("value"))),
@@ -679,9 +738,275 @@ async fn a_blocked_keychain_read_never_holds_the_catalog_lock() {
     .await
     .expect("a blocked read doesn't hold the lock");
     created.unwrap();
-    assert!(!reader.is_finished());
+    store
+        .save("/p", "NEXT", Zeroizing::new(canary("next")))
+        .await
+        .unwrap();
+    assert!(!secret.is_finished() && !legacy.is_finished() && !found.is_finished());
     drop(release);
-    assert!(reader.await.unwrap().unwrap());
+    for reader in [secret, legacy, found] {
+        assert!(reader.await.unwrap().unwrap());
+    }
+}
+
+/// Holds keychain reads until dropped, so a failed assertion never leaves
+/// the runtime's blocking pool waiting.
+struct Release(MemoryKeys);
+
+impl Release {
+    fn hold(keys: &MemoryKeys) -> Self {
+        keys.hold_reads(true);
+        Self(keys.clone())
+    }
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.hold_reads(false);
+    }
+}
+
+/// Wait until `count` reads are held.
+async fn held_reads(keys: &MemoryKeys, count: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while keys.held_reads() < count {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the reads reach the keychain");
+}
+
+const OTHER_SETUP_KEY: &str = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+
+#[tokio::test]
+async fn a_crossed_save_never_writes_back_an_older_password() {
+    let store = SecretStore::in_memory();
+    let keys = memory_keys(&store);
+    let login = store
+        .vault_create(saved_login(
+            "Example",
+            CredentialScope::Global,
+            &canary("old"),
+            TotpInput::Keep,
+        ))
+        .await
+        .unwrap();
+    // Both saves below keep this row's metadata, so only the item's
+    // revision tells them apart.
+    store
+        .vault_update(
+            &login.id,
+            login_update("https://example.com/in", None, TotpInput::Keep),
+        )
+        .await
+        .unwrap();
+    let release = Release::hold(&keys);
+    // B adds a setup key and keeps the password, so it reads the old one.
+    let crossed = {
+        let store = store.clone();
+        let id = login.id.clone();
+        tokio::spawn(async move {
+            let update = login_update(
+                "https://example.com/in",
+                None,
+                TotpInput::Set {
+                    setup: SETUP_KEY.into(),
+                },
+            );
+            store.vault_update(&id, update).await.map(|_| ())
+        })
+    };
+    held_reads(&keys, 1).await;
+    // A sets a new password and needs no read.
+    let newer = canary("newer");
+    store
+        .vault_update(
+            &login.id,
+            login_update("https://example.com/in", Some(&newer), TotpInput::Keep),
+        )
+        .await
+        .unwrap();
+    drop(release);
+    let error = crossed.await.unwrap().unwrap_err();
+    assert!(matches!(error, SecretError::Conflict));
+    assert_eq!(error.to_string(), bruhs_models::vault::ENTRY_CHANGED);
+    let stored = secret(&store, &login.id).await;
+    assert_eq!(
+        stored.password.as_deref().map(String::as_str),
+        Some(&*newer)
+    );
+    assert!(stored.totp.is_none());
+    // Tried again from a fresh read, B keeps A's password.
+    store
+        .vault_update(
+            &login.id,
+            login_update(
+                "https://example.com/in",
+                None,
+                TotpInput::Set {
+                    setup: SETUP_KEY.into(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let stored = secret(&store, &login.id).await;
+    assert_eq!(
+        stored.password.as_deref().map(String::as_str),
+        Some(&*newer)
+    );
+    assert_eq!(totp_of(&stored).secret.as_slice(), b"12345678901234567890");
+}
+
+#[tokio::test]
+async fn a_crossed_save_never_writes_back_an_older_setup_key() {
+    let store = SecretStore::in_memory();
+    let keys = memory_keys(&store);
+    let login = store
+        .vault_create(saved_login(
+            "Example",
+            CredentialScope::Global,
+            &canary("old"),
+            TotpInput::Set {
+                setup: SETUP_KEY.into(),
+            },
+        ))
+        .await
+        .unwrap();
+    // Both saves below keep this row's metadata, so only the item's
+    // revision tells them apart.
+    store
+        .vault_update(
+            &login.id,
+            login_update("https://example.com/in", None, TotpInput::Keep),
+        )
+        .await
+        .unwrap();
+    let release = Release::hold(&keys);
+    // B sets a password and keeps the setup key, so it reads the old one.
+    let crossed = {
+        let store = store.clone();
+        let id = login.id.clone();
+        let password = canary("crossed");
+        tokio::spawn(async move {
+            let update = login_update("https://example.com/in", Some(&password), TotpInput::Keep);
+            store.vault_update(&id, update).await.map(|_| ())
+        })
+    };
+    held_reads(&keys, 1).await;
+    let newer = canary("newer");
+    store
+        .vault_update(
+            &login.id,
+            login_update(
+                "https://example.com/in",
+                Some(&newer),
+                TotpInput::Set {
+                    setup: OTHER_SETUP_KEY.into(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    drop(release);
+    assert!(matches!(crossed.await.unwrap(), Err(SecretError::Conflict)));
+    let stored = secret(&store, &login.id).await;
+    assert_eq!(
+        stored.password.as_deref().map(String::as_str),
+        Some(&*newer)
+    );
+    let other = bruhs_models::vault::base32_decode(OTHER_SETUP_KEY).unwrap();
+    assert_eq!(totp_of(&stored).secret.as_slice(), other.as_slice());
+}
+
+#[tokio::test]
+async fn a_failed_switch_to_one_password_removes_the_blob_on_the_next_save() {
+    let store = SecretStore::in_memory();
+    let keys = memory_keys(&store);
+    let login = store
+        .vault_create(saved_login(
+            "Example",
+            CredentialScope::Global,
+            &canary("password"),
+            TotpInput::Keep,
+        ))
+        .await
+        .unwrap();
+    let account = format!("vault:global:{}", login.id);
+    let switch = || VaultUpdate {
+        secret: VaultSecretInput::Login {
+            url: "https://example.com/in".into(),
+            fields: LoginInput::OnePassword {
+                username: "op://P/I/username".into(),
+                password: "op://P/I/password".into(),
+                totp: None,
+            },
+        },
+    };
+    keys.refuse_writes_after(Some(0));
+    assert!(matches!(
+        store.vault_update(&login.id, switch()).await,
+        Err(SecretError::Storage)
+    ));
+    let pending = store.vault_entry(&login.id).await.unwrap().unwrap();
+    assert_eq!(pending.state, SavedCredentialState::NeedsAttention);
+    assert!(matches!(
+        &pending.kind,
+        VaultKind::Login(meta) if matches!(meta.fields, LoginFields::OnePassword { .. })
+    ));
+    assert!(item(&store, &account).is_some());
+    keys.refuse_writes_after(None);
+    let saved = store.vault_update(&login.id, switch()).await.unwrap();
+    assert_eq!(saved.state, SavedCredentialState::Saved);
+    assert!(item(&store, &account).is_none());
+    // Settled, a 1Password update touches the keychain no more.
+    keys.refuse_writes_after(Some(0));
+    assert_eq!(
+        store.vault_update(&login.id, switch()).await.unwrap().state,
+        SavedCredentialState::Saved
+    );
+}
+
+#[tokio::test]
+async fn refused_inputs_change_nothing() {
+    let store = SecretStore::in_memory();
+    let login = store
+        .vault_create(saved_login(
+            "Example",
+            CredentialScope::Global,
+            &canary("password"),
+            TotpInput::Keep,
+        ))
+        .await
+        .unwrap();
+    // A missing item stops an update that keeps the password.
+    memory_keys(&store)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    assert!(matches!(
+        store
+            .vault_update(
+                &login.id,
+                login_update(
+                    "https://example.com/in",
+                    None,
+                    TotpInput::Set {
+                        setup: SETUP_KEY.into()
+                    }
+                )
+            )
+            .await,
+        Err(SecretError::NotSaved)
+    ));
+    assert!(matches!(
+        store
+            .vault_create(key(" ", CredentialScope::Global, &canary("value")))
+            .await,
+        Err(SecretError::Invalid(bruhs_models::vault::ENTER_NAME))
+    ));
+    assert_eq!(store.vault_list().await.unwrap(), vec![login]);
 }
 
 #[tokio::test]

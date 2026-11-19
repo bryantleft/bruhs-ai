@@ -38,6 +38,11 @@ const ID_PREFIX: &str = "v1-";
 pub(super) struct VaultCatalog {
     version: u32,
     entries: BTreeMap<String, VaultEntry>,
+    /// Per entry, how many times its keychain item was written or removed.
+    /// An update that read the item before the lock writes only if this
+    /// is still what it read, so it never writes back an older value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    revisions: BTreeMap<String, u64>,
 }
 
 impl Default for VaultCatalog {
@@ -45,11 +50,19 @@ impl Default for VaultCatalog {
         Self {
             version: VAULT_VERSION,
             entries: BTreeMap::new(),
+            revisions: BTreeMap::new(),
         }
     }
 }
 
+impl VaultCatalog {
+    fn revision(&self, id: &str) -> u64 {
+        self.revisions.get(id).copied().unwrap_or_default()
+    }
+}
+
 /// An entry's keychain values, read for one use. No `Debug` or `Clone`.
+/// Only the fields of the entry's kind are set.
 #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 6"))]
 pub(in crate::secrets) struct VaultSecret {
     /// A key's value.
@@ -155,6 +168,24 @@ impl LoginBlob {
             }
         };
         Ok(Self { password, totp })
+    }
+}
+
+/// What an update does to a Saved login's one-time code setup. A pasted
+/// setup moves into `Zeroizing` before anything can fail.
+enum TotpChange {
+    Keep,
+    Remove,
+    Set(Zeroizing<String>),
+}
+
+impl From<TotpInput> for TotpChange {
+    fn from(input: TotpInput) -> Self {
+        match input {
+            TotpInput::Keep => Self::Keep,
+            TotpInput::Remove => Self::Remove,
+            TotpInput::Set { setup } => Self::Set(Zeroizing::new(setup)),
+        }
     }
 }
 
@@ -285,15 +316,24 @@ fn parsed_totp(setup: &str) -> Result<StoredTotp, SecretError> {
 }
 
 impl Vault {
+    /// `vault.json`, read on first use under the lock.
+    fn vault(&mut self) -> Result<&mut VaultCatalog, SecretError> {
+        if self.vault.is_none() {
+            let directory = self.directory.as_deref().ok_or(SecretError::Catalog)?;
+            self.vault = Some(read_vault_catalog(directory)?);
+        }
+        self.vault.as_mut().ok_or(SecretError::Catalog)
+    }
+
     fn persist_vault(&self) -> Result<(), SecretError> {
-        match &self.directory {
-            Some(directory) => write_atomically(directory, VAULT_FILE, &self.vault),
-            None => Ok(()),
+        match (&self.directory, &self.vault) {
+            (Some(directory), Some(vault)) => write_atomically(directory, VAULT_FILE, vault),
+            _ => Ok(()),
         }
     }
 
     /// Names are unique per scope across both files, compared trimmed.
-    fn ensure_unique(&self, scope: &CredentialScope, name: &str) -> Result<(), SecretError> {
+    fn ensure_unique(&mut self, scope: &CredentialScope, name: &str) -> Result<(), SecretError> {
         let legacy = match scope {
             CredentialScope::Project { path } => self
                 .catalog
@@ -303,7 +343,7 @@ impl Vault {
             CredentialScope::Global | CredentialScope::Bruh { .. } => false,
         };
         let vault = self
-            .vault
+            .vault()?
             .entries
             .values()
             .any(|entry| entry.scope == *scope && entry.name.trim() == name);
@@ -313,28 +353,31 @@ impl Vault {
         Ok(())
     }
 
-    /// Store a `vault.json` row, intent first: a row with a new item is
-    /// persisted as needing attention, the item is written, then the row
-    /// is persisted as saved.
+    /// Store a `vault.json` row, intent first: a row whose item changes is
+    /// persisted as needing attention with its revision bumped, the item
+    /// is written or removed, then the row is persisted as saved.
     fn put(&mut self, mut entry: VaultEntry, item: Item) -> Result<VaultEntry, SecretError> {
         let id = entry.id.clone();
         entry.attention = None;
-        if matches!(item, Item::Keep) {
-            self.vault.entries.insert(id, entry.clone());
-            self.persist_vault()?;
-            return Ok(entry);
+        let changes_item = !matches!(item, Item::Keep);
+        if changes_item {
+            entry.state = SavedCredentialState::NeedsAttention;
         }
-        entry.state = SavedCredentialState::NeedsAttention;
         let account = account(&entry);
-        self.vault.entries.insert(id.clone(), entry);
+        let vault = self.vault()?;
+        vault.entries.insert(id.clone(), entry.clone());
+        if changes_item {
+            let revision = vault.revisions.entry(id.clone()).or_default();
+            *revision = revision.wrapping_add(1);
+        }
         self.persist_vault()?;
         match item {
+            Item::Keep => return Ok(entry),
             Item::Write(value) => self.keys.write(&account, &value)?,
             Item::Remove => self.keys.remove(&account)?,
-            Item::Keep => {}
         }
         let entry = self
-            .vault
+            .vault()?
             .entries
             .get_mut(&id)
             .ok_or(SecretError::Catalog)?;
@@ -346,7 +389,7 @@ impl Vault {
 
     /// Remove a `vault.json` row and its item, intent first.
     fn remove(&mut self, id: &str) -> Result<(), SecretError> {
-        let Some(entry) = self.vault.entries.get_mut(id) else {
+        let Some(entry) = self.vault()?.entries.get_mut(id) else {
             return Err(SecretError::NotSaved);
         };
         entry.state = SavedCredentialState::NeedsAttention;
@@ -354,7 +397,9 @@ impl Vault {
         self.persist_vault()?;
         // Every kind: a 1Password entry may keep a Saved login's old blob.
         self.keys.remove(&account)?;
-        self.vault.entries.remove(id);
+        let vault = self.vault()?;
+        vault.entries.remove(id);
+        vault.revisions.remove(id);
         self.persist_vault()
     }
 }
@@ -362,21 +407,26 @@ impl Vault {
 /// A metadata snapshot and a keychain handle, taken without the lock.
 struct Snapshot {
     catalog: Catalog,
-    vault: VaultCatalog,
+    /// `None` when `vault.json` can't be read; legacy rows still can.
+    vault: Option<VaultCatalog>,
     keys: Keys,
 }
 
 impl Snapshot {
-    fn entries(&self) -> Vec<VaultEntry> {
-        merged(&self.catalog, &self.vault)
+    fn vault(&self) -> Result<&VaultCatalog, SecretError> {
+        self.vault.as_ref().ok_or(SecretError::Catalog)
     }
 
-    fn entry(&self, id: &str) -> Option<VaultEntry> {
-        self.catalog
-            .entries
-            .get(id)
-            .map(legacy_entry)
-            .or_else(|| self.vault.entries.get(id).cloned())
+    fn entries(&self) -> Result<Vec<VaultEntry>, SecretError> {
+        Ok(merged(&self.catalog, self.vault()?))
+    }
+
+    /// A legacy row needs only `catalog.json`.
+    fn entry(&self, id: &str) -> Result<Option<VaultEntry>, SecretError> {
+        match self.catalog.entries.get(id) {
+            Some(credential) => Ok(Some(legacy_entry(credential))),
+            None => Ok(self.vault()?.entries.get(id).cloned()),
+        }
     }
 }
 
@@ -390,7 +440,7 @@ impl SecretStore {
                 let directory = super::catalog_directory()?;
                 Ok(Snapshot {
                     catalog: read_catalog(&directory)?,
-                    vault: read_vault_catalog(&directory)?,
+                    vault: read_vault_catalog(&directory).ok(),
                     keys: Keys::Os,
                 })
             }
@@ -407,7 +457,7 @@ impl SecretStore {
             #[cfg(test)]
             Backend::FileTest(directory, keys) => Ok(Snapshot {
                 catalog: read_catalog(&directory)?,
-                vault: read_vault_catalog(&directory)?,
+                vault: read_vault_catalog(&directory).ok(),
                 keys: Keys::Memory(keys),
             }),
         })
@@ -419,11 +469,11 @@ impl SecretStore {
     /// the rest from `vault.json`, sorted by scope then name. Never reads
     /// the keychain.
     pub async fn vault_list(&self) -> Result<Vec<VaultEntry>, SecretError> {
-        Ok(self.snapshot().await?.entries())
+        self.snapshot().await?.entries()
     }
 
     pub async fn vault_entry(&self, id: &str) -> Result<Option<VaultEntry>, SecretError> {
-        Ok(self.snapshot().await?.entry(id))
+        self.snapshot().await?.entry(id)
     }
 
     /// Create an entry. The caller has canonicalized a project path and
@@ -448,13 +498,14 @@ impl SecretStore {
             VaultSecretInput::Login { fields, .. } => match fields {
                 LoginInput::OnePassword { .. } => Item::Keep,
                 LoginInput::Saved { password, totp, .. } => {
+                    let totp = TotpChange::from(totp);
                     let password = Zeroizing::new(
                         password
                             .ok_or(SecretError::Invalid(bruhs_models::vault::ENTER_PASSWORD))?,
                     );
                     let totp = match totp {
-                        TotpInput::Set { setup } => Some(parsed_totp(&Zeroizing::new(setup))?),
-                        TotpInput::Keep | TotpInput::Remove => None,
+                        TotpChange::Set(setup) => Some(parsed_totp(&setup)?),
+                        TotpChange::Keep | TotpChange::Remove => None,
                     };
                     new_login_blob(password, totp)?
                 }
@@ -501,11 +552,12 @@ impl SecretStore {
     ) -> Result<VaultEntry, SecretError> {
         let checked = match self.snapshot().await {
             Ok(snapshot) => match snapshot.entry(id) {
-                Some(existing) => update
+                Ok(Some(existing)) => update
                     .validate(&existing.kind)
                     .map(|()| (snapshot, existing))
                     .map_err(SecretError::Invalid),
-                None => Err(SecretError::NotSaved),
+                Ok(None) => Err(SecretError::NotSaved),
+                Err(error) => Err(error),
             },
             Err(error) => Err(error),
         };
@@ -541,22 +593,23 @@ impl SecretStore {
                 fields: LoginInput::Saved { password, totp, .. },
                 ..
             } => {
-                saved_login_change(
-                    &snapshot,
-                    &existing,
-                    kind,
-                    password.map(Zeroizing::new),
-                    totp,
-                )
-                .await?
+                let (password, totp) = (password.map(Zeroizing::new), TotpChange::from(totp));
+                saved_login_change(&snapshot, &existing, kind, password, totp).await?
             }
         };
+        let revision = snapshot.vault()?.revision(id);
         let id = id.to_owned();
-        self.access(move |vault| match vault.vault.entries.get(&id) {
-            None => Err(SecretError::NotSaved),
-            // Changed since the snapshot: the caller retries from a fresh one.
-            Some(current) if *current != existing => Err(SecretError::Catalog),
-            Some(_) => vault.put(VaultEntry { kind, ..existing }, item),
+        self.access(move |vault| {
+            let catalog = vault.vault()?;
+            match catalog.entries.get(&id) {
+                None => Err(SecretError::NotSaved),
+                // Another save changed the row or its item since the
+                // snapshot: writing now could put back an older value.
+                Some(current) if *current != existing || catalog.revision(&id) != revision => {
+                    Err(SecretError::Conflict)
+                }
+                Some(_) => vault.put(VaultEntry { kind, ..existing }, item),
+            }
         })
         .await
     }
@@ -585,7 +638,7 @@ impl SecretStore {
         let gone = gone.clone();
         self.access(move |vault| {
             let ids: Vec<_> = vault
-                .vault
+                .vault()?
                 .entries
                 .values()
                 .filter(|entry| {
@@ -621,22 +674,17 @@ impl SecretStore {
         if indexed || self.find(project, name).await?.is_some() {
             return Ok(Some((key, SavedSource::Project)));
         }
+        let vault = snapshot.vault()?;
         let usable =
             |entry: &&VaultEntry| entry.name == name && entry.state == SavedCredentialState::Saved;
-        let project_reference = snapshot
-            .vault
-            .entries
-            .values()
-            .filter(usable)
-            .find(|entry| {
-                matches!(&entry.scope, CredentialScope::Project { path } if path == project)
-                    && matches!(entry.kind, VaultKind::OnePassword { .. })
-            });
+        let project_reference = vault.entries.values().filter(usable).find(|entry| {
+            matches!(&entry.scope, CredentialScope::Project { path } if path == project)
+                && matches!(entry.kind, VaultKind::OnePassword { .. })
+        });
         if let Some(entry) = project_reference {
             return Ok(Some((entry.id.clone(), SavedSource::OnePassword)));
         }
-        Ok(snapshot
-            .vault
+        Ok(vault
             .entries
             .values()
             .filter(usable)
@@ -649,28 +697,25 @@ impl SecretStore {
     }
 
     /// An entry's keychain values, read without the catalog lock (ruling
-    /// F13). `None` when the entry is unknown, keeps no item (1Password
-    /// kinds) or its item is missing.
+    /// F13). `Ok(None)` only for a 1Password kind, which keeps no item; an
+    /// unknown entry, or a key or Saved login whose item is missing, is
+    /// `NotSaved`.
     #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 6"))]
     pub(in crate::secrets) async fn vault_secret(
         &self,
         id: &str,
     ) -> Result<Option<VaultSecret>, SecretError> {
         let snapshot = self.snapshot().await?;
-        let Some(entry) = snapshot.entry(id) else {
-            return Ok(None);
-        };
+        let entry = snapshot.entry(id)?.ok_or(SecretError::NotSaved)?;
         if !has_item(&entry.kind) {
             return Ok(None);
         }
         let account = account(&entry);
         let keys = snapshot.keys;
-        let Some(text) = tokio::task::spawn_blocking(move || keys.read(&account))
+        let text = tokio::task::spawn_blocking(move || keys.read(&account))
             .await
             .map_err(|_| SecretError::Catalog)??
-        else {
-            return Ok(None);
-        };
+            .ok_or(SecretError::NotSaved)?;
         Ok(Some(match entry.kind {
             VaultKind::Login(_) => {
                 let blob = LoginBlob::parse(&text)?;
@@ -697,7 +742,7 @@ async fn saved_login_change(
     existing: &VaultEntry,
     kind: VaultKind,
     password: Option<Zeroizing<String>>,
-    totp: TotpInput,
+    totp: TotpChange,
 ) -> Result<(VaultKind, Item), SecretError> {
     let (stored_login, stored_totp) = match &existing.kind {
         VaultKind::Login(LoginMeta {
@@ -706,7 +751,7 @@ async fn saved_login_change(
         }) => (true, *totp),
         _ => (false, false),
     };
-    let keep_totp = matches!(totp, TotpInput::Keep);
+    let keep_totp = matches!(totp, TotpChange::Keep);
     let unchanged = stored_login && password.is_none() && keep_totp;
     let keeps_part = stored_login && (password.is_none() || (stored_totp && keep_totp));
     let stored = if keeps_part && !unchanged {
@@ -725,9 +770,9 @@ async fn saved_login_change(
         None => (None, None),
     };
     let totp = match totp {
-        TotpInput::Set { setup } => Some(parsed_totp(&Zeroizing::new(setup))?),
-        TotpInput::Remove => None,
-        TotpInput::Keep => stored_setup,
+        TotpChange::Set(setup) => Some(parsed_totp(&setup)?),
+        TotpChange::Remove => None,
+        TotpChange::Keep => stored_setup,
     };
     let has_totp = if unchanged {
         stored_totp
