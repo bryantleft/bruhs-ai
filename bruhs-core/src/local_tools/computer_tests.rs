@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use bruhs_models::crew::{
     handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
     LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED,
-    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+    PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
@@ -428,9 +428,12 @@ async fn bruh_input_runs_only_on_the_page_it_was_allowed_on() {
     host.bruh_command_on("a", click(), Some("https://github.com/o/r"))
         .await
         .unwrap();
+    // Input allowed on a page nobody could name says so.
+    let unknown = |result: Result<_, ToolError>| matches!(result, Err(ToolError::Refused(message)) if message == PAGE_UNKNOWN);
+    assert!(unknown(host.bruh_command_on("a", click(), None).await));
     // A page that doesn't say where it is takes no input.
     fake.close_window("a");
-    assert!(refused(
+    assert!(unknown(
         host.bruh_command_on("a", click(), Some("https://github.com/o/r"))
             .await
     ));

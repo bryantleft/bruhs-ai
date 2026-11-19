@@ -19,7 +19,7 @@ use bruhs_models::{
         handed_back_note, same_page_host, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
         COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED,
         LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER,
-        PAGE_CHANGED, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        PAGE_CHANGED, PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -633,8 +633,8 @@ impl LocalToolsHost {
     /// One action from a bruh's own browser tool, which the gate allowed on
     /// `allowed_on`. Input runs only while the live page is on that host,
     /// checked under the page lock right before it is sent: a page that
-    /// moved, or that doesn't say where it is, is refused with
-    /// [`PAGE_CHANGED`].
+    /// moved is refused with [`PAGE_CHANGED`], and one that doesn't say
+    /// where it is (now or when the gate looked) with [`PAGE_UNKNOWN`].
     pub async fn bruh_command_on(
         &self,
         agent_id: &str,
@@ -687,7 +687,10 @@ impl LocalToolsHost {
                         .await
                         .ok()
                         .flatten();
-                    if live.is_none() || !same_page_host(allowed_on, live.as_deref()) {
+                    if allowed_on.is_none() || live.is_none() {
+                        return Err(ToolError::Refused(PAGE_UNKNOWN.into()));
+                    }
+                    if !same_page_host(allowed_on, live.as_deref()) {
                         return Err(ToolError::Refused(PAGE_CHANGED.into()));
                     }
                 }
@@ -956,6 +959,11 @@ impl LocalToolsHost {
             viewer,
             state: slot.state.subscribe(),
         })
+    }
+
+    /// Whether the bruh has a Computer slot: its Computer is on here.
+    pub fn has_computer(&self, agent_id: &str) -> bool {
+        self.computer_slot(agent_id).is_some()
     }
 
     /// The bruh's Computer state as it changes, for runs that wait while

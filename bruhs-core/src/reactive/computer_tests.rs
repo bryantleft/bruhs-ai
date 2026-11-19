@@ -749,7 +749,7 @@ async fn input_approved_on_one_page_is_refused_on_another() {
 }
 
 #[tokio::test]
-async fn input_on_a_page_that_does_not_answer_follows_the_forge_rule() {
+async fn input_on_a_page_that_does_not_answer_is_refused_without_asking() {
     let (_dir, runtime, host, fake) = open_computer().await;
     let run = running(&runtime, "a").await;
     fake.set_url("a", "https://shop.test/");
@@ -761,14 +761,55 @@ async fn input_on_a_page_that_does_not_answer_follows_the_forge_rule() {
         host.computer_state("a").await.unwrap().url.as_deref(),
         Some("https://shop.test/")
     );
-    // The page answers nothing now; its last address doesn't count.
+    // The page answers nothing now; its last address doesn't count, and
+    // nobody is asked to approve input that could land on any site.
     fake.close_window("a");
     assert_eq!(
         decided(browse(&runtime, &run, click(), SHORT_WAIT)).await,
-        deny(NOT_ANSWERED)
+        deny(PAGE_UNKNOWN)
     );
-    let [item] = approvals(&runtime, "a").await.try_into().unwrap();
-    assert_eq!(item.message, "Click #merge");
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
+/// A run's Computer flag is from its start. Turned off since, its browser
+/// steps are refused at once, never asked about.
+#[tokio::test]
+async fn a_computer_turned_off_mid_run_refuses_its_steps_at_once() {
+    let (_dir, runtime, host, _fake) = open_computer().await;
+    let run = running(&runtime, "a").await;
+    runtime.command(set_computer("a", false)).await.unwrap();
+    eventually(|| async { host.computer_state("a").await.is_err() }).await;
+    for command in [
+        click(),
+        json!({"command": {"action": "navigate", "url": "https://shop.test/"}}),
+    ] {
+        assert_eq!(
+            decided(browse(&runtime, &run, command, LONG_WAIT)).await,
+            deny(COMPUTER_OFF_DENIAL)
+        );
+    }
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
+/// An approval given while the owner holds the computer waits for it to
+/// come back, so the step isn't refused and asked about again.
+#[tokio::test]
+async fn an_approval_given_while_the_owner_holds_the_computer_waits_for_it() {
+    let (_dir, runtime, host, fake) = open_computer().await;
+    let run = running(&runtime, "a").await;
+    fake.set_url("a", PULL);
+    let task = browse(&runtime, &run, click(), LONG_WAIT);
+    let item = waiting_approval(&runtime, "a").await;
+    request(&host, ComputerRequest::TakeControl).await;
+    decide_approval(&runtime, &item.id, true).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !task.is_finished(),
+        "the approved step waits for the computer"
+    );
+    request(&host, ComputerRequest::HandBack).await;
+    assert_eq!(decided(task).await, allow());
+    assert_eq!(approvals(&runtime, "a").await.len(), 1);
 }
 
 #[tokio::test]

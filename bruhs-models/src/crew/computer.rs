@@ -45,6 +45,10 @@ pub const CLOSED_BY_OWNER: &str =
 pub const ACTION_STOPPED: &str = "Stopped by the owner.";
 pub const PAGE_CHANGED: &str =
     "The page changed while the owner decided. Take a snapshot and try again.";
+/// Input on a page the browser didn't name: nothing can say which site it
+/// would act on.
+pub const PAGE_UNKNOWN: &str =
+    "Your browser didn't say which page it is on. Take a snapshot, then try again.";
 /// The command route got a step the gate never let through, or one that
 /// already ran.
 pub const STEP_NOT_APPROVED: &str = "This browser step wasn't approved.";

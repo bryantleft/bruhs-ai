@@ -12,7 +12,7 @@ use bruhs_models::{
     crew::{
         approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
         ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED,
-        LOCAL_HOST_DENIAL, PAGE_CHANGED,
+        LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -287,16 +287,27 @@ fn browser_call(input: &Value, page_url: Option<String>) -> Value {
     call
 }
 
-/// Whether an approved input would now land on another page than the one
-/// the owner approved it on.
-async fn page_moved(runtime: &ReactiveRuntime, agent_id: &str, call: &Value) -> bool {
-    let input = serde_json::from_value::<BrowserAction>(call["command"].clone())
-        .is_ok_and(|action| action.kind() == BrowserActionKind::Input);
-    if !input {
-        return false;
+/// Whether a browser call is input, which acts on the page it lands on.
+fn is_input(call: &Value) -> bool {
+    serde_json::from_value::<BrowserAction>(call["command"].clone())
+        .is_ok_and(|action| action.kind() == BrowserActionKind::Input)
+}
+
+/// Why an approved input can't go now: the page moved off the host the
+/// owner approved it on, or no longer says where it is.
+async fn page_moved(
+    runtime: &ReactiveRuntime,
+    agent_id: &str,
+    call: &Value,
+) -> Option<&'static str> {
+    if !is_input(call) {
+        return None;
     }
-    let now = page_url(runtime, agent_id).await;
-    !same_page_host(call["page_url"].as_str(), now.as_deref())
+    match page_url(runtime, agent_id).await {
+        None => Some(PAGE_UNKNOWN),
+        Some(now) if !same_page_host(call["page_url"].as_str(), Some(&now)) => Some(PAGE_CHANGED),
+        Some(_) => None,
+    }
 }
 
 /// How a wait on an approval ended.
@@ -418,8 +429,23 @@ pub(super) async fn decide(
     }
     let browser = tool == BRUH_BROWSER_TOOL;
     let (input, gate) = if browser {
+        // The flag is from the run's start: a Computer turned off since has
+        // no slot, and its steps are refused at once instead of asked about.
+        let computer = computer
+            && runtime
+                .computers()
+                .is_some_and(|host| host.has_computer(&run.agent_id));
         let call = browser_call(input, page_url(runtime, &run.agent_id).await);
         let gate = browser_gate(access, provider, computer, &call, call["page_url"].as_str());
+        // Input on a page the browser doesn't name could land anywhere, so
+        // nobody is asked about it, and the route couldn't check it: a
+        // snapshot names the page first.
+        if matches!(gate, Gate::Allow | Gate::Approve)
+            && call.get("page_url").is_none()
+            && is_input(&call)
+        {
+            return Ok(Some(deny(PAGE_UNKNOWN)));
+        }
         (call, gate)
     } else {
         // The gate reads only the name, and a name can point here.
@@ -483,10 +509,21 @@ pub(super) async fn decide(
     };
     runtime.changed();
     Ok(match wait(runtime, &run.id, &item_id, timeout).await? {
-        // The page may have moved during the wait: input goes only where
-        // the owner approved it.
-        ApprovalWait::Approved if browser && page_moved(runtime, &run.agent_id, &input).await => {
-            Some(deny(PAGE_CHANGED))
+        ApprovalWait::Approved if browser => {
+            // The owner may have taken the computer before approving: the
+            // step waits for it again, or the route would refuse it and the
+            // retry would ask twice.
+            match wait_for_computer(runtime, run, timeout).await? {
+                ComputerWait::Free => {}
+                ComputerWait::Stopped => return Ok(None),
+                ComputerWait::StillHeld => return Ok(Some(deny(CONTROL_WAIT_EXPIRED))),
+            }
+            // The page may have moved during the waits: input goes only
+            // where the owner approved it.
+            match page_moved(runtime, &run.agent_id, &input).await {
+                Some(reason) => Some(deny(reason)),
+                None => allow(&input),
+            }
         }
         ApprovalWait::Approved => allow(&input),
         ApprovalWait::Denied { reply: None } => Some(deny(DENIED)),
