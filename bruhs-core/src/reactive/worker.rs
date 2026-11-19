@@ -101,6 +101,9 @@ pub(super) struct TurnVault {
     /// The folders that hold the owner's saved logins, as the deny rules
     /// name them (`ReactiveRuntime::private_rule_folders`).
     pub(super) private: Vec<PathBuf>,
+    /// Whether the bruh has a vault login it may fill, which the preamble
+    /// then tells it about (D26).
+    pub(super) logins: bool,
 }
 
 /// One run's turn. The bruh's name and access ride in the run's own message,
@@ -124,7 +127,7 @@ pub(super) fn turn(
         &bruh.access,
         effective_level(bruh.access.level, provider),
         computer,
-        false,
+        computer && vault.logins,
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {
@@ -243,6 +246,13 @@ async fn execute(
     {
         return Ok(());
     }
+    let provider = AgentProvider::for_model(&effective_agent.model);
+    let vault = runtime
+        .turn_vault(
+            &effective_agent.id,
+            computer_on(bruh.computer, &bruh.access, provider),
+        )
+        .await;
     let mut stream = match app
         .send_message(turn(
             &effective_agent,
@@ -250,9 +260,7 @@ async fn execute(
             &effective_run,
             &context,
             &runtime.home,
-            &TurnVault {
-                private: runtime.private_rule_folders().to_vec(),
-            },
+            &vault,
         ))
         .await
     {

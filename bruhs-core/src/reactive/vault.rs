@@ -1,0 +1,305 @@
+//! A bruh's vault in the runtime: the logins and keys it may use (D2), the
+//! login the browser gate checks a fill against (D9), the value the command
+//! route hands the host (D12), the preamble's flag (D26), and deleting a
+//! deleted bruh's own entries (ruling F15).
+//!
+//! Every use reads the bruh's grants from the store again. Every vault
+//! lookup is bounded by the runtime's vault wait and fails closed: a lookup
+//! that errs or doesn't answer in time finds no login.
+
+use super::{store, worker::TurnVault, ReactiveError, ReactiveRuntime};
+use crate::{
+    local_tools::FillValue,
+    secrets::{OnePasswordError, SecretError},
+};
+use bruhs_models::{
+    crew::{
+        usable_by, LoginTarget, KEYCHAIN_NEEDS_OWNER, LOGIN_NOT_GRANTED, LOGIN_NO_FIELD,
+        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, PAGE_UNKNOWN,
+        VAULT_READ_FAILED,
+    },
+    local_tools::SecretRef,
+    secrets::review_text,
+    vault::{same_origin, LoginFields, VaultEntry, VaultKind},
+};
+use std::{future::Future, time::Duration};
+
+/// The most logins `logins` lists.
+const MAX_LOGINS: usize = 50;
+/// The most key names a run's preamble lists (ruling F28).
+const MAX_KEYS: usize = 20;
+/// How long past the manager's own read wait (which ends a stuck read
+/// first and records the entry's attention) a fill still waits for it.
+const BACKSTOP: Duration = Duration::from_secs(1);
+/// A vault lookup that failed or didn't answer in time.
+const VAULT_UNAVAILABLE: &str = "The vault could not be read.";
+
+/// Why a fill gets no value: refused (the bruh may not fill that), or
+/// unavailable (the keychain or 1Password needs the owner, or the read
+/// failed). Each holds model-facing copy, never a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultRefusal {
+    Refused(&'static str),
+    Unavailable(&'static str),
+}
+
+/// `read`, unless it outlasts `wait`. A vault error or the wait is
+/// [`VAULT_UNAVAILABLE`], with no detail.
+pub(super) async fn within<T>(
+    wait: Duration,
+    read: impl Future<Output = Result<T, SecretError>>,
+) -> Result<T, ReactiveError> {
+    match tokio::time::timeout(wait, read).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(_)) | Err(_) => Err(ReactiveError::Storage(VAULT_UNAVAILABLE.into())),
+    }
+}
+
+/// `entries` sorted by name as the owner sees them, then by id.
+fn by_name(entries: &mut [VaultEntry]) {
+    entries.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// A login as `logins` lists it and the gate checks it: `None` for any
+/// other kind, or a login whose sign-in page has no origin.
+fn login_target(entry: &VaultEntry) -> Option<LoginTarget> {
+    let VaultKind::Login(meta) = &entry.kind else {
+        return None;
+    };
+    Some(LoginTarget {
+        login_id: entry.id.clone(),
+        name: entry.name.clone(),
+        url: meta.url.clone(),
+        origin: meta.origin()?,
+        fields: meta.fields(),
+    })
+}
+
+/// Whether a read of `entry` goes to 1Password.
+fn from_one_password(entry: &VaultEntry) -> bool {
+    match &entry.kind {
+        VaultKind::OnePassword { .. } => true,
+        VaultKind::Login(meta) => matches!(meta.fields, LoginFields::OnePassword { .. }),
+        VaultKind::Value => false,
+    }
+}
+
+/// The owner copy a failed value read ends the fill with.
+fn unavailable(error: &SecretError) -> VaultRefusal {
+    VaultRefusal::Unavailable(match error {
+        SecretError::OnePassword(OnePasswordError::NeedsOwner) => ONE_PASSWORD_NEEDS_OWNER,
+        SecretError::OnePassword(OnePasswordError::Missing | OnePasswordError::NotFound) => {
+            ONE_PASSWORD_UNAVAILABLE
+        }
+        SecretError::Storage => KEYCHAIN_NEEDS_OWNER,
+        _ => VAULT_READ_FAILED,
+    })
+}
+
+impl ReactiveRuntime {
+    /// The vault entries bruh `agent_id` may use, by name: its own and the
+    /// Global ones it is granted ([`usable_by`]). Empty without a vault or
+    /// for an id no agent has (a deleted bruh's entries wait for the sync
+    /// pass).
+    async fn usable_entries(&self, agent_id: &str) -> Result<Vec<VaultEntry>, ReactiveError> {
+        let Some(vault) = self.vault() else {
+            return Ok(Vec::new());
+        };
+        let id = agent_id.to_owned();
+        let Some(grants) = self
+            .call(move |connection| store::vault_grants(connection, &id))
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        let mut usable: Vec<VaultEntry> = within(self.vault_wait, vault.vault_entries())
+            .await?
+            .into_iter()
+            .filter(|entry| usable_by(entry, agent_id, &grants))
+            .collect();
+        by_name(&mut usable);
+        Ok(usable)
+    }
+
+    /// The logins bruh `agent_id` may fill, by name, at most 50: names,
+    /// sign-in pages, origins and fields, never values or references.
+    pub async fn logins(&self, agent_id: &str) -> Result<Vec<LoginTarget>, ReactiveError> {
+        Ok(self
+            .usable_entries(agent_id)
+            .await?
+            .iter()
+            .filter_map(login_target)
+            .take(MAX_LOGINS)
+            .collect())
+    }
+
+    /// Login `login_id` as the gate checks a fill against it, when bruh
+    /// `agent_id` may use it now.
+    pub(super) async fn login_target(
+        &self,
+        agent_id: &str,
+        login_id: &str,
+    ) -> Result<Option<LoginTarget>, ReactiveError> {
+        Ok(self
+            .usable_entries(agent_id)
+            .await?
+            .iter()
+            .find(|entry| entry.id == login_id)
+            .and_then(login_target))
+    }
+
+    /// The value to type for `secret`, on `page_url` (the page the gate let
+    /// the fill through on). The grant, the field and the origin are
+    /// checked again first; the value is read within the vault wait.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultRefusal::Refused`] when the bruh may not fill it there, and
+    /// [`VaultRefusal::Unavailable`] when it couldn't be read.
+    pub async fn fill_value(
+        &self,
+        agent_id: &str,
+        secret: &SecretRef,
+        page_url: Option<&str>,
+    ) -> Result<FillValue, VaultRefusal> {
+        let Some(vault) = self.vault() else {
+            return Err(VaultRefusal::Refused(LOGIN_NOT_GRANTED));
+        };
+        let usable = self
+            .usable_entries(agent_id)
+            .await
+            .map_err(|_| VaultRefusal::Unavailable(VAULT_READ_FAILED))?;
+        let Some((entry, login)) = usable.iter().find_map(|entry| {
+            (entry.id == secret.login_id)
+                .then(|| login_target(entry).map(|login| (entry, login)))
+                .flatten()
+        }) else {
+            return Err(VaultRefusal::Refused(LOGIN_NOT_GRANTED));
+        };
+        if page_url.is_none() {
+            return Err(VaultRefusal::Refused(PAGE_UNKNOWN));
+        }
+        if !login.fields.contains(&secret.field) {
+            return Err(VaultRefusal::Refused(LOGIN_NO_FIELD));
+        }
+        if !same_origin(page_url, &login.origin) {
+            return Err(VaultRefusal::Refused(LOGIN_WRONG_ORIGIN));
+        }
+        let read = vault.resolve_login(&login.login_id, secret.field);
+        let value = match tokio::time::timeout(self.vault_wait + BACKSTOP, read).await {
+            Ok(Ok(value)) => value,
+            Ok(Err(error)) => return Err(unavailable(&error)),
+            Err(_) if from_one_password(entry) => {
+                return Err(VaultRefusal::Unavailable(ONE_PASSWORD_NEEDS_OWNER));
+            }
+            Err(_) => return Err(VaultRefusal::Unavailable(KEYCHAIN_NEEDS_OWNER)),
+        };
+        Ok(FillValue {
+            login_id: login.login_id,
+            origin: login.origin,
+            field: secret.field,
+            value,
+        })
+    }
+
+    /// Whether bruh `agent_id` has a login it may fill. False when the
+    /// vault can't say.
+    pub(super) async fn has_usable_logins(&self, agent_id: &str) -> bool {
+        self.logins(agent_id)
+            .await
+            .is_ok_and(|logins| !logins.is_empty())
+    }
+
+    /// What a run's turn needs from the vault: the folders no run may
+    /// reach, and whether the preamble tells a bruh whose Computer is on
+    /// about its logins.
+    pub(super) async fn turn_vault(&self, agent_id: &str, computer: bool) -> TurnVault {
+        TurnVault {
+            private: self.private_rule_folders().to_vec(),
+            logins: computer && self.has_usable_logins(agent_id).await,
+        }
+    }
+
+    /// The names of the keys bruh `agent_id` may use (Value and 1Password
+    /// entries, never logins), sorted, at most 20, each made safe to show.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 11"))]
+    pub(super) async fn usable_keys(&self, agent_id: &str) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .usable_entries(agent_id)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|entry| !matches!(entry.kind, VaultKind::Login(_)))
+            .map(|entry| review_text(&entry.name))
+            .collect();
+        names.sort();
+        names.dedup();
+        names.truncate(MAX_KEYS);
+        names
+    }
+
+    /// The id of the key named exactly `name` that bruh `agent_id` may use:
+    /// its own entry before a granted Global one. Logins never match.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 11"))]
+    pub(super) async fn usable_value(&self, agent_id: &str, name: &str) -> Option<String> {
+        let usable = self.usable_entries(agent_id).await.ok()?;
+        let keys = || {
+            usable.iter().filter(move |entry| {
+                entry.name == name && !matches!(entry.kind, VaultKind::Login(_))
+            })
+        };
+        let own = keys().find(|entry| {
+            matches!(
+                &entry.scope,
+                bruhs_models::vault::CredentialScope::Bruh { .. }
+            )
+        });
+        own.or_else(|| keys().next()).map(|entry| entry.id.clone())
+    }
+
+    /// Delete the own vault entries of bruhs deleted from this database,
+    /// by their deletion records, then the records. A failure is logged
+    /// and the next pass tries again.
+    pub(super) async fn forget_deleted_bruhs(&self) {
+        let Some(vault) = self.vault() else {
+            return;
+        };
+        let gone = match self
+            .call(|connection| store::vault_forgets(connection))
+            .await
+        {
+            Ok(gone) => gone,
+            Err(error) => {
+                tracing::warn!(%error, "Deleted bruhs' vault entries could not be checked");
+                return;
+            }
+        };
+        if gone.is_empty() {
+            return;
+        }
+        if let Err(error) = within(self.vault_wait, vault.forget_bruh_entries(&gone)).await {
+            tracing::warn!(%error, "A deleted bruh's vault entries could not be deleted");
+            return;
+        }
+        if let Err(error) = self
+            .call(move |connection| store::clear_vault_forgets(connection, &gone))
+            .await
+        {
+            tracing::warn!(%error, "Deleted bruhs' vault records could not be cleared");
+        }
+    }
+
+    /// The deleted bruhs whose own vault entries are still to go.
+    #[cfg(test)]
+    pub(super) async fn vault_forgets_for_tests(&self) -> std::collections::HashSet<String> {
+        self.call(|connection| store::vault_forgets(connection))
+            .await
+            .unwrap()
+    }
+}

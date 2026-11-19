@@ -3,7 +3,7 @@ use bruhs_models::{agent::ModelId, ids::ThreadId, reactive::*, EpochMs};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 mod always_on;
 pub(in crate::reactive) mod crew;
@@ -97,7 +97,8 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
         CREATE TABLE IF NOT EXISTS reactive_proposals(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS reactive_cursors(source_id TEXT NOT NULL,cursor_key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(source_id,cursor_key));
         CREATE TABLE IF NOT EXISTS reactive_app_completions(topic TEXT NOT NULL,record_id TEXT NOT NULL,completed INTEGER NOT NULL,PRIMARY KEY(topic,record_id));
-        CREATE TABLE IF NOT EXISTS reactive_source_status(id TEXT PRIMARY KEY,payload TEXT NOT NULL);")?;
+        CREATE TABLE IF NOT EXISTS reactive_source_status(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reactive_vault_forget(agent_id TEXT PRIMARY KEY);")?;
     reports::initialize(&mut connection)?;
     always_on::initialize(&connection)?;
     crew::initialize(&connection)?;
@@ -573,6 +574,38 @@ fn run_status(status: RunStatus) -> &'static str {
     }
 }
 
+/// The Global entries granted to `agent_id`, or `None` when no agent has
+/// that id.
+pub(super) fn vault_grants(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<Option<Vec<String>>, ReactiveError> {
+    if get::<ReactiveAgent>(connection, "reactive_agents", agent_id)?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(crew::profile(connection, agent_id)?.vault))
+}
+
+/// The deleted bruhs whose own vault entries are still to be deleted.
+pub(super) fn vault_forgets(connection: &Connection) -> Result<HashSet<String>, ReactiveError> {
+    let mut statement = connection.prepare("SELECT agent_id FROM reactive_vault_forget")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The deletion records of bruhs whose own vault entries are gone.
+pub(super) fn clear_vault_forgets(
+    connection: &mut Connection,
+    done: &HashSet<String>,
+) -> Result<(), ReactiveError> {
+    transaction(connection, |connection| {
+        for id in done {
+            connection.execute("DELETE FROM reactive_vault_forget WHERE agent_id=?1", [id])?;
+        }
+        Ok(())
+    })
+}
+
 /// Write a run. A room run that just ended posts in its room here, inside
 /// the caller's transaction.
 pub(super) fn save_run(connection: &Connection, run: &ReactiveRun) -> Result<(), ReactiveError> {
@@ -728,6 +761,12 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
             connection.execute("DELETE FROM reactive_agents WHERE id=?1", [id])?;
             always_on::delete_agent(connection, id)?;
             crew::delete(connection, id)?;
+            // The sync pass deletes its own vault entries by this record,
+            // never by absence: the vault outlives this database.
+            connection.execute(
+                "INSERT OR IGNORE INTO reactive_vault_forget(agent_id) VALUES(?1)",
+                [id],
+            )?;
         }
         ReactiveChange::DeleteSource { id } => {
             for subscription in records::<Subscription>(connection, "reactive_subscriptions")?

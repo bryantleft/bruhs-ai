@@ -1,6 +1,6 @@
-//! Keeps the local tools host's bruh computers in step with the store, and
+//! Keeps the local tools host's bruh computers in step with the store,
 //! removes the `<home>/bruhs/<id>` tree of every deleted bruh once its
-//! browser has closed.
+//! browser has closed, and deletes a deleted bruh's own vault entries.
 //!
 //! Removal is deliberately narrow: only a real directory (never a link)
 //! directly under a real `<home>/bruhs`, whose name is a valid id that no
@@ -292,6 +292,9 @@ pub(super) async fn sync_pass(
     if let Some(host) = host {
         host.sync_bruhs(computers).await;
     }
+    // By the deletion records, every pass: attaching the vault later
+    // changes no agent.
+    runtime.forget_deleted_bruhs().await;
     if !pass.retry && pass.swept.as_ref() == Some(&ids) {
         return;
     }
@@ -330,6 +333,8 @@ struct WeakRuntime {
     syncing: Weak<std::sync::atomic::AtomicBool>,
     allowances: Weak<super::approval::Allowances>,
     private_roots: Weak<super::PrivateRoots>,
+    vault: Weak<OnceLock<crate::secrets::SecretManager>>,
+    vault_wait: std::time::Duration,
 }
 
 impl WeakRuntime {
@@ -345,6 +350,8 @@ impl WeakRuntime {
             syncing: Arc::downgrade(&runtime.syncing),
             allowances: Arc::downgrade(&runtime.allowances),
             private_roots: Arc::downgrade(&runtime.private_roots),
+            vault: Arc::downgrade(&runtime.vault),
+            vault_wait: runtime.vault_wait,
         }
     }
 
@@ -360,6 +367,8 @@ impl WeakRuntime {
             syncing: self.syncing.upgrade()?,
             allowances: self.allowances.upgrade()?,
             private_roots: self.private_roots.upgrade()?,
+            vault: self.vault.upgrade()?,
+            vault_wait: self.vault_wait,
         })
     }
 }

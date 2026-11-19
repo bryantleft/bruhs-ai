@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, future::Future, path::Path, sync::Arc, time::Duration};
 
 /// A Claude agent; [`full`] gives it Full access.
-fn full_claude(id: &str) -> ReactiveAgent {
+pub(super) fn full_claude(id: &str) -> ReactiveAgent {
     agent(id)
 }
 
@@ -47,7 +47,7 @@ async fn full(runtime: &ReactiveRuntime, id: &str) {
         .unwrap();
 }
 
-fn set_computer(id: &str, on: bool) -> ReactiveCommand {
+pub(super) fn set_computer(id: &str, on: bool) -> ReactiveCommand {
     ReactiveCommand::SetComputer {
         agent_id: id.into(),
         on,
@@ -74,7 +74,7 @@ fn create_bruh(id: &str) -> ReactiveCommand {
 }
 
 /// Waits for `check`, failing after a few seconds of real time.
-async fn eventually<F: Future<Output = bool>>(mut check: impl FnMut() -> F) {
+pub(super) async fn eventually<F: Future<Output = bool>>(mut check: impl FnMut() -> F) {
     for _ in 0..500 {
         if check().await {
             return;

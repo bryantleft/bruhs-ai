@@ -9,6 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
     },
+    time::Duration,
 };
 use tokio::sync::{watch, Mutex};
 
@@ -31,6 +32,10 @@ pub mod sources;
 mod store;
 #[cfg(test)]
 mod tests;
+mod vault;
+#[cfg(test)]
+#[cfg(unix)]
+mod vault_tests;
 mod worker;
 
 #[derive(Debug, thiserror::Error)]
@@ -86,6 +91,11 @@ pub struct ReactiveRuntime {
     /// The folders that hold the owner's saved logins, which no bruh run
     /// may reach (`secrets::private`).
     private_roots: Arc<PrivateRoots>,
+    /// The owner's vault, once attached: bruh logins and keys (`vault`).
+    vault: Arc<OnceLock<crate::secrets::SecretManager>>,
+    /// The longest any vault lookup of this runtime waits before it fails
+    /// closed.
+    vault_wait: Duration,
 }
 
 /// The folders that hold the owner's saved logins, in the two forms the
@@ -249,6 +259,8 @@ impl ReactiveRuntime {
             syncing: Arc::new(AtomicBool::new(false)),
             allowances: Arc::default(),
             private_roots: Arc::new(private_roots),
+            vault: Arc::new(OnceLock::new()),
+            vault_wait: crate::secrets::VAULT_READ_WAIT,
         })
     }
 
@@ -285,6 +297,34 @@ impl ReactiveRuntime {
         computers::spawn_sync(self);
         self.changed();
         Ok(())
+    }
+
+    /// Read bruh logins and keys from `vault`: the browser gate and the
+    /// command route use it, and the sync pass deletes a deleted bruh's own
+    /// entries. Once per runtime.
+    pub fn attach_vault(&self, vault: crate::secrets::SecretManager) -> Result<(), ReactiveError> {
+        self.vault.set(vault).map_err(|_| {
+            ReactiveError::Conflict("This reactive runtime already has its vault.".into())
+        })?;
+        computers::spawn_sync(self);
+        self.changed();
+        Ok(())
+    }
+
+    /// The owner's vault, once attached.
+    pub fn vault(&self) -> Option<&crate::secrets::SecretManager> {
+        self.vault.get()
+    }
+
+    /// This runtime with its vault lookups bounded by `wait` instead of
+    /// [`crate::secrets::VAULT_READ_WAIT`]. The attached manager bounds each
+    /// value read by its own wait (`SecretManager::with_read_wait`), which
+    /// records the entry's attention.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_vault_wait(mut self, wait: Duration) -> Self {
+        self.vault_wait = wait;
+        self
     }
 
     /// The host that runs bruh browsers, once attached.

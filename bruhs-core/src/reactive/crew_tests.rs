@@ -1064,6 +1064,7 @@ fn every_bruh_run_hides_the_browser_profiles() {
     let home = std::path::Path::new("/data");
     let vault = worker::TurnVault {
         private: vec!["/data/credentials".into()],
+        ..Default::default()
     };
     let expected: Vec<std::path::PathBuf> = [
         "/data/bruhs/a/browser",
@@ -1099,6 +1100,7 @@ fn every_bruh_run_hides_the_vault_folders() {
     );
     let vault = worker::TurnVault {
         private: private.clone(),
+        ..Default::default()
     };
     let keychains = std::path::PathBuf::from("/Users/a/Library/Keychains");
     for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
@@ -1361,6 +1363,7 @@ async fn the_deny_rules_name_a_vault_folder_by_both_paths() {
     assert_eq!(runtime.private_rule_folders(), [real, linked, canonical]);
     let vault = worker::TurnVault {
         private: runtime.private_rule_folders().to_vec(),
+        ..Default::default()
     };
     let turn = worker::turn(
         &agent("a"),

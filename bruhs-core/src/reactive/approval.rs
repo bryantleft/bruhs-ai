@@ -290,6 +290,14 @@ fn browser_call(input: &Value, page_url: Option<String>) -> Value {
     call
 }
 
+/// The login a browser call's vault fill names, if it is one.
+fn fill_login_id(input: &Value) -> Option<String> {
+    let action = serde_json::from_value::<BrowserAction>(input.get("command")?.clone()).ok()?;
+    action
+        .secret_fill()
+        .map(|(_, secret, _)| secret.login_id.clone())
+}
+
 /// Whether a browser call is input, which acts on the page it lands on.
 fn is_input(call: &Value) -> bool {
     serde_json::from_value::<BrowserAction>(call["command"].clone())
@@ -444,15 +452,27 @@ pub(super) async fn decide(
             && runtime
                 .computers()
                 .is_some_and(|host| host.has_computer(&run.agent_id));
+        // A vault fill is checked against the login as the vault has it
+        // now, looked up before the page is asked so the page is fresh. A
+        // lookup that fails or outlasts the vault wait finds none.
+        let login = match fill_login_id(input) {
+            Some(login_id) => runtime
+                .login_target(&run.agent_id, &login_id)
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "A vault fill's login could not be read");
+                    None
+                }),
+            None => None,
+        };
         let call = browser_call(input, page_url(runtime, &run.agent_id).await);
-        // No vault is attached yet, so a vault fill is refused as not granted.
         let gate = browser_gate(
             access,
             provider,
             computer,
             &call,
             call["page_url"].as_str(),
-            None,
+            login.as_ref(),
         );
         // Input on a page the browser doesn't name could land anywhere, so
         // nobody is asked about it, and the route couldn't check it: a
