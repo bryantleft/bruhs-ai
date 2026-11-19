@@ -824,22 +824,35 @@ enum GlobToken {
 /// could expand to `name`. A word without them must equal it. Iterative,
 /// O(pattern × name): the pattern is the model's. A `[` is a class only
 /// when a `]` follows it somewhere, so no `[` scans the rest in vain
-/// (ruling A2 M1).
+/// (ruling A2 M1). As in bash, a `]` first in a class (after `[`, `[!` or
+/// `[^`) is a member, not its end (rereview M4): `[]s]` is one character.
 fn glob_matches(pattern: &[u8], name: &[u8]) -> bool {
     let last_close = pattern.iter().rposition(|&byte| byte == b']');
     let mut tokens = Vec::with_capacity(pattern.len());
     let mut index = 0;
     while let Some(&byte) = pattern.get(index) {
         index += 1;
+        // Where a `[` here would look for its closing `]`.
+        let members = || {
+            let mut from = index;
+            if matches!(pattern.get(from), Some(b'!' | b'^')) {
+                from += 1;
+            }
+            if pattern.get(from) == Some(&b']') {
+                from += 1;
+            }
+            from
+        };
         tokens.push(match byte {
             b'*' => GlobToken::Any,
             b'?' => GlobToken::One,
-            b'[' if last_close.is_some_and(|close| close >= index) => {
-                let close = pattern[index..]
+            b'[' if last_close.is_some_and(|close| close >= members()) => {
+                let from = members();
+                let close = pattern[from..]
                     .iter()
                     .position(|&byte| byte == b']')
                     .unwrap_or_default();
-                index += close + 1;
+                index = from + close + 1;
                 GlobToken::One
             }
             b'[' => GlobToken::Literal(b'['),
@@ -2185,6 +2198,19 @@ mod tests {
         assert!(!is_vault_command(&brackets));
         assert!(!glob_matches(brackets.as_bytes(), b"op"));
         assert!(glob_matches(b"[[o]p", b"op") && !glob_matches(b"[o", b"op"));
+        // Rereview M4: a `]` first in a class is one of its members.
+        for word in ["[]s]ecurity", "[!]x]ecurity", "[^]x]ecurity", "o[]]"] {
+            let name: &[u8] = if word.ends_with("ecurity") {
+                b"security"
+            } else {
+                b"op"
+            };
+            assert!(glob_matches(word.as_bytes(), name), "{word}");
+        }
+        assert!(!glob_matches(b"[]s]ecurity", b"s]ecurity"));
+        assert!(glob_matches(b"[]ecurity", b"[]ecurity"));
+        let classes = "[]".repeat(100_000);
+        assert!(!is_vault_command(&classes));
         let elapsed = started.elapsed();
         assert!(
             elapsed < std::time::Duration::from_millis(200),
@@ -2198,6 +2224,8 @@ mod tests {
         let refused = [
             "security find-generic-password -s bruhs-ai-secrets -w",
             "/usr/bin/security dump-keychain",
+            "/usr/bin/[]s]ecurity dump-keychain",
+            "[]o]p read op://v/i/f",
             "sh -c \"op read op://P/I/password\"",
             "FOO=1 env op item get x",
             "ls && sudo security export",
