@@ -5,14 +5,15 @@ use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
     access_options, clamp_level, computer_switch_follows, computer_switch_off,
     computer_switch_reason, current_settings, settings_commands_for, vault_grants_follow,
-    AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH,
-    SEND_AS_ME_HINT,
+    vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT,
+    COMPUTER_SWITCH, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
 use super::face_editor::FaceEditor;
+use super::vault_grants::VaultGrants;
 use crate::ui::{Button, ButtonSize, Dropdown, DropdownOption, Input, Switch, Textarea};
 
 const LABEL: &str = "block min-w-0 space-y-1 text-label-sm text-rambutan-300";
@@ -34,7 +35,7 @@ fn effort_options() -> Vec<DropdownOption> {
 #[component]
 pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     let data = use_crew_snapshot();
-    let id = StoredValue::new(agent_id);
+    let id = StoredValue::new(agent_id.clone());
     let saved = Memo::new(move |_| {
         data.snapshot.with(|snapshot| {
             snapshot
@@ -51,8 +52,8 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     let send_as_me = RwSignal::new(false);
     let can_deliver = RwSignal::new(false);
     let computer = RwSignal::new(false);
-    // Vault grants have no picker yet: they follow the stored grants, so
-    // Save never sends SetVault.
+    // The Vault section's picks. Save sends SetVault only when they differ
+    // from the stored grants.
     let vault = RwSignal::new(Vec::<String>::new());
     let look = RwSignal::new(BruhLook::default());
     let invalid = RwSignal::new(None::<String>);
@@ -183,6 +184,13 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         }
     });
 
+    // The Vault section is off while the bruh can't use the vault, or the
+    // service can't keep its grants. It then shows the picks as they are.
+    let vault_block = Signal::derive(move || {
+        vault_unavailable(level.get(), AgentProvider::for_model(&model.get()))
+            .or_else(|| data.vault_reason())
+    });
+
     let dirty = Memo::new(move |_| saved.get().is_some_and(|saved| saved != edited()));
     let save_disabled =
         Signal::derive(move || !dirty.get() || data.busy.get() || !data.crew_ready());
@@ -302,6 +310,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                         />
                     </label>
                 </div>
+                <VaultGrants agent_id=agent_id grants=vault disabled=vault_block />
             </section>
             <section class=SECTION aria-labelledby="bruh-settings-face">
                 <h2 id="bruh-settings-face" class="text-label text-rambutan-100">"Face"</h2>

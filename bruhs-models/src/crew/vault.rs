@@ -2,7 +2,8 @@
 //! Settings offer, protocol 4 and the copy both apps show (D2, D3, D23).
 //! The entries themselves live in [`crate::vault`].
 
-use super::{service_notice, VAULT_PROTOCOL};
+use super::{service_notice, AccessLevel, VAULT_PROTOCOL};
+use crate::agent::AgentProvider;
 use crate::vault::{CredentialScope, VaultEntry};
 
 /// A bruh holds at most this many grants.
@@ -18,6 +19,8 @@ pub const VAULT_GRANTS_NONE: &str = "No shared logins or keys yet. Add one in Se
 /// entries aren't deleted yet: the new agent would inherit them.
 pub const BRUH_ID_PENDING_DELETE: &str =
     "A deleted bruh used this ID and its own vault entries aren't removed yet. Use another ID.";
+pub const VAULT_NEEDS_CLAUDE: &str = "The vault needs a Claude model.";
+pub const VAULT_NEEDS_ASK_OR_FULL: &str = "The vault needs Ask first or Full access.";
 const TOO_MANY_GRANTS: &str = "Grant at most 64 vault entries.";
 const NOT_AN_ENTRY: &str = "That isn't a vault entry.";
 
@@ -34,6 +37,20 @@ pub fn vault_ready(protocol: u32) -> bool {
 pub fn vault_reason(protocol: Option<u32>) -> Option<&'static str> {
     let protocol = protocol.filter(|protocol| !vault_ready(*protocol))?;
     service_notice(protocol, None).map(|notice| notice.message())
+}
+
+/// Why a bruh at `level` on `provider` can't use vault entries, if it
+/// can't: logins fill only in a Computer and keys go through a Claude
+/// tool at Ask or Full (D18), so neither reaches Codex or Read only.
+#[must_use]
+pub fn vault_unavailable(level: AccessLevel, provider: AgentProvider) -> Option<&'static str> {
+    if provider != AgentProvider::Claude {
+        Some(VAULT_NEEDS_CLAUDE)
+    } else if level == AccessLevel::ReadOnly {
+        Some(VAULT_NEEDS_ASK_OR_FULL)
+    } else {
+        None
+    }
 }
 
 fn grant_id_ok(id: &str) -> bool {
@@ -253,9 +270,35 @@ mod tests {
     }
 
     #[test]
+    fn only_claude_bruhs_at_ask_or_full_use_the_vault() {
+        use crate::agent::AgentProvider;
+        use crate::crew::AccessLevel;
+        for level in [AccessLevel::Ask, AccessLevel::Full] {
+            assert_eq!(vault_unavailable(level, AgentProvider::Claude), None);
+        }
+        assert_eq!(
+            vault_unavailable(AccessLevel::ReadOnly, AgentProvider::Claude),
+            Some(VAULT_NEEDS_ASK_OR_FULL)
+        );
+        // The model comes first, since a level change can't fix it.
+        for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+            assert_eq!(
+                vault_unavailable(level, AgentProvider::Codex),
+                Some(VAULT_NEEDS_CLAUDE)
+            );
+        }
+    }
+
+    #[test]
     fn vault_copy_reads_plainly() {
         assert_eq!(vault_own_line("Deploy key"), "Deploy key: its own");
-        for copy in [VAULT_GRANTS_LABEL, VAULT_GRANTS_HINT, VAULT_GRANTS_NONE] {
+        for copy in [
+            VAULT_GRANTS_LABEL,
+            VAULT_GRANTS_HINT,
+            VAULT_GRANTS_NONE,
+            VAULT_NEEDS_CLAUDE,
+            VAULT_NEEDS_ASK_OR_FULL,
+        ] {
             assert!(
                 !copy.contains(['–', '—', '•', '·']) && !copy.contains(" - "),
                 "{copy}"

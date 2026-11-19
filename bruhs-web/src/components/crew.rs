@@ -13,3 +13,4 @@ pub mod room;
 pub mod room_dialog;
 pub mod settings;
 pub mod shortcuts;
+pub mod vault_grants;

@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 
 use bruhs_models::crew::room::rooms_reason;
-use bruhs_models::crew::{crew_commands_ready, rooms_ready, service_notice};
+use bruhs_models::crew::{crew_commands_ready, rooms_ready, service_notice, vault_reason};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
 
@@ -63,6 +63,20 @@ impl CrewData {
     /// Why rooms are off, once the version is known to be older.
     pub fn rooms_reason(&self) -> Option<&'static str> {
         rooms_reason(self.protocol())
+    }
+
+    /// Whether the service keeps vault grants. Unknown counts as not yet.
+    pub fn vault_ready(&self) -> bool {
+        self.protocol().is_some_and(bruhs_models::crew::vault_ready)
+    }
+
+    /// Why vault grants are off, once the version is known to be older.
+    /// Empty while they work.
+    pub fn vault_reason(&self) -> Option<&'static str> {
+        if self.vault_ready() {
+            return None;
+        }
+        vault_reason(self.protocol())
     }
 }
 
@@ -256,6 +270,26 @@ mod tests {
             let unknown = data();
             assert!(!gate(unknown).ready);
             assert_eq!(gate(unknown).reason, None);
+        });
+    }
+
+    #[test]
+    fn a_protocol_three_snapshot_has_computers_but_no_vault_grants() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let old = data_at(3);
+            assert!(!old.vault_ready());
+            assert_eq!(
+                old.vault_reason(),
+                Some(bruhs_models::crew::ServiceNotice::ServingOld.message())
+            );
+            let current = data_at(bruhs_models::crew::VAULT_PROTOCOL);
+            assert!(current.vault_ready());
+            assert_eq!(current.vault_reason(), None);
+            // Unknown counts as not yet, with no reason to show.
+            let unknown = data();
+            assert!(!unknown.vault_ready());
+            assert_eq!(unknown.vault_reason(), None);
         });
     }
 
