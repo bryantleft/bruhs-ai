@@ -241,6 +241,35 @@ fn this_computer_is_refused_by_name_and_by_address() {
     assert!(!refused("nas.lan", &[a("10.0.0.2:80"), a("[fd00::2]:80")]));
 }
 
+/// The probe a bruh browser loads at launch is answered by the guard
+/// itself: never resolved, never sent upstream.
+#[tokio::test]
+async fn the_guard_answers_its_probe_itself() {
+    let (upstream_port, heads) = upstream_proxy().await;
+    let proxy = ProxyUrl {
+        host: "127.0.0.1".into(),
+        port: upstream_port,
+        authorization: None,
+    };
+    let upstream = Upstream {
+        http: Some(proxy.clone()),
+        https: Some(proxy),
+        no_proxy: Vec::new(),
+    };
+    let guard = NetworkGuard::start_with(upstream, resolver(&[]), Arc::new(refused)).unwrap();
+    let probe = format!("GET {GUARD_PROBE_URL} HTTP/1.1\r\nHost: {GUARD_PROBE_HOST}\r\n\r\n");
+    let (head, body) = exchange(guard.addr(), &probe).await;
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert_eq!(body, GUARD_PROBE_REPLY);
+    assert!(heads.lock().unwrap().is_empty());
+    // Only that exact name and port.
+    let other = format!(
+        "GET http://{GUARD_PROBE_HOST}:8080/ HTTP/1.1\r\nHost: {GUARD_PROBE_HOST}:8080\r\n\r\n"
+    );
+    let (_, body) = exchange(guard.addr(), &other).await;
+    assert_ne!(body, GUARD_PROBE_REPLY);
+}
+
 #[tokio::test]
 async fn a_redirect_or_subresource_to_this_computer_never_connects() {
     let fixture = fixture().await;

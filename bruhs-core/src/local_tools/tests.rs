@@ -640,6 +640,35 @@ async fn fake_page_answering(
     (cdp, server)
 }
 
+/// A launch goes ahead only when the guard itself answered its probe: a
+/// browser going direct (a name error) or through another proxy (its own
+/// page) is refused before any real page loads.
+#[tokio::test]
+async fn a_launch_needs_the_guards_own_reply_to_its_probe() {
+    use serde_json::json;
+    let (mut cdp, server) = fake_page(vec![json!("Bruhs network guard\n")]).await;
+    browser::probe_guard(&mut cdp).await.unwrap();
+    drop(cdp);
+    let calls = server.await.unwrap();
+    assert_eq!(calls[0].0, "Page.navigate");
+    assert_eq!(calls[0].1["url"], "http://bruhs-guard-probe.invalid/");
+    let refused = |result: Result<(), ToolError>| {
+        matches!(result, Err(ToolError::Unavailable(message))
+            if message == bruhs_models::crew::PROXY_POLICY_OVERRIDE)
+    };
+    let (mut cdp, _server) = fake_page(vec![json!("Bad gateway from corp-proxy")]).await;
+    assert!(refused(browser::probe_guard(&mut cdp).await));
+    let (mut cdp, _server) = fake_page_answering(
+        Vec::new(),
+        vec![(
+            "Page.navigate",
+            json!({"frameId":"f","errorText":"net::ERR_NAME_NOT_RESOLVED"}),
+        )],
+    )
+    .await;
+    assert!(refused(browser::probe_guard(&mut cdp).await));
+}
+
 /// A snapshot is a read: it gives the page no user activation, which would
 /// let it open a popup or start a download. Input still does.
 #[tokio::test]
@@ -950,6 +979,68 @@ async fn live_bruh_profile_keeps_a_cookie_across_a_graceful_close() {
     drop(second);
     assert!(profile.exists());
     fixture.abort();
+}
+
+/// A real Chrome behind the guard passes its probe; one whose traffic goes
+/// to another proxy, as an organization's policy would send it, is refused
+/// and stopped before it loads a page.
+#[tokio::test]
+#[ignore = "launches headless Chrome twice; run explicitly for local acceptance"]
+async fn live_a_launch_whose_traffic_misses_the_guard_is_refused() {
+    use browser::{Browser, LaunchOptions};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let home = tempfile::tempdir().unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let start = || BrowserStart {
+        grant_id: "live".into(),
+        url: "about:blank".into(),
+    };
+    let guard = network::NetworkGuard::start(network::Upstream::default()).unwrap();
+    let options = |proxy| LaunchOptions {
+        profile: Some(home.path().join("bruhs").join("a").join("browser")),
+        headless: true,
+        proxy: Some(proxy),
+    };
+    let mut guarded = Browser::start(
+        &client,
+        start(),
+        ProcessPolicy::default(),
+        &options(guard.addr()),
+    )
+    .await
+    .unwrap();
+    let grace = std::time::Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+    guarded.close(grace).await.unwrap();
+    drop(guarded);
+    // Another proxy: it answers every request with its own error page.
+    let decoy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let decoy_addr = decoy.local_addr().unwrap();
+    let decoy_task = tokio::spawn(async move {
+        while let Ok((mut socket, _)) = decoy.accept().await {
+            tokio::spawn(async move {
+                let mut buffer = [0u8; 4096];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 9\r\nConnection: close\r\n\r\ncorporate")
+                    .await;
+            });
+        }
+    });
+    let refused = Browser::start(
+        &client,
+        start(),
+        ProcessPolicy::default(),
+        &options(decoy_addr),
+    )
+    .await;
+    match refused {
+        Err(ToolError::Unavailable(message)) => {
+            assert_eq!(message, bruhs_models::crew::PROXY_POLICY_OVERRIDE);
+        }
+        Err(error) => panic!("refused for another reason: {error}"),
+        Ok(_) => panic!("a browser that missed the guard opened"),
+    }
+    decoy_task.abort();
 }
 
 #[tokio::test]

@@ -93,6 +93,13 @@ const LIMITS: Limits = Limits {
 const DEFAULT_PROXY_PORT: u16 = 1080;
 
 const NOT_A_SERVER: &str = "This is the proxy for a bruh's browser.";
+/// A name that never resolves, which the guard answers itself with
+/// [`GUARD_PROBE_REPLY`]. A browser that gets that reply goes through the
+/// guard; one whose proxy a policy replaced gets a name error or another
+/// proxy's page instead.
+pub(super) const GUARD_PROBE_URL: &str = "http://bruhs-guard-probe.invalid/";
+pub(super) const GUARD_PROBE_HOST: &str = "bruhs-guard-probe.invalid";
+pub(super) const GUARD_PROBE_REPLY: &str = "Bruhs network guard";
 const UNREACHABLE: &str = "Bruhs couldn't reach that site.";
 const TOO_LARGE: &str = "This request is too large.";
 
@@ -504,10 +511,24 @@ async fn handle(
             TOO_LARGE,
         ));
     }
+    if is_probe(&request) {
+        return Ok(Failure(StatusCode::OK, GUARD_PROBE_REPLY).response());
+    }
     if request.method() == Method::CONNECT {
         return tunnel(request, shared, permit).await;
     }
     forward(request, shared, permit).await
+}
+
+/// A browser's `GET` of [`GUARD_PROBE_URL`], as it asks a proxy for it.
+fn is_probe<B>(request: &Request<B>) -> bool {
+    let uri = request.uri();
+    request.method() == Method::GET
+        && uri.scheme_str() == Some("http")
+        && uri
+            .host()
+            .is_some_and(|host| host.eq_ignore_ascii_case(GUARD_PROBE_HOST))
+        && uri.port_u16().is_none_or(|port| port == 80)
 }
 
 /// About the bytes of a request head: its target and every header line.

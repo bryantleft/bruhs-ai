@@ -23,9 +23,11 @@ use tokio_tungstenite::{
 };
 
 use super::{
+    network::{GUARD_PROBE_REPLY, GUARD_PROBE_URL},
     process::{self, ProcessPolicy},
     ToolError,
 };
+use bruhs_models::crew::PROXY_POLICY_OVERRIDE;
 
 #[path = "browser_guard.rs"]
 mod browser_guard;
@@ -290,6 +292,9 @@ impl Browser {
                     .await?
                     .unwrap_or(COMPUTER_VIEWPORT)
             };
+            if options.proxy.is_some() {
+                probe_guard(&mut cdp).await?;
+            }
             cdp.navigate(&request.url).await?;
             guard.check()?;
             Ok::<_, ToolError>((cdp, guard, socket.to_owned(), viewport))
@@ -599,6 +604,26 @@ async fn write_pid_file(profile: &Path, child: &Mutex<Child>) -> Option<PathBuf>
             None
         }
     }
+}
+
+/// Check, before the first real navigation, that the page's traffic goes
+/// through the network guard: an organization's Chrome policy proxy wins
+/// over `--proxy-server`, and the browser would then run unguarded. Only
+/// the guard answers [`GUARD_PROBE_URL`] with [`GUARD_PROBE_REPLY`]; a
+/// browser going direct fails to resolve the name, and another proxy
+/// answers with its own page.
+pub(super) async fn probe_guard(cdp: &mut Cdp) -> Result<(), ToolError> {
+    let refused = || ToolError::Unavailable(PROXY_POLICY_OVERRIDE.into());
+    if cdp.load(GUARD_PROBE_URL).await?.is_err() {
+        return Err(refused());
+    }
+    let text = cdp
+        .evaluate("document.body ? document.body.innerText : ''", false)
+        .await?;
+    if text.as_str().map(str::trim) != Some(GUARD_PROBE_REPLY) {
+        return Err(refused());
+    }
+    Ok(())
 }
 
 /// Profile prefs every launch of a kept profile starts with, whatever the
@@ -932,11 +957,17 @@ impl Cdp {
     }
 
     pub async fn navigate(&mut self, url: &str) -> Result<Value, ToolError> {
+        self.load(url)
+            .await?
+            .map_err(|error| ToolError::Unavailable(format!("Browser navigation failed: {error}")))
+    }
+
+    /// Load `url` and wait for its load event. The inner error is the
+    /// `errorText` Chrome gave for a navigation that failed.
+    async fn load(&mut self, url: &str) -> Result<Result<Value, String>, ToolError> {
         let result = self.call("Page.navigate", json!({"url":url})).await?;
         if let Some(error) = result["errorText"].as_str() {
-            return Err(ToolError::Unavailable(format!(
-                "Browser navigation failed: {error}"
-            )));
+            return Ok(Err(error.to_owned()));
         }
         if let Some(loader) = result["loaderId"].as_str() {
             while self.loaded.as_deref() != Some(loader) {
@@ -948,7 +979,7 @@ impl Cdp {
                 }
             }
         }
-        Ok(result)
+        Ok(Ok(result))
     }
 
     /// Run `expression` in the page. `gesture` gives the page a user

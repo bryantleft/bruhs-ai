@@ -90,6 +90,10 @@ pub const LIVE_VIEW_NEEDS_HTTP: &str = "The live view needs an http:// server ad
 /// The live view's socket couldn't be opened.
 pub const LIVE_VIEW_UNREACHABLE: &str = "The live view can't reach the server. Try again.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
+/// A launch whose traffic didn't reach the network guard: a Chrome policy
+/// (an organization's proxy settings) wins over the guard's proxy flag.
+pub const PROXY_POLICY_OVERRIDE: &str =
+    "Chrome's proxy is set by your organization, so Bruhs won't open a bruh's browser.";
 
 pub const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";
 const NEEDS_ASK_OR_FULL: &str = "Computer needs Ask first or Full access.";
