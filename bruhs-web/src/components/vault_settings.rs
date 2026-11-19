@@ -14,8 +14,8 @@ use bruhs_models::vault::{
     bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
     form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
     row_label, vault_row, wait_reason, FormField, FormScope, LoginFields, LoginMeta, VaultBruh,
-    VaultBusy as Busy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate,
-    CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND,
+    VaultBusy as Busy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultNotice,
+    VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, FIELD_BRUH, FIELD_KIND,
     FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE,
     FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY,
     FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT,
@@ -106,7 +106,7 @@ pub fn VaultSettings() -> impl IntoView {
     let busy = RwSignal::new(Busy::Idle);
     let query = RwSignal::new(String::new());
     let open = RwSignal::new(Open::None);
-    let notice = RwSignal::new(None::<&'static str>);
+    let notice = RwSignal::new(None::<VaultNotice>);
     let new_ref = NodeRef::<html::Button>::new();
     let page_ref = NodeRef::<html::Div>::new();
     let wait =
@@ -147,7 +147,13 @@ pub fn VaultSettings() -> impl IntoView {
                 None => listing.entries.push(entry),
             }
         });
-        notice.try_set(Some(ENTRY_UPDATED));
+        notice.try_set(Some(VaultNotice::Saved));
+    });
+    // A change that got no answer may have landed (rereview M5): the list
+    // reloads, which closes any form, and the page says so.
+    let unanswered = Callback::new(move |_: ()| {
+        refresh.run(());
+        notice.try_set(Some(VaultNotice::MayHaveChanged));
     });
     // Cancel runs from inside the form; a Save's answer can land anywhere.
     let close_new = Callback::new(move |_: ()| {
@@ -193,15 +199,15 @@ pub fn VaultSettings() -> impl IntoView {
             // Always drawn, so every button's `aria-describedby` names an
             // element; empty while nothing runs. A load says so above.
             <p id=WAIT_ID role="status" class="mt-2 text-label-sm text-rambutan-400 empty:hidden">{move || wait.get().filter(|_| load.with(|load| *load != Load::Loading))}</p>
-            {move || notice.get().map(|message| view! { <p role="status" class="mt-2 text-label-sm text-pandan-300">{message}</p> })}
+            {move || notice.get().map(|notice| view! { <p role="status" data-vault-page-notice="" class=if notice.warns() { "mt-2 text-label-sm text-durian-300" } else { "mt-2 text-label-sm text-pandan-300" }>{notice.message()}</p> })}
             <Show when=move || open.with(|open| *open == Open::New)>
-                <VaultFormView entry=None bruhs=bruhs busy=busy wait=wait on_saved=saved on_close=close_new />
+                <VaultFormView entry=None bruhs=bruhs busy=busy wait=wait on_saved=saved on_close=close_new on_unanswered=unanswered />
             </Show>
             <div class="mt-3 divide-y divide-longan-800">
                 <For
                     each=visible
                     key=|key| key.clone()
-                    children=move |(_, id)| view! { <VaultRowView id=id listing=listing busy=busy wait=wait open=open notice=notice on_saved=saved new_ref=new_ref page_ref=page_ref /> }
+                    children=move |(_, id)| view! { <VaultRowView id=id listing=listing busy=busy wait=wait open=open notice=notice on_saved=saved on_unanswered=unanswered new_ref=new_ref page_ref=page_ref /> }
                 />
                 {move || (!listing.with(|listing| listing.entries.is_empty()) && visible().is_empty()).then(|| view! { <p role="status" class="py-3 text-label-sm text-rambutan-400">{NO_MATCH}</p> })}
             </div>
@@ -216,8 +222,11 @@ fn VaultRowView(
     busy: RwSignal<Busy>,
     wait: Signal<Option<&'static str>>,
     open: RwSignal<Open>,
-    notice: RwSignal<Option<&'static str>>,
+    notice: RwSignal<Option<VaultNotice>>,
     on_saved: Callback<VaultEntry>,
+    /// A change with no answer: the page reloads and says it may have
+    /// landed.
+    on_unanswered: Callback<()>,
     new_ref: NodeRef<html::Button>,
     /// The whole page, for the late-answer focus guard.
     page_ref: NodeRef<html::Div>,
@@ -314,14 +323,18 @@ fn VaultRowView(
         error.set(None);
         let id = id.get_value();
         wasm_bindgen_futures::spawn_local(async move {
-            match crate::api::delete_vault_entry(&id).await {
+            let result = crate::api::delete_vault_entry(&id).await;
+            busy.try_set(Busy::Idle);
+            match result {
                 Ok(()) => forget(),
                 Err(err) if err.is_status(404) => forget(),
+                Err(err) if crate::api::vault_failure(&err).may_have_landed() => {
+                    on_unanswered.try_run(());
+                }
                 Err(err) => {
                     error.try_set(Some(crate::api::vault_message(&err)));
                 }
             }
-            busy.try_set(Busy::Idle);
         });
     };
     let keep = move || {
@@ -374,7 +387,7 @@ fn VaultRowView(
                 </div>
             </Show>
             <Show when=move || editing.get()>
-                {move || entry.get_untracked().map(|entry| view! { <VaultFormView entry=Some(entry) bruhs=Signal::derive(move || listing.with(|listing| listing.bruhs.clone())) busy=busy wait=wait on_saved=on_saved on_close=close /> })}
+                {move || entry.get_untracked().map(|entry| view! { <VaultFormView entry=Some(entry) bruhs=Signal::derive(move || listing.with(|listing| listing.bruhs.clone())) busy=busy wait=wait on_saved=on_saved on_close=close on_unanswered=on_unanswered /> })}
             </Show>
             {move || checked.get().map(|(ok, message)| view! { <p role="status" data-vault-checked="" class=if ok { "mt-2 text-label-sm text-pandan-300" } else { "mt-2 text-label-sm text-durian-300" }>{message}</p> })}
             {move || error.get().map(|message| view! { <p role="alert" class="mt-2 text-label-sm text-lychee-300">{message}</p> })}
@@ -486,6 +499,8 @@ fn VaultFormView(
     wait: Signal<Option<&'static str>>,
     on_saved: Callback<VaultEntry>,
     on_close: Callback<()>,
+    /// The save got no answer: the page reloads, which closes this form.
+    on_unanswered: Callback<()>,
 ) -> impl IntoView {
     let editing = entry.is_some();
     let has_totp = matches!(
@@ -618,6 +633,9 @@ fn VaultFormView(
                     // the row out, and leaving Settings drops the page.
                     on_saved.try_run(entry);
                     on_close.try_run(());
+                }
+                Err(err) if crate::api::vault_failure(&err).may_have_landed() => {
+                    on_unanswered.try_run(());
                 }
                 Err(err) => {
                     error.try_set(Some(crate::api::vault_message(&err)));

@@ -128,6 +128,37 @@ pub const VAULT_CALL_TIMEOUT_MS: u32 = 75_000;
 /// one of the routes' messages.
 const MAX_VAULT_MESSAGE_LEN: usize = 512;
 
+/// A change (a save or a delete) that got no answer may still have landed
+/// on the server (rereview M5): the page reloads its listing and says so.
+pub const MAY_HAVE_CHANGED: &str =
+    "Bruhs didn't answer, so the change may have gone through. Check the list before you try again.";
+
+/// The line a vault page shows above its list after a change, on both apps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaultNotice {
+    /// The change landed: [`ENTRY_UPDATED`].
+    Saved,
+    /// The change got no answer and the listing reloads:
+    /// [`MAY_HAVE_CHANGED`].
+    MayHaveChanged,
+}
+
+impl VaultNotice {
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::Saved => ENTRY_UPDATED,
+            Self::MayHaveChanged => MAY_HAVE_CHANGED,
+        }
+    }
+
+    /// Whether the line warns (durian) rather than confirms (pandan).
+    #[must_use]
+    pub const fn warns(self) -> bool {
+        matches!(self, Self::MayHaveChanged)
+    }
+}
+
 /// Why a vault call failed, as either app saw it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultFailure<'a> {
@@ -138,6 +169,17 @@ pub enum VaultFailure<'a> {
     Status { code: u16, error: Option<&'a str> },
     /// An answer the app couldn't read, or a call it couldn't send.
     Other,
+}
+
+impl VaultFailure<'_> {
+    /// Whether a failed change may still have landed, so the page reloads
+    /// its listing and shows [`VaultNotice::MayHaveChanged`] rather than
+    /// the failure: only a call that got no answer. An answered failure
+    /// changed nothing.
+    #[must_use]
+    pub const fn may_have_landed(self) -> bool {
+        matches!(self, Self::NoAnswer)
+    }
 }
 
 /// What a vault page shows for a failed call, on both apps. A refusal
@@ -942,6 +984,17 @@ mod tests {
             VAULT_UNREACHABLE
         );
         assert_eq!(vault_failure_message(VaultFailure::Other), VAULT_FAILED);
+        // Rereview M5: only a change with no answer may have landed; the
+        // page reloads and warns rather than confirms.
+        assert!(VaultFailure::NoAnswer.may_have_landed());
+        assert!(!VaultFailure::Other.may_have_landed());
+        for code in [409, 503] {
+            assert!(!VaultFailure::Status { code, error: None }.may_have_landed());
+        }
+        assert_eq!(VaultNotice::MayHaveChanged.message(), MAY_HAVE_CHANGED);
+        assert!(VaultNotice::MayHaveChanged.warns());
+        assert_eq!(VaultNotice::Saved.message(), ENTRY_UPDATED);
+        assert!(!VaultNotice::Saved.warns());
         // The page outwaits the server's own bounds: a 30 s keychain read
         // and a 25 s `op` call.
         assert_eq!(VAULT_CALL_TIMEOUT_MS, 75_000);

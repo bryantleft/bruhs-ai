@@ -42,6 +42,17 @@ impl ServerError {
     /// `{"error": …}`, else fixed copy. No answer in time, a timeout
     /// included, says the service couldn't be reached.
     pub(crate) fn vault_message(&self) -> String {
+        self.vault_failure(|failure| vault_failure_message(failure).into())
+    }
+
+    /// Whether a failed vault change may still have landed: it got no
+    /// answer, a timeout included (rereview M5).
+    pub(crate) fn vault_may_have_landed(&self) -> bool {
+        self.vault_failure(|failure| failure.may_have_landed())
+    }
+
+    /// The failure by the rule both apps share, read by `with`.
+    fn vault_failure<T>(&self, with: impl FnOnce(VaultFailure<'_>) -> T) -> T {
         let json = match self {
             Self::Status { body, .. } => serde_json::from_str::<serde_json::Value>(body).ok(),
             _ => None,
@@ -57,7 +68,7 @@ impl ServerError {
             },
             Self::Decode { .. } | Self::Invalid(_) | Self::Client(_) => VaultFailure::Other,
         };
-        vault_failure_message(failure).into()
+        with(failure)
     }
 }
 
@@ -251,6 +262,11 @@ mod tests {
             let error = client.vault_listing().await.unwrap_err();
             assert!(error.is_transport());
             assert_eq!(error.vault_message(), VAULT_UNREACHABLE);
+            // Rereview M5: a change with no answer may still have landed.
+            assert!(error.vault_may_have_landed());
         });
+        // An answered failure changed nothing.
+        assert!(!status(409, &sentence(DUPLICATE_NAME)).vault_may_have_landed());
+        assert!(!status(503, "").vault_may_have_landed());
     }
 }

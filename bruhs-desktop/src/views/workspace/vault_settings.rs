@@ -17,8 +17,8 @@ use bruhs_models::vault::{
     bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
     form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
     row_label, vault_row, wait_reason, FormField, FormKind, FormScope, FormSource, LoginFields,
-    LoginMeta, VaultBusy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate,
-    CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND,
+    LoginMeta, VaultBusy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultNotice,
+    VaultUpdate, CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, FIELD_BRUH, FIELD_KIND,
     FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE,
     FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY,
     FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS,
@@ -203,7 +203,7 @@ pub(super) struct VaultSettings {
     listing: VaultListing,
     load: Load,
     busy: VaultBusy,
-    notice: Option<&'static str>,
+    notice: Option<VaultNotice>,
     search: Entity<InputState>,
     _search_subscription: Subscription,
     pub(super) form: Option<(Open, VaultFormState)>,
@@ -780,7 +780,7 @@ impl VaultSettings {
                     None => self.listing.entries.push(entry),
                 }
                 self.rematch(entry_name, None, cx);
-                self.notice = Some(ENTRY_UPDATED);
+                self.notice = Some(VaultNotice::Saved);
                 if let Some(open) = this_form {
                     if let Open::Entry(id) = &open {
                         self.checked.remove(id);
@@ -791,6 +791,7 @@ impl VaultSettings {
                     }
                 }
             }
+            Err(error) if error.vault_may_have_landed() => self.unanswered(window, cx),
             Err(error) => {
                 if let Some((_, form)) = self.form.as_mut().filter(|(_, f)| f.serial == serial) {
                     form.error = Some(error.vault_message());
@@ -798,6 +799,14 @@ impl VaultSettings {
             }
         }
         cx.notify();
+    }
+
+    /// A change that got no answer may have landed (rereview M5): the list
+    /// reloads, which closes any form, and the page says so, as the web
+    /// does.
+    fn unanswered(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.refresh(window, cx);
+        self.notice = Some(VaultNotice::MayHaveChanged);
     }
 
     // ── Rows ────────────────────────────────────────────────────────────
@@ -862,6 +871,7 @@ impl VaultSettings {
         match result {
             Ok(()) => self.forget(&id, window, cx),
             Err(error) if error.is_not_found() => self.forget(&id, window, cx),
+            Err(error) if error.vault_may_have_landed() => self.unanswered(window, cx),
             Err(error) => {
                 self.row_errors.insert(id, error.vault_message());
             }
@@ -1739,10 +1749,16 @@ impl Render for VaultSettings {
                         .role(Role::Status),
                 )
             })
-            .when_some(self.notice, |el, message| {
+            .when_some(self.notice, |el, notice| {
+                let color = if notice.warns() {
+                    theme::durian_300()
+                } else {
+                    theme::pandan_300()
+                };
                 el.child(
-                    small(message, theme::pandan_300())
+                    small(notice.message(), color)
                         .id("desktop-vault-saved")
+                        .debug_selector(|| "desktop-vault-saved".into())
                         .role(Role::Status),
                 )
             })
@@ -1776,7 +1792,7 @@ mod tests {
     use bruhs_models::vault::{
         delete_entry_confirm, vault_row, CredentialScope, LoginFields, LoginInput, LoginMeta,
         TotpInput, VaultAttention, VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing,
-        VaultSecretInput, VaultUpdate, ENTRY_UPDATED,
+        VaultNotice, VaultSecretInput, VaultUpdate,
     };
     use bruhs_models::vault::{FormKind, FormSource};
     use gpui::{
@@ -2158,8 +2174,89 @@ mod tests {
         view.read_with(cx, |view, _| {
             assert!(view.form.is_none());
             assert!(view.busy == VaultBusy::Idle);
-            assert_eq!(view.notice, Some(ENTRY_UPDATED));
+            assert_eq!(view.notice, Some(VaultNotice::Saved));
             assert_eq!(view.listing.entries[1], saved);
+        });
+    }
+
+    /// A call that got no answer, as reqwest reports one.
+    fn no_answer(request: &str) -> ServerError {
+        ServerError::Transport {
+            request: request.into(),
+            source: reqwest::Client::new().get("not a url").build().unwrap_err(),
+        }
+    }
+
+    /// Rereview M5: a save or a delete that got no answer may have landed,
+    /// so the page reloads its listing, which closes the form, and warns
+    /// that it may have gone through. An answered failure stays put.
+    #[gpui::test]
+    fn a_change_with_no_answer_reloads_and_says_it_may_have_landed(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, Some(listing()));
+        click(cx, "desktop-vault-new");
+        click(cx, "desktop-vault-save");
+        let serial = view.read_with(cx, |view, _| {
+            view.form.as_ref().map(|(_, form)| form.serial)
+        });
+        let Some(serial) = serial else {
+            panic!("the New entry form is open");
+        };
+        let before = requests(&view, cx).len();
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.saved(serial, Err(no_answer("POST /api/vault")), window, cx)
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            requests(&view, cx)[before..],
+            ["GET /api/vault".to_string()],
+            "the listing reloads"
+        );
+        view.read_with(cx, |view, _| {
+            assert!(view.form.is_none(), "the reload closes the form");
+            assert_eq!(view.notice, Some(VaultNotice::MayHaveChanged));
+        });
+        view.update(cx, |view, cx| view.show_listing_for_test(listing(), cx));
+        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-vault-saved"));
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.notice, Some(VaultNotice::MayHaveChanged));
+        });
+        // A delete with no answer reloads the same way, with no row error.
+        click(cx, "desktop-vault-delete-v1-deploy");
+        click(cx, "desktop-vault-confirm");
+        let before = requests(&view, cx).len();
+        deleted_answer(
+            &view,
+            cx,
+            "v1-deploy",
+            Err(no_answer("DELETE /api/vault/v1-deploy")),
+        );
+        assert_eq!(
+            requests(&view, cx)[before..],
+            ["GET /api/vault".to_string()]
+        );
+        view.read_with(cx, |view, _| {
+            assert!(view.row_errors.is_empty());
+            assert_eq!(view.notice, Some(VaultNotice::MayHaveChanged));
+        });
+        view.update(cx, |view, cx| view.show_listing_for_test(listing(), cx));
+        cx.run_until_parked();
+        // An answered refusal shows on its row and reloads nothing.
+        click(cx, "desktop-vault-delete-v1-deploy");
+        click(cx, "desktop-vault-confirm");
+        let before = requests(&view, cx).len();
+        let refused = ServerError::Status {
+            request: "DELETE /api/vault/v1-deploy".into(),
+            code: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            body: String::new(),
+        };
+        deleted_answer(&view, cx, "v1-deploy", Err(refused));
+        assert_eq!(requests(&view, cx).len(), before);
+        view.read_with(cx, |view, _| {
+            assert!(view.row_errors.contains_key("v1-deploy"));
+            assert_eq!(view.notice, None);
         });
     }
 

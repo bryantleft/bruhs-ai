@@ -29,15 +29,21 @@ fn vault_check_path(id: &str) -> String {
 /// unavailable store's own sentence, else fixed copy. A call that ran out
 /// of time says the service couldn't be reached.
 pub fn vault_message(error: &ApiError) -> String {
-    let failure = match error {
+    vault_failure_message(vault_failure(error)).to_owned()
+}
+
+/// Why a vault call failed, by the rule both apps share. A call that got
+/// no answer, a timeout included, is [`VaultFailure::NoAnswer`]: a change
+/// may still have landed (rereview M5).
+pub fn vault_failure(error: &ApiError) -> VaultFailure<'_> {
+    match error {
         ApiError::Network(_) | ApiError::Timeout { .. } => VaultFailure::NoAnswer,
         ApiError::Http { status, detail } => VaultFailure::Status {
             code: *status,
             error: detail.as_deref(),
         },
         ApiError::Decode(_) | ApiError::Aborted => VaultFailure::Other,
-    };
-    vault_failure_message(failure).to_owned()
+    }
 }
 
 /// `call`, unless `deadline` comes first: then `abort` drops the request
@@ -150,6 +156,12 @@ mod tests {
         assert_eq!(error, ApiError::Timeout { after_ms: 75_000 });
         assert!(aborted.get(), "the request is cancelled");
         assert_eq!(vault_message(&error), VAULT_UNREACHABLE);
+        // Rereview M5: a change that timed out may have landed, so the
+        // page reloads its listing; an answered refusal changed nothing.
+        assert!(vault_failure(&error).may_have_landed());
+        assert!(vault_failure(&ApiError::Network("TypeError".into())).may_have_landed());
+        assert!(!vault_failure(&ApiError::http(409, "")).may_have_landed());
+        assert!(!vault_failure(&ApiError::Decode("x".into())).may_have_landed());
 
         let aborted = std::cell::Cell::new(false);
         let answered = pin!(bounded(
