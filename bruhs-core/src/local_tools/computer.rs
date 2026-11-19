@@ -16,10 +16,11 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        handed_back_note, same_page_host, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
-        COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED,
-        LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER,
-        PAGE_CHANGED, PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        handed_back_note, same_page_host, ACTION_STOPPED, BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER,
+        CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL,
+        COMPUTER_UNSUPPORTED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS,
+        OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
+        USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -81,6 +82,9 @@ pub(super) trait ComputerPage: Send {
     ) -> Result<ToolReply, ToolError>;
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
     async fn url(&mut self) -> Option<String>;
+    /// The page target is gone (crashed, or closed itself) and takes no
+    /// command again; Chrome may still run.
+    fn gone(&self) -> bool;
     /// For a window: its main-frame address as the owner browses. The
     /// sender drops when the page is gone (closed by hand, or Chrome quit).
     fn watch_window(&self) -> watch::Receiver<Option<String>>;
@@ -118,6 +122,10 @@ impl ComputerPage for Browser {
 
     async fn url(&mut self) -> Option<String> {
         self.current_url().await.ok()
+    }
+
+    fn gone(&self) -> bool {
+        Browser::gone(self)
     }
 
     fn watch_window(&self) -> watch::Receiver<Option<String>> {
@@ -185,7 +193,14 @@ pub(super) struct Computers {
     /// Why no bruh browser opens on this system, if none does
     /// ([`platform_refusal`]).
     refusal: Option<&'static str>,
+    /// Runs in the idle reaper between its first look at a slot and its
+    /// try at the page lock, so a test can act in that gap.
+    #[cfg(test)]
+    before_reap: Mutex<Option<ReapHook>>,
 }
+
+#[cfg(test)]
+type ReapHook = Box<dyn Fn(&Slot) + Send + Sync>;
 
 impl Computers {
     pub(super) fn new(refusal: Option<&'static str>) -> Self {
@@ -699,6 +714,14 @@ impl LocalToolsHost {
                 tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await
                     .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into())));
+            if open.page.gone() {
+                // The page target ended under Chrome. Close it where it was
+                // last, so the next step reopens it, and say the step can
+                // be tried again.
+                drop(slot.close_page(&mut page).await);
+                slot.publish(&page);
+                return Err(ToolError::Unavailable(BROWSER_PAGE_STOPPED.into()));
+            }
             let url = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
                 .await
                 .ok()
@@ -706,7 +729,11 @@ impl LocalToolsHost {
             if let Some(url) = url.or(navigated.filter(|_| reply.is_ok())) {
                 page.last_url = Some(url);
             }
-            page.last_used = Some(Instant::now());
+            // A failed step isn't use: a bruh retrying a broken page doesn't
+            // keep the browser from closing when idle.
+            if reply.is_ok() {
+                page.last_used = Some(Instant::now());
+            }
             slot.publish(&page);
             drop(page);
             match (reply, note) {
@@ -1014,9 +1041,23 @@ impl LocalToolsHost {
             if slot.control() == Control::Owner {
                 return;
             }
+            #[cfg(test)]
+            if let Some(hook) = &*self
+                .computers
+                .before_reap
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+            {
+                hook(slot);
+            }
             let Ok(mut page) = slot.page.try_lock() else {
                 return;
             };
+            // Take control doesn't lock an open page, so the owner may have
+            // taken it since the first look.
+            if slot.control() == Control::Owner {
+                return;
+            }
             if slot.hub.watched() {
                 // Its idle time starts when the last viewer leaves.
                 page.last_used = Some(Instant::now());
@@ -1037,6 +1078,10 @@ impl LocalToolsHost {
         // it can't recreate a deleted bruh's profile.
         if *slot.grant.revoked.borrow() {
             return Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into()));
+        }
+        // A page whose target ended takes no command: close it to reopen.
+        if page.open.as_ref().is_some_and(|open| open.page.gone()) {
+            drop(slot.close_page(page).await);
         }
         if page.open.is_some() {
             return Ok(());
@@ -1199,6 +1244,8 @@ mod fake {
         windows: HashMap<String, watch::Sender<Option<String>>>,
         /// Sessions whose window was closed by hand: they answer nothing.
         gone: std::collections::HashSet<String>,
+        /// Sessions whose page target ended: every command fails.
+        dead: std::collections::HashSet<String>,
         fail_actions: std::collections::HashSet<String>,
         fail_launches: std::collections::HashSet<String>,
         /// The page socket each bruh's next launches report.
@@ -1288,6 +1335,15 @@ mod fake {
             drop(window);
         }
 
+        /// The bruh's page target ends while Chrome lives on, as after a
+        /// crash or a page that closed itself.
+        pub fn kill_target(&self, agent_id: &str) {
+            let mut seen = self.seen();
+            if let Some(session) = seen.sessions.get(agent_id).map(|s| s.id.clone()) {
+                seen.dead.insert(session);
+            }
+        }
+
         /// The bruh's next action fails, as on a page that errors.
         pub fn fail_next_action(&self, agent_id: &str) {
             self.seen().fail_actions.insert(agent_id.into());
@@ -1336,6 +1392,7 @@ mod fake {
                         pages: pages.clone(),
                         window: feed,
                         socket: seen.page_sockets.get(&launch.agent_id).cloned(),
+                        noticed: false,
                     };
                     seen.windows.insert(launch.agent_id.clone(), window);
                     seen.urls
@@ -1356,11 +1413,18 @@ mod fake {
         pages: FakePages,
         window: watch::Receiver<Option<String>>,
         socket: Option<String>,
+        /// A command found the target dead, as a real page's connection
+        /// learns only when it is used.
+        noticed: bool,
     }
 
     impl FakePage {
-        fn gone(&self) -> bool {
+        fn window_closed(&self) -> bool {
             self.pages.seen().gone.contains(&self.session.id)
+        }
+
+        fn dead(&self) -> bool {
+            self.pages.seen().dead.contains(&self.session.id)
         }
     }
 
@@ -1395,6 +1459,12 @@ mod fake {
             if let Some(hold) = hold {
                 hold.notified().await;
             }
+            if self.dead() {
+                self.noticed = true;
+                return Err(ToolError::Unavailable(
+                    "Chrome closed the debugging connection. Start another browser.".into(),
+                ));
+            }
             if fail {
                 return Err(ToolError::Unavailable("The page failed.".into()));
             }
@@ -1408,6 +1478,12 @@ mod fake {
         }
 
         async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
+            if self.dead() {
+                self.noticed = true;
+                return Err(ToolError::Unavailable(
+                    "Chrome closed the debugging connection. Start another browser.".into(),
+                ));
+            }
             let mut seen = self.pages.seen();
             seen.inputs
                 .entry(self.agent_id.clone())
@@ -1421,10 +1497,14 @@ mod fake {
         }
 
         async fn url(&mut self) -> Option<String> {
-            if self.gone() {
+            if self.window_closed() || self.dead() {
                 return None;
             }
             self.pages.seen().urls.get(&self.agent_id).cloned()
+        }
+
+        fn gone(&self) -> bool {
+            self.noticed
         }
 
         fn watch_window(&self) -> watch::Receiver<Option<String>> {

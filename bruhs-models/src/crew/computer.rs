@@ -43,6 +43,10 @@ pub const CONTROL_WAIT_EXPIRED: &str =
 pub const CLOSED_BY_OWNER: &str =
     "The owner closed your browser. It opens again on your next step.";
 pub const ACTION_STOPPED: &str = "Stopped by the owner.";
+/// The page target ended while Chrome lived on: a crash, or a page that
+/// closed itself.
+pub const BROWSER_PAGE_STOPPED: &str =
+    "Your browser's page stopped. It opens again on your next step, so try the step again.";
 pub const PAGE_CHANGED: &str =
     "The page changed while the owner decided. Take a snapshot and try again.";
 /// Input on a page the browser didn't name: nothing can say which site it

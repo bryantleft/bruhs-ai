@@ -121,6 +121,50 @@ async fn cdp_correlates_replies_and_retains_events() {
     server.await.unwrap();
 }
 
+/// A page connection knows its target is gone: Chrome said it crashed, or
+/// the socket ended.
+#[tokio::test]
+async fn a_page_connection_knows_when_its_target_is_gone() {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for crash in [true, false] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request: serde_json::Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            if crash {
+                let crashed = json!({"method":"Inspector.targetCrashed","params":{}});
+                socket
+                    .send(Message::Text(crashed.to_string().into()))
+                    .await
+                    .unwrap();
+                let reply = json!({"id":request["id"],"result":{}});
+                socket
+                    .send(Message::Text(reply.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+            // Without a crash, the target ends the socket instead.
+            drop(socket);
+        }
+    });
+    let endpoint = format!("ws://{addr}");
+    let connect = || browser::Cdp::connect(&endpoint, ProcessPolicy::default());
+    let mut crashed = connect().await.unwrap();
+    assert!(!crashed.closed());
+    crashed.call("Runtime.enable", json!({})).await.unwrap();
+    assert!(crashed.closed());
+    let mut ended = connect().await.unwrap();
+    assert!(ended.call("Runtime.enable", json!({})).await.is_err());
+    assert!(ended.closed());
+    server.await.unwrap();
+}
+
 #[tokio::test]
 #[ignore = "opens an isolated visible Chrome window; run explicitly for local acceptance"]
 #[expect(
@@ -1041,6 +1085,54 @@ async fn live_a_launch_whose_traffic_misses_the_guard_is_refused() {
         Ok(_) => panic!("a browser that missed the guard opened"),
     }
     decoy_task.abort();
+}
+
+/// A real page that closes itself leaves Chrome running: the browser then
+/// knows its page is gone instead of failing every step forever.
+#[tokio::test]
+#[ignore = "launches headless Chrome; run explicitly for local acceptance"]
+async fn live_a_page_that_closes_itself_is_known_gone() {
+    use browser::{Browser, LaunchOptions};
+    let home = tempfile::tempdir().unwrap();
+    let options = LaunchOptions {
+        profile: Some(home.path().join("bruhs").join("a").join("browser")),
+        headless: true,
+        proxy: None,
+    };
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let start = BrowserStart {
+        grant_id: "live".into(),
+        url: "about:blank".into(),
+    };
+    let policy = ProcessPolicy::default();
+    let mut browser = Browser::start(&client, start, policy, &options)
+        .await
+        .unwrap();
+    assert!(!browser.gone());
+    let _ = browser
+        .command(
+            BrowserAction::Evaluate {
+                expression: "setTimeout(() => window.close(), 0); true".into(),
+            },
+            policy,
+        )
+        .await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(browser
+        .command(BrowserAction::Snapshot, policy)
+        .await
+        .is_err());
+    assert!(browser.gone(), "the closed page is known gone");
+    assert!(
+        browser.exit_status().await.is_none(),
+        "Chrome itself lives on"
+    );
+    browser
+        .close(std::time::Duration::from_millis(
+            bruhs_models::crew::CLOSE_GRACE_MS,
+        ))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

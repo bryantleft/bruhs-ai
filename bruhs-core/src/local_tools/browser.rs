@@ -280,6 +280,9 @@ impl Browser {
             )
             .await?;
             cdp.call("Log.enable", json!({})).await?;
+            // Says when the page target crashes or detaches; an older Chrome
+            // without it still ends the socket when the target closes.
+            let _ = cdp.call("Inspector.enable", json!({})).await;
             let viewport = if options.headless {
                 cdp.call(
                     "Emulation.setDeviceMetricsOverride",
@@ -335,6 +338,12 @@ impl Browser {
             headed: !options.headless,
             policy,
         })
+    }
+
+    /// Whether the page target is gone while Chrome may live on: it crashed
+    /// or closed itself, and no command reaches it again.
+    pub fn gone(&self) -> bool {
+        self.cdp.closed()
     }
 
     /// The page target's debugging socket, for a second connection such as
@@ -935,6 +944,8 @@ pub(super) struct Cdp {
     loaded: Option<String>,
     /// The last mouse press not yet released.
     pressed: Option<Value>,
+    /// The connection ended, or Chrome said its target crashed or detached.
+    closed: bool,
 }
 
 impl Cdp {
@@ -953,6 +964,7 @@ impl Cdp {
             budget: policy.max_output_bytes,
             loaded: None,
             pressed: None,
+            closed: false,
         })
     }
 
@@ -971,7 +983,7 @@ impl Cdp {
         }
         if let Some(loader) = result["loaderId"].as_str() {
             while self.loaded.as_deref() != Some(loader) {
-                let frame = self.socket.next().await.ok_or_else(|| {
+                let frame = self.read().await.ok_or_else(|| {
                     ToolError::Unavailable("Chrome closed while loading the page.".into())
                 })??;
                 if let Message::Text(text) = frame {
@@ -1014,20 +1026,36 @@ impl Cdp {
                 _ => {}
             }
         }
-        self.socket
+        let sent = self
+            .socket
             .send(Message::Text(
                 json!({"id":id,"method":method,"params":params})
                     .to_string()
                     .into(),
             ))
-            .await?;
+            .await;
+        self.closed |= sent.is_err();
+        sent?;
         Ok(id)
+    }
+
+    /// The next frame, marking the connection closed when it ends or fails.
+    async fn read(&mut self) -> Option<Result<Message, tokio_tungstenite::tungstenite::Error>> {
+        let frame = self.socket.next().await;
+        self.closed |= !matches!(frame, Some(Ok(_)));
+        frame
+    }
+
+    /// Whether this connection's page is gone: the socket ended, or Chrome
+    /// said the target crashed or detached. A command can't reach it again.
+    pub fn closed(&self) -> bool {
+        self.closed
     }
 
     /// The next message from Chrome, a reply or an event, kept whole: a
     /// reader that matches replies by id loses no event.
     pub async fn next_message(&mut self) -> Result<Value, ToolError> {
-        while let Some(frame) = self.socket.next().await {
+        while let Some(frame) = self.read().await {
             if let Message::Text(text) = frame? {
                 return Ok(serde_json::from_str(&text)?);
             }
@@ -1042,7 +1070,7 @@ impl Cdp {
     /// live view reads with [`Self::send`] and [`Self::next_message`].
     pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ToolError> {
         let id = self.send(method, params).await?;
-        while let Some(frame) = self.socket.next().await {
+        while let Some(frame) = self.read().await {
             let frame = frame?;
             let Message::Text(text) = frame else {
                 continue;
@@ -1076,6 +1104,9 @@ impl Cdp {
 
     fn observe(&mut self, value: Value, bytes: usize) {
         if let Some(method) = value["method"].as_str() {
+            if matches!(method, "Inspector.targetCrashed" | "Inspector.detached") {
+                self.closed = true;
+            }
             if method == "Page.lifecycleEvent" && value["params"]["name"] == "load" {
                 self.loaded = value["params"]["loaderId"].as_str().map(str::to_owned);
             }

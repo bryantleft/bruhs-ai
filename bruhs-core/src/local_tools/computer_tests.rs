@@ -234,6 +234,84 @@ async fn an_idle_browser_closes_after_ten_minutes_unless_watched_or_held() {
     reaper.abort();
 }
 
+/// The owner takes control of an idle open page just as the reaper looks:
+/// the page stays open for them.
+#[tokio::test(start_paused = true)]
+async fn the_reaper_never_closes_a_page_the_owner_just_took() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    tokio::time::advance(Duration::from_secs(11 * 60)).await;
+    // Between the reaper's first look and its page lock, as Take control
+    // on an open page takes no lock.
+    *host.computers.before_reap.lock().unwrap() =
+        Some(Box::new(|slot| slot.set_control(Control::Owner, None)));
+    host.close_idle().await;
+    assert_eq!(fake.closes("a"), 0);
+    let state = host.computer_state("a").await.unwrap();
+    assert!(state.session_id.is_some());
+    assert_eq!(state.control, Control::Owner);
+}
+
+/// A failed step isn't use: a bruh retrying a broken page doesn't keep its
+/// browser from closing when idle.
+#[tokio::test(start_paused = true)]
+async fn a_failed_step_doesnt_keep_the_browser_awake() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    tokio::time::advance(Duration::from_secs(9 * 60)).await;
+    fake.fail_next_action("a");
+    assert!(host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .is_err());
+    tokio::time::advance(Duration::from_secs(2 * 60)).await;
+    host.close_idle().await;
+    assert_eq!(fake.closes("a"), 1);
+}
+
+/// A page whose target ended (a crash, or a page that closed itself) while
+/// Chrome lives on is closed, and the next step reopens it where it was.
+#[tokio::test]
+async fn a_dead_page_reopens_on_the_next_step() {
+    use bruhs_models::crew::BROWSER_PAGE_STOPPED;
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://a.test/x"))
+        .await
+        .unwrap();
+    fake.kill_target("a");
+    let error = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), BROWSER_PAGE_STOPPED);
+    assert_eq!(fake.closes("a"), 1);
+    assert_eq!(host.computer_state("a").await.unwrap().session_id, None);
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    let launches = fake.launches();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(launches[1].url, "https://a.test/x");
+    // The owner's input reopens a page that died between steps too.
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    fake.kill_target("a");
+    assert!(host.owner_input("a", ComputerInput::Reload).await.is_err());
+    host.owner_input("a", ComputerInput::Reload).await.unwrap();
+    assert_eq!(fake.launches().len(), 3);
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_idle_reaper_ends_with_its_host() {
     let (host, _fake) = LocalToolsHost::with_fake_pages();
