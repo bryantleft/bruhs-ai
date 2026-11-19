@@ -25,7 +25,7 @@ Ok(event.into_event())
 
 Serializer failures return an error and drop the partially built event; the task stream yields no partial frame. UTF-8 is not checked here or later. Individual writes may split a scalar, but the completed payload must contain valid UTF-8; otherwise invalid bytes can reach the wire. The task caller uses `serde_json`, which supplies UTF-8. This patch adds no unsafe code.
 
-The [constructor study](../../bench/sse-encoding-probe/README.md) passes complete raw-frame and error-parity checks for named/unnamed events, escaped text, large ASCII/Unicode fields, pretty raw JSON and partial failures. Allocation counters run separately from latency samples. The 8 KiB starting configuration follows a 256-16,384-byte bounded-constructor sweep and is then validated for the byte adapter; this does not establish a universal optimum. It avoids a full JSON temporary, although output-buffer growth can still raise or lower peak requested bytes. The buffer does not cap event size. Actual HTTP results are tracked separately in [the performance audit](../../docs/performance-goal-2026-11-09.md#buffered-task-event-encoding).
+The [constructor study](../../bench/sse-encoding-probe/README.md) passes complete raw-frame and error-parity checks for named/unnamed events, escaped text, large ASCII/Unicode fields, pretty raw JSON and partial failures. Allocation counters run separately from latency samples. The 8 KiB starting configuration follows a 256-16,384-byte bounded-constructor sweep and is then validated for the byte adapter; this does not establish a universal optimum. It avoids a full JSON temporary, although output-buffer growth can still raise or lower peak requested bytes. The buffer does not cap event size.
 
 When refreshing the dependency:
 
