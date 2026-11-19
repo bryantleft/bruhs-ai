@@ -312,9 +312,10 @@ impl SettingsForm {
     }
 
     /// The grants follow the stored ones while the owner hasn't changed
-    /// them since the fill (`vault_grants_follow`).
+    /// them since the fill (`vault_grants_follow`). The page has no vault
+    /// section yet, so it is never off.
     fn sync_vault(&mut self, stored: &[String]) {
-        if let Some(stored) = vault_grants_follow(&self.vault, &self.shown.vault, stored) {
+        if let Some(stored) = vault_grants_follow(&self.vault, &self.shown.vault, stored, false) {
             self.vault.clone_from(&stored);
             self.shown.vault = stored;
         }

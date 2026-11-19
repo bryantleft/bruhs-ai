@@ -4,8 +4,8 @@
 //! `settings_commands_for`, and only when they changed.
 
 use bruhs_models::crew::{
-    usable_by, vault_choices, vault_own_line, ServiceNotice, VAULT_GRANTS_HINT, VAULT_GRANTS_LABEL,
-    VAULT_GRANTS_NONE,
+    usable_by, vault_choice_label, vault_choices, vault_own_line, ServiceNotice, VAULT_GRANTS_HINT,
+    VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
 use bruhs_models::vault::{
     vault_row, VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH,
@@ -34,13 +34,10 @@ fn grant_rows(listing: &VaultListing, agent_id: &str, grants: &[String]) -> Vec<
         .own
         .iter()
         .map(|entry| GrantRow::Own(vault_own_line(&vault_row(entry, &listing.bruhs).name)));
-    let shared = choices.shared.iter().map(|entry| {
-        let row = vault_row(entry, &listing.bruhs);
-        GrantRow::Shared {
-            id: entry.id.clone(),
-            label: format!("{}, {}", row.name, row.kind),
-            on: usable_by(entry, agent_id, grants),
-        }
+    let shared = choices.shared.iter().map(|entry| GrantRow::Shared {
+        id: entry.id.clone(),
+        label: vault_choice_label(entry),
+        on: usable_by(entry, agent_id, grants),
     });
     own.chain(shared).collect()
 }

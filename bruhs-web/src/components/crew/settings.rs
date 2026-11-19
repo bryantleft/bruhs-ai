@@ -158,10 +158,19 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         }
     });
 
-    // The grants follow the stored ones while the owner hasn't changed them
-    // since the fill (`vault_grants_follow`), so a Save made here can't put
-    // back grants another app replaced.
+    // The Vault section is off while the bruh can't use the vault, or the
+    // service can't keep its grants. It then shows the stored grants.
+    let vault_block = Signal::derive(move || {
+        vault_unavailable(level.get(), AgentProvider::for_model(&model.get()))
+            .or_else(|| data.vault_reason())
+    });
+    // The grants follow the stored ones while the section is off, while the
+    // owner hasn't changed them since the fill, and once the picks match
+    // them (`vault_grants_follow`). Tracked, so a Save made here can't put
+    // back grants another app replaced or send a pick the section no
+    // longer offers.
     Effect::new(move |_| {
+        let off = vault_block.with(Option::is_some);
         let Some(stored) = saved.with(|saved| saved.as_ref().map(|saved| saved.vault.clone()))
         else {
             return;
@@ -172,7 +181,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             return;
         };
         let picked = vault.get();
-        if let Some(stored) = vault_grants_follow(&picked, &filled, &stored) {
+        if let Some(stored) = vault_grants_follow(&picked, &filled, &stored, off) {
             shown.update_value(|shown| {
                 if let Some(shown) = shown.as_mut() {
                     shown.vault.clone_from(&stored);
@@ -182,13 +191,6 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                 vault.set(stored);
             }
         }
-    });
-
-    // The Vault section is off while the bruh can't use the vault, or the
-    // service can't keep its grants. It then shows the picks as they are.
-    let vault_block = Signal::derive(move || {
-        vault_unavailable(level.get(), AgentProvider::for_model(&model.get()))
-            .or_else(|| data.vault_reason())
     });
 
     let dirty = Memo::new(move |_| saved.get().is_some_and(|saved| saved != edited()));

@@ -4,7 +4,10 @@
 
 use super::{service_notice, AccessLevel, VAULT_PROTOCOL};
 use crate::agent::AgentProvider;
-use crate::vault::{CredentialScope, VaultEntry};
+use crate::secrets::review_text;
+use crate::vault::{
+    CredentialScope, VaultEntry, VaultKind, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD,
+};
 
 /// A bruh holds at most this many grants.
 pub const MAX_VAULT_GRANTS: usize = 64;
@@ -132,20 +135,34 @@ pub fn vault_choices(entries: &[VaultEntry], agent_id: &str) -> VaultChoices {
     choices
 }
 
+/// How a shared entry reads in a bruh's Settings: its name, as the Vault
+/// page shows it, and its kind.
+#[must_use]
+pub fn vault_choice_label(entry: &VaultEntry) -> String {
+    let kind = match entry.kind {
+        VaultKind::Value => KIND_KEY,
+        VaultKind::Login(_) => KIND_LOGIN,
+        VaultKind::OnePassword { .. } => KIND_ONE_PASSWORD,
+    };
+    format!("{}, {kind}", review_text(&entry.name))
+}
+
 /// Whether a bruh's vault picks should follow the stored grants: while the
-/// owner hasn't changed them since the form was filled (`edited == filled`),
-/// or once the owner's picks match the stored ones. `Some` is then the
-/// grants to show and to count as filled from, so Save never puts back
-/// grants another app replaced. Compared as sets. Both apps use this rule
-/// (as [`super::computer_switch_follows`]).
+/// section is `off` (disabled), while the owner hasn't changed them since
+/// the form was filled (`edited == filled`), or once the owner's picks
+/// match the stored ones. `Some` is then the grants to show and to count as
+/// filled from, so Save never puts back grants another app replaced, nor
+/// sends a pick made before the section went off. Compared as sets. Both
+/// apps use this rule (as [`super::computer_switch_follows`]).
 #[must_use]
 pub fn vault_grants_follow(
     edited: &[String],
     filled: &[String],
     stored: &[String],
+    off: bool,
 ) -> Option<Vec<String>> {
     let edited = grant_set(edited);
-    (edited == grant_set(filled) || edited == grant_set(stored)).then(|| stored.to_vec())
+    (off || edited == grant_set(filled) || edited == grant_set(stored)).then(|| stored.to_vec())
 }
 
 /// The line for one of the bruh's own entries.
@@ -233,16 +250,22 @@ mod tests {
         );
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            vault_grants_follow(&s(&["a"]), &s(&["a"]), &s(&["a", "b"])),
+            vault_grants_follow(&s(&["a"]), &s(&["a"]), &s(&["a", "b"]), false),
             Some(s(&["a", "b"]))
         );
         assert_eq!(
-            vault_grants_follow(&s(&[]), &s(&["a"]), &s(&["a", "b"])),
+            vault_grants_follow(&s(&[]), &s(&["a"]), &s(&["a", "b"]), false),
             None
         );
         // Picked in another order: still the same grants.
         assert_eq!(
-            vault_grants_follow(&s(&["b", "a"]), &s(&[]), &s(&["a", "b"])),
+            vault_grants_follow(&s(&["b", "a"]), &s(&[]), &s(&["a", "b"]), false),
+            Some(s(&["a", "b"]))
+        );
+        // A section that is off snaps back to the stored grants, so Save
+        // never sends a pick made before it went off.
+        assert_eq!(
+            vault_grants_follow(&s(&["c"]), &s(&["a"]), &s(&["a", "b"]), true),
             Some(s(&["a", "b"]))
         );
     }
@@ -267,6 +290,38 @@ mod tests {
         let many: Vec<String> = (0..64).map(|i| format!("v{i}")).collect();
         let twice = many.iter().chain(&many).cloned().collect();
         assert_eq!(normalize_grants(twice).map(|set| set.len()), Ok(64));
+    }
+
+    #[test]
+    fn a_choice_reads_as_its_name_and_kind() {
+        let entry = |name: &str, kind| VaultEntry {
+            id: "v1-x".into(),
+            name: name.into(),
+            scope: CredentialScope::Global,
+            kind,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        };
+        let login = VaultKind::Login(crate::vault::LoginMeta {
+            url: "https://github.com/login".into(),
+            fields: crate::vault::LoginFields::Saved {
+                username: "me".into(),
+                totp: false,
+            },
+        });
+        assert_eq!(vault_choice_label(&entry("GitHub", login)), "GitHub, Login");
+        assert_eq!(
+            vault_choice_label(&entry("Deploy", VaultKind::Value)),
+            "Deploy, Key"
+        );
+        // Names show escaped, as on the Vault page.
+        let reference = VaultKind::OnePassword {
+            reference: "op://Ops/Item/field".into(),
+        };
+        assert_eq!(
+            vault_choice_label(&entry("Ops\u{202e}", reference)),
+            "Ops\\u{202e}, 1Password"
+        );
     }
 
     #[test]
