@@ -33,6 +33,14 @@ pub const APP_TOOL_DENIAL: &str = "App tools aren't available to bruh runs.";
 pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
 pub const LOCAL_HOST_DENIAL: &str = "Bruhs can't reach services on this computer.";
+/// A file tool call whose path, once resolved, is in a bruh's browser
+/// profile, which holds the owner's logins.
+pub const PROFILE_DENIAL: &str =
+    "That path leads into a bruh's browser profile, which holds the owner's logins. Leave it alone.";
+/// A file tool call that opens a file in the bruhs' folders with a second
+/// name: a hard link, which could be a profile file under another path.
+pub const LINKED_FILE_DENIAL: &str =
+    "That file is also linked somewhere else, so it could be a private file. Bruhs doesn't open linked files in a bruh's folder.";
 
 /// Forge hosts a shell command can act on as the owner. Plain `gh`, `glab`
 /// and commands naming one of these ask first at Full; see

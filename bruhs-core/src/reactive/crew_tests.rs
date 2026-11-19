@@ -1302,6 +1302,121 @@ async fn network_calls_to_this_computer_are_denied_without_asking() {
     assert!(approvals(&runtime, "a").await.is_empty());
 }
 
+/// A file tool call that reaches a browser profile through a symlink or a
+/// change of case, or opens a hard-linked file in the bruhs' trees, is
+/// denied at every level before any approval opens. A `browser` folder of
+/// the bruh's own work stays open.
+#[cfg(unix)]
+#[tokio::test]
+async fn file_calls_never_reach_a_browser_profile_by_another_name() {
+    let (dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    // The tempdir path is not canonical on macOS (/var is a symlink).
+    let tree = dir.path().join("bruhs").join("a");
+    let work = tree.join("work");
+    let profile = tree.join("browser").join("Default");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::create_dir_all(work.join("x").join("browser")).unwrap();
+    std::fs::write(profile.join("Cookies"), "cookie").unwrap();
+    std::fs::write(work.join("x").join("browser").join("f"), "work").unwrap();
+    std::os::unix::fs::symlink("../browser", work.join("b")).unwrap();
+    std::fs::hard_link(profile.join("Cookies"), work.join("p")).unwrap();
+    let at = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let through_link = at(&work.join("b").join("Default").join("Cookies"));
+    let other_case = at(&dir
+        .path()
+        .join("BRUHS")
+        .join("A")
+        .join("BROWSER")
+        .join("Default")
+        .join("Cookies"));
+    let edit = |path: &str| json!({"file_path": path, "old_string": "c", "new_string": "d"});
+    let refused = [
+        ("Read", json!({"file_path": through_link}), PROFILE_DENIAL),
+        ("Edit", edit(&through_link), PROFILE_DENIAL),
+        (
+            "Write",
+            json!({"file_path": at(&work.join("b").join("Default").join("New")), "content": "x"}),
+            PROFILE_DENIAL,
+        ),
+        ("Read", json!({"file_path": other_case}), PROFILE_DENIAL),
+        (
+            "Grep",
+            json!({"pattern": ".", "path": at(&work.join("b"))}),
+            PROFILE_DENIAL,
+        ),
+        // Relative to the bruh's folder.
+        (
+            "Glob",
+            json!({"pattern": "**", "path": "b"}),
+            PROFILE_DENIAL,
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&tree.join("browser-cache").join("f"))}),
+            PROFILE_DENIAL,
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&work.join("p"))}),
+            LINKED_FILE_DENIAL,
+        ),
+        ("Edit", edit(&at(&work.join("p"))), LINKED_FILE_DENIAL),
+    ];
+    let open = [
+        (
+            "Read",
+            json!({"file_path": at(&work.join("x").join("browser").join("f"))}),
+        ),
+        ("Grep", json!({"pattern": ".", "path": at(&tree)})),
+    ];
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        for (tool, input, reason) in &refused {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                deny(reason),
+                "{level:?} {tool} {input}"
+            );
+        }
+        for (tool, input) in &open {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                Some(crate::PermissionDecision::Allow),
+                "{level:?} {tool} {input}"
+            );
+        }
+    }
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Full,
+        &run,
+        &at(&work),
+        "Edit",
+        edit(&at(&work.join("x").join("browser").join("f"))),
+        LONG_WAIT,
+    );
+    assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
 #[tokio::test]
 async fn ask_turns_a_write_into_an_approval_that_blocks_until_decided() {
     let (_dir, runtime) = runtime_with(&[agent("a")]).await;

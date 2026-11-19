@@ -12,7 +12,7 @@ use bruhs_models::{
     crew::{
         approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
         ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED,
-        LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN,
+        LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -406,8 +406,14 @@ enum Opened {
 /// worker's attempt at `run`, which an allowed browser step belongs to.
 ///
 /// The owner's hold and the approval are separate waits, each bounded by
-/// `timeout`, so one call waits at most twice `timeout`: an approval asked
+/// `timeout`, and an approved browser step waits for the hold once more,
+/// so one call waits at most three times `timeout`: an approval asked
 /// after a long hold still gets its whole time.
+///
+/// A file tool call is refused first when it reaches a browser profile by
+/// another name (`private_file_refusal`). Claude itself allows Read,
+/// Grep and Glob at Ask and Full, so only the calls it asks about reach
+/// this check.
 #[expect(
     clippy::too_many_arguments,
     reason = "one call site in the worker passes the run's fixed context"
@@ -455,6 +461,9 @@ pub(super) async fn decide(
             if reaches_this_computer(&host, system_lookup).await {
                 return Ok(Some(deny(LOCAL_HOST_DENIAL)));
             }
+        }
+        if let Some(reason) = private_file_refusal(&runtime.home, project_path, tool, input) {
+            return Ok(Some(deny(reason)));
         }
         let (input, resolved) = resolved_input(input);
         // A path that can't be resolved never counts as inside the folder.
@@ -570,6 +579,105 @@ fn deny(reason: &str) -> PermissionDecision {
     PermissionDecision::Deny {
         reason: Some(reason.into()),
     }
+}
+
+/// File tools, whose `file_path`, `notebook_path` or `path` names a target.
+const FILE_TOOLS: [&str; 8] = [
+    "Read",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "Grep",
+    "Glob",
+    "LS",
+];
+/// The file tools that open the one file they name.
+const OPENING_TOOLS: [&str; 5] = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// Why a file tool call must not reach its target. The provider's deny
+/// rules (`computers::hidden_folders`) match a path by name, so this looks
+/// at what the path really is:
+///
+/// - Resolved (symlinks followed, a relative path taken from `project`),
+///   a path in any `<home>/bruhs/*/browser*` folder, compared without case
+///   as case-insensitive volumes do, gets [`PROFILE_DENIAL`].
+/// - A tool that opens one file gets [`LINKED_FILE_DENIAL`] for a regular
+///   file under `<home>/bruhs` with more than one name: a hard link to a
+///   profile file can sit anywhere in a bruh's folder.
+///
+/// A path that can't be resolved is left to the gate and the provider.
+fn private_file_refusal(
+    home: &Path,
+    project: &str,
+    tool: &str,
+    input: &Value,
+) -> Option<&'static str> {
+    if !FILE_TOOLS.contains(&tool) {
+        return None;
+    }
+    let trees = home.join(super::computers::TREES);
+    for key in ["file_path", "notebook_path", "path"] {
+        let Some(named) = input[key].as_str().filter(|path| !path.is_empty()) else {
+            continue;
+        };
+        // Joining an absolute path replaces `project`.
+        let named = Path::new(project).join(named);
+        if !named.is_absolute() {
+            continue;
+        }
+        let Some(real) = resolve(&named, 0) else {
+            continue;
+        };
+        let Some(mut inside) = below(&trees, &real) else {
+            continue;
+        };
+        let in_profile = inside.nth(1).is_some_and(|folder| {
+            folder
+                .as_os_str()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("browser")
+        });
+        if in_profile {
+            return Some(PROFILE_DENIAL);
+        }
+        if OPENING_TOOLS.contains(&tool) && has_other_names(&real) {
+            return Some(LINKED_FILE_DENIAL);
+        }
+    }
+    None
+}
+
+/// The rest of `path` below `folder`, both compared by component and
+/// without case; `None` when `path` isn't inside it.
+fn below<'a>(folder: &Path, path: &'a Path) -> Option<std::path::Components<'a>> {
+    let mut rest = path.components();
+    for want in folder.components() {
+        let have = rest.next()?;
+        if !have
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&want.as_os_str().to_string_lossy())
+        {
+            return None;
+        }
+    }
+    Some(rest)
+}
+
+/// Whether `path` is a regular file with more than one hard link.
+#[cfg(unix)]
+fn has_other_names(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.nlink() > 1)
+}
+
+/// Off Unix, no bruh browser runs (`COMPUTER_UNSUPPORTED`), so no profile
+/// file can be linked.
+#[cfg(not(unix))]
+fn has_other_names(_path: &Path) -> bool {
+    false
 }
 
 /// `input` with its file paths resolved, so a symlink inside the folder

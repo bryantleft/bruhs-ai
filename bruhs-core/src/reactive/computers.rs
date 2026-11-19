@@ -22,7 +22,7 @@ use tokio::sync::{watch, Mutex};
 /// The file in each `bruhs/<id>` tree Bruhs made, holding exactly `<id>`.
 pub(super) const OWNED_MARKER: &str = ".bruhs-owned";
 /// The folder under the runtime's home that holds every bruh's tree.
-const TREES: &str = "bruhs";
+pub(super) const TREES: &str = "bruhs";
 /// A marker larger than this is not one Bruhs wrote.
 const MARKER_LIMIT: u64 = 1024;
 
