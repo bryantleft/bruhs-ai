@@ -6,7 +6,10 @@ use std::{
     path::PathBuf,
     rc::{Rc, Weak},
     str::FromStr,
-    sync::{Arc, Once, atomic::AtomicBool},
+    sync::{
+        Arc, Once,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -95,7 +98,7 @@ pub struct WindowsWindowState {
 
 pub(crate) struct WindowsWindowInner {
     hwnd: HWND,
-    destroying: Cell<bool>,
+    pub(crate) destroying: Arc<AtomicBool>,
     pub(crate) dialog_owner: Rc<crate::dialog::DialogOwner>,
     drop_target_helper: IDropTargetHelper,
     pub(crate) state: WindowsWindowState,
@@ -287,7 +290,7 @@ impl WindowsWindowInner {
 
         Ok(Rc::new(Self {
             hwnd,
-            destroying: Cell::new(false),
+            destroying: Arc::new(AtomicBool::new(false)),
             dialog_owner: crate::dialog::DialogOwner::new(hwnd),
             drop_target_helper: context.drop_target_helper.clone(),
             state,
@@ -615,7 +618,7 @@ impl rwh::HasDisplayHandle for WindowsWindow {
 impl Drop for WindowsWindow {
     fn drop(&mut self) {
         self.0.dialog_owner.close();
-        if self.0.destroying.get() {
+        if self.0.destroying.load(Ordering::Acquire) {
             return;
         }
         unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
@@ -631,7 +634,7 @@ impl Drop for WindowsWindow {
             .executor
             .spawn(async move {
                 this.dialog_owner.when_idle().await;
-                if this.destroying.get() {
+                if this.destroying.load(Ordering::Acquire) {
                     return;
                 }
                 let handle = this.hwnd;
@@ -1484,7 +1487,7 @@ unsafe extern "system" fn window_procedure(
     let result = if let Some(inner) = inner.upgrade() {
         if msg == WM_DESTROY {
             // WM_CLOSE can destroy the HWND before GPUI drops its Window.
-            inner.destroying.set(true);
+            inner.destroying.store(true, Ordering::Release);
         }
         if msg == WM_NCDESTROY {
             inner.dialog_owner.close();

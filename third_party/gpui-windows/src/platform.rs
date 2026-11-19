@@ -41,6 +41,7 @@ use gpui::*;
 
 struct TrackedWindow {
     handle: SafeHwnd,
+    destroying: Arc<AtomicBool>,
     frame_signal: Arc<PlatformFrameSignal>,
 }
 
@@ -464,6 +465,10 @@ impl WindowsPlatform {
                         break;
                     };
                     for hwnd in all_windows.read().iter() {
+                        // The main thread removes this entry by queued message after WM_DESTROY.
+                        if hwnd.destroying.load(Ordering::Acquire) {
+                            continue;
+                        }
                         unsafe {
                             if let Some(signal_at) = signal_at {
                                 if IsWindowVisible(hwnd.as_raw()).as_bool()
@@ -475,9 +480,18 @@ impl WindowsPlatform {
                                     hwnd.frame_signal.take();
                                 }
                             }
-                            RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
-                                .ok()
-                                .log_err();
+                            let redraw =
+                                RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE).ok();
+                            if let Err(error) = redraw {
+                                // Destruction can race the check above. Only an invalidated HWND
+                                // belonging to a window already in teardown is expected here.
+                                if error.code()
+                                    != HRESULT::from_win32(ERROR_INVALID_WINDOW_HANDLE.0)
+                                    || !hwnd.destroying.load(Ordering::Acquire)
+                                {
+                                    Err::<(), _>(error).log_err();
+                                }
+                            }
                         }
                     }
                 }
@@ -750,6 +764,7 @@ impl Platform for WindowsPlatform {
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
         self.raw_window_handles.write().push(TrackedWindow {
+            destroying: window.destroying.clone(),
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
         });
