@@ -280,6 +280,7 @@ function Wait-WidgetCount([RichSmokeProcess] $Gui, [string] $Key, [int] $Count) 
     throw "Pointer input did not durably save counter $Count"
 }
 
+$lifecycleErrors = [Collections.Generic.List[string]]::new()
 function Invoke-Scene([string] $Scene, [int] $Count, [bool] $Click) {
     $settings['BRUHS_DESKTOP_TERMINAL_SMOKE'] = '1'
     $settings['BRUHS_DESKTOP_SMOKE_SKIP_TERMINAL'] = '1'
@@ -311,7 +312,7 @@ function Invoke-Scene([string] $Scene, [int] $Count, [bool] $Click) {
         if (!$gui.Child.WaitForExit($remaining)) { throw 'The GUI did not exit after WM_CLOSE' }
         $gui.Child.WaitForExit()
         if ($gui.Child.ExitCode -ne 0) { throw "GUI exit code $($gui.Child.ExitCode): $($gui.Log)" }
-        if ($gui.Log -match 'panicked at|app_will_quit timed out|Invalid window handle|Class not registered|window not found') { throw "Native lifecycle failure: $($gui.Log)" }
+        if ($gui.Log -match 'panicked at|app_will_quit timed out|Invalid window handle|Class not registered|window not found') { $lifecycleErrors.Add($gui.Log) }
         if ($gui.Log -notmatch 'teardown=(?:app_quit|parent_closed) hosts_disposed=\d+ hosts_remaining=0') {
             throw 'Native host teardown was not confirmed'
         }
@@ -338,4 +339,6 @@ try {
     $result = @{ passed=$true; sandbox=$second.Native.sandbox; parentBlocked=$second.Native.probe.parentBlocked; savedCounter=2; reopenedCounter=3; stateKey=$second.Key; nativePointerInput=$true; normalWindowClose=$true; renderedCounterPixels=$true }
     $result | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $OutputDirectory 'result.json')
     $result | ConvertTo-Json
+    foreach ($errorLog in $lifecycleErrors) { Write-Output $errorLog }
+    if ($lifecycleErrors.Count -gt 0) { throw 'Native lifecycle diagnostics recorded above' }
 } finally { $server.Dispose() }
