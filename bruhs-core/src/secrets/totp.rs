@@ -5,6 +5,7 @@ use super::storage::StoredTotp;
 use bruhs_models::vault::TotpAlgorithm;
 use hmac::{Hmac, Mac};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zeroize::{Zeroize as _, Zeroizing};
 
 /// A code with less than this left in its period isn't used: the next
 /// period's code is, after waiting for it, so a site never gets a code
@@ -57,18 +58,21 @@ fn code_time(now_ms: u64, period: u64) -> (u64, u64) {
     }
 }
 
-/// An HMAC tag. HMAC takes a key of any length.
-fn mac<M: Mac + hmac::digest::KeyInit>(key: &[u8], message: &[u8]) -> Vec<u8> {
+/// An HMAC tag, wiped on drop: it determines the code. HMAC takes a key
+/// of any length.
+fn mac<M: Mac + hmac::digest::KeyInit>(key: &[u8], message: &[u8]) -> Zeroizing<Vec<u8>> {
     let mut mac =
         <M as hmac::digest::KeyInit>::new_from_slice(key).expect("HMAC takes a key of any length");
     mac.update(message);
-    mac.finalize().into_bytes().to_vec()
+    let mut tag = mac.finalize().into_bytes();
+    let copy = Zeroizing::new(tag.to_vec());
+    tag.as_mut_slice().zeroize();
+    copy
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zeroize::Zeroizing;
 
     #[test]
     fn codes_match_rfc_6238() {

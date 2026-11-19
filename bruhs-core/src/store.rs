@@ -170,8 +170,9 @@ impl AppStateBuilder {
         self
     }
 
-    /// Pure: no I/O and nothing spawned, so it is safe outside a tokio
-    /// runtime. Call [`AppState::start_background`] from the process that
+    /// Nothing spawned and no I/O beyond looking for the 1Password CLI
+    /// (environment reads and file stats; `op` never runs), so it is safe
+    /// outside a tokio runtime. Call [`AppState::start_background`] from the process that
     /// should run the background loops.
     pub fn build(self) -> AppState {
         let registry = Arc::new(BackgroundTaskRegistry::new());

@@ -27,7 +27,7 @@ const PATH_OVERRIDE: &str = "BRUHS_OP_PATH";
 /// Where Homebrew puts `op` when a launchd service's `PATH` lacks it.
 const FALLBACKS: [&str; 2] = ["/opt/homebrew/bin/op", "/usr/local/bin/op"];
 /// The only variables `op` gets, besides every `OP_*` one (ruling F14).
-const PASSED_ENV: [&str; 8] = [
+const PASSED_ENV: [&str; 9] = [
     "PATH",
     "HOME",
     "USER",
@@ -36,6 +36,7 @@ const PASSED_ENV: [&str; 8] = [
     "LANG",
     "LC_ALL",
     "XDG_CONFIG_HOME",
+    "XDG_RUNTIME_DIR",
 ];
 
 /// Why a read failed. The text is owner copy; it never holds stderr.
@@ -122,10 +123,15 @@ impl OnePassword {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // Its own process group, so a timeout stops anything it started too.
+        #[cfg(unix)]
+        command.process_group(0);
         let mut child = command.spawn().map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => OnePasswordError::Missing,
             _ => OnePasswordError::Failed,
         })?;
+        #[cfg(unix)]
+        let _group = super::ProcessGroup(child.id().and_then(|id| i32::try_from(id).ok()));
         let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take())
         else {
             return Err(OnePasswordError::Failed);
@@ -154,7 +160,7 @@ impl OnePassword {
         if success {
             value(output)
         } else {
-            Err(classify(&errors))
+            Err(classify(&errors, reference))
         }
     }
 }
@@ -253,9 +259,17 @@ fn value(mut output: Zeroizing<Vec<u8>>) -> Result<Zeroizing<String>, OnePasswor
         })
 }
 
-/// What a failed read's stderr means, matched case-insensitively.
-fn classify(errors: &[u8]) -> OnePasswordError {
-    let text = Zeroizing::new(String::from_utf8_lossy(errors).to_lowercase());
+/// What a failed read's stderr means, matched case-insensitively. The
+/// reference and its vault, item and field names are taken out first, so
+/// a name like "Desktop App" in a quoted error can't steer the match.
+fn classify(errors: &[u8], reference: &str) -> OnePasswordError {
+    let mut text = Zeroizing::new(String::from_utf8_lossy(errors).to_lowercase());
+    let reference = reference.to_lowercase();
+    let path = reference.strip_prefix("op://").unwrap_or(&reference);
+    let path = path.split('?').next().unwrap_or_default();
+    for word in std::iter::once(reference.as_str()).chain(path.split('/')) {
+        text = without_word(&text, word);
+    }
     let has = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
     if has(&[
         "not currently signed in",
@@ -269,6 +283,26 @@ fn classify(errors: &[u8]) -> OnePasswordError {
     } else {
         OnePasswordError::Failed
     }
+}
+
+/// `text` with each whole-word occurrence of `word` replaced by a space.
+fn without_word(text: &str, word: &str) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(text.len()));
+    if word.is_empty() {
+        out.push_str(text);
+        return out;
+    }
+    let mut rest = text;
+    while let Some(at) = rest.find(word) {
+        out.push_str(&rest[..at]);
+        let after = rest[at + word.len()..].chars().next();
+        let bounded = !out.chars().next_back().is_some_and(char::is_alphanumeric)
+            && !after.is_some_and(char::is_alphanumeric);
+        out.push_str(if bounded { " " } else { word });
+        rest = &rest[at + word.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -368,17 +402,25 @@ printf 'op-canary\n'"#,
     }
 
     #[tokio::test]
-    async fn a_timed_out_read_kills_op() {
+    async fn a_timed_out_read_kills_op_and_its_children() {
         let folder = tempfile::tempdir().unwrap();
-        let marker = folder.path().join("finished");
-        let body = format!("/bin/sleep 2; : > '{}'", marker.display());
-        let op = OnePassword::at(stand_in(folder.path(), &body), Duration::from_millis(100));
+        let started = folder.path().join("started");
+        let finished = folder.path().join("finished");
+        // A child of `op` that outlives it, as a helper would: the whole
+        // group goes.
+        let body = format!(
+            "( : > '{}'; /bin/sleep 2; : > '{}' ) & wait",
+            started.display(),
+            finished.display()
+        );
+        let op = OnePassword::at(stand_in(folder.path(), &body), Duration::from_secs(1));
         assert_eq!(
             op.read("op://P/I/password").await.unwrap_err(),
             OnePasswordError::NeedsOwner
         );
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        assert!(!marker.exists(), "op ran on after its wait");
+        assert!(started.exists(), "the child ran before the wait ended");
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        assert!(!finished.exists(), "op's child ran on after its wait");
     }
 
     #[test]
@@ -394,17 +436,52 @@ printf 'op-canary\n'"#,
 
     #[test]
     fn stderr_is_classified_case_insensitively() {
+        let reference = "op://P/I/password";
         assert_eq!(
-            classify(b"[ERROR] You are NOT CURRENTLY SIGNED IN."),
+            classify(b"[ERROR] You are NOT CURRENTLY SIGNED IN.", reference),
             OnePasswordError::NeedsOwner
         );
         assert_eq!(
-            classify(b"connecting to Desktop App: timeout"),
+            classify(b"connecting to Desktop App: timeout", reference),
             OnePasswordError::NeedsOwner
         );
-        assert_eq!(classify(b"could not find item"), OnePasswordError::NotFound);
-        assert_eq!(classify(b"No item found"), OnePasswordError::NotFound);
-        assert_eq!(classify(b"\xff\xfe"), OnePasswordError::Failed);
+        assert_eq!(
+            classify(b"could not find item", reference),
+            OnePasswordError::NotFound
+        );
+        assert_eq!(
+            classify(b"No item found", reference),
+            OnePasswordError::NotFound
+        );
+        assert_eq!(classify(b"\xff\xfe", reference), OnePasswordError::Failed);
+    }
+
+    #[test]
+    fn names_in_the_reference_never_steer_the_match() {
+        let reference = "op://Work/Desktop App/Authorization";
+        assert_eq!(
+            classify(
+                b"[ERROR] \"Desktop App\" isn't an item in the \"Work\" vault.",
+                reference
+            ),
+            OnePasswordError::NotFound
+        );
+        assert_eq!(
+            classify(
+                b"[ERROR] could not read secret 'op://Work/Desktop App/Authorization': boom",
+                reference
+            ),
+            OnePasswordError::Failed
+        );
+        // A real sign-in failure still reads as one; only whole words go.
+        assert_eq!(
+            classify(
+                b"[ERROR] account is not signed in",
+                "op://Private/Sign/password"
+            ),
+            OnePasswordError::NeedsOwner
+        );
+        assert_eq!(without_word("happy app", "app").as_str(), "happy  ");
     }
 
     #[test]

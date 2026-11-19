@@ -360,18 +360,20 @@ async fn a_stuck_keychain_read_is_not_stacked() {
         Some(VaultAttention::KeychainNeedsYou)
     );
     assert_eq!(manager.store.held_reads(), 1);
-    // The first read is still parked: later ones answer at once, without
-    // parking another thread behind it.
+    // The first read is still parked and its waiter gave up: later ones
+    // answer at once, without waiting on it or parking another thread,
+    // even with a long read wait of their own.
+    let patient = manager.clone().with_read_wait(Duration::from_secs(10));
     for _ in 0..3 {
         let started = std::time::Instant::now();
         assert!(matches!(
-            manager
+            patient
                 .resolve_login(&login.id, SecretField::Password)
                 .await,
             Err(SecretError::Storage)
         ));
-        assert!(!manager.vault_check(&login.id).await.unwrap().ok);
-        assert!(started.elapsed() < Duration::from_millis(150));
+        assert!(!patient.vault_check(&login.id).await.unwrap().ok);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
     assert_eq!(manager.store.held_reads(), 1);
     // Saves never wait on it either.
@@ -401,6 +403,54 @@ async fn a_stuck_keychain_read_is_not_stacked() {
         .unwrap();
     assert_eq!(got.as_str(), password);
     assert_eq!(attention_of(&manager, &login.id).await, None);
+}
+
+#[tokio::test]
+async fn a_second_read_waits_for_the_first_instead_of_failing() {
+    let folder = tempfile::tempdir().unwrap();
+    let manager = manager(folder.path()).with_read_wait(Duration::from_secs(10));
+    let password = canary("password");
+    let login = manager
+        .vault_create(saved_login("Saved", &password, TotpInput::Keep))
+        .await
+        .unwrap();
+    let release = Release::hold(&manager.store);
+    let read = |manager: SecretManager, id: String| {
+        tokio::spawn(async move {
+            manager
+                .resolve_login(&id, SecretField::Password)
+                .await
+                .map(|value| value.as_str().to_owned())
+        })
+    };
+    let first = read(manager.clone(), login.id.clone());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.store.held_reads() < 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the first read reaches the keychain");
+    let second = read(manager.clone(), login.id.clone());
+    let check = {
+        let manager = manager.clone();
+        let id = login.id.clone();
+        tokio::spawn(async move { manager.vault_check(&id).await })
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Both wait on the first read without starting their own.
+    assert!(!second.is_finished() && !check.is_finished());
+    assert_eq!(manager.store.held_reads(), 1);
+    drop(release);
+    assert_eq!(first.await.unwrap().unwrap(), password);
+    assert_eq!(second.await.unwrap().unwrap(), password);
+    assert!(check.await.unwrap().unwrap().ok);
+    assert_eq!(attention_of(&manager, &login.id).await, None);
+    assert!(manager
+        .reading
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_empty());
 }
 
 #[tokio::test]

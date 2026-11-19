@@ -30,7 +30,7 @@ use bruhs_models::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     process::Stdio,
     sync::{
@@ -113,17 +113,17 @@ pub struct SecretManager {
     /// The last failed read per entry id, cleared by the next success.
     attention: Arc<Mutex<HashMap<String, VaultAttention>>>,
     /// Entries whose keychain item has a read in flight. Each id names one
-    /// keychain account. A read whose waiter gave up keeps its blocking
-    /// thread until the keychain answers; until then another read of that
-    /// item is refused at once instead of parking another thread (F13).
-    reading: Arc<Mutex<HashSet<String>>>,
+    /// keychain account. Another read of that item waits for the flight to
+    /// end, then reads for itself. A read whose waiter gave up keeps its
+    /// blocking thread until the keychain answers; until then another read
+    /// of that item is refused at once instead of parking another thread
+    /// (F13).
+    reading: Flights,
     read_wait: Duration,
 }
 
 /// Where one value of an entry comes from.
 enum Source {
-    /// A Saved login's username, kept as metadata.
-    Metadata(String),
     Keychain(Pick),
     OnePassword(String),
 }
@@ -136,19 +136,49 @@ enum Pick {
     Code,
 }
 
-/// Clears an entry's in-flight read when the read itself ends, not when
-/// its waiter gives up.
+type Flights = Arc<Mutex<HashMap<String, Arc<Flight>>>>;
+
+/// One keychain read in flight.
+struct Flight {
+    /// Set when the caller that started the read stopped waiting for it:
+    /// the read is stuck behind a prompt nobody answered.
+    abandoned: AtomicBool,
+    /// Its sender is dropped when the read ends, which wakes the waiters.
+    done: watch::Receiver<()>,
+}
+
+/// Owned by the reading task: removes the flight when the read itself
+/// ends (not when its waiter gives up), then wakes the waiters.
 struct InFlight {
-    reading: Arc<Mutex<HashSet<String>>>,
+    reading: Flights,
     id: String,
+    flight: Arc<Flight>,
+    _done: watch::Sender<()>,
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.reading
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.id);
+        let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+        if reading
+            .get(&self.id)
+            .is_some_and(|flight| Arc::ptr_eq(flight, &self.flight))
+        {
+            reading.remove(&self.id);
+        }
+        drop(reading);
+        // `_done` drops after this, waking the waiters.
+    }
+}
+
+/// Held by the caller that started a read: marks the flight abandoned if
+/// that caller's future is dropped before the read answers.
+struct Starter(Option<Arc<Flight>>);
+
+impl Drop for Starter {
+    fn drop(&mut self) {
+        if let Some(flight) = self.0.take() {
+            flight.abandoned.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -310,8 +340,9 @@ impl SecretManager {
             return Err(SecretError::NotSaved);
         }
         let source = match (meta.fields, field) {
+            // Metadata, not a vault read: it leaves the entry's attention.
             (LoginFields::Saved { username, .. }, SecretField::Username) => {
-                Source::Metadata(username)
+                return Ok(Zeroizing::new(username));
             }
             (LoginFields::Saved { .. }, SecretField::Password) => Source::Keychain(Pick::Password),
             (LoginFields::Saved { .. }, SecretField::Totp) => Source::Keychain(Pick::Code),
@@ -409,7 +440,6 @@ impl SecretManager {
 
     async fn read(&self, id: &str, source: Source) -> Result<Zeroizing<String>, SecretError> {
         let pick = match source {
-            Source::Metadata(text) => return Ok(Zeroizing::new(text)),
             Source::OnePassword(reference) => {
                 return Ok(self.one_password.read(&reference).await?);
             }
@@ -428,29 +458,50 @@ impl SecretManager {
 
     /// An entry's keychain item, read on its own task so a waiter that
     /// gives up leaves the read to finish. While one is in flight, another
-    /// for the same entry is `Storage` at once.
+    /// read of the entry waits for it to end (within the caller's read
+    /// wait) and then reads for itself; once the first one's waiter has
+    /// given up, it is `Storage` at once.
     async fn keychain(&self, id: &str) -> Result<storage::VaultSecret, SecretError> {
-        if !self
-            .reading
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_owned())
-        {
-            return Err(SecretError::Storage);
-        }
-        let flight = InFlight {
+        let (flight, done) = loop {
+            let mut done = {
+                let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
+                match reading.get(id) {
+                    Some(flight) if flight.abandoned.load(Ordering::Acquire) => {
+                        return Err(SecretError::Storage);
+                    }
+                    Some(flight) => flight.done.clone(),
+                    None => {
+                        let (done, receiver) = watch::channel(());
+                        let flight = Arc::new(Flight {
+                            abandoned: AtomicBool::new(false),
+                            done: receiver,
+                        });
+                        reading.insert(id.to_owned(), flight.clone());
+                        drop(reading);
+                        break (flight, done);
+                    }
+                }
+            };
+            // Nothing is ever sent: this ends when the read's sender drops.
+            let _ = done.changed().await;
+        };
+        let mut starter = Starter(Some(flight.clone()));
+        let in_flight = InFlight {
             reading: self.reading.clone(),
             id: id.to_owned(),
+            flight,
+            _done: done,
         };
         let store = self.store.clone();
         let id = id.to_owned();
-        tokio::spawn(async move {
-            let _flight = flight;
+        let read = tokio::spawn(async move {
+            let _in_flight = in_flight;
             store.vault_secret(&id).await
         })
-        .await
-        .map_err(|_| SecretError::Catalog)??
-        .ok_or(SecretError::NotSaved)
+        .await;
+        starter.0 = None;
+        read.map_err(|_| SecretError::Catalog)??
+            .ok_or(SecretError::NotSaved)
     }
 
     pub fn connections(&self) -> &crate::connections::Connections {
