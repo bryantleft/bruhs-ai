@@ -79,8 +79,10 @@ pub const REFRESH: &str = "Refresh";
 pub const LOADING: &str = "Loading the vault.";
 /// Follows a listing's error.
 pub const LOAD_RETRY: &str = "Refresh to try again.";
-/// Why the page's buttons wait while one change or check runs.
+/// Why the page's buttons wait while one change runs.
 pub const WAIT_FOR_CHANGE: &str = "Wait for the current change to finish.";
+/// Why the page's buttons wait while one entry's Check reads it.
+pub const WAIT_FOR_CHECK: &str = "Wait for the check to finish.";
 /// Why One bruh can't be chosen yet.
 pub const NO_BRUHS: &str = "Make a bruh first to give it an entry of its own.";
 /// The listing refused to a page on another address (ruling F26 and its

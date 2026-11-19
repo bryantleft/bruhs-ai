@@ -21,12 +21,16 @@ use bruhs_models::vault::{
     LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
     REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT,
     SEARCH_PLACEHOLDER, SOURCE_ONE_PASSWORD, SOURCE_SAVED, STATE_NEEDS_ATTENTION, TOTP_HINT,
-    WAIT_FOR_CHANGE,
+    WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
 };
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
 
 const BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-longan-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
+/// The confirm Delete: `BUTTON` with lychee text and ring in place of the
+/// neutral ones, since stacking both would leave the stylesheet's order to
+/// pick the color.
+const DANGER_BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-lychee-200 inset-ring inset-ring-lychee-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
 const LABEL: &str = "block min-w-0 text-label-sm text-rambutan-300";
 const FIELD: &str = "bruhs-control mt-1 block min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400 read-only:text-rambutan-400";
 const HINT: &str = "mt-1 text-label-sm text-rambutan-500";
@@ -155,12 +159,21 @@ enum Open {
     Entry(String),
 }
 
+/// What the page is waiting on, if anything.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Busy {
+    Idle,
+    Changing,
+    Checking,
+}
+
 /// Why the buttons are disabled right now, if they are.
-fn wait_reason(busy: bool, load: &Load) -> Option<&'static str> {
+fn wait_reason(busy: Busy, load: &Load) -> Option<&'static str> {
     match (busy, load) {
-        (true, Load::Loading) => Some(LOADING),
-        (true, _) => Some(WAIT_FOR_CHANGE),
-        (false, _) => None,
+        (Busy::Idle, _) => None,
+        (_, Load::Loading) => Some(LOADING),
+        (Busy::Checking, _) => Some(WAIT_FOR_CHECK),
+        (Busy::Changing, _) => Some(WAIT_FOR_CHANGE),
     }
 }
 
@@ -169,7 +182,7 @@ pub fn VaultSettings() -> impl IntoView {
     let listing = RwSignal::new(VaultListing::default());
     let load = RwSignal::new(Load::Loading);
     let generation = RwSignal::new(0u64);
-    let busy = RwSignal::new(false);
+    let busy = RwSignal::new(Busy::Idle);
     let query = RwSignal::new(String::new());
     let open = RwSignal::new(Open::None);
     let notice = RwSignal::new(None::<&'static str>);
@@ -180,10 +193,10 @@ pub fn VaultSettings() -> impl IntoView {
         wait.get().is_some() || load.with(|load| !matches!(load, Load::Ready))
     });
     let refresh = Callback::new(move |_: ()| {
-        if busy.get_untracked() {
+        if busy.get_untracked() != Busy::Idle {
             return;
         }
-        busy.set(true);
+        busy.set(Busy::Changing);
         notice.set(None);
         open.set(Open::None);
         load.set(Load::Loading);
@@ -197,21 +210,21 @@ pub fn VaultSettings() -> impl IntoView {
             listing.try_set(next);
             generation.try_update(|generation| *generation = generation.wrapping_add(1));
             load.try_set(state);
-            busy.try_set(false);
+            busy.try_set(Busy::Idle);
         });
     });
     Effect::new(move |_| refresh.run(()));
     let saved = Callback::new(move |entry: VaultEntry| {
-        listing.update(
-            |listing| match listing.entries.iter_mut().find(|row| row.id == entry.id) {
+        listing.try_update(|listing| {
+            match listing.entries.iter_mut().find(|row| row.id == entry.id) {
                 Some(row) => *row = entry,
                 None => listing.entries.push(entry),
-            },
-        );
-        notice.set(Some(ENTRY_UPDATED));
+            }
+        });
+        notice.try_set(Some(ENTRY_UPDATED));
     });
     let close_new = Callback::new(move |_: ()| {
-        open.set(Open::None);
+        open.try_set(Open::None);
         focus_after_render(new_ref);
     });
     let bruhs = Signal::derive(move || listing.with(|listing| listing.bruhs.clone()));
@@ -234,20 +247,22 @@ pub fn VaultSettings() -> impl IntoView {
                 <input type="search" aria-label=SEARCH_PLACEHOLDER placeholder=SEARCH_PLACEHOLDER autocomplete="off" spellcheck="false" class="bruhs-control min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400 sm:flex-1" on:input=move |event| query.set(event_target_value(&event)) />
                 <div class="flex flex-wrap gap-2">
                     <button type="button" node_ref=new_ref data-vault-new="" class=BUTTON aria-expanded=move || if open.with(|open| *open == Open::New) { "true" } else { "false" } aria-describedby=format!("{STATUS_ID} {WAIT_ID}") disabled=move || new_blocked.get() title=move || wait.get() on:click=move |_| { notice.set(None); open.set(Open::New); }>{NEW_ENTRY}</button>
-                    <button type="button" data-vault-refresh="" class=BUTTON aria-describedby=WAIT_ID disabled=move || wait.get().is_some() title=move || wait.get() on:click=move |_| refresh.run(())>{REFRESH}</button>
+                    <button type="button" data-vault-refresh="" class=BUTTON aria-describedby=format!("{STATUS_ID} {WAIT_ID}") disabled=move || wait.get().is_some() title=move || wait.get() on:click=move |_| refresh.run(())>{REFRESH}</button>
                 </div>
             </div>
             <p id=KEEP_HINT_ID class="mt-2 text-label-sm text-rambutan-400">{KEEP_HINT}</p>
             {move || (load.with(|load| *load == Load::Ready) && !listing.with(|listing| listing.one_password)).then(|| view! { <p data-vault-op-missing="" class="mt-1 text-label-sm text-rambutan-400">{OP_MISSING_HINT}</p> })}
-            {move || match load.get() {
-                Load::Loading => view! { <p id=STATUS_ID role="status" class="mt-3 text-label-sm text-rambutan-400">{LOADING}</p> }.into_any(),
-                Load::Failed(message) => view! { <p id=STATUS_ID role="alert" class="mt-3 text-label-sm text-lychee-300">{format!("{message} {LOAD_RETRY}")}</p> }.into_any(),
-                Load::ServingOld => view! { <p id=STATUS_ID role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{ServiceNotice::ServingOld.message()}</p> }.into_any(),
-                Load::OwnerOnly => view! { <p id=STATUS_ID role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{OPEN_FROM_OWN_ADDRESS}</p> }.into_any(),
-                Load::Ready if listing.with(|listing| listing.entries.is_empty()) => view! { <p id=STATUS_ID role="status" class="mt-3 text-label-sm text-rambutan-400">{EMPTY}</p> }.into_any(),
+            <div id=STATUS_ID>{move || match load.get() {
+                Load::Loading => view! { <p role="status" class="mt-3 text-label-sm text-rambutan-400">{LOADING}</p> }.into_any(),
+                Load::Failed(message) => view! { <p role="alert" class="mt-3 text-label-sm text-lychee-300">{format!("{message} {LOAD_RETRY}")}</p> }.into_any(),
+                Load::ServingOld => view! { <p role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{ServiceNotice::ServingOld.message()}</p> }.into_any(),
+                Load::OwnerOnly => view! { <p role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{OPEN_FROM_OWN_ADDRESS}</p> }.into_any(),
+                Load::Ready if listing.with(|listing| listing.entries.is_empty()) => view! { <p role="status" class="mt-3 text-label-sm text-rambutan-400">{EMPTY}</p> }.into_any(),
                 Load::Ready => ().into_any(),
-            }}
-            {move || (busy.get() && load.with(|load| *load != Load::Loading)).then(|| view! { <p id=WAIT_ID role="status" class="mt-2 text-label-sm text-rambutan-400">{WAIT_FOR_CHANGE}</p> })}
+            }}</div>
+            // Always drawn, so every button's `aria-describedby` names an
+            // element; empty while nothing runs. A load says so above.
+            <p id=WAIT_ID role="status" class="mt-2 text-label-sm text-rambutan-400 empty:hidden">{move || wait.get().filter(|_| load.with(|load| *load != Load::Loading))}</p>
             {move || notice.get().map(|message| view! { <p role="status" class="mt-2 text-label-sm text-pandan-300">{message}</p> })}
             <Show when=move || open.with(|open| *open == Open::New)>
                 <VaultFormView entry=None bruhs=bruhs busy=busy wait=wait on_saved=saved on_close=close_new />
@@ -268,7 +283,7 @@ pub fn VaultSettings() -> impl IntoView {
 fn VaultRowView(
     id: String,
     listing: RwSignal<VaultListing>,
-    busy: RwSignal<bool>,
+    busy: RwSignal<Busy>,
     wait: Signal<Option<&'static str>>,
     open: RwSignal<Open>,
     notice: RwSignal<Option<&'static str>>,
@@ -307,7 +322,10 @@ fn VaultRowView(
     let label = format!("Vault entry: {name}");
     let confirm = delete_entry_confirm(&name);
     let forget = move || {
-        let id = id.get_value();
+        // Runs after an await: the row may be gone by now.
+        let Some(id) = id.try_get_value() else {
+            return;
+        };
         open.try_update(|open| {
             if matches!(open, Open::Entry(open) if *open == id) {
                 *open = Open::None;
@@ -317,10 +335,10 @@ fn VaultRowView(
         focus_after_render(new_ref);
     };
     let check = move |_| {
-        if busy.get_untracked() {
+        if busy.get_untracked() != Busy::Idle {
             return;
         }
-        busy.set(true);
+        busy.set(Busy::Checking);
         notice.set(None);
         checked.set(None);
         error.set(None);
@@ -344,14 +362,14 @@ fn VaultRowView(
                     error.try_set(Some(err.to_string()));
                 }
             }
-            busy.try_set(false);
+            busy.try_set(Busy::Idle);
         });
     };
     let delete = move |_| {
-        if busy.get_untracked() {
+        if busy.get_untracked() != Busy::Idle {
             return;
         }
-        busy.set(true);
+        busy.set(Busy::Changing);
         notice.set(None);
         error.set(None);
         let id = id.get_value();
@@ -363,15 +381,19 @@ fn VaultRowView(
                     error.try_set(Some(err.to_string()));
                 }
             }
-            busy.try_set(false);
+            busy.try_set(Busy::Idle);
         });
     };
     let keep = move || {
         asking.set(false);
         focus_after_render(delete_ref);
     };
+    // The form saves through the page's `on_saved`, which outlives this
+    // row (a search can filter it out mid-save). Closing drops what an
+    // earlier Check said, so the row shows the entry's own state.
     let close = Callback::new(move |_: ()| {
-        open.set(Open::None);
+        checked.try_set(None);
+        open.try_set(Open::None);
         focus_after_render(edit_ref);
     });
     let disabled = move || wait.get().is_some();
@@ -392,7 +414,7 @@ fn VaultRowView(
                     }
                 })}
                 <div class="flex flex-wrap gap-2">
-                    <button type="button" node_ref=edit_ref data-vault-edit="" class=BUTTON aria-expanded=move || if editing.get() { "true" } else { "false" } aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { notice.set(None); asking.set(false); open.set(Open::Entry(id.get_value())); }>{EDIT}</button>
+                    <button type="button" node_ref=edit_ref data-vault-edit="" class=BUTTON aria-expanded=move || if editing.get() { "true" } else { "false" } aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { notice.set(None); asking.set(false); checked.set(None); open.set(Open::Entry(id.get_value())); }>{EDIT}</button>
                     <button type="button" data-vault-check="" class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=check>{CHECK}</button>
                     <Show when=move || !asking.get()>
                         <button type="button" node_ref=delete_ref data-vault-delete="" class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { error.set(None); asking.set(true); focus_after_render(keep_ref); }>{DELETE}</button>
@@ -403,7 +425,7 @@ fn VaultRowView(
                 <div role="group" aria-labelledby=question_id.clone() class="mt-3 space-y-2 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50" on:keydown=move |event: web_sys::KeyboardEvent| if event.key() == "Escape" { event.prevent_default(); event.stop_propagation(); keep(); }>
                     <p id=question_id.clone() class="text-body-sm text-rambutan-200">{confirm.clone()}</p>
                     <div class="flex flex-wrap items-center gap-2">
-                        <button type="button" data-vault-confirm="" class=format!("{BUTTON} text-lychee-200 inset-ring-lychee-700") aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=delete>{DELETE}</button>
+                        <button type="button" data-vault-confirm="" class=DANGER_BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=delete>{DELETE}</button>
                         <button type="button" node_ref=keep_ref class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| keep()>{KEEP}</button>
                     </div>
                 </div>
@@ -497,7 +519,7 @@ fn select_field<T: Copy + PartialEq + Default + Send + Sync + 'static>(
 fn VaultFormView(
     entry: Option<VaultEntry>,
     bruhs: Signal<Vec<VaultBruh>>,
-    busy: RwSignal<bool>,
+    busy: RwSignal<Busy>,
     wait: Signal<Option<&'static str>>,
     on_saved: Callback<VaultEntry>,
     on_close: Callback<()>,
@@ -567,14 +589,14 @@ fn VaultFormView(
         }
     };
     let cancel = Callback::new(move |_: ()| {
-        if busy.get_untracked() {
+        if busy.get_untracked() != Busy::Idle {
             return;
         }
         clear();
         on_close.run(());
     });
     let submit = move || {
-        if busy.get_untracked() {
+        if busy.get_untracked() != Busy::Idle {
             return;
         }
         let form = VaultForm {
@@ -609,7 +631,7 @@ fn VaultFormView(
                 return;
             }
         };
-        busy.set(true);
+        busy.set(Busy::Changing);
         error.set(None);
         wasm_bindgen_futures::spawn_local(async move {
             let result = match &request {
@@ -617,11 +639,13 @@ fn VaultFormView(
                 Request::Update(id, update) => crate::api::update_vault_entry(id, update).await,
             };
             drop(request);
-            busy.try_set(false);
+            busy.try_set(Busy::Idle);
             match result {
                 Ok(entry) => {
-                    on_saved.run(entry);
-                    on_close.run(());
+                    // The row or the page may be gone: a search can filter
+                    // the row out, and leaving Settings drops the page.
+                    on_saved.try_run(entry);
+                    on_close.try_run(());
                 }
                 Err(err) => {
                     error.try_set(Some(err.to_string()));
@@ -793,8 +817,15 @@ mod tests {
 
     #[test]
     fn buttons_say_why_they_wait() {
-        assert_eq!(wait_reason(true, &Load::Loading), Some(LOADING));
-        assert_eq!(wait_reason(true, &Load::Ready), Some(WAIT_FOR_CHANGE));
-        assert_eq!(wait_reason(false, &Load::OwnerOnly), None);
+        assert_eq!(wait_reason(Busy::Changing, &Load::Loading), Some(LOADING));
+        assert_eq!(
+            wait_reason(Busy::Changing, &Load::Ready),
+            Some(WAIT_FOR_CHANGE)
+        );
+        assert_eq!(
+            wait_reason(Busy::Checking, &Load::Ready),
+            Some(WAIT_FOR_CHECK)
+        );
+        assert_eq!(wait_reason(Busy::Idle, &Load::OwnerOnly), None);
     }
 }
