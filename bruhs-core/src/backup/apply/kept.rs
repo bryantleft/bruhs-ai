@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use bruhs_models::backup::{
     valid_id, valid_stamp, PreRestoreInfo, RestoreSource, BACKUP_BUSY, GONE, KEYCHAIN_NEEDS_YOU,
-    RESTORE_PENDING,
+    NOTHING_TO_PUT_BACK, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,8 @@ use crate::secrets::{forget_seal_key, SecretStore};
 const PARKED: &str = ".in-the-way";
 /// The free `.in-the-way-<n>` a park looks for among this many.
 const PARK_TRIES: u32 = 1000;
+/// A kept set being deleted: `<root>/backups/.deleting-<stamp>`.
+const DELETING: &str = ".deleting-";
 /// Seal keys a removal failed for, retried by the sweep.
 const ORPHAN_KEYS: &str = "keys-to-forget.json";
 /// Tries of a seal key removal before it waits for the sweep.
@@ -40,19 +42,26 @@ const FORGET_TRIES: usize = 3;
 
 /// A kept set's `meta/info.json`: its manifest. A put back acts only on a
 /// set whose info names its stamp and whose entries are all there.
+/// Every field but the stamp has a default, so a set a newer Bruhs wrote
+/// still reads here (R2-I1).
 #[derive(Serialize, Deserialize)]
 pub(super) struct KeptInfo {
     stamp: String,
+    #[serde(default)]
     made_at_ms: EpochMs,
+    #[serde(default)]
     bytes: u64,
     /// Whether `meta/keychain.sealed` holds the day's items.
+    #[serde(default)]
     keychain: bool,
+    #[serde(default)]
     roots: Vec<KeptRoot>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct KeptRoot {
     root: RootKey,
+    #[serde(default)]
     names: Vec<String>,
 }
 
@@ -134,16 +143,20 @@ pub fn delete_pre_restore(
     }
     // The key goes first: a keychain that refuses leaves the set whole, and
     // a stop after it leaves a set whose key is gone, never a key without
-    // its set (M8). Removing the info unlists the set before its folders.
+    // its set (M8). Each folder is then renamed to `.deleting-<stamp>`,
+    // which unlists it at once; a stop before it is removed leaves a name
+    // the sweep removes without judging any set (R2-I1).
     forget_seal_key(store, &kept_account(stamp))
         .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
-    let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
-    if real_dir(&meta) {
-        remove_if_there(&meta.join(INFO))?;
-        sync_dir(&meta)?;
-    }
     for root in pass_roots(roots) {
-        remove_tree(&kept_dir(roots, *root, stamp))?;
+        let folder = kept_dir(roots, *root, stamp);
+        if !real_dir(&folder) {
+            continue;
+        }
+        let doomed = roots.backups(*root).join(format!("{DELETING}{stamp}"));
+        remove_tree(&doomed)?;
+        rename_synced(&folder, &doomed)?;
+        remove_tree(&doomed)?;
     }
     Ok(())
 }
@@ -203,6 +216,11 @@ pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>
         }
         places.push((*root, names));
     }
+    // A set that holds only what a rollback parked is no state to go back
+    // to: putting it back would empty the roots.
+    if places.iter().all(|(_, names)| names.is_empty()) {
+        return Err(BackupError::Refused(NOTHING_TO_PUT_BACK));
+    }
     let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
     if info.keychain && !is_file(&meta.join(SEALED)) {
         return Ok(None);
@@ -234,44 +252,103 @@ pub(super) fn kept_info(roots: &Roots, stamp: &str) -> Option<KeptInfo> {
     read_json::<KeptInfo>(&meta.join(INFO), SMALL_MAX).filter(|info| info.stamp == stamp)
 }
 
-impl Apply<'_> {
-    /// Writes the kept set's `meta/info.json` from what its folders hold:
-    /// its manifest, which a put back checks.
-    pub(super) fn write_info(&self, keychain: bool) -> Result<(), BackupError> {
-        let mut roots = Vec::new();
-        let mut bytes = 0_u64;
-        for pass in &self.journal.passes {
-            let folder = self.kept(pass.root);
-            let names = if real_dir(&folder) {
-                top_names(&folder)?
-            } else {
-                Vec::new()
-            };
-            for name in &names {
-                bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
-            }
-            roots.push(KeptRoot {
-                root: pass.root,
-                names,
-            });
-        }
-        let info = KeptInfo {
-            stamp: self.journal.stamp.clone(),
-            made_at_ms: self.journal.made_at_ms,
-            bytes,
-            keychain,
-            roots,
+/// Writes the set `stamp`'s `meta/info.json` from what its folders in
+/// `roots_of` hold: its manifest, which a put back checks.
+fn write_set_info(
+    roots: &Roots,
+    stamp: &str,
+    made_at_ms: EpochMs,
+    keychain: bool,
+    roots_of: &[RootKey],
+) -> Result<(), BackupError> {
+    let mut listed = Vec::new();
+    let mut bytes = 0_u64;
+    for root in roots_of {
+        let folder = kept_dir(roots, *root, stamp);
+        let names = if real_dir(&folder) {
+            top_names(&folder)?
+        } else {
+            Vec::new()
         };
-        let meta = self.kept(RootKey::Core).join(META);
-        new_dir(&self.kept(RootKey::Core))?;
-        new_dir(&meta)?;
-        write_atomically(&meta, INFO, &to_json(&info)?)
+        for name in &names {
+            bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
+        }
+        listed.push(KeptRoot { root: *root, names });
+    }
+    let info = KeptInfo {
+        stamp: stamp.to_owned(),
+        made_at_ms,
+        bytes,
+        keychain,
+        roots: listed,
+    };
+    let core = kept_dir(roots, RootKey::Core, stamp);
+    let meta = core.join(META);
+    new_dir(&core)?;
+    new_dir(&meta)?;
+    write_atomically(&meta, INFO, &to_json(&info)?)
+}
+
+impl Apply<'_> {
+    fn pass_keys(&self) -> Vec<RootKey> {
+        self.journal.passes.iter().map(|pass| pass.root).collect()
+    }
+
+    /// Writes the new kept set's `meta/info.json` from what it holds.
+    pub(super) fn write_info(&self, keychain: bool) -> Result<(), BackupError> {
+        write_set_info(
+            self.roots,
+            &self.journal.stamp,
+            self.journal.made_at_ms,
+            keychain,
+            &self.pass_keys(),
+        )
+    }
+
+    /// After a put back whose carry of parked entries failed (R2-M3), the
+    /// set put back keeps those entries as a set with nothing to put back:
+    /// its seal and key go and its info lists only them. Answers whether
+    /// the set stays. Safe to repeat.
+    pub(super) fn keep_parked_source(&self) -> Result<bool, BackupError> {
+        let RestoreSource::PreRestore { stamp } = &self.journal.source else {
+            return Ok(false);
+        };
+        // A parked folder the carry emptied holds nothing to keep.
+        let mut held = false;
+        for root in self.pass_keys() {
+            let folder = kept_dir(self.roots, root, stamp);
+            if !real_dir(&folder) {
+                continue;
+            }
+            for name in top_names(&folder)? {
+                if parked(&name) && std::fs::read_dir(folder.join(&name))?.next().is_some() {
+                    held = true;
+                }
+            }
+        }
+        if !held {
+            return Ok(false);
+        }
+        let meta = kept_dir(self.roots, RootKey::Core, stamp).join(META);
+        remove_if_there(&meta.join(SEALED))?;
+        remove_if_there(&meta.join(WEB_PART))?;
+        forget_key(self.store, self.backups, &kept_account(stamp));
+        let made_at_ms =
+            kept_info(self.roots, stamp).map_or(self.journal.made_at_ms, |info| info.made_at_ms);
+        write_set_info(self.roots, stamp, made_at_ms, false, &self.pass_keys())?;
+        Ok(true)
     }
 }
 
-/// Whether `name` is a folder a rollback parked things in (N2, N7).
+/// Whether `name` is a folder a rollback parked things in (N2, N7):
+/// `.in-the-way` or `.in-the-way-<digits>`, never an owner's own name that
+/// only starts the same (R2-M1).
 pub(super) fn parked(name: &str) -> bool {
-    name.starts_with(PARKED)
+    name == PARKED
+        || name
+            .strip_prefix(PARKED)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Moves `from` into the first `.in-the-way-<n>/<rel>` of the kept folder
@@ -332,12 +409,15 @@ pub(super) fn forget_key(store: &SecretStore, backups: &Path, account: &str) {
     }
 }
 
-/// The restore side of the sweep (B Task 8 N6, M11, out of scope), only
-/// while no apply runs (`restore.lock` free, held throughout) and no
-/// journal waits:
+/// The restore side of the sweep (B Task 8 N6, M11, R2-I1, out of scope),
+/// only while no apply runs (`restore.lock` free, held throughout):
 /// - the partial records a stopped process left in `backups`;
-/// - `pre-restore-*` folders without a manifest (a delete or rollback
-///   stopped part way), with their keys;
+/// - `.deleting-<stamp>` folders, a delete that stopped part way;
+///
+/// and, while no journal waits either:
+///
+/// - `pre-restore-*` folders whose manifest is not there at all (never
+///   one that only fails to read), with their keys;
 /// - seal keys a removal failed for, once their set is gone.
 ///
 /// Blocks on the keychain.
@@ -357,6 +437,22 @@ pub(in crate::backup) fn sweep_restore(roots: &Roots, store: &SecretStore) {
             |name| name.strip_prefix(leftover.as_str()).is_some_and(valid_id),
         );
     }
+    // A delete that stopped part way.
+    for root in pass_roots(roots) {
+        let Ok(entries) = std::fs::read_dir(roots.backups(*root)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let doomed = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_prefix(DELETING))
+                .is_some_and(valid_stamp);
+            if doomed && remove_tree(&entry.path()).is_err() {
+                tracing::warn!("Bruhs couldn't finish deleting a kept restore set");
+            }
+        }
+    }
     if !matches!(exists(&backups.join(JOURNAL)), Ok(false)) {
         return;
     }
@@ -371,12 +467,29 @@ pub(in crate::backup) fn sweep_restore(roots: &Roots, store: &SecretStore) {
             let Some(stamp) = name.strip_prefix(KEPT_PREFIX).filter(|s| valid_stamp(s)) else {
                 continue;
             };
-            if kept_info(roots, stamp).is_none() && real_dir(&entry.path()) {
-                if remove_tree(&entry.path()).is_err() {
-                    tracing::warn!("Bruhs couldn't remove a restore's leftover folder");
-                }
-                forget_key(store, &backups, &kept_account(stamp));
+            if !real_dir(&entry.path()) {
+                continue;
             }
+            // Only a set whose manifest is plainly not there goes: one that
+            // can't be read or parsed may be the owner's only undo (R2-I1).
+            let info = kept_dir(roots, RootKey::Core, stamp).join(META).join(INFO);
+            match std::fs::symlink_metadata(&info) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(_) => {
+                    if kept_info(roots, stamp).is_none() {
+                        tracing::warn!("A kept restore set's info doesn't read; Bruhs leaves it");
+                    }
+                    continue;
+                }
+                Err(_) => {
+                    tracing::warn!("A kept restore set's info doesn't read; Bruhs leaves it");
+                    continue;
+                }
+            }
+            if remove_tree(&entry.path()).is_err() {
+                tracing::warn!("Bruhs couldn't remove a restore's leftover folder");
+            }
+            forget_key(store, &backups, &kept_account(stamp));
         }
     }
     forget_orphan_keys(roots, store, &backups);
@@ -406,7 +519,9 @@ fn forget_orphan_keys(roots: &Roots, store: &SecretStore, backups: &Path) {
         } else {
             continue;
         };
-        if gone && forget_seal_key(store, &account).is_err() {
+        // A key whose set is still there stays listed until the set goes
+        // (R2-M2).
+        if !gone || forget_seal_key(store, &account).is_err() {
             left.push(account);
         }
     }

@@ -41,7 +41,7 @@ use bruhs_models::backup::{
     BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview, RestoreResult,
     RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE, INVALID_REQUEST,
     KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE,
-    MANIFEST_MAX_BYTES, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
+    MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -359,7 +359,9 @@ pub fn waiting_web_part(roots: &Roots) -> Option<WebPartInfo> {
 }
 
 /// Whether the background service should start again after the last
-/// apply. Clears the flag, so only one caller starts it.
+/// apply. Clears the flag, so only one caller starts it. Takes
+/// `restore.lock`, waiting up to 5 seconds for an apply that holds it:
+/// call it off the async runtime.
 pub fn take_service_restart(roots: &Roots) -> bool {
     let Some(backups) = backups_dir(roots) else {
         return false;
@@ -413,7 +415,9 @@ fn plan(
     let set = match check_source(roots, &pending.source) {
         Ok(Some(set)) => set,
         Ok(None) => return Err(refuse(backups, BackupError::Refused(GONE))),
-        Err(error @ BackupError::Format(_)) => return Err(refuse(backups, error)),
+        Err(error @ (BackupError::Format(_) | BackupError::Refused(_))) => {
+            return Err(refuse(backups, error))
+        }
         Err(error) => return Err(error),
     };
     // The source's items open before anything moves; only their accounts
@@ -716,7 +720,16 @@ impl Apply<'_> {
     /// `result.json`, then makes it all durable with one full sync (M5).
     /// Both files are replaced whole, so doing it again is safe.
     fn finish(&self) -> Result<(), BackupError> {
-        self.carry_parked()?;
+        // Past the keychain writes nothing rolls back, so a carry that
+        // fails is skipped, not repeated: the entries stay in the set put
+        // back, which `clean_up` keeps (R2-M3).
+        let mut warnings = Vec::new();
+        if self.carry_parked().is_err() {
+            tracing::warn!(
+                "Bruhs couldn't carry kept files into the new set; they stay where they were"
+            );
+            warnings.push(PARKED_STAYED.to_owned());
+        }
         self.write_info(true)?;
         let web_part = self.journal.web_part.as_ref().and_then(|id| {
             let path = self.backups.join(WEB_PARTS).join(format!("{id}.bin"));
@@ -730,7 +743,7 @@ impl Apply<'_> {
         let result = ResultFile {
             applied_at_ms: EpochMs::now(),
             stamp: self.journal.stamp.clone(),
-            warnings: Vec::new(),
+            warnings,
             service_to_restart: self.journal.service_to_restart,
             web_part,
         };
@@ -746,10 +759,12 @@ impl Apply<'_> {
             RestoreSource::PreRestore { stamp } => kept_account(stamp),
             RestoreSource::Other => return Err(BackupError::Refused(INVALID_REQUEST)),
         };
-        for pass in &self.journal.passes {
-            remove_tree(&source_dir(self.roots, &self.journal.source, pass.root)?)?;
+        if !self.keep_parked_source()? {
+            for pass in &self.journal.passes {
+                remove_tree(&source_dir(self.roots, &self.journal.source, pass.root)?)?;
+            }
+            forget_key(self.store, self.backups, &account);
         }
-        forget_key(self.store, self.backups, &account);
         remove_if_there(&self.backups.join(PENDING))?;
         sync_dir(self.backups)?;
         Journal::remove(self.backups)

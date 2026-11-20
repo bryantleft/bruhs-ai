@@ -1524,45 +1524,168 @@ async fn a_rollback_parks_what_was_made_mid_apply_under_free_names() {
     );
     assert_eq!(staged, before.staged_core);
 
-    // A put back of that set leaves the parked folders in a set (N7): the
-    // root never gets them, the new set carries them.
+    // That set holds only what was parked: there is nothing to put back,
+    // whether asked now or found waiting at a start, and nothing changes.
+    let source = RestoreSource::PreRestore {
+        stamp: kept[0].stamp.clone(),
+    };
+    let today = files_under(&roots.core, &["backups"]);
+    let set_files = files_under(&set, &[]);
+    assert!(matches!(
+        schedule(roots, &source, false),
+        Err(BackupError::Refused(message)) if message == NOTHING_TO_PUT_BACK
+    ));
+    std::fs::write(
+        roots.backups(RootKey::Core).join("pending.json"),
+        serde_json::to_vec(&serde_json::json!({ "source": source, "created_at_ms": 0 })).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None),
+        Err(BackupError::Refused(message)) if message == NOTHING_TO_PUT_BACK
+    ));
+    assert!(pending(roots).is_none());
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+    assert_eq!(files_under(&set, &[]), set_files);
+    assert_eq!(pre_restores(roots), kept);
+}
+
+/// A put back carries a set's parked folders into the new set and never
+/// places them (N7); an owner's own name that only starts the same is
+/// placed like any other (R2-M1).
+#[tokio::test]
+async fn a_put_back_carries_parked_folders_into_the_new_set() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    write(
+        &roots.core.join(".in-the-way-notes/mine.txt"),
+        b"owner's own",
+    );
+    let today = files_under(&roots.core, &["backups"]);
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    let first = pre_restores(roots)[0].stamp.clone();
+    write(
+        &kept_dir(roots, RootKey::Core, &first).join(".in-the-way-1/audio/late.txt"),
+        b"parked",
+    );
     schedule(
         roots,
         &RestoreSource::PreRestore {
-            stamp: kept[0].stamp.clone(),
+            stamp: first.clone(),
         },
         false,
     )
     .unwrap();
-    assert!(matches!(
-        apply_pending(roots, &fixture.store, None).unwrap(),
-        ApplyOutcome::Applied(_)
-    ));
-    let names: Vec<String> = std::fs::read_dir(&roots.core)
-        .unwrap()
-        .flatten()
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .collect();
-    assert!(
-        !names.iter().any(|name| name.starts_with(".in-the-way")),
-        "{names:?}"
-    );
-    let now = pre_restores(roots);
-    assert_eq!(now.len(), 1);
-    assert_ne!(now[0].stamp, kept[0].stamp);
-    let carried = files_under(&kept_dir(roots, RootKey::Core, &now[0].stamp), &["meta"]);
-    let parked: Vec<&PathBuf> = carried
-        .keys()
-        .filter(|path| path.to_string_lossy().starts_with(".in-the-way"))
-        .collect();
-    assert_eq!(parked.len(), 3, "{parked:?}");
+    let ApplyOutcome::Applied(result) = apply_pending(roots, &fixture.store, None).unwrap() else {
+        panic!("not applied");
+    };
+    assert!(result.warnings.is_empty());
+    assert_eq!(files_under(&roots.core, &NEVER), without(&today, &NEVER));
+    assert!(!roots.core.join(".in-the-way-1").exists());
+    let kept = pre_restores(roots);
+    assert_eq!(kept.len(), 1);
+    let set = kept_dir(roots, RootKey::Core, &kept[0].stamp);
     assert_eq!(
-        without(
-            &carried,
-            &[".in-the-way-1", ".in-the-way-2", ".in-the-way-3"]
-        ),
-        without(&before.core, &NEVER)
+        std::fs::read(set.join(".in-the-way-1/audio/late.txt")).unwrap(),
+        b"parked"
     );
+    assert!(!kept_dir(roots, RootKey::Core, &first).exists());
+}
+
+/// A carry that fails after the keychain writes is skipped with a warning
+/// rather than repeated (R2-M3): the parked entries stay in the set put
+/// back, which stays as a set with nothing to put back.
+#[tokio::test]
+async fn a_carry_that_fails_is_skipped_and_its_set_kept() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    let first = pre_restores(roots)[0].stamp.clone();
+    let parked = kept_dir(roots, RootKey::Core, &first).join(".in-the-way-1");
+    write(&parked.join("audio/late.txt"), b"parked");
+    std::fs::set_permissions(&parked, std::fs::Permissions::from_mode(0o500)).unwrap();
+    schedule(
+        roots,
+        &RestoreSource::PreRestore {
+            stamp: first.clone(),
+        },
+        false,
+    )
+    .unwrap();
+    let outcome = apply_pending(roots, &fixture.store, None);
+    std::fs::set_permissions(&parked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let Ok(ApplyOutcome::Applied(result)) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(result.warnings, vec![PARKED_STAYED.to_owned()]);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    let kept = pre_restores(roots);
+    assert_eq!(kept.len(), 2);
+    let old = kept.iter().find(|set| set.stamp == first).unwrap();
+    assert!(old.bytes > 0);
+    assert_eq!(
+        files_under(&kept_dir(roots, RootKey::Core, &first), &["meta"]),
+        BTreeMap::from([(
+            PathBuf::from(".in-the-way-1/audio/late.txt"),
+            b"parked".to_vec()
+        )])
+    );
+    assert!(!kept_dir(roots, RootKey::Core, &first)
+        .join("meta/keychain.sealed")
+        .exists());
+    assert!(no_key(&fixture.store, &format!("pre-restore:{first}")));
+    assert!(matches!(
+        schedule(roots, &RestoreSource::PreRestore { stamp: first }, false),
+        Err(BackupError::Refused(message)) if message == NOTHING_TO_PUT_BACK
+    ));
+}
+
+/// The sweep never judges a set whose manifest is there but doesn't read
+/// (R2-I1), and finishes a delete that stopped part way.
+#[tokio::test]
+async fn the_sweep_keeps_unreadable_sets_and_finishes_deletes() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    let stamp = pre_restores(roots)[0].stamp.clone();
+    let info = kept_dir(roots, RootKey::Core, &stamp).join("meta/info.json");
+    let good = std::fs::read(&info).unwrap();
+    std::fs::write(&info, b"{written by something else").unwrap();
+    let doomed = roots
+        .backups(RootKey::Desktop)
+        .join(".deleting-2026-01-01-0000-abcd");
+    write(&doomed.join("half/file.txt"), b"going");
+    let host = host(&fixture);
+    host.sweep();
+    for root in [RootKey::Core, RootKey::Desktop] {
+        assert!(kept_dir(roots, root, &stamp).exists());
+    }
+    assert!(!no_key(&fixture.store, &format!("pre-restore:{stamp}")));
+    assert!(!doomed.exists());
+    // A newer Bruhs' info with fields this one doesn't know still reads.
+    let mut newer: serde_json::Value = serde_json::from_slice(&good).unwrap();
+    newer["from_the_future"] = true.into();
+    newer.as_object_mut().unwrap().remove("bytes");
+    std::fs::write(&info, serde_json::to_vec(&newer).unwrap()).unwrap();
+    assert_eq!(pre_restores(roots).len(), 1);
+    // A delete leaves no `.deleting-` folder behind.
+    delete_pre_restore(roots, &fixture.store, &stamp).unwrap();
+    for root in [RootKey::Core, RootKey::Desktop] {
+        let left: Vec<String> = std::fs::read_dir(roots.backups(root))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".deleting-") || name.starts_with("pre-restore-"))
+            .collect();
+        assert_eq!(left, Vec::<String>::new());
+    }
 }
 
 /// A seal that fails for good, with nothing moved yet, drops the apply:
@@ -1643,6 +1766,15 @@ async fn the_sweep_removes_unlisted_kept_folders_and_their_keys() {
     assert!(no_key(&fixture.store, &format!("pre-restore:{stray}")));
     assert!(no_key(&fixture.store, &format!("pre-restore:{gone}")));
     assert!(!no_key(&fixture.store, &format!("pre-restore:{listed}")));
+    // The listed set's key stays on the list until that set goes (R2-M2).
+    let list: Vec<String> =
+        serde_json::from_slice(&std::fs::read(backups.join("keys-to-forget.json")).unwrap())
+            .unwrap();
+    assert_eq!(list, vec![format!("pre-restore:{listed}")]);
+    std::fs::remove_dir_all(kept_dir(roots, RootKey::Core, &listed)).unwrap();
+    std::fs::remove_dir_all(kept_dir(roots, RootKey::Desktop, &listed)).unwrap();
+    host.sweep();
+    assert!(no_key(&fixture.store, &format!("pre-restore:{listed}")));
     assert!(!backups.join("keys-to-forget.json").exists());
 }
 

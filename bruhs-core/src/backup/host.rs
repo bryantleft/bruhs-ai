@@ -465,6 +465,10 @@ impl BackupHost {
     /// stopped process left in chosen folders, and staged restores that
     /// never finished or weren't applied within 24 hours, with their seal
     /// keys (ruling F25).
+    ///
+    /// The restore's part takes `restore.lock` and may remove keychain
+    /// items (seal keys whose set is gone), so it can wait on the
+    /// keychain: call it off the async runtime.
     pub fn sweep(&self) {
         let now = SystemTime::now();
         for folder in [OUTGOING, INCOMING] {
