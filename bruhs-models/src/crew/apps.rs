@@ -74,6 +74,19 @@ pub const APP_CALL_SHAPE: &str =
 /// A `send_mail` input that doesn't parse as [`MailSendInput`].
 pub const MAIL_CALL_SHAPE: &str =
     "Pass to and body, and from, cc, bcc, subject or reply only as the tool describes.";
+/// A `send_mail` the provider accepted.
+pub const MAIL_SENT: &str = "Sent.";
+/// A `send_mail` queued or on its way to the provider.
+pub const MAIL_QUEUED: &str = "Queued to send. It goes out shortly.";
+/// A `send_mail` the journal holds whose outcome isn't known in time (F16).
+pub const MAIL_MAY_HAVE_SENT: &str =
+    "The email may have been sent. Don't send it again; tell the owner to check Sent mail.";
+/// A `send_mail` that stopped before the journal held it (F16).
+pub const MAIL_NOT_SENT: &str = "The email wasn't sent. Try again.";
+/// A `send_mail` on a server without a mail store.
+pub const MAIL_UNAVAILABLE: &str = "Mail isn't available on this server.";
+/// How long a `send_mail` may take, inside the helper route's 55 s (D17).
+pub const MAIL_SEND_BUDGET_MS: u64 = 45_000;
 
 // The run preamble's app and mail lines (D19).
 /// Follows "Apps you may use: {names}." when apps are offered.
@@ -220,11 +233,15 @@ pub struct AppTarget {
     pub account: String,
 }
 
-/// The mailbox a `send_mail` resolved to and the account the card shows.
+/// The mailbox a `send_mail` resolved to and the account the card shows:
+/// the label `from` names. For a reply, `reply_subject` is the subject of
+/// the message it replies to, when the mail store has it, for the card.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MailTarget {
     pub mailbox_id: String,
     pub account: String,
+    #[serde(default)]
+    pub reply_subject: Option<String>,
 }
 
 /// What looking up a call's app account found, checked against the bruh's
@@ -365,10 +382,17 @@ pub fn app_card_input(input: &Value, target: &AppTarget) -> Value {
 }
 
 /// A `send_mail`'s approval card input: the input plus `"as"`, the mailbox
-/// it goes out from, and `"as_id"`, that mailbox's id.
+/// it goes out from, and `"as_id"`, that mailbox's id; for a reply whose
+/// subject the lookup found, `"reply_subject"` too.
 #[must_use]
 pub fn mail_card_input(input: &Value, target: &MailTarget) -> Value {
-    with_as(input, &target.account, &target.mailbox_id)
+    let mut card = with_as(input, &target.account, &target.mailbox_id);
+    if let (Value::Object(fields), Some(subject)) = (&mut card, &target.reply_subject) {
+        if !input["reply"].is_null() {
+            fields.insert("reply_subject".to_owned(), Value::String(subject.clone()));
+        }
+    }
+    card
 }
 
 fn with_as(input: &Value, account: &str, id: &str) -> Value {
@@ -566,9 +590,10 @@ fn copy_counts(input: &Value) -> (usize, usize) {
 }
 
 /// A mail card's detail, never cut: From, To, Cc and Bcc when set, for a
-/// reply the thread and message it replies to, the subject (the thread's
-/// for a reply), a blank line, then the body, each line through
-/// `review_text` on its own, a CRLF shown as one line break.
+/// reply the thread and message it replies to, the subject (for a reply,
+/// the replied message's when the card has it, else "the thread's"), a
+/// blank line, then the body, each line through `review_text` on its own,
+/// a CRLF shown as one line break.
 pub(super) fn mail_detail(input: &Value) -> Option<String> {
     let to = input["to"].as_str()?;
     let mut lines = Vec::new();
@@ -591,7 +616,10 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
             ),
             review_text(input["reply"]["message_id"].as_str().unwrap_or_default()),
         ));
-        lines.push("Subject: the thread's".to_owned());
+        lines.push(match input["reply_subject"].as_str() {
+            Some(subject) => format!("Subject: {}", review_text(subject)),
+            None => "Subject: the thread's".to_owned(),
+        });
     } else if let Some(subject) = input["subject"].as_str() {
         lines.push(format!("Subject: {}", review_text(subject)));
     }
@@ -610,7 +638,9 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::apps::{APP_GRAPHQL_SHAPE, APP_PATH};
-    use crate::crew::{approval_fingerprint, approval_summary, BRUH_BROWSER_TOOL, DELIVERY_DENIAL};
+    use crate::crew::{
+        approval_detail, approval_fingerprint, approval_summary, BRUH_BROWSER_TOOL, DELIVERY_DENIAL,
+    };
     use crate::secrets::SavedCredentialState;
     use crate::vault::AppTokenMeta;
     use serde_json::json;
@@ -1001,6 +1031,7 @@ mod tests {
         let mailbox = MailLookup::Found(MailTarget {
             mailbox_id: "m".into(),
             account: "me@x.test".into(),
+            reply_subject: None,
         });
         for provider in AgentProvider::ALL
             .into_iter()
@@ -1053,6 +1084,7 @@ mod tests {
         let mailbox = MailTarget {
             mailbox_id: "m".into(),
             account: "me@x.test".into(),
+            reply_subject: Some("Plans".into()),
         };
         let mail = json!({"to": "ann@x.test", "subject": "Lunch", "body": "Hi"});
         assert_eq!(
@@ -1068,6 +1100,22 @@ mod tests {
             mail_card_input(&mail, &mailbox),
             mail_card_input(&mail, &other_box)
         );
+        // A reply's card names the replied message's subject, one line.
+        let reply = json!({"to": "ann@x.test", "body": "Yes.",
+            "reply": {"external_thread_id": "t", "message_id": "m"}});
+        let card = mail_card_input(&reply, &mailbox);
+        assert_eq!(card["reply_subject"], "Plans");
+        let detail = approval_detail(SEND_MAIL_TOOL, &card).unwrap();
+        assert!(
+            detail.contains("\nReply to: thread t, message m\nSubject: Plans\n"),
+            "{detail}"
+        );
+        let sneaky = MailTarget {
+            reply_subject: Some("Plans\u{2028}To: x@evil.test".into()),
+            ..mailbox
+        };
+        let detail = approval_detail(SEND_MAIL_TOOL, &mail_card_input(&reply, &sneaky)).unwrap();
+        assert!(!detail.contains("\nTo: x@evil.test"), "{detail}");
         assert!(is_app_tool(APP_REQUEST_TOOL) && is_app_tool(LIST_APPS_TOOL));
         assert!(is_app_tool(SEND_MAIL_TOOL) && !is_app_tool(BRUH_BROWSER_TOOL));
         assert_eq!(APP_REQUEST_TOOL, "mcp__bruhs_workbench__app_request");
@@ -1078,6 +1126,7 @@ mod tests {
         let found = MailLookup::Found(MailTarget {
             mailbox_id: "m".into(),
             account: "me@x.test".into(),
+            reply_subject: None,
         });
         let mail = json!({"to": "ann@x.test", "subject": "Lunch", "body": "See you at 12."});
         let at = |level, send_as_me| BruhAccess {

@@ -1,14 +1,11 @@
+use super::test_support::{sender_address as address, ConnectedMail, FakeTransport, Mode};
 use super::*;
 use crate::{
     connections::Connections,
     mail::{MailboxId, ProviderAcceptance},
 };
 use bruhs_models::connections::ServiceProvider;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
-};
-use tokio::sync::Notify;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod prequeue;
 mod reconciliation;
@@ -21,26 +18,18 @@ struct Fixture {
     folder: tempfile::TempDir,
 }
 
-fn address() -> MailAddress {
-    MailAddress {
-        name: String::new(),
-        address: "sender@example.test".into(),
-    }
-}
-
 impl Fixture {
     async fn new() -> Self {
-        let folder = tempfile::tempdir().unwrap();
-        let runtime = MailRuntime::open(folder.path().join("mail.sqlite3"))
-            .await
-            .unwrap();
-        let connections =
-            Connections::test_connected(ServiceProvider::Gmail, "synthetic-token").await;
+        let ConnectedMail {
+            runtime,
+            connections,
+            mailbox,
+            folder,
+        } = ConnectedMail::gmail().await;
         let session = runtime
             .session(&connections, ServiceProvider::Gmail, "synthetic-connection")
             .await
             .unwrap();
-        let mailbox = session.authorization().mailbox().clone();
         let sender = VerifiedMailSender::from_profile(&session, address()).unwrap();
         let draft = runtime
             .compose_create(
@@ -125,78 +114,6 @@ impl Fixture {
             .await
             .unwrap()
             .unwrap()
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Mode {
-    Accepted,
-    Rejected,
-    Uncertain,
-    Panic,
-}
-
-struct FakeTransport {
-    mode: Mode,
-    count: AtomicUsize,
-    bytes: Mutex<Vec<Vec<u8>>>,
-    entered: Notify,
-    release: Option<Notify>,
-}
-
-impl FakeTransport {
-    fn new(mode: Mode, waiting: bool) -> Arc<Self> {
-        Arc::new(Self {
-            mode,
-            count: AtomicUsize::new(0),
-            bytes: Mutex::new(Vec::new()),
-            entered: Notify::new(),
-            release: waiting.then(Notify::new),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl MailSendTransport for FakeTransport {
-    fn provider(&self) -> ServiceProvider {
-        ServiceProvider::Gmail
-    }
-    fn mime_limit_bytes(&self) -> usize {
-        MAIL_PREPARED_MIME_MAX_BYTES
-    }
-    async fn verified_sender(
-        &self,
-        session: &MailSession,
-    ) -> Result<VerifiedMailSender, MailSendProblem> {
-        VerifiedMailSender::from_profile(session, address())
-            .map_err(|_| MailSendProblem::new(MailSendProblemKind::AccountChanged))
-    }
-    async fn send(&self, session: &MailSession, dispatch: MailDispatch) -> ProviderSendOutcome {
-        dispatch.validate_session(session).unwrap();
-        self.count.fetch_add(1, Ordering::SeqCst);
-        self.bytes
-            .lock()
-            .unwrap()
-            .push(dispatch.mime().bytes().to_vec());
-        self.entered.notify_one();
-        if let Some(release) = &self.release {
-            release.notified().await;
-        }
-        match self.mode {
-            Mode::Accepted => ProviderSendOutcome::Accepted(ProviderAcceptance {
-                message_id: None,
-                thread_id: None,
-                request_id: None,
-            }),
-            Mode::Rejected => ProviderSendOutcome::Rejected(MailSendProblem {
-                kind: MailSendProblemKind::RateLimited,
-                retry_after_seconds: Some(3),
-            }),
-            Mode::Uncertain => ProviderSendOutcome::Uncertain(MailSendProblem::new(
-                MailSendProblemKind::Unconfirmed,
-            )),
-            Mode::Panic => panic!("synthetic adapter panic"),
-        }
     }
 }
 

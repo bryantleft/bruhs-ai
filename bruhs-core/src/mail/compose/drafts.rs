@@ -78,6 +78,21 @@ impl MailRuntime {
         .await
     }
 
+    /// Deletes a draft that no send reached; `Ok(false)` when the send
+    /// journal holds an operation for it, which keeps it (ruling F16).
+    pub async fn compose_discard_unsent(
+        &self,
+        expected_host: String,
+        mailbox_id: String,
+        client_id: String,
+    ) -> Result<bool, ComposeError> {
+        self.compose_host(&expected_host)?;
+        self.compose_call(true, move |cache| {
+            cache.compose_discard_unsent(&mailbox_id, &client_id)
+        })
+        .await
+    }
+
     pub async fn compose_drafts(
         &self,
         expected_host: String,

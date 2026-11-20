@@ -8,6 +8,8 @@ pub mod reconciliation;
 pub(crate) mod record;
 mod transport;
 pub use dispatch::MailSendTask;
+#[cfg(any(test, feature = "test-support"))]
+pub use dispatch::test_support;
 pub use mime::{PreparedMime, VerifiedMailSender};
 pub use transport::{
     MailDispatch, MailSendProblem, MailSendProblemKind, MailSendTransport, ProviderSendOutcome,

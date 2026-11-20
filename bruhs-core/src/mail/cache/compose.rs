@@ -329,6 +329,37 @@ impl MailCache {
         self.compose_view(self.compose_snapshot(mailbox_id, &request.client_id)?)
     }
 
+    /// Deletes an editable draft that no send reached, with its files and
+    /// prepared copies. `Ok(false)` keeps it: the send journal holds an
+    /// operation for it. One transaction, so a send queued at the same time
+    /// either finds no draft or keeps it.
+    pub(crate) fn compose_discard_unsent(
+        &mut self,
+        mailbox_id: &str,
+        client: &str,
+    ) -> Result<bool, ComposeError> {
+        client_id(client)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let checked = mailbox(&tx, mailbox_id)?;
+        let reference = checked.draft(client, None).map_err(CacheError::from)?;
+        let held: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM send_operations WHERE mailbox=?1 AND draft_id=?2)",
+            params![mailbox_id, reference.canonical_id],
+            |row| row.get(0),
+        )?;
+        if held {
+            return Ok(false);
+        }
+        tx.execute(
+            "DELETE FROM drafts WHERE mailbox=?1 AND draft_id=?2 AND client_id=?3 AND state='editing'",
+            params![mailbox_id, reference.canonical_id, client],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     pub(crate) fn compose_save(
         &mut self,
         mailbox_id: &str,

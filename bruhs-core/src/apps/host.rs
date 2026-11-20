@@ -1,12 +1,14 @@
-//! The apps host (D8, D18, D21): connects and replaces app tokens only
-//! after a passing test call, tests saved ones, sends a gated call with its
-//! token, and lists accounts and mailboxes, value free.
+//! The apps host (D8, D17, D18, D21): connects and replaces app tokens
+//! only after a passing test call, tests saved ones, sends a gated call
+//! with its token, sends a bruh's email, and lists accounts and mailboxes,
+//! value free.
 //!
 //! Tokens arrive in the write-only [`AppConnect`] and [`AppReplace`] bodies
 //! and move into `Zeroizing` at once. The store wipes what it keeps or
 //! refuses; nothing here logs, returns or formats one.
 
 use super::{AppHttp, AppsError};
+use crate::mail::compose::MailSendTransport;
 use crate::mail::gmail::GmailClient;
 use crate::mail::outlook::OutlookClient;
 use crate::mail::MailRuntime;
@@ -18,15 +20,29 @@ use bruhs_models::apps::{
     ANOTHER_ACCOUNT, MAILBOXES_UNAVAILABLE, UNKNOWN_APP,
 };
 use bruhs_models::connections::ServiceProvider;
-use bruhs_models::crew::KEYCHAIN_NEEDS_OWNER;
+use bruhs_models::crew::{
+    MailSendInput, KEYCHAIN_NEEDS_OWNER, MAIL_NOT_GRANTED, MAIL_SEND_BUDGET_MS, MAIL_UNAVAILABLE,
+};
+use bruhs_models::mail::{MailDispatchState, MailReplyTarget};
 use bruhs_models::vault::{
     validate_entry_name, AppTokenMeta, CredentialScope, VaultCreate, VaultEntry, VaultKind,
     VaultSecretInput, VaultUpdate, APPS_NOT_PROJECTS, CHOOSE_APP, CHOOSE_BRUH, INVALID_ENTRY,
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 use zeroize::Zeroizing;
+
+/// What a bruh's `send_mail` came to (D17): the journal's state, its
+/// operation, and the model-facing copy saying what that means.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MailSendOutcome {
+    pub state: MailDispatchState,
+    pub operation_id: Option<String>,
+    pub message: String,
+}
 
 /// Everything the Apps routes, a bruh's app calls and the polls go
 /// through. Clone it freely: its [`AppHttp`] is the process's one client,
@@ -36,10 +52,12 @@ pub struct AppsHost {
     vault: SecretManager,
     http: AppHttp,
     mail: Option<MailRuntime>,
-    #[expect(dead_code, reason = "used from Task 9")]
     gmail: Arc<GmailClient>,
-    #[expect(dead_code, reason = "used from Task 9")]
     outlook: Arc<OutlookClient>,
+    /// Sends every mailbox's email instead of Gmail and Outlook (tests).
+    mail_transport: Option<Arc<dyn MailSendTransport>>,
+    /// How long a `send_mail` may take ([`MAIL_SEND_BUDGET_MS`]).
+    send_budget: Duration,
     /// Held from a connect's duplicate check through its save, never
     /// across its test call, so two connects of one account can't both
     /// save. Shared by every clone.
@@ -62,8 +80,26 @@ impl AppsHost {
             mail,
             gmail,
             outlook,
+            mail_transport: None,
+            send_budget: Duration::from_millis(MAIL_SEND_BUDGET_MS),
             connecting: Arc::default(),
         }
+    }
+
+    /// Sends email through `transport` whatever the mailbox's provider.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_mail_transport(mut self, transport: Arc<dyn MailSendTransport>) -> Self {
+        self.mail_transport = Some(transport);
+        self
+    }
+
+    /// Bounds each `send_mail` by `budget` instead of 45 s.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_send_budget(mut self, budget: Duration) -> Self {
+        self.send_budget = budget;
+        self
     }
 
     pub fn http(&self) -> &AppHttp {
@@ -249,6 +285,95 @@ impl AppsHost {
     /// The Gmail and Outlook mailboxes whose connection is present now
     /// (F14). None without a mail runtime.
     pub async fn mailboxes(&self) -> Result<Vec<AppMailbox>, AppsError> {
+        Ok(self
+            .connected_mailboxes()
+            .await?
+            .into_iter()
+            .map(|(mailbox, _)| mailbox)
+            .collect())
+    }
+
+    /// Sends a bruh's email from a connected mailbox (D17) through the
+    /// compose path, bounded by the send budget; never retried. `from`,
+    /// when given, must name the mailbox's label, in any case. A failure
+    /// before the send journal holds it is an error with
+    /// `MAIL_NOT_SENT`; once it does, the outcome carries its state.
+    pub async fn send_mail(
+        &self,
+        mailbox_id: &str,
+        input: MailSendInput,
+    ) -> Result<MailSendOutcome, AppsError> {
+        let Some(mail) = &self.mail else {
+            return Err(AppsError::Unavailable(MAIL_UNAVAILABLE));
+        };
+        input.validate().map_err(AppsError::Invalid)?;
+        // Checked against the live list: a stale or disconnected mailbox
+        // sends nothing.
+        let (mailbox, connection_id) = self
+            .connected_mailboxes()
+            .await?
+            .into_iter()
+            .find(|(mailbox, _)| mailbox.mailbox_id == mailbox_id)
+            .ok_or(AppsError::Refused(MAIL_NOT_GRANTED))?;
+        if input
+            .from
+            .as_ref()
+            .is_some_and(|from| !from.eq_ignore_ascii_case(&mailbox.account))
+        {
+            return Err(AppsError::Refused(MAIL_NOT_GRANTED));
+        }
+        let transport = self
+            .mail_transport(mailbox.provider)
+            .ok_or(AppsError::Refused(MAIL_NOT_GRANTED))?;
+        super::mail::send(
+            mail,
+            self.vault.connections(),
+            super::mail::Mailbox {
+                id: &mailbox.mailbox_id,
+                provider: mailbox.provider,
+                connection_id: &connection_id,
+            },
+            transport,
+            input,
+            self.send_budget,
+        )
+        .await
+    }
+
+    /// The subject of the message `reply` names, as the mail store holds
+    /// it: what a reply to it is sent with. For a reply's card.
+    pub async fn reply_subject(&self, mailbox_id: &str, reply: &MailReplyTarget) -> Option<String> {
+        let mail = self.mail.as_ref()?;
+        let thread = mail
+            .connected_thread(
+                mail.host().as_str().to_owned(),
+                mailbox_id.to_owned(),
+                reply.external_thread_id.clone(),
+            )
+            .await
+            .ok()??;
+        thread
+            .connected_mail
+            .messages
+            .into_iter()
+            .find(|message| message.id == reply.message_id)
+            .map(|message| message.envelope.subject)
+    }
+
+    fn mail_transport(&self, provider: ServiceProvider) -> Option<Arc<dyn MailSendTransport>> {
+        if let Some(transport) = &self.mail_transport {
+            return Some(Arc::clone(transport));
+        }
+        match provider {
+            ServiceProvider::Gmail => Some(self.gmail.clone()),
+            ServiceProvider::Outlook => Some(self.outlook.clone()),
+            _ => None,
+        }
+    }
+
+    /// Each connected Gmail and Outlook mailbox with the connection id it
+    /// was bound with, which is the one present now (F14).
+    async fn connected_mailboxes(&self) -> Result<Vec<(AppMailbox, String)>, AppsError> {
         let Some(mail) = &self.mail else {
             return Ok(Vec::new());
         };
@@ -280,11 +405,14 @@ impl AppsHost {
                 }
             };
             if id.as_deref() == Some(mailbox.last_connection_id.as_str()) {
-                mailboxes.push(AppMailbox {
-                    account: mailbox_account(mailbox.provider, &mailbox.account_label),
-                    mailbox_id: mailbox.mailbox_id,
-                    provider: mailbox.provider,
-                });
+                mailboxes.push((
+                    AppMailbox {
+                        account: mailbox_account(mailbox.provider, &mailbox.account_label),
+                        mailbox_id: mailbox.mailbox_id,
+                        provider: mailbox.provider,
+                    },
+                    mailbox.last_connection_id,
+                ));
             }
         }
         Ok(mailboxes)
