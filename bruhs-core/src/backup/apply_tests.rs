@@ -386,6 +386,18 @@ fn no_key(store: &SecretStore, account: &str) -> bool {
     matches!(read_seal_key(store, account), Err(SecretError::NotSaved))
 }
 
+/// Takes `file`'s lock for a test, trying again for a moment: a process
+/// another test forks holds a copy of the lock until it execs.
+fn hold(file: &File) {
+    for _ in 0..200 {
+        if file.try_lock().is_ok() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the lock stayed held");
+}
+
 fn never_stop(_: &Step, _: Point) -> bool {
     false
 }
@@ -575,7 +587,7 @@ async fn apply_waits_for_every_writer() {
         assert!(pending(roots).is_some());
     };
     let server = File::open(&server_lock).unwrap();
-    server.try_lock().unwrap();
+    hold(&server);
     assert_eq!(
         apply_pending(roots, &fixture.store, None).unwrap(),
         ApplyOutcome::Busy(Holder::Server)
@@ -596,7 +608,7 @@ async fn apply_waits_for_every_writer() {
         .write(true)
         .open(roots.backups(RootKey::Core).join("restore.lock"))
         .unwrap();
-    restore.try_lock().unwrap();
+    hold(&restore);
     assert_eq!(
         apply_pending(roots, &fixture.store, None).unwrap(),
         ApplyOutcome::Busy(Holder::Restore)
@@ -1437,7 +1449,7 @@ async fn the_restore_lock_holds_off_schedule_the_web_part_and_the_sweep() {
         .write(true)
         .open(backups.join("restore.lock"))
         .unwrap();
-    lock.try_lock().unwrap();
+    hold(&lock);
     assert!(matches!(
         schedule(roots, &staged_source(&before), false),
         Err(BackupError::Busy(BACKUP_BUSY))
@@ -1551,8 +1563,9 @@ async fn a_rollback_parks_what_was_made_mid_apply_under_free_names() {
 }
 
 /// A put back carries a set's parked folders into the new set and never
-/// places them (N7); an owner's own name that only starts the same is
-/// placed like any other (R2-M1).
+/// places them (N7); an owner's own entries that only look alike, a
+/// `.in-the-way-notes/` folder and a file named `.in-the-way`, are placed
+/// like any other (R2-M1, R3-M1).
 #[tokio::test]
 async fn a_put_back_carries_parked_folders_into_the_new_set() {
     let fixture = fixture(false, false);
@@ -1562,6 +1575,8 @@ async fn a_put_back_carries_parked_folders_into_the_new_set() {
         &roots.core.join(".in-the-way-notes/mine.txt"),
         b"owner's own",
     );
+    write(&roots.core.join(".in-the-way"), b"an owner's file");
+    write(&roots.core.join(".in-the-way-7"), b"a file, not a folder");
     let today = files_under(&roots.core, &["backups"]);
     schedule(roots, &staged_source(&before), false).unwrap();
     apply_pending(roots, &fixture.store, None).unwrap();
@@ -1753,7 +1768,7 @@ async fn the_sweep_removes_unlisted_kept_folders_and_their_keys() {
         .write(true)
         .open(backups.join("restore.lock"))
         .unwrap();
-    lock.try_lock().unwrap();
+    hold(&lock);
     host.sweep();
     assert!(kept_dir(roots, RootKey::Desktop, stray).exists());
     drop(lock);
@@ -1790,7 +1805,7 @@ async fn the_service_restart_is_taken_under_the_restore_lock() {
         .write(true)
         .open(fixture.roots.backups(RootKey::Core).join("restore.lock"))
         .unwrap();
-    lock.try_lock().unwrap();
+    hold(&lock);
     let release = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(300));
         drop(lock);
@@ -1800,4 +1815,70 @@ async fn the_service_restart_is_taken_under_the_restore_lock() {
     assert!(started.elapsed() >= Duration::from_millis(250));
     release.join().unwrap();
     assert!(!take_service_restart(&fixture.roots));
+}
+
+/// A kept set's info without `keychain` reads it from the sealed file,
+/// and one without `roots` is damage, not a set with nothing in it
+/// (R3-M3).
+#[tokio::test]
+async fn an_info_missing_fields_reads_safely() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
+    let stamp = pre_restores(roots)[0].stamp.clone();
+    let path = kept_dir(roots, RootKey::Core, &stamp).join("meta/info.json");
+    let info: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let source = RestoreSource::PreRestore { stamp };
+
+    let mut no_roots = info.clone();
+    no_roots.as_object_mut().unwrap().remove("roots");
+    std::fs::write(&path, serde_json::to_vec(&no_roots).unwrap()).unwrap();
+    assert!(matches!(
+        schedule(roots, &source, false),
+        Err(BackupError::Format(DAMAGED))
+    ));
+
+    let mut no_keychain = info;
+    no_keychain.as_object_mut().unwrap().remove("keychain");
+    std::fs::write(&path, serde_json::to_vec(&no_keychain).unwrap()).unwrap();
+    schedule(roots, &source, false).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    // The sealed items were written back: today's item is A's again.
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+}
+
+/// A lock a forked process still holds a copy of for a moment (until it
+/// execs) isn't taken for a running apply: the lock is tried again first.
+#[tokio::test]
+async fn a_lock_a_forked_copy_still_holds_for_a_moment_is_free() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(roots.backups(RootKey::Core).join("restore.lock"))
+        .unwrap();
+    hold(&lock);
+    // The same open file, as a forked child shares it until it execs.
+    let copy = lock.try_clone().unwrap();
+    drop(lock);
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        drop(copy);
+    });
+    schedule(roots, &staged_source(&before), false).unwrap();
+    release.join().unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
 }

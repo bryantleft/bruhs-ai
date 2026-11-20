@@ -102,6 +102,9 @@ const EVERYTHING: BackupOptions = BackupOptions {
     audio: true,
     browser_profiles: true,
 };
+/// How long a lock that reads as held is tried again before it counts as
+/// held (see [`lock`]).
+const LOCK_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 /// How long [`take_service_restart`] waits for an apply's lock.
 const RESTORE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// The minute of a stamp gets a random suffix; this many tries find a
@@ -1419,11 +1422,22 @@ fn open_lock_file(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Takes `file`'s lock without waiting on a holder, trying again for a
+/// moment first. A process another thread forks holds a copy of every
+/// open file, and with it the lock, until it execs, so a lock released a
+/// moment ago can read as held; a real holder still holds it after
+/// [`LOCK_GRACE`].
 fn lock(file: File) -> io::Result<Lock> {
-    match file.try_lock() {
-        Ok(()) => Ok(Lock::Free(Some(file))),
-        Err(TryLockError::WouldBlock) => Ok(Lock::Held),
-        Err(TryLockError::Error(error)) => Err(error),
+    let until = std::time::Instant::now() + LOCK_GRACE;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Lock::Free(Some(file))),
+            Err(TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(TryLockError::WouldBlock) => return Ok(Lock::Held),
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
     }
 }
 

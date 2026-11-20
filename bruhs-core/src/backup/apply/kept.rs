@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bruhs_models::backup::{
-    valid_id, valid_stamp, PreRestoreInfo, RestoreSource, BACKUP_BUSY, GONE, KEYCHAIN_NEEDS_YOU,
-    NOTHING_TO_PUT_BACK, RESTORE_PENDING,
+    valid_id, valid_stamp, PreRestoreInfo, RestoreSource, BACKUP_BUSY, DAMAGED, GONE,
+    KEYCHAIN_NEEDS_YOU, NOTHING_TO_PUT_BACK, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{Deserialize, Serialize};
@@ -51,11 +51,14 @@ pub(super) struct KeptInfo {
     made_at_ms: EpochMs,
     #[serde(default)]
     bytes: u64,
-    /// Whether `meta/keychain.sealed` holds the day's items.
+    /// Whether `meta/keychain.sealed` holds the day's items. When an info
+    /// doesn't say, a sealed file being there does (R3-M3).
     #[serde(default)]
-    keychain: bool,
+    keychain: Option<bool>,
+    /// What each root's folder holds. An info without it is damaged, never
+    /// a set with nothing to put back (R3-M3).
     #[serde(default)]
-    roots: Vec<KeptRoot>,
+    roots: Option<Vec<KeptRoot>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -186,8 +189,10 @@ pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>
     let Some(info) = kept_info(roots, stamp) else {
         return Ok(None);
     };
-    if info
-        .roots
+    let Some(listed) = &info.roots else {
+        return Err(BackupError::Format(DAMAGED));
+    };
+    if listed
         .iter()
         .any(|kept| !pass_roots(roots).contains(&kept.root))
     {
@@ -200,14 +205,13 @@ pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>
             return Ok(None);
         }
         // What a rollback parked stays in the set (N7).
-        let names: Vec<String> = info
-            .roots
+        let names: Vec<String> = listed
             .iter()
             .find(|kept| kept.root == *root)
             .map(|kept| kept.names.clone())
             .unwrap_or_default()
             .into_iter()
-            .filter(|name| !parked(name))
+            .filter(|name| !parked_folder(&folder, name))
             .collect();
         for name in &names {
             if !movable(name) || !exists(&folder.join(name))? {
@@ -222,12 +226,14 @@ pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>
         return Err(BackupError::Refused(NOTHING_TO_PUT_BACK));
     }
     let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
-    if info.keychain && !is_file(&meta.join(SEALED)) {
+    let sealed = is_file(&meta.join(SEALED));
+    let keychain = info.keychain.unwrap_or(sealed);
+    if keychain && !sealed {
         return Ok(None);
     }
     Ok(Some(SourceSet {
         places,
-        keychain: info.keychain,
+        keychain,
         web_part: is_file(&meta.join(WEB_PART)),
         rewrites: Vec::new(),
     }))
@@ -279,8 +285,8 @@ fn write_set_info(
         stamp: stamp.to_owned(),
         made_at_ms,
         bytes,
-        keychain,
-        roots: listed,
+        keychain: Some(keychain),
+        roots: Some(listed),
     };
     let core = kept_dir(roots, RootKey::Core, stamp);
     let meta = core.join(META);
@@ -321,7 +327,9 @@ impl Apply<'_> {
                 continue;
             }
             for name in top_names(&folder)? {
-                if parked(&name) && std::fs::read_dir(folder.join(&name))?.next().is_some() {
+                if parked_folder(&folder, &name)
+                    && std::fs::read_dir(folder.join(&name))?.next().is_some()
+                {
                     held = true;
                 }
             }
@@ -340,15 +348,15 @@ impl Apply<'_> {
     }
 }
 
-/// Whether `name` is a folder a rollback parked things in (N2, N7):
-/// `.in-the-way` or `.in-the-way-<digits>`, never an owner's own name that
-/// only starts the same (R2-M1).
-pub(super) fn parked(name: &str) -> bool {
-    name == PARKED
-        || name
-            .strip_prefix(PARKED)
-            .and_then(|rest| rest.strip_prefix('-'))
-            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+/// Whether `name` in the kept folder `folder` is one a rollback parked
+/// things in (N2, N7): named `.in-the-way-<digits>` and a real folder,
+/// never an owner's own entry that only looks alike (R2-M1, R3-M1).
+pub(super) fn parked_folder(folder: &Path, name: &str) -> bool {
+    let named = name
+        .strip_prefix(PARKED)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()));
+    named && real_dir(&folder.join(name))
 }
 
 /// Moves `from` into the first `.in-the-way-<n>/<rel>` of the kept folder
@@ -563,7 +571,7 @@ impl Apply<'_> {
                 continue;
             }
             for name in top_names(&from)? {
-                if !parked(&name) {
+                if !parked_folder(&from, &name) {
                     continue;
                 }
                 let folder = from.join(&name);
