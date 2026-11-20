@@ -4,8 +4,13 @@
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
+use super::apps::{app_detail, app_summary, mail_detail, mail_summary};
 use super::computer::{browser_detail, browser_summary, VAULT_PREAMBLE};
-use super::{AccessLevel, BruhAccess, BRUH_BROWSER_TOOL};
+use super::{
+    AccessLevel, BruhAccess, APPS_PREAMBLE, APP_REQUEST_TOOL, BRUH_BROWSER_TOOL,
+    NEVER_SEND_PREAMBLE, PREAMBLE_MAX_NAMES, SEND_APPROVAL_PREAMBLE, SEND_ASK_PREAMBLE,
+    SEND_AS_ME_PREAMBLE, SEND_MAIL_TOOL,
+};
 use crate::agent::AgentProvider;
 use crate::secrets::review_text;
 
@@ -30,7 +35,7 @@ pub enum GatedAction {
 }
 
 pub const READ_ONLY_DENIAL: &str = "This bruh is read only. Return a reviewable draft instead.";
-pub const APP_TOOL_DENIAL: &str = "App tools aren't available to bruh runs.";
+pub const APP_TOOL_DENIAL: &str = "Only the tools Bruhs gives you are available.";
 pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
 pub const LOCAL_HOST_DENIAL: &str = "Bruhs can't reach services on this computer.";
@@ -1065,6 +1070,8 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
         ),
         "WebFetch" => (input["url"].as_str().map(|url| format!("Fetch {url}")), 0),
         BRUH_BROWSER_TOOL => (browser_summary(input), 0),
+        APP_REQUEST_TOOL => (app_summary(input), 0),
+        SEND_MAIL_TOOL => (mail_summary(input), 0),
         BRUH_SECRET_TOOL => match (
             input["name"].as_str(),
             input["env_var"].as_str(),
@@ -1112,7 +1119,9 @@ pub const DETAIL_CUT_NOTE: &str = "Cut at 4 KB. The full call is longer.";
 /// What the call would do in full, for the card to show under its summary:
 /// the whole command, the text a write or edit puts in, or the input of any
 /// other tool. `None` when the summary already says it all. Cut at
-/// [`DETAIL_MAX_BYTES`], ending with [`DETAIL_CUT_NOTE`] when cut.
+/// [`DETAIL_MAX_BYTES`], ending with [`DETAIL_CUT_NOTE`] when cut, except
+/// an app call's or an email's, which is never cut (D16, ruling F12): the
+/// call limits keep it small, and the owner sees all of what goes out.
 #[must_use]
 pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
     let text = match tool {
@@ -1127,6 +1136,8 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
         "SandboxNetworkAccess" => return None,
         BRUH_BROWSER_TOOL => browser_detail(input, SUMMARY_MAX_CHARS)?,
         BRUH_SECRET_TOOL => vault_key_detail(input)?,
+        APP_REQUEST_TOOL => return app_detail(input, SUMMARY_MAX_CHARS),
+        SEND_MAIL_TOOL => return mail_detail(input),
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]
@@ -1202,19 +1213,37 @@ pub fn approval_fingerprint(tool: &str, input: &Value) -> String {
     format!("{:x}", Sha256::digest(format!("{tool}\n{input}")))
 }
 
+/// The tools a bruh run is offered beyond its shell and files, as the run
+/// preamble names them (D19).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreambleTools<'a> {
+    /// Its Computer is on, so it has `local_browser`.
+    pub computer: bool,
+    /// With the browser, it has a vault login it can fill.
+    pub vault_logins: bool,
+    /// The keys it may use through [`BRUH_SECRET_TOOL`], empty when the
+    /// tool isn't offered.
+    pub vault_keys: &'a [String],
+    /// The names of the apps it may call, empty when the app tools aren't
+    /// offered.
+    pub apps: &'a [String],
+    /// The account labels of the mailboxes `send_mail` sends from, empty
+    /// when it isn't offered.
+    pub mail: &'a [String],
+}
+
 /// The opening lines of every bruh run: its name, what it may do and, when
-/// its Computer is on, its browser and, with a usable login
-/// (`vault_logins`), how it fills vault logins. `vault_keys` names the keys
-/// it may use through [`BRUH_SECRET_TOOL`], empty when the tool isn't
-/// offered.
+/// its Computer is on, its browser and, with a usable login, how it fills
+/// vault logins; the vault keys it may use; the apps it may call and the
+/// mailboxes it may send from, and then what sending as the owner needs at
+/// its level. A bruh with no app or mail tool is told never to send in the
+/// owner's name.
 #[must_use]
 pub fn run_preamble(
     name: &str,
     access: &BruhAccess,
     level: AccessLevel,
-    computer: bool,
-    vault_logins: bool,
-    vault_keys: &[String],
+    tools: &PreambleTools<'_>,
 ) -> String {
     let access_line = match level {
         AccessLevel::ReadOnly => "Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.",
@@ -1222,28 +1251,81 @@ pub fn run_preamble(
         AccessLevel::Full => "Access: full. You may edit files and run commands in your working folder without asking.",
     };
     let mut lines = vec![format!("Your name is {name}."), access_line.to_string()];
-    if computer {
+    if tools.computer {
         lines.push("You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back.".to_string());
-        if vault_logins {
+        if tools.vault_logins {
             lines.push(VAULT_PREAMBLE.to_string());
         }
     }
-    if !vault_keys.is_empty() {
+    if !tools.vault_keys.is_empty() {
         lines.push(format!(
             "Vault keys you may use: {}. {SECRET_PREAMBLE}",
-            vault_keys.join(", ")
+            tools.vault_keys.join(", ")
+        ));
+    }
+    if !tools.apps.is_empty() {
+        lines.push(format!(
+            "Apps you may use: {}. {APPS_PREAMBLE}",
+            preamble_names(tools.apps)
+        ));
+    }
+    if !tools.mail.is_empty() {
+        lines.push(format!(
+            "send_mail sends email as the owner from {}.",
+            preamble_names(tools.mail)
         ));
     }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
     }
-    lines.push("Never send messages in the owner's name.".to_string());
+    let sends = !tools.apps.is_empty() || !tools.mail.is_empty();
+    lines.push(
+        match (sends, level) {
+            (false, _) | (true, AccessLevel::ReadOnly) => NEVER_SEND_PREAMBLE,
+            (true, AccessLevel::Ask) => SEND_ASK_PREAMBLE,
+            (true, AccessLevel::Full) if access.send_as_me => SEND_AS_ME_PREAMBLE,
+            (true, AccessLevel::Full) => SEND_APPROVAL_PREAMBLE,
+        }
+        .to_string(),
+    );
     lines.join("\n")
+}
+
+/// At most [`PREAMBLE_MAX_NAMES`] names, each through `review_text`.
+fn preamble_names(names: &[String]) -> String {
+    names
+        .iter()
+        .take(PREAMBLE_MAX_NAMES)
+        .map(|name| review_text(name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The preamble with no app or mail tools, as p1 to p4 wrote it.
+    fn preamble(
+        name: &str,
+        access: &BruhAccess,
+        level: AccessLevel,
+        computer: bool,
+        vault_logins: bool,
+        vault_keys: &[String],
+    ) -> String {
+        let tools = PreambleTools {
+            computer,
+            vault_logins,
+            vault_keys,
+            apps: &[],
+            mail: &[],
+        };
+        run_preamble(name, access, level, &tools)
+    }
+
+    use crate::crew::MAIL_BODY_MAX_BYTES;
+    use serde_json::json;
 
     fn full(can_deliver: bool) -> BruhAccess {
         BruhAccess {
@@ -1964,24 +2046,24 @@ mod tests {
 
     #[test]
     fn the_preamble_names_the_bruh_and_its_access() {
-        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false, false, &[]);
+        let text = preamble("Penny", &full(false), AccessLevel::Full, false, false, &[]);
         assert!(text.starts_with("Your name is Penny."));
         assert!(
             text.contains("without asking")
                 && text.contains("Never push, merge or open pull requests.")
         );
         assert!(
-            !run_preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
+            !preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
                 .contains("Never push")
         );
         assert_eq!(
-            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false, false, &[]),
+            preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false, false, &[]),
             "Your name is Penny.\n\
              Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.\n\
              Never push, merge or open pull requests.\n\
              Never send messages in the owner's name."
         );
-        let ask = run_preamble(
+        let ask = preamble(
             "Penny",
             &BruhAccess {
                 level: AccessLevel::Ask,
@@ -1995,7 +2077,7 @@ mod tests {
         );
         assert!(ask.contains("Access: ask first.") && ask.contains("Never push"));
         assert!(
-            run_preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
+            preamble("Penny", &full(true), AccessLevel::Full, false, false, &[])
                 .ends_with("Never send messages in the owner's name.")
         );
     }
@@ -2023,7 +2105,7 @@ mod tests {
             level: AccessLevel::Full,
             ..Default::default()
         };
-        let on = run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]);
+        let on = preamble("Ada", &full, AccessLevel::Full, true, false, &[]);
         assert!(on.contains("the local_browser tool"));
         let lines: Vec<&str> = on.lines().collect();
         assert!(lines[1].starts_with("Access: full."), "{on}");
@@ -2032,8 +2114,7 @@ mod tests {
             "You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back."
         );
         assert!(
-            !run_preamble("Ada", &full, AccessLevel::Full, false, false, &[])
-                .contains("local_browser")
+            !preamble("Ada", &full, AccessLevel::Full, false, false, &[]).contains("local_browser")
         );
     }
 
@@ -2043,7 +2124,7 @@ mod tests {
             level: AccessLevel::Full,
             ..Default::default()
         };
-        let on = run_preamble("Ada", &full, AccessLevel::Full, true, true, &[]);
+        let on = preamble("Ada", &full, AccessLevel::Full, true, true, &[]);
         assert!(on.contains("You never see the values."), "{on}");
         assert!(on.contains(VAULT_PREAMBLE), "{on}");
         // Ruling A2 I1: submit only in a sign-in form the bruh didn't type
@@ -2054,8 +2135,8 @@ mod tests {
             !VAULT_PREAMBLE.contains("presses Enter"),
             "{VAULT_PREAMBLE}"
         );
-        assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]).contains("vault"));
-        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true, &[]).contains("vault"));
+        assert!(!preamble("Ada", &full, AccessLevel::Full, true, false, &[]).contains("vault"));
+        assert!(!preamble("Ada", &full, AccessLevel::Full, false, true, &[]).contains("vault"));
     }
 
     #[test]
@@ -2165,7 +2246,7 @@ mod tests {
             ..Default::default()
         };
         let keys = ["API_KEY".to_owned(), "DEPLOY_KEY".to_owned()];
-        let on = run_preamble("Ada", &full, AccessLevel::Full, false, false, &keys);
+        let on = preamble("Ada", &full, AccessLevel::Full, false, false, &keys);
         assert!(
             on.contains(&format!(
                 "Vault keys you may use: API_KEY, DEPLOY_KEY. {SECRET_PREAMBLE}"
@@ -2177,7 +2258,7 @@ mod tests {
             "For a command that needs one, use request_secret with the key's name; the owner approves each use."
         );
         assert!(
-            !run_preamble("Ada", &full, AccessLevel::Full, false, false, &[])
+            !preamble("Ada", &full, AccessLevel::Full, false, false, &[])
                 .contains("request_secret")
         );
     }
@@ -2344,5 +2425,166 @@ mod tests {
                 "{access:?}"
             );
         }
+    }
+
+    #[test]
+    fn app_and_mail_cards_show_the_whole_call() {
+        let post = json!({"app": "slack", "method": "POST", "path": "/api/chat.postMessage",
+            "body": {"channel": "C1", "text": "hi"}, "as": "me"});
+        assert_eq!(
+            approval_summary(APP_REQUEST_TOOL, &post),
+            "As you on Slack: POST /api/chat.postMessage"
+        );
+        assert_eq!(
+            approval_detail(APP_REQUEST_TOOL, &post).as_deref(),
+            Some("Account: me\nBody: {\"channel\":\"C1\",\"text\":\"hi\"}")
+        );
+        let patch = json!({"app": "notion", "method": "PATCH", "path": "/v1/pages/p",
+            "query": {"a": 1}, "body": {}, "as": "ws"});
+        assert_eq!(
+            approval_summary(APP_REQUEST_TOOL, &patch),
+            "Notion: PATCH /v1/pages/p"
+        );
+        assert_eq!(
+            approval_detail(APP_REQUEST_TOOL, &patch).as_deref(),
+            Some("Account: ws\nQuery: {\"a\":1}\nBody: {}")
+        );
+        let mail = json!({"to": "ann@x.test", "cc": "bo@x.test", "subject": "Lunch",
+            "body": "See you at 12.", "as": "me@x.test"});
+        assert_eq!(
+            approval_summary(SEND_MAIL_TOOL, &mail),
+            "Email ann@x.test: Lunch"
+        );
+        assert_eq!(
+            approval_detail(SEND_MAIL_TOOL, &mail).as_deref(),
+            Some(
+                "From: me@x.test\nTo: ann@x.test\nCc: bo@x.test\nSubject: Lunch\n\nSee you at 12."
+            )
+        );
+        let long = json!({"to": "a@x.test", "subject": "s",
+            "body": "x".repeat(MAIL_BODY_MAX_BYTES), "as": "me"});
+        assert!(!approval_detail(SEND_MAIL_TOOL, &long)
+            .unwrap()
+            .contains(DETAIL_CUT_NOTE));
+    }
+
+    #[test]
+    fn a_long_path_and_a_many_line_body_show_whole_and_readable() {
+        // Ruling F12: a cut summary puts the whole call first in the detail.
+        let path = format!("/v1/pages/{}", "p".repeat(600));
+        let long = json!({"app": "notion", "method": "patch", "path": path,
+            "body": {"x": 1}, "as": "ws"});
+        let summary = approval_summary(APP_REQUEST_TOOL, &long);
+        assert_eq!(summary.chars().count(), 200);
+        assert!(summary.starts_with("Notion: PATCH /v1/pages/pp") && summary.ends_with('…'));
+        assert_eq!(
+            approval_detail(APP_REQUEST_TOOL, &long),
+            Some(format!(
+                "Call: PATCH {path}\nAccount: ws\nBody: {{\"x\":1}}"
+            ))
+        );
+        // The card shows the normalized path the call is sent on (F4).
+        let escaped = json!({"app": "github", "method": "PUT",
+            "path": "/repos/o/r/pulls/1/%6Derge", "as": "octo"});
+        assert_eq!(
+            approval_summary(APP_REQUEST_TOOL, &escaped),
+            "GitHub: PUT /repos/o/r/pulls/1/merge"
+        );
+        assert_eq!(
+            approval_detail(APP_REQUEST_TOOL, &escaped).as_deref(),
+            Some("Account: octo")
+        );
+        // Each body line is reviewed on its own, so a line break shows as
+        // one, and a bidi control or escape in JSON shows escaped.
+        let mail = json!({"to": "ann@x.test", "subject": "Plan", "as": "me@x.test",
+            "body": "One\nTwo \u{202e}owt\nThree"});
+        let detail = approval_detail(SEND_MAIL_TOOL, &mail).unwrap();
+        assert!(
+            detail.ends_with("\n\nOne\nTwo \\u{202e}owt\nThree"),
+            "{detail}"
+        );
+        let sneaky = json!({"app": "slack", "method": "POST", "path": "/api/chat.postMessage",
+            "body": {"text": "a\u{202e}b"}, "as": "me"});
+        assert!(!approval_detail(APP_REQUEST_TOOL, &sneaky)
+            .unwrap()
+            .contains('\u{202e}'));
+        // A reply keeps the thread's subject.
+        let reply = json!({"to": "ann@x.test", "body": "Yes.", "as": "me@x.test",
+            "reply": {"external_thread_id": "t", "message_id": "m"}});
+        assert_eq!(
+            approval_summary(SEND_MAIL_TOOL, &reply),
+            "Reply by email to ann@x.test"
+        );
+        assert_eq!(
+            approval_detail(SEND_MAIL_TOOL, &reply).as_deref(),
+            Some("From: me@x.test\nTo: ann@x.test\nSubject: the thread's\n\nYes.")
+        );
+    }
+
+    #[test]
+    fn the_preamble_says_what_sends_ask() {
+        fn tools<'a>(apps: &'a [String], mail: &'a [String]) -> PreambleTools<'a> {
+            PreambleTools {
+                computer: false,
+                vault_logins: false,
+                vault_keys: &[],
+                apps,
+                mail,
+            }
+        }
+        let full = |send_as_me| BruhAccess {
+            level: AccessLevel::Full,
+            send_as_me,
+            ..Default::default()
+        };
+        let names = vec!["GitHub".to_string()];
+        let boxes = vec!["me@x.test".to_string()];
+        let plain = run_preamble("Ada", &full(false), AccessLevel::Full, &tools(&[], &[]));
+        assert!(plain.contains("Never send messages in the owner's name."));
+        let with = run_preamble(
+            "Ada",
+            &full(false),
+            AccessLevel::Full,
+            &tools(&names, &boxes),
+        );
+        assert!(
+            with.contains("Apps you may use: GitHub.")
+                && with.contains("send_mail sends email as the owner from me@x.test.")
+        );
+        assert!(
+            with.contains("email and posts in the owner's name wait for the owner's approval")
+                && !with.contains("Never send messages")
+        );
+        assert!(
+            run_preamble("Ada", &full(true), AccessLevel::Full, &tools(&names, &[]))
+                .contains("without asking. Do it only when")
+        );
+        assert!(with.contains(&format!("Apps you may use: GitHub. {APPS_PREAMBLE}")));
+        let ask = BruhAccess {
+            level: AccessLevel::Ask,
+            ..Default::default()
+        };
+        let asked = run_preamble("Ada", &ask, AccessLevel::Ask, &tools(&[], &boxes));
+        assert!(asked.contains(SEND_ASK_PREAMBLE) && !asked.contains("Apps you may use"));
+        // Names are reviewed, and at most 20 are listed.
+        let many: Vec<String> = (0..25).map(|i| format!("App{i:02}")).collect();
+        let listed = run_preamble("Ada", &full(false), AccessLevel::Full, &tools(&many, &[]));
+        assert!(
+            listed.contains("App19.") && !listed.contains("App20"),
+            "{listed}"
+        );
+        let odd = vec!["a\u{202e}b".to_string()];
+        assert!(
+            !run_preamble("Ada", &full(false), AccessLevel::Full, &tools(&odd, &[]))
+                .contains('\u{202e}')
+        );
+    }
+
+    #[test]
+    fn only_bruhs_tools_are_named_in_the_denial() {
+        assert_eq!(
+            APP_TOOL_DENIAL,
+            "Only the tools Bruhs gives you are available."
+        );
     }
 }

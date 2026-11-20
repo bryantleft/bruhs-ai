@@ -5,7 +5,7 @@ use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
     crew::{
         computer_on, effective_level, run_preamble, vault_key_card_fits, AccessLevel, BruhProfile,
-        APPROVAL_WAIT_MS, BRUH_SECRET_TOOL, VAULT_KEY_TOO_LONG,
+        PreambleTools, APPROVAL_WAIT_MS, BRUH_SECRET_TOOL, VAULT_KEY_TOO_LONG,
     },
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
     secrets::{SecretDecision, SecretRequest},
@@ -149,9 +149,13 @@ pub(super) fn turn(
         &agent.name,
         &bruh.access,
         effective_level(bruh.access.level, provider),
-        computer,
-        computer && vault.logins,
-        keys,
+        &PreambleTools {
+            computer,
+            vault_logins: computer && vault.logins,
+            vault_keys: keys,
+            apps: &[],
+            mail: &[],
+        },
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {
