@@ -38,10 +38,10 @@ use std::path::{Path, PathBuf};
 
 use bruhs_models::backup::{
     backup_file_name, desktop_entry, folded_entry_key, included, valid_id, valid_stamp,
-    BackupManifest, BackupOptions, PathRewrite, PendingRestore, PreRestoreInfo, RestorePreview,
-    RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE,
-    INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED,
-    KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, RESERVED_TOP, RESTORE_PENDING,
+    BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview, RestoreResult,
+    RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE, INVALID_REQUEST,
+    KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE,
+    MANIFEST_MAX_BYTES, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -55,11 +55,16 @@ use super::journal::{
 use super::open::staging_dir;
 use super::{BackupError, RootKey, Roots};
 use crate::secrets::{
-    forget_seal_key, keychain_inventory, read_seal_key, seal_items, store_seal_key, unseal_items,
-    ItemRef, KeychainItem, SecretError, SecretStore, BACKUP_SERVICE,
+    keychain_inventory, read_seal_key, seal_items, store_seal_key, unseal_items, ItemRef,
+    KeychainItem, SecretError, SecretStore, BACKUP_SERVICE,
 };
 
+mod kept;
 mod rollback;
+
+pub(super) use kept::sweep_restore;
+use kept::{check_kept, forget_key, hold_restore_lock, kept_account, kept_dir, kept_info, park};
+pub use kept::{delete_pre_restore, keep_previous_web_part, pre_restores};
 
 /// The apply's own lock, inside `<core>/backups`, which no apply moves.
 pub(super) const RESTORE_LOCK: &str = "restore.lock";
@@ -97,6 +102,8 @@ const EVERYTHING: BackupOptions = BackupOptions {
     audio: true,
     browser_profiles: true,
 };
+/// How long [`take_service_restart`] waits for an apply's lock.
+const RESTORE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// The minute of a stamp gets a random suffix; this many tries find a
 /// free one.
 const STAMP_TRIES: usize = 64;
@@ -166,24 +173,6 @@ impl ResultFile {
             warnings: self.warnings.clone(),
         }
     }
-}
-
-/// A kept set's `meta/info.json`: its manifest. A put back acts only on a
-/// set whose info names its stamp and whose entries are all there.
-#[derive(Serialize, Deserialize)]
-struct KeptInfo {
-    stamp: String,
-    made_at_ms: EpochMs,
-    bytes: u64,
-    /// Whether `meta/keychain.sealed` holds the day's items.
-    keychain: bool,
-    roots: Vec<KeptRoot>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct KeptRoot {
-    root: RootKey,
-    names: Vec<String>,
 }
 
 /// What a source brings, once checked.
@@ -375,6 +364,12 @@ pub fn take_service_restart(roots: &Roots) -> bool {
     let Some(backups) = backups_dir(roots) else {
         return false;
     };
+    // Under the apply's lock, so the sweep never takes the record mid-write
+    // (N8); an apply still holding it after a few seconds wins.
+    let Some(_restore_lock) = hold_restore_lock(&backups, RESTORE_LOCK_WAIT) else {
+        tracing::warn!("Bruhs couldn't take the restore lock to read the service restart");
+        return false;
+    };
     let Some(mut result) = read_result(&backups) else {
         return false;
     };
@@ -387,119 +382,6 @@ pub fn take_service_restart(roots: &Roots) -> bool {
         tracing::warn!("Bruhs couldn't clear the restore's service restart");
     }
     true
-}
-
-/// The sets kept from earlier restores, newest first (D18). A set a put
-/// back is consuming isn't listed.
-pub fn pre_restores(roots: &Roots) -> Vec<PreRestoreInfo> {
-    let Some(backups) = backups_dir(roots) else {
-        return Vec::new();
-    };
-    let consuming = match Journal::load(roots) {
-        Ok(Some(Journal {
-            source: RestoreSource::PreRestore { stamp },
-            ..
-        })) => Some(stamp),
-        _ => None,
-    };
-    let Ok(entries) = std::fs::read_dir(&backups) else {
-        return Vec::new();
-    };
-    let mut kept: Vec<PreRestoreInfo> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            let stamp = name.strip_prefix(KEPT_PREFIX).filter(|s| valid_stamp(s))?;
-            if consuming.as_deref() == Some(stamp) {
-                return None;
-            }
-            let info = kept_info(roots, stamp)?;
-            Some(PreRestoreInfo {
-                stamp: info.stamp,
-                made_at_ms: info.made_at_ms,
-                bytes: info.bytes,
-                has_web_part: is_file(
-                    &kept_dir(roots, RootKey::Core, stamp)
-                        .join(META)
-                        .join(WEB_PART),
-                ),
-            })
-        })
-        .collect();
-    kept.sort_by(|a, b| {
-        b.made_at_ms
-            .cmp(&a.made_at_ms)
-            .then_with(|| b.stamp.cmp(&a.stamp))
-    });
-    kept
-}
-
-/// Deletes a kept set: its seal key, then both roots' folders. An invalid
-/// or unknown stamp is `GONE`; a set a waiting or running restore uses is
-/// `RESTORE_PENDING`; one an apply holds `restore.lock` over,
-/// `BACKUP_BUSY`. Blocks on the keychain.
-pub fn delete_pre_restore(
-    roots: &Roots,
-    store: &SecretStore,
-    stamp: &str,
-) -> Result<(), BackupError> {
-    if !valid_stamp(stamp) {
-        return Err(BackupError::Refused(GONE));
-    }
-    let backups = backups_dir(roots).ok_or(BackupError::Refused(GONE))?;
-    let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
-        return Err(BackupError::Busy(BACKUP_BUSY));
-    };
-    let named = |source: &RestoreSource| matches!(source, RestoreSource::PreRestore { stamp: used } if used == stamp);
-    let journal = Journal::load(roots)?;
-    let in_use = journal
-        .as_ref()
-        .is_some_and(|journal| journal.stamp == stamp || named(&journal.source))
-        || read_pending(&backups)?.is_some_and(|pending| named(&pending.source));
-    if in_use {
-        return Err(BackupError::Refused(RESTORE_PENDING));
-    }
-    if !pass_roots(roots)
-        .iter()
-        .any(|root| real_dir(&kept_dir(roots, *root, stamp)))
-    {
-        return Err(BackupError::Refused(GONE));
-    }
-    // The key goes first: a keychain that refuses leaves the set whole, and
-    // a stop after it leaves a set whose key is gone, never a key without
-    // its set (M8). Removing the info unlists the set before its folders.
-    forget_seal_key(store, &kept_account(stamp))
-        .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
-    let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
-    if real_dir(&meta) {
-        remove_if_there(&meta.join(INFO))?;
-        sync_dir(&meta)?;
-    }
-    for root in pass_roots(roots) {
-        remove_tree(&kept_dir(roots, *root, stamp))?;
-    }
-    Ok(())
-}
-
-/// Moves a finished upload of the browser's data from before its own
-/// restore into the newest kept set's `meta/web-part.bin` (D18, D19),
-/// replacing one kept before. `BACKUP_BUSY` while an apply holds
-/// `restore.lock`.
-pub fn keep_previous_web_part(roots: &Roots, upload: &Path) -> Result<(), BackupError> {
-    let gone = || BackupError::Refused(GONE);
-    let backups = backups_dir(roots).ok_or_else(gone)?;
-    let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
-        return Err(BackupError::Busy(BACKUP_BUSY));
-    };
-    if !is_file(upload) {
-        return Err(gone());
-    }
-    let newest = pre_restores(roots).into_iter().next().ok_or_else(gone)?;
-    let meta = kept_dir(roots, RootKey::Core, &newest.stamp).join(META);
-    if !real_dir(&meta) {
-        return Err(gone());
-    }
-    rename_synced(upload, &meta.join(WEB_PART))
 }
 
 /// Whether `name` is a top-level name an apply may move: one plain
@@ -606,7 +488,13 @@ impl Apply<'_> {
             if kept_info(self.roots, &self.journal.stamp).is_some() {
                 return Err(BackupError::Format(DAMAGED));
             }
-            self.seal()?;
+            if let Err(error) = self.seal() {
+                return Err(if seal_permanent(&error) {
+                    self.abandon(error)
+                } else {
+                    error
+                });
+            }
             self.step(Step::Sealed)?;
         }
         // Before the keychain writes, a rename that fails for good undoes
@@ -828,6 +716,7 @@ impl Apply<'_> {
     /// `result.json`, then makes it all durable with one full sync (M5).
     /// Both files are replaced whole, so doing it again is safe.
     fn finish(&self) -> Result<(), BackupError> {
+        self.carry_parked()?;
         self.write_info(true)?;
         let web_part = self.journal.web_part.as_ref().and_then(|id| {
             let path = self.backups.join(WEB_PARTS).join(format!("{id}.bin"));
@@ -849,39 +738,6 @@ impl Apply<'_> {
         full_sync(self.backups)
     }
 
-    /// Writes the kept set's `meta/info.json` from what its folders hold:
-    /// its manifest, which a put back checks.
-    fn write_info(&self, keychain: bool) -> Result<(), BackupError> {
-        let mut roots = Vec::new();
-        let mut bytes = 0_u64;
-        for pass in &self.journal.passes {
-            let folder = self.kept(pass.root);
-            let names = if real_dir(&folder) {
-                top_names(&folder)?
-            } else {
-                Vec::new()
-            };
-            for name in &names {
-                bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
-            }
-            roots.push(KeptRoot {
-                root: pass.root,
-                names,
-            });
-        }
-        let info = KeptInfo {
-            stamp: self.journal.stamp.clone(),
-            made_at_ms: self.journal.made_at_ms,
-            bytes,
-            keychain,
-            roots,
-        };
-        let meta = self.kept(RootKey::Core).join(META);
-        new_dir(&self.kept(RootKey::Core))?;
-        new_dir(&meta)?;
-        write_atomically(&meta, INFO, &to_json(&info)?)
-    }
-
     /// Removes the source and its seal key, then `pending.json`, then the
     /// journal.
     fn clean_up(&self) -> Result<(), BackupError> {
@@ -893,12 +749,42 @@ impl Apply<'_> {
         for pass in &self.journal.passes {
             remove_tree(&source_dir(self.roots, &self.journal.source, pass.root)?)?;
         }
-        if forget_seal_key(self.store, &account).is_err() {
-            tracing::warn!("Bruhs couldn't remove a restored set's key");
-        }
+        forget_key(self.store, self.backups, &account);
         remove_if_there(&self.backups.join(PENDING))?;
         sync_dir(self.backups)?;
         Journal::remove(self.backups)
+    }
+
+    /// Drops an apply whose seal failed for good (N4). Nothing has moved:
+    /// the kept folders, the seal key, `pending.json` and the journal go,
+    /// and the answer is the seal's own error.
+    fn abandon(&self, error: BackupError) -> BackupError {
+        tracing::warn!("A restore couldn't keep today's keychain items aside, so it was dropped");
+        let dropped = (|| {
+            for pass in &self.journal.passes {
+                remove_tree(&self.kept(pass.root))?;
+            }
+            forget_key(self.store, self.backups, &kept_account(&self.journal.stamp));
+            remove_if_there(&self.backups.join(PENDING))?;
+            sync_dir(self.backups)?;
+            Journal::remove(self.backups)
+        })();
+        match dropped {
+            Ok(()) => error,
+            Err(failed) => failed,
+        }
+    }
+}
+
+/// Whether a seal failed for good: a refused item, catalogs that don't
+/// read, or a folder or file it can't make. A keychain that needs the
+/// owner may answer later.
+fn seal_permanent(error: &BackupError) -> bool {
+    match error {
+        BackupError::Keychain(message) => {
+            *message == KEYCHAIN_ITEM_REFUSED || *message == KEYCHAIN_READ_FAILED
+        }
+        other => permanent(other),
     }
 }
 
@@ -913,6 +799,42 @@ fn check_source(roots: &Roots, source: &RestoreSource) -> Result<Option<SourceSe
         RestoreSource::PreRestore { stamp } if valid_stamp(stamp) => check_kept(roots, stamp),
         _ => Ok(None),
     }
+}
+
+/// The root Task 7 staged a backup's `origin` entry `top` in (D11).
+fn staged_root(roots: &Roots, manifest: &BackupManifest, origin: RootKey, top: &str) -> RootKey {
+    if roots.same() {
+        RootKey::Core
+    } else if manifest.same_root && desktop_entry(top) {
+        RootKey::Desktop
+    } else {
+        origin
+    }
+}
+
+/// The paths below `root` that a staged restore's manifest names as
+/// files, as they sit in the root once placed. `None` when the staging's
+/// manifest is gone or unreadable.
+fn manifest_files(roots: &Roots, id: &str, root: RootKey) -> Option<BTreeSet<String>> {
+    let path = staging_dir(roots, RootKey::Core, id)
+        .join(META)
+        .join(MANIFEST);
+    let manifest = read_json::<BackupManifest>(&path, MANIFEST_MAX_BYTES)?;
+    Some(
+        manifest
+            .files
+            .iter()
+            .filter_map(|file| {
+                let (origin, rel) = if let Some(rel) = file.path.strip_prefix("core/") {
+                    (RootKey::Core, rel)
+                } else {
+                    (RootKey::Desktop, file.path.strip_prefix("desktop/")?)
+                };
+                let top = rel.split('/').next().unwrap_or_default();
+                (staged_root(roots, &manifest, origin, top) == root).then(|| rel.to_owned())
+            })
+            .collect(),
+    )
 }
 
 fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupError> {
@@ -942,14 +864,7 @@ fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupErro
             continue;
         };
         let top = rel.split('/').next().unwrap_or_default();
-        // Where Task 7 staged it (D11).
-        let root = if roots.same() {
-            RootKey::Core
-        } else if manifest.same_root && desktop_entry(top) {
-            RootKey::Desktop
-        } else {
-            origin
-        };
+        let root = staged_root(roots, &manifest, origin, top);
         if let Some((_, names)) = expected.iter_mut().find(|(key, _)| *key == root) {
             names.insert(top);
         }
@@ -989,48 +904,6 @@ fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupErro
         keychain,
         web_part,
         rewrites: preview.rewrites,
-    }))
-}
-
-fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>, BackupError> {
-    let Some(info) = kept_info(roots, stamp) else {
-        return Ok(None);
-    };
-    if info
-        .roots
-        .iter()
-        .any(|kept| !pass_roots(roots).contains(&kept.root))
-    {
-        return Ok(None);
-    }
-    let mut places = Vec::new();
-    for root in pass_roots(roots) {
-        let folder = kept_dir(roots, *root, stamp);
-        if !real_dir(&folder) {
-            return Ok(None);
-        }
-        let names = info
-            .roots
-            .iter()
-            .find(|kept| kept.root == *root)
-            .map(|kept| kept.names.clone())
-            .unwrap_or_default();
-        for name in &names {
-            if !movable(name) || !exists(&folder.join(name))? {
-                return Ok(None);
-            }
-        }
-        places.push((*root, names));
-    }
-    let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
-    if info.keychain && !is_file(&meta.join(SEALED)) {
-        return Ok(None);
-    }
-    Ok(Some(SourceSet {
-        places,
-        keychain: info.keychain,
-        web_part: is_file(&meta.join(WEB_PART)),
-        rewrites: Vec::new(),
     }))
 }
 
@@ -1275,25 +1148,6 @@ fn inventory_at(
 ) -> Result<Vec<ItemRef>, BackupError> {
     keychain_inventory(credentials, connections, &calendar.join(GOOGLE))
         .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))
-}
-
-/// The keychain account of a kept set's seal key.
-fn kept_account(stamp: &str) -> String {
-    format!("pre-restore:{stamp}")
-}
-
-/// `<root>/backups/pre-restore-<stamp>`.
-fn kept_dir(roots: &Roots, root: RootKey, stamp: &str) -> PathBuf {
-    roots.backups(root).join(format!("{KEPT_PREFIX}{stamp}"))
-}
-
-/// A kept set's info, when it names the set's stamp.
-fn kept_info(roots: &Roots, stamp: &str) -> Option<KeptInfo> {
-    let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
-    if !real_dir(&kept_dir(roots, RootKey::Core, stamp)) || !real_dir(&meta) {
-        return None;
-    }
-    read_json::<KeptInfo>(&meta.join(INFO), SMALL_MAX).filter(|info| info.stamp == stamp)
 }
 
 /// A fresh stamp (D18): this minute in UTC and 4 random hex, free in both
@@ -1590,7 +1444,8 @@ fn in_the_way() -> BackupError {
     ))
 }
 
-/// A rename the plan makes can't happen: another volume, or no permission.
+/// A rename the plan makes can't happen: another volume, or no permission
+/// (N5).
 fn cant_move() -> BackupError {
-    BackupError::Io(io::Error::other("a restore can't move this data"))
+    BackupError::Refused(RESTORE_CANT_MOVE)
 }

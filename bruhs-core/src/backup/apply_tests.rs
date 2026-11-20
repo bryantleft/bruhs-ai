@@ -1159,7 +1159,7 @@ async fn an_entry_in_the_way_rolls_back_and_is_kept() {
     assert_eq!(kept.len(), 1);
     let set = kept_dir(roots, RootKey::Core, &kept[0].stamp);
     assert_eq!(
-        std::fs::read(set.join(".in-the-way/server/intruder.txt")).unwrap(),
+        std::fs::read(set.join(".in-the-way-1/server/intruder.txt")).unwrap(),
         b"made mid-apply"
     );
     assert!(!set.join("meta/keychain.sealed").exists());
@@ -1231,7 +1231,10 @@ async fn permanent_refusals_clear_the_pending_restore() {
     std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o500)).unwrap();
     let outcome = apply_pending(&fixture.roots, &fixture.store, None);
     std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(matches!(outcome, Err(BackupError::Io(_))), "{outcome:?}");
+    assert!(
+        matches!(&outcome, Err(error) if error.message() == RESTORE_CANT_MOVE),
+        "{outcome:?}"
+    );
     assert!(pending(&fixture.roots).is_none());
     assert!(!backups(&fixture).join("apply.json").exists());
     assert_eq!(files_under(&fixture.roots.core, &["backups"]), before.core);
@@ -1450,4 +1453,219 @@ async fn the_restore_lock_holds_off_schedule_the_web_part_and_the_sweep() {
     keep_previous_web_part(roots, &upload).unwrap();
     host.sweep();
     assert!(partials.iter().all(|partial| !partial.exists()));
+}
+
+/// Applies with `hook` and expects a rollback.
+fn apply_rolling_back(fixture: &Fixture, hook: &dyn Fn(&Step, Point) -> bool) {
+    let outcome = apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, hook);
+    assert!(rolled_back(outcome));
+}
+
+fn placed(step: &Step, wanted: &str) -> bool {
+    matches!(step, Step::Placed { name, .. } if name == wanted)
+}
+
+/// A rollback leaves an earlier restore's waiting browser part waiting
+/// (B Task 8 N1).
+#[tokio::test]
+async fn a_rollback_keeps_a_waiting_web_part() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), true, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    apply_pending(&fixture.roots, &fixture.store, None).unwrap();
+    let waiting = waiting_web_part(&fixture.roots).unwrap();
+    let stamp = pre_restores(&fixture.roots)[0].stamp.clone();
+    schedule(&fixture.roots, &RestoreSource::PreRestore { stamp }, false).unwrap();
+    apply_rolling_back(&fixture, &|_, point| point == Point::Before);
+    assert_eq!(waiting_web_part(&fixture.roots), Some(waiting));
+}
+
+/// A park never lands on an earlier one (N2), and a file written inside a
+/// restored folder after it was placed is parked, not sent back to the
+/// staging the sweep removes (N3).
+#[tokio::test]
+async fn a_rollback_parks_what_was_made_mid_apply_under_free_names() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    let roots = &fixture.roots;
+    let hook = |step: &Step, point: Point| {
+        if placed(step, "attachments") && point == Point::Recorded {
+            let stamp = journal_stamp(roots).unwrap();
+            // An earlier park of the same name.
+            write(
+                &kept_dir(roots, RootKey::Core, &stamp).join(".in-the-way-1/server/old.txt"),
+                b"parked before",
+            );
+            write(&roots.core.join("server/intruder.txt"), b"made mid-apply");
+            write(
+                &roots.core.join("attachments/new-note.txt"),
+                b"written after placing",
+            );
+        }
+        false
+    };
+    apply_rolling_back(&fixture, &hook);
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+    assert_eq!(files_under(&roots.desktop, &["backups"]), before.desktop);
+    let kept = pre_restores(roots);
+    assert_eq!(kept.len(), 1);
+    let set = kept_dir(roots, RootKey::Core, &kept[0].stamp);
+    let read = |rel: &str| std::fs::read(set.join(rel)).unwrap();
+    assert_eq!(read(".in-the-way-1/server/old.txt"), b"parked before");
+    assert_eq!(read(".in-the-way-2/server/intruder.txt"), b"made mid-apply");
+    assert_eq!(
+        read(".in-the-way-1/attachments/new-note.txt"),
+        b"written after placing"
+    );
+    let staged = files_under(
+        &staging_dir(roots, RootKey::Core, &before.staged),
+        &["meta"],
+    );
+    assert_eq!(staged, before.staged_core);
+
+    // A put back of that set leaves the parked folders in a set (N7): the
+    // root never gets them, the new set carries them.
+    schedule(
+        roots,
+        &RestoreSource::PreRestore {
+            stamp: kept[0].stamp.clone(),
+        },
+        false,
+    )
+    .unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let names: Vec<String> = std::fs::read_dir(&roots.core)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        !names.iter().any(|name| name.starts_with(".in-the-way")),
+        "{names:?}"
+    );
+    let now = pre_restores(roots);
+    assert_eq!(now.len(), 1);
+    assert_ne!(now[0].stamp, kept[0].stamp);
+    let carried = files_under(&kept_dir(roots, RootKey::Core, &now[0].stamp), &["meta"]);
+    let parked: Vec<&PathBuf> = carried
+        .keys()
+        .filter(|path| path.to_string_lossy().starts_with(".in-the-way"))
+        .collect();
+    assert_eq!(parked.len(), 3, "{parked:?}");
+    assert_eq!(
+        without(
+            &carried,
+            &[".in-the-way-1", ".in-the-way-2", ".in-the-way-3"]
+        ),
+        without(&before.core, &NEVER)
+    );
+}
+
+/// A seal that fails for good, with nothing moved yet, drops the apply:
+/// no journal, nothing waiting, no kept folders (N4).
+#[tokio::test]
+async fn a_seal_that_fails_for_good_drops_the_apply() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    std::fs::write(roots.core.join("credentials/catalog.json"), b"{damaged").unwrap();
+    let today = files_under(&roots.core, &["backups"]);
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None),
+        Err(BackupError::Keychain(message)) if message == KEYCHAIN_READ_FAILED
+    ));
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    assert!(pending(roots).is_none());
+    assert_eq!(kept_folders(roots), Vec::<String>::new());
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+    assert!(staging_dir(roots, RootKey::Core, &before.staged).exists());
+}
+
+/// The sweep removes kept folders without a manifest, but never while an
+/// apply could be making one (N6), and forgets the keys a removal failed
+/// for once their set is gone.
+#[tokio::test]
+async fn the_sweep_removes_unlisted_kept_folders_and_their_keys() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    let listed = pre_restores(roots)[0].stamp.clone();
+    let stray = "2026-01-01-0000-abcd";
+    let gone = "2026-01-02-0000-abcd";
+    for root in [RootKey::Core, RootKey::Desktop] {
+        write(&kept_dir(roots, root, stray).join("half/file.txt"), b"left");
+    }
+    for stamp in [stray, gone] {
+        crate::secrets::store_seal_key(&fixture.store, &format!("pre-restore:{stamp}"), &[7; 32])
+            .unwrap();
+    }
+    let backups = roots.backups(RootKey::Core);
+    std::fs::write(
+        backups.join("keys-to-forget.json"),
+        serde_json::to_vec(&[
+            format!("pre-restore:{gone}"),
+            format!("pre-restore:{listed}"),
+            "not an account".to_owned(),
+        ])
+        .unwrap(),
+    )
+    .unwrap();
+    let host = host(&fixture);
+
+    // A journal waiting: nothing of a set goes.
+    std::fs::write(backups.join("apply.json"), b"{}").unwrap();
+    host.sweep();
+    assert!(kept_dir(roots, RootKey::Core, stray).exists());
+    std::fs::remove_file(backups.join("apply.json")).unwrap();
+    // An apply holding the lock: likewise.
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .open(backups.join("restore.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    host.sweep();
+    assert!(kept_dir(roots, RootKey::Desktop, stray).exists());
+    drop(lock);
+
+    host.sweep();
+    for root in [RootKey::Core, RootKey::Desktop] {
+        assert!(!kept_dir(roots, root, stray).exists());
+        assert!(kept_dir(roots, root, &listed).exists());
+    }
+    assert!(no_key(&fixture.store, &format!("pre-restore:{stray}")));
+    assert!(no_key(&fixture.store, &format!("pre-restore:{gone}")));
+    assert!(!no_key(&fixture.store, &format!("pre-restore:{listed}")));
+    assert!(!backups.join("keys-to-forget.json").exists());
+}
+
+/// Clearing the service restart waits for an apply's lock (N8).
+#[tokio::test]
+async fn the_service_restart_is_taken_under_the_restore_lock() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), true).unwrap();
+    apply_pending(&fixture.roots, &fixture.store, None).unwrap();
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .open(fixture.roots.backups(RootKey::Core).join("restore.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(lock);
+    });
+    let started = std::time::Instant::now();
+    assert!(take_service_restart(&fixture.roots));
+    assert!(started.elapsed() >= Duration::from_millis(250));
+    release.join().unwrap();
+    assert!(!take_service_restart(&fixture.roots));
 }

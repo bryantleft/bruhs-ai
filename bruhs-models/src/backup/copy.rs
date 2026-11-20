@@ -153,6 +153,8 @@ pub const KEYCHAIN_READ_FAILED: &str = "Bruhs couldn't read its keychain items. 
 pub const KEYCHAIN_SET_UNREADABLE: &str = "The saved keychain items could not be opened.";
 pub const BACKUP_BUSY: &str = "A backup or restore is already running.";
 pub const RESTORE_PENDING: &str = "A restore is waiting to finish. Start Bruhs again to finish it.";
+pub const RESTORE_CANT_MOVE: &str =
+    "Bruhs can't move some of its data. Check the folder's permissions, then restore again.";
 pub const RESTORE_ROLLED_BACK: &str =
     "The restore couldn't finish, so your data was put back as it was. Nothing was replaced.";
 pub const CONFIRM_REPLACE: &str = "Confirm that your data will be replaced.";
@@ -277,6 +279,7 @@ pub const ALL_COPY: &[&str] = &[
     KEYCHAIN_SET_UNREADABLE,
     BACKUP_BUSY,
     RESTORE_PENDING,
+    RESTORE_CANT_MOVE,
     RESTORE_ROLLED_BACK,
     CONFIRM_REPLACE,
     RECORDING_FIRST,
