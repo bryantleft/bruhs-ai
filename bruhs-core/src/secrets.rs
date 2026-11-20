@@ -359,9 +359,9 @@ impl SecretManager {
             .map(|entry| entry.name)
     }
 
-    /// Drop the last failure of entries that are gone. Public for a process
-    /// whose vault changed through another one: the desktop, after a delete
-    /// made through bruhs-server.
+    /// Drop the last failure of entries that are gone, or whose values were
+    /// just replaced. Public for a process whose vault changed through
+    /// another one: the desktop, after a delete made through bruhs-server.
     pub fn forget_attention<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
         let mut attention = self
             .attention
@@ -437,6 +437,15 @@ impl SecretManager {
             read_wait: VAULT_READ_WAIT,
             running: Arc::default(),
         }
+    }
+
+    /// Record a failure on an entry as a failed read would.
+    #[cfg(test)]
+    pub(crate) fn note_attention_for_tests(&self, id: &str, attention: VaultAttention) {
+        self.attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned(), attention);
     }
 
     /// While the returned guard lives, every vault lookup of an in-memory

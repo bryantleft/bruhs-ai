@@ -40,6 +40,10 @@ pub struct AppsHost {
     gmail: Arc<GmailClient>,
     #[expect(dead_code, reason = "used from Task 9")]
     outlook: Arc<OutlookClient>,
+    /// Held from a connect's duplicate check through its save, never
+    /// across its test call, so two connects of one account can't both
+    /// save. Shared by every clone.
+    connecting: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppsHost {
@@ -58,6 +62,7 @@ impl AppsHost {
             mail,
             gmail,
             outlook,
+            connecting: Arc::default(),
         }
     }
 
@@ -107,6 +112,7 @@ impl AppsHost {
             .map_err(|failure| {
                 AppsError::TestFailed(test_failure_message(connector.name, failure))
             })?;
+        let _connecting = self.connecting.lock().await;
         let taken = self
             .vault
             .app_tokens()
@@ -169,7 +175,9 @@ impl AppsHost {
             .map_err(|failure| {
                 AppsError::TestFailed(test_failure_message(connector.name, failure))
             })?;
-        if account != meta.account {
+        // An app whose test names the token itself (Cloudflare) can't
+        // check this: the owner chose the entry, and its label stays.
+        if connector.test.stable_account && account != meta.account {
             return Err(AppsError::TestFailed(ANOTHER_ACCOUNT.to_owned()));
         }
         let update = VaultUpdate {
@@ -182,10 +190,17 @@ impl AppsHost {
             },
         };
         drop(secret);
-        self.vault
+        let entry = self
+            .vault
             .vault_update(&entry.id, update)
             .await
-            .map_err(vault_error)
+            .map_err(vault_error)?;
+        // The old token's last failure no longer applies.
+        self.vault.forget_attention([entry.id.as_str()]);
+        Ok(VaultEntry {
+            attention: None,
+            ..entry
+        })
     }
 
     /// Runs a saved account's test call. A failed test is an `ok: false`
@@ -194,6 +209,9 @@ impl AppsHost {
         // The keychain read first: it is bounded by the vault's read wait.
         let secret = self.resolve(id).await?;
         let (_, meta, connector) = self.app_entry(id).await?;
+        // The keychain read set or cleared the entry's attention. A refused
+        // test isn't a vault failure, so it leaves that as the read left it
+        // (no attention); the result says what the app answered.
         Ok(match self.test(connector, &meta.params, &secret).await {
             Ok(account) => AppTestResult {
                 ok: true,
@@ -351,7 +369,7 @@ impl AppsHost {
                 | AppsError::TestFailed(_)
                 | AppsError::Vault(_) => TestFailure::Unexpected,
             })?;
-        test_account(test, reply.status, &reply.body)
+        test_account(connector, params, reply.status, &reply.body)
     }
 }
 

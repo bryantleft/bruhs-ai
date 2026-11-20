@@ -84,6 +84,9 @@ pub const RESPONSE_HEADERS: [&str; 6] = [
     "x-ratelimit-reset",
 ];
 
+/// What a scrubbed secret reads as in a reply (D14).
+pub const REDACTED: &str = "[redacted]";
+
 // Model-facing copy.
 pub const APP_METHOD: &str = "Use GET, POST, PUT, PATCH or DELETE.";
 pub const APP_PATH: &str =

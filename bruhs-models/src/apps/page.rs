@@ -5,7 +5,7 @@
 //! they derive neither `Debug` nor `Clone`. Every other type here is value
 //! free.
 
-use super::AppTest;
+use super::{AccountTenant, AppConnector, REDACTED};
 use crate::connections::ServiceProvider;
 use crate::secrets::{review_text, SavedCredentialState};
 use crate::vault::{CredentialScope, VaultAttention, MAX_APP_ACCOUNT_CHARS, MAX_NAME_CHARS};
@@ -191,20 +191,65 @@ pub fn mailbox_account(provider: ServiceProvider, label: &str) -> String {
 /// is left.
 #[must_use]
 pub fn account_label(raw: &str) -> Option<String> {
-    let shown: String = review_text(raw.trim())
-        .chars()
-        .take(MAX_APP_ACCOUNT_CHARS)
-        .collect();
-    let shown = shown.trim();
-    (!shown.is_empty()).then(|| shown.to_owned())
+    let shown = shown(raw);
+    let cut = cut(&shown, MAX_APP_ACCOUNT_CHARS);
+    (!cut.is_empty()).then_some(cut)
+}
+
+/// The account a test call named, as stored: its label with the tenant the
+/// connector names (ruling A Task 8 I2). Jira is "{label} on {site}",
+/// Shopify the shop, and Slack, Linear and Notion "{label} in {workspace}"
+/// when the reply names one. A long label is cut to fit
+/// [`MAX_APP_ACCOUNT_CHARS`], never the tenant; only a tenant too long to
+/// leave room for any label stands alone, cut. `None` when the label is
+/// empty, or when it or the tenant holds a scrubbed secret (an app that
+/// echoes the token as the account).
+#[must_use]
+pub fn account_for(
+    connector: &AppConnector,
+    params: &BTreeMap<String, String>,
+    label: &str,
+    reply: &Value,
+) -> Option<String> {
+    let label = shown(label);
+    if label.is_empty() || label.contains(REDACTED) {
+        return None;
+    }
+    let (separator, tenant) = match connector.test.tenant {
+        AccountTenant::None => return account_label(&label),
+        AccountTenant::Param(id) => return params.get(id).and_then(|shop| account_label(shop)),
+        AccountTenant::Site(id) => (" on ", params.get(id).map(|site| shown(site))?),
+        AccountTenant::Workspace(pointer) => match reply.pointer(pointer) {
+            Some(Value::String(name)) if !shown(name).is_empty() => (" in ", shown(name)),
+            _ => return account_label(&label),
+        },
+    };
+    if tenant.contains(REDACTED) {
+        return None;
+    }
+    let room = MAX_APP_ACCOUNT_CHARS
+        .saturating_sub(separator.chars().count())
+        .saturating_sub(tenant.chars().count());
+    let label = cut(&label, room);
+    if label.is_empty() {
+        return account_label(&tenant);
+    }
+    Some(format!("{label}{separator}{tenant}"))
 }
 
 /// Reads a test call's answer: 401 and 403 are `Refused`; any other non-2xx
 /// is `Unexpected`; an `ok` pointer holding `false` is `Refused` (Slack
 /// answers 200 on a bad token) and one holding anything but `true` is
 /// `Unexpected`; then the first account pointer holding a string or number
-/// names the account, or it is `Unexpected`.
-pub fn test_account(test: &AppTest, status: u16, body: &Value) -> Result<String, TestFailure> {
+/// names the account, stored as [`account_for`] makes it, or it is
+/// `Unexpected`.
+pub fn test_account(
+    connector: &AppConnector,
+    params: &BTreeMap<String, String>,
+    status: u16,
+    body: &Value,
+) -> Result<String, TestFailure> {
+    let test = &connector.test;
     match status {
         401 | 403 => return Err(TestFailure::Refused),
         200..=299 => {}
@@ -217,14 +262,27 @@ pub fn test_account(test: &AppTest, status: u16, body: &Value) -> Result<String,
             _ => return Err(TestFailure::Unexpected),
         }
     }
-    test.account
+    let label = test
+        .account
         .iter()
         .find_map(|pointer| match body.pointer(pointer)? {
-            Value::String(text) => account_label(text),
-            Value::Number(number) => account_label(&number.to_string()),
+            Value::String(text) if !text.trim().is_empty() => Some(text.clone()),
+            Value::Number(number) => Some(number.to_string()),
             _ => None,
         })
-        .ok_or(TestFailure::Unexpected)
+        .ok_or(TestFailure::Unexpected)?;
+    account_for(connector, params, &label, body).ok_or(TestFailure::Unexpected)
+}
+
+/// Text as [`review_text`] shows it, trimmed.
+fn shown(raw: &str) -> String {
+    review_text(raw.trim())
+}
+
+/// The first `chars` characters, trimmed at the end.
+fn cut(text: &str, chars: usize) -> String {
+    let cut: String = text.chars().take(chars).collect();
+    cut.trim_end().to_owned()
 }
 
 #[cfg(test)]
@@ -233,58 +291,197 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn none() -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+
+    fn params(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
+    fn named(
+        app: &str,
+        params: &BTreeMap<String, String>,
+        body: Value,
+    ) -> Result<String, TestFailure> {
+        test_account(connector(app).unwrap(), params, 200, &body)
+    }
+
     #[test]
     fn test_calls_name_the_account_or_say_why_not() {
-        let github = connector("github").unwrap().test;
+        let github = connector("github").unwrap();
+        let none = none();
         assert_eq!(
-            test_account(&github, 200, &json!({"login": "octo"})),
+            named("github", &none, json!({"login": "octo"})),
             Ok("octo".into())
         );
         assert_eq!(
-            test_account(&github, 401, &json!({})),
+            test_account(github, &none, 401, &json!({})),
             Err(TestFailure::Refused)
         );
         assert_eq!(
-            test_account(&github, 403, &json!({"login": "octo"})),
+            test_account(github, &none, 403, &json!({"login": "octo"})),
             Err(TestFailure::Refused)
         );
         assert_eq!(
-            test_account(&github, 500, &json!({"login": "octo"})),
+            test_account(github, &none, 500, &json!({"login": "octo"})),
             Err(TestFailure::Unexpected)
         );
         assert_eq!(
-            test_account(&github, 200, &json!({"login": ""})),
+            named("github", &none, json!({"login": ""})),
             Err(TestFailure::Unexpected)
         );
         assert_eq!(
-            test_account(&github, 200, &json!("not json")),
+            named("github", &none, json!("not json")),
+            Err(TestFailure::Unexpected)
+        );
+        // An app that echoes the token names a scrubbed account: unexpected.
+        assert_eq!(
+            named("github", &none, json!({"login": "[redacted]"})),
+            Err(TestFailure::Unexpected)
+        );
+        assert_eq!(
+            named("github", &none, json!({"login": "x [redacted] y"})),
             Err(TestFailure::Unexpected)
         );
         // Slack answers 200 with ok false on a bad token.
-        let slack = connector("slack").unwrap().test;
         assert_eq!(
-            test_account(&slack, 200, &json!({"ok": false, "user": "me"})),
+            named("slack", &none, json!({"ok": false, "user": "me"})),
             Err(TestFailure::Refused)
         );
         assert_eq!(
-            test_account(&slack, 200, &json!({"user": "me"})),
+            named("slack", &none, json!({"user": "me"})),
             Err(TestFailure::Unexpected)
         );
         assert_eq!(
-            test_account(&slack, 200, &json!({"ok": true, "user": "me"})),
+            named("slack", &none, json!({"ok": true, "user": "me"})),
             Ok("me".into())
         );
         // The first pointer that holds a value wins; a number counts.
-        let airtable = connector("airtable").unwrap().test;
         assert_eq!(
-            test_account(&airtable, 200, &json!({"id": "usr1"})),
+            named("airtable", &none, json!({"email": " ", "id": "usr1"})),
             Ok("usr1".into())
         );
-        let hubspot = connector("hubspot").unwrap().test;
         assert_eq!(
-            test_account(&hubspot, 200, &json!({"portalId": 42})),
+            named("hubspot", &none, json!({"portalId": 42})),
             Ok("42".into())
         );
+    }
+
+    #[test]
+    fn labels_name_their_site_shop_or_workspace() {
+        let none = none();
+        // Jira: one Atlassian email on two sites is two accounts.
+        let acme = params(&[("site", "acme"), ("email", "me@x.test")]);
+        let beta = params(&[("site", "beta"), ("email", "me@x.test")]);
+        let me = json!({"emailAddress": "me@x.test"});
+        assert_eq!(
+            named("jira", &acme, me.clone()),
+            Ok("me@x.test on acme".into())
+        );
+        assert_eq!(named("jira", &beta, me), Ok("me@x.test on beta".into()));
+        // Shopify: the shop's DNS label, not its display name.
+        assert_eq!(
+            named(
+                "shopify",
+                &params(&[("shop", "acme-store")]),
+                json!({"shop": {"name": "My Store"}})
+            ),
+            Ok("acme-store".into())
+        );
+        // Workspaces, where the reply names one.
+        assert_eq!(
+            named(
+                "slack",
+                &none,
+                json!({"ok": true, "user": "ann", "team": "Acme"})
+            ),
+            Ok("ann in Acme".into())
+        );
+        assert_eq!(
+            named(
+                "linear",
+                &none,
+                json!({"data": {"viewer": {"email": "a@x.test", "organization": {"urlKey": "acme"}}}})
+            ),
+            Ok("a@x.test in acme".into())
+        );
+        assert_eq!(
+            named(
+                "notion",
+                &none,
+                json!({"name": "Bruhs", "bot": {"workspace_name": "Ann's Notion"}})
+            ),
+            Ok("Bruhs in Ann's Notion".into())
+        );
+        assert_eq!(
+            named("notion", &none, json!({"name": "Bruhs"})),
+            Ok("Bruhs".into())
+        );
+        // A workspace is shown as stored, and a scrubbed one is refused.
+        assert_eq!(
+            named(
+                "slack",
+                &none,
+                json!({"ok": true, "user": "ann", "team": "A\u{202e}cme"})
+            ),
+            Ok("ann in A\\u{202e}cme".into())
+        );
+        assert_eq!(
+            named(
+                "slack",
+                &none,
+                json!({"ok": true, "user": "ann", "team": "A\u{202e}"})
+            ),
+            Ok("ann in A\\u{202e}".into())
+        );
+        assert_eq!(
+            named(
+                "slack",
+                &none,
+                json!({"ok": true, "user": "ann", "team": "[redacted]"})
+            ),
+            Err(TestFailure::Unexpected)
+        );
+    }
+
+    #[test]
+    fn a_long_label_is_cut_and_its_tenant_kept() {
+        let site = "s".repeat(40);
+        let jira = params(&[("site", &site), ("email", "me@x.test")]);
+        let long = "e".repeat(100);
+        let account = named("jira", &jira, json!({"emailAddress": long})).unwrap();
+        assert_eq!(account.chars().count(), MAX_APP_ACCOUNT_CHARS);
+        assert!(account.ends_with(&format!(" on {site}")), "{account}");
+        assert!(account.starts_with("eee"));
+        // A tenant that leaves no room for any label stands alone.
+        let site = "s".repeat(63);
+        let jira = params(&[("site", &site), ("email", "me@x.test")]);
+        assert_eq!(
+            named("jira", &jira, json!({"emailAddress": "me@x.test"})),
+            Ok(site)
+        );
+        let team = "t".repeat(100);
+        assert_eq!(
+            named(
+                "slack",
+                &none(),
+                json!({"ok": true, "user": "ann", "team": team})
+            ),
+            Ok("t".repeat(MAX_APP_ACCOUNT_CHARS))
+        );
+        // Every account fits the stored cap and shows as stored.
+        for body in [
+            json!({"emailAddress": "e".repeat(300)}),
+            json!({"emailAddress": "a\u{7}\u{2028}b"}),
+        ] {
+            let account = named("jira", &jira, body).unwrap();
+            assert!(account.chars().count() <= MAX_APP_ACCOUNT_CHARS);
+            assert_eq!(review_text(&account), account);
+        }
     }
 
     #[test]

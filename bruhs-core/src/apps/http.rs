@@ -47,7 +47,7 @@ use zeroize::Zeroizing;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CALL_TIMEOUT: Duration = Duration::from_millis(APP_CALL_TIMEOUT_MS);
 /// What every secret is replaced with.
-const REDACTED: &str = "[redacted]";
+const REDACTED: &str = bruhs_models::apps::REDACTED;
 /// Shorter strings can't be scrubbed without cutting ordinary words (F8);
 /// the catalog refuses tokens and keys this short.
 const MIN_SECRET_BYTES: usize = 8;

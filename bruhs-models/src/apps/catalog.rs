@@ -71,6 +71,29 @@ pub struct AppTest {
     pub account: &'static [&'static str],
     /// A pointer that must hold `true`, for apps that answer 200 on failure.
     pub ok: Option<&'static str>,
+    /// What tells this account apart from the same person's account in
+    /// another site, shop or workspace ([`super::account_for`]).
+    pub tenant: AccountTenant,
+    /// Whether every token of one account names the same account. False
+    /// for an app whose test call names the token itself (Cloudflare's
+    /// token id): a replacement can't be checked against the stored
+    /// account, so it keeps the stored one.
+    pub stable_account: bool,
+}
+
+/// The tenant part of an account's stored label (ruling A Task 8 I2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountTenant {
+    /// The test call's label alone: one account per person.
+    None,
+    /// "{label} on {param}": a Jira site.
+    Site(&'static str),
+    /// The param alone: a Shopify shop, whose DNS label is unique and
+    /// stays when the shop is renamed.
+    Param(&'static str),
+    /// "{label} in {value}", the value at this pointer of the test reply,
+    /// when it names one: a Slack, Linear or Notion workspace.
+    Workspace(&'static str),
 }
 
 /// One allowlisted endpoint: upper-case methods plus a path glob
@@ -213,6 +236,8 @@ const fn test_get(path: &'static str, account: &'static [&'static str]) -> AppTe
         body: None,
         account,
         ok: None,
+        tenant: AccountTenant::None,
+        stable_account: true,
     }
 }
 
@@ -291,7 +316,11 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://www.notion.so/profile/integrations",
         scopes_hint: "An internal integration's secret. Share only the pages and databases a bruh needs with the integration, and leave out comment access unless it should comment.",
-        test: test_get("/v1/users/me", &["/name"]),
+        // An internal integration's bot user names its workspace.
+        test: AppTest {
+            tenant: AccountTenant::Workspace("/bot/workspace_name"),
+            ..test_get("/v1/users/me", &["/name"])
+        },
         endpoints: &[
             get("/v1/users"),
             get("/v1/users/*"),
@@ -328,9 +357,13 @@ pub const CONNECTORS: [AppConnector; 14] = [
         test: AppTest {
             method: "POST",
             path: "/graphql",
-            body: Some(r#"{"query":"{ viewer { email } }"}"#),
+            body: Some(r#"{"query":"{ viewer { email organization { urlKey } } }"}"#),
             account: &["/data/viewer/email"],
             ok: None,
+            // An API key belongs to one workspace; its URL key is unique
+            // and readable.
+            tenant: AccountTenant::Workspace("/data/viewer/organization/urlKey"),
+            stable_account: true,
         },
         endpoints: &[],
         graphql: Some(GraphqlRule {
@@ -497,7 +530,11 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN, EMAIL, SITE],
         token_help_url: "https://id.atlassian.com/manage-profile/security/api-tokens",
         scopes_hint: "An API token for your Atlassian account, with scopes for the Jira work a bruh does if you can choose them. Use the email you sign in with.",
-        test: test_get("/rest/api/3/myself", &["/emailAddress", "/displayName"]),
+        // One Atlassian account signs in to every site.
+        test: AppTest {
+            tenant: AccountTenant::Site("site"),
+            ..test_get("/rest/api/3/myself", &["/emailAddress", "/displayName"])
+        },
         // Only `/rest/api/3`: `/rest/api/2` and `/rest/api/latest` are refused.
         endpoints: &[
             get("/rest/api/3/myself"),
@@ -533,7 +570,10 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN, SHOP],
         token_help_url: "https://help.shopify.com/en/manual/apps/app-types/custom-apps",
         scopes_hint: "A custom app's Admin API access token with only the scopes a bruh needs, such as read_orders.",
-        test: test_get("/admin/api/2026-10/shop.json", &["/shop/name"]),
+        test: AppTest {
+            tenant: AccountTenant::Param("shop"),
+            ..test_get("/admin/api/2026-10/shop.json", &["/shop/name"])
+        },
         // REST only under a version; GraphQL at any `/admin/…/graphql.json`.
         endpoints: &[
             get("/admin/api/*/shop.json"),
@@ -633,7 +673,11 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://dash.cloudflare.com/profile/api-tokens",
         scopes_hint: "A user API token with only the permissions and zones a bruh needs, such as Zone DNS Read.",
-        test: test_get("/client/v4/user/tokens/verify", &["/result/id"]),
+        // Verify names the token, not the user: each token is its own id.
+        test: AppTest {
+            stable_account: false,
+            ..test_get("/client/v4/user/tokens/verify", &["/result/id"])
+        },
         endpoints: &[
             get("/client/v4/user/tokens/verify"),
             get("/client/v4/accounts"),
@@ -664,6 +708,8 @@ pub const CONNECTORS: [AppConnector; 14] = [
             body: None,
             account: &["/user"],
             ok: Some("/ok"),
+            tenant: AccountTenant::Workspace("/team"),
+            stable_account: true,
         },
         // Slack's Web API takes GET or POST for every method, posting
         // included, so each method is named with both.
@@ -957,6 +1003,39 @@ mod tests {
         // Airtable returns email only with user.email:read.
         assert_eq!(row("airtable").test.account, ["/email", "/id"]);
         assert_eq!(row("slack").test.ok, Some("/ok"));
+        // The tenant each label names (ruling A Task 8 I2, M7). The
+        // workspace pointers follow each app's docs; Task 19's live checks
+        // confirm them.
+        let tenants: Vec<_> = CONNECTORS
+            .iter()
+            .filter(|c| c.test.tenant != AccountTenant::None)
+            .map(|c| (c.id, c.test.tenant))
+            .collect();
+        assert_eq!(
+            tenants,
+            [
+                ("notion", AccountTenant::Workspace("/bot/workspace_name")),
+                (
+                    "linear",
+                    AccountTenant::Workspace("/data/viewer/organization/urlKey")
+                ),
+                ("jira", AccountTenant::Site("site")),
+                ("shopify", AccountTenant::Param("shop")),
+                ("slack", AccountTenant::Workspace("/team")),
+            ]
+        );
+        let unstable: Vec<_> = CONNECTORS
+            .iter()
+            .filter(|c| !c.test.stable_account)
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(unstable, ["cloudflare"]);
+        // A Site or Param tenant names a param the account has.
+        for c in &CONNECTORS {
+            if let AccountTenant::Site(id) | AccountTenant::Param(id) = c.test.tenant {
+                assert!(c.params.iter().any(|p| p.id == id && !p.secret), "{}", c.id);
+            }
+        }
         assert_eq!(row("linear").test.method, "POST");
         assert!(row("figma")
             .token_help_url

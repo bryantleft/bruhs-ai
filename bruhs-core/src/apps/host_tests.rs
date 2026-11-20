@@ -8,7 +8,7 @@ use crate::secrets::SecretStore;
 use bruhs_models::apps::{AppCall, ACCOUNT_CONNECTED, ANOTHER_ACCOUNT, UNKNOWN_APP};
 use bruhs_models::crew::KEYCHAIN_NEEDS_OWNER;
 use bruhs_models::vault::{
-    CredentialScope, VaultCreate, VaultKind, VaultSecretInput, APPS_NOT_PROJECTS,
+    CredentialScope, VaultAttention, VaultCreate, VaultKind, VaultSecretInput, APPS_NOT_PROJECTS,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -258,7 +258,15 @@ async fn replace_keeps_the_account_and_tests_the_new_token() {
     );
     assert_eq!(resolved(&host, &entry.id).await, old);
 
+    // The old token's last failure goes with it.
+    host.vault()
+        .note_attention_for_tests(&entry.id, VaultAttention::Failed);
     let replaced = host.replace(&entry.id, replace(&new)).await.unwrap();
+    assert_eq!(
+        (replaced.name.as_str(), &replaced.scope, replaced.attention),
+        (entry.name.as_str(), &entry.scope, None)
+    );
+    assert_eq!(host.accounts().await.unwrap()[0].attention, None);
     assert_eq!(
         (replaced.id.as_str(), replaced.kind),
         (entry.id.as_str(), entry.kind)
@@ -494,4 +502,183 @@ async fn the_listing_names_accounts_and_mailboxes_only() {
     // With no mail runtime there are none.
     let Fixture { host: bare, .. } = fixture().await;
     assert!(bare.mailboxes().await.unwrap().is_empty());
+}
+
+fn jira(token: &str, site: &str) -> AppConnect {
+    let mut connect = github(token);
+    connect.app = "jira".into();
+    connect.params = [("site", site), ("email", "me@x.test")]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    connect
+}
+
+#[tokio::test]
+async fn one_email_on_two_jira_sites_is_two_accounts() {
+    let Fixture { server, host } = fixture().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"emailAddress": "me@x.test"})),
+        )
+        .mount(&server)
+        .await;
+    let acme = host.connect(jira(&canary(), "acme")).await.unwrap();
+    let beta = host.connect(jira(&canary(), "Beta")).await.unwrap();
+    let account = |entry: &VaultEntry| match &entry.kind {
+        VaultKind::AppToken(meta) => meta.account.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(account(&acme), "me@x.test on acme");
+    assert_eq!(account(&beta), "me@x.test on beta");
+    assert_eq!(beta.name, "Jira me@x.test on beta");
+    // The same site again is the same account.
+    let again = host.connect(jira(&canary(), "acme")).await.unwrap_err();
+    assert!(
+        matches!(again, AppsError::Invalid(message) if message == ACCOUNT_CONNECTED),
+        "{again:?}"
+    );
+    // A replace compares the label with its site, so it still matches.
+    let new = canary();
+    host.replace(&acme.id, replace(&new)).await.unwrap();
+    assert_eq!(resolved(&host, &acme.id).await, new);
+}
+
+#[tokio::test]
+async fn a_cloudflare_token_is_replaced_though_each_token_has_its_own_id() {
+    let Fixture { server, host } = fixture().await;
+    let (old, new) = (canary(), canary());
+    for (token, id) in [(&old, "id-old"), (&new, "id-new")] {
+        Mock::given(method("GET"))
+            .and(path("/client/v4/user/tokens/verify"))
+            .and(header("authorization", format!("Bearer {token}").as_str()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"success": true, "result": {"id": id}})),
+            )
+            .with_priority(1)
+            .mount(&server)
+            .await;
+    }
+    refuse_the_rest(&server).await;
+    let mut connect = github(&old);
+    connect.app = "cloudflare".into();
+    let entry = host.connect(connect).await.unwrap();
+    let replaced = host.replace(&entry.id, replace(&new)).await.unwrap();
+    // The stored label stays; the new token resolves.
+    assert_eq!(replaced.kind, entry.kind);
+    assert_eq!(resolved(&host, &entry.id).await, new);
+    // A refused token is still refused.
+    assert_eq!(
+        failed(
+            host.replace(&entry.id, replace(&canary()))
+                .await
+                .unwrap_err()
+        ),
+        "Cloudflare refused the token. Check it and what it may do."
+    );
+    assert_eq!(resolved(&host, &entry.id).await, new);
+}
+
+#[tokio::test]
+async fn hostile_or_echoed_labels_never_store_as_written() {
+    let Fixture { server, host } = fixture().await;
+    let (hostile, echo) = (canary(), canary());
+    github_user(&server, &hostile, "a\u{202e}b\u{7}").await;
+    // An app that echoes the token as the account: the reply is scrubbed,
+    // so the label would be [redacted].
+    github_user(&server, &echo, &echo).await;
+    let entry = host.connect(github(&hostile)).await.unwrap();
+    let VaultKind::AppToken(meta) = &entry.kind else {
+        panic!();
+    };
+    assert_eq!(meta.account, "a\\u{202e}b\\u{7}");
+    assert_eq!(entry.name, "GitHub a\\u{202e}b\\u{7}");
+    let error = host.connect(github(&echo)).await.unwrap_err();
+    assert_eq!(
+        failed(error),
+        "GitHub answered in a way Bruhs didn't expect. Check the token's account and try again."
+    );
+    assert_eq!(host.accounts().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_passing_test_clears_the_last_failure() {
+    let Fixture { server, host } = fixture().await;
+    let good = canary();
+    github_user(&server, &good, "octo").await;
+    refuse_the_rest(&server).await;
+    let entry = host.connect(github(&good)).await.unwrap();
+    host.vault()
+        .note_attention_for_tests(&entry.id, VaultAttention::Failed);
+    assert!(host.test_saved(&entry.id).await.unwrap().ok);
+    assert_eq!(host.accounts().await.unwrap()[0].attention, None);
+    // A token the app refuses was still read: the result says why, and the
+    // entry shows no vault failure.
+    server.reset().await;
+    refuse_the_rest(&server).await;
+    assert!(!host.test_saved(&entry.id).await.unwrap().ok);
+    assert_eq!(host.accounts().await.unwrap()[0].attention, None);
+}
+
+#[tokio::test]
+async fn two_connects_of_one_account_save_once() {
+    let Fixture { server, host } = fixture().await;
+    let good = canary();
+    // Slow enough that both test calls are in flight together.
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"login": "octo"}))
+                .set_delay(Duration::from_millis(200)),
+        )
+        .mount(&server)
+        .await;
+    let named = |name: &str| {
+        let mut connect = github(&good);
+        connect.name = Some(name.into());
+        connect
+    };
+    let (a, b) = tokio::join!(host.connect(named("One")), host.connect(named("Two")));
+    assert_eq!(
+        usize::from(a.is_ok()) + usize::from(b.is_ok()),
+        1,
+        "{a:?} {b:?}"
+    );
+    assert_eq!(host.accounts().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn no_error_shows_a_token() {
+    let vault =
+        SecretManager::new(SecretStore::in_memory()).with_read_wait(Duration::from_millis(200));
+    let Fixture { server, host } = fixture_with(vault.clone(), None).await;
+    let (good, bad, echo) = (canary(), canary(), canary());
+    github_user(&server, &good, "octo").await;
+    github_user(&server, &echo, &echo).await;
+    refuse_the_rest(&server).await;
+    let entry = host.connect(github(&good)).await.unwrap();
+    let mut errors = vec![
+        host.connect(github(&bad)).await.unwrap_err(),
+        host.connect(github(&echo)).await.unwrap_err(),
+        host.connect(github(&good)).await.unwrap_err(),
+        host.replace(&entry.id, replace(&bad)).await.unwrap_err(),
+        host.replace(&entry.id, replace(&echo)).await.unwrap_err(),
+        host.replace("v1-missing", replace(&bad)).await.unwrap_err(),
+    ];
+    let mut short = github(&bad);
+    short.params.insert("token".into(), good.clone());
+    errors.push(host.connect(short).await.unwrap_err());
+    let held = vault.hold_store_for_tests().unwrap();
+    errors.push(host.test_saved(&entry.id).await.unwrap_err());
+    drop(held);
+    for error in &errors {
+        for shown in [format!("{error:?}"), error.to_string()] {
+            for token in [&good, &bad, &echo] {
+                assert!(!shown.contains(token.as_str()), "{shown}");
+            }
+        }
+    }
 }
