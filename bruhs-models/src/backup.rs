@@ -4,7 +4,8 @@
 //! rule, names and ids, and the lines both apps show. Pure and wasm-safe: the
 //! encryption lives in `bruhs-backup`, the file work in `bruhs-core`.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::crew::CREW_PROTOCOL;
 use crate::EpochMs;
@@ -48,6 +49,9 @@ pub enum BackupApp {
     #[default]
     Desktop,
     Web,
+    /// An app a newer Bruhs added. Read only: requests refuse it.
+    #[serde(other)]
+    Other,
 }
 
 impl BackupApp {
@@ -56,6 +60,7 @@ impl BackupApp {
         match self {
             Self::Desktop => "desktop",
             Self::Web => "web",
+            Self::Other => "other",
         }
     }
 }
@@ -67,6 +72,7 @@ pub struct CreateBackup {
     pub password: String,
     #[serde(default)]
     pub options: BackupOptions,
+    #[serde(deserialize_with = "known")]
     pub app: BackupApp,
     /// The id of the browser's encrypted part, uploaded first.
     #[serde(default)]
@@ -98,8 +104,15 @@ pub enum OpenSource {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RestoreSource {
-    Staged { id: String },
-    PreRestore { stamp: String },
+    Staged {
+        id: String,
+    },
+    PreRestore {
+        stamp: String,
+    },
+    /// A source a newer Bruhs added. Read only: requests refuse it.
+    #[serde(other)]
+    Other,
 }
 
 /// Only so a `PendingRestore` can default its fields; an empty id is never
@@ -114,6 +127,7 @@ impl Default for RestoreSource {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyRestore {
+    #[serde(deserialize_with = "known")]
     pub source: RestoreSource,
     /// The owner confirmed that their data will be replaced.
     pub replace: bool,
@@ -137,6 +151,9 @@ pub enum JobStep {
     Writing,
     Checking,
     Preparing,
+    /// A step a newer Bruhs added.
+    #[serde(other)]
+    Other,
 }
 
 /// A make or open job.
@@ -157,6 +174,40 @@ pub enum JobState {
     Failed {
         message: String,
     },
+    /// A state a newer Bruhs added.
+    #[serde(other)]
+    Other,
+}
+
+/// The read-only `Other` fallbacks above let an older app decode a newer
+/// server's answers. A request body never carries one.
+trait Known {
+    fn is_known(&self) -> bool;
+}
+
+impl Known for BackupApp {
+    fn is_known(&self) -> bool {
+        !matches!(self, Self::Other)
+    }
+}
+
+impl Known for RestoreSource {
+    fn is_known(&self) -> bool {
+        !matches!(self, Self::Other)
+    }
+}
+
+fn known<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Known,
+{
+    let value = T::deserialize(deserializer)?;
+    if value.is_known() {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom("unknown variant"))
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -369,27 +420,50 @@ pub enum OptionKind {
     Browsers,
 }
 
-/// A backup password: at least [`MIN_PASSWORD_CHARS`] characters, at most
-/// [`MAX_PASSWORD_BYTES`] bytes, and no control characters.
+/// The password as the key derivation takes it: Unicode NFC, so an "é"
+/// typed as one code point on one computer and as "e" plus an accent on
+/// another opens the same backup. Every create, open and web-part lock or
+/// unlock derives from this, never from the typed string. Callers hold the
+/// result in `Zeroizing` (this crate has no `zeroize`).
+pub fn normalize_password(password: &str) -> String {
+    password.nfc().collect()
+}
+
+/// A backup password, judged in its [`normalize_password`] form: at least
+/// [`MIN_PASSWORD_CHARS`] characters, at most [`MAX_PASSWORD_BYTES`] bytes,
+/// no control characters and not only whitespace.
 pub fn validate_password(password: &str) -> Result<(), &'static str> {
+    // Checked on the typed bytes first, so a huge input is never normalized.
     if password.len() > MAX_PASSWORD_BYTES {
+        return Err(PASSWORD_LONG);
+    }
+    let normalized = normalize_password(password);
+    if normalized.len() > MAX_PASSWORD_BYTES {
         Err(PASSWORD_LONG)
-    } else if password.chars().any(char::is_control) {
+    } else if normalized.chars().any(char::is_control) {
         Err(PASSWORD_CONTROL)
-    } else if password.chars().count() < MIN_PASSWORD_CHARS {
+    } else if normalized.chars().count() < MIN_PASSWORD_CHARS {
         Err(PASSWORD_SHORT)
+    } else if normalized.chars().all(char::is_whitespace) {
+        Err(PASSWORD_BLANK)
     } else {
         Ok(())
     }
 }
 
-/// The error for a password typed twice, if any.
+/// The error for a password typed twice, if any. The two match when their
+/// [`normalize_password`] forms do, since that is what the key comes from.
 pub fn password_pair_error(first: &str, second: &str) -> Option<&'static str> {
     match validate_password(first) {
         Err(message) => Some(message),
-        Ok(()) if first != second => Some(PASSWORDS_DIFFER),
+        Ok(()) if normalize_password(first) != normalize_password(second) => Some(PASSWORDS_DIFFER),
         Ok(()) => None,
     }
+}
+
+/// `"{n} {one}"` when `n` is 1, else `"{n} {other}"`.
+fn plural(n: u64, one: &str, other: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { other })
 }
 
 /// `bruhs-backup-YYYY-MM-DD-HHMM.bruhsbak`, in UTC.
@@ -507,6 +581,7 @@ fn fill(template: &str, values: &[(&str, &str)]) -> String {
 
 /// What an opened backup holds, one sentence per line.
 pub fn preview_lines(preview: &RestorePreview) -> Vec<String> {
+    let counts = preview.counts;
     let mut lines = vec![
         fill(
             PREVIEW_MADE,
@@ -519,10 +594,27 @@ pub fn preview_lines(preview: &RestorePreview) -> Vec<String> {
         fill(
             PREVIEW_COUNTS,
             &[
-                ("bruhs", &preview.counts.bruhs.to_string()),
-                ("entries", &preview.counts.vault_entries.to_string()),
-                ("items", &preview.counts.keychain_items.to_string()),
-                ("files", &preview.counts.files.to_string()),
+                (
+                    "bruhs",
+                    &plural(u64::from(counts.bruhs), COUNT_BRUH, COUNT_BRUHS),
+                ),
+                (
+                    "entries",
+                    &plural(
+                        u64::from(counts.vault_entries),
+                        COUNT_VAULT_ENTRY,
+                        COUNT_VAULT_ENTRIES,
+                    ),
+                ),
+                (
+                    "items",
+                    &plural(
+                        u64::from(counts.keychain_items),
+                        COUNT_KEYCHAIN_ITEM,
+                        COUNT_KEYCHAIN_ITEMS,
+                    ),
+                ),
+                ("files", &plural(counts.files, COUNT_FILE, COUNT_FILES)),
                 ("size", &format_bytes(preview.bytes)),
             ],
         ),
@@ -557,10 +649,12 @@ pub fn preview_lines(preview: &RestorePreview) -> Vec<String> {
         lines.push(PREVIEW_NO_BROWSERS.to_string());
     }
     if preview.skipped_links > 0 {
-        lines.push(fill(
-            PREVIEW_SKIPPED_LINKS,
-            &[("n", &preview.skipped_links.to_string())],
-        ));
+        let template = if preview.skipped_links == 1 {
+            PREVIEW_SKIPPED_LINK
+        } else {
+            PREVIEW_SKIPPED_LINKS
+        };
+        lines.push(fill(template, &[("n", &preview.skipped_links.to_string())]));
     }
     lines
 }
@@ -581,6 +675,7 @@ pub fn job_line(state: &JobState) -> Option<String> {
         JobStep::Writing => JOB_WRITING,
         JobStep::Checking => JOB_CHECKING,
         JobStep::Preparing => JOB_PREPARING,
+        JobStep::Other => JOB_WORKING,
     };
     Some(fill(
         template,
@@ -663,6 +758,109 @@ mod tests {
             None
         );
         assert_eq!(password_pair_error("short", "short"), Some(PASSWORD_SHORT));
+    }
+
+    #[test]
+    fn passwords_refuse_blanks_and_compare_in_nfc() {
+        assert_eq!(validate_password(&" ".repeat(12)), Err(PASSWORD_BLANK));
+        assert_eq!(validate_password(&"\u{a0}".repeat(12)), Err(PASSWORD_BLANK));
+        assert_eq!(validate_password(&" ".repeat(3)), Err(PASSWORD_SHORT));
+        assert_eq!(validate_password(&format!("{}a", " ".repeat(11))), Ok(()));
+
+        let composed = "\u{e9}".repeat(12);
+        let decomposed = "e\u{301}".repeat(12);
+        assert_ne!(composed, decomposed);
+        assert_eq!(normalize_password(&decomposed), composed);
+        assert_eq!(normalize_password(&composed), composed);
+        assert_eq!(validate_password(&decomposed), Ok(()));
+        // 12 code points typed, but 6 characters once composed.
+        assert_eq!(
+            validate_password(&"e\u{301}".repeat(6)),
+            Err(PASSWORD_SHORT)
+        );
+        assert_eq!(password_pair_error(&composed, &decomposed), None);
+    }
+
+    fn preview_with(counts: u64, skipped_links: u32) -> RestorePreview {
+        let small = u32::try_from(counts).unwrap();
+        RestorePreview {
+            counts: BackupCounts {
+                bruhs: small,
+                vault_entries: small,
+                keychain_items: small,
+                files: counts,
+            },
+            bytes: 0,
+            skipped_links,
+            ..RestorePreview::default()
+        }
+    }
+
+    #[test]
+    fn counts_and_links_agree_with_their_number() {
+        assert_eq!(
+            preview_lines(&preview_with(0, 0))[1],
+            "0 bruhs, 0 vault entries, 0 keychain items, 0 files, 0 B."
+        );
+        assert_eq!(
+            preview_lines(&preview_with(1, 1))[1],
+            "1 bruh, 1 vault entry, 1 keychain item, 1 file, 0 B."
+        );
+        assert_eq!(
+            preview_lines(&preview_with(2, 2))[1],
+            "2 bruhs, 2 vault entries, 2 keychain items, 2 files, 0 B."
+        );
+        let link_line = |links| {
+            preview_lines(&preview_with(0, links))
+                .into_iter()
+                .find(|line| line.contains("left out"))
+        };
+        assert_eq!(link_line(0), None);
+        assert_eq!(link_line(1).as_deref(), Some("1 link was left out."));
+        assert_eq!(link_line(2).as_deref(), Some("2 links were left out."));
+    }
+
+    #[test]
+    fn older_apps_read_newer_answers_but_requests_stay_strict() {
+        assert_eq!(
+            serde_json::from_str::<JobStep>(r#""compressing""#).unwrap(),
+            JobStep::Other
+        );
+        assert_eq!(
+            serde_json::from_str::<BackupApp>(r#""mobile""#).unwrap(),
+            BackupApp::Other
+        );
+        let overview: BackupOverview = serde_json::from_value(json!({
+            "job": {"id": "a", "state": {"state": "paused", "at": 1}},
+            "last": {"made_at_ms": 0, "app": "mobile", "bytes": 1},
+            "pending": {"source": {"type": "cloud", "url": "x"}, "created_at_ms": 0},
+        }))
+        .unwrap();
+        let job = overview.job.unwrap();
+        assert_eq!(job.state, JobState::Other);
+        assert_eq!(job_line(&job.state), None);
+        assert_eq!(overview.last.unwrap().app, BackupApp::Other);
+        assert_eq!(overview.pending.unwrap().source, RestoreSource::Other);
+        assert_eq!(
+            job_line(&JobState::Running {
+                done_bytes: 1_000,
+                total_bytes: 2_000,
+                step: JobStep::Other
+            })
+            .as_deref(),
+            Some("Working: 1 KB of 2 KB")
+        );
+
+        assert!(serde_json::from_str::<ApplyRestore>(
+            r#"{"source":{"type":"cloud"},"replace":true}"#
+        )
+        .is_err());
+        assert!(
+            serde_json::from_str::<CreateBackup>(r#"{"password":"p","app":"mobile"}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<CreateBackup>(r#"{"password":"p","app":"desktop"}"#).is_ok()
+        );
     }
 
     #[test]

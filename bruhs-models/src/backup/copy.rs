@@ -40,14 +40,24 @@ pub const JOB_KEYCHAIN: &str = "Reading your keychain";
 pub const JOB_WRITING: &str = "Writing the backup: {done} of {total}";
 pub const JOB_CHECKING: &str = "Checking the backup: {done} of {total}";
 pub const JOB_PREPARING: &str = "Preparing your data for this computer";
+/// A step this build doesn't know, from a newer server.
+pub const JOB_WORKING: &str = "Working: {done} of {total}";
 pub const LOCKING_WEB: &str = "Locking this browser's data";
 pub const CREATED_WEB: &str = "Backup ready: {name}, {size}.";
 pub const CREATED_DESKTOP: &str = "Saved {name}, {size}.";
 
 // What a backup holds, shown before a restore.
 pub const PREVIEW_MADE: &str = "Made {date} on the {app} app, Bruhs {version}.";
-pub const PREVIEW_COUNTS: &str =
-    "{bruhs} bruhs, {entries} vault entries, {items} keychain items, {files} files, {size}.";
+/// Each value is a count with its noun, from the `COUNT_*` pairs.
+pub const PREVIEW_COUNTS: &str = "{bruhs}, {entries}, {items}, {files}, {size}.";
+pub const COUNT_BRUH: &str = "bruh";
+pub const COUNT_BRUHS: &str = "bruhs";
+pub const COUNT_VAULT_ENTRY: &str = "vault entry";
+pub const COUNT_VAULT_ENTRIES: &str = "vault entries";
+pub const COUNT_KEYCHAIN_ITEM: &str = "keychain item";
+pub const COUNT_KEYCHAIN_ITEMS: &str = "keychain items";
+pub const COUNT_FILE: &str = "file";
+pub const COUNT_FILES: &str = "files";
 pub const PREVIEW_REWRITE: &str = "Paths under {from} become {to}.";
 pub const PREVIEW_OUTSIDE: &str =
     "These folders are outside the old home and stay as they are: {list}.";
@@ -57,6 +67,7 @@ pub const PREVIEW_NO_KEYCHAIN: &str =
     "No keychain items in this backup. Restored vault entries need their values again.";
 pub const PREVIEW_NO_AUDIO: &str = "Meeting audio isn't in this backup.";
 pub const PREVIEW_NO_BROWSERS: &str = "Bruh browser sign-ins aren't in this backup.";
+pub const PREVIEW_SKIPPED_LINK: &str = "{n} link was left out.";
 pub const PREVIEW_SKIPPED_LINKS: &str = "{n} links were left out.";
 
 // Restoring.
@@ -83,6 +94,7 @@ pub const LAST_BACKUP_LINE: &str = "Last backup: {date} from the {app} app, {siz
 pub const PASSWORD_SHORT: &str = "Use at least 12 characters.";
 pub const PASSWORD_LONG: &str = "Keep the password under 1 KB.";
 pub const PASSWORD_CONTROL: &str = "Passwords can't contain control characters.";
+pub const PASSWORD_BLANK: &str = "Use more than spaces in the password.";
 pub const PASSWORDS_DIFFER: &str = "The passwords don't match.";
 pub const WRONG_PASSWORD: &str = "That password doesn't open this backup, or the file was changed.";
 pub const NOT_A_BACKUP: &str = "This isn't a Bruhs backup.";
@@ -152,11 +164,20 @@ pub const ALL_COPY: &[&str] = &[
     JOB_WRITING,
     JOB_CHECKING,
     JOB_PREPARING,
+    JOB_WORKING,
     LOCKING_WEB,
     CREATED_WEB,
     CREATED_DESKTOP,
     PREVIEW_MADE,
     PREVIEW_COUNTS,
+    COUNT_BRUH,
+    COUNT_BRUHS,
+    COUNT_VAULT_ENTRY,
+    COUNT_VAULT_ENTRIES,
+    COUNT_KEYCHAIN_ITEM,
+    COUNT_KEYCHAIN_ITEMS,
+    COUNT_FILE,
+    COUNT_FILES,
     PREVIEW_REWRITE,
     PREVIEW_OUTSIDE,
     PREVIEW_WEB,
@@ -164,6 +185,7 @@ pub const ALL_COPY: &[&str] = &[
     PREVIEW_NO_KEYCHAIN,
     PREVIEW_NO_AUDIO,
     PREVIEW_NO_BROWSERS,
+    PREVIEW_SKIPPED_LINK,
     PREVIEW_SKIPPED_LINKS,
     REPLACE_WARNING,
     STOPPING,
@@ -180,6 +202,7 @@ pub const ALL_COPY: &[&str] = &[
     PASSWORD_SHORT,
     PASSWORD_LONG,
     PASSWORD_CONTROL,
+    PASSWORD_BLANK,
     PASSWORDS_DIFFER,
     WRONG_PASSWORD,
     NOT_A_BACKUP,
@@ -225,5 +248,14 @@ mod tests {
             );
             assert!(!text.starts_with("- ") && !text.contains('•'), "{text}");
         }
+    }
+
+    #[test]
+    fn all_copy_lists_every_constant() {
+        let declared = include_str!("copy.rs")
+            .lines()
+            .filter(|line| line.starts_with("pub const ") && line.contains(": &str"))
+            .count();
+        assert_eq!(ALL_COPY.len(), declared);
     }
 }
