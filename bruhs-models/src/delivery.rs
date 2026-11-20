@@ -1,5 +1,7 @@
 //! Reviewable repository delivery operations shared by native and web clients.
 
+pub mod generation;
+use generation::GenerationOptions;
 use serde::{Deserialize, Serialize};
 
 /// Auto recognizes GitHub and GitLab.com remotes. Self-hosted GitLab is explicit.
@@ -66,6 +68,9 @@ pub struct ProjectScripts {
     pub setup: Vec<Command>,
     #[serde(default)]
     pub run: Vec<Command>,
+    /// Owner-reviewed checks run in a separate checkout of selected changes.
+    #[serde(default)]
+    pub check: Vec<Command>,
     #[serde(default)]
     pub teardown: Vec<Command>,
     #[serde(default)]
@@ -187,6 +192,8 @@ pub enum DeliveryAction {
     },
     CommitPushPull {
         files: Vec<String>,
+        #[serde(default)]
+        verification_id: Option<String>,
         message: String,
         title: String,
         body: String,
@@ -228,6 +235,10 @@ pub enum DeliveryAction {
         number: u64,
         method: MergeMethod,
     },
+    /// Run configured checks against HEAD plus exactly these selected files.
+    Verify {
+        files: Vec<String>,
+    },
     Lifecycle {
         phase: LifecyclePhase,
     },
@@ -257,12 +268,55 @@ pub struct PrepareRequest {
     pub timeout_seconds: u64,
 }
 
+/// The host chooses the task's working directory and source; callers supply only
+/// the action they want to review. Source context never grants execution access.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskPrepareRequest {
+    #[serde(default)]
+    pub forge: Forge,
+    pub action: DeliveryAction,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskDeliverySource {
+    pub task_id: crate::ids::ThreadId,
+    pub title: String,
+    pub parent_id: Option<crate::ids::ThreadId>,
+    pub work_item_origin: Option<crate::workbench_handoff::WorkItemTaskOrigin>,
+}
+
+impl From<&crate::coordination::CoordinatedTask> for TaskDeliverySource {
+    fn from(task: &crate::coordination::CoordinatedTask) -> Self {
+        Self {
+            task_id: task.id.clone(),
+            title: task.title.clone(),
+            parent_id: task.parent_id.clone(),
+            work_item_origin: task.work_item_origin.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskDeliveryContext {
+    pub source: TaskDeliverySource,
+    pub path: String,
+    pub branch: String,
+    pub head: String,
+    pub state: crate::coordination::TaskState,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreparedAction {
     #[serde(default = "legacy_forge")]
     pub forge: Forge,
     #[serde(default)]
     pub repository: Option<ForgeRepository>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_task: Option<TaskDeliverySource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<SourceVerification>,
     pub id: String,
     pub path: String,
     pub action: DeliveryAction,
@@ -278,6 +332,21 @@ pub struct PreparedAction {
     pub stack: Option<StackPlan>,
     #[serde(default)]
     pub native_stack: Option<NativeStackPlan>,
+}
+
+/// Evidence copied by the host from a completed independent check receipt.
+/// It is revalidated against the selected payload before delivery starts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceVerification {
+    pub receipt_id: String,
+    pub source_head: String,
+    pub source_fingerprint: String,
+    #[serde(default)]
+    pub checked_tree: String,
+    pub files: Vec<String>,
+    pub commands: Vec<Command>,
+    pub completed_at_ms: i64,
 }
 
 /// A native stack preview. Heads are observational, not atomic merge leases.
@@ -352,6 +421,11 @@ pub struct ActionReceipt {
     pub prepared: PreparedAction,
     pub status: ActionStatus,
     pub completed_commands: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_tree: Option<String>,
+    /// Immutable commit selected for push; not a claim that the remote accepted it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_commit: Option<String>,
     pub output: String,
     pub error: Option<String>,
     pub updated_at_ms: i64,
@@ -382,6 +456,13 @@ impl Check {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangedFileCount {
+    Exact(usize),
+    Capped,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pull {
     pub number: u64,
@@ -405,6 +486,8 @@ pub struct Pull {
     pub checks: Vec<Check>,
     pub comments: Vec<PullComment>,
     pub reviews: Vec<PullComment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_files: Option<ChangedFileCount>,
     pub files: Vec<String>,
 }
 
@@ -543,6 +626,8 @@ pub enum ReadResult {
         stacks: Vec<StackLink>,
     },
     Pull {
+        #[serde(default)]
+        review_guides_enabled: bool,
         pull: Box<Pull>,
     },
     Diff {
@@ -568,6 +653,20 @@ pub struct ActionId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_delivery_requests_cannot_substitute_a_path_or_source_snapshot() {
+        let request = serde_json::json!({
+            "forge":"git_hub", "action":{"type":"comment","number":42,"body":"Owner review"},
+            "timeout_seconds":5
+        });
+        assert!(serde_json::from_value::<TaskPrepareRequest>(request.clone()).is_ok());
+        for field in ["path", "source_task", "task_id"] {
+            let mut substituted = request.clone();
+            substituted[field] = serde_json::json!("another-project");
+            assert!(serde_json::from_value::<TaskPrepareRequest>(substituted).is_err());
+        }
+    }
 
     #[test]
     fn checks_distinguish_failures_from_work_and_cancelled_checks() {
@@ -603,4 +702,221 @@ mod tests {
         assert!(!is_repository_relative("a\\..\\b"));
         assert!(!is_repository_relative(".GIT"));
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WritingStyle {
+    #[default]
+    Repository,
+    Conventional,
+    Custom,
+}
+impl WritingStyle {
+    pub fn key(self) -> &'static str {
+        match self { Self::Repository => "repository", Self::Conventional => "conventional", Self::Custom => "custom" }
+    }
+}
+
+/// A project may explicitly follow its text generator even when its environment has a dedicated writer.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WriterModel {
+    #[default]
+    TextGeneration,
+    Separate {
+        model: String,
+        #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
+        options: GenerationOptions,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WriterDraft {
+    Commit { files: Vec<String> },
+    Pull { base: String, head: String, #[serde(default)] files: Vec<String> },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WriterDraftRequest {
+    pub path: String,
+    pub draft: WriterDraft,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WriterText {
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+}
+
+/// Per-repository overrides inherit individual fields from the delivery host.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DeliveryOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_guides_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_guide_model: Option<GuideModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_guide_instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writer_model: Option<WriterModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writing_style: Option<WritingStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub writer_instructions: Option<String>,
+    pub merge_method: Option<MergeMethod>,
+    pub follow_templates: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub remove_agent_credits: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeliveryPreferences {
+    #[serde(default)]
+    pub review_guides_enabled: bool,
+    #[serde(default)]
+    pub review_guide_model: GuideModel,
+    #[serde(default)]
+    pub review_guide_instructions: String,
+    #[serde(default)]
+    pub writer_model: WriterModel,
+    #[serde(default)]
+    pub writing_style: WritingStyle,
+    #[serde(default)]
+    pub writer_instructions: String,
+    pub merge_method: MergeMethod,
+    pub follow_templates: bool,
+    #[serde(default)]
+    pub remove_agent_credits: bool,
+    pub overrides: DeliveryOverrides,
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeliveryPreferenceScope {pub path:Option<String>}
+
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(tag="setting",content="value",rename_all="snake_case",deny_unknown_fields)]
+pub enum DeliveryPreferenceChange {
+    ReviewGuidesEnabled(Option<bool>),
+    ReviewGuideModel(Option<GuideModel>),
+    ReviewGuideInstructions(Option<String>),
+    WriterModel(Option<WriterModel>),
+    GenerationOption {
+        target: generation::GenerationTarget,
+        model: String,
+        kind: generation::OptionKind,
+        value: String,
+    },
+    WritingStyle(Option<WritingStyle>),
+    WriterInstructions(Option<String>),
+    ResetWritingStyle,
+    MergeMethod(Option<MergeMethod>),
+    FollowTemplates(Option<bool>),
+    RemoveAgentCredits(Option<bool>),
+}
+
+#[derive(Debug,Clone,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetDeliveryPreference {pub path:Option<String>,pub change:DeliveryPreferenceChange}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GuideModel {
+    #[default]
+    Writer,
+    Separate {
+        model: String,
+        #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
+        options: GenerationOptions,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewGuideRequest {
+    pub path: String,
+    #[serde(default)]
+    pub forge: Forge,
+    pub number: u64,
+    pub head_oid: String,
+    pub base_oid: String,
+    #[serde(default)]
+    pub generate: bool,
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReviewGuide {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_base_oid: Option<String>,
+    pub model: String,
+    pub head_oid: String,
+    pub base_oid: String,
+    pub stops: Vec<GuideStop>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuideStop {
+    pub title: String,
+    pub summary: String,
+    pub attention: Option<GuideAttention>,
+    #[serde(default)]
+    pub files: Vec<GuideFile>,
+    #[serde(default)]
+    pub excerpts: Vec<GuideExcerpt>,
+    #[serde(default)]
+    pub questions: Vec<String>,
+    #[serde(default)]
+    pub notes: Vec<GuideNote>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuideAttention {
+    pub kind: AttentionKind,
+    pub note: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AttentionKind {
+    Tradeoff,
+    Contract,
+    Product,
+    Risk,
+    Accessibility,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuideFile {
+    #[serde(default)]
+    pub source_side: GuideSide,
+    pub path: String,
+    pub note: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuideNote {
+    pub path: String,
+    pub line: usize,
+    pub title: String,
+    pub body: String,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GuideSide {
+    Old,
+    #[default]
+    New,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GuideExcerpt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    pub path: String,
+    pub side: GuideSide,
+    pub start: usize,
+    pub end: usize,
+    pub caption: String,
+    #[serde(default)]
+    pub code: String,
 }

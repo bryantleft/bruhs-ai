@@ -248,16 +248,72 @@ pub fn parse_hunk_header(header: &str) -> HunkRange {
     out
 }
 
-fn strip_prefix_path(s: &str) -> Option<String> {
-    let s = s.trim();
-    if s == "/dev/null" {
+/// Git C-quotes control characters and, by default, non-ASCII path bytes.
+fn patch_path(raw: &str) -> String {
+    let Some(encoded) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return raw.to_owned();
+    };
+    let mut bytes = encoded.bytes();
+    let mut decoded = Vec::with_capacity(raw.len());
+    while let Some(c) = bytes.next() {
+        if c != b'\\' {
+            decoded.push(c);
+            continue;
+        }
+        let byte = match bytes.next() {
+            Some(b'a') => 7,
+            Some(b'b') => 8,
+            Some(b't') => b'\t',
+            Some(b'n') => b'\n',
+            Some(b'v') => 11,
+            Some(b'f') => 12,
+            Some(b'r') => b'\r',
+            Some(c @ (b'"' | b'\\')) => c,
+            Some(a @ b'0'..=b'3') => {
+                let (Some(b @ b'0'..=b'7'), Some(c @ b'0'..=b'7')) = (bytes.next(), bytes.next())
+                else {
+                    return raw.to_owned();
+                };
+                (a - b'0') * 64 + (b - b'0') * 8 + (c - b'0')
+            }
+            _ => return raw.to_owned(),
+        };
+        decoded.push(byte);
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn strip_prefix_path(raw: &str) -> Option<String> {
+    let path = patch_path(raw.split('\t').next().unwrap_or(raw));
+    if path == "/dev/null" {
         return None;
     }
-    let s = s
-        .strip_prefix("a/")
-        .or_else(|| s.strip_prefix("b/"))
-        .unwrap_or(s);
-    Some(s.to_string())
+    Some(
+        path.strip_prefix("a/")
+            .or_else(|| path.strip_prefix("b/"))
+            .unwrap_or(&path)
+            .to_owned(),
+    )
+}
+
+fn header_paths(header: &str) -> (Option<String>, Option<String>) {
+    let mut candidates = header.match_indices(' ').filter_map(|(i, _)| {
+        let (a, b) = header.split_at(i);
+        let b = &b[1..];
+        (b.starts_with("b/") || b.starts_with("\"b/")).then_some((a, b))
+    });
+    // Unquoted filenames may themselves contain " b/". Prefer the split where
+    // the two paths match. For renames the explicit metadata below is authoritative.
+    let middle = header.len() / 2;
+    let equal = header.split_at_checked(middle).and_then(|(a, rest)| {
+        let b = rest.strip_prefix(' ')?;
+        (strip_prefix_path(a) == strip_prefix_path(b)).then_some((a, b))
+    });
+    let pair = equal.or_else(|| candidates.next());
+    pair.map_or_else(
+        || (strip_prefix_path(header), None),
+        |(a, b)| (strip_prefix_path(a), strip_prefix_path(b)),
+    )
 }
 
 /// Parse `git diff` output into per-file hunks. Tolerates binary markers,
@@ -303,16 +359,36 @@ pub fn parse_unified(text: &str) -> Vec<FileDiff> {
             if let Some(f) = cur.take() {
                 files.push(f);
             }
-            let mut parts = rest.splitn(2, " b/");
-            let a = parts.next().and_then(strip_prefix_path);
-            let b = parts.next().map(|p| p.trim().to_string());
+            let (a, b) = header_paths(rest);
             cur = Some(FileDiff {
                 old_path: a,
                 new_path: b,
                 hunks: Vec::new(),
                 is_binary: false,
             });
-        } else if line.starts_with("Binary files") {
+        } else if line.starts_with("deleted file mode ") {
+            if let Some(f) = cur.as_mut() {
+                f.new_path = None;
+            }
+        } else if line.starts_with("new file mode ") {
+            if let Some(f) = cur.as_mut() {
+                f.old_path = None;
+            }
+        } else if let Some(path) = line
+            .strip_prefix("rename from ")
+            .or_else(|| line.strip_prefix("copy from "))
+        {
+            if let Some(f) = cur.as_mut() {
+                f.old_path = Some(patch_path(path));
+            }
+        } else if let Some(path) = line
+            .strip_prefix("rename to ")
+            .or_else(|| line.strip_prefix("copy to "))
+        {
+            if let Some(f) = cur.as_mut() {
+                f.new_path = Some(patch_path(path));
+            }
+        } else if line.starts_with("Binary files") || line == "GIT binary patch" {
             if let Some(f) = cur.as_mut() {
                 f.is_binary = true;
             }
@@ -392,9 +468,11 @@ mod tests {
     fn long_equal_prefix_preserves_line_numbers_and_removal_ties() {
         let prefix = "same\n".repeat(1500);
         let lines = lcs_diff(&format!("{prefix}a\nb"), &format!("{prefix}b\na"));
-        assert!(lines[..1500]
-            .iter()
-            .all(|line| line.kind == LineKind::Context));
+        assert!(
+            lines[..1500]
+                .iter()
+                .all(|line| line.kind == LineKind::Context)
+        );
         assert_eq!(
             &lines[1500..],
             &[
@@ -491,6 +569,19 @@ mod tests {
         assert!(files[0].is_deleted());
         assert_eq!(files[0].display_path(), "gone.rs");
         assert_eq!(files[0].stats().deletions, 1);
+    }
+
+    #[test]
+    fn quoted_path_bytes_and_deleted_binaries_keep_review_links_on_the_right_revision() {
+        let files = parse_unified(concat!(
+            "diff --git \"a/caf\\303\\251.png\" \"b/caf\\303\\251.png\"\n",
+            "deleted file mode 100644\nBinary files differ\n",
+            "diff --git a/old name b/new name\nsimilarity index 100%\nrename from old name\nrename to new name\n"
+        ));
+        assert!(files[0].is_binary && files[0].is_deleted());
+        assert_eq!(files[0].display_path(), "café.png");
+        assert_eq!(files[1].old_path.as_deref(), Some("old name"));
+        assert_eq!(files[1].new_path.as_deref(), Some("new name"));
     }
 
     #[test]

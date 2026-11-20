@@ -91,10 +91,19 @@ pub fn transcript(
     runs: &[ReactiveRun],
     outbox: &[OutboxItem],
 ) -> Vec<TranscriptItem> {
+    conversation_items(agent_id, runs, outbox, false)
+}
+
+/// Include the prompt that started each turn in a scheduled thread.
+pub fn task_transcript(agent_id: &str, runs: &[ReactiveRun], outbox: &[OutboxItem]) -> Vec<TranscriptItem> {
+    conversation_items(agent_id, runs, outbox, true)
+}
+
+fn conversation_items(agent_id: &str, runs: &[ReactiveRun], outbox: &[OutboxItem], show_prompts: bool) -> Vec<TranscriptItem> {
     let mut items = Vec::new();
     for run in runs.iter().filter(|run| run.agent_id == agent_id) {
         let chat = matches!(run.trigger, Some(RunTrigger::Chat));
-        if is_owner_line(run) {
+        if is_owner_line(run) || (show_prompts && !matches!(run.status, RunStatus::AwaitingReview | RunStatus::Merged)) {
             let said = run.owner_message.as_deref().unwrap_or(&run.prompt);
             let (text, caption) = match parse_delivery(said) {
                 Some(view) => (view.body.to_string(), Some(view.caption())),

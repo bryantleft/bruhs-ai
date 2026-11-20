@@ -25,7 +25,7 @@ pub use transcript::*;
 mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
-pub const CREW_PROTOCOL: u32 = 3;
+pub const CREW_PROTOCOL: u32 = 5;
 
 /// First version that has Stop, access and the other crew commands.
 pub const CREW_COMMANDS_PROTOCOL: u32 = 1;

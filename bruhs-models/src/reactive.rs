@@ -9,6 +9,8 @@ use serde_json::Value;
 mod always_on;
 mod draft;
 mod report;
+mod webhook;
+pub use webhook::*;
 pub use always_on::*;
 pub use draft::{workflow_draft, ReactiveWorkflowDraft};
 pub use report::*;
@@ -73,6 +75,8 @@ pub enum SourceKind {
     Schedule {
         every_ms: u64,
     },
+    /// A scheduled prompt that becomes due once, including after an offline interval.
+    Once { due_at: EpochMs },
     /// Wall-clock times in a named IANA time zone, such as weekdays at 08:00.
     Calendar {
         /// `HH:MM` local times, 24-hour clock.
@@ -87,6 +91,107 @@ pub enum SourceKind {
         topic: String,
     },
     Custom,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum TaskConversation {
+    /// Existing automations continue in the agent's own conversation.
+    #[default]
+    Agent,
+    NewThread,
+    Continue,
+    FreshSession,
+}
+impl TaskConversation {
+    pub fn is_agent(&self) -> bool {
+        *self == Self::Agent
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::NewThread => "new_thread",
+            Self::Continue => "continue",
+            Self::FreshSession => "fresh_session",
+        }
+    }
+    pub fn has_destination(self) -> bool {
+        matches!(self, Self::Continue | Self::FreshSession)
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Agent => "Agent conversation",
+            Self::NewThread => "New thread each run",
+            Self::Continue => "One thread, continuing the conversation",
+            Self::FreshSession => "One thread, fresh session each run",
+        }
+    }
+    pub const ALL: [Self; 4] = [
+        Self::NewThread,
+        Self::Continue,
+        Self::FreshSession,
+        Self::Agent,
+    ];
+}
+
+/// An explicit destination change in a scheduled task edit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskDestinationEdit {
+    Existing {
+        thread_id: crate::ids::ThreadId,
+    },
+    /// Detach only the binding that was shown when the owner opened the editor.
+    FirstRun {
+        previous: crate::ids::ThreadId,
+    },
+}
+
+/// A conversation found in the selected project's scheduled task history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskThreadChoice {
+    pub thread_id: crate::ids::ThreadId,
+    pub title: String,
+    pub agent_id: String,
+    pub checkout: TaskCheckout,
+}
+
+/// Filesystem location used when a scheduled task starts a provider turn.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskCheckout {
+    #[default]
+    Project,
+    Existing {
+        path: String,
+    },
+    Worktree {
+        base_branch: String,
+        start_from_remote: bool,
+    },
+}
+
+impl TaskCheckout {
+    pub fn is_project(&self) -> bool {
+        matches!(self, Self::Project)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Project => Ok(()),
+            Self::Existing { path } => {
+                if path.trim().is_empty() || path.contains('\0') {
+                    return Err("Enter the absolute path of the checkout.".into());
+                }
+                Ok(())
+            }
+            Self::Worktree { base_branch, .. } => {
+                crate::logic::git::BranchName::try_from(base_branch.as_str())
+                    .map(|_| ())
+                    .map_err(|error| format!("Choose a valid base branch. {error}"))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +210,22 @@ pub struct Subscription {
     pub debounce_ms: u64,
     #[serde(default)]
     pub throttle_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub webhook_filters: Vec<WebhookFilter>,
+    /// Owner-authored request template. Older subscriptions use their original event envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "WebhookSecurity::is_empty")]
+    pub webhook_security: WebhookSecurity,
+    #[serde(default, skip_serializing_if = "WebhookDedupe::is_empty")]
+    pub webhook_dedupe: WebhookDedupe,
+    /// Scheduled task name. Older tasks display their agent's name until named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_title: Option<String>,
+    #[serde(default, skip_serializing_if = "TaskConversation::is_agent")]
+    pub task_conversation: TaskConversation,
+    #[serde(default, skip_serializing_if = "TaskCheckout::is_project")]
+    pub task_checkout: TaskCheckout,
     /// What a new event does while this subscription's agent is mid-run.
     #[serde(default, skip_serializing_if = "BusyPolicy::is_queue")]
     pub on_busy: BusyPolicy,
@@ -120,7 +241,17 @@ pub struct AutomationSetup {
     pub subscription: Subscription,
 }
 
+impl Subscription {
+    pub fn title<'a>(&'a self, agent: &'a ReactiveAgent) -> &'a str {
+        self.task_title.as_deref().unwrap_or(&agent.name)
+    }
+}
+
 impl AutomationSetup {
+    pub fn title(&self) -> &str {
+        self.subscription.title(&self.agent)
+    }
+
     pub fn from_subscription(
         snapshot: &ReactiveSnapshot,
         subscription: &Subscription,
@@ -147,6 +278,8 @@ impl AutomationSetup {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReactiveEvent {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filtered_subscriptions: Vec<String>,
     pub id: String,
     pub source_id: String,
     pub key: String,
@@ -184,6 +317,8 @@ pub struct ReactiveRun {
     pub status: RunStatus,
     pub prompt: String,
     pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "TaskCheckout::is_project")]
+    pub task_checkout: TaskCheckout,
     pub session_id: Option<String>,
     pub created_at: EpochMs,
     pub updated_at: EpochMs,
@@ -258,6 +393,18 @@ pub enum ReactiveCommand {
         id: String,
         approve: bool,
     },
+    /// Run one time-based task immediately. Repeating a request with the same run ID is idempotent.
+    RunScheduledTask { id: String, run_id: String },
+    /// Commit edited task settings and a requested activation change together.
+    SaveScheduledTask {
+        automation: Box<AutomationSetup>,
+        enabled: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signing_secret: Option<WebhookSigningSecret>,
+        /// Omitted by older clients and edits that keep the current destination.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        destination: Option<TaskDestinationEdit>,
+    },
     SetAutomationEnabled {
         id: String,
         enabled: bool,
@@ -275,6 +422,17 @@ pub enum ReactiveCommand {
         /// ends. Only sent to a service that speaks rooms.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run_id: Option<String>,
+    },
+    /// Delete a task conversation and the schedules linked to it when the owner chose Delete.
+    DeleteTaskThread {
+        thread_id: crate::ids::ThreadId,
+        linked_tasks: std::collections::BTreeSet<String>,
+    },
+    /// An owner reply in a scheduled task's saved destination.
+    ChatInTaskThread {
+        task_id: String,
+        thread_id: crate::ids::ThreadId,
+        message: String,
     },
     CreateRoom {
         room: Room,
@@ -399,6 +557,21 @@ pub struct ReactiveSnapshot {
     pub proposals: Vec<ReactiveProposal>,
     #[serde(default)]
     pub source_statuses: Vec<SourceStatus>,
+    /// Persistent task destinations, including threads outside the recent runs page.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub task_threads: std::collections::BTreeMap<String, crate::ids::ThreadId>,
+    /// Manually selected destinations. Its presence signals support for project thread search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_task_threads: Option<std::collections::BTreeMap<String,TaskThreadChoice>>,
+    /// This host can delete scheduled conversations and their linked tasks atomically.
+    #[serde(default)]
+    pub can_delete_task_threads: bool,
+    /// The host supports per-task webhook URLs and rotation.
+    #[serde(default)]
+    pub can_address_task_webhooks: bool,
+    /// Next occurrences for active time-based sources. Older hosts omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run_by_source: Option<std::collections::BTreeMap<String, EpochMs>>,
     /// Unresolved questions plus a page of recent updates, newest first.
     #[serde(default)]
     pub outbox: Vec<OutboxItem>,

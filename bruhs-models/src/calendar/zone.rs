@@ -11,7 +11,7 @@
 const MINUTE_MS: i64 = 60_000;
 const DAY_MS: i64 = 86_400_000;
 /// Offsets in use stay within ±14 hours of UTC.
-const MAX_OFFSET_MS: i64 = 14 * 60 * MINUTE_MS;
+pub(crate) const MAX_OFFSET_MS: i64 = 14 * 60 * MINUTE_MS;
 
 /// The wall-clock reading of `instant_ms`, expressed as milliseconds since
 /// 1970-01-01T00:00 *on the wall clock* (so `div_euclid(DAY_MS)` is the

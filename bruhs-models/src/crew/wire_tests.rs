@@ -208,8 +208,8 @@ fn computer_is_its_own_command_and_survives_an_access_save() {
     )
     .unwrap();
     assert!(!state.computer, "an older service's bruh reads as off");
-    assert!(computer_ready(3) && !computer_ready(2) && CREW_PROTOCOL == 3);
-    assert_eq!(COMPUTER_PROTOCOL, CREW_PROTOCOL);
+    assert_eq!(COMPUTER_PROTOCOL, 3);
+    assert!(computer_ready(3) && !computer_ready(2) && computer_ready(CREW_PROTOCOL));
 
     let agent = crate::reactive::ReactiveAgent {
         id: "a".into(),

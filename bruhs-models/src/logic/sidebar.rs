@@ -5,7 +5,7 @@
 //! thread has not been dragged into a spot.
 
 /// Idle threads older than this fold into Settled. T3's default is three
-/// days and is configurable; bruhs keeps one day.
+/// days. Existing bruhs workspaces default to one day.
 pub const SETTLED_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// How long an Undo notification stays up.
@@ -39,6 +39,7 @@ pub enum DragEffect {
 pub struct SidebarFacts<'a> {
     pub id: &'a str,
     pub updated_at_ms: i64,
+    pub idle_settle_after_ms: Option<i64>,
     pub pinned: bool,
     pub settled: bool,
     pub pin_rank: Option<i64>,
@@ -106,7 +107,7 @@ pub fn is_settled(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {
     if facts.active || facts.unread {
         return false;
     }
-    now_ms.saturating_sub(facts.updated_at_ms) >= SETTLED_AFTER_MS
+    facts.idle_settle_after_ms.is_some_and(|age| now_ms.saturating_sub(facts.updated_at_ms) >= age)
 }
 
 fn snoozed(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {
@@ -390,8 +391,8 @@ pub struct ThreadMenuFacts {
     pub settled: bool,
     /// Snoozed until a time that is still ahead.
     pub snoozed: bool,
-    /// A turn is running, so the title cannot be regenerated.
-    pub streaming: bool,
+    /// The client currently cannot start another title request.
+    pub title_action_disabled: bool,
     /// The thread is open and its composer holds a draft.
     pub has_draft: bool,
 }
@@ -411,7 +412,7 @@ pub enum ThreadMenuEntry {
     Snooze(SnoozePreset),
     /// Opens the custom snooze dialog.
     SnoozeCustom,
-    /// Disabled while a turn runs.
+    /// Disabled when the client cannot start another title request.
     RegenerateTitle {
         enabled: bool,
     },
@@ -474,7 +475,7 @@ pub fn thread_menu(
     rows.push(ThreadMenuEntry::SnoozeCustom);
     rows.push(ThreadMenuEntry::Separator);
     rows.push(ThreadMenuEntry::RegenerateTitle {
-        enabled: !facts.streaming,
+        enabled: !facts.title_action_disabled,
     });
     if facts.has_draft {
         rows.push(ThreadMenuEntry::DiscardDraft);
@@ -545,6 +546,7 @@ mod tests {
         SidebarFacts {
             id,
             updated_at_ms: 1_000,
+            idle_settle_after_ms: Some(SETTLED_AFTER_MS),
             pinned: false,
             settled: false,
             pin_rank: None,
@@ -780,7 +782,7 @@ mod tests {
             pinned: true,
             settled: true,
             snoozed: true,
-            streaming: true,
+            title_action_disabled: true,
             has_draft: true,
         };
         assert_eq!(
@@ -803,7 +805,7 @@ mod tests {
         let rows = thread_menu(busy, 0, 0);
         assert!(
             !rows.contains(&ThreadMenuEntry::RegenerateTitle { enabled: true }),
-            "a running turn disables Regenerate title"
+            "the client can disable title regeneration"
         );
         assert!(!ThreadMenuEntry::Separator.enabled());
         assert!(ThreadMenuEntry::SnoozeCustom.enabled());

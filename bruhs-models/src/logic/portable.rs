@@ -235,14 +235,14 @@ pub fn thread_context(title: &str, messages: &[PortableMessage]) -> Option<Strin
 /// message under its role, tool calls as one line each with their output
 /// cut short. When it is longer than `max_chars`, the oldest messages are
 /// dropped (and a note says so).
-pub fn transcript_markdown(
+pub fn transcript_markdown<'a>(
     title: &str,
     source: &str,
-    messages: &[PortableMessage],
+    messages: impl IntoIterator<Item = &'a PortableMessage>,
     max_chars: usize,
 ) -> String {
     let header = format!("# {}\n\n_Conversation from {source}._\n\n", one_line(title));
-    let blocks: Vec<String> = messages.iter().filter_map(message_markdown).collect();
+    let blocks: Vec<String> = messages.into_iter().filter_map(message_markdown).collect();
     let mut kept = Vec::new();
     let mut used = header.chars().count();
     for block in blocks.iter().rev() {

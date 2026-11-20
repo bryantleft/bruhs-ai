@@ -351,6 +351,10 @@ pub struct DictationTranscript {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DictationOptions {
     #[serde(default)]
+    pub silence_filtering: bool,
+    #[serde(default)]
+    pub remove_filler_words: bool,
+    #[serde(default)]
     pub model: crate::WhisperModel,
     pub language: Option<String>,
 }

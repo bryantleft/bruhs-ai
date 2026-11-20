@@ -41,37 +41,41 @@ impl SecretOperation {
         {
             return Err("Credential names and reasons cannot contain control characters.");
         }
-        let mut chars = self.env_var.chars();
-        let valid = chars
-            .next()
-            .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
-            && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-        if !valid
-            || matches!(
-                self.env_var.as_str(),
-                "PATH"
-                    | "HOME"
-                    | "SHELL"
-                    | "ENV"
-                    | "BASH_ENV"
-                    | "ZDOTDIR"
-                    | "IFS"
-                    | "SHELLOPTS"
-                    | "BASHOPTS"
-                    | "NODE_OPTIONS"
-                    | "PYTHONPATH"
-                    | "PYTHONHOME"
-            )
-            || ["LD_", "DYLD_", "BRUHS_"]
-                .iter()
-                .any(|prefix| self.env_var.starts_with(prefix))
-        {
-            return Err(
-                "Use an uppercase credential variable, not a process-control or Bruhs variable.",
-            );
-        }
-        Ok(())
+        validate_credential_variable(&self.env_var)
     }
+}
+
+pub fn validate_credential_variable(name: &str) -> Result<(), &'static str> {
+    let mut chars = name.chars();
+    let valid = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    if !valid
+        || matches!(
+            name,
+            "PATH"
+                | "HOME"
+                | "SHELL"
+                | "ENV"
+                | "BASH_ENV"
+                | "ZDOTDIR"
+                | "IFS"
+                | "SHELLOPTS"
+                | "BASHOPTS"
+                | "NODE_OPTIONS"
+                | "PYTHONPATH"
+                | "PYTHONHOME"
+        )
+        || ["LD_", "DYLD_", "BRUHS_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    {
+        return Err(
+            "Use an uppercase credential variable, not a process-control or Bruhs variable.",
+        );
+    }
+    Ok(())
 }
 
 fn is_format_control(c: char) -> bool {
