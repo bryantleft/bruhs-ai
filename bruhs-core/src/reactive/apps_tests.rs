@@ -3,10 +3,14 @@
 //! and what `list_apps` tells it. The keychain is the in-memory store, the
 //! mail a synthetic Gmail connection, and no call leaves the test.
 
+use super::approval::decide;
 use super::apps::pick_mailbox;
 use super::computer_tests::full_claude;
-use super::crew_tests::{queued_run, runtime_with};
-use super::{worker, ReactiveRuntime};
+use super::crew_tests::{
+    approvals, claim_one, decide_approval, decided, deny, finish, queued_run, runtime_with,
+    waiting_approval, Decision, LONG_WAIT, NOT_ANSWERED, SHORT_WAIT,
+};
+use super::{worker, ReactiveRuntime, StepAllowance};
 use crate::apps::{AppHttp, AppsHost};
 use crate::mail::compose::test_support::ConnectedMail;
 use crate::mail::gmail::GmailClient;
@@ -14,6 +18,8 @@ use crate::mail::outlook::OutlookClient;
 use crate::mail::{SyncBatch, ThreadWrite};
 use crate::secrets::{SecretManager, SecretStore};
 use crate::workbench_tools::BruhTools;
+use crate::PermissionDecision;
+use bruhs_models::agent::AgentProvider;
 use bruhs_models::apps::{AppMailbox, MAX_ACCOUNT_CHARS};
 use bruhs_models::connections::ServiceProvider;
 use bruhs_models::crew::*;
@@ -22,12 +28,13 @@ use bruhs_models::mail::{
     MailReplyTarget,
 };
 use bruhs_models::reactive::{ReactiveAgent, ReactiveCommand, ReactiveRun};
-use bruhs_models::vault::{CredentialScope, VaultCreate, VaultSecretInput};
+use bruhs_models::vault::{CredentialScope, VaultCreate, VaultSecretInput, OWNER_ONLY_CARD};
 use bruhs_models::{InboxConversation, InboxMessage, InboxSource};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use wiremock::MockServer;
 
 /// A random value no listing may hold.
@@ -803,4 +810,626 @@ async fn list_apps_names_accounts_and_guides_without_tokens() {
         assert!(!text.contains(token.as_str()));
     }
     assert!(!text.to_lowercase().contains("authorization"));
+}
+
+// ── The gate on app and mail calls ─────────────────────────────────────────
+
+const DENIED: &str = "The owner denied this. Continue without it.";
+
+fn access(level: AccessLevel, send_as_me: bool, can_deliver: bool) -> BruhAccess {
+    BruhAccess {
+        level,
+        send_as_me,
+        can_deliver,
+    }
+}
+
+/// Saves `access` for bruh `a`, then claims a chat for it: a Running run.
+/// Saving access stops `a`'s earlier runs.
+async fn claimed_at(fixture: &Fixture, access: &BruhAccess) -> ReactiveRun {
+    let runtime = &fixture.runtime;
+    runtime
+        .command(ReactiveCommand::SetBruh {
+            agent_id: "a".into(),
+            look: BruhLook::default(),
+            access: access.clone(),
+            effort: None,
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Chat {
+            agent_id: "a".into(),
+            message: "Do the work.".into(),
+            run_id: None,
+        })
+        .await
+        .unwrap();
+    let run = claim_one(runtime).await.unwrap().run;
+    assert_eq!(run.agent_id, "a");
+    run
+}
+
+/// `approval::decide` for a Claude bruh at `access`, in the background.
+fn spawn_gate(
+    fixture: &Fixture,
+    access: &BruhAccess,
+    run: &ReactiveRun,
+    tool: &str,
+    input: Value,
+    timeout: Duration,
+) -> tokio::task::JoinHandle<Decision> {
+    let (runtime, access, run, tool) = (
+        fixture.runtime.clone(),
+        access.clone(),
+        run.clone(),
+        tool.to_owned(),
+    );
+    tokio::spawn(async move {
+        decide(
+            &runtime,
+            &access,
+            AgentProvider::Claude,
+            false,
+            &run,
+            runtime
+                .allowances
+                .current_claim(&run.id)
+                .unwrap_or_default(),
+            "",
+            &tool,
+            &input,
+            timeout,
+        )
+        .await
+    })
+}
+
+fn allow() -> Option<PermissionDecision> {
+    Some(PermissionDecision::Allow)
+}
+
+async fn consume(fixture: &Fixture, tool: &str, input: &Value) -> Option<StepAllowance> {
+    fixture
+        .runtime
+        .consume_app_allowance("a", tool, input)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn reads_run_at_ask_and_leave_one_allowance() {
+    let mut fixture = Fixture::new().await;
+    let octo = fixture
+        .token(
+            "GitHub octo",
+            CredentialScope::Global,
+            "github",
+            "octo",
+            &[],
+        )
+        .await;
+    fixture.grant_token("a", &octo).await;
+    let run = claimed_at(&fixture, &access(AccessLevel::Ask, false, false)).await;
+    let input =
+        json!({"app": "github", "method": "GET", "path": "/repos/o/r", "query": {"per_page": 1}});
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, APP_REQUEST_TOOL, &input)
+            .await
+            .unwrap(),
+        allow()
+    );
+    assert!(approvals(&fixture.runtime, "a").await.is_empty());
+
+    // Matched on the tool and the input exactly as sent.
+    let reencoded =
+        json!({"app": "github", "method": "GET", "path": "/repos/o/r", "query": {"per_page": 1.0}});
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &reencoded).await, None);
+    assert_eq!(consume(&fixture, SEND_MAIL_TOOL, &input).await, None);
+    assert_eq!(consume(&fixture, BRUH_BROWSER_TOOL, &input).await, None);
+    assert_eq!(
+        fixture
+            .runtime
+            .consume_browser_allowance("a", &input)
+            .await
+            .unwrap(),
+        None
+    );
+    let allowance = consume(&fixture, APP_REQUEST_TOOL, &input).await.unwrap();
+    assert_eq!(allowance.tool, APP_REQUEST_TOOL);
+    assert_eq!(allowance.command, input);
+    assert_eq!(allowance.run_id, run.id);
+    assert_eq!(allowance.target.as_deref(), Some(octo.as_str()));
+    assert_eq!(allowance.page_url, None);
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &input).await, None);
+
+    // list_apps is a read too.
+    let list = json!({});
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, LIST_APPS_TOOL, &list)
+            .await
+            .unwrap(),
+        allow()
+    );
+    let listed = consume(&fixture, LIST_APPS_TOOL, &list).await.unwrap();
+    assert_eq!(listed.target, None);
+    assert!(approvals(&fixture.runtime, "a").await.is_empty());
+}
+
+#[tokio::test]
+async fn writes_and_sends_ask_with_whole_cards() {
+    let mut fixture = Fixture::new().await;
+    let notion = fixture
+        .token("Notion", CredentialScope::Global, "notion", "ws", &[])
+        .await;
+    let slack = fixture
+        .token("Slack", CredentialScope::Global, "slack", "me", &[])
+        .await;
+    fixture.grant_token("a", &notion).await;
+    fixture.grant_token("a", &slack).await;
+    let ask = access(AccessLevel::Ask, false, false);
+    let run = claimed_at(&fixture, &ask).await;
+    let patch = json!({"app": "notion", "method": "PATCH", "path": "/v1/pages/p", "body": {"archived": true}});
+
+    // Approved: the call goes once.
+    let task = spawn_gate(
+        &fixture,
+        &ask,
+        &run,
+        APP_REQUEST_TOOL,
+        patch.clone(),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&fixture.runtime, "a").await;
+    let request = item.approval.clone().unwrap();
+    assert_eq!(request.tool, APP_REQUEST_TOOL);
+    assert_eq!(request.summary, "Notion: PATCH /v1/pages/p");
+    let detail = request.detail.unwrap();
+    assert!(detail.starts_with("Account: "), "{detail}");
+    assert!(detail.contains("\"archived\":true"), "{detail}");
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &patch).await, None);
+    decide_approval(&fixture.runtime, &item.id, true).await;
+    assert_eq!(decided(task).await, allow());
+    // The card's input, with its "as", is not the call.
+    let card = app_card_input(
+        &patch,
+        &AppTarget {
+            entry_id: notion.clone(),
+            app: "notion".into(),
+            account: "ws".into(),
+        },
+    );
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &card).await, None);
+    let allowance = consume(&fixture, APP_REQUEST_TOOL, &patch).await.unwrap();
+    assert_eq!(allowance.target.as_deref(), Some(notion.as_str()));
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &patch).await, None);
+
+    // Denied: p3's copy, and nothing to send.
+    let task = spawn_gate(
+        &fixture,
+        &ask,
+        &run,
+        APP_REQUEST_TOOL,
+        patch.clone(),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&fixture.runtime, "a").await;
+    decide_approval(&fixture.runtime, &item.id, false).await;
+    assert_eq!(decided(task).await, deny(DENIED));
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &patch).await, None);
+
+    // Full without Send as me: a post as the owner still asks.
+    let full = access(AccessLevel::Full, false, false);
+    let run = claimed_at(&fixture, &full).await;
+    let post = json!({"app": "slack", "method": "POST", "path": "/api/chat.postMessage", "body": {"channel": "C1", "text": "hi"}});
+    let task = spawn_gate(
+        &fixture,
+        &full,
+        &run,
+        APP_REQUEST_TOOL,
+        post.clone(),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&fixture.runtime, "a").await;
+    assert_eq!(
+        item.approval.as_ref().unwrap().summary,
+        "As you on Slack: POST /api/chat.postMessage"
+    );
+    decide_approval(&fixture.runtime, &item.id, false).await;
+    assert_eq!(decided(task).await, deny(DENIED));
+    // A Full write runs at once.
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &full,
+            &run,
+            APP_REQUEST_TOOL,
+            patch.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        allow()
+    );
+    assert!(consume(&fixture, APP_REQUEST_TOOL, &patch).await.is_some());
+
+    // Full with Send as me: the post runs at once.
+    let sends = access(AccessLevel::Full, true, false);
+    let run = claimed_at(&fixture, &sends).await;
+    let before = approvals(&fixture.runtime, "a").await.len();
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, APP_REQUEST_TOOL, &post)
+            .await
+            .unwrap(),
+        allow()
+    );
+    assert_eq!(approvals(&fixture.runtime, "a").await.len(), before);
+    assert!(consume(&fixture, APP_REQUEST_TOOL, &post).await.is_some());
+}
+
+#[tokio::test]
+async fn send_mail_is_a_send() {
+    let fixture = Fixture::new().await;
+    fixture.grant_mailbox("a").await;
+    let mailbox = fixture.mailbox().await;
+    let mail =
+        json!({"to": "ann@x.test", "subject": "Lunch", "body": "Noon works.\nSee you there."});
+
+    let sends = access(AccessLevel::Full, true, false);
+    let run = claimed_at(&fixture, &sends).await;
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, SEND_MAIL_TOOL, &mail)
+            .await
+            .unwrap(),
+        allow()
+    );
+    let allowance = consume(&fixture, SEND_MAIL_TOOL, &mail).await.unwrap();
+    assert_eq!(allowance.command, mail);
+    assert_eq!(
+        allowance.target.as_deref(),
+        Some(mailbox.mailbox_id.as_str())
+    );
+    assert!(approvals(&fixture.runtime, "a").await.is_empty());
+
+    let full = access(AccessLevel::Full, false, false);
+    let run = claimed_at(&fixture, &full).await;
+    let task = spawn_gate(
+        &fixture,
+        &full,
+        &run,
+        SEND_MAIL_TOOL,
+        mail.clone(),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&fixture.runtime, "a").await;
+    let request = item.approval.clone().unwrap();
+    assert_eq!(request.tool, SEND_MAIL_TOOL);
+    assert_eq!(request.summary, "Email ann@x.test: Lunch");
+    let detail = request.detail.unwrap();
+    assert!(detail.contains("Noon works.\nSee you there."), "{detail}");
+    assert!(detail.contains(&mailbox.account), "{detail}");
+    decide_approval(&fixture.runtime, &item.id, true).await;
+    assert_eq!(decided(task).await, allow());
+    assert!(consume(&fixture, SEND_MAIL_TOOL, &mail).await.is_some());
+    assert_eq!(consume(&fixture, SEND_MAIL_TOOL, &mail).await, None);
+}
+
+#[tokio::test]
+async fn forge_delivery_needs_can_deliver() {
+    let mut fixture = Fixture::new().await;
+    let octo = fixture
+        .token(
+            "GitHub octo",
+            CredentialScope::Global,
+            "github",
+            "octo",
+            &[],
+        )
+        .await;
+    fixture.grant_token("a", &octo).await;
+    let merge = json!({"app": "github", "method": "PUT", "path": "/repos/o/r/pulls/1/merge"});
+    let run = claimed_at(&fixture, &access(AccessLevel::Full, true, false)).await;
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, APP_REQUEST_TOOL, &merge)
+            .await
+            .unwrap(),
+        deny(DELIVERY_DENIAL)
+    );
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &merge).await, None);
+    let run = claimed_at(&fixture, &access(AccessLevel::Full, true, true)).await;
+    assert_eq!(
+        fixture
+            .runtime
+            .gate_app_call_for_tests(&run, APP_REQUEST_TOOL, &merge)
+            .await
+            .unwrap(),
+        allow()
+    );
+    assert!(consume(&fixture, APP_REQUEST_TOOL, &merge).await.is_some());
+    assert!(approvals(&fixture.runtime, "a").await.is_empty());
+}
+
+#[tokio::test]
+async fn a_revoked_grant_stops_the_next_call() {
+    let mut fixture = Fixture::new().await;
+    let octo = fixture
+        .token(
+            "GitHub octo",
+            CredentialScope::Global,
+            "github",
+            "octo",
+            &[],
+        )
+        .await;
+    fixture.grant_token("a", &octo).await;
+    fixture.grant_mailbox("a").await;
+    let run = claimed_at(&fixture, &access(AccessLevel::Full, true, false)).await;
+    let read = json!({"app": "github", "method": "GET", "path": "/repos/o/r"});
+    let mail = json!({"to": "ann@x.test", "subject": "Lunch", "body": "Noon?"});
+    let gate = |tool: &'static str, input: Value| {
+        let (runtime, run) = (fixture.runtime.clone(), run.clone());
+        async move {
+            runtime
+                .gate_app_call_for_tests(&run, tool, &input)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(gate(APP_REQUEST_TOOL, read.clone()).await, allow());
+    assert_eq!(gate(SEND_MAIL_TOOL, mail.clone()).await, allow());
+    for grant in [
+        AppGrant::Token {
+            entry_id: octo.clone(),
+        },
+        AppGrant::Mailbox {
+            mailbox_id: fixture.mail.mailbox.as_str().into(),
+        },
+    ] {
+        fixture
+            .runtime
+            .command(ReactiveCommand::SetAppGrant {
+                agent_id: "a".into(),
+                grant,
+                granted: false,
+            })
+            .await
+            .unwrap();
+    }
+    // The revoke cancelled nothing: the same run's next calls are refused.
+    assert_eq!(gate(APP_REQUEST_TOOL, read).await, deny(APP_NOT_GRANTED));
+    assert_eq!(gate(SEND_MAIL_TOOL, mail).await, deny(MAIL_NOT_GRANTED));
+}
+
+/// Ruling F25: a late approval leaves a grant for the card, and the resumed
+/// run's same call uses it once, leaving its allowance on the raw input
+/// and the account the gate picked now.
+#[tokio::test]
+async fn a_late_approval_runs_once_in_the_resumed_run() {
+    let mut fixture = Fixture::new().await;
+    let notion = fixture
+        .token("Notion", CredentialScope::Global, "notion", "ws", &[])
+        .await;
+    fixture.grant_token("a", &notion).await;
+    let ask = access(AccessLevel::Ask, false, false);
+    let run = claimed_at(&fixture, &ask).await;
+    let patch = json!({"app": "notion", "method": "PATCH", "path": "/v1/pages/p", "body": {"archived": true}});
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &ask,
+            &run,
+            APP_REQUEST_TOOL,
+            patch.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        deny(NOT_ANSWERED)
+    );
+    let [item] = approvals(&fixture.runtime, "a").await.try_into().unwrap();
+    finish(
+        &fixture.runtime,
+        &run.id,
+        "Waiting on the owner's approval.",
+    )
+    .await;
+    decide_approval(&fixture.runtime, &item.id, true).await;
+    let resumed = claim_one(&fixture.runtime).await.unwrap().run;
+    assert_ne!(resumed.id, run.id);
+
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &ask,
+            &resumed,
+            APP_REQUEST_TOOL,
+            patch.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        allow()
+    );
+    assert_eq!(approvals(&fixture.runtime, "a").await.len(), 1);
+    let allowance = consume(&fixture, APP_REQUEST_TOOL, &patch).await.unwrap();
+    assert_eq!(allowance.run_id, resumed.id);
+    assert_eq!(allowance.command, patch);
+    assert_eq!(allowance.target.as_deref(), Some(notion.as_str()));
+    assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &patch).await, None);
+    // The grant is used up: the same call asks again.
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &ask,
+            &resumed,
+            APP_REQUEST_TOOL,
+            patch.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        deny(NOT_ANSWERED)
+    );
+    assert_eq!(approvals(&fixture.runtime, "a").await.len(), 2);
+}
+
+/// Ruling F10: a call without `account` resolves again on each use, and
+/// its allowance names the account the gate picked for it.
+#[tokio::test]
+async fn an_allowance_names_the_account_the_gate_picked() {
+    let mut fixture = Fixture::new().await;
+    let octo = fixture
+        .token(
+            "GitHub octo",
+            CredentialScope::Global,
+            "github",
+            "octo",
+            &[],
+        )
+        .await;
+    let work = fixture
+        .token(
+            "GitHub work",
+            CredentialScope::Global,
+            "github",
+            "work",
+            &[],
+        )
+        .await;
+    fixture.grant_token("a", &octo).await;
+    fixture.grant_token("a", &work).await;
+    let full = access(AccessLevel::Full, true, false);
+    let run = claimed_at(&fixture, &full).await;
+    let named = json!({"app": "github", "account": "work", "method": "POST", "path": "/repos/o/r/issues", "body": {"title": "Hi"}});
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &full,
+            &run,
+            APP_REQUEST_TOOL,
+            named.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        allow()
+    );
+    let allowance = consume(&fixture, APP_REQUEST_TOOL, &named).await.unwrap();
+    assert_eq!(allowance.target.as_deref(), Some(work.as_str()));
+
+    // Two accounts and none named: refused until one goes.
+    let unnamed = json!({"app": "github", "method": "POST", "path": "/repos/o/r/issues", "body": {"title": "Hi"}});
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &full,
+            &run,
+            APP_REQUEST_TOOL,
+            unnamed.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        deny(APP_ACCOUNT_NEEDED)
+    );
+    fixture
+        .runtime
+        .command(ReactiveCommand::SetAppGrant {
+            agent_id: "a".into(),
+            grant: AppGrant::Token {
+                entry_id: work.clone(),
+            },
+            granted: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        decided(spawn_gate(
+            &fixture,
+            &full,
+            &run,
+            APP_REQUEST_TOOL,
+            unnamed.clone(),
+            SHORT_WAIT
+        ))
+        .await,
+        allow()
+    );
+    let allowance = consume(&fixture, APP_REQUEST_TOOL, &unnamed).await.unwrap();
+    assert_eq!(allowance.target.as_deref(), Some(octo.as_str()));
+}
+
+#[tokio::test]
+async fn pages_can_not_grant_apps_approve_sends_or_save_app_polls() {
+    let fixture = Fixture::new().await;
+    let runtime = &fixture.runtime;
+    let run = claimed_at(&fixture, &access(AccessLevel::Ask, false, false)).await;
+    let target = AppTarget {
+        entry_id: "e".into(),
+        app: "notion".into(),
+        account: "ws".into(),
+    };
+    let app = runtime
+        .open_approval_for_tests(
+            &run,
+            APP_REQUEST_TOOL,
+            &app_card_input(
+                &json!({"app": "notion", "method": "PATCH", "path": "/v1/pages/p"}),
+                &target,
+            ),
+        )
+        .await
+        .unwrap();
+    let mail = runtime
+        .open_approval_for_tests(
+            &run,
+            SEND_MAIL_TOOL,
+            &mail_card_input(
+                &json!({"to": "ann@x.test", "subject": "Lunch", "body": "Noon?"}),
+                &MailTarget {
+                    mailbox_id: "m".into(),
+                    account: "me@x.test".into(),
+                    reply_subject: None,
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let bash = runtime
+        .open_approval_for_tests(&run, "Bash", &json!({"command": "make"}))
+        .await
+        .unwrap();
+    for (id, expected) in [
+        (app, Some(OWNER_ONLY_CARD)),
+        (mail, Some(OWNER_ONLY_CARD)),
+        (bash, None),
+        ("unknown".to_owned(), None),
+    ] {
+        for approve in [true, false] {
+            let decide = ReactiveCommand::DecideApproval {
+                id: id.clone(),
+                approve,
+            };
+            assert_eq!(
+                runtime.owner_only_refusal(&decide).await.unwrap(),
+                expected,
+                "{decide:?}"
+            );
+        }
+    }
+    let grant = ReactiveCommand::SetAppGrant {
+        agent_id: "a".into(),
+        grant: AppGrant::Mailbox {
+            mailbox_id: "m".into(),
+        },
+        granted: true,
+    };
+    assert_eq!(
+        runtime.owner_only_refusal(&grant).await.unwrap(),
+        Some(OWNER_ONLY_APPS)
+    );
 }

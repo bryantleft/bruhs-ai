@@ -71,7 +71,7 @@ pub struct SourceEmission {
     pub payload: Value,
 }
 
-pub use approval::BrowserAllowance;
+pub use approval::StepAllowance;
 pub use notify::{system_notifier, Notifier};
 pub use vault::VaultRefusal;
 

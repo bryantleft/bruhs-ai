@@ -2,17 +2,20 @@
 //! call of an unattended run; a call that needs approval becomes an outbox
 //! item, and the run waits for the answer, a timeout or Stop. While the
 //! owner has the bruh's computer, every call waits first for it to come
-//! back. A browser call is gated on the page it acts on, and each one the
-//! gate lets through leaves a one-shot allowance the command route uses up.
+//! back. A browser call is gated on the page it acts on, and an app or mail
+//! call on the account or mailbox it goes out as, looked up live. Each one
+//! the gate lets through leaves a one-shot allowance its route uses up.
 
 use super::{store, ReactiveError, ReactiveRuntime};
 use crate::PermissionDecision;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
-        ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED,
-        LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL,
+        app_card_input, app_gate, approval_fingerprint, apps_unavailable, browser_gate,
+        is_app_tool, list_apps_gate, mail_card_input, mail_gate, network_host, permission_gate,
+        same_page_host, AppLookup, ApprovalState, BruhAccess, Gate, MailLookup, APP_REQUEST_TOOL,
+        BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED, LINKED_FILE_DENIAL,
+        LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL, SEND_MAIL_TOOL,
         VAULT_COMMAND_RUNNING, VAULT_FILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
@@ -36,26 +39,34 @@ const NOT_ANSWERED: &str =
 const MAX_LINKS: u8 = 40;
 /// How long the gate waits for a network tool call's host to resolve.
 const RESOLVE_WAIT: Duration = Duration::from_secs(2);
-/// How long an allowed browser step waits for the helper's request: the
-/// helper's own request deadline.
+/// How long an allowed step waits for the helper's request: the helper's
+/// own request deadline.
 const ALLOWANCE_TTL: Duration = crate::capture_client::REQUEST_TIMEOUT;
 
-/// A browser step the gate let through, kept until the bruh's helper sends
-/// it to the command route. One request uses it up.
+/// A bruh step the gate let through, kept until the bruh's helper sends it
+/// to its route: a browser step, an app call or an email. One request uses
+/// it up.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BrowserAllowance {
+pub struct StepAllowance {
     pub agent_id: String,
     pub run_id: String,
-    /// The step exactly as the gate saw it: the tool input's `command`.
+    /// The tool the gate let through.
+    pub tool: String,
+    /// The step exactly as the bruh sent it: a browser call's `command`,
+    /// or an app or mail tool's whole input, never the card's.
     pub command: Value,
-    /// The page the gate saw it act on, when known.
+    /// The page the gate saw a browser step act on, when known.
     pub page_url: Option<String>,
+    /// The vault entry an app call or the mailbox an email goes out as,
+    /// as the gate looked it up (ruling F10). The route's live lookup must
+    /// find the same one.
+    pub target: Option<String>,
     /// The attempt at the run that was allowed it ([`Allowances::claim`]).
     claim: u64,
     expires: Instant,
 }
 
-/// The browser steps allowed and not yet sent, one entry per allowed call,
+/// The steps allowed and not yet sent, one entry per allowed call,
 /// so identical calls in parallel each run once. Each belongs to one claim
 /// of its run: a retry keeps the run's id, so an old attempt's worker that
 /// hasn't noticed its cancel yet can neither leave a step for the new
@@ -65,7 +76,7 @@ pub(super) struct Allowances(Mutex<AllowanceState>);
 
 #[derive(Debug, Default)]
 struct AllowanceState {
-    list: Vec<BrowserAllowance>,
+    list: Vec<StepAllowance>,
     /// Each running run's current claim.
     claims: std::collections::HashMap<String, u64>,
     last_claim: u64,
@@ -99,7 +110,7 @@ impl Allowances {
     }
 
     /// Keep `allowance`, unless its claim is no longer its run's current one.
-    fn record(&self, allowance: BrowserAllowance) {
+    fn record(&self, allowance: StepAllowance) {
         let mut state = self.state();
         if state.claims.get(&allowance.run_id) != Some(&allowance.claim) {
             return;
@@ -109,15 +120,24 @@ impl Allowances {
         state.list.push(allowance);
     }
 
-    /// Take the newest allowance for `agent_id`'s exact `command` that is
-    /// still good at `now`, from its run's current claim. Expired ones go.
-    fn take(&self, agent_id: &str, command: &Value, now: Instant) -> Option<BrowserAllowance> {
+    /// Take the newest allowance for `agent_id`'s exact `command` of
+    /// `tool` that is still good at `now`, from its run's current claim.
+    /// Expired ones go.
+    fn take(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        command: &Value,
+        now: Instant,
+    ) -> Option<StepAllowance> {
         let mut state = self.state();
         let AllowanceState { list, claims, .. } = &mut *state;
         list.retain(|kept| kept.expires > now && claims.get(&kept.run_id) == Some(&kept.claim));
         let taken = list
             .iter()
-            .rposition(|kept| kept.agent_id == agent_id && &kept.command == command)
+            .rposition(|kept| {
+                kept.agent_id == agent_id && kept.tool == tool && &kept.command == command
+            })
             .map(|index| list.remove(index));
         drop(state);
         taken
@@ -144,17 +164,48 @@ impl ReactiveRuntime {
         &self,
         agent_id: &str,
         command: &Value,
-    ) -> Result<Option<BrowserAllowance>, ReactiveError> {
-        let (allowances, agent_id, command) = (
+    ) -> Result<Option<StepAllowance>, ReactiveError> {
+        self.consume_allowance(agent_id, BRUH_BROWSER_TOOL, command)
+            .await
+    }
+
+    /// Use up the allowance the gate left for this exact call of app or
+    /// mail `tool` (`input` as the helper sent it, never the card's) by a
+    /// running run of `agent_id`. `None` when the gate never let it
+    /// through, it already ran or expired, its run stopped, or `tool` is
+    /// no app or mail tool. The allowance's `target` is the account or
+    /// mailbox the gate picked, which the route checks against its own
+    /// live lookup.
+    pub async fn consume_app_allowance(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        input: &Value,
+    ) -> Result<Option<StepAllowance>, ReactiveError> {
+        if !is_app_tool(tool) {
+            return Ok(None);
+        }
+        self.consume_allowance(agent_id, tool, input).await
+    }
+
+    async fn consume_allowance(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        command: &Value,
+    ) -> Result<Option<StepAllowance>, ReactiveError> {
+        let (allowances, agent_id, tool, command) = (
             Arc::clone(&self.allowances),
             agent_id.to_owned(),
+            tool.to_owned(),
             command.clone(),
         );
         // Taken and checked under the database lock, which a claim holds
         // while it forgets a retried run's old allowances: an old one can't
         // be taken before that and found Running after it.
         self.call(move |connection| {
-            while let Some(allowance) = allowances.take(&agent_id, &command, Instant::now()) {
+            while let Some(allowance) = allowances.take(&agent_id, &tool, &command, Instant::now())
+            {
                 let status = match store::run_record(connection, &allowance.run_id) {
                     Ok(run) => Some(run.status),
                     Err(ReactiveError::NotFound(_)) => None,
@@ -169,16 +220,20 @@ impl ReactiveRuntime {
         .await
     }
 
-    /// Whether outbox item `id` asks to use a vault key
-    /// ([`BRUH_SECRET_TOOL`]), whose answer only the owner's own app may
-    /// give. An unknown item is not one.
-    pub(super) async fn is_vault_key_approval(&self, id: &str) -> Result<bool, ReactiveError> {
+    /// Whether outbox item `id` is a card only the owner's own app may
+    /// answer: a use of a vault key ([`BRUH_SECRET_TOOL`]), an app call
+    /// ([`APP_REQUEST_TOOL`]) or an email ([`SEND_MAIL_TOOL`]), each in the
+    /// owner's name. An unknown item is not one.
+    pub(super) async fn is_owner_only_approval(&self, id: &str) -> Result<bool, ReactiveError> {
         let id = id.to_owned();
         self.call(
             move |connection| match store::crew::approval(connection, &id) {
-                Ok(item) => Ok(item
-                    .approval
-                    .is_some_and(|request| request.tool == BRUH_SECRET_TOOL)),
+                Ok(item) => Ok(item.approval.is_some_and(|request| {
+                    matches!(
+                        request.tool.as_str(),
+                        BRUH_SECRET_TOOL | APP_REQUEST_TOOL | SEND_MAIL_TOOL
+                    )
+                })),
                 Err(ReactiveError::NotFound(_)) => Ok(false),
                 Err(error) => Err(error),
             },
@@ -222,11 +277,13 @@ impl ReactiveRuntime {
         let Some(claim) = self.allowances.state().claims.get(&run.id).copied() else {
             return;
         };
-        self.allowances.record(BrowserAllowance {
+        self.allowances.record(StepAllowance {
             agent_id: run.agent_id.clone(),
             run_id: run.id.clone(),
+            tool: BRUH_BROWSER_TOOL.to_owned(),
             command,
             page_url,
+            target: None,
             claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         });
@@ -259,6 +316,54 @@ impl ReactiveRuntime {
             claim,
             "",
             BRUH_BROWSER_TOOL,
+            input,
+            Duration::from_secs(5),
+        )
+        .await
+    }
+
+    /// The gate's answer to one call of app or mail `tool` by claimed run
+    /// `run`, at its bruh's stored access and provider, as the worker asks
+    /// it: an allowed call leaves its allowance. For route tests outside
+    /// this crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn gate_app_call_for_tests(
+        &self,
+        run: &ReactiveRun,
+        tool: &str,
+        input: &Value,
+    ) -> Result<Option<PermissionDecision>, ReactiveError> {
+        let agent_id = run.agent_id.clone();
+        let (profile, agent) = self
+            .call(move |connection| {
+                let profile = store::crew::profile(connection, &agent_id)?;
+                let agent = store::records::<bruhs_models::reactive::ReactiveAgent>(
+                    connection,
+                    "reactive_agents",
+                )?
+                .into_iter()
+                .find(|agent| agent.id == agent_id)
+                .ok_or_else(|| ReactiveError::NotFound("The agent was not found.".into()))?;
+                Ok((profile, agent))
+            })
+            .await?;
+        let provider = AgentProvider::for_model(&agent.model);
+        let claim = self
+            .allowances
+            .state()
+            .claims
+            .get(&run.id)
+            .copied()
+            .unwrap_or_default();
+        decide(
+            self,
+            &profile.access,
+            provider,
+            bruhs_models::crew::computer_on(profile.computer, &profile.access, provider),
+            run,
+            claim,
+            &agent.project_path,
+            tool,
             input,
             Duration::from_secs(5),
         )
@@ -592,7 +697,10 @@ async fn wait_for_vault_command(
 /// approval. Every call first waits while an approved vault command of the
 /// run runs, then while the owner has the bruh's computer. `None` means
 /// the run stopped while it waited. `claim` is the worker's attempt at
-/// `run`, which an allowed browser step belongs to.
+/// `run`, which an allowed browser, app or mail step belongs to.
+///
+/// The bruh's app and mail tools take their own gate ([`app_call`]),
+/// before `permission_gate` would refuse them as helper tools.
 ///
 /// The vault command, the owner's hold and the approval are separate
 /// waits, each bounded by `timeout`, and an approved browser step waits for
@@ -630,7 +738,13 @@ pub(super) async fn decide(
         ComputerWait::StillHeld => return Ok(Some(deny(CONTROL_WAIT_EXPIRED))),
     }
     let browser = tool == BRUH_BROWSER_TOOL;
-    let (input, gate) = if browser {
+    // The card's input, the gate's answer, and what an allowed call leaves
+    // for its route, if anything.
+    let (input, gate, step) = if is_app_tool(tool) {
+        // Before `permission_gate`, whose `mcp__` rule refuses every other
+        // tool of the helper.
+        app_call(runtime, access, provider, &run.agent_id, tool, input).await
+    } else if browser {
         // The flag is from the run's start: a Computer turned off since has
         // no slot, and its steps are refused at once instead of asked about.
         let computer = computer
@@ -668,7 +782,12 @@ pub(super) async fn decide(
         {
             return Ok(Some(deny(PAGE_UNKNOWN)));
         }
-        (call, gate)
+        let step = Step {
+            command: call["command"].clone(),
+            page_url: call["page_url"].as_str().map(str::to_owned),
+            target: None,
+        };
+        (call, gate, Some(step))
     } else {
         // The gate reads only the name, and a name can point here.
         if let Some(host) = network_host(tool, input) {
@@ -696,16 +815,18 @@ pub(super) async fn decide(
         };
         let confined = crate::agent::unattended_shell_confined(access, provider);
         let gate = permission_gate(access, provider, tool, &input, &project, confined);
-        (input, gate)
+        (input, gate, None)
     };
-    // Each allowed browser call may reach the command route once.
-    let allow = |input: &Value| {
-        if browser {
-            runtime.allowances.record(BrowserAllowance {
+    // Each allowed browser, app or mail call may reach its route once.
+    let allow = || {
+        if let Some(step) = &step {
+            runtime.allowances.record(StepAllowance {
                 agent_id: run.agent_id.clone(),
                 run_id: run.id.clone(),
-                command: input["command"].clone(),
-                page_url: input["page_url"].as_str().map(str::to_owned),
+                tool: tool.to_owned(),
+                command: step.command.clone(),
+                page_url: step.page_url.clone(),
+                target: step.target.clone(),
                 claim,
                 expires: Instant::now() + ALLOWANCE_TTL,
             });
@@ -713,14 +834,16 @@ pub(super) async fn decide(
         Some(PermissionDecision::Allow)
     };
     match gate {
-        Gate::Allow => return Ok(allow(&input)),
+        Gate::Allow => return Ok(allow()),
         Gate::Deny(reason) => return Ok(Some(deny(reason))),
         Gate::Approve => {}
     }
     let item_id = match open(runtime, run, tool, &input, true).await? {
         Opened::Stopped => return Ok(None),
-        // The grant was made for this page, so it needs no second look.
-        Opened::Granted => return Ok(allow(&input)),
+        // The grant was made for this page, account or mailbox (the card
+        // names it), so it needs no second look; the allowance keeps the
+        // call as sent (ruling F25).
+        Opened::Granted => return Ok(allow()),
         Opened::Waiting(id) => id,
     };
     runtime.changed();
@@ -738,10 +861,10 @@ pub(super) async fn decide(
             // where the owner approved it.
             match page_moved(runtime, &run.agent_id, &input).await {
                 Some(reason) => Some(deny(reason)),
-                None => allow(&input),
+                None => allow(),
             }
         }
-        ApprovalWait::Approved => allow(&input),
+        ApprovalWait::Approved => allow(),
         ApprovalWait::Denied { reply: None } => Some(deny(DENIED)),
         ApprovalWait::Denied { reply: Some(reply) } => {
             Some(deny(&format!("The owner denied this and replied: {reply}")))
@@ -749,6 +872,67 @@ pub(super) async fn decide(
         ApprovalWait::Expired => Some(deny(NOT_ANSWERED)),
         ApprovalWait::Stopped => None,
     })
+}
+
+/// What an allowed call leaves for its route: see [`StepAllowance`].
+struct Step {
+    command: Value,
+    page_url: Option<String>,
+    target: Option<String>,
+}
+
+/// One call of the bruh's app or mail tools as the gate sees it: the card
+/// input (the call plus the account or mailbox it goes out as), the gate's
+/// answer, and the step an allowed call leaves, which keeps the input as
+/// sent and the target the lookup found (ruling F10). The account or
+/// mailbox is looked up live from the bruh's grants, so a revoked grant
+/// stops the next call.
+async fn app_call(
+    runtime: &ReactiveRuntime,
+    access: &BruhAccess,
+    provider: AgentProvider,
+    agent_id: &str,
+    tool: &str,
+    input: &Value,
+) -> (Value, Gate, Option<Step>) {
+    let step = |target: Option<String>| {
+        Some(Step {
+            command: input.clone(),
+            page_url: None,
+            target,
+        })
+    };
+    // A bruh that can't use apps is refused without a lookup.
+    if let Some(reason) = apps_unavailable(access.level, provider) {
+        return (input.clone(), Gate::Deny(reason), None);
+    }
+    match tool {
+        APP_REQUEST_TOOL => {
+            let lookup = runtime.app_lookup(agent_id, input).await;
+            let gate = app_gate(access, provider, input, &lookup);
+            match lookup {
+                AppLookup::Found(target) => (
+                    app_card_input(input, &target),
+                    gate,
+                    step(Some(target.entry_id)),
+                ),
+                AppLookup::Missing(_) => (input.clone(), gate, None),
+            }
+        }
+        SEND_MAIL_TOOL => {
+            let lookup = runtime.mail_lookup(agent_id, input).await;
+            let gate = mail_gate(access, provider, input, &lookup);
+            match lookup {
+                MailLookup::Found(target) => (
+                    mail_card_input(input, &target),
+                    gate,
+                    step(Some(target.mailbox_id)),
+                ),
+                MailLookup::Missing(_) => (input.clone(), gate, None),
+            }
+        }
+        _ => (input.clone(), list_apps_gate(access, provider), step(None)),
+    }
 }
 
 /// Whether a network tool call's `host` is this computer: an address
@@ -950,11 +1134,13 @@ mod tests {
         let allowances = Allowances::default();
         let command = serde_json::json!({"action": "snapshot"});
         let claim = allowances.claim("r");
-        let allowance = |expires| BrowserAllowance {
+        let allowance = |expires| StepAllowance {
             agent_id: "a".into(),
             run_id: "r".into(),
+            tool: BRUH_BROWSER_TOOL.into(),
             command: command.clone(),
             page_url: None,
+            target: None,
             claim,
             expires,
         };
@@ -962,11 +1148,17 @@ mod tests {
         let deadline = now + ALLOWANCE_TTL;
         allowances.record(allowance(deadline));
         let just_before = deadline - Duration::from_millis(1);
-        assert!(allowances.take("a", &command, just_before).is_some());
+        assert!(allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, just_before)
+            .is_some());
         allowances.record(allowance(deadline));
-        assert!(allowances.take("a", &command, deadline).is_none());
+        assert!(allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, deadline)
+            .is_none());
         // An expired allowance is gone for good.
-        assert!(allowances.take("a", &command, just_before).is_none());
+        assert!(allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, just_before)
+            .is_none());
     }
 
     /// An old attempt's worker, still running after a cancel and a retry
@@ -976,11 +1168,13 @@ mod tests {
     fn an_old_attempt_never_records_into_or_forgets_a_new_one() {
         let allowances = Allowances::default();
         let command = serde_json::json!({"action": "snapshot"});
-        let allowance = |claim| BrowserAllowance {
+        let allowance = |claim| StepAllowance {
             agent_id: "a".into(),
             run_id: "r".into(),
+            tool: BRUH_BROWSER_TOOL.into(),
             command: command.clone(),
             page_url: None,
+            target: None,
             claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         };
@@ -988,21 +1182,65 @@ mod tests {
         allowances.record(allowance(old));
         let new = allowances.claim("r");
         assert!(
-            allowances.take("a", &command, Instant::now()).is_none(),
+            allowances
+                .take("a", BRUH_BROWSER_TOOL, &command, Instant::now())
+                .is_none(),
             "a claim forgets earlier attempts"
         );
         allowances.record(allowance(old));
-        assert!(allowances.take("a", &command, Instant::now()).is_none());
+        assert!(allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, Instant::now())
+            .is_none());
         allowances.record(allowance(new));
         allowances.forget_run("r", old);
         assert_eq!(allowances.current_claim("r"), Some(new));
-        let taken = allowances.take("a", &command, Instant::now()).unwrap();
+        let taken = allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, Instant::now())
+            .unwrap();
         assert_eq!(taken.claim, new);
         // Once the new attempt ends, nothing records for the run.
         allowances.forget_run("r", new);
         assert_eq!(allowances.current_claim("r"), None);
         allowances.record(allowance(new));
-        assert!(allowances.take("a", &command, Instant::now()).is_none());
+        assert!(allowances
+            .take("a", BRUH_BROWSER_TOOL, &command, Instant::now())
+            .is_none());
+    }
+
+    /// An allowance answers only its own tool's call: a browser step never
+    /// stands in for an app call or an email with the same input, nor one
+    /// app tool for another.
+    #[test]
+    fn an_allowance_is_taken_only_by_its_own_tool() {
+        let allowances = Allowances::default();
+        let input = serde_json::json!({"app": "github", "method": "GET", "path": "/user"});
+        let claim = allowances.claim("r");
+        allowances.record(StepAllowance {
+            agent_id: "a".into(),
+            run_id: "r".into(),
+            tool: APP_REQUEST_TOOL.into(),
+            command: input.clone(),
+            page_url: None,
+            target: Some("e".into()),
+            claim,
+            expires: Instant::now() + ALLOWANCE_TTL,
+        });
+        for tool in [BRUH_BROWSER_TOOL, SEND_MAIL_TOOL, BRUH_SECRET_TOOL] {
+            assert!(
+                allowances.take("a", tool, &input, Instant::now()).is_none(),
+                "{tool}"
+            );
+        }
+        assert!(allowances
+            .take("b", APP_REQUEST_TOOL, &input, Instant::now())
+            .is_none());
+        let taken = allowances
+            .take("a", APP_REQUEST_TOOL, &input, Instant::now())
+            .unwrap();
+        assert_eq!(taken.target.as_deref(), Some("e"));
+        assert!(allowances
+            .take("a", APP_REQUEST_TOOL, &input, Instant::now())
+            .is_none());
     }
 
     /// A name that resolves here is this computer, whatever it reads as;
