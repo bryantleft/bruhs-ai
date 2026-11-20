@@ -177,7 +177,7 @@ impl AgentTurn {
     /// says, and nothing else. The caller decides each with the bruh's
     /// grants and level ([`bruhs_models::crew::computer_on`],
     /// [`bruhs_models::crew::apps_unavailable`]); only an unattended Claude
-    /// turn at Ask or Full gets them ([`bruh_tool_set`]).
+    /// turn at Ask or Full gets them (`bruh_tool_set`).
     pub fn bruh_tools(mut self, tools: Option<crate::workbench_tools::BruhTools>) -> Self {
         self.bruh_tools = tools;
         self

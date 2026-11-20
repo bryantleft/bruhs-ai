@@ -258,7 +258,7 @@ impl ReactiveRuntime {
     /// Why `command` takes the owner's own app, as its refusal's copy, or
     /// `None` when any allowed page may send it (rulings F26 and BC I2): a
     /// bruh's vault and app grants, an answer to its ask to use a vault key,
-    /// call an app or send an email ([`Self::is_owner_only_approval`]),
+    /// call an app or send an email (`Self::is_owner_only_approval`),
     /// deleting an agent, which deletes a bruh's own vault entries, applied
     /// or approved as a proposal, and turning an app poll routine on or off,
     /// since an enabled one polls with the owner's own account. Replying to

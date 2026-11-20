@@ -103,7 +103,7 @@ struct Outgoing<'a> {
 
 impl AppHttp {
     /// The production client: rustls, https only, no proxy, no redirects,
-    /// and the [`GuardedResolver`].
+    /// and the `GuardedResolver`.
     pub fn system() -> Result<Self, AppsError> {
         Self::guarded(GuardedResolver::system())
     }
