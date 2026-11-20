@@ -175,7 +175,6 @@ impl AppHttp {
     /// Sends a bruh's call on its normalized path. The gate has already
     /// classified it; this checks the call's limits again and that it is
     /// for `connector`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 8"))]
     pub(crate) async fn call(
         &self,
         connector: &'static AppConnector,
@@ -198,7 +197,6 @@ impl AppHttp {
 
     /// A call Bruhs itself makes, with no query: a token's test call and
     /// the polls.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 8"))]
     pub(crate) async fn raw(
         &self,
         connector: &'static AppConnector,

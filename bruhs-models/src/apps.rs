@@ -12,9 +12,11 @@
 
 mod catalog;
 mod guides;
+mod page;
 mod poll;
 mod rules;
 pub use catalog::*;
+pub use page::*;
 pub use poll::*;
 pub use rules::*;
 
@@ -95,6 +97,9 @@ pub const APP_QUERY_VALUES: &str =
 pub const APP_QUERY_METHOD: &str = "Pass the method as method, not in the query.";
 pub const APP_GET_BODY: &str = "GET and DELETE calls take no body.";
 pub const APP_BODY_TOO_LARGE: &str = "Keep the body under 16 KB.";
+/// Stripe reads form fields, not JSON, so its calls carry no body.
+pub const APP_QUERY_ONLY: &str =
+    "Stripe takes no body. Pass every parameter in query, nested ones as metadata[key].";
 pub const UNKNOWN_APP: &str = "There is no such app. list_apps lists the ones you may use.";
 /// A GraphQL call with another method or a URL query (ruling A, C2).
 pub const APP_GRAPHQL_SHAPE: &str =

@@ -2,7 +2,9 @@
 //! their own tokens. [`AppHttp`] is the one client that reaches them (D13,
 //! D14); the rules, the catalog and all copy live in `bruhs_models::apps`.
 
+mod host;
 mod http;
+pub use host::*;
 pub use http::AppHttp;
 
 /// Names a debug build's test upstream (D24): `http://127.0.0.1:<port>` or
@@ -32,4 +34,14 @@ pub enum AppsError {
     TooLarge(&'static str),
     #[error("{0}")]
     TimedOut(&'static str),
+    /// A token's test call failed, with the owner copy saying why
+    /// (`bruhs_models::apps::test_failure_message` or `ANOTHER_ACCOUNT`).
+    /// Nothing was saved.
+    #[error("{0}")]
+    TestFailed(String),
+    /// The vault couldn't save or find the account: a missing entry, a
+    /// save that crossed another, or a catalog that can't be read. Its
+    /// text is the vault's fixed copy.
+    #[error(transparent)]
+    Vault(crate::secrets::SecretError),
 }

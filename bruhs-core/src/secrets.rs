@@ -576,8 +576,9 @@ impl SecretManager {
 
     /// Read every value of an entry once and drop it: whether that worked,
     /// with `CHECK_OK` or the failure's owner copy, never a value. An app
-    /// token is checked on the Apps page, and a newer Bruhs' kind can't be
-    /// read: both answer so without a read.
+    /// token is checked by its test call, which the server runs through
+    /// `AppsHost::test_saved` before it would reach here, and a newer
+    /// Bruhs' kind can't be read: both answer so without a read.
     pub async fn vault_check(&self, id: &str) -> Result<VaultCheck, SecretError> {
         let entry = self.known(id).await?;
         let unread = |message: &str| VaultCheck {

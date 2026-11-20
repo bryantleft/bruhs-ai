@@ -7,8 +7,8 @@
 use super::{
     AppAction, AppConnector, APP_ACCOUNT_SHAPE, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE,
     APP_FIELD_REFUSED, APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD, APP_PATH, APP_PATH_ESCAPE,
-    APP_QUERY_METHOD, APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS, MAX_PATH_BYTES,
-    MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
+    APP_QUERY_METHOD, APP_QUERY_ONLY, APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS,
+    MAX_PATH_BYTES, MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
 };
 use crate::secrets::review_text;
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,10 @@ pub fn validate_call(call: &AppCall) -> Result<(), &'static str> {
         }
         if compact_len(body) > APP_BODY_MAX_BYTES {
             return Err(APP_BODY_TOO_LARGE);
+        }
+        // Stripe reads form fields, never JSON: its calls go by query only.
+        if call.app == "stripe" {
+            return Err(APP_QUERY_ONLY);
         }
     }
     if let Some(account) = &call.account {
@@ -566,6 +570,14 @@ mod tests {
             validate_call(&call("POST", Some(json!("x".repeat(APP_BODY_MAX_BYTES))))),
             Err(APP_BODY_TOO_LARGE)
         );
+        // Stripe reads form fields, so a JSON body would be dropped.
+        let mut stripe = call("POST", Some(json!({"email": "a@b.test"})));
+        stripe.app = "stripe".into();
+        stripe.path = "/v1/customers".into();
+        assert_eq!(validate_call(&stripe), Err(APP_QUERY_ONLY));
+        stripe.body = None;
+        stripe.query.insert("email".into(), json!("a@b.test"));
+        assert!(validate_call(&stripe).is_ok());
         let mut many = call("GET", None);
         many.query = (0..51).map(|i| (format!("k{i}"), json!(1))).collect();
         assert_eq!(validate_call(&many), Err(APP_QUERY_TOO_LARGE));
