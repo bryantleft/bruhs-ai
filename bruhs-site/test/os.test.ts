@@ -45,6 +45,7 @@ describe("index.html", () => {
   });
 
   it("links the hero and closing download actions to the platform picker", () => {
-    assert.equal(html.match(/href="\/download">Download bruhs<\/a>/g)?.length, 2);
+    assert.equal(html.match(/class="btn btn-primary for-desktop" href="\/download">Download for desktop<\/a>/g)?.length, 2);
+    assert.equal(html.match(/<button class="btn btn-primary for-phone"[^>]* data-share>/g)?.length, 2);
   });
 });

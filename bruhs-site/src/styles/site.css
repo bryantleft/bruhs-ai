@@ -163,6 +163,7 @@ kbd, .kbd {
 .hero .lede { max-width: 40ch; text-wrap: balance; }
 .hero .get-row { justify-content: center; margin-top: 4px; }
 .get-row { display: flex; flex-wrap: wrap; max-width: 100%; gap: 8px; }
+:root[data-os="phone"] .for-desktop,
 :root:not([data-os="phone"]) .for-phone { display: none; }
 .share-url { flex-basis: 100%; width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--ring-15); border-radius: var(--grape); background: var(--longan-900); color: var(--rambutan-100); font: inherit; }
 .share-url[hidden] { display: none; }
