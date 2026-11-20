@@ -50,9 +50,26 @@ pub const CONTENT_FOLDERS: [&str; 4] = [
     "knowledge-attachments",
 ];
 
-/// File name endings a backup leaves out of Bruhs' own folders: lock files
-/// and SQLite's side files. Owner content keeps them (D4 ruling).
-const EXCLUDED_SUFFIXES: [&str; 4] = [".lock", "-wal", "-shm", "-journal"];
+/// Other top-level names Bruhs keeps in its roots. With [`EXCLUDED_TOP`],
+/// [`CONTENT_FOLDERS`] and [`DESKTOP_ENTRIES`], an entry whose first name
+/// matches one of these only when case is ignored is refused (I1 ruling):
+/// on a case-insensitive volume it would land in, or replace, the real one.
+const KNOWN_TOP: [&str; 7] = [
+    "server",
+    "credentials",
+    "connections",
+    "calendar",
+    "workbench",
+    "pith-mcp.json",
+    "worktree-meter.json",
+];
+/// Lock file ending a backup leaves out of Bruhs' own folders. Owner
+/// content keeps it (D4 ruling).
+const LOCK_SUFFIX: &str = ".lock";
+/// SQLite side files, left out of Bruhs' own databases. Owner content and a
+/// bruh's browser profile, whose databases are copied raw (F15), keep them:
+/// without its `-wal` or hot `-journal` a raw copy loses committed data.
+const SQLITE_SIDE_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 /// Media file extensions under `audio/` that the audio option covers
 /// (ruling F9: transcripts, centroids and OCR always go in).
 const AUDIO_EXTENSIONS: [&str; 9] = [
@@ -86,12 +103,21 @@ pub enum EntryPath {
 
 /// Checks an archive entry path (D9): `manifest.json`, `keychain.json`,
 /// `web/part.bin`, or a relative path under `core/` or `desktop/` whose
-/// components are all normal names. Refuses an empty, `.` or `..`
-/// component (so a doubled or trailing `/` too), a leading `/`, a
-/// backslash, NUL or any control character, a component over 255 bytes and
-/// a path over 4096 bytes, with [`UNSAFE_ENTRY`].
+/// components are all normal names. Refuses with [`UNSAFE_ENTRY`]:
+/// - an empty, `.` or `..` component (so a doubled or trailing `/` too), a
+///   leading `/`, a component over 255 bytes and a path over 4096 bytes;
+/// - a backslash, NUL or any control character, and the invisible format,
+///   bidi and line or paragraph separator characters that can disguise a
+///   name;
+/// - a first name a backup never holds ([`EXCLUDED_TOP`], in any case), or
+///   one that matches a known top-level name only when case is ignored
+///   (`Credentials`, `SERVICE`), I1 ruling.
 pub fn safe_entry_path(path: &str) -> Result<EntryPath, &'static str> {
-    if path.len() > MAX_PATH_BYTES || path.chars().any(|c| c.is_control() || c == '\\') {
+    if path.len() > MAX_PATH_BYTES
+        || path
+            .chars()
+            .any(|c| c.is_control() || c == '\\' || invisible(c))
+    {
         return Err(UNSAFE_ENTRY);
     }
     match path {
@@ -114,11 +140,55 @@ pub fn safe_entry_path(path: &str) -> Result<EntryPath, &'static str> {
             && component != ".."
             && component.len() <= MAX_COMPONENT_BYTES
     };
-    if rest.split('/').all(normal) {
+    let first = rest.split('/').next().unwrap_or_default();
+    if rest.split('/').all(normal) && !refused_top(first) {
         Ok(entry(rest.to_owned()))
     } else {
         Err(UNSAFE_ENTRY)
     }
+}
+
+/// Whether an entry's first name is never restored: an excluded top-level
+/// name in any case, or a case variant of a known one.
+fn refused_top(first: &str) -> bool {
+    let variant = |known: &&str| first.eq_ignore_ascii_case(known) && first != *known;
+    EXCLUDED_TOP
+        .iter()
+        .any(|excluded| first.eq_ignore_ascii_case(excluded))
+        || KNOWN_TOP.iter().any(variant)
+        || CONTENT_FOLDERS.iter().any(variant)
+        || DESKTOP_ENTRIES.iter().any(variant)
+}
+
+/// The format (Cf), line separator (Zl) and paragraph separator (Zp)
+/// characters: soft hyphen, zero-width and joiner characters, bidi marks,
+/// embeddings, overrides and isolates, the byte order mark, interlinear
+/// annotation and tag characters, and the like.
+fn invisible(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+    )
 }
 
 /// Why a path is left out of a backup.
@@ -139,27 +209,35 @@ pub enum Excluded {
 /// files and SQLite side files are left out of Bruhs' own folders, but
 /// owner content (the content folders and each bruh's `work` folder) keeps
 /// them, so a project's `Cargo.lock` or an owner database's journal comes
-/// back whole. A bruh's
-/// `browser-cache` and the profile's cache folders always; its `browser`
-/// profile and the media files under `audio/` by option. Everything else
-/// goes in, including folders a later Bruhs adds.
+/// back whole; a bruh's browser profile keeps its SQLite side files. Always
+/// out: the broker files under `credentials/brokers` (each holds a live
+/// bearer token), a bruh's `browser.pid` and `browser-cache`, and the
+/// profile's cache folders (I2 ruling). By option: its `browser` profile
+/// and the media files under `audio/`. Everything else goes in, including
+/// folders a later Bruhs adds.
 pub fn excluded(rel: &str, is_dir: bool) -> Excluded {
     let parts: Vec<&str> = rel.split('/').collect();
     if EXCLUDED_TOP.contains(&parts[0]) {
         return Excluded::Always;
     }
+    if parts[0] == "credentials" && parts.get(1) == Some(&"brokers") {
+        return Excluded::Always;
+    }
     let name = parts.last().copied().unwrap_or_default();
+    let in_browser = bruh_folder(&parts) == Some("browser");
     if !is_dir
         && !owner_content(&parts)
-        && EXCLUDED_SUFFIXES
-            .iter()
-            .any(|suffix| name.ends_with(suffix))
+        && (name.ends_with(LOCK_SUFFIX)
+            || (!in_browser
+                && SQLITE_SIDE_SUFFIXES
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))))
     {
         return Excluded::Always;
     }
     if let Some(folder) = bruh_folder(&parts) {
         match folder {
-            "browser-cache" => return Excluded::Always,
+            "browser-cache" | "browser.pid" => return Excluded::Always,
             "browser" if parts[4..].iter().any(|part| BROWSER_CACHES.contains(part)) => {
                 return Excluded::Always
             }
@@ -241,8 +319,9 @@ impl RootsInfo {
 /// F8), longest `from` first. A one-root backup restored onto two roots
 /// sends each of [`DESKTOP_ENTRIES`] to the desktop root and the rest to
 /// the core root; a two-root backup onto one root sends both roots there.
-/// Equal pairs, empty sides and a second rule for the same `from` are
-/// dropped, so the same computer gets no rules.
+/// Equal pairs, a side that isn't absolute or holds a control character,
+/// and a second rule for the same `from` are dropped, so the same computer
+/// gets no rules.
 pub fn rewrite_rules(from: &RootsInfo, to: &RootsInfo) -> Vec<PathRewrite> {
     let mut pairs = Vec::new();
     if from.same() {
@@ -262,7 +341,7 @@ pub fn rewrite_rules(from: &RootsInfo, to: &RootsInfo) -> Vec<PathRewrite> {
     let mut rules: Vec<PathRewrite> = Vec::new();
     for (from, to) in pairs {
         let (from, to) = (trim_slash(&from), trim_slash(&to));
-        if from.is_empty() || to.is_empty() || from == to {
+        if !absolute(from) || !absolute(to) || from == to {
             continue;
         }
         if rules.iter().all(|rule| rule.from != from) {
@@ -274,6 +353,11 @@ pub fn rewrite_rules(from: &RootsInfo, to: &RootsInfo) -> Vec<PathRewrite> {
     }
     rules.sort_by_key(|rule| std::cmp::Reverse(rule.from.len()));
     rules
+}
+
+/// A rule side a restore trusts: absolute, with no control character.
+fn absolute(path: &str) -> bool {
+    path.starts_with('/') && !path.chars().any(char::is_control)
 }
 
 fn join(root: &str, name: &str) -> String {
@@ -339,9 +423,10 @@ pub fn rewrite_json(value: &mut serde_json::Value, rules: &[PathRewrite]) -> usi
 /// The JSON fields and SQLite columns that hold absolute paths, the only
 /// places [`collect_outside`] looks (D10 ruling): project paths (threads,
 /// work items, bruhs and the credential catalog), agent working folders,
-/// and meeting and capture audio. A bare `path` isn't one: it also names
-/// API routes such as `/api/events`.
-pub const PATH_FIELDS: [&str; 16] = [
+/// meeting and capture audio, and database connection files. A bare `path`
+/// isn't one, on purpose: it also names API routes such as `/api/events`,
+/// so the worktree and whiteboard `path` fields go unflagged.
+pub const PATH_FIELDS: [&str; 19] = [
     "project_path",
     "projectPath",
     "cwd",
@@ -354,6 +439,9 @@ pub const PATH_FIELDS: [&str; 16] = [
     "repo_root",
     "repoRoot",
     "worktree_path",
+    "worktreePath",
+    "connection_path",
+    "connectionPath",
     "audio_path",
     "audioPath",
     "wav_path",
@@ -370,7 +458,9 @@ pub fn path_field(name: &str) -> bool {
 /// value) that sit under no rule's `from` or `to`, by their first two
 /// components (`/Volumes/Work`), up to 20 in all (D10). A path is a string
 /// that starts with `/`, has at least two components, no newline and at
-/// most 4096 bytes. Other strings and object keys are never read.
+/// most 4096 bytes; one with a `.`, `..` or empty component (a single
+/// trailing `/` aside) is named whole, since it may lead anywhere. Other
+/// strings and object keys are never read.
 /// Temporary and system folders are never named, and nothing is when there
 /// are no rules, since then nothing moves.
 pub fn collect_outside(
@@ -426,11 +516,15 @@ fn note_outside(text: &str, rules: &[PathRewrite], into: &mut BTreeSet<String>) 
     {
         return;
     }
-    let mut parts = text[1..].split('/');
-    let (Some(first), Some(second)) = (parts.next(), parts.next()) else {
+    let body = &text[1..];
+    let parts: Vec<&str> = body.strip_suffix('/').unwrap_or(body).split('/').collect();
+    let [first, second, ..] = parts[..] else {
         return;
     };
-    if first.is_empty() || second.is_empty() {
+    // A `.`, `..` or empty component can lead anywhere, whatever prefix the
+    // text starts with (`/home/ada/../../Volumes/x`), so it is flagged whole.
+    if parts.iter().any(|part| matches!(*part, "" | "." | "..")) {
+        into.insert(text.to_owned());
         return;
     }
     if NEVER_OUTSIDE.iter().any(|prefix| under(text, prefix))
@@ -485,6 +579,49 @@ mod tests {
             assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad:?}");
         }
         assert!(safe_entry_path(&format!("core/{}", "a".repeat(255))).is_ok());
+    }
+
+    /// I1 ruling and the invisible-character minor.
+    #[test]
+    fn entry_paths_refuse_excluded_tops_case_variants_and_invisible_names() {
+        for bad in [
+            "core/backups/staging/x",
+            "core/capture/daemon-token",
+            "core/Capture/x",
+            "core/service/releases/x",
+            "core/SERVICE",
+            "core/Credentials/vault.json",
+            "core/Backups",
+            "core/codex-lean-sessions.lock",
+            "desktop/logs/x.log",
+            "core/Server/reactive.sqlite3",
+            "desktop/Delivery/journal.json",
+            "desktop/Desktop-State.json",
+            "core/AUDIO/m1.wav",
+            "core/a\u{202E}gpj.exe",
+            "core/a\u{200B}",
+            "core/a\u{2028}b",
+            "core/a\u{2029}b",
+            "core/\u{FEFF}server/x",
+            "core/a\u{2066}b",
+            "core/a\u{E0041}",
+            "core/a\u{00AD}b",
+        ] {
+            assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad:?}");
+        }
+        for good in [
+            "core/server/reactive.sqlite3",
+            "core/credentials/vault.json",
+            "desktop/delivery/journal.json",
+            "core/servers/x",
+            "core/server/bruhs/a1/work/Service/x",
+            "core/C:/x",
+            "core/a\u{FF0F}b",
+            "core/\u{2025}",
+            "core/caf\u{E9}",
+        ] {
+            assert!(safe_entry_path(good).is_ok(), "{good:?}");
+        }
     }
 
     #[test]
@@ -566,11 +703,55 @@ mod tests {
             "server/mail.sqlite3-shm",
             "calendar/google/state.lock",
             "server/bruhs/a1/profile.json.lock",
-            "server/bruhs/a1/browser/Default/Cookies-journal",
         ] {
             assert_eq!(excluded(dropped, false), Excluded::Always, "{dropped}");
             assert!(!included(dropped, false, &options), "{dropped}");
         }
+    }
+
+    /// I2 ruling: broker tokens and a browser's pid file never go in.
+    #[test]
+    fn brokers_and_browser_pid_files_are_always_out() {
+        let all = BackupOptions {
+            keychain: true,
+            audio: true,
+            browser_profiles: true,
+        };
+        for rel in [
+            "credentials/brokers",
+            "credentials/brokers/broker-1-x.json",
+            "server/bruhs/a1/browser.pid",
+        ] {
+            assert_eq!(
+                excluded(rel, rel.ends_with("brokers")),
+                Excluded::Always,
+                "{rel}"
+            );
+            assert!(!included(rel, false, &all), "{rel}");
+        }
+        assert!(included("credentials/vault.json", false, &all));
+        assert!(included("credentials/catalog.json", false, &all));
+    }
+
+    /// Minor 4: a bruh's browser databases are copied raw, so their SQLite
+    /// side files stay with them; lock files still don't.
+    #[test]
+    fn browser_profiles_keep_sqlite_side_files() {
+        for rel in [
+            "server/bruhs/a1/browser/Default/Cookies-journal",
+            "server/bruhs/a1/browser/Default/History-wal",
+            "server/bruhs/a1/browser/Default/History-shm",
+        ] {
+            assert_eq!(excluded(rel, false), Excluded::Browser, "{rel}");
+        }
+        assert_eq!(
+            excluded("server/bruhs/a1/browser/Default/x.lock", false),
+            Excluded::Always
+        );
+        assert_eq!(
+            excluded("server/bruhs/a1/profile.sqlite3-wal", false),
+            Excluded::Always
+        );
     }
 
     /// Ruling F9: audio off leaves out media files only.
@@ -751,7 +932,6 @@ mod tests {
                 "/var/folders/ab/T",
                 "/proc/1/fd",
                 "/usr",
-                "//host/x",
                 "/a/b\nc"
             ]}),
             &rules,
@@ -764,6 +944,57 @@ mod tests {
         let mut none = BTreeSet::new();
         collect_outside(&json!({"cwd": "/Volumes/Work/repo"}), &[], &mut none);
         assert!(none.is_empty());
+    }
+
+    /// Minor 3: a `.`, `..` or empty component can't hide a path behind a
+    /// rule's prefix or a system folder.
+    #[test]
+    fn irregular_paths_are_flagged_whole() {
+        let rules = rewrite_rules(&linux(), &mac());
+        let mut outside = BTreeSet::new();
+        collect_outside(
+            &json!({"cwd": [
+                "/home/ada/../../Volumes/x",
+                "/tmp/../Volumes/y",
+                "//host/x",
+                "/Volumes/./z",
+                "/home/ada/src/",
+                "/Volumes/Work/",
+            ]}),
+            &rules,
+            &mut outside,
+        );
+        assert_eq!(
+            outside.iter().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "//host/x",
+                "/Volumes/./z",
+                "/Volumes/Work",
+                "/home/ada/../../Volumes/x",
+                "/tmp/../Volumes/y",
+            ]
+        );
+    }
+
+    /// Minor 7: a side that isn't absolute, or holds a control character,
+    /// makes no rule.
+    #[test]
+    fn rewrite_rules_need_absolute_sides() {
+        let relative = RootsInfo {
+            home: "a".into(),
+            core: "a/x".into(),
+            desktop: "a/x".into(),
+        };
+        assert!(rewrite_rules(&relative, &mac()).is_empty());
+        let mut broken = linux();
+        broken.home = "/home/ada\n".into();
+        let rules = rewrite_rules(&broken, &mac());
+        assert!(
+            rules.iter().all(|rule| rule.from != "/home/ada\n"),
+            "{rules:?}"
+        );
+        assert_eq!(rewrite_path("/home/ada/src", &rules), None);
+        assert!(rewrite_path("/home/ada/.local/share/bruhs-ai/server", &rules).is_some());
     }
 
     /// D10 ruling: only the known path fields are read, so routes and other
@@ -802,5 +1033,6 @@ mod tests {
             ["/opt/work", "/srv/repos"]
         );
         assert!(path_field("cwd") && !path_field("path"));
+        assert!(path_field("worktreePath") && path_field("connection_path"));
     }
 }
