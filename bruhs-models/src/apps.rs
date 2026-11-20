@@ -134,6 +134,10 @@ pub const APP_TIMED_OUT: &str =
 /// broken, oversized or non-text reply. The app may have acted on it.
 pub const APP_MAY_HAVE_LANDED: &str =
     "The app may have made that change. Read before trying again.";
+/// The route ran out of time before the call started, after a slow lookup
+/// or listing, so nothing was sent (final review A2 M6).
+pub const APP_OUT_OF_TIME: &str =
+    "Bruhs sent nothing: looking the account up took too long. Try again.";
 /// Every call slot stayed busy until the deadline, so nothing was sent.
 pub const APP_BUSY: &str =
     "Bruhs sent nothing: too many app calls are running. Try again in a moment.";

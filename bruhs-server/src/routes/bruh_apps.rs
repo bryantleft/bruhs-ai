@@ -10,10 +10,12 @@
 //! - `list_apps` answers the bruh's apps and mailboxes.
 //! - `app_request` looks its account up live, which must be the one the
 //!   gate picked (ruling F10), runs the gate again at the bruh's stored
-//!   access (only a Deny refuses: the allowance is the answer), reads the
-//!   token, looks the account up once more, and sends the call. Any status
-//!   the app answers is the value.
-//! - `send_mail` does the same with its mailbox and sends the email.
+//!   access (a Deny refuses, and so does an Approve unless the owner
+//!   approved this call: final review BC M2), reads the token, looks the
+//!   account up once more, and sends the call. Any status the app answers
+//!   is the value.
+//! - `send_mail` does the same with its mailbox, counts the email against
+//!   the bruh's hourly cap (A2 M7), and sends it.
 //!
 //! The whole route answers within [`ROUTE_BUDGET`], under the helper's own
 //! 60 s request, and never cuts a write it sent (ruling F11): the lookups
@@ -33,13 +35,15 @@ use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::secrets::SecretError;
 use bruhs_models::agent::AgentProvider;
 use bruhs_models::apps::{
-    AppCall, APPS_NOT_ON_SERVER, APP_CALL_TIMEOUT_MS, APP_MAY_HAVE_LANDED, APP_UNREACHABLE,
+    AppCall, APPS_NOT_ON_SERVER, APP_CALL_TIMEOUT_MS, APP_MAY_HAVE_LANDED, APP_OUT_OF_TIME,
+    APP_UNREACHABLE,
 };
 use bruhs_models::crew::{
     app_gate, list_apps_gate, mail_gate, AppLookup, BruhAccess, Gate, MailLookup, MailSendInput,
     APPS_UNREADABLE, APP_CALL_SHAPE, APP_NOT_GRANTED, APP_REQUEST_TOOL, BRUH_NO_TOOLS,
-    CALL_FROM_A_PAGE, CALL_NOT_APPROVED, KEYCHAIN_NEEDS_OWNER, LIST_APPS_TOOL, MAIL_CALL_SHAPE,
-    MAIL_NOT_GRANTED, MAIL_NOT_SENT, MAIL_SEND_BUDGET_MS, SEND_MAIL_TOOL,
+    CALL_FROM_A_PAGE, CALL_NOT_APPROVED, CALL_TOO_LARGE, KEYCHAIN_NEEDS_OWNER, LIST_APPS_TOOL,
+    MAIL_CALL_SHAPE, MAIL_NOT_GRANTED, MAIL_NOT_SENT, MAIL_RATE_LIMITED, MAIL_SEND_BUDGET_MS,
+    SEND_MAIL_TOOL,
 };
 use bruhs_models::local_tools::ToolReply;
 use serde_json::Value;
@@ -124,7 +128,14 @@ pub async fn call(
         return Err(RouteError::forbidden(CALL_FROM_A_PAGE));
     }
     let runtime = super::reactive::runtime(runtime)?;
-    let Json(body) = body.map_err(|_| RouteError::forbidden(CALL_NOT_APPROVED))?;
+    let Json(body) = body.map_err(|rejection| {
+        // Over the route's body limit: no tool takes that much (BC M3).
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            RouteError::status(StatusCode::PAYLOAD_TOO_LARGE, CALL_TOO_LARGE)
+        } else {
+            RouteError::forbidden(CALL_NOT_APPROVED)
+        }
+    })?;
     let tool = tool_named(body["tool"].as_str())
         .ok_or_else(|| RouteError::forbidden(CALL_NOT_APPROVED))?;
     // Used up first, matched against the input exactly as the helper sent
@@ -141,6 +152,7 @@ pub async fn call(
         tool,
         &input,
         allowance.target.as_deref(),
+        allowance.owner_approved,
         started,
         Budget::ROUTE,
     )
@@ -169,11 +181,13 @@ async fn bruh_access(
     Ok((bruh.access, AgentProvider::for_model(&agent.model)))
 }
 
-/// Refuse what the gate, run again, denies. Allow and Approve go on: the
-/// allowance was the gate's or the owner's answer.
-fn regated(gate: Gate) -> Result<(), RouteError> {
+/// Refuse what the gate, run again, denies. Allow goes on; Approve goes on
+/// only when the owner approved this call, since an access lowered after
+/// the gate's Allow would otherwise send it unasked (final review BC M2).
+fn regated(gate: Gate, owner_approved: bool) -> Result<(), RouteError> {
     match gate {
         Gate::Deny(reason) => Err(RouteError::forbidden(reason)),
+        Gate::Approve if !owner_approved => Err(RouteError::forbidden(CALL_NOT_APPROVED)),
         Gate::Allow | Gate::Approve => Ok(()),
     }
 }
@@ -186,6 +200,7 @@ async fn answer(
     tool: &'static str,
     input: &Value,
     target: Option<&str>,
+    owner_approved: bool,
     started: Instant,
     budget: Budget,
 ) -> Result<Value, RouteError> {
@@ -195,7 +210,7 @@ async fn answer(
         .map_err(|_| RouteError::unavailable(APPS_UNREADABLE))??;
     match tool {
         LIST_APPS_TOOL => {
-            regated(list_apps_gate(&access, provider))?;
+            regated(list_apps_gate(&access, provider), owner_approved)?;
             let app = input.get("app").and_then(Value::as_str);
             Ok(
                 tokio::time::timeout_at(reads_by, runtime.list_apps(id, app))
@@ -213,7 +228,7 @@ async fn answer(
                 id,
                 (&access, provider),
                 input,
-                target,
+                (target, owner_approved),
                 started,
                 budget,
             )
@@ -229,7 +244,7 @@ async fn answer(
                 id,
                 (&access, provider),
                 input,
-                target,
+                (target, owner_approved),
                 started,
                 budget,
             )
@@ -253,7 +268,7 @@ async fn app_request(
     id: &str,
     (access, provider): (&BruhAccess, AgentProvider),
     input: &Value,
-    target: Option<&str>,
+    (target, owner_approved): (Option<&str>, bool),
     started: Instant,
     budget: Budget,
 ) -> Result<Value, RouteError> {
@@ -269,7 +284,7 @@ async fn app_request(
     if target != Some(entry_id.as_str()) {
         return Err(RouteError::forbidden(APP_NOT_GRANTED));
     }
-    regated(app_gate(access, provider, input, &lookup))?;
+    regated(app_gate(access, provider, input, &lookup), owner_approved)?;
     let call: AppCall = serde_json::from_value(input.clone())
         .map_err(|_| RouteError::status(StatusCode::BAD_REQUEST, APP_CALL_SHAPE))?;
     let keychain = || RouteError::unavailable(KEYCHAIN_NEEDS_OWNER);
@@ -295,8 +310,8 @@ async fn app_request(
         return Err(RouteError::forbidden(APP_NOT_GRANTED));
     }
     if !fits(Instant::now(), started + budget.total, budget.call) {
-        // Nothing was sent: a retry is safe.
-        return Err(keychain());
+        // Nothing was sent and the token was read: a retry is safe (A2 M6).
+        return Err(RouteError::unavailable(APP_OUT_OF_TIME));
     }
     // Once sent, the call runs to its own timeout.
     let response = apps.send_ready(ready).await.map_err(bruh_error)?;
@@ -315,7 +330,7 @@ async fn send_mail(
     id: &str,
     (access, provider): (&BruhAccess, AgentProvider),
     input: &Value,
-    target: Option<&str>,
+    (target, owner_approved): (Option<&str>, bool),
     started: Instant,
     budget: Budget,
 ) -> Result<Value, RouteError> {
@@ -336,11 +351,18 @@ async fn send_mail(
     if target != Some(mailbox_id.as_str()) {
         return Err(RouteError::forbidden(MAIL_NOT_GRANTED));
     }
-    regated(mail_gate(access, provider, input, &lookup))?;
+    regated(mail_gate(access, provider, input, &lookup), owner_approved)?;
     let mail: MailSendInput = serde_json::from_value(input.clone())
         .map_err(|_| RouteError::status(StatusCode::BAD_REQUEST, MAIL_CALL_SHAPE))?;
     if !fits(Instant::now(), deadline, budget.mail) {
         return Err(not_sent());
+    }
+    // Counted as it goes, whatever it answers (A2 M7).
+    if !runtime.take_mail_send(id) {
+        return Err(RouteError::status(
+            StatusCode::TOO_MANY_REQUESTS,
+            MAIL_RATE_LIMITED,
+        ));
     }
     let outcome = apps
         .send_mail(&mailbox_id, mail)

@@ -8,11 +8,11 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use bruhs_core::mail::compose::test_support::{FakeTransport, Mode};
 use bruhs_core::PermissionDecision;
-use bruhs_models::apps::REDACTED;
+use bruhs_models::apps::{APP_OUT_OF_TIME, REDACTED};
 use bruhs_models::crew::{
     AccessLevel, AppGrant, APP_NOT_GRANTED, APP_REQUEST_TOOL, BRUH_NO_TOOLS, CALL_FROM_A_PAGE,
-    CALL_NOT_APPROVED, KEYCHAIN_NEEDS_OWNER, LIST_APPS_TOOL, MAIL_MAY_HAVE_SENT, MAIL_NOT_GRANTED,
-    MAIL_SENT, SEND_MAIL_TOOL,
+    CALL_NOT_APPROVED, CALL_TOO_LARGE, LIST_APPS_TOOL, MAIL_MAY_HAVE_SENT, MAIL_NOT_GRANTED,
+    MAIL_RATE_LIMITED, MAIL_SENDS_PER_HOUR, MAIL_SENT, SEND_MAIL_TOOL,
 };
 use bruhs_models::reactive::{ReactiveCommand, ReactiveRun};
 use bruhs_models::vault::OWNER_ONLY_CARD;
@@ -312,6 +312,7 @@ async fn slow_lookups_send_nothing() {
         APP_REQUEST_TOOL,
         &issues(),
         Some(&id),
+        false,
         Instant::now(),
         short,
     )
@@ -356,6 +357,7 @@ async fn slow_lookups_send_nothing() {
         SEND_MAIL_TOOL,
         &json!({"to": "ann@x.test", "subject": "Lunch", "body": "See you at 12."}),
         Some(&mailbox_id),
+        false,
         Instant::now(),
         short,
     )
@@ -393,6 +395,7 @@ async fn a_lowered_level_stops_the_call() {
         APP_REQUEST_TOOL,
         &issues(),
         Some(&id),
+        false,
         Instant::now(),
         Budget::ROUTE,
     )
@@ -482,14 +485,17 @@ async fn a_call_that_no_longer_fits_is_never_sent() {
         APP_REQUEST_TOOL,
         &issues(),
         Some(&id),
+        false,
         Instant::now(),
         short,
     )
     .await;
+    // Final review A2 M6: nothing was sent and the keychain was fine, so
+    // the bruh is told to try again, not to stop for the owner.
     match refused {
         Err(RouteError::App(error)) => {
             assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
-            assert_eq!(error.to_string(), KEYCHAIN_NEEDS_OWNER);
+            assert_eq!(error.to_string(), APP_OUT_OF_TIME);
         }
         other => panic!("expected 503, got {other:?}"),
     }
@@ -501,6 +507,7 @@ async fn a_call_that_no_longer_fits_is_never_sent() {
         APP_REQUEST_TOOL,
         &issues(),
         Some(&id),
+        false,
         Instant::now(),
         Budget::ROUTE,
     )
@@ -516,6 +523,7 @@ async fn a_call_that_no_longer_fits_is_never_sent() {
         LIST_APPS_TOOL,
         &json!({}),
         None,
+        false,
         Instant::now(),
         Budget::ROUTE,
     )
@@ -587,4 +595,178 @@ async fn an_app_card_is_answered_only_from_bruhs_own_pages() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{text}");
+}
+
+/// Final review BC M2: an access lowered between the gate's Allow and the
+/// route leaves an allowance the owner never approved, so the route's
+/// second gate, now Approve, refuses it; one the owner approved goes.
+#[tokio::test]
+async fn a_lowered_access_never_turns_a_gate_allow_into_a_send() {
+    let fixture = Fixture::new().await;
+    let (id, _) = fixture.granted_github("octo").await;
+    Mock::given(method("POST"))
+        .and(path("/repos/o/r/issues/1/comments"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({"id": 1})))
+        .mount(&fixture.upstream)
+        .await;
+    fixture.set_access(AccessLevel::Ask, false).await;
+    let comment = json!({"app": "github", "method": "POST", "path": "/repos/o/r/issues/1/comments", "body": {"body": "Fixed."}});
+    let call = |owner_approved| {
+        answer(
+            &fixture.runtime,
+            "a",
+            APP_REQUEST_TOOL,
+            &comment,
+            Some(&id),
+            owner_approved,
+            Instant::now(),
+            Budget::ROUTE,
+        )
+    };
+    match call(false).await {
+        Err(RouteError::App(error)) => {
+            assert_eq!(error.status(), StatusCode::FORBIDDEN);
+            assert_eq!(error.to_string(), CALL_NOT_APPROVED);
+        }
+        other => panic!("expected 403, got {other:?}"),
+    }
+    assert_eq!(fixture.app_calls().await, 0);
+    assert_eq!(call(true).await.unwrap()["status"], 201);
+    assert_eq!(fixture.app_calls().await, 1);
+}
+
+/// Final review BC M3: a helper body over the route's 64 KB says so, not
+/// that the call wasn't approved.
+#[tokio::test]
+async fn an_oversized_call_says_it_is_too_large() {
+    let fixture = Fixture::new().await;
+    let body = json!({"tool": "send_mail", "input": {"to": "ann@x.test", "subject": "s",
+        "body": "\u{1}".repeat(12_000)}});
+    let (status, text) = fixture
+        .send(Method::POST, ROUTE, Some(Body::Json(body)), None)
+        .await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::PAYLOAD_TOO_LARGE, error(CALL_TOO_LARGE))
+    );
+}
+
+/// Final review A2 M7: the route counts each email just before it goes,
+/// so a bruh at its hourly cap sends nothing even with an allowance.
+#[tokio::test]
+async fn the_route_sends_at_most_the_hourly_cap() {
+    let lunch = json!({"to": "ann@x.test", "subject": "Lunch", "body": "See you at 12."});
+    let transport = FakeTransport::new(Mode::Accepted, false);
+    let fixture = Fixture::with_mail(Some(MailSetup {
+        transport: Some(transport.clone()),
+        send_budget: Some(Duration::from_millis(500)),
+    }))
+    .await;
+    fixture.set_access(AccessLevel::Full, true).await;
+    fixture.grant_mailbox(true).await;
+    let run = fixture.running().await;
+    for _ in 1..MAIL_SENDS_PER_HOUR {
+        assert!(fixture.runtime.take_mail_send("a"));
+    }
+    // The 30th goes.
+    fixture.gate(&run, SEND_MAIL_TOOL, &lunch).await;
+    let (status, text) = fixture.helper(SEND_MAIL_TOOL, &lunch, None).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert_eq!(transport.sends(), 1);
+    // A 31st the gate let through just before the cap is refused.
+    let again = json!({"to": "ann@x.test", "subject": "Again", "body": "One more."});
+    let decision = fixture.gate(&run, SEND_MAIL_TOOL, &again).await;
+    assert!(
+        matches!(&decision, PermissionDecision::Deny { reason: Some(reason) } if reason == MAIL_RATE_LIMITED),
+        "{decision:?}"
+    );
+    let raced = answer(
+        &fixture.runtime,
+        "a",
+        SEND_MAIL_TOOL,
+        &again,
+        Some(fixture.mail.as_ref().unwrap().mailbox.as_str()),
+        false,
+        Instant::now(),
+        Budget::ROUTE,
+    )
+    .await;
+    match raced {
+        Err(RouteError::Status(status, message)) => {
+            assert_eq!(
+                (status, message.as_str()),
+                (StatusCode::TOO_MANY_REQUESTS, MAIL_RATE_LIMITED)
+            );
+        }
+        other => panic!("expected 429, got {other:?}"),
+    }
+    assert_eq!(transport.sends(), 1);
+}
+
+/// Final review BC I1: a page the loopback guard trusts but that isn't the
+/// owner's reads an app card's summary from the crew state and its live
+/// frames, never its detail (the account, the body).
+#[tokio::test]
+async fn other_pages_never_read_an_owner_card_detail() {
+    let fixture = Fixture::new().await;
+    fixture
+        .state
+        .attach_reactive(fixture.runtime.clone())
+        .unwrap();
+    let run = fixture.running().await;
+    let card = json!({
+        "app": "github", "method": "POST", "path": "/repos/o/r/issues",
+        "body": {"title": "Secret plan"}, "as": "octo-work", "as_id": "entry",
+    });
+    let item = fixture
+        .runtime
+        .open_approval_for_tests(&run, APP_REQUEST_TOOL, &card)
+        .await
+        .unwrap();
+    let detail_of = |text: &str| {
+        let snapshot: Value = serde_json::from_str(text).unwrap();
+        let found = snapshot["outbox"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|outbox| outbox["id"] == item.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            found["approval"]["summary"],
+            "As you on GitHub: POST /repos/o/r/issues"
+        );
+        found["approval"]["detail"].clone()
+    };
+    let own = fixture.base.clone();
+    for origin in [None, Some(own.as_str())] {
+        let (status, text) = fixture
+            .send(Method::GET, "/api/reactive", None, origin)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert!(
+            detail_of(&text).as_str().unwrap().contains("octo-work"),
+            "{origin:?}"
+        );
+    }
+    let (status, text) = fixture
+        .send(Method::GET, "/api/reactive", None, Some(OTHER_PAGE))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert_eq!(detail_of(&text), Value::Null);
+    assert!(!text.contains("octo-work") && !text.contains("Secret plan"));
+
+    // The live frames: the reactive stream and the web's combined one.
+    for path in ["/api/reactive/stream", "/api/events/stream"] {
+        let seen = fixture.stream_until(path, Some(&own), "octo-work").await;
+        assert!(seen.contains("octo-work"), "{path}: {seen}");
+        let other = fixture
+            .stream_until(path, Some(OTHER_PAGE), "As you on GitHub")
+            .await;
+        assert!(other.contains("As you on GitHub"), "{path}: {other}");
+        assert!(
+            !other.contains("octo-work") && !other.contains("Secret plan"),
+            "{path}: {other}"
+        );
+    }
 }

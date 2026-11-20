@@ -92,6 +92,8 @@ pub struct ReactiveRuntime {
     syncing: Arc<AtomicBool>,
     /// Browser steps the gate let through, until the command route runs them.
     allowances: Arc<approval::Allowances>,
+    /// When each bruh's recent emails went out (final review A2 M7).
+    mail_sends: Arc<approval::MailSends>,
     /// The folders that hold the owner's saved logins, which no bruh run
     /// may reach (`secrets::private`).
     private_roots: Arc<PrivateRoots>,
@@ -265,6 +267,7 @@ impl ReactiveRuntime {
             computers: Arc::new(OnceLock::new()),
             syncing: Arc::new(AtomicBool::new(false)),
             allowances: Arc::default(),
+            mail_sends: Arc::default(),
             private_roots: Arc::new(private_roots),
             vault: Arc::new(OnceLock::new()),
             apps: Arc::new(OnceLock::new()),

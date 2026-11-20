@@ -105,6 +105,16 @@ pub const MAIL_NOT_SENT: &str = "The email wasn't sent. Try again.";
 pub const MAIL_REPLY_UNKNOWN: &str = "That message isn't in this mailbox's mail. Reply only to a message Bruhs showed you, or send a new email.";
 /// A `send_mail` on a server without a mail store.
 pub const MAIL_UNAVAILABLE: &str = "Mail isn't available on this server.";
+/// The most emails one bruh sends in an hour, asked or not, so a reply
+/// loop with an autoresponder stays bounded (final review A2 M7).
+pub const MAIL_SENDS_PER_HOUR: usize = 30;
+/// A `send_mail` past [`MAIL_SENDS_PER_HOUR`]: refused before any card, so
+/// it costs the owner no approval.
+pub const MAIL_RATE_LIMITED: &str = "You've sent 30 emails in the last hour. Wait before sending more, and tell the owner if you're replying to an automatic sender.";
+/// A helper call over the route's 64 KB, more than any tool takes (final
+/// review BC M3).
+pub const CALL_TOO_LARGE: &str =
+    "That call is over 64 KB. Send less: a shorter body or fewer fields.";
 /// How long a `send_mail` may take, inside the helper route's 55 s (D17).
 pub const MAIL_SEND_BUDGET_MS: u64 = 45_000;
 

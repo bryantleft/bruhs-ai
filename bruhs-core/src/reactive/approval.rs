@@ -12,11 +12,12 @@ use bruhs_models::{
     agent::AgentProvider,
     crew::{
         app_card_input, app_gate, approval_fingerprint, apps_unavailable, browser_gate,
-        is_app_tool, list_apps_gate, mail_card_input, mail_gate, network_host, permission_gate,
-        same_page_host, AppLookup, ApprovalState, BruhAccess, Gate, MailLookup, APP_REQUEST_TOOL,
-        BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED, LINKED_FILE_DENIAL,
-        LOCAL_HOST_DENIAL, PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL, SEND_MAIL_TOOL,
-        VAULT_COMMAND_RUNNING, VAULT_FILE_DENIAL,
+        is_app_tool, list_apps_gate, mail_card_input, mail_gate, network_host, owner_only_card,
+        permission_gate, same_page_host, AppLookup, ApprovalState, BruhAccess, Gate, MailLookup,
+        APP_REQUEST_TOOL, BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED,
+        LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, MAIL_RATE_LIMITED, MAIL_SENDS_PER_HOUR,
+        PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL, SEND_MAIL_TOOL, VAULT_COMMAND_RUNNING,
+        VAULT_FILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -61,9 +62,55 @@ pub struct StepAllowance {
     /// as the gate looked it up (ruling F10). The route's live lookup must
     /// find the same one.
     pub target: Option<String>,
+    /// The owner approved this call on its card (or a late grant they
+    /// left), rather than the gate allowing it outright. The route's second
+    /// gate takes an Approve only from such an allowance, so an access
+    /// lowered just after the gate can't let a call through unasked (final
+    /// review BC M2).
+    pub owner_approved: bool,
     /// The attempt at the run that was allowed it ([`Allowances::claim`]).
     claim: u64,
     expires: Instant,
+}
+
+/// How long [`MailSends`] remembers a send.
+const MAIL_SEND_WINDOW: Duration = Duration::from_secs(60 * 60);
+
+/// When each bruh's emails of the last hour went out, so no bruh sends more
+/// than [`MAIL_SENDS_PER_HOUR`] (final review A2 M7). Kept in memory: a
+/// restart forgets it.
+#[derive(Debug, Default)]
+pub(super) struct MailSends(Mutex<std::collections::HashMap<String, Vec<Instant>>>);
+
+impl MailSends {
+    /// `agent_id`'s sends still inside the window at `now`.
+    fn recent<'a>(
+        sends: &'a mut std::collections::HashMap<String, Vec<Instant>>,
+        agent_id: &str,
+        now: Instant,
+    ) -> &'a mut Vec<Instant> {
+        let recent = sends.entry(agent_id.to_owned()).or_default();
+        recent.retain(|sent| now.saturating_duration_since(*sent) < MAIL_SEND_WINDOW);
+        recent
+    }
+
+    /// Whether `agent_id` may send another email at `now`.
+    fn has_room(&self, agent_id: &str, now: Instant) -> bool {
+        let mut sends = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        Self::recent(&mut sends, agent_id, now).len() < MAIL_SENDS_PER_HOUR
+    }
+
+    /// Count one email of `agent_id` at `now`, if it has room: false
+    /// otherwise.
+    fn take(&self, agent_id: &str, now: Instant) -> bool {
+        let mut sends = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let recent = Self::recent(&mut sends, agent_id, now);
+        if recent.len() >= MAIL_SENDS_PER_HOUR {
+            return false;
+        }
+        recent.push(now);
+        true
+    }
 }
 
 /// The steps allowed and not yet sent, one entry per allowed call,
@@ -157,6 +204,13 @@ impl Allowances {
 }
 
 impl ReactiveRuntime {
+    /// Count one email bruh `agent_id` is about to send: false, and nothing
+    /// counted, when it has sent [`MAIL_SENDS_PER_HOUR`] in the last hour.
+    /// The route calls it just before the send.
+    pub fn take_mail_send(&self, agent_id: &str) -> bool {
+        self.mail_sends.take(agent_id, Instant::now())
+    }
+
     /// Use up the allowance the gate left for this exact browser step of a
     /// running run of `agent_id`. `None` when the gate never let it
     /// through, it already ran or expired, or its run stopped.
@@ -228,12 +282,9 @@ impl ReactiveRuntime {
         let id = id.to_owned();
         self.call(
             move |connection| match store::crew::approval(connection, &id) {
-                Ok(item) => Ok(item.approval.is_some_and(|request| {
-                    matches!(
-                        request.tool.as_str(),
-                        BRUH_SECRET_TOOL | APP_REQUEST_TOOL | SEND_MAIL_TOOL
-                    )
-                })),
+                Ok(item) => Ok(item
+                    .approval
+                    .is_some_and(|request| owner_only_card(&request.tool))),
                 Err(ReactiveError::NotFound(_)) => Ok(false),
                 Err(error) => Err(error),
             },
@@ -284,6 +335,7 @@ impl ReactiveRuntime {
             command,
             page_url,
             target: None,
+            owner_approved: false,
             claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         });
@@ -817,8 +869,9 @@ pub(super) async fn decide(
         let gate = permission_gate(access, provider, tool, &input, &project, confined);
         (input, gate, None)
     };
-    // Each allowed browser, app or mail call may reach its route once.
-    let allow = || {
+    // Each allowed browser, app or mail call may reach its route once,
+    // marked with whether the owner approved it (final review BC M2).
+    let allow = |owner_approved: bool| {
         if let Some(step) = &step {
             runtime.allowances.record(StepAllowance {
                 agent_id: run.agent_id.clone(),
@@ -827,6 +880,7 @@ pub(super) async fn decide(
                 command: step.command.clone(),
                 page_url: step.page_url.clone(),
                 target: step.target.clone(),
+                owner_approved,
                 claim,
                 expires: Instant::now() + ALLOWANCE_TTL,
             });
@@ -834,7 +888,7 @@ pub(super) async fn decide(
         Some(PermissionDecision::Allow)
     };
     match gate {
-        Gate::Allow => return Ok(allow()),
+        Gate::Allow => return Ok(allow(false)),
         Gate::Deny(reason) => return Ok(Some(deny(reason))),
         Gate::Approve => {}
     }
@@ -843,7 +897,7 @@ pub(super) async fn decide(
         // The grant was made for this page, account or mailbox (the card
         // names it), so it needs no second look; the allowance keeps the
         // call as sent (ruling F25).
-        Opened::Granted => return Ok(allow()),
+        Opened::Granted => return Ok(allow(true)),
         Opened::Waiting(id) => id,
     };
     runtime.changed();
@@ -861,10 +915,10 @@ pub(super) async fn decide(
             // where the owner approved it.
             match page_moved(runtime, &run.agent_id, &input).await {
                 Some(reason) => Some(deny(reason)),
-                None => allow(),
+                None => allow(true),
             }
         }
-        ApprovalWait::Approved => allow(),
+        ApprovalWait::Approved => allow(true),
         ApprovalWait::Denied { reply: None } => Some(deny(DENIED)),
         ApprovalWait::Denied { reply: Some(reply) } => {
             Some(deny(&format!("The owner denied this and replied: {reply}")))
@@ -921,7 +975,16 @@ async fn app_call(
         }
         SEND_MAIL_TOOL => {
             let lookup = runtime.mail_lookup(agent_id, input).await;
-            let gate = mail_gate(access, provider, input, &lookup);
+            let gate = match mail_gate(access, provider, input, &lookup) {
+                // Past the hourly cap, refused before any card (final
+                // review A2 M7); the route counts the send itself.
+                Gate::Allow | Gate::Approve
+                    if !runtime.mail_sends.has_room(agent_id, Instant::now()) =>
+                {
+                    Gate::Deny(MAIL_RATE_LIMITED)
+                }
+                gate => gate,
+            };
             match lookup {
                 MailLookup::Found(target) => (
                     mail_card_input(input, &target),
@@ -1129,6 +1192,26 @@ pub(super) fn resolve(path: &Path, links: u8) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// Final review A2 M7: 30 emails a bruh an hour, each bruh counted on
+    /// its own; one that falls out of the hour makes room.
+    #[test]
+    fn email_sends_are_capped_per_bruh_per_hour() {
+        let sends = MailSends::default();
+        let start = Instant::now();
+        for minute in 0..MAIL_SENDS_PER_HOUR {
+            let at = start + Duration::from_secs(60 * u64::try_from(minute).unwrap());
+            assert!(sends.has_room("a", at));
+            assert!(sends.take("a", at));
+        }
+        let later = start + Duration::from_secs(59 * 60);
+        assert!(!sends.has_room("a", later) && !sends.take("a", later));
+        assert!(sends.take("b", later));
+        // The first send is an hour old: one more fits, then none.
+        let hour = start + MAIL_SEND_WINDOW;
+        assert!(sends.take("a", hour));
+        assert!(!sends.take("a", hour));
+    }
+
     #[test]
     fn an_allowance_lasts_until_the_helpers_deadline() {
         let allowances = Allowances::default();
@@ -1141,6 +1224,7 @@ mod tests {
             command: command.clone(),
             page_url: None,
             target: None,
+            owner_approved: false,
             claim,
             expires,
         };
@@ -1175,6 +1259,7 @@ mod tests {
             command: command.clone(),
             page_url: None,
             target: None,
+            owner_approved: false,
             claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         };
@@ -1222,6 +1307,7 @@ mod tests {
             command: input.clone(),
             page_url: None,
             target: Some("e".into()),
+            owner_approved: false,
             claim,
             expires: Instant::now() + ALLOWANCE_TTL,
         });

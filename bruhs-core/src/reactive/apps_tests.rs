@@ -943,6 +943,8 @@ async fn reads_run_at_ask_and_leave_one_allowance() {
     assert_eq!(allowance.run_id, run.id);
     assert_eq!(allowance.target.as_deref(), Some(octo.as_str()));
     assert_eq!(allowance.page_url, None);
+    // Final review BC M2: the gate allowed it; the owner approved nothing.
+    assert!(!allowance.owner_approved);
     assert_eq!(consume(&fixture, APP_REQUEST_TOOL, &input).await, None);
 
     // list_apps is a read too.
@@ -1117,8 +1119,39 @@ async fn send_mail_is_a_send() {
     assert!(detail.contains(&mailbox.account), "{detail}");
     decide_approval(&fixture.runtime, &item.id, true).await;
     assert_eq!(decided(task).await, allow());
-    assert!(consume(&fixture, SEND_MAIL_TOOL, &mail).await.is_some());
+    let approved = consume(&fixture, SEND_MAIL_TOOL, &mail).await.unwrap();
+    // Final review BC M2: this one the owner approved on its card.
+    assert!(approved.owner_approved);
     assert_eq!(consume(&fixture, SEND_MAIL_TOOL, &mail).await, None);
+}
+
+/// Final review A2 M7: a bruh that has sent its 30 emails this hour is
+/// refused at the gate, before any card, so the cap costs the owner no
+/// approval; another bruh keeps its own count.
+#[tokio::test]
+async fn a_bruh_past_its_email_cap_asks_nobody() {
+    let fixture = Fixture::new().await;
+    fixture.grant_mailbox("a").await;
+    let mail = json!({"to": "ann@x.test", "subject": "Lunch", "body": "Noon?"});
+    for _ in 0..MAIL_SENDS_PER_HOUR {
+        assert!(fixture.runtime.take_mail_send("a"));
+    }
+    assert!(!fixture.runtime.take_mail_send("a"));
+    assert!(fixture.runtime.take_mail_send("b"));
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        let run = claimed_at(&fixture, &access(level, level == AccessLevel::Full, false)).await;
+        assert_eq!(
+            fixture
+                .runtime
+                .gate_app_call_for_tests(&run, SEND_MAIL_TOOL, &mail)
+                .await
+                .unwrap(),
+            deny(MAIL_RATE_LIMITED),
+            "{level:?}"
+        );
+        assert!(approvals(&fixture.runtime, "a").await.is_empty());
+        assert_eq!(consume(&fixture, SEND_MAIL_TOOL, &mail).await, None);
+    }
 }
 
 #[tokio::test]
