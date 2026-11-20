@@ -1420,6 +1420,21 @@ async fn pages_can_not_grant_apps_approve_sends_or_save_app_polls() {
                 "{decide:?}"
             );
         }
+        // Final review BC M1: a reply or a dismissal closes the card and
+        // speaks to the bruh in the owner's voice.
+        for command in [
+            ReactiveCommand::AnswerOutbox {
+                id: id.clone(),
+                message: "Go ahead, post it anyway.".into(),
+            },
+            ReactiveCommand::DismissOutbox { id: id.clone() },
+        ] {
+            assert_eq!(
+                runtime.owner_only_refusal(&command).await.unwrap(),
+                expected,
+                "{command:?}"
+            );
+        }
     }
     let grant = ReactiveCommand::SetAppGrant {
         agent_id: "a".into(),
@@ -1431,5 +1446,66 @@ async fn pages_can_not_grant_apps_approve_sends_or_save_app_polls() {
     assert_eq!(
         runtime.owner_only_refusal(&grant).await.unwrap(),
         Some(OWNER_ONLY_APPS)
+    );
+}
+
+/// Final review A2 I1: a Codex bruh with an app token of its own can't use
+/// it; a page that moves it to a Claude model would turn it on, so that
+/// takes the owner, as a grant does.
+#[tokio::test]
+async fn moving_a_bruh_with_its_own_token_to_claude_takes_the_owner() {
+    let mut fixture = Fixture::new().await;
+    let codex = |id: &str| ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..full_claude(id)
+    };
+    for id in ["c", "d"] {
+        fixture
+            .runtime
+            .command(ReactiveCommand::Apply {
+                change: bruhs_models::reactive::ReactiveChange::SaveAgent { agent: codex(id) },
+            })
+            .await
+            .unwrap();
+        fixture
+            .runtime
+            .command(ReactiveCommand::SetBruh {
+                agent_id: id.into(),
+                look: BruhLook::default(),
+                access: BruhAccess {
+                    level: AccessLevel::Full,
+                    ..BruhAccess::default()
+                },
+                effort: None,
+            })
+            .await
+            .unwrap();
+    }
+    fixture
+        .token("GitHub mine", bruh("c"), "github", "octo", &[])
+        .await;
+    let to_claude = |id: &str| ReactiveCommand::Apply {
+        change: bruhs_models::reactive::ReactiveChange::SaveAgent {
+            agent: ReactiveAgent {
+                model: "claude-sonnet-4-6".into(),
+                ..codex(id)
+            },
+        },
+    };
+    assert_eq!(
+        fixture
+            .runtime
+            .owner_only_refusal(&to_claude("c"))
+            .await
+            .unwrap(),
+        Some(OWNER_ONLY_ACCESS)
+    );
+    assert_eq!(
+        fixture
+            .runtime
+            .owner_only_refusal(&to_claude("d"))
+            .await
+            .unwrap(),
+        None
     );
 }

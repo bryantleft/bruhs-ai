@@ -1232,6 +1232,20 @@ pub struct PreambleTools<'a> {
     pub mail: &'a [String],
 }
 
+/// Whether `new` lets a bruh do anything `old` didn't: a higher level, or
+/// Send as me or Can deliver switched on (final review A2 I1).
+#[must_use]
+pub fn raises_access(old: &BruhAccess, new: &BruhAccess) -> bool {
+    let rank = |level: AccessLevel| match level {
+        AccessLevel::ReadOnly => 0,
+        AccessLevel::Ask => 1,
+        AccessLevel::Full => 2,
+    };
+    rank(new.level) > rank(old.level)
+        || (new.send_as_me && !old.send_as_me)
+        || (new.can_deliver && !old.can_deliver)
+}
+
 /// The opening lines of every bruh run: its name, what it may do and, when
 /// its Computer is on, its browser and, with a usable login, how it fills
 /// vault logins; the vault keys it may use; the apps it may call and the
@@ -2126,6 +2140,34 @@ mod tests {
         assert!(
             !preamble("Ada", &full, AccessLevel::Full, false, false, &[]).contains("local_browser")
         );
+    }
+
+    #[test]
+    fn raising_access_is_any_step_up() {
+        let at = |level, send_as_me, can_deliver| BruhAccess {
+            level,
+            send_as_me,
+            can_deliver,
+        };
+        let ask = at(AccessLevel::Ask, false, false);
+        for new in [
+            at(AccessLevel::Full, false, false),
+            at(AccessLevel::Ask, true, false),
+            at(AccessLevel::Ask, false, true),
+            at(AccessLevel::ReadOnly, true, false),
+        ] {
+            assert!(raises_access(&ask, &new), "{new:?}");
+        }
+        for new in [
+            ask.clone(),
+            at(AccessLevel::ReadOnly, false, false),
+            BruhAccess::default(),
+        ] {
+            assert!(!raises_access(&ask, &new), "{new:?}");
+        }
+        let full = at(AccessLevel::Full, true, true);
+        assert!(!raises_access(&full, &at(AccessLevel::Ask, false, true)));
+        assert!(!raises_access(&full, &full));
     }
 
     /// Final review A1 I3: the browser's input is a write, never a card, so

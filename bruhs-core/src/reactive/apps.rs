@@ -16,9 +16,10 @@ use bruhs_models::apps::{
 use bruhs_models::crew::{
     usable_app_token, AppLookup, AppTarget, MailLookup, MailTarget, APPS_UNREADABLE,
     APP_ACCOUNT_NEEDED, APP_ACCOUNT_UNKNOWN, APP_NOT_GRANTED, MAIL_FROM_NEEDED, MAIL_NOT_GRANTED,
-    PREAMBLE_MAX_NAMES,
+    OWNER_ONLY_ACCESS, PREAMBLE_MAX_NAMES,
 };
 use bruhs_models::mail::MailReplyTarget;
+use bruhs_models::reactive::ReactiveAgent;
 use bruhs_models::vault::{CredentialScope, VaultEntry, VaultKind};
 use serde_json::{json, Value};
 
@@ -203,6 +204,42 @@ fn account_json(one: &Usable) -> Value {
 }
 
 impl ReactiveRuntime {
+    /// Why a page that isn't the owner's may not save `agent` (final review
+    /// A2 I1): its new model turns on the Computer the owner switched on, or
+    /// the app tools for a bruh that holds app or mailbox grants or its own
+    /// app tokens. A token listing that fails or doesn't answer in time
+    /// refuses.
+    ///
+    /// # Errors
+    ///
+    /// A store failure reading the agent or its profile.
+    pub(super) async fn save_agent_refusal(
+        &self,
+        agent: ReactiveAgent,
+    ) -> Result<Option<&'static str>, ReactiveError> {
+        let id = agent.id.clone();
+        let unlocks = self
+            .call(move |connection| store::crew::model_unlocks(connection, &agent))
+            .await?;
+        let refused = unlocks.computer
+            || (unlocks.apps && (unlocks.holds_grants || self.holds_own_app_tokens(&id).await));
+        Ok(refused.then_some(OWNER_ONLY_ACCESS))
+    }
+
+    /// Whether bruh `agent_id` has app tokens of its own. True when the
+    /// vault can't say in time, so a caller refuses.
+    async fn holds_own_app_tokens(&self, agent_id: &str) -> bool {
+        let Some(apps) = self.apps() else {
+            return false;
+        };
+        match tokio::time::timeout(self.vault_wait, apps.vault().app_tokens()).await {
+            Ok(Ok(entries)) => entries.iter().any(|entry| {
+                matches!(&entry.scope, CredentialScope::Bruh { agent_id: owner } if owner == agent_id)
+            }),
+            Ok(Err(_)) | Err(_) => true,
+        }
+    }
+
     /// Bruh `agent_id`'s app and mailbox grants, read live, or `None` when
     /// no agent has that id.
     async fn app_grants(

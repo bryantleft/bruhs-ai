@@ -10,10 +10,10 @@ use crate::{local_tools::BruhComputer, reactive::clock};
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_detail, approval_fingerprint, approval_summary, computer_on, effective_level,
-        level_unavailable, normalize_grants, rail_order, status_for, toggle_grant, AppGrant,
-        ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
-        MAX_APP_GRANTS, MAX_MAIL_GRANTS,
+        approval_detail, approval_fingerprint, approval_summary, apps_unavailable, computer_on,
+        effective_level, level_unavailable, normalize_grants, rail_order, raises_access,
+        status_for, toggle_grant, AppGrant, ApprovalRequest, ApprovalState, BruhAccess, BruhLook,
+        BruhProfile, BruhState, MAX_APP_GRANTS, MAX_MAIL_GRANTS,
     },
     logic::run_place::claude_effort,
     reactive::{
@@ -234,6 +234,97 @@ pub(in crate::reactive) fn proposal_saves_app_poll(
     Ok(
         get::<ReactiveProposal>(connection, "reactive_proposals", id)?
             .is_some_and(|proposal| saves_app_poll(&proposal.change)),
+    )
+}
+
+/// Whether `SetBruh` would raise bruh `agent_id`'s stored access to
+/// `access` (final review A2 I1). An id with no profile compares with the
+/// default, read only.
+pub(in crate::reactive) fn raises_bruh(
+    connection: &Connection,
+    agent_id: &str,
+    access: &BruhAccess,
+) -> Result<bool, ReactiveError> {
+    Ok(raises_access(
+        &profile(connection, agent_id)?.access,
+        access,
+    ))
+}
+
+/// Whether `SetComputer` would turn bruh `agent_id`'s Computer switch on.
+pub(in crate::reactive) fn turns_computer_on(
+    connection: &Connection,
+    agent_id: &str,
+    on: bool,
+) -> Result<bool, ReactiveError> {
+    Ok(on && !profile(connection, agent_id)?.computer)
+}
+
+/// What saving `agent` over the stored one turns on by changing its model
+/// (final review A2 I1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::reactive) struct ModelUnlocks {
+    /// The new model can use the app tools and the old one couldn't.
+    pub apps: bool,
+    /// The bruh holds app or mailbox grants for them to use.
+    pub holds_grants: bool,
+    /// The bruh's Computer switch is on and only the new model can run it.
+    pub computer: bool,
+}
+
+/// [`ModelUnlocks`] for saving `agent`; nothing for a new agent, which has
+/// no grants and no Computer yet.
+pub(in crate::reactive) fn model_unlocks(
+    connection: &Connection,
+    agent: &ReactiveAgent,
+) -> Result<ModelUnlocks, ReactiveError> {
+    let Some(old) = get::<ReactiveAgent>(connection, "reactive_agents", &agent.id)? else {
+        return Ok(ModelUnlocks::default());
+    };
+    let profile = profile(connection, &agent.id)?;
+    let (before, after) = (
+        AgentProvider::for_model(&old.model),
+        AgentProvider::for_model(&agent.model),
+    );
+    let level = profile.access.level;
+    let computer_runs = |provider| computer_on(profile.computer, &profile.access, provider);
+    Ok(ModelUnlocks {
+        apps: apps_unavailable(level, before).is_some() && apps_unavailable(level, after).is_none(),
+        holds_grants: !profile.apps.is_empty() || !profile.mail.is_empty(),
+        computer: !computer_runs(before) && computer_runs(after),
+    })
+}
+
+/// The agent proposal `id` saves when approved, if it saves one.
+pub(in crate::reactive) fn proposal_saves_agent(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<ReactiveAgent>, ReactiveError> {
+    Ok(
+        get::<ReactiveProposal>(connection, "reactive_proposals", id)?.and_then(|proposal| {
+            match proposal.change {
+                ReactiveChange::SaveAgent { agent } => Some(agent),
+                _ => None,
+            }
+        }),
+    )
+}
+
+/// Whether run `id` was started by an app poll source, whose events come
+/// from the owner's own account (final review BC M1). False for an id no
+/// run has.
+pub(in crate::reactive) fn run_polls_app(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, ReactiveError> {
+    let Some(source_id) =
+        get::<ReactiveRun>(connection, "reactive_runs", id)?.and_then(|run| run.source_id)
+    else {
+        return Ok(false);
+    };
+    Ok(
+        get::<EventSource>(connection, "reactive_sources", &source_id)?
+            .is_some_and(|source| matches!(source.kind, SourceKind::AppPoll { .. })),
     )
 }
 

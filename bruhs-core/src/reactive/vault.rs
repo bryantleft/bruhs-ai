@@ -15,8 +15,8 @@ use crate::{
 use bruhs_models::{
     crew::{
         usable_by, LoginTarget, KEYCHAIN_NEEDS_OWNER, LOGIN_NOT_GRANTED, LOGIN_NO_FIELD,
-        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, OWNER_ONLY_APPS,
-        PAGE_UNKNOWN, VAULT_READ_FAILED,
+        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, OWNER_ONLY_ACCESS,
+        OWNER_ONLY_APPS, PAGE_UNKNOWN, VAULT_READ_FAILED,
     },
     local_tools::SecretRef,
     reactive::{ReactiveChange, ReactiveCommand},
@@ -261,7 +261,11 @@ impl ReactiveRuntime {
     /// call an app or send an email ([`Self::is_owner_only_approval`]),
     /// deleting an agent, which deletes a bruh's own vault entries, applied
     /// or approved as a proposal, and turning an app poll routine on or off,
-    /// since an enabled one polls with the owner's own account.
+    /// since an enabled one polls with the owner's own account. Replying to
+    /// or dismissing one of those cards and approving a run an app poll
+    /// started take the owner too (final review BC M1). So does anything that
+    /// raises a bruh: its access, its Computer, or a model change that turns
+    /// on its app grants or Computer (A2 I1); lowering stays open.
     ///
     /// # Errors
     ///
@@ -287,20 +291,52 @@ impl ReactiveRuntime {
             }
             ReactiveCommand::DecideProposal { id, approve: true } => {
                 let id = id.clone();
-                self.call(move |connection| {
-                    Ok(if store::proposal_deletes_agent(connection, &id)? {
-                        Some(OWNER_ONLY_DELETE_BRUH)
-                    } else {
-                        store::crew::proposal_saves_app_poll(connection, &id)?
-                            .then_some(OWNER_ONLY_APPS)
+                let (refusal, agent) = self
+                    .call(move |connection| {
+                        Ok(if store::proposal_deletes_agent(connection, &id)? {
+                            (Some(OWNER_ONLY_DELETE_BRUH), None)
+                        } else if store::crew::proposal_saves_app_poll(connection, &id)? {
+                            (Some(OWNER_ONLY_APPS), None)
+                        } else {
+                            (None, store::crew::proposal_saves_agent(connection, &id)?)
+                        })
                     })
-                })
-                .await?
+                    .await?;
+                match (refusal, agent) {
+                    (Some(refusal), _) => Some(refusal),
+                    (None, Some(agent)) => self.save_agent_refusal(agent).await?,
+                    (None, None) => None,
+                }
             }
-            ReactiveCommand::DecideApproval { id, .. } => self
+            ReactiveCommand::Apply {
+                change: ReactiveChange::SaveAgent { agent },
+            } => self.save_agent_refusal(agent.clone()).await?,
+            ReactiveCommand::SetBruh {
+                agent_id, access, ..
+            } => {
+                let (id, access) = (agent_id.clone(), access.clone());
+                self.call(move |connection| store::crew::raises_bruh(connection, &id, &access))
+                    .await?
+                    .then_some(OWNER_ONLY_ACCESS)
+            }
+            ReactiveCommand::SetComputer { agent_id, on } => {
+                let (id, on) = (agent_id.clone(), *on);
+                self.call(move |connection| store::crew::turns_computer_on(connection, &id, on))
+                    .await?
+                    .then_some(OWNER_ONLY_ACCESS)
+            }
+            ReactiveCommand::DecideApproval { id, .. }
+            | ReactiveCommand::AnswerOutbox { id, .. }
+            | ReactiveCommand::DismissOutbox { id } => self
                 .is_owner_only_approval(id)
                 .await?
                 .then_some(OWNER_ONLY_CARD),
+            ReactiveCommand::ApproveRun { id } => {
+                let id = id.clone();
+                self.call(move |connection| store::crew::run_polls_app(connection, &id))
+                    .await?
+                    .then_some(OWNER_ONLY_APPS)
+            }
             _ => None,
         })
     }

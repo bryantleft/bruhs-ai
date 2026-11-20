@@ -2679,3 +2679,241 @@ async fn enabling_an_automation_never_rewrites_a_newer_source() {
     assert!(!snapshot.subscriptions[0].enabled);
     assert_eq!(snapshot.sources[0].kind, SourceKind::Other);
 }
+
+/// Final review A2 I1: a page that isn't the owner's may lower a bruh but
+/// never raise it: not its level, Send as me, Can deliver or Computer, and
+/// not by moving a bruh that holds apps to a model that can use them.
+#[tokio::test]
+async fn raising_a_bruh_takes_the_owner() {
+    let codex = |id: &str| ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..agent(id)
+    };
+    let (_dir, runtime) = runtime_with(&[agent("a"), codex("c"), codex("d")]).await;
+    let access = |level, send_as_me, can_deliver| BruhAccess {
+        level,
+        send_as_me,
+        can_deliver,
+    };
+    let set = |agent_id: &str, access: BruhAccess| ReactiveCommand::SetBruh {
+        agent_id: agent_id.into(),
+        look: pandan(),
+        access,
+        effort: None,
+    };
+    runtime
+        .command(set("a", access(AccessLevel::Ask, false, false)))
+        .await
+        .unwrap();
+    for (new, expected) in [
+        (
+            access(AccessLevel::Full, false, false),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            access(AccessLevel::Ask, true, false),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            access(AccessLevel::Ask, false, true),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            access(AccessLevel::ReadOnly, true, false),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        // A look edit and a lowering stay open, so a page can stop a bruh.
+        (access(AccessLevel::Ask, false, false), None),
+        (access(AccessLevel::ReadOnly, false, false), None),
+    ] {
+        assert_eq!(
+            runtime
+                .owner_only_refusal(&set("a", new.clone()))
+                .await
+                .unwrap(),
+            expected,
+            "{new:?}"
+        );
+    }
+    let computer = |on| ReactiveCommand::SetComputer {
+        agent_id: "a".into(),
+        on,
+    };
+    assert_eq!(
+        runtime.owner_only_refusal(&computer(true)).await.unwrap(),
+        Some(OWNER_ONLY_ACCESS)
+    );
+    assert_eq!(
+        runtime.owner_only_refusal(&computer(false)).await.unwrap(),
+        None
+    );
+    runtime.command(computer(true)).await.unwrap();
+    assert_eq!(
+        runtime.owner_only_refusal(&computer(true)).await.unwrap(),
+        None
+    );
+
+    // Codex can't use apps; moving one that holds a mailbox to Claude
+    // would turn its grants on.
+    runtime
+        .command(set("c", access(AccessLevel::Full, true, false)))
+        .await
+        .unwrap();
+    runtime
+        .command(set("d", access(AccessLevel::Full, true, false)))
+        .await
+        .unwrap();
+    runtime
+        .command(app_grant(
+            "c",
+            AppGrant::Mailbox {
+                mailbox_id: "m".into(),
+            },
+            true,
+        ))
+        .await
+        .unwrap();
+    let save = |agent: ReactiveAgent| ReactiveChange::SaveAgent { agent };
+    let to_claude = |id: &str| ReactiveAgent {
+        model: "claude-sonnet-4-6".into(),
+        ..codex(id)
+    };
+    let snapshot = runtime
+        .command(ReactiveCommand::Propose {
+            change: save(to_claude("c")),
+        })
+        .await
+        .unwrap();
+    let proposal = snapshot.proposals[0].id.clone();
+    runtime
+        .command(app_grant(
+            "a",
+            AppGrant::Mailbox {
+                mailbox_id: "m".into(),
+            },
+            true,
+        ))
+        .await
+        .unwrap();
+    for (command, expected) in [
+        (
+            ReactiveCommand::Apply {
+                change: save(to_claude("c")),
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal.clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal,
+                approve: false,
+            },
+            None,
+        ),
+        // Recorded (F26 d): new instructions on the same model.
+        (
+            ReactiveCommand::Apply {
+                change: save(ReactiveAgent {
+                    instructions: "Other work.".into(),
+                    ..codex("c")
+                }),
+            },
+            None,
+        ),
+        // No grants to turn on, a lowering, and a new bruh.
+        (
+            ReactiveCommand::Apply {
+                change: save(to_claude("d")),
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::Apply {
+                change: save(ReactiveAgent {
+                    model: "gpt-5.3-codex".into(),
+                    ..agent("a")
+                }),
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::Apply {
+                change: save(agent("new")),
+            },
+            None,
+        ),
+    ] {
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+}
+
+/// Final review BC M1: approving a run an App source started starts that
+/// bruh on the owner's account's data, so it takes the owner.
+#[tokio::test]
+async fn approving_an_app_source_run_takes_the_owner() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let schedule = EventSource {
+        kind: SourceKind::Schedule { every_ms: 60_000 },
+        ..app_poll_source("t", "o/r")
+    };
+    for source in [app_poll_source("p", "o/r"), schedule] {
+        runtime
+            .command(ReactiveCommand::Apply {
+                change: ReactiveChange::SaveSource { source },
+            })
+            .await
+            .unwrap();
+    }
+    for (id, source) in [("polls", "p"), ("ticks", "t")] {
+        runtime
+            .command(ReactiveCommand::Apply {
+                change: ReactiveChange::SaveSubscription {
+                    subscription: subscription_to(id, source, "a", true),
+                },
+            })
+            .await
+            .unwrap();
+    }
+    let mut runs = Vec::new();
+    for source in ["p", "t"] {
+        let snapshot = runtime
+            .command(ReactiveCommand::Publish {
+                source_id: source.into(),
+                key: format!("{source}-1"),
+                payload: json!({"title": "x"}),
+            })
+            .await
+            .unwrap();
+        runs.push(
+            snapshot
+                .runs
+                .iter()
+                .find(|run| run.source_id.as_deref() == Some(source))
+                .unwrap()
+                .id
+                .clone(),
+        );
+    }
+    for (id, expected) in [
+        (runs[0].clone(), Some(OWNER_ONLY_APPS)),
+        (runs[1].clone(), None),
+        ("gone".to_owned(), None),
+    ] {
+        let command = ReactiveCommand::ApproveRun { id };
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+}

@@ -156,6 +156,10 @@ pub const MAX_MAIL_GRANTS: usize = 16;
 
 /// Refused unless the request comes from the owner's own app (D23).
 pub const OWNER_ONLY_APPS: &str = "Open Bruhs from its own address to change apps.";
+/// A page that isn't the owner's raised a bruh's access, turned its
+/// Computer on, or moved a bruh that holds apps to a model that can use
+/// them (final review A2 I1). Lowering stays open to any page.
+pub const OWNER_ONLY_ACCESS: &str = "Open Bruhs from its own address to raise a bruh's access.";
 const NOT_AN_APP_ACCOUNT: &str = "That isn't an app account.";
 const TOO_MANY_APP_GRANTS: &str = "Grant at most 64 app accounts.";
 const TOO_MANY_MAIL_GRANTS: &str = "Grant at most 16 mail accounts.";
