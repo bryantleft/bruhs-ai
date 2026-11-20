@@ -739,6 +739,28 @@ pub fn option_label(kind: OptionKind, amount: u64) -> String {
     }
 }
 
+/// The filled [`NO_SPACE`]: `needed` more bytes must be freed.
+pub fn no_space(needed: u64) -> String {
+    fill(NO_SPACE, &[("size", &format_bytes(needed))])
+}
+
+/// The warning for owner files and folders a backup left out by name, if
+/// it left any out.
+pub fn skipped_names_line(skipped: u32) -> Option<String> {
+    let template = match skipped {
+        0 => return None,
+        1 => SKIPPED_NAME,
+        _ => SKIPPED_NAMES,
+    };
+    Some(fill(template, &[("n", &skipped.to_string())]))
+}
+
+/// The warning for a bruh whose browser was still busy, so its profile
+/// stayed out of the backup.
+pub fn browser_busy_line(name: &str) -> String {
+    fill(BROWSER_BUSY, &[("name", name)])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1111,6 +1133,27 @@ mod tests {
                 bytes: 512_000
             }),
             "Last backup: 2026-11-20 14:30 UTC from the web app, 512 KB."
+        );
+    }
+
+    #[test]
+    fn backup_warnings_fill_their_values() {
+        assert_eq!(skipped_names_line(0), None);
+        assert_eq!(
+            skipped_names_line(1).as_deref(),
+            Some("1 file or folder with a name a backup can't hold was left out.")
+        );
+        assert_eq!(
+            skipped_names_line(3).as_deref(),
+            Some("3 files or folders with names a backup can't hold were left out.")
+        );
+        assert_eq!(
+            browser_busy_line("Scout {n}"),
+            "Scout {n}'s browser was busy, so its sign-ins aren't in this backup."
+        );
+        assert_eq!(
+            no_space(1_500_000_000),
+            "There isn't enough free disk space. Free 1.5 GB and try again."
         );
     }
 }

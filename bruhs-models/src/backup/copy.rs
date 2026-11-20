@@ -45,6 +45,13 @@ pub const JOB_WORKING: &str = "Working: {done} of {total}";
 pub const LOCKING_WEB: &str = "Locking this browser's data";
 pub const CREATED_WEB: &str = "Backup ready: {name}, {size}.";
 pub const CREATED_DESKTOP: &str = "Saved {name}, {size}.";
+/// Warnings on a made backup. `{n}` counts owner files and folders left
+/// out by name (a folder counts once), `{name}` is a bruh's name.
+pub const SKIPPED_NAME: &str = "{n} file or folder with a name a backup can't hold was left out.";
+pub const SKIPPED_NAMES: &str =
+    "{n} files or folders with names a backup can't hold were left out.";
+pub const BROWSER_BUSY: &str = "{name}'s browser was busy, so its sign-ins aren't in this backup.";
+pub const BACKUP_STOPPED: &str = "The backup was stopped. Nothing was saved.";
 
 // What a backup holds, shown before a restore.
 pub const PREVIEW_MADE: &str = "Made {date} on the {app} app, Bruhs {version}.";
@@ -112,6 +119,9 @@ pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try a
 /// I2 ruling). Owner files with such names are left out and counted.
 pub const DATA_NAME_REFUSED: &str =
     "A file in Bruhs' own folders has a name a backup can't hold, so no backup was made.";
+/// A data root whose own path isn't UTF-8 (B Task 5 ruling).
+pub const ROOT_NAME_REFUSED: &str =
+    "A Bruhs data folder has a name a backup can't hold, so no backup was made.";
 pub const KEYCHAIN_NEEDS_YOU: &str =
     "Your keychain needs you. Allow access on this computer, or leave out saved logins and keys.";
 pub const KEYCHAIN_ITEM_REFUSED: &str = "That keychain item isn't one of Bruhs' own.";
@@ -175,6 +185,10 @@ pub const ALL_COPY: &[&str] = &[
     LOCKING_WEB,
     CREATED_WEB,
     CREATED_DESKTOP,
+    SKIPPED_NAME,
+    SKIPPED_NAMES,
+    BROWSER_BUSY,
+    BACKUP_STOPPED,
     PREVIEW_MADE,
     PREVIEW_COUNTS,
     COUNT_BRUH,
@@ -221,6 +235,7 @@ pub const ALL_COPY: &[&str] = &[
     NO_SPACE,
     FILE_CHANGED,
     DATA_NAME_REFUSED,
+    ROOT_NAME_REFUSED,
     KEYCHAIN_NEEDS_YOU,
     KEYCHAIN_ITEM_REFUSED,
     KEYCHAIN_READ_FAILED,

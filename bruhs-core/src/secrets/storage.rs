@@ -517,7 +517,7 @@ impl SecretStore {
     }
 
     /// While held, every keychain read waits, like an unanswered prompt.
-    pub(super) fn hold_reads(&self, hold: bool) {
+    pub(crate) fn hold_reads(&self, hold: bool) {
         self.memory_keys().hold_reads(hold);
     }
 

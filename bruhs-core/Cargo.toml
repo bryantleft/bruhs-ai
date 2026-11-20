@@ -63,7 +63,10 @@ ress = "0.11.7"
 libc = "0.2"
 # Backup walks the data roots through folder handles, never following a link.
 rustix = { version = "1", features = ["fs"] }
-rusqlite = { workspace = true }
+# `backup`: rollback-mode databases are snapshotted with the online backup API.
+rusqlite = { workspace = true, features = ["backup"] }
+# Backups are a tar stream inside the encrypted container (no xattrs).
+tar = { version = "0.4", default-features = false }
 tokio-postgres = "=0.7.18"
 sqlparser = { version = "=0.64.0", features = ["visitor"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }

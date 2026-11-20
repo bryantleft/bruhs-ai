@@ -480,16 +480,18 @@ pub fn open_source(file: &SourceFile) -> io::Result<File> {
     ))
 }
 
-/// Copies the SQLite database at `source` into the new file `into` with
-/// `VACUUM INTO` and returns the copy's size. The copy is one consistent
-/// snapshot, committed WAL frames included.
+/// Copies the SQLite database at `source` into the new file `into` and
+/// returns the copy's size. The copy is one consistent snapshot,
+/// committed WAL frames included.
 ///
 /// The live database is opened read-only through SQLite, with no link
 /// anywhere in `source` (pass a [`SourceFile::path`], which is resolved)
-/// and schema code untrusted. The snapshot takes only a read transaction
-/// and never writes the live file. In WAL mode a writer keeps committing
-/// while it runs; in rollback mode a writer waits for it (B Task 5 I3:
-/// Task 6 copies those databases with the online backup API instead).
+/// and schema code untrusted, and is never written. A WAL database is
+/// copied with `VACUUM INTO`, whose one read transaction never stops a
+/// writer. A rollback-mode database (`server/mail.sqlite3`,
+/// `database-connections.sqlite3`) is copied with the online backup API a
+/// few pages a step, so a writer waits at most one step for its lock
+/// (B Task 5 I3); a write between steps starts the copy again.
 /// `into` is created first with mode 0600, never replacing a file or
 /// following a link, and its folder is resolved; on failure it is
 /// removed. Errors carry no path (ruling F15).
@@ -501,7 +503,7 @@ pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     drop(options.open(into)?);
-    match vacuum_into(source, into) {
+    match copy_database(source, into) {
         Ok(()) => Ok(std::fs::symlink_metadata(into)?.len()),
         Err(error) => {
             // Best effort: the copy is incomplete and in a 0600 file.
@@ -511,7 +513,7 @@ pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
     }
 }
 
-fn vacuum_into(source: &Path, into: &Path) -> Result<(), BackupError> {
+fn copy_database(source: &Path, into: &Path) -> Result<(), BackupError> {
     // SQLite's `NOFOLLOW` refuses a link anywhere in a path (`/var` is one
     // on macOS), so the target's folder, which Bruhs made, is resolved.
     let into = resolved_folder(into)?;
@@ -528,9 +530,53 @@ fn vacuum_into(source: &Path, into: &Path) -> Result<(), BackupError> {
     live.busy_timeout(SQLITE_WAIT).map_err(sqlite_failed)?;
     live.pragma_update(None, "trusted_schema", false)
         .map_err(sqlite_failed)?;
-    live.execute("VACUUM INTO ?1", [target])
+    let mode: String = live
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
         .map_err(sqlite_failed)?;
+    if mode.eq_ignore_ascii_case("wal") {
+        live.execute("VACUUM INTO ?1", [target])
+            .map_err(sqlite_failed)?;
+    } else {
+        backup_in_steps(&live, &into)?;
+    }
     live.close().map_err(|(_, error)| sqlite_failed(error))
+}
+
+/// Pages one online backup step copies; SQLite's default page is 4 KiB.
+const BACKUP_STEP_PAGES: i32 = 64;
+/// The pause between two steps, when a writer may take its lock.
+const BACKUP_STEP_PAUSE: Duration = Duration::from_millis(2);
+/// How long a backup may keep starting again under a busy writer.
+const BACKUP_DEADLINE: Duration = Duration::from_secs(120);
+
+/// Copies `live` into the empty file `into` with SQLite's online backup
+/// API, a few pages at a time. The source's lock is held only during a
+/// step.
+fn backup_in_steps(live: &Connection, into: &Path) -> Result<(), BackupError> {
+    use rusqlite::backup::{Backup, StepResult};
+    let mut copy = Connection::open_with_flags(
+        into,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(sqlite_failed)?;
+    {
+        let backup = Backup::new(live, &mut copy).map_err(sqlite_failed)?;
+        let started = std::time::Instant::now();
+        loop {
+            match backup.step(BACKUP_STEP_PAGES).map_err(sqlite_failed)? {
+                StepResult::Done => break,
+                StepResult::More | StepResult::Busy | StepResult::Locked => {}
+                _ => return Err(snapshot_failed("a SQLite backup step failed")),
+            }
+            if started.elapsed() > BACKUP_DEADLINE {
+                return Err(snapshot_failed("a SQLite backup never caught up"));
+            }
+            std::thread::sleep(BACKUP_STEP_PAUSE);
+        }
+    }
+    copy.close().map_err(|(_, error)| sqlite_failed(error))
 }
 
 /// `path` with its folder resolved and its final name kept as it is.

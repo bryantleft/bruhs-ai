@@ -1,0 +1,896 @@
+//! Making a backup, over temporary roots, a file-test keychain and fake
+//! bruh browsers only. Keys derive at `KdfParams::FLOOR`.
+#![cfg(unix)]
+
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use base64::Engine as _;
+use bruhs_backup::{Decryptor, Encryptor, Header, Kdf, KdfParams, Key, Kind, Secret};
+use bruhs_models::backup::*;
+use bruhs_models::crew::{BruhAccess, BruhLook, CREW_PROTOCOL};
+use bruhs_models::reactive::{ReactiveAgent, ReactiveCommand};
+use bruhs_models::secrets::SavedCredentialState;
+use bruhs_models::vault::{CredentialScope, VaultEntry, VaultKind};
+use rusqlite::{Connection, OpenFlags};
+use zeroize::Zeroizing;
+
+use super::*;
+use crate::local_tools::{BruhComputer, LocalToolsHost};
+use crate::reactive::ReactiveRuntime;
+use crate::secrets::{SecretStore, CONNECTIONS_SERVICE, SECRETS_SERVICE};
+
+const PASSWORD: &str = "correct horse 1";
+const GLOBAL_VALUE: &str = "v1-11111111111111111111111111111111";
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    roots: Roots,
+    store: SecretStore,
+    runtime: ReactiveRuntime,
+    /// The keychain value of the Global Value; the connection's token is
+    /// `<canary>-github`.
+    canary: String,
+    /// A folder outside both roots for chosen destinations.
+    out: PathBuf,
+}
+
+fn write(path: &Path, bytes: &[u8]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, bytes).unwrap();
+}
+
+fn agent(id: &str, name: &str) -> ReactiveAgent {
+    ReactiveAgent {
+        id: id.into(),
+        name: name.into(),
+        instructions: "Keep notes.".into(),
+        memory: String::new(),
+        model: "claude-sonnet-4-6".into(),
+        project_path: String::new(),
+        enabled: true,
+    }
+}
+
+async fn hire(runtime: &ReactiveRuntime, id: &str, name: &str) {
+    runtime
+        .command(ReactiveCommand::CreateBruh {
+            agent: agent(id, name),
+            look: BruhLook::default(),
+            access: BruhAccess::default(),
+            effort: None,
+        })
+        .await
+        .unwrap();
+}
+
+/// Two roots under a resolved temp home: a reactive database with one
+/// bruh, a rollback-mode mail database, a vault Global Value and a
+/// connection with their keychain items, meeting audio and a transcript,
+/// the bruh's browser profile and the desktop's state.
+async fn fixture() -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let home = base.join("home");
+    let core = home.join("core");
+    let roots = Roots {
+        home: home.clone(),
+        core: core.clone(),
+        desktop: home.join("desktop"),
+        config: core.clone(),
+    };
+    std::fs::create_dir_all(core.join("server")).unwrap();
+    let runtime = ReactiveRuntime::open(core.join("server/reactive.sqlite3"))
+        .await
+        .unwrap();
+    hire(&runtime, "b1", "Scout").await;
+
+    let mail = Connection::open(core.join("server/mail.sqlite3")).unwrap();
+    mail.execute_batch("CREATE TABLE mail(subject TEXT); INSERT INTO mail VALUES ('hello');")
+        .unwrap();
+    drop(mail);
+
+    let entry = serde_json::to_value(VaultEntry {
+        id: GLOBAL_VALUE.into(),
+        name: "API_KEY".into(),
+        scope: CredentialScope::Global,
+        kind: VaultKind::Value,
+        state: SavedCredentialState::Saved,
+        attention: None,
+    })
+    .unwrap();
+    write(
+        &core.join("credentials/vault.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "entries": { GLOBAL_VALUE: entry },
+        }))
+        .unwrap(),
+    );
+    write(
+        &core.join("connections/github.json"),
+        b"{\"id\":\"github\"}",
+    );
+    let store = SecretStore::file_test(core.join("credentials"));
+    let canary = format!("canary-{}", uuid::Uuid::new_v4().simple());
+    store
+        .write_item(
+            SECRETS_SERVICE,
+            &format!("vault:global:{GLOBAL_VALUE}"),
+            &canary,
+        )
+        .unwrap();
+    store
+        .write_item(CONNECTIONS_SERVICE, "github", &format!("{canary}-github"))
+        .unwrap();
+
+    write(&core.join("audio/m1.wav"), &[7; 3000]);
+    write(&core.join("audio/m2.wav"), &[8; 2000]);
+    write(&core.join("audio/m1.jsonl"), b"{\"text\":\"hi\"}\n");
+    write(
+        &core.join("server/bruhs/b1/browser/Default/Cookies"),
+        b"cookie jar",
+    );
+    write(
+        &core.join("server/bruhs/b1/browser/Default/Code Cache/js/x"),
+        &[1; 500],
+    );
+    write(&roots.desktop.join("desktop-state.json"), b"{\"open\":[]}");
+    let out = base.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    Fixture {
+        _dir: dir,
+        roots,
+        store,
+        runtime,
+        canary,
+        out,
+    }
+}
+
+fn host(fixture: &Fixture) -> BackupHost {
+    BackupHost::new(fixture.roots.clone(), fixture.store.clone())
+        .with_reactive(fixture.runtime.clone())
+        .for_tests(false)
+}
+
+fn request(output: Output, options: BackupOptions) -> CreateRequest {
+    CreateRequest {
+        password: Zeroizing::new(PASSWORD.into()),
+        options,
+        app: BackupApp::Desktop,
+        web_part: None,
+        web_db_version: None,
+        output,
+    }
+}
+
+/// The job's end state.
+async fn finished(host: &BackupHost, id: &str) -> JobState {
+    for _ in 0..3000 {
+        let state = host.job(id).unwrap().state;
+        if !matches!(state, JobState::Running { .. }) {
+            return state;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the job never finished");
+}
+
+async fn created(host: &BackupHost, request: CreateRequest) -> BackupFile {
+    let job = host.start_create(request).await.unwrap();
+    match finished(host, &job.id).await {
+        JobState::Created { file } => file,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Where a made backup is: its chosen path, or its download.
+fn backup_path(host: &BackupHost, file: &BackupFile) -> PathBuf {
+    match (&file.path, &file.download) {
+        (Some(path), None) => PathBuf::from(path),
+        (None, Some(url)) => host
+            .outgoing(url.rsplit('/').next().unwrap())
+            .expect("the download waits"),
+        other => panic!("{other:?}"),
+    }
+}
+
+struct Entry {
+    path: String,
+    folder: bool,
+    bytes: Vec<u8>,
+}
+
+/// Every entry of a backup, decrypted with its password, after checking
+/// that the stream ends where the tar does.
+fn open_backup(path: &Path) -> Vec<Entry> {
+    let password = normalize_password(PASSWORD);
+    let mut decryptor = Decryptor::open(
+        File::open(path).unwrap(),
+        Secret::Password(&password),
+        Kind::Full,
+    )
+    .unwrap();
+    let mut entries = Vec::new();
+    {
+        let mut archive = tar::Archive::new(&mut decryptor);
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = String::from_utf8(entry.path_bytes().into_owned()).unwrap();
+            let folder = entry.header().entry_type() == tar::EntryType::Directory;
+            assert!(
+                folder || entry.header().entry_type() == tar::EntryType::Regular,
+                "{path}"
+            );
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            entries.push(Entry {
+                path,
+                folder,
+                bytes,
+            });
+        }
+    }
+    let mut rest = Vec::new();
+    decryptor.read_to_end(&mut rest).unwrap();
+    assert!(rest.len() <= 10 * 1024 && rest.iter().all(|byte| *byte == 0));
+    decryptor.finish().unwrap();
+    entries
+}
+
+fn manifest_of(entries: &[Entry]) -> BackupManifest {
+    let last = entries.last().unwrap();
+    assert_eq!(last.path, "manifest.json", "the manifest is last");
+    serde_json::from_slice(&last.bytes).unwrap()
+}
+
+fn entry<'a>(entries: &'a [Entry], path: &str) -> Option<&'a Entry> {
+    entries.iter().find(|entry| entry.path == path)
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The keychain values in `keychain.json`, by account.
+fn keychain_values(entries: &[Entry]) -> Vec<(String, String)> {
+    let json: serde_json::Value =
+        serde_json::from_slice(&entry(entries, "keychain.json").unwrap().bytes).unwrap();
+    json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            let value = base64::engine::general_purpose::STANDARD
+                .decode(item["value"].as_str().unwrap())
+                .unwrap();
+            (
+                item["account"].as_str().unwrap().to_owned(),
+                String::from_utf8(value).unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// A rows count read from a database entry.
+fn rows(bytes: &[u8], table: &str) -> i64 {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("copy.sqlite3");
+    std::fs::write(&path, bytes).unwrap();
+    let copy = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    copy.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+    .unwrap()
+}
+
+fn names_in(folder: &Path) -> Vec<String> {
+    std::fs::read_dir(folder)
+        .map(|entries| {
+            entries
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_backup_holds_every_file_and_opens_with_its_password() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let file = created(
+        &host,
+        request(
+            Output::File {
+                path: fixture.out.join("mine"),
+                overwrite: false,
+            },
+            BackupOptions::default(),
+        ),
+    )
+    .await;
+    let path = fixture.out.join("mine.bruhsbak");
+    assert_eq!(file.path.as_deref(), Some(path.to_str().unwrap()));
+    assert_eq!(file.name, "mine.bruhsbak");
+    assert_eq!(file.download, None);
+    assert!(file.warnings.is_empty(), "{:?}", file.warnings);
+    let metadata = std::fs::metadata(&path).unwrap();
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+    assert_eq!(file.bytes, metadata.len());
+    assert_eq!(names_in(&fixture.out), ["mine.bruhsbak"], "no partial file");
+    assert!(
+        names_in(&host.tmp_dir()).is_empty(),
+        "snapshots are deleted"
+    );
+
+    let entries = open_backup(&path);
+    let manifest = manifest_of(&entries);
+    let listed = inventory(&fixture.roots, &BackupOptions::default()).unwrap();
+    let data: Vec<&str> = entries
+        .iter()
+        .filter(|entry| {
+            !entry.folder && (entry.path.starts_with("core/") || entry.path.starts_with("desktop/"))
+        })
+        .map(|entry| entry.path.as_str())
+        .collect();
+    let expected: Vec<String> = listed
+        .files
+        .iter()
+        .map(|file| match file.root {
+            RootKey::Core => format!("core/{}", file.rel),
+            RootKey::Desktop => format!("desktop/{}", file.rel),
+        })
+        .collect();
+    assert_eq!(data, expected);
+    assert!(data.contains(&"core/server/reactive.sqlite3"));
+    assert!(data.contains(&"core/audio/m1.wav"));
+    assert!(!data.iter().any(|path| path.contains("/browser/")));
+    for file in listed.files.iter().filter(|file| !file.sqlite) {
+        let prefix = match file.root {
+            RootKey::Core => "core",
+            RootKey::Desktop => "desktop",
+        };
+        let stored = entry(&entries, &format!("{prefix}/{}", file.rel)).unwrap();
+        assert_eq!(
+            stored.bytes,
+            std::fs::read(&file.path).unwrap(),
+            "{}",
+            file.rel
+        );
+    }
+    // Databases are SQLite snapshots: WAL and rollback mode alike.
+    let reactive = entry(&entries, "core/server/reactive.sqlite3").unwrap();
+    assert_eq!(rows(&reactive.bytes, "reactive_agents"), 1);
+    let mail = entry(&entries, "core/server/mail.sqlite3").unwrap();
+    assert_eq!(rows(&mail.bytes, "mail"), 1);
+
+    // Folder entries carry no trailing slash and never name a root.
+    let folders: Vec<&str> = entries
+        .iter()
+        .filter(|entry| entry.folder)
+        .map(|entry| entry.path.as_str())
+        .collect();
+    assert!(folders.contains(&"core/server/bruhs/b1"), "{folders:?}");
+    assert!(folders
+        .iter()
+        .all(|folder| !folder.ends_with('/') && !matches!(*folder, "core" | "desktop")));
+
+    let mut values = keychain_values(&entries);
+    values.sort();
+    assert_eq!(
+        values,
+        [
+            ("github".to_owned(), format!("{}-github", fixture.canary)),
+            (
+                format!("vault:global:{GLOBAL_VALUE}"),
+                fixture.canary.clone()
+            ),
+        ]
+    );
+
+    // Every entry but the folders and the manifest is listed with its size
+    // and hash; nothing else is.
+    let stored: Vec<(&str, u64, String)> = entries
+        .iter()
+        .filter(|entry| !entry.folder && entry.path != "manifest.json")
+        .map(|entry| {
+            (
+                entry.path.as_str(),
+                u64::try_from(entry.bytes.len()).unwrap(),
+                sha256(&entry.bytes),
+            )
+        })
+        .collect();
+    let in_manifest: Vec<(&str, u64, String)> = manifest
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.bytes, file.sha256.clone()))
+        .collect();
+    assert_eq!(in_manifest, stored);
+    assert!(stored.iter().any(|(path, ..)| *path == "keychain.json"));
+    assert_eq!(manifest.format, MANIFEST_FORMAT);
+    assert_eq!(manifest.reactive_protocol, CREW_PROTOCOL);
+    assert_eq!(manifest.made_on, BackupApp::Desktop);
+    assert_eq!(manifest.home, fixture.roots.home.to_str().unwrap());
+    assert_eq!(manifest.core_root, fixture.roots.core.to_str().unwrap());
+    assert_eq!(
+        manifest.desktop_root,
+        fixture.roots.desktop.to_str().unwrap()
+    );
+    assert!(!manifest.same_root);
+    assert_eq!(manifest.web_db_version, None);
+    assert_eq!(manifest.keychain_items, 2);
+    assert_eq!(manifest.counts.keychain_items, 2);
+    assert_eq!(manifest.counts.bruhs, 1);
+    assert_eq!(manifest.counts.vault_entries, 1);
+    assert_eq!(
+        manifest.counts.files,
+        u64::try_from(expected.len()).unwrap()
+    );
+    assert_eq!(manifest.options, BackupOptions::default());
+}
+
+/// Every regular file under `folder` changed since `since`, read without
+/// following links.
+fn files_under(folder: &Path, since: SystemTime, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            files_under(&entry.path(), since, found);
+        } else if metadata.is_file()
+            && metadata.len() <= 64 << 20
+            && metadata.modified().is_ok_and(|changed| changed >= since)
+        {
+            found.push(entry.path());
+        }
+    }
+}
+
+fn holds(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+#[tokio::test]
+async fn keychain_values_appear_only_inside_the_ciphertext() {
+    let since = SystemTime::now() - Duration::from_secs(2);
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let file = created(&host, request(Output::Outgoing, BackupOptions::default())).await;
+    let path = backup_path(&host, &file);
+    assert!(path.starts_with(fixture.roots.backups(RootKey::Core).join("outgoing")));
+    assert_eq!(path.extension().unwrap(), "bruhsbak");
+    let manifest = manifest_of(&open_backup(&path));
+    assert_eq!(file.name, backup_file_name(manifest.made_at_ms));
+    assert!(file.path.is_none());
+
+    let plain = fixture.canary.as_bytes().to_vec();
+    let encoded = base64::engine::general_purpose::STANDARD
+        .encode(&fixture.canary)
+        .into_bytes();
+    let mut scanned = Vec::new();
+    for folder in [
+        fixture.roots.core.clone(),
+        fixture.roots.desktop.clone(),
+        fixture.out.clone(),
+        std::env::temp_dir(),
+    ] {
+        files_under(&folder, since, &mut scanned);
+    }
+    assert!(scanned.contains(&path), "the scan covers the backup itself");
+    for scanned in &scanned {
+        let Ok(bytes) = std::fs::read(scanned) else {
+            continue;
+        };
+        assert!(
+            !holds(&bytes, &plain) && !holds(&bytes, &encoded),
+            "a keychain value is readable in {}",
+            scanned.display()
+        );
+    }
+    // The values are in the backup all the same.
+    assert!(keychain_values(&open_backup(&path))
+        .iter()
+        .any(|(_, value)| *value == fixture.canary));
+}
+
+#[tokio::test]
+async fn options_leave_out_what_the_owner_unticks() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let file = created(
+        &host,
+        request(
+            Output::Outgoing,
+            BackupOptions {
+                keychain: false,
+                audio: false,
+                browser_profiles: false,
+            },
+        ),
+    )
+    .await;
+    let entries = open_backup(&backup_path(&host, &file));
+    let manifest = manifest_of(&entries);
+    assert!(entry(&entries, "keychain.json").is_none());
+    assert_eq!(manifest.keychain_items, 0);
+    assert!(!entries
+        .iter()
+        .any(|entry| entry.path.starts_with("core/audio/") && entry.path.ends_with(".wav")));
+    // Audio off leaves out the media only (ruling F9).
+    assert!(entry(&entries, "core/audio/m1.jsonl").is_some());
+
+    // Browser profiles: each bruh's browser is closed first; a busy one
+    // stays out and is named.
+    hire(&fixture.runtime, "b2", "Busy Bee").await;
+    let profile = |id: &str| {
+        fixture
+            .roots
+            .core
+            .join(format!("server/bruhs/{id}/browser"))
+    };
+    write(&profile("b2").join("Default/Cookies"), b"busy jar");
+    // An owner file whose name a restore would refuse is left out and
+    // counted.
+    write(
+        &fixture
+            .roots
+            .core
+            .join("server/bruhs/b1/work/odd\\name.txt"),
+        b"odd",
+    );
+    let (tools, fake) = LocalToolsHost::with_fake_pages();
+    let computer = |id: &str| BruhComputer {
+        agent_id: id.into(),
+        name: id.into(),
+        paused: false,
+        profile_dir: profile(id),
+    };
+    tools.sync_bruhs(vec![computer("b1"), computer("b2")]).await;
+    tools.open_computer("b1").await.unwrap();
+    tools.open_computer("b2").await.unwrap();
+    let held = fake.hold_next_action("b2");
+    let step = tokio::spawn({
+        let tools = Arc::clone(&tools);
+        async move {
+            tools
+                .bruh_command("b2", bruhs_models::local_tools::BrowserAction::Snapshot)
+                .await
+        }
+    });
+    for _ in 0..500 {
+        if fake.actions("b2").len() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fake.actions("b2").len(), 1, "b2's step is running");
+
+    let host = host.with_computers(Arc::clone(&tools));
+    let file = created(
+        &host,
+        request(
+            Output::Outgoing,
+            BackupOptions {
+                browser_profiles: true,
+                ..BackupOptions::default()
+            },
+        ),
+    )
+    .await;
+    held.notify_one();
+    let _ = step.await;
+    assert_eq!(fake.closes("b1"), 1, "b1's browser was closed first");
+    let entries = open_backup(&backup_path(&host, &file));
+    assert!(entry(&entries, "core/server/bruhs/b1/browser/Default/Cookies").is_some());
+    assert!(!entries
+        .iter()
+        .any(|entry| entry.path.contains("Code Cache")));
+    assert!(!entries
+        .iter()
+        .any(|entry| entry.path.starts_with("core/server/bruhs/b2/browser")));
+    assert_eq!(
+        file.warnings,
+        [
+            browser_busy_line("Busy Bee"),
+            skipped_names_line(1).unwrap()
+        ]
+    );
+    let manifest = manifest_of(&entries);
+    assert!(manifest.options.browser_profiles);
+    assert_eq!(manifest.skipped_names, 1);
+    assert!(!entries.iter().any(|entry| entry.path.contains("odd")));
+}
+
+#[test]
+fn destinations_are_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    let core = base.join("core");
+    let roots = Roots {
+        home: base.clone(),
+        core: core.clone(),
+        desktop: base.join("desktop"),
+        config: core.clone(),
+    };
+    std::fs::create_dir_all(&core).unwrap();
+    let refused = |path: &Path, overwrite: bool| match check_destination(&roots, path, overwrite) {
+        Err(BackupError::Refused(message)) => message,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(refused(&core.join("x.bruhsbak"), false), DESTINATION_INSIDE);
+    let out = base.join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let existing = out.join("kept.bruhsbak");
+    std::fs::write(&existing, b"mine").unwrap();
+    assert_eq!(refused(&existing, false), DESTINATION_EXISTS);
+    assert_eq!(std::fs::read(&existing).unwrap(), b"mine");
+    assert_eq!(
+        check_destination(&roots, &existing, true).unwrap(),
+        existing
+    );
+    std::fs::create_dir_all(out.join("folder.bruhsbak")).unwrap();
+    assert_eq!(
+        refused(&out.join("folder.bruhsbak"), true),
+        DESTINATION_EXISTS
+    );
+    assert_eq!(
+        refused(&base.join("missing/x.bruhsbak"), false),
+        DESTINATION_MISSING
+    );
+    assert_eq!(
+        refused(Path::new("relative.bruhsbak"), false),
+        DESTINATION_MISSING
+    );
+    assert_eq!(
+        check_destination(&roots, &out.join("x"), false).unwrap(),
+        out.join("x.bruhsbak")
+    );
+    assert_eq!(
+        check_destination(&roots, &out.join("x.zip"), false).unwrap(),
+        out.join("x.zip.bruhsbak")
+    );
+}
+
+#[tokio::test]
+async fn one_job_at_a_time_and_none_while_a_restore_waits() {
+    let fixture = fixture().await;
+    let reached = Arc::new(AtomicBool::new(false));
+    let released = Arc::new(AtomicBool::new(false));
+    let hook = {
+        let (reached, released) = (Arc::clone(&reached), Arc::clone(&released));
+        Arc::new(move || {
+            reached.store(true, Ordering::SeqCst);
+            while !released.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+    };
+    let host = host(&fixture).with_before_file(hook);
+    let job = host
+        .start_create(request(Output::Outgoing, BackupOptions::default()))
+        .await
+        .unwrap();
+    assert!(valid_id(&job.id));
+    for _ in 0..1000 {
+        if reached.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(reached.load(Ordering::SeqCst), "the job reached its files");
+    assert!(host.running());
+    let outgoing = fixture.roots.backups(RootKey::Core).join("outgoing");
+    let partial = names_in(&outgoing);
+    assert!(
+        partial.len() == 1 && partial[0].starts_with('.') && partial[0].contains(".partial-"),
+        "{partial:?}"
+    );
+    assert!(matches!(
+        host.start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await,
+        Err(BackupError::Busy(BACKUP_BUSY))
+    ));
+
+    assert!(
+        !host.cancel("0".repeat(32).as_str()),
+        "only the job's own id"
+    );
+    assert!(host.cancel(&job.id));
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        finished(&host, &job.id).await,
+        JobState::Failed {
+            message: BACKUP_STOPPED.into()
+        }
+    );
+    assert!(!host.running());
+    assert!(names_in(&outgoing).is_empty(), "the partial file is gone");
+    assert!(names_in(&host.tmp_dir()).is_empty());
+    assert!(!host.cancel(&job.id), "a finished job can't be stopped");
+
+    let pending = fixture.roots.backups(RootKey::Core).join("pending.json");
+    std::fs::write(&pending, b"{}").unwrap();
+    assert!(matches!(
+        host.start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await,
+        Err(BackupError::Refused(RESTORE_PENDING))
+    ));
+    std::fs::remove_file(&pending).unwrap();
+
+    // While the capture daemon records, no backup starts (ruling F24).
+    let recording = BackupHost::new(fixture.roots.clone(), fixture.store.clone()).for_tests(true);
+    assert!(matches!(
+        recording
+            .start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await,
+        Err(BackupError::Refused(RECORDING_FIRST))
+    ));
+    let mut short = request(Output::Outgoing, BackupOptions::default());
+    short.password = Zeroizing::new("short".into());
+    assert!(matches!(
+        host.start_create(short).await,
+        Err(BackupError::Refused(PASSWORD_SHORT))
+    ));
+}
+
+#[tokio::test]
+async fn a_locked_keychain_stops_the_backup() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    fixture.store.hold_reads(true);
+    let job = host
+        .start_create(request(
+            Output::File {
+                path: fixture.out.join("locked"),
+                overwrite: false,
+            },
+            BackupOptions::default(),
+        ))
+        .await
+        .unwrap();
+    let state = finished(&host, &job.id).await;
+    fixture.store.hold_reads(false);
+    assert_eq!(
+        state,
+        JobState::Failed {
+            message: KEYCHAIN_NEEDS_YOU.into()
+        }
+    );
+    assert!(names_in(&fixture.out).is_empty(), "no file, partial or not");
+    assert!(names_in(&host.tmp_dir()).is_empty());
+}
+
+/// A container of `kind` holding `plain`, as the browser makes its part.
+fn container(kind: Kind, plain: &[u8]) -> Vec<u8> {
+    let header = Header::new(kind, Kdf::Argon2id(KdfParams::FLOOR), [9; 23]);
+    let key = Key::derive(&normalize_password(PASSWORD), &header).unwrap();
+    let mut writer = Encryptor::new(Vec::new(), &header, &key).unwrap();
+    std::io::Write::write_all(&mut writer, plain).unwrap();
+    writer.finish().unwrap()
+}
+
+#[tokio::test]
+async fn a_web_part_rides_along() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let part = container(Kind::WebPart, b"{\"version\":1,\"stores\":{}}");
+    let mut upload = host.begin_upload(UploadKind::WebPart).unwrap();
+    upload.write(&part[..10]).unwrap();
+    upload.write(&part[10..]).unwrap();
+    let id = upload.finish().unwrap();
+    assert!(valid_id(&id));
+    let stored = host.uploaded(UploadKind::WebPart, &id).unwrap();
+    assert_eq!(std::fs::read(&stored).unwrap(), part);
+
+    let mut asked = request(Output::Outgoing, BackupOptions::default());
+    asked.app = BackupApp::Web;
+    asked.web_part = Some(stored);
+    asked.web_db_version = Some(13);
+    let file = created(&host, asked).await;
+    let entries = open_backup(&backup_path(&host, &file));
+    let manifest = manifest_of(&entries);
+    let web = entry(&entries, "web/part.bin").unwrap();
+    assert_eq!(web.bytes, part, "byte for byte");
+    assert_eq!(manifest.web_db_version, Some(13));
+    assert_eq!(manifest.made_on, BackupApp::Web);
+    assert!(manifest
+        .files
+        .iter()
+        .any(|file| file.path == "web/part.bin" && file.sha256 == sha256(&part)));
+    let order: Vec<&str> = entries
+        .iter()
+        .rev()
+        .take(3)
+        .map(|entry| entry.path.as_str())
+        .collect();
+    assert_eq!(order, ["manifest.json", "web/part.bin", "keychain.json"]);
+
+    // A full backup's header is no web part: refused as an upload, and as
+    // a stored file.
+    let full = container(Kind::Full, b"not a web part");
+    let incoming = fixture.roots.backups(RootKey::Core).join("incoming");
+    let before = names_in(&incoming);
+    let mut upload = host.begin_upload(UploadKind::WebPart).unwrap();
+    upload.write(&full).unwrap();
+    assert!(matches!(
+        upload.finish(),
+        Err(BackupError::Format(NOT_A_BACKUP))
+    ));
+    let mut dropped = host.begin_upload(UploadKind::Restore).unwrap();
+    dropped.write(&full).unwrap();
+    drop(dropped);
+    assert_eq!(names_in(&incoming), before, "unfinished uploads are gone");
+
+    let wrong = fixture.out.join("part.bin");
+    std::fs::write(&wrong, &full).unwrap();
+    let mut asked = request(Output::Outgoing, BackupOptions::default());
+    asked.web_part = Some(wrong);
+    let job = host.start_create(asked).await.unwrap();
+    assert_eq!(
+        finished(&host, &job.id).await,
+        JobState::Failed {
+            message: NOT_A_BACKUP.into()
+        }
+    );
+}
+
+#[tokio::test]
+async fn the_last_backup_is_recorded() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    assert_eq!(host.last(), None);
+    let mut asked = request(Output::Outgoing, BackupOptions::default());
+    asked.app = BackupApp::Web;
+    let file = created(&host, asked).await;
+    let manifest = manifest_of(&open_backup(&backup_path(&host, &file)));
+    let last = host.last().unwrap();
+    assert_eq!(
+        last,
+        LastBackup {
+            made_at_ms: manifest.made_at_ms,
+            app: BackupApp::Web,
+            bytes: file.bytes,
+        }
+    );
+
+    let overview = host.overview().await;
+    assert!(overview.supported);
+    assert_eq!(overview.last, Some(last));
+    assert_eq!(overview.keychain_items, 2);
+    assert_eq!(overview.sizes.audio_bytes, 5000);
+    assert!(overview.sizes.browser_bytes > 0);
+    assert!(matches!(
+        overview.job.map(|job| job.state),
+        Some(JobState::Created { .. })
+    ));
+
+    // A finished download goes once it was sent.
+    let id = file
+        .download
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(host.outgoing(&id).is_some());
+    host.finish_download(&id);
+    assert!(host.outgoing(&id).is_none());
+    assert!(host.outgoing("../x").is_none());
+}

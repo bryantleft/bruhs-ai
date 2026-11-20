@@ -16,15 +16,25 @@ use bruhs_models::backup::{excluded, Excluded, RootsInfo};
 #[cfg(unix)]
 mod collect;
 #[cfg(unix)]
+mod create;
+#[cfg(unix)]
 mod disk;
+#[cfg(unix)]
+mod host;
 
 #[cfg(unix)]
 pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
 #[cfg(unix)]
+pub use create::{check_destination, CancelFlag, CreateRequest, Output};
+#[cfg(unix)]
 pub use disk::{free_bytes, FREE_MARGIN};
+#[cfg(unix)]
+pub use host::{BackupHost, Upload, UploadKind};
 
 #[cfg(test)]
 mod collect_tests;
+#[cfg(test)]
+mod create_tests;
 
 /// The app and organisation names `directories` resolves the roots from.
 const QUALIFIER: &str = "dev";
