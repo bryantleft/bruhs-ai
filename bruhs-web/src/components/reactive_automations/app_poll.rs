@@ -20,6 +20,10 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Input};
 
 const LABEL: &str = "block min-w-0 space-y-1 text-label-sm text-rambutan-300";
 const HINT: &str = "text-label-sm text-rambutan-400";
+/// The fields' grid: a full row of the editor, two columns from `lg`.
+const POLL_GRID: &str = "grid min-w-0 gap-3 sm:col-span-2 lg:grid-cols-2";
+/// A line across both of the fields' columns.
+const POLL_FULL_ROW: &str = "lg:col-span-2";
 const WATCHES: [PollWatch; 3] = [
     PollWatch::GithubIssues,
     PollWatch::GithubPulls,
@@ -86,8 +90,8 @@ pub fn AppPollFields(
         })
     };
     view! {
-        <div data-app-poll="" class="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2">
-            {move || disabled.get().map(|reason| view! { <p id="app-poll-off" role="status" data-app-poll-off="" class="text-label-sm text-durian-300 sm:col-span-2">{reason}</p> })}
+        <div data-app-poll="" class=POLL_GRID>
+            {move || disabled.get().map(|reason| view! { <p id="app-poll-off" role="status" data-app-poll-off="" class=format!("text-label-sm text-durian-300 {POLL_FULL_ROW}")>{reason}</p> })}
             <label class=LABEL>
                 <span>{WATCH_LABEL}</span>
                 <select
@@ -186,6 +190,22 @@ mod tests {
     // The account choices and watch changes are `bruhs_models::apps`',
     // tested there.
     use super::*;
+
+    /// At 640×480 the bruh page's column is about 350px wide, and two
+    /// columns from `sm` cut the selects to "New GitHub is" and "GitHub
+    /// octo-0". The fields stack until `lg`, as on the desktop, and a full
+    /// row never adds a column to a one-column grid.
+    #[test]
+    fn the_fields_stack_until_lg() {
+        assert!(POLL_GRID.contains("lg:grid-cols-2"), "{POLL_GRID}");
+        assert!(!POLL_GRID.contains("sm:grid-cols-2"), "{POLL_GRID}");
+        assert!(
+            POLL_GRID.contains("sm:col-span-2"),
+            "a full row of the editor"
+        );
+        assert!(POLL_FULL_ROW.contains("lg:col-span-2"), "{POLL_FULL_ROW}");
+        assert!(!POLL_FULL_ROW.contains("sm:col-span-2"), "{POLL_FULL_ROW}");
+    }
 
     #[test]
     fn watch_keys_round_trip() {
