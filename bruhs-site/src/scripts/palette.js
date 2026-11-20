@@ -122,7 +122,7 @@ export const COMMANDS = [
   {
     id: "download",
     tag: "page",
-    label: "Download bruhs",
+    label: "Download for desktop",
     detail: "free and open source",
     keywords: "download install mac macos linux windows app get open source github source clone release",
     target: "/download",
