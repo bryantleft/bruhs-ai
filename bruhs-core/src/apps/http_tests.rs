@@ -4,8 +4,9 @@
 use super::*;
 use base64::Engine;
 use bruhs_models::apps::{
-    connector, AppHost, APP_BUSY, APP_CUT_NOTE, APP_HOST_REFUSED, APP_NOT_TEXT,
-    APP_RESPONSE_MAX_BYTES, APP_TIMED_OUT, APP_TOO_LARGE, APP_UNREACHABLE, CONNECTORS,
+    connector, AppHost, APP_BUSY, APP_CUT_NOTE, APP_HOST_REFUSED, APP_MAY_HAVE_LANDED,
+    APP_NOT_TEXT, APP_RESPONSE_MAX_BYTES, APP_TIMED_OUT, APP_TOO_LARGE, APP_UNREACHABLE,
+    CONNECTORS,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -464,6 +465,137 @@ async fn failures_say_nothing_of_the_transport() {
         assert!(!message.contains(&at.ip().to_string()), "{message}");
         assert!(!message.contains(&at.port().to_string()), "{message}");
     }
+}
+
+/// A loopback app that reads each whole request, then writes `answer`
+/// (perhaps nothing) and closes the connection. It counts the requests.
+async fn closing_app(answer: &'static [u8]) -> (SocketAddr, Arc<AtomicUsize>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            // Headers, then as many body bytes as they name.
+            let whole = loop {
+                let Ok(read) = socket.read(&mut buffer).await else {
+                    break false;
+                };
+                if read == 0 {
+                    break false;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                let text = String::from_utf8_lossy(&request).to_lowercase();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break true;
+                    }
+                }
+            };
+            if whole {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let _ = socket.write_all(answer).await;
+            }
+            let _ = socket.shutdown().await;
+        }
+    });
+    (addr, seen)
+}
+
+/// Ruling A Task 13 I1: once a write is sent, a failed answer says it may
+/// have landed; a read, or a write that never left, says it can't reach.
+#[tokio::test]
+async fn a_write_whose_answer_fails_may_have_landed() {
+    let account = params(&[]);
+    let token = secret(&canary().0);
+    let body = json!({"title": "Bug"});
+    let landed =
+        |error: AppsError| matches!(error, AppsError::MayHaveLanded(m) if m == APP_MAY_HAVE_LANDED);
+    let unreachable =
+        |error: AppsError| matches!(error, AppsError::Unreachable(m) if m == APP_UNREACHABLE);
+    let answers: [&'static [u8]; 2] = [
+        // The connection closes with no answer.
+        b"",
+        // The answer stops partway through its body.
+        b"HTTP/1.1 201 Created\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{\"id\":",
+    ];
+    for answer in answers {
+        let (addr, seen) = closing_app(answer).await;
+        let http = AppHttp::with_upstream(addr).unwrap();
+        let post = http
+            .raw(
+                app("github"),
+                &account,
+                &token,
+                "POST",
+                "/repos/o/r/issues",
+                Some(&body),
+            )
+            .await
+            .unwrap_err();
+        assert!(landed(post), "{answer:?}");
+        assert_eq!(seen.load(Ordering::SeqCst), 1, "the app got the write");
+        let get = http
+            .raw(
+                app("github"),
+                &account,
+                &token,
+                "GET",
+                "/repos/o/r/issues",
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(unreachable(get), "{answer:?}");
+    }
+
+    // An oversized or non-text answer to a write may have landed too.
+    let (server, http) = upstream().await;
+    Mock::given(path("/huge"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(vec![b'x'; 2 * 1024 * 1024], "text/plain"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/bin"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(vec![0xff, 0xfe, 0x00, 0x9f], "text/plain"),
+        )
+        .mount(&server)
+        .await;
+    for route in ["/huge", "/bin"] {
+        let post = http
+            .raw(app("github"), &account, &token, "POST", route, Some(&body))
+            .await
+            .unwrap_err();
+        assert!(landed(post), "{route}");
+    }
+
+    // A write that never connected sent nothing.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = closed.local_addr().unwrap();
+    drop(closed);
+    let never = AppHttp::with_upstream(addr)
+        .unwrap()
+        .raw(
+            app("github"),
+            &account,
+            &token,
+            "POST",
+            "/repos/o/r/issues",
+            Some(&body),
+        )
+        .await
+        .unwrap_err();
+    assert!(unreachable(never));
 }
 
 /// A lookup that answers every name with `answers` and counts its calls.

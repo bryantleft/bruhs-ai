@@ -281,6 +281,95 @@ async fn the_route_calls_only_the_account_the_gate_picked() {
         (StatusCode::FORBIDDEN, error(APP_NOT_GRANTED))
     );
     assert_eq!(fixture.app_calls().await, 0);
+    // The refusal spent the allowance: with "work" back, the same call
+    // still needs the gate again.
+    fixture.grant_token(&octo_id, false).await;
+    fixture.grant_token(&work, true).await;
+    let (status, text) = fixture.helper(APP_REQUEST_TOOL, &issues(), None).await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::FORBIDDEN, error(CALL_NOT_APPROVED))
+    );
+    assert_eq!(fixture.app_calls().await, 0);
+}
+
+/// A lookup that outlasts the read budget sends nothing: the app's
+/// account list, then the mailbox list. The budgets are short here.
+#[tokio::test]
+async fn slow_lookups_send_nothing() {
+    let fixture = Fixture::new().await;
+    let (id, _) = fixture.granted_github("octo").await;
+    fixture.echo_issues().await;
+    let short = Budget {
+        read: Duration::from_millis(300),
+        ..Budget::ROUTE
+    };
+    let held = fixture.state.secrets().hold_store_for_tests().unwrap();
+    let started = std::time::Instant::now();
+    let refused = answer(
+        &fixture.runtime,
+        "a",
+        APP_REQUEST_TOOL,
+        &issues(),
+        Some(&id),
+        Instant::now(),
+        short,
+    )
+    .await;
+    drop(held);
+    match refused {
+        Err(RouteError::App(error)) => {
+            assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(error.to_string(), bruhs_models::apps::APP_UNREACHABLE);
+        }
+        other => panic!("expected 503, got {other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(fixture.app_calls().await, 0);
+    drop(fixture);
+
+    let transport = FakeTransport::new(Mode::Accepted, false);
+    let fixture = Fixture::with_mail(Some(MailSetup {
+        transport: Some(transport.clone()),
+        send_budget: None,
+    }))
+    .await;
+    fixture.set_access(AccessLevel::Full, true).await;
+    fixture.grant_mailbox(true).await;
+    let mailbox_id = fixture.mail.as_ref().unwrap().mailbox.as_str().to_owned();
+    // The send's window leaves the lookup 300 ms.
+    let short = Budget {
+        mail: ROUTE_BUDGET - Duration::from_millis(300),
+        ..Budget::ROUTE
+    };
+    let held = fixture
+        .mail
+        .as_ref()
+        .unwrap()
+        .runtime
+        .hold_cache_for_tests()
+        .await;
+    let started = std::time::Instant::now();
+    let refused = answer(
+        &fixture.runtime,
+        "a",
+        SEND_MAIL_TOOL,
+        &json!({"to": "ann@x.test", "subject": "Lunch", "body": "See you at 12."}),
+        Some(&mailbox_id),
+        Instant::now(),
+        short,
+    )
+    .await;
+    drop(held);
+    match refused {
+        Err(RouteError::App(error)) => {
+            assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(error.to_string(), bruhs_models::crew::MAIL_NOT_SENT);
+        }
+        other => panic!("expected 503, got {other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert_eq!(transport.sends(), 0);
 }
 
 /// A lowered level cancels the run, so its allowance goes; the route also

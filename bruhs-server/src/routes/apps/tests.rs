@@ -510,6 +510,7 @@ async fn malformed_bodies_never_echo() {
     let id = fixture.connected(&token).await;
     let bodies = [
         json!({"app": "github", "token": {"x": token}}).to_string(),
+        json!({"token": {"x": token}}).to_string(),
         json!({"app": "github", "scope": {"type": "global"}, "token": token, "extra": token})
             .to_string(),
         format!("{{\"app\": \"github\", \"token\": \"{token}"),
@@ -519,7 +520,7 @@ async fn malformed_bodies_never_echo() {
             .send(
                 Method::POST,
                 "/api/apps/accounts",
-                Some(Body::Raw(body)),
+                Some(Body::Raw(body.clone())),
                 None,
             )
             .await;
@@ -529,7 +530,7 @@ async fn malformed_bodies_never_echo() {
             .send(
                 Method::PUT,
                 &format!("/api/apps/accounts/{id}"),
-                Some(Body::Raw(json!({"token": {"x": token}}).to_string())),
+                Some(Body::Raw(body)),
                 None,
             )
             .await;

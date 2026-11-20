@@ -21,7 +21,8 @@ use bruhs_models::apps::{
 };
 use bruhs_models::connections::ServiceProvider;
 use bruhs_models::crew::{
-    MailSendInput, KEYCHAIN_NEEDS_OWNER, MAIL_NOT_GRANTED, MAIL_SEND_BUDGET_MS, MAIL_UNAVAILABLE,
+    MailSendInput, KEYCHAIN_NEEDS_OWNER, MAIL_NOT_GRANTED, MAIL_NOT_SENT, MAIL_SEND_BUDGET_MS,
+    MAIL_UNAVAILABLE,
 };
 use bruhs_models::mail::{MailDispatchState, MailReplyTarget};
 use bruhs_models::vault::{
@@ -321,13 +322,17 @@ impl AppsHost {
         };
         input.validate().map_err(AppsError::Invalid)?;
         // Checked against the live list: a stale or disconnected mailbox
-        // sends nothing.
-        let (mailbox, connection_id) = self
-            .connected_mailboxes()
-            .await?
-            .into_iter()
-            .find(|(mailbox, _)| mailbox.mailbox_id == mailbox_id)
-            .ok_or(AppsError::Refused(MAIL_NOT_GRANTED))?;
+        // sends nothing. The read counts toward the send budget, so the
+        // whole send answers in time; nothing is sent before it ends, so a
+        // slow one is MAIL_NOT_SENT (ruling A Task 13 I2).
+        let started = tokio::time::Instant::now();
+        let (mailbox, connection_id) =
+            tokio::time::timeout(self.send_budget, self.connected_mailboxes())
+                .await
+                .map_err(|_| AppsError::TimedOut(MAIL_NOT_SENT))??
+                .into_iter()
+                .find(|(mailbox, _)| mailbox.mailbox_id == mailbox_id)
+                .ok_or(AppsError::Refused(MAIL_NOT_GRANTED))?;
         if input
             .from
             .as_ref()
@@ -348,7 +353,7 @@ impl AppsHost {
             },
             transport,
             input,
-            self.send_budget,
+            self.send_budget.saturating_sub(started.elapsed()),
         )
         .await
     }
@@ -530,7 +535,8 @@ impl AppsHost {
                 AppsError::Refused(_)
                 | AppsError::Unavailable(_)
                 | AppsError::Unreachable(_)
-                | AppsError::TimedOut(_) => TestFailure::Unreachable,
+                | AppsError::TimedOut(_)
+                | AppsError::MayHaveLanded(_) => TestFailure::Unreachable,
                 AppsError::Invalid(_)
                 | AppsError::TooLarge(_)
                 | AppsError::TestFailed(_)

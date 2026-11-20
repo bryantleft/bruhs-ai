@@ -11,7 +11,8 @@
 //! - `app_request` looks its account up live, which must be the one the
 //!   gate picked (ruling F10), runs the gate again at the bruh's stored
 //!   access (only a Deny refuses: the allowance is the answer), reads the
-//!   token and sends the call. Any status the app answers is the value.
+//!   token, looks the account up once more, and sends the call. Any status
+//!   the app answers is the value.
 //! - `send_mail` does the same with its mailbox and sends the email.
 //!
 //! The whole route answers within [`ROUTE_BUDGET`], under the helper's own
@@ -31,7 +32,9 @@ use bruhs_core::apps::{AppsError, AppsHost};
 use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::secrets::SecretError;
 use bruhs_models::agent::AgentProvider;
-use bruhs_models::apps::{AppCall, APPS_NOT_ON_SERVER, APP_CALL_TIMEOUT_MS, APP_UNREACHABLE};
+use bruhs_models::apps::{
+    AppCall, APPS_NOT_ON_SERVER, APP_CALL_TIMEOUT_MS, APP_MAY_HAVE_LANDED, APP_UNREACHABLE,
+};
 use bruhs_models::crew::{
     app_gate, list_apps_gate, mail_gate, AppLookup, BruhAccess, Gate, MailLookup, MailSendInput,
     APPS_UNREADABLE, APP_CALL_SHAPE, APP_NOT_GRANTED, APP_REQUEST_TOOL, BRUH_NO_TOOLS,
@@ -216,7 +219,7 @@ async fn answer(
             )
             .await
         }
-        _ => {
+        SEND_MAIL_TOOL => {
             let apps = runtime
                 .apps()
                 .ok_or_else(|| RouteError::unavailable(APPS_NOT_ON_SERVER))?;
@@ -232,6 +235,8 @@ async fn answer(
             )
             .await
         }
+        // A tool added later never falls into a send.
+        _ => Err(RouteError::forbidden(CALL_NOT_APPROVED)),
     }
 }
 
@@ -281,13 +286,21 @@ async fn app_request(
         .await
         .map_err(|_| keychain())?
         .map_err(bruh_error)?;
+    // The token read can wait on the keychain: a grant revoked meanwhile
+    // stops the call (ruling A Task 13 minors).
+    let again = tokio::time::timeout_at(reads_by, runtime.app_lookup(id, input))
+        .await
+        .map_err(|_| RouteError::unavailable(APP_UNREACHABLE))?;
+    if !matches!(&again, AppLookup::Found(found) if found.entry_id == entry_id) {
+        return Err(RouteError::forbidden(APP_NOT_GRANTED));
+    }
     if !fits(Instant::now(), started + budget.total, budget.call) {
         // Nothing was sent: a retry is safe.
         return Err(keychain());
     }
     // Once sent, the call runs to its own timeout.
     let response = apps.send_ready(ready).await.map_err(bruh_error)?;
-    serde_json::to_value(response).map_err(|_| RouteError::unavailable(APP_UNREACHABLE))
+    serde_json::to_value(response).map_err(|_| RouteError::unavailable(APP_MAY_HAVE_LANDED))
 }
 
 /// A `send_mail`: the mailbox looked up live and checked against the

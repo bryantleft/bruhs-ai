@@ -36,6 +36,10 @@ pub enum AppsError {
     TooLarge(&'static str),
     #[error("{0}")]
     TimedOut(&'static str),
+    /// A write was sent but its answer failed (I1): the app may have acted
+    /// on it, so it isn't one to retry blindly.
+    #[error("{0}")]
+    MayHaveLanded(&'static str),
     /// A token's test call failed, with the owner copy saying why
     /// (`bruhs_models::apps::test_failure_message` or `ANOTHER_ACCOUNT`).
     /// Nothing was saved.

@@ -449,9 +449,10 @@ impl SecretManager {
     }
 
     /// While the returned guard lives, every vault lookup of an in-memory
-    /// store waits ([`SecretStore::hold_for_tests`]).
-    #[cfg(test)]
-    pub(crate) fn hold_store_for_tests(&self) -> Option<impl Sized + '_> {
+    /// store waits ([`SecretStore::hold_for_tests`]). For route tests
+    /// outside this crate too.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hold_store_for_tests(&self) -> Option<impl Sized + '_> {
         self.store.hold_for_tests()
     }
 

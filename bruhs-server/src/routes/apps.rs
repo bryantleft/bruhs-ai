@@ -36,7 +36,8 @@ use bruhs_models::apps::{
 };
 use bruhs_models::crew::{apps_unavailable, CREW_PROTOCOL, KEYCHAIN_NEEDS_OWNER, OWNER_ONLY_APPS};
 use bruhs_models::vault::{
-    CredentialScope, VaultCreate, VaultEntry, VaultKind, VaultSecretInput, BRUH_MISSING,
+    CredentialScope, VaultCreate, VaultEntry, VaultKind, VaultSecretInput, VaultUpdate,
+    BRUH_MISSING,
 };
 use serde_json::json;
 
@@ -108,6 +109,7 @@ pub(super) fn app_status(error: &AppsError) -> Option<(StatusCode, &'static str)
         AppsError::Unreachable(message) => (StatusCode::BAD_GATEWAY, message),
         AppsError::TooLarge(message) => (StatusCode::PAYLOAD_TOO_LARGE, message),
         AppsError::TimedOut(message) => (StatusCode::GATEWAY_TIMEOUT, message),
+        AppsError::MayHaveLanded(message) => (StatusCode::BAD_GATEWAY, message),
         AppsError::TestFailed(_) | AppsError::MailSync(_) | AppsError::Vault(_) => return None,
     })
 }
@@ -180,6 +182,20 @@ fn discard_connect(connect: AppConnect) {
             app,
             account: String::new(),
             params,
+            token: Some(token),
+            key,
+        },
+    });
+}
+
+/// [`discard_connect`] for a replace body.
+fn discard_replace(replace: AppReplace) {
+    let AppReplace { token, key } = replace;
+    bruhs_core::secrets::discard_update(VaultUpdate {
+        secret: VaultSecretInput::AppToken {
+            app: String::new(),
+            account: String::new(),
+            params: std::collections::BTreeMap::new(),
             token: Some(token),
             key,
         },
@@ -310,7 +326,13 @@ pub async fn replace(
     owner_apps(&config.access, &headers)?;
     let Json(replace) = body.map_err(|_| AppError::BadRequest(INVALID_APP_ACCOUNT.into()))?;
     // `replace` moves into `Zeroizing` inside the host, refused or not.
-    let apps = host(apps)?;
+    let apps = match host(apps) {
+        Ok(apps) => apps,
+        Err(refused) => {
+            discard_replace(replace);
+            return Err(refused);
+        }
+    };
     let entry = apps.replace(&id, replace).await.map_err(owner_error)?;
     account(entry).map(Json)
 }

@@ -344,6 +344,13 @@ impl MailRuntime {
         .await
     }
 
+    /// While the returned guard lives, every cache call waits, as behind a
+    /// long sync. For tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn hold_cache_for_tests(&self) -> impl Sized {
+        self.cache.clone().lock_owned().await
+    }
+
     async fn call<T: Send + 'static>(
         &self,
         changed: bool,

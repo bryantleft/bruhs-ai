@@ -22,10 +22,10 @@ use base64::Engine;
 use bruhs_models::apps::{
     app_host, host_declared, normalize_path, validate_call, AppAuth, AppCall, AppConnector,
     AppResponse, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE, APP_BUSY, APP_CALL_TIMEOUT_MS,
-    APP_CUT_NOTE, APP_GET_BODY, APP_HOST_REFUSED, APP_METHOD, APP_METHODS, APP_NOT_TEXT, APP_PATH,
-    APP_QUERY_VALUES, APP_READ_MAX_BYTES, APP_RESPONSE_MAX_BYTES, APP_TIMED_OUT, APP_TOO_LARGE,
-    APP_UNREACHABLE, EMAIL_SHAPE, MAX_APP_CALLS, RESPONSE_HEADERS, TOKEN_SHAPE, UNKNOWN_APP,
-    USER_AGENT,
+    APP_CUT_NOTE, APP_GET_BODY, APP_HOST_REFUSED, APP_MAY_HAVE_LANDED, APP_METHOD, APP_METHODS,
+    APP_NOT_TEXT, APP_PATH, APP_QUERY_VALUES, APP_READ_MAX_BYTES, APP_RESPONSE_MAX_BYTES,
+    APP_TIMED_OUT, APP_TOO_LARGE, APP_UNREACHABLE, EMAIL_SHAPE, MAX_APP_CALLS, RESPONSE_HEADERS,
+    TOKEN_SHAPE, UNKNOWN_APP, USER_AGENT,
 };
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
@@ -251,6 +251,9 @@ impl AppHttp {
         outgoing: Outgoing<'_>,
     ) -> Result<AppResponse, AppsError> {
         let method = app_method(outgoing.method)?;
+        // Once a write is on the wire, a failed answer can't say it
+        // didn't land (ruling A Task 13 I1).
+        let writes = method != reqwest::Method::GET;
         let body = match outgoing.body {
             Some(_) if matches!(method, reqwest::Method::GET | reqwest::Method::DELETE) => {
                 return Err(AppsError::Invalid(APP_GET_BODY))
@@ -299,8 +302,13 @@ impl AppHttp {
             APP_RESPONSE_MAX_BYTES
         };
         let work = async {
-            let response = request.send().await.map_err(transport_error)?;
-            read_reply(response, &secrets, shown).await
+            let response = request
+                .send()
+                .await
+                .map_err(|error| send_error(&error, writes))?;
+            read_reply(response, &secrets, shown)
+                .await
+                .map_err(|error| answer_error(error, writes))
         };
         tokio::time::timeout_at(deadline, work)
             .await
@@ -686,7 +694,11 @@ async fn read_reply(
     }
     // The raw reply may hold the token, so it's wiped when dropped.
     let mut raw = Zeroizing::new(Vec::new());
-    while let Some(chunk) = response.chunk().await.map_err(transport_error)? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| transport_error(&error))?
+    {
         if raw.len().saturating_add(chunk.len()) > APP_READ_MAX_BYTES {
             return Err(too_large);
         }
@@ -751,10 +763,32 @@ fn kept_headers(headers: &HeaderMap, secrets: &[&str]) -> BTreeMap<String, Strin
         .collect()
 }
 
+/// A request that failed to send. A refused host, a connection that never
+/// opened or a request that never built sent nothing; any other failure
+/// may have come after a write was on the wire.
+fn send_error(error: &reqwest::Error, writes: bool) -> AppsError {
+    match transport_error(error) {
+        AppsError::Unreachable(_) if writes && !(error.is_connect() || error.is_builder()) => {
+            AppsError::MayHaveLanded(APP_MAY_HAVE_LANDED)
+        }
+        mapped => mapped,
+    }
+}
+
+/// A reply that failed after the app answered: for a write, the app may
+/// have acted on it whatever went wrong with the reply.
+fn answer_error(error: AppsError, writes: bool) -> AppsError {
+    match error {
+        AppsError::TimedOut(_) | AppsError::Refused(_) => error,
+        _ if writes => AppsError::MayHaveLanded(APP_MAY_HAVE_LANDED),
+        _ => error,
+    }
+}
+
 /// Fixed copy for a failed request: never reqwest's text, which names the
 /// address.
-fn transport_error(error: reqwest::Error) -> AppsError {
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+fn transport_error(error: &reqwest::Error) -> AppsError {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(current) = cause {
         if current.is::<HostRefused>() {
             return AppsError::Refused(APP_HOST_REFUSED);

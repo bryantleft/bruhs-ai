@@ -121,6 +121,10 @@ pub const APP_UNREACHABLE: &str =
     "Bruhs couldn't reach the app. Try again later, and tell the owner if it keeps failing.";
 pub const APP_TIMED_OUT: &str =
     "The app didn't answer in 30 seconds. A write may still have landed: read before trying again.";
+/// A write whose answer failed after it was sent: a dropped connection, a
+/// broken, oversized or non-text reply. The app may have acted on it.
+pub const APP_MAY_HAVE_LANDED: &str =
+    "The app may have made that change. Read before trying again.";
 /// Every call slot stayed busy until the deadline, so nothing was sent.
 pub const APP_BUSY: &str =
     "Bruhs sent nothing: too many app calls are running. Try again in a moment.";

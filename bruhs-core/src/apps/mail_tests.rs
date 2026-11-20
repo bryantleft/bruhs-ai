@@ -428,3 +428,27 @@ async fn no_mail_runtime_means_no_mail() {
         "{error:?}"
     );
 }
+
+/// Ruling A Task 13 I2: the mailbox check counts toward the send budget.
+/// A mail store that doesn't answer in time sends nothing and says so,
+/// within the budget.
+#[tokio::test]
+async fn a_slow_mailbox_check_sends_nothing_in_time() {
+    let mail = ConnectedMail::gmail().await;
+    let transport = FakeTransport::new(Mode::Accepted, false);
+    let host = mail_host(&mail, transport.clone()).with_send_budget(Duration::from_millis(300));
+    let held = mail.runtime.hold_cache_for_tests().await;
+    let started = std::time::Instant::now();
+    let refused = host
+        .send_mail(mail.mailbox.as_str(), lunch())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, AppsError::TimedOut(message) if message == MAIL_NOT_SENT),
+        "{refused:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+    drop(held);
+    assert_eq!(transport.sends(), 0);
+    assert_eq!(drafts(&mail).await, 0, "no draft was made");
+}
