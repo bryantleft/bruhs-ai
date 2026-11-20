@@ -12,6 +12,10 @@ use crate::EpochMs;
 
 mod copy;
 pub use copy::*;
+mod paths;
+pub use paths::*;
+mod web;
+pub use web::*;
 
 /// The newest manifest format this build reads.
 pub const MANIFEST_FORMAT: u16 = 1;
