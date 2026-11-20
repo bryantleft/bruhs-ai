@@ -799,7 +799,7 @@ mod tests {
                 "/client/v4/zones/z/dns_records/r",
                 None
             ),
-            AppAction::Write
+            AppAction::SendAsOwner
         );
         assert!(
             path_glob("/repos/*/*/contents/**", "/repos/o/r/contents/a/b/c")
@@ -1242,7 +1242,7 @@ mod tests {
                 "cloudflare",
                 "POST",
                 "/client/v4/zones/z/dns_records",
-                AppAction::Write,
+                AppAction::SendAsOwner,
             ),
             ("figma", "GET", "/v1/files/f/nodes", AppAction::Read),
         ] {
@@ -1296,6 +1296,152 @@ mod tests {
                     Err(connector.unlisted),
                     "{} {method}",
                     connector.id
+                );
+            }
+        }
+    }
+
+    /// Final review A1 M3 and M4: a post can't show as someone else, and a
+    /// write that would notify people or redirect mail asks like a send.
+    #[test]
+    fn sends_never_speak_as_someone_else_and_writes_never_notify() {
+        let with_key = |app: &str, method: &str, path: &str, key: &str, in_query: bool| {
+            let mut call = call(app, method, path, None);
+            if in_query {
+                call.query.insert(key.into(), json!("x"));
+            } else {
+                call.body = Some(Value::Object(serde_json::Map::from_iter([(
+                    key.to_string(),
+                    json!("x"),
+                )])));
+            }
+            classify(connector(app).unwrap(), &call)
+        };
+        for path in [
+            "/api/chat.postMessage",
+            "/api/chat.update",
+            "/api/chat.scheduleMessage",
+        ] {
+            for key in ["username", "icon_url", "icon_emoji", "as_user", "USERNAME"] {
+                assert_eq!(
+                    with_key("slack", "POST", path, key, false),
+                    Err(APP_FIELD_REFUSED),
+                    "{path} {key}"
+                );
+                assert_eq!(
+                    with_key("slack", "GET", path, key, true),
+                    Err(APP_FIELD_REFUSED),
+                    "{path} {key}"
+                );
+            }
+            assert_eq!(
+                with_key("slack", "POST", path, "text", false),
+                Ok(AppAction::SendAsOwner),
+                "{path}"
+            );
+        }
+        for (app, method, path, key, in_query) in [
+            (
+                "clickup",
+                "POST",
+                "/api/v2/list/l/task",
+                "notify_all",
+                false,
+            ),
+            ("clickup", "POST", "/api/v2/list/l/task", "assignees", false),
+            ("clickup", "PUT", "/api/v2/task/t", "assignees", false),
+            ("trello", "POST", "/1/cards", "idMembers", true),
+            ("trello", "PUT", "/1/cards/c", "idMembers", true),
+            ("todoist", "POST", "/api/v1/tasks", "assignee_id", false),
+            ("todoist", "POST", "/api/v1/tasks/1", "assignee_id", false),
+            (
+                "todoist",
+                "POST",
+                "/api/v1/tasks/1",
+                "responsible_uid",
+                false,
+            ),
+            ("stripe", "POST", "/v1/customers/cus_1", "email", true),
+        ] {
+            assert_eq!(
+                with_key(app, method, path, key, in_query),
+                Err(APP_FIELD_REFUSED),
+                "{app} {method} {path} {key}"
+            );
+        }
+        // A new Stripe customer may have an email; nothing is sent to it yet.
+        assert_eq!(
+            with_key("stripe", "POST", "/v1/customers", "email", true),
+            Ok(AppAction::Write)
+        );
+        assert_eq!(
+            with_key("clickup", "POST", "/api/v2/list/l/task", "name", false),
+            Ok(AppAction::Write)
+        );
+        // A DNS change can capture the owner's mail and password resets.
+        for (method, path) in [
+            ("POST", "/client/v4/zones/z/dns_records"),
+            ("PUT", "/client/v4/zones/z/dns_records/r"),
+            ("PATCH", "/client/v4/zones/z/dns_records/r"),
+            ("DELETE", "/client/v4/zones/z/dns_records/r"),
+        ] {
+            let body = (method != "DELETE").then(|| json!({}));
+            assert_eq!(
+                action("cloudflare", method, path, body),
+                AppAction::SendAsOwner,
+                "{method} {path}"
+            );
+        }
+    }
+
+    /// Final review A1 M5: HubSpot's object types are named, so a type that
+    /// charges or sends (invoices, quotes, payments, a custom object) is
+    /// refused until the catalog names it.
+    #[test]
+    fn hubspot_names_its_object_types() {
+        for kind in [
+            "contacts",
+            "companies",
+            "deals",
+            "tickets",
+            "notes",
+            "tasks",
+        ] {
+            let base = format!("/crm/v3/objects/{kind}");
+            for (method, path, class) in [
+                ("GET", base.clone(), AppAction::Read),
+                ("GET", format!("{base}/1"), AppAction::Read),
+                ("POST", format!("{base}/search"), AppAction::Read),
+                ("POST", format!("{base}/batch/read"), AppAction::Read),
+                ("POST", base.clone(), AppAction::Write),
+                ("PATCH", format!("{base}/1"), AppAction::Write),
+            ] {
+                let body = (method != "GET").then(|| json!({}));
+                assert_eq!(
+                    action("hubspot", method, &path, body),
+                    class,
+                    "{method} {path}"
+                );
+            }
+        }
+        for kind in [
+            "invoices",
+            "quotes",
+            "payments",
+            "line_items",
+            "2-123",
+            "p_x",
+        ] {
+            for (method, path) in [
+                ("GET", format!("/crm/v3/objects/{kind}")),
+                ("POST", format!("/crm/v3/objects/{kind}")),
+                ("PATCH", format!("/crm/v3/objects/{kind}/1")),
+            ] {
+                let body = (method != "GET").then(|| json!({}));
+                assert_eq!(
+                    outcome("hubspot", method, &path, body),
+                    Err(connector("hubspot").unwrap().unlisted),
+                    "{method} {path}"
                 );
             }
         }

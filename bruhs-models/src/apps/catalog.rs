@@ -249,6 +249,35 @@ const fn test_get(path: &'static str, account: &'static [&'static str]) -> AppTe
     }
 }
 
+/// Todoist's assignee fields, new and old.
+const TODOIST_ASSIGN: &[&str] = &["assignee_id", "responsible_uid"];
+/// Slack fields that make a message show as another name or face.
+const SLACK_PERSONA: &[&str] = &["username", "icon_url", "icon_emoji", "as_user"];
+
+/// HubSpot's endpoints, with each named CRM object type's list and record
+/// reads, search and batch reads, create and update. Types are named, so
+/// invoices, quotes, payments and custom objects stay refused (final review
+/// A1 M5).
+macro_rules! hubspot_endpoints {
+    ($($kind:literal),+) => {
+        &[
+            get("/account-info/v3/details"),
+            get("/crm/v3/owners"),
+            get("/crm/v3/properties/*"),
+            $(
+                get(concat!("/crm/v3/objects/", $kind)),
+                get(concat!("/crm/v3/objects/", $kind, "/*")),
+                read(POST, concat!("/crm/v3/objects/", $kind, "/search")),
+                read(POST, concat!("/crm/v3/objects/", $kind, "/batch/read")),
+                write(POST, concat!("/crm/v3/objects/", $kind)),
+                write(PATCH, concat!("/crm/v3/objects/", $kind, "/*")),
+            )+
+            send(POST, "/marketing/v3/transactional/single-email/send"),
+            send(POST, "/conversations/v3/conversations/threads/*/messages"),
+        ]
+    };
+}
+
 /// The Shopify Admin API version every Shopify call and guide uses: the
 /// latest stable on 2026-11-19, served until October 2027 (F27).
 pub const SHOPIFY_API_VERSION: &str = "2026-10";
@@ -430,10 +459,11 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/api/v1/sections"),
             get("/api/v1/labels"),
             get("/api/v1/comments"),
-            write(POST, "/api/v1/tasks"),
+            // Assigning a task notifies the assignee (final review A1 M4).
+            write(POST, "/api/v1/tasks").refusing(TODOIST_ASSIGN),
             // Quick add's `note` posts a comment as the owner.
             send(POST, "/api/v1/tasks/quick"),
-            write(POST, "/api/v1/tasks/*"),
+            write(POST, "/api/v1/tasks/*").refusing(TODOIST_ASSIGN),
             write(POST, "/api/v1/tasks/*/close"),
             write(POST, "/api/v1/tasks/*/reopen"),
             write(DELETE, "/api/v1/tasks/*"),
@@ -462,8 +492,9 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/1/lists/*/cards"),
             get("/1/cards/*"),
             get("/1/cards/*/actions"),
-            write(POST, "/1/cards"),
-            write(PUT, "/1/cards/*"),
+            // Adding members notifies them (final review A1 M4).
+            write(POST, "/1/cards").refusing(&["idmembers"]),
+            write(PUT, "/1/cards/*").refusing(&["idmembers"]),
             send(POST, "/1/cards/*/actions/comments"),
         ],
         graphql: None,
@@ -491,8 +522,9 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/api/v2/list/*/task"),
             get("/api/v2/task/*"),
             get("/api/v2/task/*/comment"),
-            write(POST, "/api/v2/list/*/task"),
-            write(PUT, "/api/v2/task/*"),
+            // `notify_all` and assignees notify people (final review A1 M4).
+            write(POST, "/api/v2/list/*/task").refusing(&["notify_all", "assignees"]),
+            write(PUT, "/api/v2/task/*").refusing(&["notify_all", "assignees"]),
             send(POST, "/api/v2/task/*/comment"),
             send(POST, "/api/v2/list/*/comment"),
             send(POST, "/api/v2/view/*/comment"),
@@ -512,19 +544,7 @@ pub const CONNECTORS: [AppConnector; 14] = [
         token_help_url: "https://app.hubspot.com/private-apps",
         scopes_hint: "A private app's access token with only the scopes a bruh needs, such as crm.objects.contacts.read.",
         test: test_get("/account-info/v3/details", &["/portalId"]),
-        endpoints: &[
-            get("/account-info/v3/details"),
-            get("/crm/v3/owners"),
-            get("/crm/v3/properties/*"),
-            get("/crm/v3/objects/*"),
-            get("/crm/v3/objects/*/*"),
-            read(POST, "/crm/v3/objects/*/search"),
-            read(POST, "/crm/v3/objects/*/batch/read"),
-            write(POST, "/crm/v3/objects/*"),
-            write(PATCH, "/crm/v3/objects/*/*"),
-            send(POST, "/marketing/v3/transactional/single-email/send"),
-            send(POST, "/conversations/v3/conversations/threads/*/messages"),
-        ],
+        endpoints: hubspot_endpoints!("contacts", "companies", "deals", "tickets", "notes", "tasks"),
         graphql: None,
         unlisted: unlisted!("HubSpot"),
         guide: guides::HUBSPOT,
@@ -648,7 +668,9 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/v1/disputes"),
             // A customer balance is charged on the next invoice.
             write(POST, "/v1/customers").refusing(&["balance"]),
-            write(POST, "/v1/customers/*").refusing(&["balance"]),
+            // A new email gets the customer's invoices, receipts and their
+            // hosted links (final review A1 M4).
+            write(POST, "/v1/customers/*").refusing(&["balance", "email"]),
             write(POST, "/v1/products"),
             write(POST, "/v1/products/*"),
             write(POST, "/v1/prices"),
@@ -700,8 +722,10 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/client/v4/zones/*"),
             get("/client/v4/zones/*/dns_records"),
             get("/client/v4/zones/*/dns_records/*"),
-            write(POST, "/client/v4/zones/*/dns_records"),
-            write(PUT_PATCH_DELETE, "/client/v4/zones/*/dns_records/*"),
+            // Repointing MX or A records can capture the owner's mail and
+            // password resets, so a DNS change asks like a send (A1 M4).
+            send(POST, "/client/v4/zones/*/dns_records"),
+            send(PUT_PATCH_DELETE, "/client/v4/zones/*/dns_records/*"),
         ],
         graphql: None,
         unlisted: unlisted!("Cloudflare"),
@@ -743,9 +767,11 @@ pub const CONNECTORS: [AppConnector; 14] = [
             read(GET_POST, "/api/team.info"),
             read(GET_POST, "/api/reactions.get"),
             read(GET_POST, "/api/pins.list"),
-            send(GET_POST, "/api/chat.postMessage"),
-            send(GET_POST, "/api/chat.update"),
-            send(GET_POST, "/api/chat.scheduleMessage"),
+            // A bot token with chat:write.customize could post as anyone
+            // (final review A1 M3).
+            send(GET_POST, "/api/chat.postMessage").refusing(SLACK_PERSONA),
+            send(GET_POST, "/api/chat.update").refusing(SLACK_PERSONA),
+            send(GET_POST, "/api/chat.scheduleMessage").refusing(SLACK_PERSONA),
             send(GET_POST, "/api/reactions.add"),
             send(GET_POST, "/api/reactions.remove"),
         ],
