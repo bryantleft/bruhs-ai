@@ -1,11 +1,12 @@
-//! The backup host (D6, D20, ruling F25): one job at a time, the web's
-//! uploads, the downloads waiting in `backups/outgoing`, the last backup
-//! record and the overview.
+//! The backup host (D6, D8, D20, ruling F25): one job at a time (making or
+//! opening a backup), the web's uploads, the downloads waiting in
+//! `backups/outgoing`, the last backup record, the sweep and the overview.
 //!
 //! Nothing here logs or returns a password, a keychain value or a path
 //! inside a backup.
 
 use std::fs::{File, OpenOptions};
+use std::future::Future;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -15,8 +16,8 @@ use std::time::{Duration, SystemTime};
 use bruhs_backup::{Header, KdfParams, Kind, HEADER_LEN};
 use bruhs_models::backup::{
     no_space, valid_id, validate_password, BackupJob, BackupOptions, BackupOverview, BackupSizes,
-    JobState, JobStep, LastBackup, BACKUP_BUSY, INVALID_REQUEST, NOT_A_BACKUP, RECORDING_FIRST,
-    RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    JobState, JobStep, LastBackup, StagedRestore, BACKUP_BUSY, INVALID_REQUEST, NOT_A_BACKUP,
+    RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
@@ -33,7 +34,7 @@ const OUTGOING: &str = "outgoing";
 const INCOMING: &str = "incoming";
 const TMP: &str = "tmp";
 /// The restore a start finishes (Task 8 writes it).
-const PENDING: &str = "pending.json";
+pub(super) const PENDING: &str = "pending.json";
 /// The last backup made here.
 const LAST: &str = "last.json";
 /// A download or upload left this long is swept.
@@ -76,6 +77,25 @@ pub(super) struct Config {
     /// test can hold a job or change a file mid-write.
     #[cfg(test)]
     pub(super) before_file: Option<TestHook>,
+    /// Answers in place of the volume's free space, so a test can fill the
+    /// disk.
+    #[cfg(test)]
+    pub(super) free_space: Option<FreeSpace>,
+}
+
+#[cfg(test)]
+pub(super) type FreeSpace = Arc<dyn Fn(&Path) -> u64 + Send + Sync>;
+
+impl Config {
+    /// The free bytes on the volume of `folder` (a test's answer when it
+    /// set one).
+    pub(super) fn free_bytes(&self, folder: &Path) -> io::Result<u64> {
+        #[cfg(test)]
+        if let Some(free) = &self.free_space {
+            return Ok(free(folder));
+        }
+        free_bytes(folder)
+    }
 }
 
 /// Where the writer calls a test's hook, with the entry's path.
@@ -130,6 +150,8 @@ impl BackupHost {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 #[cfg(test)]
                 before_file: None,
+                #[cfg(test)]
+                free_space: None,
             }),
             shared: Arc::default(),
         }
@@ -173,6 +195,12 @@ impl BackupHost {
         self
     }
 
+    #[cfg(test)]
+    pub(super) fn with_free_space(mut self, free: FreeSpace) -> Self {
+        Arc::make_mut(&mut self.config).free_space = Some(free);
+        self
+    }
+
     pub fn roots(&self) -> &Roots {
         &self.config.roots
     }
@@ -212,11 +240,31 @@ impl BackupHost {
             return Err(BackupError::Refused(RECORDING_FIRST));
         }
 
+        let host = self.clone();
+        self.launch(JobStep::Collecting, move |_, progress, cancel| async move {
+            match create::create(&host, request, &progress, &cancel).await {
+                Ok(file) => JobState::Created { file },
+                Err(error) => JobState::Failed {
+                    message: error.message(),
+                },
+            }
+        })
+    }
+
+    /// Runs `work` as the one job, unless a job runs (`BACKUP_BUSY`).
+    /// `work` gets the job's id, its progress and its cancel flag, and
+    /// answers the job's end state; a job whose task stops without one
+    /// ends `Failed`.
+    pub(super) fn launch<W, F>(&self, step: JobStep, work: W) -> Result<BackupJob, BackupError>
+    where
+        W: FnOnce(String, watch::Sender<JobState>, CancelFlag) -> F,
+        F: Future<Output = JobState> + Send + 'static,
+    {
         let id = random_id();
         let first = JobState::Running {
             done_bytes: 0,
             total_bytes: 0,
-            step: JobStep::Collecting,
+            step,
         };
         let (progress, state) = watch::channel(first.clone());
         let cancel = CancelFlag::default();
@@ -231,23 +279,13 @@ impl BackupHost {
                 cancel: cancel.clone(),
             });
         }
-        let host = self.clone();
+        let work = work(id.clone(), progress.clone(), cancel);
         tokio::spawn(async move {
-            let work = {
-                let progress = progress.clone();
-                tokio::spawn(
-                    async move { create::create(&host, request, &progress, &cancel).await },
-                )
-            };
-            let state = match work.await {
-                Ok(Ok(file)) => JobState::Created { file },
-                Ok(Err(error)) => JobState::Failed {
-                    message: error.message(),
-                },
-                Err(_) => JobState::Failed {
+            let state = tokio::spawn(work)
+                .await
+                .unwrap_or_else(|_| JobState::Failed {
                     message: BackupError::Io(io::Error::other("the backup job stopped")).message(),
-                },
-            };
+                });
             progress.send_replace(state);
         });
         Ok(BackupJob { id, state: first })
@@ -281,6 +319,14 @@ impl BackupHost {
         self.lock_job().as_ref().is_some_and(JobSlot::running)
     }
 
+    /// The running job's id.
+    pub(super) fn running_id(&self) -> Option<String> {
+        self.lock_job()
+            .as_ref()
+            .filter(|slot| slot.running())
+            .map(|slot| slot.id.clone())
+    }
+
     fn lock_job(&self) -> std::sync::MutexGuard<'_, Option<JobSlot>> {
         self.shared
             .job
@@ -290,10 +336,15 @@ impl BackupHost {
 
     /// `<core>/backups`, or one of its folders, when it is a real folder:
     /// nothing is read or removed through a link (B Task 5 I1 ruling).
-    fn private_folder(&self, folder: Option<&str>) -> Option<PathBuf> {
+    pub(super) fn private_folder(&self, folder: Option<&str>) -> Option<PathBuf> {
+        self.private_folder_in(RootKey::Core, folder)
+    }
+
+    /// [`Self::private_folder`] in either root.
+    pub(super) fn private_folder_in(&self, root: RootKey, folder: Option<&str>) -> Option<PathBuf> {
         let real =
             |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir());
-        let backups = self.roots().backups(RootKey::Core);
+        let backups = self.roots().backups(root);
         if !real(&backups) {
             return None;
         }
@@ -305,7 +356,7 @@ impl BackupHost {
 
     /// Whether a restore waits. A `pending.json` seen through a linked
     /// `backups` folder doesn't count; the job then refuses that folder.
-    fn restore_pending(&self) -> bool {
+    pub(super) fn restore_pending(&self) -> bool {
         self.private_folder(None)
             .is_some_and(|backups| std::fs::symlink_metadata(backups.join(PENDING)).is_ok())
     }
@@ -376,8 +427,10 @@ impl BackupHost {
     }
 
     /// Removes downloads and uploads older than 30 minutes and, unless a
-    /// job runs, every snapshot left in `backups/tmp` and the partial
-    /// files a stopped process left in chosen folders.
+    /// job runs, every snapshot left in `backups/tmp`, the partial files a
+    /// stopped process left in chosen folders, and staged restores that
+    /// never finished or weren't applied within 24 hours, with their seal
+    /// keys (ruling F25).
     pub fn sweep(&self) {
         let now = SystemTime::now();
         for folder in [OUTGOING, INCOMING] {
@@ -399,6 +452,7 @@ impl BackupHost {
             remove_marked_partials(&tmp);
             sweep_folder(&tmp, |_| true, |_| true);
         }
+        self.sweep_staged();
         // A `last.json` record that a stopped process never renamed.
         if let Some(backups) = self.private_folder(None) {
             let leftover = format!(".{LAST}.partial-");
@@ -413,17 +467,7 @@ impl BackupHost {
     /// The last backup made on this computer.
     pub fn last(&self) -> Option<LastBackup> {
         let path = self.private_folder(None)?.join(LAST);
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)
-            .ok()?;
-        if !file.metadata().ok()?.is_file() {
-            return None;
-        }
-        let mut text = Vec::new();
-        file.take(LAST_MAX_BYTES).read_to_end(&mut text).ok()?;
-        serde_json::from_slice(&text).ok()
+        serde_json::from_slice(&read_small(&path, LAST_MAX_BYTES)?).ok()
     }
 
     /// Records the backup just made, replacing the record atomically.
@@ -445,7 +489,8 @@ impl BackupHost {
     }
 
     /// What Settings shows (ruling F25: sizes, keychain items, outside
-    /// roots, the last backup and the job; restore fields come later).
+    /// roots, the last backup, the job and a staged restore; the other
+    /// restore fields come later).
     pub async fn overview(&self) -> BackupOverview {
         let roots = self.roots().clone();
         let measured = tokio::task::spawn_blocking(move || {
@@ -479,6 +524,7 @@ impl BackupHost {
                 .outside_overrides(|name| std::env::var_os(name)),
             last: self.last(),
             job,
+            staged: self.staged().map(|preview| StagedRestore { preview }),
             ..BackupOverview::default()
         }
     }
@@ -587,6 +633,24 @@ pub(super) fn web_part_header(head: &[u8]) -> bool {
         .ok()
         .and_then(|bytes| Header::parse(bytes).ok())
         .is_some_and(|header| header.kind == Kind::WebPart)
+}
+
+/// A small regular file's bytes, read without following a link or waiting
+/// on a FIFO; `None` when it is missing, not a regular file or over `max`
+/// bytes.
+pub(super) fn read_small(path: &Path, max: u64) -> Option<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > max {
+        return None;
+    }
+    let mut text = Vec::new();
+    file.take(max).read_to_end(&mut text).ok()?;
+    Some(text)
 }
 
 /// Creates a new 0600 file, never replacing one or following a link.

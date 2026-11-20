@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 use super::{BackupOptions, PathRewrite, UNSAFE_ENTRY};
 
@@ -154,6 +155,14 @@ pub fn safe_entry_path(path: &str) -> Result<EntryPath, &'static str> {
     } else {
         Err(UNSAFE_ENTRY)
     }
+}
+
+/// The name two entry paths share on a volume that ignores case and
+/// Unicode normalization (APFS, HFS+): lower case, then NFC. A restore
+/// refuses two different paths with one key (`NAMES_CLASH`), since one
+/// would land on the other.
+pub fn folded_entry_key(path: &str) -> String {
+    path.nfd().flat_map(char::to_lowercase).nfc().collect()
 }
 
 /// Whether an entry's first name is never restored: an excluded top-level
@@ -587,6 +596,16 @@ mod tests {
             assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad:?}");
         }
         assert!(safe_entry_path(&format!("core/{}", "a".repeat(255))).is_ok());
+    }
+
+    #[test]
+    fn folded_keys_match_names_one_volume_would_merge() {
+        let key = folded_entry_key;
+        assert_eq!(key("core/Notes.txt"), key("core/notes.txt"));
+        assert_eq!(key("core/caf\u{e9}"), key("core/cafe\u{301}"));
+        assert_eq!(key("core/CAF\u{c9}"), key("core/cafe\u{301}"));
+        assert_ne!(key("core/notes.txt"), key("core/notes.md"));
+        assert_ne!(key("core/a"), key("desktop/a"));
     }
 
     /// B Task 5 N1 ruling: at most 64 levels below the root's name.

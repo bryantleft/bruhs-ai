@@ -1,6 +1,7 @@
 //! Backup and restore of everything Bruhs keeps on this computer (crew
 //! project 6): the data roots, what a backup takes from them, consistent
-//! SQLite copies and the free space a job needs.
+//! SQLite copies, the free space a job needs, and opening a backup into
+//! staging folders before a restore.
 //!
 //! The container format lives in `bruhs-backup`, the wire types, rules and
 //! copy in `bruhs_models::backup`. Nothing here is reachable from a bruh:
@@ -21,6 +22,8 @@ mod create;
 mod disk;
 #[cfg(unix)]
 mod host;
+#[cfg(unix)]
+mod open;
 
 #[cfg(unix)]
 pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
@@ -37,6 +40,8 @@ pub use host::{BackupHost, Upload, UploadKind};
 mod collect_tests;
 #[cfg(test)]
 mod create_tests;
+#[cfg(test)]
+mod open_tests;
 
 /// The app and organisation names `directories` resolves the roots from.
 const QUALIFIER: &str = "dev";

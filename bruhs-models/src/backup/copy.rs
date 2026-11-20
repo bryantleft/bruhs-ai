@@ -125,6 +125,10 @@ pub const NEWER_WEB_DATA: &str =
     "This browser data comes from a newer Bruhs. Update Bruhs, then try again.";
 pub const UNSAFE_ENTRY: &str = "This backup holds a file Bruhs won't write. Nothing was changed.";
 pub const DAMAGED: &str = "This backup is damaged. Nothing was changed.";
+/// Two entries a case-insensitive or accent-insensitive volume would give
+/// one name (`Notes` and `notes`, or an "é" typed two ways).
+pub const NAMES_CLASH: &str =
+    "This backup holds two files whose names differ only in case or accents. Nothing was changed.";
 pub const ROOTS_OVERLAP: &str =
     "This backup's two data folders overlap on this computer. Nothing was changed.";
 pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and try again.";
@@ -251,6 +255,7 @@ pub const ALL_COPY: &[&str] = &[
     NEWER_WEB_DATA,
     UNSAFE_ENTRY,
     DAMAGED,
+    NAMES_CLASH,
     ROOTS_OVERLAP,
     NO_SPACE,
     FILE_CHANGED,
