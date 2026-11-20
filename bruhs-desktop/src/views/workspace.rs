@@ -65,6 +65,7 @@ use bruhs_ui::press::on_press_view;
 use bruhs_ui::text_field::TextInput;
 
 mod app_links;
+mod apps_settings;
 mod automations_ui;
 mod booking_ui;
 #[cfg(test)]
@@ -687,6 +688,7 @@ enum SettingsSection {
     Updates,
     Beta,
     Vault,
+    Apps,
     Calendar,
     Recording,
     Transcription,
@@ -1244,6 +1246,7 @@ pub struct Workspace {
     local_servers_generation: u64,
     settings_section: SettingsSection,
     vault_settings: Entity<vault_settings::VaultSettings>,
+    apps_settings: Entity<apps_settings::AppsSettings>,
     /// Provider CLI and app update checks (Settings → Updates, sidebar button).
     updates: Entity<updates_ui::DesktopUpdates>,
     /// Scroll position of the stacked settings sections.
@@ -1996,6 +1999,8 @@ impl Workspace {
             settings_section: SettingsSection::General,
             vault_settings: cx
                 .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx)),
+            apps_settings: cx
+                .new(|cx| apps_settings::AppsSettings::new(meetings_client(), window, cx)),
             updates: {
                 let enabled = persisted
                     .as_ref()
@@ -2912,6 +2917,10 @@ impl Render for Workspace {
         if !self.settings_visible() && self.vault_settings.read(cx).holds_visit(cx) {
             self.vault_settings
                 .update(cx, |view, cx| view.left(window, cx));
+        }
+        if !self.settings_visible() && self.apps_settings.read(cx).has_editor() {
+            self.apps_settings
+                .update(cx, |view, cx| view.clear_editor(window, cx));
         }
         for thread in &self.threads {
             let visible = self.active_view == AppView::Chat

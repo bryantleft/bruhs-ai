@@ -54,11 +54,12 @@ fn follow_up_button(
 }
 
 impl SettingsSection {
-    pub(super) const ALL: [SettingsSection; 11] = [
+    pub(super) const ALL: [SettingsSection; 12] = [
         Self::General,
         Self::Updates,
         Self::Beta,
         Self::Vault,
+        Self::Apps,
         Self::Calendar,
         Self::Recording,
         Self::Transcription,
@@ -76,6 +77,7 @@ impl SettingsSection {
     pub(super) fn id(self) -> &'static str {
         match self {
             Self::Vault => "vault",
+            Self::Apps => "apps",
             Self::General => "general",
             Self::Updates => "updates",
             Self::Beta => "beta",
@@ -99,6 +101,7 @@ impl SettingsSection {
     pub(super) fn icon_path(self) -> &'static str {
         match self {
             Self::Vault => "icons/shield.svg",
+            Self::Apps => assets::TOOL_GLOBE_ICON_PATH,
             Self::General => "icons/settings.svg",
             Self::Updates => assets::DOWNLOAD_ICON_PATH,
             Self::Beta => assets::ACTIVITY_ICON_PATH,
@@ -115,6 +118,7 @@ impl SettingsSection {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Vault => bruhs_models::vault::VAULT_TITLE,
+            Self::Apps => bruhs_models::apps::APPS_TITLE,
             Self::General => "General",
             Self::Updates => "Updates",
             Self::Beta => "Beta",
@@ -132,6 +136,7 @@ impl SettingsSection {
     pub(super) fn description(self) -> &'static str {
         match self {
             Self::Vault => bruhs_models::vault::VAULT_DESCRIPTION,
+            Self::Apps => bruhs_models::apps::APPS_DESCRIPTION,
             Self::General => "Defaults for new turns.",
             Self::Updates => "Provider CLIs and this build of bruhs.",
             Self::Beta => "Sidebar sections that are still settling in.",
@@ -152,6 +157,7 @@ impl SettingsSection {
     pub(super) fn selector(self) -> &'static str {
         match self {
             Self::Vault => "desktop-settings-nav-vault",
+            Self::Apps => "desktop-settings-nav-apps",
             Self::General => "desktop-settings-nav-general",
             Self::Updates => "desktop-settings-nav-updates",
             Self::Beta => "desktop-settings-nav-beta",
@@ -331,6 +337,8 @@ impl Workspace {
             open_dropdown: None,
         });
         self.vault_settings
+            .update(cx, |view, cx| view.refresh(window, cx));
+        self.apps_settings
             .update(cx, |view, cx| view.refresh(window, cx));
         // A page on the web: nothing inside is focused until the first Tab.
         self.focus_modal_dialog(window, cx);
@@ -1146,6 +1154,9 @@ impl Workspace {
         let rows = match section {
             SettingsSection::Vault => {
                 vec![div().child(self.vault_settings.clone()).into_any_element()]
+            }
+            SettingsSection::Apps => {
+                vec![div().child(self.apps_settings.clone()).into_any_element()]
             }
             SettingsSection::General => {
                 // Web order: roles and task models sit above the two title

@@ -48,7 +48,7 @@ const SOURCE_DROPDOWN: &str = "desktop-vault-stored-in";
 
 /// The dropdown takes `'static` values; each bruh id is kept once for the
 /// life of the app, so the set grows only with the crew.
-fn bruh_value(id: &str) -> &'static str {
+pub(super) fn bruh_value(id: &str) -> &'static str {
     static VALUES: std::sync::OnceLock<Mutex<HashSet<&'static str>>> = std::sync::OnceLock::new();
     if id.is_empty() {
         return "";
@@ -1017,13 +1017,13 @@ impl VaultSettings {
     }
 }
 
-fn is_forbidden(error: &ServerError) -> bool {
+pub(super) fn is_forbidden(error: &ServerError) -> bool {
     matches!(error, ServerError::Status { code, .. } if *code == reqwest::StatusCode::FORBIDDEN)
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────
 
-fn small(text: impl Into<SharedString>, color: Hsla) -> Div {
+pub(super) fn small(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .min_w_0()
         .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -1032,7 +1032,7 @@ fn small(text: impl Into<SharedString>, color: Hsla) -> Div {
         .child(text.into())
 }
 
-fn labelled(label: &'static str, control: impl IntoElement) -> Div {
+pub(super) fn labelled(label: &'static str, control: impl IntoElement) -> Div {
     div()
         .min_w_0()
         .w_full()
@@ -1043,7 +1043,7 @@ fn labelled(label: &'static str, control: impl IntoElement) -> Div {
         .child(control)
 }
 
-fn field(
+pub(super) fn field(
     input: &Entity<InputState>,
     label: &'static str,
     readonly: bool,
@@ -1062,7 +1062,7 @@ fn field(
         .text_size(px(FIELD_TEXT_PX))
 }
 
-fn button(
+pub(super) fn button(
     id: impl Into<ElementId>,
     selector: String,
     label: &'static str,
@@ -1082,7 +1082,7 @@ fn button(
     .child(label)
 }
 
-fn panel() -> Div {
+pub(super) fn panel() -> Div {
     div()
         .mt_3()
         .p_3()
