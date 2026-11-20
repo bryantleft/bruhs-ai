@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::Value;
 use std::sync::Arc;
 
 struct Fixture {
@@ -487,4 +488,509 @@ async fn weekly_report_preset_and_run_retry_use_the_same_http_contract_for_nativ
         .await
         .unwrap();
     assert_eq!(hostile.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn webhook_filters_use_http_request_metadata_without_persisting_it() {
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    fixture.command(json!({"action":"apply","change":{"type":"save_subscription","subscription":{
+        "id":"scan-bills","source_id":"scans","agent_id":"bills","instructions":"Review this delivery","enabled":true,
+        "webhook_filters":[{"path":"query.queue","op":"equals","value":"ready queue"},{"path":"headers.x-source","op":"exists"},{"path":"body.action","op":"in","value":["opened","reopened"]}]
+    }}})).await;
+    let token=fixture.runtime.webhook_token("scans").await.unwrap();
+    for (action, expected) in [("closed", vec!["scan-bills"]),("opened",vec![])] {
+        let response=fixture.client.post(format!("{}/api/reactive/hooks/scans?queue=other&queue=ready+queue",fixture.base))
+            .bearer_auth(&token).header("X-Source","private-source-fixture").json(&json!({"action":action}))
+            .send().await.unwrap();
+        assert_eq!(response.status(),StatusCode::ACCEPTED);
+        let event:ReactiveEvent=response.json().await.unwrap();
+        assert!(event.filtered_subscriptions.is_empty());
+        let snapshot = fixture.runtime.snapshot().await.unwrap();
+        let stored = snapshot.events.iter().find(|stored| stored.id == event.id).unwrap();
+        assert_eq!(stored.filtered_subscriptions, expected);
+    }
+    let snapshot=fixture.runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(),1);
+    assert!(!serde_json::to_string(&snapshot).unwrap().contains("private-source-fixture"));
+}
+
+#[tokio::test]
+async fn webhook_delivery_history_is_scoped_to_the_task_and_records_each_http_attempt() {
+    use bruhs_models::reactive::{WebhookDelivery, WebhookDeliverySummary, WebhookOutcome};
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    fixture.command(json!({"action":"apply","change":{"type":"save_subscription","subscription":{
+        "id":"only-closed","source_id":"scans","agent_id":"bills","instructions":"Review closed items","enabled":true,
+        "webhook_filters":[{"path":"body.action","op":"equals","value":"closed"}]
+    }}})).await;
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    let hook = format!(
+        "{}/api/reactive/hooks/scans?lane=ready&access_token=query-secret",
+        fixture.base
+    );
+    let body =
+        json!({"action":"opened","nested":[{"password":"body-secret"}],"text":"東京".repeat(3500)});
+    for credential in ["invalid", &token, &token] {
+        let response = fixture
+            .client
+            .post(&hook)
+            .bearer_auth(credential)
+            .header("x-event-id", "first")
+            .header("x-api-key", "header-secret")
+            .header("x-source", "scanner")
+            .header("x-reflection", &token)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            if credential == "invalid" {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::ACCEPTED
+            }
+        );
+    }
+    let list = |task: &str| {
+        fixture
+            .client
+            .get(format!(
+                "{}/api/reactive/tasks/{task}/deliveries",
+                fixture.base
+            ))
+            .send()
+    };
+    let foreign_origin = fixture.client
+        .get(format!("{}/api/reactive/tasks/scan-bills/deliveries", fixture.base))
+        .header("Origin", "https://unrelated.example")
+        .send().await.unwrap();
+    assert_eq!(foreign_origin.status(), StatusCode::FORBIDDEN);
+    let response = list("scan-bills").await.unwrap();
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let items: Vec<WebhookDeliverySummary> = response.json().await.unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].outcome, WebhookOutcome::Duplicate);
+    assert_eq!(items[1].outcome, WebhookOutcome::AwaitingReview);
+    let filtered: Vec<WebhookDeliverySummary> =
+        list("only-closed").await.unwrap().json().await.unwrap();
+    assert_eq!(filtered[1].outcome, WebhookOutcome::Filtered);
+    let get = |task: &str, id: &str| {
+        fixture
+            .client
+            .get(format!(
+                "{}/api/reactive/tasks/{task}/deliveries/{id}",
+                fixture.base
+            ))
+            .send()
+    };
+    let detail: WebhookDelivery = get("scan-bills", &items[1].id)
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        detail.body_truncated
+            && detail.headers.contains("x-source: scanner")
+            && detail.query.contains("lane: ready")
+    );
+    assert!(detail
+        .prompt
+        .as_ref()
+        .unwrap()
+        .contains("Summarize the scan"));
+    let serialized = serde_json::to_string(&detail).unwrap();
+    for secret in [&token, "body-secret", "query-secret", "header-secret"] {
+        assert!(!serialized.contains(secret));
+    }
+    let detail: WebhookDelivery = get("only-closed", &items[1].id)
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail.summary.outcome, WebhookOutcome::Filtered);
+    assert!(detail.prompt.is_none());
+    assert!(detail.error.unwrap().contains("body.action"));
+    let conflict = fixture
+        .client
+        .post(&hook)
+        .bearer_auth(&token)
+        .header("x-event-id", "first")
+        .json(&json!({"action":"different"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+    let rejected: Vec<WebhookDeliverySummary> =
+        list("scan-bills").await.unwrap().json().await.unwrap();
+    assert_eq!(rejected[0].outcome, WebhookOutcome::Rejected);
+    let failed: WebhookDelivery = get("scan-bills", &rejected[0].id)
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(failed.error.unwrap().contains("different content"));
+    assert_eq!(fixture.runtime.snapshot().await.unwrap().runs.len(), 1);
+    fixture
+        .command(
+            json!({"action":"apply","change":{"type":"delete_subscription","id":"only-closed"}}),
+        )
+        .await;
+    assert_eq!(
+        list("only-closed").await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    fixture.command(json!({"action":"apply","change":{"type":"save_subscription","subscription":{
+        "id":"only-closed","source_id":"scans","agent_id":"bills","instructions":"A new task","enabled":true
+    }}})).await;
+    assert_eq!(
+        get("only-closed", &items[1].id).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        get("scan-bills", &items[1].id).await.unwrap().status(),
+        StatusCode::OK
+    );
+}
+
+
+#[tokio::test]
+async fn webhook_history_keeps_recent_attempts_and_original_task_outcomes_across_restart() {
+    use bruhs_models::reactive::{WebhookOutcome, HISTORY_LIMIT};
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    for (id, controls) in [
+        ("batch", json!({"debounce_ms":60000})),
+        ("slow", json!({"throttle_ms":60000})),
+        ("paused", json!({"enabled":false})),
+    ] {
+        let mut sub = json!({"id":id,"source_id":"scans","agent_id":"bills","instructions":"Inspect","enabled":true});
+        sub.as_object_mut()
+            .unwrap()
+            .extend(controls.as_object().unwrap().clone());
+        fixture
+            .command(
+                json!({"action":"apply","change":{"type":"save_subscription","subscription":sub}}),
+            )
+            .await;
+    }
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    for key in ["a", "b"] {
+        fixture
+            .runtime
+            .publish_hook("scans", &token, key, json!({"id":key}))
+            .await
+            .unwrap();
+    }
+    for (task, expected) in [
+        ("batch", WebhookOutcome::Coalesced),
+        ("slow", WebhookOutcome::Throttled),
+        ("paused", WebhookOutcome::Paused),
+    ] {
+        let rows = fixture
+            .runtime
+            .webhook_deliveries(task.into())
+            .await
+            .unwrap();
+        assert_eq!(rows[0].outcome, expected);
+    }
+    let oldest = fixture
+        .runtime
+        .webhook_deliveries("batch".into())
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    for _ in 0..HISTORY_LIMIT {
+        fixture
+            .runtime
+            .publish_hook("scans", &token, "b", json!({"id":"b"}))
+            .await
+            .unwrap();
+    }
+    let db = tempfile::tempdir().unwrap();
+    // A consistent copy of a live WAL database is also a fresh runtime with no in-memory history.
+    let saved = db.path().join("reopened.sqlite3");
+    let source =
+        rusqlite::Connection::open(fixture.directory.path().join("automation.sqlite3")).unwrap();
+    source
+        .execute("VACUUM INTO ?1", [saved.to_str().unwrap()])
+        .unwrap();
+    let reopened = ReactiveRuntime::open(saved).await.unwrap();
+    let rows = reopened.webhook_deliveries("batch".into()).await.unwrap();
+    assert_eq!(rows.len(), HISTORY_LIMIT);
+    assert!(rows
+        .iter()
+        .all(|row| row.outcome == WebhookOutcome::Duplicate));
+    assert!(matches!(
+        reopened.webhook_delivery("batch".into(), oldest.id).await,
+        Err(ReactiveError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn webhook_signature_checks_exact_http_body_and_preserves_shared_source_retries() {
+    use bruhs_models::reactive::WebhookOutcome;
+    const SIGNATURE: &str =
+        "sha256=f165f0f326ac75f6c8ba9f3c3eba3e535cf9cda666ee3a3e048e3504cfb68b30";
+    const BODY: &str = "{ \"fixture\": true }";
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    let snapshot = fixture.runtime.snapshot().await.unwrap();
+    let mut task = serde_json::to_value(&snapshot.subscriptions[0]).unwrap();
+    task["webhook_security"] = json!({"signature":{"header":"x-check","encoding":"hex","prefix":"SHA256="},"max_delivery_age_minutes":5});
+    task["webhook_prompt"] = json!("Review {{body.fixture}} {{headers.x-check}}.");
+    let saved = fixture
+        .command(json!({"action":"save_scheduled_task", "enabled":true,
+        "automation":{"agent":snapshot.agents[0],"source":snapshot.sources[0],"subscription":task},
+        "signing_secret":"fixture-signing-key"}))
+        .await;
+    assert!(!saved.to_string().contains("fixture-signing-key"));
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    let hook = format!("{}/api/reactive/hooks/scans", fixture.base);
+    let deliver = |id, signature, raw| {
+        fixture
+            .client
+            .post(&hook)
+            .bearer_auth(&token)
+            .header("x-event-id", id)
+            .header("x-check", signature)
+            .header("content-type", "application/json")
+            .body(raw)
+            .send()
+    };
+
+    assert_eq!(
+        deliver("first", SIGNATURE, "{\"fixture\":true}")
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert!(fixture.runtime.snapshot().await.unwrap().events.is_empty());
+    assert_eq!(
+        deliver("first", SIGNATURE, BODY).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        deliver("first", SIGNATURE, BODY).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    let history = fixture
+        .runtime
+        .webhook_deliveries("scan-bills".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        history.iter().map(|h| h.outcome).collect::<Vec<_>>(),
+        [
+            WebhookOutcome::Duplicate,
+            WebhookOutcome::AwaitingReview,
+            WebhookOutcome::RejectedSignature
+        ]
+    );
+    let detail = fixture
+        .runtime
+        .webhook_delivery("scan-bills".into(), history[1].id.clone())
+        .await
+        .unwrap();
+    assert!(!serde_json::to_string(&detail).unwrap().contains(SIGNATURE));
+    assert_eq!(detail.body, BODY);
+    let mut sibling = snapshot.subscriptions[0].clone();
+    sibling.id = "unsigned".into();
+    fixture
+        .command(
+            json!({"action":"apply","change":{"type":"save_subscription","subscription":sibling}}),
+        )
+        .await;
+    for (sig, body) in [("invalid", "{}"), (SIGNATURE, BODY), (SIGNATURE, BODY)] {
+        assert_eq!(
+            deliver("shared", sig, body).await.unwrap().status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let fresh = fixture.runtime.snapshot().await.unwrap();
+    assert_eq!(fresh.runs.len(), 3);
+    assert!(!serde_json::to_string(&fresh).unwrap().contains(SIGNATURE));
+    let signed = fixture
+        .runtime
+        .webhook_deliveries("scan-bills".into())
+        .await
+        .unwrap();
+    assert_eq!(signed[0].outcome, WebhookOutcome::Duplicate);
+    assert_eq!(signed[1].outcome, WebhookOutcome::AwaitingReview);
+    assert_eq!(signed[2].outcome, WebhookOutcome::RejectedSignature);
+}
+
+#[tokio::test]
+async fn raw_webhook_checks_original_bytes_and_renders_decoded_text() {
+    use bruhs_models::reactive::WebhookOutcome;
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    let snapshot = fixture.runtime.snapshot().await.unwrap();
+    let mut task = serde_json::to_value(&snapshot.subscriptions[0]).unwrap();
+    task["webhook_security"] =
+        json!({"signature":{"header":"x-check","encoding":"hex","prefix":""}});
+    task["webhook_prompt"] = json!("Read {{body}} {{body.subject}} {{headers.absent}}");
+    fixture
+        .command(json!({"action":"save_scheduled_task","enabled":true,
+        "automation":{"agent":snapshot.agents[0],"source":snapshot.sources[0],"subscription":task},
+        "signing_secret":"raw-body-fixture"}))
+        .await;
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    let send = |signature| {
+        fixture
+            .client
+            .post(format!("{}/api/reactive/hooks/scans", fixture.base))
+            .bearer_auth(&token)
+            .header("content-type", "application/octet-stream")
+            .header("x-check", signature)
+            .header("x-event-id", "binary")
+            .body(b"\xef\xbb\xbfnote:\x80\n".to_vec())
+            .send()
+    };
+    // Digest of the decoded/re-encoded display text, then of the original bytes.
+    assert_eq!(
+        send("6beb9085a73cd267ddcd90eeaabb26c85569058c360eb27158db34366a0a9bc6")
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send("eecd5bcfe5047b85d18fc80678b4d7e981b0d2e2b11c9643fc73de7700342cb7")
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let rows = fixture
+        .runtime
+        .webhook_deliveries("scan-bills".into())
+        .await
+        .unwrap();
+    assert_eq!(rows[0].outcome, WebhookOutcome::AwaitingReview);
+    assert_eq!(rows[0].missing_field_count, 2);
+    let detail = fixture
+        .runtime
+        .webhook_delivery("scan-bills".into(), rows[0].id.clone())
+        .await
+        .unwrap();
+    assert_eq!(detail.body, "note:�\n");
+    assert!(detail.signature_verified);
+    assert_eq!(detail.missing_fields, ["body.subject", "headers.absent"]);
+    assert!(detail.prompt.unwrap().contains(">note:�\n</"));
+    let rejected = fixture
+        .runtime
+        .webhook_delivery("scan-bills".into(), rows[1].id.clone())
+        .await
+        .unwrap();
+    assert!(!rejected.signature_verified);
+}
+
+#[tokio::test]
+async fn form_webhook_fields_route_requests_and_redact_all_occurrences_in_history() {
+    use bruhs_models::reactive::WebhookOutcome;
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    fixture.command(json!({"action":"apply","change":{"type":"save_subscription","subscription":{
+        "id":"scan-bills","agent_id":"bills","source_id":"scans","instructions":"Review","enabled":true,
+        "webhook_filters":[{"path":"body.state","op":"equals","value":"needs review"}],
+        "webhook_prompt":"{{body}} / {{body.title}} / {{body.missing}}",
+        "webhook_dedupe":{"replay_key":"{{body.title}}"}
+    }}})).await;
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    let post = |data| {
+        fixture
+            .client
+            .post(format!("{}/api/reactive/hooks/scans", fixture.base))
+            .bearer_auth(&token)
+            .header(
+                "content-type",
+                "Application/X-WWW-Form-Urlencoded; charset=utf-8",
+            )
+            .body(data)
+            .send()
+    };
+    let raw =
+        "state=held&state=needs+review&title=caf%C3%A9&to%6ben=first-value&token=second-value";
+    for data in [raw, raw, "state=held&title=next"] {
+        assert_eq!(post(data).await.unwrap().status(), StatusCode::ACCEPTED);
+    }
+    let snap = fixture.runtime.snapshot().await.unwrap();
+    assert_eq!(snap.runs.len(), 1);
+    assert!(snap.runs[0].prompt.contains(raw));
+    assert!(snap.runs[0].prompt.contains(">café</"));
+    let rows = fixture
+        .runtime
+        .webhook_deliveries("scan-bills".into())
+        .await
+        .unwrap();
+    assert_eq!(rows[0].outcome, WebhookOutcome::Filtered);
+    assert!(rows[0]
+        .filter_reason
+        .as_ref()
+        .unwrap()
+        .contains("body.state"));
+    assert_eq!(rows[1].outcome, WebhookOutcome::Duplicate);
+    assert_eq!(rows[2].missing_field_count, 1);
+    let detail = fixture
+        .runtime
+        .webhook_delivery("scan-bills".into(), rows[2].id.clone())
+        .await
+        .unwrap();
+    let preview = serde_json::to_string(&detail).unwrap();
+    assert!(!preview.contains("first-value") && !preview.contains("second-value"));
+    assert!(
+        detail.body.contains("state=needs+review")
+            && detail.body.matches("%5Bredacted%5D").count() == 2
+    );
+    assert_eq!(detail.summary.missing_field_count, 1);
+}
+
+#[tokio::test]
+async fn opaque_webhook_retries_compare_wire_bytes_and_use_the_wire_size_budget() {
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    let post = |id, data: Vec<u8>| {
+        fixture
+            .client
+            .post(format!("{}/api/reactive/hooks/scans", fixture.base))
+            .bearer_auth(&token)
+            .header("content-type", "text/plain")
+            .header("x-event-id", id)
+            .body(data)
+            .send()
+    };
+    for (bytes, status) in [
+        (vec![0x80], StatusCode::ACCEPTED),
+        (vec![0x80], StatusCode::ACCEPTED),
+        (vec![0x81], StatusCode::CONFLICT),
+    ] {
+        assert_eq!(post("bad-utf8", bytes).await.unwrap().status(), status);
+    }
+    assert_eq!(
+        post("empty", vec![]).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        post("boundary", vec![b'\n'; MAX_PAYLOAD_BYTES])
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        post("too-large", vec![b'\n'; MAX_PAYLOAD_BYTES + 1])
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    assert_eq!(fixture.runtime.snapshot().await.unwrap().events.len(), 3);
 }

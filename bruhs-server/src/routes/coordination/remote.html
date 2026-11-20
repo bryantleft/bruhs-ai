@@ -106,6 +106,7 @@ a.chip{position:relative;z-index:1;text-decoration:none;border-radius:.25rem;pad
  <h1>Tasks</h1><span id="summary" class="muted" role="status" aria-live="polite"></span><span class="grow"></span>
  <label class="project" id="project-label" hidden><span class="sr-only">Project</span><select id="project-filter" aria-label="Project"></select></label>
  <button id="new-task" class="primary" type="button" hidden aria-keyshortcuts="n">New task</button>
+ <button id="open-handoffs" type="button" hidden>Task handoffs</button>
  <button id="open-specs" type="button" hidden>Specifications</button>
  <button id="open-access" type="button" hidden>Phone access</button>
 </header>
@@ -123,13 +124,14 @@ a.chip{position:relative;z-index:1;text-decoration:none;border-radius:.25rem;pad
    <div id="detail" style="display:grid;gap:14px"></div>
    <details id="wake-section" class="section" hidden><summary>Resume from pull request events</summary><p id="wake-target" class="muted"></p><p>Approve which changes from an existing Delivery watch may continue this task. It keeps its current model, project and access. Review text never grants extra permission to publish or merge.</p><form id="wake-form" style="display:grid;gap:8px"><label>Delivery watch<select id="wake-watch" required><option value="">Load your delivery watches</option></select></label><div class="row"><button id="wake-refresh" type="button">Refresh delivery watches</button></div><div class="row wake-kinds"><label><input type="checkbox" name="wake-kind" value="checks">Checks</label><label><input type="checkbox" name="wake-kind" value="review">Reviews and comments</label><label><input type="checkbox" name="wake-kind" value="head">Head commit</label><label><input type="checkbox" name="wake-kind" value="conflict">Conflicts</label><label><input type="checkbox" name="wake-kind" value="terminal">Closed or merged</label></div><div class="row"><button id="wake-save">Approve task continuation</button></div></form><div id="wake-subscriptions"></div><h3>Event receipts</h3><div id="wake-receipts"></div><p class="muted">Events wait behind a busy task. Stopping a task disables its subscriptions. Interrupted or uncertain reserved turns are never replayed; inspect and resume them yourself. The bounded journal retains deduplication receipts until its task is deleted.</p><p class="muted">An approved watch also links its pull request to this task on the board.</p></details>
   </section>
-  <section id="create-pane" hidden><form id="create" style="display:grid;gap:12px">
-   <div class="fields"><label>Title<input id="title" required></label><label>Project folder<input id="project" required placeholder="/Users/me/projects/app"></label><label>Model<input id="model" value="claude-sonnet-4-5" required></label><label>Access<select id="access"><option value="default">Ask first</option><option value="plan">Plan: read only</option><option value="acceptEdits">Accept edits</option><option value="bypassPermissions">Full access</option></select></label><label>Workspace<select id="isolation"><option value="shared">Current folder</option><option value="worktree">New worktree</option></select></label><label>Base branch<input id="base" value="main"></label></div>
+  <section id="create-pane" hidden><p id="handoff-summary" class="muted" hidden></p><button id="forget-handoff" type="button" hidden>Discard handoff</button><button id="handoff-status" type="button" hidden>Check start status</button><form id="create" aria-label="New task settings" style="display:grid;gap:12px">
+   <div class="fields"><label>Title<input id="title" required></label><label>Project folder<input id="project" required placeholder="/Users/me/projects/app"></label><label>Model<input id="model" value="claude-sonnet-4-5" required></label><label>Reasoning effort<select id="effort"><option value="">Provider default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label><label>Run budget in seconds (optional)<input id="execution-budget" type="number" min="1" step="1" placeholder="Unlimited unless set"></label><label>Access<select id="access"><option value="default">Ask first</option><option value="plan">Plan: read only</option><option value="acceptEdits">Accept edits</option><option value="bypassPermissions">Full access</option></select></label><label>Workspace<select id="isolation"><option value="shared">Current folder</option><option value="worktree">New worktree</option></select></label><label>Base branch<input id="base" value="main"></label></div>
    <label>Task<textarea id="prompt" required rows="6"></textarea></label>
    <p class="muted">A new worktree gives the task its own branch, so its pull requests appear on its card.</p>
    <div class="row"><button class="primary">Start task</button></div>
-   <details><summary>Compare models</summary><label>Models, one per line<textarea id="models" placeholder="claude-sonnet-4-5&#10;gpt-6.1-sol"></textarea></label><p class="muted">Each model gets its own worktree and the same task.</p><div class="row"><button id="fanout" type="button">Start model comparison</button></div></details>
+   <details id="compare-models"><summary>Compare models</summary><label>Models, one per line<textarea id="models" placeholder="claude-sonnet-4-5&#10;gpt-6.1-sol"></textarea></label><p class="muted">Each model gets its own worktree and the same task.</p><div class="row"><button id="fanout" type="button">Start model comparison</button></div></details>
   </form></section>
+  <section id="handoffs-pane" hidden><p class="muted">Prepared copies stay on this host until you discard them. Starting a run keeps the original personal task unchanged.</p><div id="handoffs-list"></div><button id="refresh-handoffs" type="button">Refresh handoffs</button></section>
   <section id="spec-pane" hidden><form id="spec-form" style="display:grid;gap:12px"><div class="fields"><label>Specification<select id="spec"><option value="">New specification</option></select></label><label>Title<input id="spec-title" required></label><label>Project folder<input id="spec-project" required></label></div><p id="spec-target" class="muted"></p><label>Acceptance criteria and constraints<textarea id="spec-content" required rows="10"></textarea></label><div class="row"><button>Save specification</button><button id="attach-spec" type="button">Attach to selected task</button></div><p class="muted">Each turn pins its specification revision. A changed specification applies when you send the next message. Running work keeps its pinned revision visible.</p></form></section>
   <section id="access-pane" hidden style="display:grid;gap:12px"><form id="grant-form" style="display:grid;gap:10px"><p id="grant-target" class="muted"></p><div class="fields"><label>Access<select id="grant-scope"><option value="owner">Owner: task controls</option><option value="guest">Guest: selected task only</option></select></label><label>Expires after this many minutes<input id="grant-minutes" type="number" min="1" required></label></div><div class="row"><button>Create access token</button></div></form><pre id="issued-token" hidden></pre><div id="grants"></div><details><summary>Connect over SSH</summary><div style="display:grid;gap:10px"><label>SSH host or alias<input id="ssh-host" placeholder="me@devbox"></label><label>Local forwarding port<input id="ssh-local" type="number" min="1024" max="65535" placeholder="45001"></label><label>Host task port<input id="ssh-remote" type="number" min="1024" max="65535" placeholder="45000"></label><div class="row"><button id="ssh-command" type="button">Prepare tunnel command</button></div><pre id="ssh-output"></pre><p class="muted">Run the command in your terminal. Keep the host awake. Open the forwarded page and pair with an expiring owner token. For phones, publish the task port through your own HTTPS proxy or Tailscale Serve. The ordinary Bruhs API remains local.</p></div></details></section>
  </div>
@@ -147,7 +149,7 @@ const ICON={
  merged:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="8.5" r="1.6"/><path d="M4.5 5.1v5.8M4.5 5.5c0 2 2.5 3 5.4 3"/></svg>',
  comment:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
  child:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="2" width="5" height="4" rx="1"/><rect x="9" y="10" width="5" height="4" rx="1"/><path d="M4.5 6v4a2 2 0 0 0 2 2H9"/></svg>',
- check:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>',
+ review:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="1.8" width="10" height="12.4" rx="1.2"/><path d="M5.2 5h5.6M5.2 8h5.6M5.2 11h3.6"/></svg>',
  dot:'<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.5" fill="currentColor"/></svg>'};
 let snapshot={tasks:[],specs:[],guest_proposals:[],wake_subscriptions:[],wakes:[]},board={cards:[],refreshing:false,link_error:null},selected=null,drawerMode=null,opener=null,busy=false,readRevision=0,boardRevision=0,pairRevision=0,events=null,token=local?'':sessionStorage.getItem('bruhs-task-token')||'',specDirty=false,renderedTask=null,wakeReview=null,boardTimer=null,archiveOpen=false,connected=false,guestOpened=false;
 const drafts=new Map(),seenStates=new Map();let notify=sessionStorage.getItem('bruhs-task-notifications')==='1';
@@ -199,14 +201,14 @@ function worktreeSection(task){
  box.append(row);return box}
 function setBoard(next){board=next;scheduleBoard()}
 function scheduleBoard(){clearTimeout(boardTimer);boardTimer=null;if(board.refreshing)boardTimer=setTimeout(refreshBoard,2000)}
-async function refreshBoard(){if((!local&&!token)||busy)return;const rev=++boardRevision;try{const next=await request('/board');if(rev!==boardRevision)return;setBoard(next);renderBoard();renderHeader()}catch(e){if(rev===boardRevision)$('link-error').textContent='The board could not refresh: '+(e.message||e)}}
-async function refresh(){if((!local&&!token)||busy)return;const rev=++readRevision,brev=++boardRevision;try{const [next,nextBoard]=await Promise.all([request(local?'':'/tasks'),request('/board').catch(e=>({failed:e}))]);if(rev!==readRevision)return;if(brev===boardRevision){if(nextBoard.failed)$('link-error').textContent='The board could not refresh: '+(nextBoard.failed.message||nextBoard.failed);else setBoard(nextBoard)}showSnapshot(next)}catch(e){if(rev!==readRevision)return;fail(e);$('status').textContent='Could not refresh. Your previous results are retained.'}}
+async function refreshBoard(){await refresh()}
+async function refresh(){if((!local&&!token)||busy)return false;const rev=++readRevision,brev=++boardRevision;try{const [next,nextBoard]=await Promise.all([request(local?'':'/tasks'),request('/board').catch(e=>({failed:e}))]);if(rev!==readRevision)return;if(brev===boardRevision){if(nextBoard.failed)$('link-error').textContent='The board could not refresh: '+(nextBoard.failed.message||nextBoard.failed);else setBoard(nextBoard)}showSnapshot(next);return true}catch(e){if(rev!==readRevision)return false;fail(e);$('status').textContent='Could not refresh. Your previous results are retained.';return false}}
 async function command(body){if(busy)return;busy=true;++readRevision;++boardRevision;render();try{snapshot=await request('/commands',body);$('error').textContent=''}catch(e){fail(e)}finally{busy=false;render();await refresh()}}
-function button(label,action,disabled=false,cls){const b=element('button',label,cls);b.type='button';b.disabled=busy||disabled;b.onclick=()=>Promise.resolve(action()).catch(fail);return b}
+function button(label,action,disabled=false,cls){const b=element('button',label,cls);b.type='button';b.disabled=busy||disabled;b.onclick=()=>Promise.resolve().then(action).catch(fail);return b}
 function field(label,id,type='textarea',value=''){const l=element('label',label),input=document.createElement(type);input.id=id;input.value=value;l.append(input);return l}
 
 /* Drawer */
-const PANES={task:'detail-pane',create:'create-pane',specs:'spec-pane',access:'access-pane'},PANE_TITLE={create:'New task',specs:'Specifications',access:'Phone and guest access'};
+const PANES={task:'detail-pane',create:'create-pane',specs:'spec-pane',access:'access-pane',handoffs:'handoffs-pane'},PANE_TITLE={create:'New task',specs:'Specifications',access:'Phone and guest access',handoffs:'Task handoffs'};
 const STATE_LABEL={ready:'Queued',running:'Working',waiting_approval:'Needs approval',waiting_child:'Waiting on delegate',completed:'Done',failed:'Failed',cancelled:'Stopped',interrupted:'Interrupted',limited:'Usage limit'};
 function openDrawer(mode,from,focus=true){const wasOpen=!$('drawer').hidden;drawerMode=mode;if(from)opener=from;for(const [m,id]of Object.entries(PANES))$(id).hidden=m!==mode;if(PANE_TITLE[mode])$('drawer-title').textContent=PANE_TITLE[mode];$('drawer').hidden=false;if(!wasOpen&&!matchMedia('(prefers-reduced-motion: reduce)').matches){$('drawer').classList.add('entering');requestAnimationFrame(()=>requestAnimationFrame(()=>$('drawer').classList.remove('entering')))}render();if(focus)$('drawer-title').focus({preventScroll:true})}
 function closeDrawer(restore=true){if($('drawer').hidden)return;saveDrafts();const mode=drawerMode;drawerMode=null;$('drawer').hidden=true;const from=opener;opener=null;renderBoard();
@@ -214,7 +216,7 @@ function closeDrawer(restore=true){if($('drawer').hidden)return;saveDrafts();con
  const cardId=from?.dataset?.card||selected,back=from&&document.contains(from)?from:cardId&&document.querySelector('[data-card="'+CSS.escape(cardId)+'"]');selected=null;if(restore&&back)back.focus({preventScroll:false})}
 function openTask(id,from,focus=true){selected=id;openDrawer('task',from,focus)}
 $('drawer-close').onclick=()=>closeDrawer();
-$('new-task').onclick=e=>{if(projectFilter&&!$('project').value)$('project').value=projectFilter;openDrawer('create',e.currentTarget);$('title').focus()};
+$('new-task').onclick=e=>{if(currentHandoff){clearHandoffView();$('title').value='';$('prompt').value=''}if(projectFilter&&!$('project').value)$('project').value=projectFilter;openDrawer('create',e.currentTarget);$('title').focus()};
 // From the header these panes act on no task; a task's own buttons open them for it.
 $('open-specs').onclick=e=>{selected=null;openDrawer('specs',e.currentTarget)};
 $('open-access').onclick=e=>{selected=null;openDrawer('access',e.currentTarget);grants().catch(fail)};
@@ -234,7 +236,7 @@ function cardNode(c,multiProject){
  const chips=element('div',undefined,'chips');for(const p of c.pulls)chips.append(pullChip(p));
  if(c.relationship!=='root'&&RELATION[c.relationship])chips.append(element('span',RELATION[c.relationship],'chip'));
  if(c.children){const k=element('span',undefined,'chip');k.append(icon('child'),element('span',c.children+(c.children===1?' child':' children')+(c.active_children?', '+c.active_children+' running':'')));chips.append(k)}
- if(c.verifications){const k=element('span',undefined,'chip');k.append(icon('check'),element('span',c.verifications+(c.verifications===1?' verification':' verifications')));chips.append(k)}
+ if(c.verifications){const k=element('span',undefined,'chip');k.append(icon('review'),element('span',c.verifications+(c.verifications===1?' agent review':' agent reviews')));chips.append(k)}
  if(multiProject){const k=element('span',base(c.project_path),'chip');k.title=c.project_path;chips.append(k)}
  if(chips.childElementCount)body.append(chips);
  const foot=element('div',undefined,'card-foot'),status=element('span',undefined,'status tone-'+c.status.tone);status.id='st-'+c.id;
@@ -270,12 +272,77 @@ function renderHeader(){
  const live=board.cards.filter(c=>!c.archived),working=live.filter(c=>c.status.busy).length,needs=live.filter(c=>c.status.tone==='action').length,ready=live.filter(c=>c.lane==='ready').length,parts=[];
  if(working)parts.push(working+' working');if(needs)parts.push(needs+(needs===1?' needs you':' need you'));if(ready)parts.push(ready+' ready to merge');$('summary').textContent=connected?(parts.join(', ')||(live.length?'All quiet':'')):'';
  const linkError=board.link_error?'Pull request lookup failed. Cards show what was read last. '+board.link_error:'';$('link-error').textContent=linkError.split('\n')[0];$('link-error').title=linkError;
- const own=owner()&&connected;$('new-task').hidden=!own;$('open-specs').hidden=!own;$('open-access').hidden=!local||!connected;
+ const own=owner()&&connected;$('new-task').hidden=!own;$('open-handoffs').hidden=!local||!own;$('open-specs').hidden=!own;$('open-access').hidden=!local||!connected;
 }
 $('project-filter').onchange=()=>{projectFilter=$('project-filter').value;try{projectFilter?localStorage.setItem('bruhs-board-project',projectFilter):localStorage.removeItem('bruhs-board-project')}catch{}renderBoard();renderHeader()};
 
+async function listHandoffs(){
+ const handoffs=await request('/handoffs'),list=$('handoffs-list');list.replaceChildren();
+ if(!handoffs.length)list.append(element('p','No retained task handoffs.','muted'));
+ for(const h of handoffs){
+  const row=element('section',undefined,'section');row.dataset.handoff=h.id;
+  row.append(element('h3',h.title),element('p',(h.task_id?'Started':'Prepared')+' · '+ago(h.created_at),'muted'));
+  const actions=element('div',undefined,'row');
+  actions.append(button(h.task_id?'Open run':'Review',async()=>{history.replaceState(null,'',location.pathname+location.search+'#handoff='+encodeURIComponent(h.id));handoffLoaded=false;await loadHandoff()}));
+  actions.append(button(h.task_id?'Forget source copy':'Discard',async()=>{await request('/handoffs/'+encodeURIComponent(h.id),undefined,'DELETE');if(currentHandoff?.id===h.id)clearHandoffView();await listHandoffs()}));
+  if(h.task_id)row.append(element('p','Forgetting this copy keeps its run and transcript. The old Start link will stop working.','faint'));
+  row.append(actions);list.append(row);
+ }
+}
+$('open-handoffs').onclick=()=>{openDrawer('handoffs',null);listHandoffs().catch(fail)};
+$('refresh-handoffs').onclick=()=>listHandoffs().catch(fail);
+
+/* Personal-task handoff: loading and reviewing never starts a provider. */
+let currentHandoff=null,handoffLoaded=false;
+function handoffId(){return local?new URLSearchParams(location.hash.slice(1)).get('handoff'):null}
+function clearHandoffView(){currentHandoff=null;handoffLoaded=false;$('handoff-summary').hidden=true;$('forget-handoff').hidden=true;$('handoff-status').hidden=true;$('compare-models').hidden=false;history.replaceState(null,'',location.pathname+location.search)}
+async function loadHandoff(keepDraft=false){
+ const id=handoffId();if(!id)return;
+ try{
+  const review=await request('/handoffs/'+encodeURIComponent(id)),h=review.handoff;
+  if(h.started){
+   await refresh();
+   if(!snapshot.tasks.some(t=>t.id===h.started.task_id))throw new Error('This handoff already started, but its task is no longer available. No work was replayed.');
+   currentHandoff=h;$('error').textContent='';openTask(h.started.task_id,null);return;
+  }
+  currentHandoff=h;
+  $('handoff-summary').textContent='From personal task: '+h.request.item.title+'. Review the copied context, project, model and access before starting. Only this task is copied; the original stays unchanged.';
+  $('handoff-summary').hidden=false;$('forget-handoff').hidden=false;$('handoff-status').hidden=false;$('compare-models').hidden=true;
+  const firstReview=!keepDraft||!handoffLoaded;
+  if(firstReview){
+   const t=review.task;$('title').value=t.title;$('project').value=t.project_path;$('prompt').value=t.prompt;$('model').value=t.model;$('effort').value=t.effort||'';$('execution-budget').value=t.execution_timeout_seconds||'';$('access').value=t.permission_mode;$('isolation').value='shared';
+   handoffLoaded=true;
+  }
+  openDrawer('create',null,false);$('drawer-title').textContent='Review agent work';
+  if(firstReview)($('project').value?$('prompt'):$('project')).focus({preventScroll:true});
+  $('error').textContent='';
+ }catch(e){fail(e)}
+}
+$('handoff-status').onclick=async()=>{if(busy)return;await refresh();await loadHandoff(true)};
+$('forget-handoff').onclick=async()=>{
+ if(busy||!currentHandoff)return;
+ try{await request('/handoffs/'+encodeURIComponent(currentHandoff.id),undefined,'DELETE');clearHandoffView();closeDrawer();$('title').value='';$('prompt').value='';$('error').textContent='';$('status').textContent='Handoff discarded. The personal task is unchanged.'}catch(e){fail(e)}
+};
+async function startWorkItem(){
+ if(busy||!currentHandoff)return;
+ const id=currentHandoff.id,task=taskRequest();
+ busy=true;++readRevision;++boardRevision;
+ for(const input of $('create').querySelectorAll('input,textarea,select,button'))input.disabled=true;
+ $('forget-handoff').disabled=true;
+ try{
+  snapshot=await request('/handoffs/'+encodeURIComponent(id)+'/start',task);
+  const run=snapshot.tasks.find(t=>!t.parent_id&&t.work_item_origin?.handoff_id===id);
+  if(!run)throw new Error('The saved task was not in the response.');
+  $('error').textContent='';openTask(run.id,null);
+ }catch(e){fail((e.message||e)+' Check start status to inspect the saved run, or retry this handoff. A repeated Start cannot create a second run.')}
+ finally{
+  busy=false;for(const input of $('create').querySelectorAll('input,textarea,select,button'))input.disabled=false;
+  $('forget-handoff').disabled=false;render();await refresh();
+ }
+}
+
 /* Task detail */
-window.addEventListener('message',event=>{const data=event.data;if(window.parent===window||event.source!==window.parent||event.origin!==location.origin||(!local&&!snapshot.can_control)||!data||data.type!=='bruhs:prefill-task'||typeof data.path!=='string'||typeof data.prompt!=='string'||data.path.length>120000||data.prompt.length>120000)return;$('project').value=data.path;$('prompt').value=data.prompt;$('title').value=typeof data.title==='string'?data.title:'New task';openDrawer('create',null,false);$('prompt').focus()});
+window.addEventListener('message',event=>{const data=event.data;if(window.parent===window||event.source!==window.parent||event.origin!==location.origin||(!local&&!snapshot.can_control)||!data||data.type!=='bruhs:prefill-task'||typeof data.path!=='string'||typeof data.prompt!=='string'||data.path.length>120000||data.prompt.length>120000)return;if(currentHandoff)clearHandoffView();$('project').value=data.path;$('prompt').value=data.prompt;$('title').value=typeof data.title==='string'?data.title:'New task';openDrawer('create',null,false);$('prompt').focus()});
 function renderWakes(){
  $('wake-error').hidden=!owner()||!snapshot.wake_error;$('wake-error').textContent=owner()?snapshot.wake_error||'':'';
  const task=current();$('wake-section').hidden=!local||!task;
@@ -294,30 +361,42 @@ async function loadWakeWatches(){
 $('wake-section').ontoggle=()=>{if(local&&$('wake-section').open&&$('wake-watch').options.length===1)loadWakeWatches().catch(fail)};
 $('wake-refresh').onclick=()=>loadWakeWatches().catch(fail);
 $('wake-form').onsubmit=e=>{e.preventDefault();const review=wakeReview,kinds=[...document.querySelectorAll('[name="wake-kind"]:checked')].map(input=>input.value);if(!review||!kinds.length){fail('Select a task, PR watch and at least one event type first.');return}command({action:'save_wake_subscription',task_id:review.id,watch_id:$('wake-watch').value,kinds,expected_model:review.model,expected_permission_mode:review.permission_mode})};
-function saveDrafts(){if(!renderedTask)return;const saved={};for(const id of ['next-message','child-title','child-model','child-prompt','guest-message'])if($(id))saved[id]=$(id).value;if($('child-actions')?.open)saved.childOpen=true;drafts.set(renderedTask,saved)}
+function saveDrafts(){if(!renderedTask)return;const saved={};for(const id of ['next-message','task-effort','task-budget','child-title','child-model','child-effort','child-prompt','guest-message'])if($(id))saved[id]=$(id).value;if($('child-actions')?.open)saved.childOpen=true;drafts.set(renderedTask,saved)}
+function renderVerification(detail,task,card){
+ if(task.relationship==='verify')detail.append(element('p','Agent verification report. Review the findings and cited check results before accepting the work.','muted'));
+ const review=card?.verification;if(!review)return;
+ const box=element('section',undefined,'section');box.setAttribute('aria-label','Agent verification');box.append(element('h3','Agent verification'));
+ const freshness={matches_task:'Matches the saved request and specification. File changes require a new review.',task_changed:'The task has a newer request. Run a new review.',specification_changed:'The specification changed after this review. Run a new review.',specification_unavailable:'The reviewed specification is unavailable. Restore or attach a specification before reviewing again.',workspace_changed:'This review used a different workspace. Run a new review in the task workspace.',context_unavailable:'The saved review context is unavailable. Run a new review.'};
+ box.append(element('p',freshness[review.freshness]||'Review context is unavailable. Run a new review.','muted'));
+ if(review.spec_revision!==null&&review.spec_revision!==undefined)box.append(element('p','Reviewed specification revision '+review.spec_revision+'.','faint'));
+ if(review.state==='completed')box.append(element('p','Review ready means the agent finished its report. Inspect its findings and cited check results before accepting the work.','muted'));
+ const report=snapshot.tasks.find(t=>t.id===review.task_id);if(report)box.append(button('Open verification report',()=>openTask(report.id,null)));detail.append(box);
+}
 function renderDetail(){
  const detail=$('detail'),task=current();const transcriptEl=detail.querySelector('.transcript'),stick=!transcriptEl||transcriptEl.scrollHeight-transcriptEl.scrollTop-transcriptEl.clientHeight<24,keepScroll=transcriptEl?.scrollTop;
  detail.replaceChildren();if(!task){$('drawer-title').textContent='Task not found';return}
- const card=cardOf(task.id);$('drawer-title').textContent=task.title;
+ const cachedCard=cardOf(task.id),card=board.revision===snapshot.revision?cachedCard:null;$('drawer-title').textContent=task.title;
  const facts=element('div',undefined,'facts');
  if(card){const st=element('span',undefined,'status tone-'+card.status.tone);if(card.status.busy)st.append(element('span',undefined,'busy-mark'));st.append(element('span',card.status.label));facts.append(st,element('span',card.archived?'Archived':LANE_LABEL[card.lane]));if(card.branch){const b=element('span',undefined,'chip');b.append(icon('branch'),element('span',card.branch));facts.append(b)}for(const p of card.pulls)facts.append(pullChip(p))}
- else facts.append(element('span',task.state.replaceAll('_',' ')));
- facts.append(element('span',card?.model_label||task.model),element('span','Access: '+task.permission_mode));detail.append(facts);
+ else {const tone=task.state==='failed'?'danger':['interrupted','cancelled','limited'].includes(task.state)?'warning':'neutral';facts.append(element('span',STATE_LABEL[task.state]||task.state.replaceAll('_',' '),'status tone-'+tone))}
+ facts.append(element('span',card?.model_label||task.model),element('span','Access: '+task.permission_mode),element('span','Effort: '+(task.effort||'provider default')),element('span','Run budget: '+(task.execution_timeout_seconds?task.execution_timeout_seconds+' seconds':'unlimited')));detail.append(facts);
  if(task.parent_id){const parent=snapshot.tasks.find(t=>t.id===task.parent_id);const p=element('p',undefined,'muted');p.append(element('span',(RELATION[task.relationship]||'Child')+' of '));if(parent){const b=button(parent.title,()=>openTask(parent.id,null),false,'quiet');b.style.padding='0 4px';p.append(b)}else p.append(element('span',task.parent_id));detail.append(p)}
+ if(task.work_item_origin){const o=task.work_item_origin,source=element('div',undefined,'section');source.append(element('strong','From personal task: '+o.item_title),element('p','Task ID: '+o.item_id,'faint'));if(o.source?.kind==='meeting')source.append(element('p','Source meeting: '+o.source.title+' ('+o.source.meeting_id+')','muted'));if(o.time_block_event_ids.length)source.append(element('p','Planned calendar blocks: '+o.time_block_event_ids.join(', '),'faint'));detail.append(source)}
  if(task.working_path)detail.append(element('p',task.working_path,'faint'));
  if(task.spec_id){const s=snapshot.specs.find(s=>s.id===task.spec_id);detail.append(element('p','Specification revision '+task.spec_revision+(s&&s.revision!==task.spec_revision?'. New revision '+s.revision+' applies next turn.':''),'muted'))}
+ renderVerification(detail,task,card);
  if(task.error)detail.append(element('p',task.error,'error'));
  if(owner())for(const approval of task.approvals){const block=element('div',undefined,'approval');block.append(element('h3','Approval needed: '+approval.tool),element('pre',JSON.stringify(approval.input,null,2)));const r=element('div',undefined,'row');r.append(button('Allow once',()=>command({action:'approval',id:task.id,request_id:approval.id,allow:true}),false,'primary'),button('Deny',()=>command({action:'approval',id:task.id,request_id:approval.id,allow:false})));block.append(r);detail.append(block)}
  const transcript=element('div',undefined,'transcript');transcript.setAttribute('aria-label','Task transcript');transcript.tabIndex=0;for(const message of task.messages){const row=element('div',undefined,'message');row.append(element('strong',message.role==='user'?'You':'Agent'),element('div',message.text));transcript.append(row)}if(task.live_output){const row=element('div',undefined,'message');row.append(element('strong','Agent'),element('div',task.live_output));transcript.append(row)}detail.append(transcript);
  requestAnimationFrame(()=>{transcript.scrollTop=stick?transcript.scrollHeight:keepScroll||0});
  const children=snapshot.tasks.filter(t=>t.parent_id===task.id).sort((a,b)=>b.created_at-a.created_at);
- if(children.length){const box=element('div',undefined,'section related');box.setAttribute('aria-label','Related tasks');box.append(element('h3','Related tasks'));for(const child of children){const row=element('div',undefined,'related-row'),t=element('button',child.title,'title');t.type='button';t.onclick=()=>openTask(child.id,null);row.append(element('span',RELATION[child.relationship]||'Child','faint'),t,element('span',STATE_LABEL[child.state]||child.state,'muted'),element('span',ago(child.updated_at),'faint'));box.append(row)}detail.append(box)}
+ if(children.length){const box=element('div',undefined,'section related');box.setAttribute('aria-label','Related tasks');box.append(element('h3','Related tasks'));for(const child of children){const row=element('div',undefined,'related-row'),t=element('button',child.title,'title');t.type='button';t.onclick=()=>openTask(child.id,null);row.append(element('span',RELATION[child.relationship]||'Child','faint'),t,element('span',child.relationship==='verify'&&child.state==='completed'?'Review ready':STATE_LABEL[child.state]||child.state,'muted'),element('span',ago(child.updated_at),'faint'));box.append(row)}detail.append(box)}
  if(owner()){
-  const compose=field('Next message','next-message');detail.append(compose);const send=element('div',undefined,'row');send.append(button('Send message',async()=>{await command({action:'send',id:task.id,prompt:$('next-message').value});if(!$('error').textContent&&$('next-message'))$('next-message').value=''},active(task),'primary'));detail.append(send);
+  const effort=effortField('Reasoning effort for the next turn','task-effort',task.effort);effort.querySelector('select').disabled=active(task);detail.append(effort,button('Save effort',()=>command({action:'set_effort',id:task.id,effort:$('task-effort').value||null}),active(task)),element('p','Claude and Codex support effort overrides. Other runtimes use provider default. Changing effort starts no run.','muted'));const budget=field('Run budget in seconds for the next turn (optional)','task-budget','input',task.execution_timeout_seconds||'');budget.querySelector('input').type='number';budget.querySelector('input').min='1';budget.querySelector('input').step='1';budget.querySelector('input').disabled=active(task);detail.append(budget,button('Save run budget',async()=>command({action:'set_execution_budget',id:task.id,seconds:executionBudget('task-budget')}),active(task)),element('p','A budget stops the current run and its active child tasks, preserving their files and partial output. Leave blank for unlimited duration. Saving a budget starts no run. Child tasks inherit the setting.','muted'));const compose=field('Next message','next-message');detail.append(compose);const send=element('div',undefined,'row');send.append(button('Send message',async()=>{await command({action:'send',id:task.id,prompt:$('next-message').value});if(!$('error').textContent&&$('next-message'))$('next-message').value=''},active(task),'primary'));detail.append(send);
   const actions=element('div',undefined,'row section');actions.append(button('Stop task and children',()=>command({action:'cancel',id:task.id}),!active(task)&&!descendantActive(task.id)),button('Bring back answer',()=>command({action:'bring_back',id:task.id}),active(task)||!task.parent_id),task.archived_at?button('Restore to board',()=>command({action:'unarchive',id:task.id})):button('Archive',()=>command({action:'archive',id:task.id}),active(task)),button('Delete task record',()=>command({action:'delete',id:task.id}),active(task)));detail.append(actions);
-  const more=element('div',undefined,'row');more.append(button('Attach specification',()=>openDrawer('specs',null)));if(local)more.append(button('Share with a guest',()=>{openDrawer('access',null);$('grant-scope').value='guest';grants().catch(fail)}));detail.append(more);
+  const more=element('div',undefined,'row');more.append(button('Attach specification',()=>openDrawer('specs',null)));if(local){const delivery=button('Review delivery',()=>{if(parent===window)location.href='/api/workbench/ui#delivery='+encodeURIComponent(task.id);else parent.postMessage({type:'bruhs:review-task-delivery',task_id:task.id},location.origin)},active(task));delivery.id='review-delivery';more.append(delivery);more.append(button('Share with a guest',()=>{openDrawer('access',null);$('grant-scope').value='guest';grants().catch(fail)}))}detail.append(more);
   const recovery=element('div',undefined,'row');recovery.append(button('Resume at reported reset',()=>command({action:'schedule_reset',id:task.id}),active(task)),button(task.auto_resume_on_limit?'Automatic quota recovery: On':'Automatic quota recovery: Off',()=>command({action:'auto_resume',id:task.id,enabled:!task.auto_resume_on_limit})));if(task.resume_at)recovery.append(element('span','Resume scheduled: '+new Date(task.resume_at).toLocaleString()),button('Cancel scheduled resume',()=>command({action:'cancel_resume',id:task.id})));detail.append(recovery);
-  const split=document.createElement('details');split.id='child-actions';split.className='section';split.append(element('summary','Delegate, explore, or verify'));split.append(field('Title','child-title','input',task.title),field('Model','child-model','input',task.model),field('Task or question','child-prompt'));const childActions=element('div',undefined,'row');for(const [label,relationship]of[['Delegate','delegate'],['Fork','fork'],['Side chat','side_chat'],['Verify against specification','verify']])childActions.append(button(label,()=>command({action:'fork',id:task.id,title:$('child-title').value,model:$('child-model').value,prompt:$('child-prompt').value||(relationship==='verify'?'Verify the current implementation against the shared specification and cite evidence.':''),relationship,isolation:relationship==='delegate'?{kind:'worktree',base_branch:$('base').value}:{kind:'shared'}})));split.append(childActions,element('p','Delegates get their own worktree and card. Verification moves this card to Validating.','muted'));detail.append(split);
+  const split=document.createElement('details');split.id='child-actions';split.className='section';split.append(element('summary','Delegate, explore, or verify'));split.append(field('Title','child-title','input',task.title),field('Model','child-model','input',task.model),effortField('Reasoning effort','child-effort',task.effort),field('Task or question','child-prompt'));const childActions=element('div',undefined,'row');for(const [label,relationship]of[['Delegate','delegate'],['Fork','fork'],['Side chat','side_chat'],['Verify against specification','verify']])childActions.append(button(label,()=>command({action:'fork',id:task.id,title:$('child-title').value,model:$('child-model').value,effort:$('child-effort').value||null,prompt:$('child-prompt').value||(relationship==='verify'?'Verify the current implementation against the shared specification and cite evidence.':''),relationship,isolation:relationship==='delegate'?{kind:'worktree',base_branch:$('base').value}:{kind:'shared'}})));split.append(childActions,element('p','Delegates get their own worktree and card. Verification starts a read-only agent review in Validating. Review its report and cited check results before accepting the work.','muted'));detail.append(split);
   for(const proposal of snapshot.guest_proposals.filter(p=>p.task_id===task.id)){const p=element('div',undefined,'section');p.append(element('h3','Guest message awaiting your review'),element('p',proposal.text));const r=element('div',undefined,'row');r.append(button('Send to agent',()=>command({action:'guest_proposal',id:proposal.id,accept:true})),button('Dismiss',()=>command({action:'guest_proposal',id:proposal.id,accept:false})));p.append(r);detail.append(p)}
   if(task.working_path&&task.working_path!==task.project_path)detail.append(worktreeSection(task));
  }else{detail.append(field('Message for the owner to review','guest-message'));const r=element('div',undefined,'row');r.append(button('Propose message',async()=>{await request('/proposals',{text:$('guest-message').value});$('status').textContent='Message sent to the owner for review.'}));detail.append(r)}
@@ -334,9 +413,11 @@ function render(){
  if(focused&&$(focused)&&$(focused)!==document.activeElement){try{$(focused).focus({preventScroll:true});if(typeof selectionStart==='number')$(focused).setSelectionRange(selectionStart,selectionEnd)}catch{}}
 }
 setInterval(()=>{if(!document.hidden&&connected){if(!board.refreshing)refreshBoard();else renderBoard()}},60000);
-function taskRequest(){return{title:$('title').value,project_path:$('project').value,prompt:$('prompt').value,model:$('model').value,permission_mode:$('access').value,isolation:$('isolation').value==='worktree'?{kind:'worktree',base_branch:$('base').value}:{kind:'shared'},spec_id:null}}
+function effortField(label,id,value){const wrap=element('label',label),select=document.createElement('select');select.id=id;for(const level of ['', 'low','medium','high','xhigh','max']){const option=element('option',level||'Provider default');option.value=level;select.append(option)}select.value=value||'';wrap.append(select);return wrap}
+function executionBudget(id){const raw=$(id).value.trim();if(!raw)return null;const seconds=Number(raw);if(!Number.isSafeInteger(seconds)||seconds<=0)throw new Error('Choose a positive whole-number run budget or leave it blank.');return seconds;}
+function taskRequest(){return{title:$('title').value,project_path:$('project').value,prompt:$('prompt').value,model:$('model').value,effort:$('effort').value||null,execution_timeout_seconds:executionBudget('execution-budget'),permission_mode:$('access').value,isolation:$('isolation').value==='worktree'?{kind:'worktree',base_branch:$('base').value}:{kind:'shared'},spec_id:null}}
 async function startFromForm(body){const before=new Set(snapshot.tasks.map(t=>t.id));await command(body);if($('error').textContent)return;const created=snapshot.tasks.filter(t=>!before.has(t.id));for(const id of ['title','prompt','models'])$(id).value='';if(created.length===1)openTask(created[0].id,null);else closeDrawer()}
-$('create').onsubmit=e=>{e.preventDefault();startFromForm({action:'create',task:taskRequest()})};$('fanout').onclick=()=>{const task=taskRequest();task.isolation={kind:'worktree',base_branch:$('base').value};startFromForm({action:'fanout',task,models:$('models').value.split('\n').map(s=>s.trim()).filter(Boolean)})};
+$('create').onsubmit=e=>{e.preventDefault();Promise.resolve().then(()=>currentHandoff?startWorkItem():startFromForm({action:'create',task:taskRequest()})).catch(fail)};$('fanout').onclick=()=>Promise.resolve().then(()=>{if(currentHandoff){fail('Finish this handoff before starting a separate model comparison.');return}const task=taskRequest();task.isolation={kind:'worktree',base_branch:$('base').value};startFromForm({action:'fanout',task,models:$('models').value.split('\n').map(s=>s.trim()).filter(Boolean)})}).catch(fail);
 $('spec').onchange=()=>{const s=snapshot.specs.find(s=>s.id===$('spec').value);$('spec-title').value=s?.title||'';$('spec-project').value=s?.project_path||$('project').value;$('spec-content').value=s?.content||'';specDirty=false};for(const id of ['spec-title','spec-project','spec-content'])$(id).oninput=()=>specDirty=true;
 $('spec-form').onsubmit=async e=>{e.preventDefault();const s=snapshot.specs.find(s=>s.id===$('spec').value);await command({action:'save_spec',id:s?.id||null,project_path:$('spec-project').value,title:$('spec-title').value,content:$('spec-content').value,expected_revision:s?.revision||0});specDirty=false;render()};$('attach-spec').onclick=()=>{if(!selected||!$('spec').value){fail('Open a task and select a saved specification first.');return}command({action:'attach_spec',id:selected,spec_id:$('spec').value})};
 async function grants(){const data=await request('/access');const box=$('grants');box.replaceChildren();for(const grant of data){const row=element('div',undefined,'row section');row.append(element('span',grant.scope.kind+' access expires '+new Date(grant.expires_at).toLocaleString(),'grow'),button('Revoke',async()=>{await request('/access/'+encodeURIComponent(grant.id),undefined,'DELETE');await grants()}));box.append(row)}}
@@ -371,9 +452,9 @@ async function listen(){
   if(!connection.signal.aborted)$('status').textContent='Live updates disconnected. Refresh or reconnect.';
  }catch(e){if(!connection.signal.aborted&&e.name!=='AbortError')fail(e)}finally{reader?.releaseLock()}
 }
-$('refresh').onclick=refresh;$('pair').onsubmit=async e=>{e.preventDefault();token=$('token').value;const attempt=++pairRevision,rev=++readRevision;events?.abort();try{const next=await request('/tasks');if(attempt!==pairRevision)return;sessionStorage.setItem('bruhs-task-token',token);$('token').value='';$('error').textContent='';if(rev===readRevision)showSnapshot(next);listen();refreshBoard()}catch(e){if(attempt!==pairRevision)return;token='';fail(e)}};
+$('refresh').onclick=async()=>{if(await refresh()){$('error').textContent='';listen();await loadHandoff(true)}};$('pair').onsubmit=async e=>{e.preventDefault();token=$('token').value;const attempt=++pairRevision,rev=++readRevision;events?.abort();try{const next=await request('/tasks');if(attempt!==pairRevision)return;sessionStorage.setItem('bruhs-task-token',token);$('token').value='';$('error').textContent='';if(rev===readRevision)showSnapshot(next);listen();refreshBoard()}catch(e){if(attempt!==pairRevision)return;token='';fail(e)}};
 $('disconnect').onclick=()=>{++pairRevision;++readRevision;++boardRevision;events?.abort();sessionStorage.removeItem('bruhs-task-token');token='';connected=false;snapshot={tasks:[],specs:[],guest_proposals:[]};board={cards:[],refreshing:false};closeDrawer(false);render();$('pair').hidden=false;$('disconnect').hidden=true;$('status').textContent='Disconnected'};
 $('notify').hidden=!('Notification'in window);$('notify').onclick=async()=>{try{const permission=await Notification.requestPermission();notify=permission==='granted';sessionStorage.setItem('bruhs-task-notifications',notify?'1':'0');$('notify').textContent=notify?'Notifications enabled':'Enable notifications';$('status').textContent=notify?'Task attention notifications are enabled.':'Notifications are unavailable or were not allowed.'}catch(e){fail(e)}};
-$('pair').hidden=local||Boolean(token);if(local||token){refresh().then(()=>listen())}else render();
+$('pair').hidden=local||Boolean(token);if(local||token){refresh().then(async()=>{listen();await loadHandoff();const id=local?new URLSearchParams(location.hash.slice(1)).get('task'):null;if(id){if(snapshot.tasks.some(task=>task.id===id))openTask(id,null);else fail('The source task is no longer available. Retained delivery receipts keep their copied source details.')}})}else render();
 })();
 </script></body></html>

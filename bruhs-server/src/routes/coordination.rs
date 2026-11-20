@@ -96,6 +96,56 @@ pub async fn command(
     Ok(Json(checked_command(&runtime(value)?, command).await?))
 }
 
+pub async fn prepare_work_item(
+    value: Option<Extension<CoordinationRuntime>>,
+    Json(request): Json<bruhs_models::workbench_handoff::WorkItemHandoffRequest>,
+) -> Result<Json<bruhs_models::workbench_handoff::WorkItemHandoff>, AppError> {
+    Ok(Json(runtime(value)?.prepare_work_item(request).await?))
+}
+
+pub async fn work_item_handoffs(
+    value: Option<Extension<CoordinationRuntime>>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(runtime(value)?.work_item_handoffs().await),
+    ))
+}
+
+pub async fn work_item_handoff(
+    value: Option<Extension<CoordinationRuntime>>,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+) -> Result<impl IntoResponse, AppError> {
+    let handoff = runtime(value)?.work_item_handoff(&id).await?;
+    let task = bruhs_models::workbench_handoff::work_item_draft(&handoff.request)
+        .map_err(|error| AppError::BadRequest(error.into()))?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({"handoff":handoff,"task":task})),
+    ))
+}
+
+pub async fn start_work_item(
+    value: Option<Extension<CoordinationRuntime>>,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+    Json(request): Json<bruhs_models::coordination::NewTask>,
+) -> Result<Json<CoordinationSnapshot>, AppError> {
+    let runtime = runtime(value)?;
+    if runtime.work_item_handoff(&id).await?.started.is_none() {
+        HomePath::resolve(&request.project_path).await?;
+    }
+    runtime.start_work_item(&id, request).await?;
+    Ok(Json(runtime.snapshot().await))
+}
+
+pub async fn forget_work_item_handoff(
+    value: Option<Extension<CoordinationRuntime>>,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+) -> Result<StatusCode, AppError> {
+    runtime(value)?.forget_work_item_handoff(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct ChildWait {
     parent_id: bruhs_models::ids::ThreadId,

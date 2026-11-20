@@ -2,10 +2,10 @@ use crate::error::AppError;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::{
+    Json,
     body::Bytes,
     extract::{Extension, Path, Query},
     http::HeaderMap,
-    Json,
 };
 use bruhs_core::local_tools::{LocalToolsHost, ToolError};
 use bruhs_models::local_tools::*;
@@ -153,10 +153,26 @@ async fn video_message(socket: &mut WebSocket) -> Option<Result<Message, axum::E
     }
 }
 
+pub async fn dictionary(
+    Json(req): Json<bruhs_models::voice_dictionary::DictionaryRequest>,
+) -> Result<Json<bruhs_models::voice_dictionary::HostDictionaries>, AppError> {
+    bruhs_core::voice_dictionary::execute(req)
+        .await
+        .map(Json)
+        .map_err(|e| match e {
+            bruhs_core::voice_dictionary::Error::Invalid(message) => AppError::BadRequest(message),
+            other => AppError::internal(other),
+        })
+}
+#[derive(Deserialize)]
+pub struct DictationScope {
+    project: Option<String>,
+}
 pub async fn dictation(
     Extension(host): Extension<Arc<LocalToolsHost>>,
     Extension(daemon): Extension<Arc<bruhs_core::capture_client::DaemonEndpoint>>,
     Query(options): Query<DictationOptions>,
+    Query(scope): Query<DictationScope>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<DictationTranscript>, AppError> {
@@ -170,7 +186,17 @@ pub async fn dictation(
     tokio::select! {
         biased;
         _ = revoked.changed() => Err(AppError::Forbidden("Dictation access was revoked.".into())),
-        result = bruhs_core::capture_client::transcribe_dictation(&daemon, &options, body.to_vec()) => result.map(Json).map_err(|error| AppError::bad_gateway("Local dictation failed", error)),
+        result=async {
+            let request=bruhs_models::voice_dictionary::DictionaryRequest{project:scope.project,edit:None};
+            let spellings=match bruhs_core::voice_dictionary::execute(request).await {
+                Ok(dictionaries)=>Some(dictionaries),
+                Err(bruhs_core::voice_dictionary::Error::Invalid(message))=>return Err(AppError::BadRequest(message)),
+                Err(error)=>{ tracing::warn!(%error, "Skipping unavailable voice dictionaries"); None }
+            };
+            let mut reply=bruhs_core::capture_client::transcribe_dictation(&daemon,&options,body.to_vec()).await.map_err(|e|AppError::bad_gateway("Local dictation failed",e))?;
+            if let Some(dictionaries)=spellings {reply.text=dictionaries.environment.apply(Some(&dictionaries.project),&reply.text);}
+            Ok(Json(reply))
+        }=>result,
     }
 }
 

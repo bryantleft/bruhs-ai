@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     response::Html,
     routing::{delete, get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use bruhs_core::delivery::{DeliveryError, DeliveryService};
 use bruhs_models::delivery::*;
@@ -16,9 +16,17 @@ pub fn router(service: DeliveryService) -> Router {
         .route("/api/delivery/ui", get(ui))
         .route("/api/delivery", get(snapshot))
         .route("/api/delivery/read", post(read))
+        .route("/api/delivery/preferences/read", post(preferences))
+        .route("/api/delivery/preferences", post(set_preference))
+        .route("/api/delivery/pull-template", post(pull_template))
+        .route("/api/delivery/review-guide", post(review_guide))
+        .route("/api/delivery/write-draft", post(write_draft))
         .route("/api/delivery/trackers/read", post(tracker_settings))
         .route("/api/delivery/trackers", post(configure_tracker))
         .route("/api/delivery/prepare", post(prepare))
+        .route("/api/delivery/tasks/{id}", get(task_context))
+        .route("/api/delivery/tasks/{id}/prepare", post(prepare_task))
+        .route("/api/delivery/task-source/forget", post(forget_task_source))
         .route("/api/delivery/execute", post(execute))
         .route(
             "/api/delivery/execute-native-stack",
@@ -53,6 +61,60 @@ async fn snapshot(State(service): State<DeliveryService>) -> Json<DeliverySnapsh
     Json(service.snapshot().await)
 }
 
+async fn preference_path(path: Option<&str>) -> Result<Option<HomePath>, AppError> {
+    match path {
+        Some(path) => Ok(Some(HomePath::resolve(path).await?)),
+        None => Ok(None),
+    }
+}
+
+async fn preferences(
+    State(service): State<DeliveryService>,
+    Json(scope): Json<DeliveryPreferenceScope>,
+) -> Result<Json<DeliveryPreferences>, AppError> {
+    let path = preference_path(scope.path.as_deref()).await?;
+    Ok(Json(
+        service
+            .preferences(path.as_ref().map(HomePath::as_path))
+            .await,
+    ))
+}
+
+async fn set_preference(
+    State(service): State<DeliveryService>,
+    Json(request): Json<SetDeliveryPreference>,
+) -> Result<Json<DeliveryPreferences>, AppError> {
+    let path = preference_path(request.path.as_deref()).await?;
+    service
+        .set_preference(path.as_ref().map(HomePath::as_path), request.change)
+        .await
+        .map(Json)
+        .map_err(map_error)
+}
+
+async fn write_draft(State(service): State<DeliveryService>, Json(request): Json<WriterDraftRequest>) -> Result<Json<WriterText>, AppError> {
+    let path = HomePath::resolve(&request.path).await?;
+    service.write_draft(path.as_path(), request.draft).await.map(Json).map_err(map_error)
+}
+
+async fn review_guide(State(service): State<DeliveryService>, Json(request): Json<ReviewGuideRequest>) -> Result<Json<serde_json::Value>, AppError> {
+    let path = HomePath::resolve(&request.path).await?;
+    let guide = service.review_guide(path.as_path(), &request).await.map_err(map_error)?;
+    Ok(Json(serde_json::json!({"guide": guide})))
+}
+
+async fn pull_template(
+    State(service): State<DeliveryService>,
+    Json(scope): Json<DeliveryPreferenceScope>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let path = HomePath::required(scope.path.as_deref()).await?;
+    let body = service
+        .pull_template(path.as_path())
+        .await
+        .map_err(map_error)?;
+    Ok(Json(serde_json::json!({"body":body})))
+}
+
 async fn read(
     State(service): State<DeliveryService>,
     Json(request): Json<ReadRequest>,
@@ -68,6 +130,7 @@ async fn read(
             ReadResult::Pulls { pulls, stacks }
         }
         DeliveryQuery::Pull { number } => ReadResult::Pull {
+            review_guides_enabled: service.preferences(Some(path.as_path())).await.review_guides_enabled,
             pull: Box::new(
                 service
                     .pull_for(path.as_path(), number, request.forge)
@@ -161,6 +224,60 @@ async fn prepare(
         .to_string_lossy()
         .into_owned();
     service.prepare(request).await.map(Json).map_err(map_error)
+}
+
+async fn source_task(
+    runtime: Option<Extension<bruhs_core::coordination::CoordinationRuntime>>,
+    id: &bruhs_models::ids::ThreadId,
+) -> Result<bruhs_models::coordination::CoordinatedTask, AppError> {
+    let Some(Extension(runtime)) = runtime else {
+        return Err(AppError::Unavailable(
+            "Task workspaces are unavailable. Restart the companion server.".into(),
+        ));
+    };
+    let mut task = runtime.task(id).await?;
+    task.working_path = HomePath::resolve(&task.working_path)
+        .await?
+        .into_path_buf()
+        .to_string_lossy()
+        .into_owned();
+    Ok(task)
+}
+
+async fn task_context(
+    State(service): State<DeliveryService>,
+    runtime: Option<Extension<bruhs_core::coordination::CoordinationRuntime>>,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+) -> Result<Json<TaskDeliveryContext>, AppError> {
+    service
+        .task_context(&source_task(runtime, &id).await?)
+        .await
+        .map(Json)
+        .map_err(map_error)
+}
+
+async fn prepare_task(
+    State(service): State<DeliveryService>,
+    runtime: Option<Extension<bruhs_core::coordination::CoordinationRuntime>>,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+    Json(request): Json<TaskPrepareRequest>,
+) -> Result<Json<PreparedAction>, AppError> {
+    service
+        .prepare_task(&source_task(runtime, &id).await?, request)
+        .await
+        .map(Json)
+        .map_err(map_error)
+}
+
+async fn forget_task_source(
+    State(service): State<DeliveryService>,
+    Json(request): Json<ActionId>,
+) -> Result<Json<ActionReceipt>, AppError> {
+    service
+        .forget_task_source(&request.id)
+        .await
+        .map(Json)
+        .map_err(map_error)
 }
 
 async fn execute(
