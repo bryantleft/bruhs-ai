@@ -1163,6 +1163,21 @@ mod tests {
             ),
             Gate::Allow
         );
+        // Final review A1 I1: at Full with Can deliver but not Send as me, a
+        // comment sent over GraphQL never skips the card its REST form gets.
+        let graphql_comment = json!({"app": "github", "method": "POST", "path": "/graphql", "body": {
+            "query": "mutation{addComment(input:{subjectId:\"I_1\",body:\"fixed\"}){clientMutationId}}"
+        }});
+        let rest_comment = json!({"app": "github", "method": "POST", "path": "/repos/o/r/issues/1/comments", "body": {"body": "fixed"}});
+        let deliverer = at(AccessLevel::Full, false, true);
+        assert_eq!(
+            app_gate(&deliverer, claude, &rest_comment, &found("github")),
+            Gate::Approve
+        );
+        assert_eq!(
+            app_gate(&deliverer, claude, &graphql_comment, &found("github")),
+            Gate::Deny(crate::apps::APP_GITHUB_GRAPHQL_WRITES)
+        );
         let patch = json!({"app": "notion", "method": "PATCH", "path": "/v1/pages/p", "body": {}});
         assert_eq!(
             app_gate(
@@ -1244,7 +1259,7 @@ mod tests {
                 json!({"app": "github", "method": "POST", "path": "/graphql",
                 "body": {"query": "mutation{mergePullRequest(input:{}){clientMutationId}}"}})
             ),
-            Gate::Deny(DELIVERY_DENIAL)
+            Gate::Deny(crate::apps::APP_GITHUB_GRAPHQL_WRITES)
         );
         // An endpoint the allowlist doesn't name is refused with its copy.
         assert_eq!(

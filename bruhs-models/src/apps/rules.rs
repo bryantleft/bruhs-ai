@@ -6,9 +6,10 @@
 
 use super::{
     AppAction, AppConnector, APP_ACCOUNT_SHAPE, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE,
-    APP_FIELD_REFUSED, APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD, APP_PATH, APP_PATH_ESCAPE,
-    APP_QUERY_METHOD, APP_QUERY_ONLY, APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS,
-    MAX_PATH_BYTES, MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
+    APP_CREDENTIAL_REFUSED, APP_FIELD_REFUSED, APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD,
+    APP_PATH, APP_PATH_ESCAPE, APP_QUERY_METHOD, APP_QUERY_ONLY, APP_QUERY_TOO_LARGE,
+    APP_QUERY_VALUES, MAX_ACCOUNT_CHARS, MAX_PATH_BYTES, MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES,
+    MAX_QUERY_PARAMS,
 };
 use crate::secrets::review_text;
 use serde::{Deserialize, Serialize};
@@ -234,9 +235,11 @@ fn segment_match(pattern: &[u8], text: &[u8]) -> bool {
 /// The one entry point for what a call may do (ruling A). On the call's
 /// normalized path and its method in any case:
 ///
-/// - The connector's GraphQL path takes only a POST with no URL query
-///   (`APP_GRAPHQL_SHAPE` otherwise). A query operation is a read; a
-///   mutation, subscription or anything unreadable is the rule's action.
+/// - The connector's GraphQL path takes only a POST with no URL query and a
+///   body of [`GRAPHQL_BODY_KEYS`] whose document can be read
+///   (`APP_GRAPHQL_SHAPE` otherwise). A word the rule refuses is
+///   `APP_CREDENTIAL_REFUSED`. A query operation is a read; a mutation,
+///   subscription or anything else is the rule's `mutation`.
 /// - Otherwise the first allowlisted endpoint that matches gives the class.
 /// - Anything else is refused with the connector's `unlisted` copy, so an
 ///   alias, a credential endpoint or a new money action is never sent until
@@ -252,10 +255,24 @@ pub fn classify(connector: &AppConnector, call: &AppCall) -> Result<AppAction, &
         if method != "POST" || !call.query.is_empty() {
             return Err(APP_GRAPHQL_SHAPE);
         }
-        return Ok(match graphql_operation(call.body.as_ref()) {
-            GraphqlOperation::Query => AppAction::Read,
-            GraphqlOperation::Mutation => graphql.mutation,
+        let tokens = graphql_document(call.body.as_ref())
+            .and_then(tokens)
+            .ok_or(APP_GRAPHQL_SHAPE)?;
+        let refused = tokens.iter().any(|token| match token {
+            Token::Word(word) => graphql
+                .refused_names
+                .iter()
+                .any(|name| segment_match(name.as_bytes(), word.as_bytes())),
+            Token::Open(_) | Token::Close(_) => false,
         });
+        if refused {
+            return Err(APP_CREDENTIAL_REFUSED);
+        }
+        return if only_queries(&tokens) {
+            Ok(AppAction::Read)
+        } else {
+            graphql.mutation
+        };
     }
     connector
         .endpoints
@@ -291,6 +308,24 @@ fn sends_refused_key(call: &AppCall, keys: &[&str]) -> bool {
                     .is_some_and(|rest| rest.starts_with('['))
         })
     })
+}
+
+/// The only keys a GraphQL body may hold. Anything else (`doc_id`,
+/// `extensions.persistedQuery`, …) could make the app run a stored document
+/// the classifier never read (final review A1 M2).
+pub const GRAPHQL_BODY_KEYS: [&str; 3] = ["query", "variables", "operationName"];
+
+/// The document of a GraphQL body that holds only [`GRAPHQL_BODY_KEYS`] and
+/// a string `query`.
+fn graphql_document(body: Option<&Value>) -> Option<&str> {
+    let object = body?.as_object()?;
+    if !object
+        .keys()
+        .all(|key| GRAPHQL_BODY_KEYS.contains(&key.as_str()))
+    {
+        return None;
+    }
+    object.get("query")?.as_str()
 }
 
 /// What a GraphQL document does (D6).
@@ -443,7 +478,7 @@ fn skip_selection(tokens: &[Token<'_>], mut at: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{connector, CONNECTORS};
+    use super::super::{connector, APP_GITHUB_GRAPHQL_WRITES, CONNECTORS};
     use super::*;
     use serde_json::json;
 
@@ -687,8 +722,9 @@ mod tests {
             ),
             AppAction::Read
         );
+        // Final review A1 I1: GitHub writes go by REST only.
         assert_eq!(
-            action(
+            outcome(
                 "github",
                 "POST",
                 "/graphql",
@@ -696,7 +732,7 @@ mod tests {
                     json!({"query": "mutation { mergePullRequest(input: {}) { clientMutationId } }"})
                 )
             ),
-            AppAction::Delivery
+            Err(APP_GITHUB_GRAPHQL_WRITES)
         );
         assert_eq!(
             action("notion", "POST", "/v1/search", Some(json!({}))),
@@ -792,8 +828,8 @@ mod tests {
         );
         let mutation = json!({"query": "mutation { updateRef(input: {}) { clientMutationId } }"});
         assert_eq!(
-            action("github", "POST", "/graph%71l", Some(mutation)),
-            AppAction::Delivery
+            outcome("github", "POST", "/graph%71l", Some(mutation)),
+            Err(APP_GITHUB_GRAPHQL_WRITES)
         );
         // I2: methods match in any case, so a lower-case one can't slip by.
         assert_eq!(
@@ -874,11 +910,15 @@ mod tests {
                     "{app} {method}"
                 );
             }
-            // No body, or one that isn't readable, is a mutation.
-            assert_ne!(action(app, "POST", path, None), AppAction::Read, "{app}");
+            // No body, or one that isn't readable, is never a read.
+            assert_eq!(
+                outcome(app, "POST", path, None),
+                Err(APP_GRAPHQL_SHAPE),
+                "{app}"
+            );
             assert_ne!(
-                action(app, "POST", path, Some(json!({"query": "{ a "}))),
-                AppAction::Read,
+                outcome(app, "POST", path, Some(json!({"query": "{ a "}))),
+                Ok(AppAction::Read),
                 "{app}"
             );
         }
@@ -910,14 +950,136 @@ mod tests {
             AppAction::Read
         );
         assert_eq!(
-            action(
+            outcome(
                 "github",
                 "POST",
                 "/graphql",
                 Some(json!({"query": "subscription { a }"}))
             ),
-            AppAction::Delivery
+            Err(APP_GITHUB_GRAPHQL_WRITES)
         );
+    }
+
+    /// Final review A1 I1: a GitHub mutation would be Delivery, which runs
+    /// without a card for a bruh with Can deliver but not Send as me, so a
+    /// comment or approval sent over GraphQL would skip the card REST gets.
+    #[test]
+    fn github_graphql_takes_queries_only() {
+        for document in [
+            "mutation { addComment(input: {subjectId: \"I_1\", body: \"fixed\"}) { clientMutationId } }",
+            "mutation { a: addPullRequestReview(input: {event: APPROVE}) { clientMutationId } }",
+            "mutation { createSponsorship(input: {}) { clientMutationId } }",
+            "query A { viewer { login } } mutation B { createIssue(input: {}) { clientMutationId } }",
+            "subscription { a }",
+            "{ a ",
+        ] {
+            assert_eq!(
+                outcome("github", "POST", "/graphql", Some(json!({"query": document}))),
+                Err(APP_GITHUB_GRAPHQL_WRITES),
+                "{document}"
+            );
+        }
+        assert_eq!(
+            action(
+                "github",
+                "POST",
+                "/graphql",
+                Some(json!({"query": "query { viewer { login } }"}))
+            ),
+            AppAction::Read
+        );
+    }
+
+    /// Final review A1 I2: a GraphQL field is selected only by its literal
+    /// name, so an alias or a fragment can't hide one the rule refuses, in
+    /// a mutation or a query.
+    #[test]
+    fn graphql_never_names_a_credential_field() {
+        let shopify = "/admin/api/2026-10/graphql.json";
+        for (app, path, document) in [
+            ("shopify", shopify, "mutation { t: storefrontAccessTokenCreate(input: {title: \"x\"}) { storefrontAccessToken { id } } }"),
+            ("shopify", shopify, "mutation { ...F } fragment F on Mutation { d: delegateAccessTokenCreate(input: {delegateAccessScope: [\"read_orders\"]}) { userErrors { field } } }"),
+            ("shopify", shopify, "mutation { delegateAccessTokenDestroy(accessToken: \"x\") { status } }"),
+            ("shopify", shopify, "mutation { w: webhookSubscriptionCreate(topic: ORDERS_CREATE, webhookSubscription: {callbackUrl: \"https://x.test\"}) { userErrors { field } } }"),
+            ("shopify", shopify, "mutation { ...H } fragment H on Mutation { webhookSubscriptionUpdate(id: \"1\") { userErrors { field } } }"),
+            ("shopify", shopify, "mutation { eventBridgeWebhookSubscriptionCreate(topic: A) { userErrors { field } } }"),
+            ("shopify", shopify, "mutation { pubSubWebhookSubscriptionCreate(topic: A) { userErrors { field } } }"),
+            ("shopify", shopify, "{ shop { ...S } } fragment S on Shop { t: storefrontAccessTokens(first: 5) { edges { node { id } } } }"),
+            ("shopify", shopify, "{ shop { tokens: storefrontAccessTokens(first: 5) { edges { node { value: accessToken } } } } }"),
+            ("shopify", shopify, "{ shop { STOREFRONTACCESSTOKENS(first: 1) { edges { node { id } } } } }"),
+            ("linear", "/graphql", "mutation { w: webhookCreate(input: {url: \"https://x.test\"}) { success } }"),
+            ("linear", "/graphql", "mutation { ...U } fragment U on Mutation { webhookUpdate(id: \"1\", input: {}) { success } }"),
+            ("linear", "/graphql", "{ ...W } fragment W on Query { hooks: webhooks { nodes { s: secret } } }"),
+            ("linear", "/graphql", "{ w: webhook(id: \"1\") { id } }"),
+            ("linear", "/graphql", "mutation { apiKeyCreate(input: {}) { success } }"),
+            ("linear", "/graphql", "mutation { oauthClientRotateSecret(id: \"1\") { success } }"),
+        ] {
+            assert_eq!(
+                outcome(app, "POST", path, Some(json!({"query": document}))),
+                Err(APP_CREDENTIAL_REFUSED),
+                "{app} {document}"
+            );
+        }
+        // Names inside strings and comments aren't fields; other calls go on.
+        for (app, path, document, class) in [
+            ("shopify", shopify, "{ shop { name } }", AppAction::Read),
+            ("shopify", shopify, "# accessToken\n{ orders(first: 5, query: \"webhookSubscriptionCreate\") { edges { node { id } } } }", AppAction::Read),
+            ("shopify", shopify, "mutation { productUpdate(input: {}) { product { id } } }", AppAction::SendAsOwner),
+            ("linear", "/graphql", "{ issues(filter: {title: {contains: \"webhook secret\"}}) { nodes { id } } }", AppAction::Read),
+            ("linear", "/graphql", "mutation { issueCreate(input: {title: \"x\"}) { success } }", AppAction::SendAsOwner),
+        ] {
+            assert_eq!(
+                outcome(app, "POST", path, Some(json!({"query": document}))),
+                Ok(class),
+                "{app} {document}"
+            );
+        }
+    }
+
+    /// Final review A1 M2: a stored-document key would make the app run a
+    /// document the classifier never read, so the body holds the document,
+    /// its variables and its operation name only.
+    #[test]
+    fn graphql_bodies_hold_only_the_document() {
+        for (app, path) in [
+            ("github", "/graphql"),
+            ("linear", "/graphql"),
+            ("shopify", "/admin/api/2026-10/graphql.json"),
+        ] {
+            for body in [
+                json!({"query": "{ a }", "doc_id": "1"}),
+                json!({"query": "{ a }", "documentId": "1"}),
+                json!({"query": "{ a }", "id": "1"}),
+                json!({"query": "{ a }", "queryId": "1"}),
+                json!({"query": "{ a }", "extensions": {"persistedQuery": {"sha256Hash": "x"}}}),
+                json!({"doc_id": "1"}),
+                json!({"query": 5}),
+                json!([{"query": "{ a }"}]),
+                json!("{ a }"),
+                // An unterminated string can't be read, so nothing in it is checked.
+                json!({"query": "{ a(s: \"x }"}),
+            ] {
+                assert_eq!(
+                    outcome(app, "POST", path, Some(body.clone())),
+                    Err(APP_GRAPHQL_SHAPE),
+                    "{app} {body}"
+                );
+            }
+            assert_eq!(
+                outcome(
+                    app,
+                    "POST",
+                    path,
+                    Some(json!({
+                        "query": "query Q($n: Int) { a(n: $n) }",
+                        "variables": {"n": 1},
+                        "operationName": "Q"
+                    }))
+                ),
+                Ok(AppAction::Read),
+                "{app}"
+            );
+        }
     }
 
     #[test]

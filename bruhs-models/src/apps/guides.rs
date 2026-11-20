@@ -5,7 +5,7 @@
 //! "Other endpoints are refused." At most 800 bytes each, and every call a
 //! guide names is on its app's allowlist.
 
-pub(super) const GITHUB: &str = "Base address https://api.github.com. Bruhs adds the token and API version headers. Put query parameters in query, not the path. Common calls: GET /repos/{owner}/{repo}/issues (query state, labels), GET /repos/{owner}/{repo}/pulls, GET /repos/{owner}/{repo}/issues/{n}/comments, GET /search/issues (query q), POST /repos/{owner}/{repo}/issues {title, body}, POST /repos/{owner}/{repo}/issues/{n}/comments {body}. Paging: per_page up to 100 and page; the link header names the next page. Issues, comments and reviews post as the owner and need Send as me or approval. Opening and merging pull requests, writing contents or refs, and GraphQL mutations (POST /graphql) count as delivery and need Full access with Can deliver. Other endpoints are refused.";
+pub(super) const GITHUB: &str = "Base address https://api.github.com. Bruhs adds the token and API version headers. Put query parameters in query, not the path. Common calls: GET /repos/{owner}/{repo}/issues (query state, labels), GET /repos/{owner}/{repo}/pulls, GET /repos/{owner}/{repo}/issues/{n}/comments, GET /search/issues (query q), POST /repos/{owner}/{repo}/issues {title, body}, POST /repos/{owner}/{repo}/issues/{n}/comments {body}. Paging: per_page up to 100 and page; the link header names the next page. Issues, comments and reviews post as the owner and need Send as me or approval. Opening and merging pull requests and writing contents or refs count as delivery and need Full access with Can deliver. GraphQL (POST /graphql) takes queries only; make writes with REST. Other endpoints are refused.";
 
 pub(super) const NOTION: &str = "Base address https://api.notion.com. Bruhs adds the token and Notion-Version 2022-06-28. Common calls: POST /v1/search {query}, POST /v1/databases/{id}/query {filter}, GET /v1/pages/{id}, GET /v1/blocks/{id}/children, PATCH /v1/pages/{id} {properties}, POST /v1/pages {parent, properties}. Paging: page_size up to 100; pass next_cursor back as start_cursor while has_more is true. Search and database queries are reads. Comments (POST /v1/comments) post as the owner and need Send as me or approval. Page and block changes are writes. Other endpoints are refused.";
 
@@ -62,7 +62,7 @@ mod tests {
                 .endpoints
                 .iter()
                 .map(|endpoint| endpoint.action)
-                .chain(connector.graphql.map(|graphql| graphql.mutation))
+                .chain(connector.graphql.and_then(|graphql| graphql.mutation.ok()))
                 .collect();
             let sends = classes.contains(&AppAction::SendAsOwner);
             assert_eq!(guide.contains("Send as me or approval"), sends, "{id}");

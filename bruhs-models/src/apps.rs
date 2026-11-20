@@ -107,6 +107,15 @@ pub const UNKNOWN_APP: &str = "There is no such app. list_apps lists the ones yo
 /// A GraphQL call with another method or a URL query (ruling A, C2).
 pub const APP_GRAPHQL_SHAPE: &str =
     "Send GraphQL as a POST with the document in the body and no URL query.";
+/// A GraphQL document that selects or names a field the app's rule refuses:
+/// one that makes, reads or changes a token, key, secret or webhook (final
+/// review A1 I2).
+pub const APP_CREDENTIAL_REFUSED: &str =
+    "Bruhs doesn't let a bruh make, read or change app credentials, keys or webhooks. Ask the owner.";
+/// A GitHub GraphQL mutation: GitHub writes go by REST, where each one has
+/// its own class (final review A1 I1).
+pub const APP_GITHUB_GRAPHQL_WRITES: &str =
+    "Bruhs sends GitHub GraphQL queries only. Use the REST endpoints for GitHub writes.";
 pub const APP_ACCOUNT_SHAPE: &str =
     "Name the account in 1 to 64 characters, with no control characters.";
 /// A field an allowlisted endpoint takes but a bruh may not send, such as a

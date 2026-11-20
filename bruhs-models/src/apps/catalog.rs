@@ -118,12 +118,20 @@ impl EndpointRule {
     }
 }
 
-/// The app's GraphQL path. It takes only a POST with no URL query; a query
-/// operation is a read and anything else is `mutation`.
+/// The app's GraphQL path. It takes only a POST whose body holds the
+/// document (and its variables and operation name) and no URL query; a
+/// query operation is a read and anything else is `mutation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphqlRule {
     pub path: &'static str,
-    pub mutation: AppAction,
+    /// The class of a mutation, or the model-facing copy that refuses every
+    /// mutation (GitHub's, whose writes go by REST: final review A1 I1).
+    pub mutation: Result<AppAction, &'static str>,
+    /// Name globs ([`super::path_glob`]'s `*`, any case) that no word of the
+    /// document may match, in a query or a mutation:
+    /// [`super::APP_CREDENTIAL_REFUSED`]. GraphQL selects a field only by its
+    /// literal name, so an alias or a fragment can't hide one (A1 I2).
+    pub refused_names: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,7 +310,8 @@ pub const CONNECTORS: [AppConnector; 14] = [
         ],
         graphql: Some(GraphqlRule {
             path: "/graphql",
-            mutation: AppAction::Delivery,
+            mutation: Err(super::APP_GITHUB_GRAPHQL_WRITES),
+            refused_names: &[],
         }),
         unlisted: unlisted!("GitHub"),
         guide: guides::GITHUB,
@@ -368,7 +377,9 @@ pub const CONNECTORS: [AppConnector; 14] = [
         endpoints: &[],
         graphql: Some(GraphqlRule {
             path: "/graphql",
-            mutation: AppAction::SendAsOwner,
+            mutation: Ok(AppAction::SendAsOwner),
+            // Webhooks (and their signing secrets), API keys and OAuth clients.
+            refused_names: &["webhook*", "*secret*", "apiKey*", "oauthClient*"],
         }),
         unlisted: unlisted!("Linear"),
         guide: guides::LINEAR,
@@ -595,7 +606,10 @@ pub const CONNECTORS: [AppConnector; 14] = [
         ],
         graphql: Some(GraphqlRule {
             path: "/admin/**/graphql.json",
-            mutation: AppAction::SendAsOwner,
+            mutation: Ok(AppAction::SendAsOwner),
+            // Delegate and Storefront tokens (`accessToken` is their value)
+            // and every kind of webhook subscription.
+            refused_names: &["*accessToken*", "*webhookSubscription*"],
         }),
         unlisted: unlisted!("Shopify"),
         guide: guides::SHOPIFY,
