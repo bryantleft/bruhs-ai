@@ -8,10 +8,16 @@
 use super::{AccountTenant, AppConnector, REDACTED};
 use crate::connections::ServiceProvider;
 use crate::secrets::{review_text, SavedCredentialState};
-use crate::vault::{CredentialScope, VaultAttention, MAX_APP_ACCOUNT_CHARS, MAX_NAME_CHARS};
+use crate::vault::{
+    server_port, CredentialScope, VaultAttention, VaultBusy, MAX_APP_ACCOUNT_CHARS, MAX_NAME_CHARS,
+    WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+
+mod form;
+pub use form::*;
 
 // Page copy.
 pub const APPS_TITLE: &str = "Apps";
@@ -29,6 +35,10 @@ pub const NO_MAILBOXES: &str = "No mail accounts connected.";
 pub const NO_BRUHS_FOR_APPS: &str = "Make a bruh to grant it apps.";
 pub const GRANTS_LABEL: &str = "Bruhs";
 pub const APPS_LOADING: &str = "Loading apps.";
+/// Under a connect form's Name.
+pub const APP_NAME_HINT: &str = "Leave it empty to name it after the app and account.";
+/// Under a Replace token form's API key.
+pub const KEEP_KEY_HINT: &str = "Leave the API key empty to keep it.";
 /// A replacement token whose test call names another account (ruling F24).
 pub const ANOTHER_ACCOUNT: &str =
     "That token belongs to another account. Connect it as a new account.";
@@ -39,6 +49,51 @@ pub const MAILBOXES_UNAVAILABLE: &str = "Bruhs couldn't read your mail accounts.
 /// A connect or replace body that isn't one: never serde's text, which can
 /// quote the token.
 pub const INVALID_APP_ACCOUNT: &str = "Invalid app account.";
+
+/// The listing refused to a page on another address (D23).
+/// [`open_apps_from_own_address`] names the address when it knows the port.
+pub const OPEN_APPS_FROM_OWN_ADDRESS: &str =
+    "Open Bruhs from its own address to see and change apps.";
+
+/// [`OPEN_APPS_FROM_OWN_ADDRESS`] naming the exact address that may see
+/// and change apps, as the vault's notice does: the server binds only
+/// `127.0.0.1`. `server` is the client's own server URL.
+#[must_use]
+pub fn open_apps_from_own_address(server: &str) -> String {
+    server_port(server).map_or_else(
+        || OPEN_APPS_FROM_OWN_ADDRESS.to_owned(),
+        |port| format!("Open Bruhs at http://127.0.0.1:{port} to see and change apps."),
+    )
+}
+
+/// Why the page's buttons are disabled right now, if they are: the
+/// listing loading, a test call, or a change.
+#[must_use]
+pub fn apps_wait_reason(busy: VaultBusy, loading: bool) -> Option<&'static str> {
+    match busy {
+        VaultBusy::Idle => None,
+        _ if loading => Some(APPS_LOADING),
+        VaultBusy::Checking => Some(WAIT_FOR_CHECK),
+        VaultBusy::Changing => Some(WAIT_FOR_CHANGE),
+    }
+}
+
+/// An account's Used by line: [`SCOPE_SHARED`], or "{bruh}'s own" by the
+/// bruh's name when the listing has it.
+#[must_use]
+pub fn app_scope_line(scope: &CredentialScope, bruhs: &[AppsBruh]) -> String {
+    match scope {
+        CredentialScope::Global => SCOPE_SHARED.into(),
+        CredentialScope::Bruh { agent_id } => {
+            let name = bruhs
+                .iter()
+                .find(|bruh| &bruh.agent_id == agent_id)
+                .map_or(agent_id.as_str(), |bruh| bruh.name.as_str());
+            format!("{}'s own", review_text(name))
+        }
+        CredentialScope::Project { path } => format!("Project: {}", review_text(path)),
+    }
+}
 
 /// One connected app account, value free (`GET /api/apps`).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -543,6 +598,9 @@ mod tests {
         for copy in [
             APPS_DESCRIPTION,
             MAIL_HINT,
+            APP_NAME_HINT,
+            KEEP_KEY_HINT,
+            OPEN_APPS_FROM_OWN_ADDRESS,
             ANOTHER_ACCOUNT,
             ACCOUNT_CONNECTED,
             MAILBOXES_UNAVAILABLE,
@@ -599,6 +657,62 @@ mod tests {
         assert_eq!(
             json!(result),
             json!({"ok": false, "account": null, "message": "m"})
+        );
+    }
+
+    #[test]
+    fn the_page_says_who_uses_an_account_and_why_it_waits() {
+        use crate::vault::{VaultBusy, WAIT_FOR_CHANGE, WAIT_FOR_CHECK};
+        let bruhs = [AppsBruh {
+            agent_id: "a".into(),
+            name: "A\u{202e}da".into(),
+            apps: Vec::new(),
+            mail: Vec::new(),
+            unavailable: None,
+        }];
+        assert_eq!(
+            app_scope_line(&CredentialScope::Global, &bruhs),
+            SCOPE_SHARED
+        );
+        assert_eq!(
+            app_scope_line(
+                &CredentialScope::Bruh {
+                    agent_id: "a".into()
+                },
+                &bruhs
+            ),
+            "A\\u{202e}da's own"
+        );
+        assert_eq!(
+            app_scope_line(
+                &CredentialScope::Bruh {
+                    agent_id: "gone".into()
+                },
+                &bruhs
+            ),
+            "gone's own"
+        );
+        assert_eq!(apps_wait_reason(VaultBusy::Idle, true), None);
+        assert_eq!(
+            apps_wait_reason(VaultBusy::Changing, true),
+            Some(APPS_LOADING)
+        );
+        assert_eq!(
+            apps_wait_reason(VaultBusy::Changing, false),
+            Some(WAIT_FOR_CHANGE)
+        );
+        assert_eq!(
+            apps_wait_reason(VaultBusy::Checking, false),
+            Some(WAIT_FOR_CHECK)
+        );
+        // Owner-only pages name the exact address (rereview I1 of p4).
+        assert_eq!(
+            open_apps_from_own_address("http://127.0.0.1:3001"),
+            "Open Bruhs at http://127.0.0.1:3001 to see and change apps."
+        );
+        assert_eq!(
+            open_apps_from_own_address("https://bruhs.localhost"),
+            OPEN_APPS_FROM_OWN_ADDRESS
         );
     }
 }

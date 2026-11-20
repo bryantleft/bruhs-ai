@@ -95,7 +95,7 @@ where
     bounded(call, deadline, || abort.abort()).await
 }
 
-async fn vault_json<B: Serialize + ?Sized, T: DeserializeOwned>(
+pub(super) async fn vault_json<B: Serialize + ?Sized, T: DeserializeOwned>(
     method: Method,
     route: &str,
     body: Option<&B>,

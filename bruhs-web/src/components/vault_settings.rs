@@ -26,14 +26,14 @@ use bruhs_models::vault::{
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
 
-const BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-longan-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
+pub(super) const BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-longan-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
 /// The confirm Delete: `BUTTON` with lychee text and ring in place of the
 /// neutral ones, since stacking both would leave the stylesheet's order to
 /// pick the color.
-const DANGER_BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-lychee-200 inset-ring inset-ring-lychee-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
-const LABEL: &str = "block min-w-0 text-label-sm text-rambutan-300";
-const FIELD: &str = "bruhs-control mt-1 block min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400 read-only:text-rambutan-400";
-const HINT: &str = "mt-1 text-label-sm text-rambutan-500";
+pub(super) const DANGER_BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-lychee-200 inset-ring inset-ring-lychee-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
+pub(super) const LABEL: &str = "block min-w-0 text-label-sm text-rambutan-300";
+pub(super) const FIELD: &str = "bruhs-control mt-1 block min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400 read-only:text-rambutan-400";
+pub(super) const HINT: &str = "mt-1 text-label-sm text-rambutan-500";
 /// The page's line that says values are never shown; edited value fields
 /// point at it.
 const KEEP_HINT_ID: &str = "vault-keep-hint";
@@ -42,7 +42,7 @@ const STATUS_ID: &str = "vault-status";
 const WAIT_ID: &str = "vault-wait";
 
 /// A DOM id prefix no other row or form on the page uses.
-fn unique_id(prefix: &str) -> String {
+pub(super) fn unique_id(prefix: &str) -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
@@ -52,7 +52,7 @@ fn unique_id(prefix: &str) -> String {
 /// A late answer moves focus only then, as the desktop's does (BC M1): by
 /// the time a keychain prompt is answered the owner may be in another
 /// Settings section or elsewhere in the app.
-fn focus_on_page(page: NodeRef<html::Div>) -> bool {
+pub(super) fn focus_on_page(page: NodeRef<html::Div>) -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return false;
     };
@@ -71,7 +71,7 @@ fn focus_on_page(page: NodeRef<html::Div>) -> bool {
 }
 
 /// Focus `target` once the view has drawn it.
-fn focus_after_render(target: NodeRef<html::Button>) {
+pub(super) fn focus_after_render(target: NodeRef<html::Button>) {
     request_animation_frame(move || {
         if let Some(Some(button)) = target.try_get_untracked() {
             let _ = button.focus();
@@ -410,7 +410,7 @@ enum Request {
 /// A value field: a password input that is never filled, is cleared when
 /// it leaves the page, and keeps its keys from the app's shortcuts.
 #[component]
-fn SecretInput(
+pub(super) fn SecretInput(
     label: &'static str,
     node: NodeRef<html::Input>,
     described_by: Option<String>,

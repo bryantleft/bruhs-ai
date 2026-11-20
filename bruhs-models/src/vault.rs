@@ -116,7 +116,7 @@ pub fn open_from_own_address(server: &str) -> String {
 }
 
 /// The explicit port of an `http(s)://host:port` URL.
-fn server_port(url: &str) -> Option<u16> {
+pub(crate) fn server_port(url: &str) -> Option<u16> {
     let (_, rest) = url.split_once("://")?;
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority

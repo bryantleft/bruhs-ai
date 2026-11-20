@@ -1,4 +1,5 @@
 pub mod api_client_panel;
+pub mod apps_settings;
 pub mod auth_banner;
 pub mod auto_record_prompt;
 pub mod auto_record_settings;
