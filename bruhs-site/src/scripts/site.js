@@ -302,8 +302,9 @@ function go(command) {
   }
   const section = document.getElementById(id);
   if (!section) return;
+  if (section instanceof HTMLDetailsElement) section.open = true;
   section.scrollIntoView({ block: "start" });
-  const focusTarget = section.querySelector("h2");
+  const focusTarget = section.querySelector("h2, summary");
   if (focusTarget instanceof HTMLElement) focusTarget.focus({ preventScroll: true });
 }
 
@@ -683,7 +684,7 @@ for (const button of document.querySelectorAll("button[data-share]")) {
   let reset = 0;
   button.addEventListener("click", async () => {
     if (button.getAttribute("aria-disabled") === "true") return;
-    const link = { title: "bruhs", text: "bruhs, one window for your whole day. Download it on your desktop.", url: "https://bruhs.ai/download" };
+    const link = { title: "bruhs", text: "bruhs, your local-first digital brain. Download it on your desktop.", url: "https://bruhs.ai/download" };
     clearTimeout(reset);
     if (label) label.textContent = text;
     if (status) status.textContent = "";
