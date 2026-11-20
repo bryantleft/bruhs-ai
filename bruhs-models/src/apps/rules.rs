@@ -1036,6 +1036,36 @@ mod tests {
         }
     }
 
+    /// Re-review N2 and M4: a Shopify bulk operation carries a whole
+    /// document in a string, which the classifier never reads, and a few
+    /// mutations plant lasting outbound endpoints or code. Each is refused
+    /// by name, with the document inline or in variables.
+    #[test]
+    fn shopify_bulk_operations_and_planted_endpoints_are_refused() {
+        let shopify = "/admin/api/2026-10/graphql.json";
+        let refused = |body: Value| outcome("shopify", "POST", shopify, Some(body));
+        let inner = "{ shop { storefrontAccessTokens { edges { node { accessToken } } } } }";
+        for body in [
+            json!({"query": "mutation($q: String!) { bulkOperationRunQuery(query: $q) { bulkOperation { id } } }",
+                "variables": {"q": inner}}),
+            json!({"query": "mutation { b: bulkOperationRunQuery(query: \"{ orders { edges { node { id } } } }\") { bulkOperation { id } } }"}),
+            json!({"query": "mutation($m: String!, $p: String!) { bulkOperationRunMutation(mutation: $m, stagedUploadPath: $p) { bulkOperation { id } } }",
+                "variables": {"m": "mutation { productCreate(input: {}) { product { id } } }", "p": "x"}}),
+            json!({"query": "mutation { stagedUploadsCreate(input: []) { stagedTargets { url } } }"}),
+            json!({"query": "mutation { fulfillmentServiceCreate(name: \"x\", callbackUrl: \"https://x.test\") { userErrors { field } } }"}),
+            json!({"query": "mutation { ...C } fragment C on Mutation { carrierServiceCreate(input: {}) { userErrors { field } } }"}),
+            json!({"query": "mutation { s: scriptTagCreate(input: {src: \"https://x.test/a.js\"}) { userErrors { field } } }"}),
+            json!({"query": "mutation { WEBPIXELCREATE(webPixel: {}) { userErrors { field } } }"}),
+        ] {
+            assert_eq!(refused(body.clone()), Err(APP_CREDENTIAL_REFUSED), "{body}");
+        }
+        // Reading a finished bulk operation is a plain query.
+        assert_eq!(
+            refused(json!({"query": "{ currentBulkOperation { status } }"})),
+            Ok(AppAction::Read)
+        );
+    }
+
     /// Final review A1 M2: a stored-document key would make the app run a
     /// document the classifier never read, so the body holds the document,
     /// its variables and its operation name only.

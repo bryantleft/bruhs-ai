@@ -628,8 +628,21 @@ pub const CONNECTORS: [AppConnector; 14] = [
             path: "/admin/**/graphql.json",
             mutation: Ok(AppAction::SendAsOwner),
             // Delegate and Storefront tokens (`accessToken` is their value)
-            // and every kind of webhook subscription.
-            refused_names: &["*accessToken*", "*webhookSubscription*"],
+            // and every kind of webhook subscription. Bulk operations carry
+            // a whole document in a string, which the classifier never
+            // reads, and staged uploads only feed them; services, script
+            // tags and web pixels plant lasting outbound endpoints or code
+            // (re-review N2 and M4).
+            refused_names: &[
+                "*accessToken*",
+                "*webhookSubscription*",
+                "bulkOperationRun*",
+                "stagedUploadsCreate",
+                "fulfillmentServiceCreate",
+                "carrierServiceCreate",
+                "scriptTagCreate",
+                "webPixelCreate",
+            ],
         }),
         unlisted: unlisted!("Shopify"),
         guide: guides::SHOPIFY,
