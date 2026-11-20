@@ -15,6 +15,7 @@
 
 use axum::{
     extract::{Query, State},
+    http::HeaderMap,
     response::sse::{Event, KeepAlive, Sse},
 };
 use bruhs_core::AppState;
@@ -34,13 +35,17 @@ pub struct StreamQuery {
     resume: bool,
 }
 
-/// GET /api/events/stream
+/// GET /api/events/stream. Its `reactive` frames carry owner card details
+/// only for the owner's own pages (final review BC I1).
 pub async fn get_events_stream(
     State(state): State<Arc<AppState>>,
+    State(config): State<Arc<crate::config::Config>>,
+    headers: HeaderMap,
     #[cfg(unix)] relay: Option<axum::Extension<crate::workspace_relay::WorkspaceRelay>>,
     Query(query): Query<StreamQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let events = events(state, query.resume);
+    let owner = config.access.owner_request(&headers);
+    let events = events(state, query.resume, owner);
     // Every stream opens with its relay ID (`workspace_relay`); an MCP
     // workspace session bound to it ends when the stream closes.
     #[cfg(unix)]
@@ -69,7 +74,11 @@ fn relay_frames(
     }
 }
 
-fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event, Infallible>> {
+fn events(
+    state: Arc<AppState>,
+    resume: bool,
+    owner: bool,
+) -> impl Stream<Item = Result<Event, Infallible>> {
     let tasks = named(tasks::task_snapshots(state.registry().clone()), TASKS);
     let meetings = named(
         meetings_stream::bridge(state.subscribe_meeting_events()),
@@ -80,7 +89,7 @@ fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event
         calendar_events_stream::event_stream(state.clone()),
         CALENDAR,
     );
-    let reactive = named(reactive_signals(state.reactive().cloned()), REACTIVE);
+    let reactive = named(reactive_signals(state.reactive().cloned(), owner), REACTIVE);
     if resume {
         state.google_calendar().force_full_sync();
     }
@@ -88,15 +97,20 @@ fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event
 }
 
 /// Agent update counts: one frame on open, then one per change (coalesced).
+/// Without `owner`, owner card details are left out of each frame.
 pub(crate) fn reactive_signals(
     runtime: Option<bruhs_core::reactive::ReactiveRuntime>,
+    owner: bool,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {
         let Some(runtime) = runtime else { return; };
         let mut changes = runtime.watch_changes();
         let mut previous = None;
         loop {
-            match runtime.outbox_signal().await {
+            let signal = runtime.outbox_signal().await.map(|signal| {
+                if owner { signal } else { signal.without_owner_details() }
+            });
+            match signal {
                 Ok(signal) if previous.as_ref() != Some(&signal) => {
                     if let Ok(event) = Event::default().json_data(&signal) {
                         yield Ok(event);
@@ -133,8 +147,15 @@ mod tests {
     #[tokio::test]
     async fn one_connection_carries_every_source() {
         let state = Arc::new(AppState::new());
+        let config = crate::config::Config::from_settings(crate::config::Settings {
+            port: Some("0"),
+            ..Default::default()
+        })
+        .unwrap();
         let mut body = get_events_stream(
             State(state),
+            State(Arc::new(config)),
+            HeaderMap::new(),
             #[cfg(unix)]
             None,
             Query(StreamQuery::default()),
@@ -177,9 +198,9 @@ mod tests {
     #[tokio::test]
     async fn only_a_reopen_requests_a_full_calendar_resync() {
         let state = Arc::new(AppState::new());
-        drop(events(state.clone(), false));
+        drop(events(state.clone(), false, true));
         assert!(!state.google_calendar().full_sync_pending());
-        drop(events(state.clone(), true));
+        drop(events(state.clone(), true, true));
         assert!(state.google_calendar().full_sync_pending());
     }
 

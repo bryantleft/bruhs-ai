@@ -245,6 +245,30 @@ impl Fixture {
         (response.status(), response.text().await.unwrap())
     }
 
+    /// The start of the event stream at `path`, from a page at `origin`:
+    /// its chunks until one holds `until` (or 5 s pass).
+    pub(crate) async fn stream_until(
+        &self,
+        path: &str,
+        origin: Option<&str>,
+        until: &str,
+    ) -> String {
+        let mut request = self.client.get(format!("{}{path}", self.base));
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        let mut response = request.send().await.unwrap();
+        let mut text = String::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !text.contains(until) {
+            match tokio::time::timeout_at(deadline, response.chunk()).await {
+                Ok(Ok(Some(chunk))) => text.push_str(&String::from_utf8_lossy(&chunk)),
+                _ => break,
+            }
+        }
+        text
+    }
+
     pub(crate) async fn post(&self, path: &str, body: Value) -> (StatusCode, String) {
         self.send(Method::POST, path, Some(Body::Json(body)), None)
             .await
@@ -385,10 +409,10 @@ async fn connect_lists_tests_and_disconnects_without_tokens() {
     let kept = fixture
         .state
         .secrets()
-        .resolve_app_token(&id)
+        .app_token_for_tests(&id)
         .await
         .unwrap();
-    assert_eq!(kept.token.as_str(), good);
+    assert_eq!(kept.as_str(), good);
     drop(kept);
     let (status, text) = fixture
         .send(

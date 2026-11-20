@@ -447,6 +447,18 @@ pub struct ReactiveSnapshot {
 }
 
 impl ReactiveSnapshot {
+    /// The snapshot as a page that isn't the owner's may see it: see
+    /// [`OutboxItem::without_owner_details`].
+    #[must_use]
+    pub fn without_owner_details(mut self) -> Self {
+        self.outbox = self
+            .outbox
+            .into_iter()
+            .map(OutboxItem::without_owner_details)
+            .collect();
+        self
+    }
+
     /// Updates the owner has not read yet.
     pub fn unread_count(&self) -> usize {
         self.outbox.iter().filter(|item| item.is_unread()).count()

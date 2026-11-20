@@ -38,10 +38,18 @@ impl From<ReactiveError> for AppError {
     }
 }
 
+/// `GET /api/reactive`. A page that isn't the owner's gets vault key, app
+/// and mail cards without their detail: the account, the call's body, an
+/// email's recipients and text (final review BC I1).
 pub async fn snapshot(
     value: Option<Extension<ReactiveRuntime>>,
+    State(config): State<Arc<Config>>,
+    headers: HeaderMap,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let snapshot = runtime(value)?.snapshot().await?;
+    let mut snapshot = runtime(value)?.snapshot().await?;
+    if !config.access.owner_request(&headers) {
+        snapshot = snapshot.without_owner_details();
+    }
     Ok((
         [(axum::http::header::CACHE_CONTROL, "no-store")],
         Json(snapshot),
@@ -135,9 +143,12 @@ pub async fn room_messages(
 }
 
 /// `GET /api/reactive/stream`: unnamed frames of `OutboxSignal`, the same
-/// producer as the combined stream's `reactive` frame.
+/// producer as the combined stream's `reactive` frame, without owner card
+/// details for a page that isn't the owner's (final review BC I1).
 pub async fn stream(
     value: Option<Extension<ReactiveRuntime>>,
+    State(config): State<Arc<Config>>,
+    headers: HeaderMap,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures_core::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
@@ -145,8 +156,9 @@ pub async fn stream(
     AppError,
 > {
     let runtime = runtime(value)?;
+    let owner = config.access.owner_request(&headers);
     Ok(
-        axum::response::sse::Sse::new(super::events_stream::reactive_signals(Some(runtime)))
+        axum::response::sse::Sse::new(super::events_stream::reactive_signals(Some(runtime), owner))
             .keep_alive(axum::response::sse::KeepAlive::default()),
     )
 }

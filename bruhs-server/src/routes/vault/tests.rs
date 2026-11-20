@@ -540,10 +540,10 @@ async fn the_vault_routes_refuse_app_tokens() {
     let stored = fixture
         .state
         .secrets()
-        .resolve_app_token(&saved.id)
+        .app_token_for_tests(&saved.id)
         .await
         .unwrap();
-    assert_eq!(stored.token.as_str(), token);
+    assert_eq!(stored.as_str(), token);
     let (_, text) = fixture.listing().await;
     assert!(!text.contains(&token) && !text.contains(&replaced));
 }

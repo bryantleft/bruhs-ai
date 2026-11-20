@@ -159,6 +159,30 @@ impl OutboxItem {
     pub fn is_open_question(&self) -> bool {
         self.kind == OutboxKind::Ask && self.resolved_at.is_none()
     }
+
+    /// The item as a page that isn't the owner's may see it: a vault key,
+    /// app or mail card keeps its summary but loses its detail (the
+    /// account, the call's body, an email's recipients and text), since
+    /// only the owner's own app may answer it (final review BC I1).
+    #[must_use]
+    pub fn without_owner_details(mut self) -> Self {
+        if let Some(request) = self.approval.as_mut() {
+            if crate::crew::owner_only_card(&request.tool) {
+                request.detail = None;
+            }
+        }
+        self
+    }
+}
+
+impl OutboxSignal {
+    /// The frame as a page that isn't the owner's may see it: see
+    /// [`OutboxItem::without_owner_details`].
+    #[must_use]
+    pub fn without_owner_details(mut self) -> Self {
+        self.latest_unread = self.latest_unread.map(OutboxItem::without_owner_details);
+        self
+    }
 }
 
 /// The live-stream summary clients use for badges and new-update banners.
@@ -407,6 +431,47 @@ pub fn describe_calendar(times: &[String], weekdays: &[u8], time_zone: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Final review BC I1: a page that isn't the owner's sees an app, mail
+    /// or vault key card's summary but never its detail; other cards keep
+    /// theirs.
+    #[test]
+    fn owner_only_cards_lose_their_detail_for_other_pages() {
+        use crate::crew::{ApprovalRequest, APP_REQUEST_TOOL, BRUH_SECRET_TOOL, SEND_MAIL_TOOL};
+        let card = |tool: &str| OutboxItem {
+            id: "o1".into(),
+            agent_id: "a".into(),
+            run_id: "r1".into(),
+            kind: OutboxKind::Ask,
+            title: "Approval needed".into(),
+            message: "As you on GitHub: POST /repos/o/r/issues".into(),
+            created_at: EpochMs::saturating_from_i64(1),
+            read_at: None,
+            resolved_at: None,
+            answer: None,
+            system: SystemDelivery::default(),
+            approval: Some(ApprovalRequest {
+                tool: tool.into(),
+                summary: "As you on GitHub: POST /repos/o/r/issues".into(),
+                fingerprint: "f".into(),
+                state: crate::crew::ApprovalState::default(),
+                detail: Some("Account: octo-work\nBody: {}".into()),
+            }),
+        };
+        for tool in [APP_REQUEST_TOOL, SEND_MAIL_TOOL, BRUH_SECRET_TOOL] {
+            let seen = card(tool).without_owner_details();
+            let request = seen.approval.as_ref().unwrap();
+            assert_eq!(request.detail, None, "{tool}");
+            assert_eq!(request.summary, card(tool).approval.unwrap().summary);
+            let signal = OutboxSignal {
+                latest_unread: Some(card(tool)),
+                ..OutboxSignal::default()
+            }
+            .without_owner_details();
+            assert_eq!(signal.latest_unread, Some(seen));
+        }
+        assert_eq!(card("Bash").without_owner_details(), card("Bash"));
+    }
 
     #[test]
     fn quiet_hours_cross_midnight_and_reject_bad_times() {

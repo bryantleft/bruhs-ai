@@ -34,11 +34,19 @@ pub fn discard_update(update: VaultUpdate) {
 }
 
 /// An app token's keychain values, read for one app call or poll (D8).
-/// Neither `Debug` nor `Clone`: the values are wiped when it drops.
+/// Neither `Debug` nor `Clone`: the values are wiped when it drops. Only
+/// this crate's app host and polls read one (final review A2 M5), so no
+/// other crate can reach a token outside the helper route's checks:
+///
+/// ```compile_fail
+/// async fn read(vault: &bruhs_core::secrets::SecretManager) {
+///     let _ = vault.resolve_app_token("v1-app").await;
+/// }
+/// ```
 pub struct AppSecret {
-    pub token: Zeroizing<String>,
+    pub(crate) token: Zeroizing<String>,
     /// Trello's API key; `None` for every other app.
-    pub key: Option<Zeroizing<String>>,
+    pub(crate) key: Option<Zeroizing<String>>,
 }
 
 use crate::{OrchestratorEvent, QueryEvent};
@@ -519,7 +527,7 @@ impl SecretManager {
     /// lookup and the keychain read share one read wait, and the read
     /// records or clears the entry's attention as a login's does. Any
     /// other kind, or an id no entry has, is `NotSaved`.
-    pub async fn resolve_app_token(&self, id: &str) -> Result<AppSecret, SecretError> {
+    pub(crate) async fn resolve_app_token(&self, id: &str) -> Result<AppSecret, SecretError> {
         let started = tokio::time::Instant::now();
         let entry = tokio::time::timeout(self.read_wait, self.known(id))
             .await
@@ -530,6 +538,17 @@ impl SecretManager {
         let left = self.read_wait.saturating_sub(started.elapsed());
         self.attended_within(id, left, self.app_keychain(id), false)
             .await
+    }
+
+    /// The token [`Self::resolve_app_token`] reads, for route tests outside
+    /// this crate.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::resolve_app_token`].
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn app_token_for_tests(&self, id: &str) -> Result<Zeroizing<String>, SecretError> {
+        Ok(std::mem::take(&mut self.resolve_app_token(id).await?.token))
     }
 
     /// A key's value, from the keychain or 1Password. A login, a newer

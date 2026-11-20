@@ -59,6 +59,14 @@ pub const VAULT_FILE_DENIAL: &str = "That path holds the owner's saved logins. L
 /// usable vault key (D18): run one exact command with a key's value in its
 /// environment. Every use asks the owner, at every level.
 pub const BRUH_SECRET_TOOL: &str = "mcp__bruhs_secrets__request_secret";
+/// Whether a card of `tool` is one only the owner's own app may answer and
+/// read in full: a use of a vault key, an app call or an email, each in the
+/// owner's name (rulings F26, BC I2 and final review BC I1).
+#[must_use]
+pub fn owner_only_card(tool: &str) -> bool {
+    matches!(tool, BRUH_SECRET_TOOL | APP_REQUEST_TOOL | SEND_MAIL_TOOL)
+}
+
 /// The run preamble's line after the key names, when [`BRUH_SECRET_TOOL`]
 /// is offered (D26, ruling F28).
 pub const SECRET_PREAMBLE: &str =
