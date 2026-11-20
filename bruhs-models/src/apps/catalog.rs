@@ -80,6 +80,19 @@ pub struct EndpointRule {
     pub methods: &'static [&'static str],
     pub path: &'static str,
     pub action: AppAction,
+    /// Query or top-level body keys (any case, `key[…]` included) a call to
+    /// this endpoint may not send: [`super::APP_FIELD_REFUSED`].
+    pub refused_keys: &'static [&'static str],
+}
+
+impl EndpointRule {
+    /// The same endpoint, refusing these keys.
+    const fn refusing(self, refused_keys: &'static [&'static str]) -> Self {
+        EndpointRule {
+            refused_keys,
+            ..self
+        }
+    }
 }
 
 /// The app's GraphQL path. It takes only a POST with no URL query; a query
@@ -169,6 +182,7 @@ const fn rule(
         methods,
         path,
         action,
+        refused_keys: &[],
     }
 }
 
@@ -373,6 +387,8 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/api/v1/labels"),
             get("/api/v1/comments"),
             write(POST, "/api/v1/tasks"),
+            // Quick add's `note` posts a comment as the owner.
+            send(POST, "/api/v1/tasks/quick"),
             write(POST, "/api/v1/tasks/*"),
             write(POST, "/api/v1/tasks/*/close"),
             write(POST, "/api/v1/tasks/*/reopen"),
@@ -493,8 +509,10 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/rest/api/3/project/*"),
             read(POST, "/rest/api/3/search/jql"),
             read(POST, "/rest/api/3/issue/bulkfetch"),
-            write(PUT, "/rest/api/3/issue/*"),
-            write(POST, "/rest/api/3/issue/*/transitions"),
+            // An edit or transition can carry `update.comment`, which posts
+            // and emails a comment as the owner.
+            send(PUT, "/rest/api/3/issue/*"),
+            send(POST, "/rest/api/3/issue/*/transitions"),
             send(POST, "/rest/api/3/issue"),
             send(POST, "/rest/api/3/issue/*/comment"),
             send(POST, "/rest/api/3/issue/*/notify"),
@@ -574,14 +592,17 @@ pub const CONNECTORS: [AppConnector; 14] = [
             get("/v1/refunds/*"),
             get("/v1/payouts"),
             get("/v1/disputes"),
-            write(POST, "/v1/customers"),
-            write(POST, "/v1/customers/*"),
+            // A customer balance is charged on the next invoice.
+            write(POST, "/v1/customers").refusing(&["balance"]),
+            write(POST, "/v1/customers/*").refusing(&["balance"]),
             write(POST, "/v1/products"),
             write(POST, "/v1/products/*"),
             write(POST, "/v1/prices"),
-            write(POST, "/v1/invoiceitems"),
-            write(POST, "/v1/invoices"),
-            write(POST, "/v1/invoices/*"),
+            // Invoice items are swept into the next charge, and a draft with
+            // auto_advance finalizes, then charges or emails the customer.
+            send(POST, "/v1/invoiceitems"),
+            send(POST, "/v1/invoices"),
+            send(POST, "/v1/invoices/*"),
             send(POST, "/v1/charges"),
             send(POST, "/v1/charges/*/capture"),
             send(POST, "/v1/payment_intents"),

@@ -6,10 +6,11 @@
 
 use super::{
     AppAction, AppConnector, APP_ACCOUNT_SHAPE, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE,
-    APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD, APP_PATH, APP_PATH_ESCAPE, APP_QUERY_METHOD,
-    APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS, MAX_PATH_BYTES, MAX_QUERY_BYTES,
-    MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
+    APP_FIELD_REFUSED, APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD, APP_PATH, APP_PATH_ESCAPE,
+    APP_QUERY_METHOD, APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS, MAX_PATH_BYTES,
+    MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
 };
+use crate::secrets::review_text;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -55,7 +56,9 @@ pub fn validate_call(call: &AppCall) -> Result<(), &'static str> {
     }
     if let Some(account) = &call.account {
         let chars = account.chars().count();
-        if chars == 0 || chars > MAX_ACCOUNT_CHARS {
+        // `review_text` escapes control and bidi or other format characters,
+        // so a name it changes would show differently on the card.
+        if chars == 0 || chars > MAX_ACCOUNT_CHARS || review_text(account) != *account {
             return Err(APP_ACCOUNT_SHAPE);
         }
     }
@@ -256,8 +259,34 @@ pub fn classify(connector: &AppConnector, call: &AppCall) -> Result<AppAction, &
         .find(|endpoint| {
             endpoint.methods.contains(&method.as_str()) && path_glob(endpoint.path, &path)
         })
-        .map(|endpoint| endpoint.action)
         .ok_or(connector.unlisted)
+        .and_then(|endpoint| {
+            if sends_refused_key(call, endpoint.refused_keys) {
+                Err(APP_FIELD_REFUSED)
+            } else {
+                Ok(endpoint.action)
+            }
+        })
+}
+
+/// Whether the query or the body's top-level object names one of `keys`,
+/// in any case, alone or as `key[…]` (form-style nesting).
+fn sends_refused_key(call: &AppCall, keys: &[&str]) -> bool {
+    let body_keys = call
+        .body
+        .as_ref()
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|object| object.keys());
+    call.query.keys().chain(body_keys).any(|sent| {
+        let sent = sent.to_ascii_lowercase();
+        keys.iter().any(|key| {
+            sent == *key
+                || sent
+                    .strip_prefix(key)
+                    .is_some_and(|rest| rest.starts_with('['))
+        })
+    })
 }
 
 /// What a GraphQL document does (D6).
@@ -590,6 +619,14 @@ mod tests {
             (&*"é".repeat(MAX_ACCOUNT_CHARS), Ok(())),
             (&*"a".repeat(MAX_ACCOUNT_CHARS + 1), Err(APP_ACCOUNT_SHAPE)),
             ("", Err(APP_ACCOUNT_SHAPE)),
+            // Fix round 2: control and bidi characters would show differently
+            // on the card than the name the lookup matches.
+            ("me\nyou", Err(APP_ACCOUNT_SHAPE)),
+            ("me\u{7}", Err(APP_ACCOUNT_SHAPE)),
+            ("\u{202e}em", Err(APP_ACCOUNT_SHAPE)),
+            ("me\u{2066}x\u{2069}", Err(APP_ACCOUNT_SHAPE)),
+            ("me\u{200b}", Err(APP_ACCOUNT_SHAPE)),
+            ("Acme Café", Ok(())),
         ] {
             let mut named = call("GET", None);
             named.account = Some(account.to_string());
@@ -967,13 +1004,38 @@ mod tests {
                 "/rest/api/3/issue/bulkfetch",
                 AppAction::Read,
             ),
-            ("jira", "PUT", "/rest/api/3/issue/X-1", AppAction::Write),
+            // N2: an edit or transition can carry a comment.
+            (
+                "jira",
+                "PUT",
+                "/rest/api/3/issue/X-1",
+                AppAction::SendAsOwner,
+            ),
             (
                 "jira",
                 "POST",
                 "/rest/api/3/issue/X-1/transitions",
-                AppAction::Write,
+                AppAction::SendAsOwner,
             ),
+            // N1: invoices and invoice items can charge or email a customer.
+            ("stripe", "POST", "/v1/invoices", AppAction::SendAsOwner),
+            (
+                "stripe",
+                "POST",
+                "/v1/invoices/in_1",
+                AppAction::SendAsOwner,
+            ),
+            ("stripe", "POST", "/v1/invoiceitems", AppAction::SendAsOwner),
+            ("stripe", "POST", "/v1/customers/cus_1", AppAction::Write),
+            ("stripe", "POST", "/v1/products/prod_1", AppAction::Write),
+            // Todoist quick add's note is a comment.
+            (
+                "todoist",
+                "POST",
+                "/api/v1/tasks/quick",
+                AppAction::SendAsOwner,
+            ),
+            ("todoist", "POST", "/api/v1/tasks/1", AppAction::Write),
             (
                 "hubspot",
                 "POST",
@@ -1015,6 +1077,38 @@ mod tests {
                 class,
                 "{app} {method} {path}"
             );
+        }
+        // N1: a bruh can't set a Stripe customer's balance, in the query
+        // (where Stripe parameters go) or the body, in any case or nesting.
+        let stripe = connector("stripe").unwrap();
+        for path in ["/v1/customers", "/v1/customers/cus_1"] {
+            for key in ["balance", "BALANCE", "balance[x]"] {
+                let mut in_query = call("stripe", "POST", path, None);
+                in_query.query.insert(key.into(), json!(500));
+                assert_eq!(
+                    classify(stripe, &in_query),
+                    Err(APP_FIELD_REFUSED),
+                    "{path} {key}"
+                );
+                let in_body = call(
+                    "stripe",
+                    "POST",
+                    path,
+                    Some(Value::Object(serde_json::Map::from_iter([(
+                        key.to_string(),
+                        json!(500),
+                    )]))),
+                );
+                assert_eq!(
+                    classify(stripe, &in_body),
+                    Err(APP_FIELD_REFUSED),
+                    "{path} {key}"
+                );
+            }
+            let mut fine = call("stripe", "POST", path, None);
+            fine.query.insert("name".into(), json!("Ann"));
+            fine.query.insert("balance_note".into(), json!("x"));
+            assert_eq!(classify(stripe, &fine), Ok(AppAction::Write), "{path}");
         }
         // Nothing unlisted is ever a read, or anything else.
         for connector in &CONNECTORS {

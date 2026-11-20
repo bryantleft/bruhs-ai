@@ -97,7 +97,12 @@ pub const UNKNOWN_APP: &str = "There is no such app. list_apps lists the ones yo
 /// A GraphQL call with another method or a URL query (ruling A, C2).
 pub const APP_GRAPHQL_SHAPE: &str =
     "Send GraphQL as a POST with the document in the body and no URL query.";
-pub const APP_ACCOUNT_SHAPE: &str = "Name the account in 1 to 64 characters.";
+pub const APP_ACCOUNT_SHAPE: &str =
+    "Name the account in 1 to 64 characters, with no control characters.";
+/// A field an allowlisted endpoint takes but a bruh may not send, such as a
+/// Stripe customer's balance.
+pub const APP_FIELD_REFUSED: &str =
+    "Bruhs doesn't let a bruh send that field to that endpoint. Ask the owner.";
 pub const APP_CUT_NOTE: &str = "Cut at 32 KB. Ask for less: fewer fields or a smaller page.";
 pub const APP_TOO_LARGE: &str =
     "The app's answer is over 1 MB. Ask for less: fewer fields or a smaller page.";
