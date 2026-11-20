@@ -9,6 +9,9 @@
 //! - `POST /api/vault/{id}/check`: whether one read worked
 //!   ([`VaultCheck`]).
 //!
+//! An app token is the Apps routes' to create and replace (D8): these
+//! refuse the kind with [`MANAGE_IN_APPS`]. Delete and Check take any entry.
+//!
 //! Every route sits behind the shared loopback guard, and each also needs
 //! a request from the owner's own app ([`Policy::owner_request`]): other
 //! loopback pages may neither read the vault nor change it. Bodies
@@ -24,8 +27,9 @@ use axum::{
 };
 use bruhs_core::{reactive::ReactiveRuntime, secrets::SecretError, AppState};
 use bruhs_models::vault::{
-    CredentialScope, VaultBruh, VaultCheck, VaultCreate, VaultEntry, VaultListing, VaultUpdate,
-    BRUH_MISSING, ENTRY_CHANGED, ENTRY_GONE, INVALID_ENTRY, OWNER_ONLY, PROJECT_MISSING,
+    CredentialScope, VaultBruh, VaultCheck, VaultCreate, VaultEntry, VaultListing,
+    VaultSecretInput, VaultUpdate, BRUH_MISSING, ENTRY_CHANGED, ENTRY_GONE, INVALID_ENTRY,
+    MANAGE_IN_APPS, OWNER_ONLY, PROJECT_MISSING,
 };
 
 use crate::config::Config;
@@ -64,6 +68,13 @@ pub(super) fn owner_only(policy: &Policy, headers: &HeaderMap) -> Result<(), App
     } else {
         Err(AppError::Forbidden(OWNER_ONLY.into()))
     }
+}
+
+/// [`MANAGE_IN_APPS`] when `secret` is an app token, which only the Apps
+/// routes create or replace (D8, after their test call).
+fn app_token_refusal(secret: &VaultSecretInput) -> Option<AppError> {
+    matches!(secret, VaultSecretInput::AppToken { .. })
+        .then(|| AppError::BadRequest(MANAGE_IN_APPS.into()))
 }
 
 /// A request body that must be a vault request, or [`INVALID_ENTRY`].
@@ -117,6 +128,10 @@ pub async fn create(
 ) -> Result<Json<VaultEntry>, AppError> {
     owner_only(&config.access, &headers)?;
     let mut create = body(create)?;
+    if let Some(refused) = app_token_refusal(&create.secret) {
+        bruhs_core::secrets::discard(create);
+        return Err(refused);
+    }
     if let Err(refused) = scope_checked(&mut create.scope, runtime.as_ref()).await {
         // Its values are wiped as the store wipes a create it refuses.
         bruhs_core::secrets::discard(create);
@@ -197,6 +212,10 @@ pub async fn update(
 ) -> Result<Json<VaultEntry>, AppError> {
     owner_only(&config.access, &headers)?;
     let update = body(update)?;
+    if let Some(refused) = app_token_refusal(&update.secret) {
+        bruhs_core::secrets::discard_update(update);
+        return Err(refused);
+    }
     state
         .secrets()
         .vault_update(&id, update)

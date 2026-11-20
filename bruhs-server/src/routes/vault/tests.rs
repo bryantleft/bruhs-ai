@@ -9,7 +9,7 @@ use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::AppState;
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand};
 use bruhs_models::vault::{
-    SecretField, VaultAttention, BRUH_MISSING, CHECK_OK, ENTRY_GONE, INVALID_ENTRY,
+    SecretField, VaultAttention, BRUH_MISSING, CHECK_OK, ENTRY_GONE, INVALID_ENTRY, MANAGE_IN_APPS,
     PROJECT_MISSING, SIGN_IN_LOCAL,
 };
 use reqwest::Method;
@@ -471,4 +471,79 @@ async fn credentials_routes_are_gone() {
         assert!(!status.is_success(), "{method}: {text}");
         assert_eq!(status, unknown, "{method}: {text}");
     }
+}
+
+/// D8: only the Apps routes create or replace an app token. The vault
+/// routes refuse the kind, store nothing and never echo the token.
+#[tokio::test]
+async fn the_vault_routes_refuse_app_tokens() {
+    let fixture = Fixture::new().await;
+    let (token, key) = (canary("ghp"), canary("key"));
+    let app_token = |scope: Value| {
+        json!({
+            "name": "GitHub",
+            "scope": scope,
+            "secret": {"kind": "app_token", "app": "github", "account": "octocat",
+                "token": token},
+        })
+    };
+    for scope in [
+        json!({"type": "global"}),
+        json!({"type": "bruh", "agent_id": "a"}),
+        // A bruh that doesn't exist is refused as an app token first.
+        json!({"type": "bruh", "agent_id": "gone"}),
+    ] {
+        let (status, text) = fixture.create(app_token(scope)).await;
+        assert_eq!(
+            (status, text.as_str()),
+            (StatusCode::BAD_REQUEST, error(MANAGE_IN_APPS).as_str())
+        );
+    }
+    let trello = json!({
+        "name": "Trello",
+        "scope": {"type": "global"},
+        "secret": {"kind": "app_token", "app": "trello", "account": "me",
+            "token": token, "key": key},
+    });
+    let (status, text) = fixture.create(trello).await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::BAD_REQUEST, error(MANAGE_IN_APPS))
+    );
+    let (listing, text) = fixture.listing().await;
+    assert_eq!(listing["entries"], json!([]), "nothing was stored");
+    assert!(!text.contains(&token) && !text.contains(&key));
+
+    // Nor does an update replace one, even of an app token the Apps
+    // routes saved.
+    let saved = fixture
+        .state
+        .secrets()
+        .vault_create(serde_json::from_value(app_token(json!({"type": "global"}))).unwrap())
+        .await
+        .unwrap();
+    let replaced = canary("ghp");
+    let (status, text) = fixture
+        .send(
+            Method::PUT,
+            &format!("/api/vault/{}", saved.id),
+            Some(Body::Json(json!({"secret": {
+                "kind": "app_token", "app": "github", "account": "octocat",
+                "token": replaced,
+            }}))),
+        )
+        .await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::BAD_REQUEST, error(MANAGE_IN_APPS))
+    );
+    let stored = fixture
+        .state
+        .secrets()
+        .resolve_app_token(&saved.id)
+        .await
+        .unwrap();
+    assert_eq!(stored.token.as_str(), token);
+    let (_, text) = fixture.listing().await;
+    assert!(!text.contains(&token) && !text.contains(&replaced));
 }

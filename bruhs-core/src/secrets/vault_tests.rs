@@ -595,3 +595,173 @@ impl Drop for Release {
         self.0.hold_reads(false);
     }
 }
+
+fn github_token(name: &str, token: &str) -> VaultCreate {
+    key(
+        name,
+        VaultSecretInput::AppToken {
+            app: "github".into(),
+            account: "octocat".into(),
+            params: std::collections::BTreeMap::new(),
+            token: Some(token.into()),
+            key: None,
+        },
+    )
+}
+
+/// D8: an app token serves app calls only. It resolves on its own path,
+/// with the attention a read leaves, and no key, thread request or
+/// listing of keys ever gives it out.
+#[tokio::test]
+async fn app_tokens_resolve_and_never_serve_other_uses() {
+    let folder = tempfile::tempdir().unwrap();
+    let manager = manager(folder.path());
+    let token = canary("ghp");
+    let app = manager
+        .vault_create(github_token("GITHUB_TOKEN", &token))
+        .await
+        .unwrap();
+    let resolved = manager.resolve_app_token(&app.id).await.unwrap();
+    assert_eq!(resolved.token.as_str(), token);
+    assert!(resolved.key.is_none());
+    assert!(matches!(
+        manager.resolve_value(&app.id).await,
+        Err(SecretError::Invalid(MANAGE_IN_APPS))
+    ));
+    for field in [SecretField::Username, SecretField::Password] {
+        assert!(matches!(
+            manager.resolve_login(&app.id, field).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    // A thread asking for a key of its name finds no saved match.
+    assert_eq!(
+        manager
+            .store
+            .request_match("/q", "GITHUB_TOKEN")
+            .await
+            .unwrap(),
+        None
+    );
+
+    // Only app tokens list, and only app tokens resolve this way.
+    let plain = manager
+        .vault_create(key(
+            "KEY",
+            VaultSecretInput::Value {
+                value: Some(canary("value")),
+            },
+        ))
+        .await
+        .unwrap();
+    let ids: Vec<_> = manager
+        .app_tokens()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, std::slice::from_ref(&app.id));
+    for id in [plain.id.as_str(), "v1-unknown"] {
+        assert!(matches!(
+            manager.resolve_app_token(id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    assert_eq!(attention_of(&manager, &plain.id).await, None);
+
+    // A missing item needs a look, shown on the listing, and the next
+    // good read clears it.
+    manager
+        .store
+        .remove_item(&format!("vault:global:{}", app.id));
+    assert!(matches!(
+        manager.resolve_app_token(&app.id).await,
+        Err(SecretError::NotSaved)
+    ));
+    assert_eq!(
+        attention_of(&manager, &app.id).await,
+        Some(VaultAttention::Failed)
+    );
+    assert_eq!(
+        manager.app_tokens().await.unwrap()[0].attention,
+        Some(VaultAttention::Failed)
+    );
+    let replaced = canary("ghp");
+    manager
+        .vault_update(
+            &app.id,
+            VaultUpdate {
+                secret: VaultSecretInput::AppToken {
+                    app: "github".into(),
+                    account: "octocat".into(),
+                    params: std::collections::BTreeMap::new(),
+                    token: Some(replaced.clone()),
+                    key: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        manager
+            .resolve_app_token(&app.id)
+            .await
+            .unwrap()
+            .token
+            .as_str(),
+        replaced
+    );
+    assert_eq!(attention_of(&manager, &app.id).await, None);
+    let listing = serde_json::to_string(&manager.vault_listing().await.unwrap()).unwrap();
+    assert!(!listing.contains(&token) && !listing.contains(&replaced));
+}
+
+/// A token read stuck on a keychain prompt ends within the read wait, as
+/// a key's does, and parks no second read.
+#[tokio::test]
+async fn a_stuck_app_token_read_ends_within_the_read_wait() {
+    let folder = tempfile::tempdir().unwrap();
+    let manager = manager(folder.path()).with_read_wait(Duration::from_millis(200));
+    let token = canary("ghp");
+    let app = manager
+        .vault_create(github_token("GITHUB_TOKEN", &token))
+        .await
+        .unwrap();
+    let release = Release::hold(&manager.store);
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            manager.resolve_app_token(&app.id).await,
+            Err(SecretError::Storage)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+    assert_eq!(manager.store.held_reads(), 1);
+    assert_eq!(
+        attention_of(&manager, &app.id).await,
+        Some(VaultAttention::KeychainNeedsYou)
+    );
+    drop(release);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !manager
+            .reading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the parked read ends once the keychain answers");
+    assert_eq!(
+        manager
+            .resolve_app_token(&app.id)
+            .await
+            .unwrap()
+            .token
+            .as_str(),
+        token
+    );
+}

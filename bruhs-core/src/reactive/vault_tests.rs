@@ -746,6 +746,51 @@ async fn keys_are_listed_by_name_and_matched_own_first() {
     assert_eq!(runtime.usable_keys("b").await, ["B_ONLY"]);
 }
 
+/// D8: an app token is never a key, granted as one or as an app.
+#[tokio::test]
+async fn app_tokens_never_list_or_match_as_keys() {
+    let folder = tempfile::tempdir().unwrap();
+    let vault = manager(folder.path(), 0);
+    let token = |name: &str, scope: CredentialScope| VaultCreate {
+        name: name.into(),
+        scope,
+        secret: VaultSecretInput::AppToken {
+            app: "github".into(),
+            account: "octocat".into(),
+            params: std::collections::BTreeMap::new(),
+            token: Some(canary("ghp")),
+            key: None,
+        },
+    };
+    let shared = vault
+        .vault_create(token("GITHUB_TOKEN", CredentialScope::Global))
+        .await
+        .unwrap();
+    vault
+        .vault_create(token("OWN_TOKEN", bruh("a")))
+        .await
+        .unwrap();
+    let (_dir, runtime, _host, _fake) = vault_runtime(vault, None).await;
+    runtime
+        .command(set_vault("a", &[&shared.id]))
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::SetAppGrant {
+            agent_id: "a".into(),
+            grant: AppGrant::Token {
+                entry_id: shared.id.clone(),
+            },
+            granted: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(runtime.usable_keys("a").await, Vec::<String>::new());
+    for name in ["GITHUB_TOKEN", "OWN_TOKEN"] {
+        assert_eq!(runtime.usable_value("a", name).await, None, "{name}");
+    }
+}
+
 #[tokio::test]
 async fn a_hanging_vault_refuses_the_fill_within_the_wait() {
     let folder = tempfile::tempdir().unwrap();

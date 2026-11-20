@@ -28,6 +28,19 @@ pub fn discard(create: bruhs_models::vault::VaultCreate) {
     storage::scrub(create.secret);
 }
 
+/// [`discard`] for a vault update the caller refused.
+pub fn discard_update(update: VaultUpdate) {
+    storage::scrub(update.secret);
+}
+
+/// An app token's keychain values, read for one app call or poll (D8).
+/// Neither `Debug` nor `Clone`: the values are wiped when it drops.
+pub struct AppSecret {
+    pub token: Zeroizing<String>,
+    /// Trello's API key; `None` for every other app.
+    pub key: Option<Zeroizing<String>>,
+}
+
 use crate::{OrchestratorEvent, QueryEvent};
 use bruhs_models::{
     ids::ThreadId,
@@ -297,7 +310,11 @@ impl SecretManager {
         // by the read wait, and joined to a read already waiting (ruling A1
         // M1).
         let kept = || self.attended(id, self.keychain(id), false);
-        let entry = self.store.vault_update_keeping(id, update, kept).await?;
+        let kept_app = || self.attended(id, self.app_keychain(id), false);
+        let entry = self
+            .store
+            .vault_update_keeping(id, update, kept, kept_app)
+            .await?;
         self.refresh_saved_requests(&entry.name).await;
         Ok(entry)
     }
@@ -461,19 +478,48 @@ impl SecretManager {
     /// the server to fill.
     pub async fn vault_listing(&self) -> Result<VaultListing, SecretError> {
         let mut entries = self.store.vault_list().await?;
-        let attention = self
-            .attention
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        for entry in &mut entries {
-            entry.attention = attention.get(&entry.id).copied();
-        }
-        drop(attention);
+        self.show_attention(&mut entries);
         Ok(VaultListing {
             entries,
             bruhs: Vec::new(),
             one_password: self.one_password.installed(),
         })
+    }
+
+    /// Every app token entry, value free, with its last failure, sorted by
+    /// scope then name.
+    pub async fn app_tokens(&self) -> Result<Vec<VaultEntry>, SecretError> {
+        let mut entries = self.store.vault_list().await?;
+        entries.retain(|entry| matches!(entry.kind, VaultKind::AppToken(_)));
+        self.show_attention(&mut entries);
+        Ok(entries)
+    }
+
+    fn show_attention(&self, entries: &mut [VaultEntry]) {
+        let attention = self
+            .attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for entry in entries {
+            entry.attention = attention.get(&entry.id).copied();
+        }
+    }
+
+    /// An app token's values, for an app call or poll only (D8). The
+    /// lookup and the keychain read share one read wait, and the read
+    /// records or clears the entry's attention as a login's does. Any
+    /// other kind, or an id no entry has, is `NotSaved`.
+    pub async fn resolve_app_token(&self, id: &str) -> Result<AppSecret, SecretError> {
+        let started = tokio::time::Instant::now();
+        let entry = tokio::time::timeout(self.read_wait, self.known(id))
+            .await
+            .map_err(|_| SecretError::Storage)??;
+        if !matches!(entry.kind, VaultKind::AppToken(_)) {
+            return Err(SecretError::NotSaved);
+        }
+        let left = self.read_wait.saturating_sub(started.elapsed());
+        self.attended_within(id, left, self.app_keychain(id), false)
+            .await
     }
 
     /// A key's value, from the keychain or 1Password. A login, a newer
@@ -597,7 +643,19 @@ impl SecretManager {
         read: impl std::future::Future<Output = Result<T, SecretError>>,
         one_password: bool,
     ) -> Result<T, SecretError> {
-        let result = match tokio::time::timeout(self.read_wait, read).await {
+        self.attended_within(id, self.read_wait, read, one_password)
+            .await
+    }
+
+    /// [`Self::attended`] within `wait`.
+    async fn attended_within<T>(
+        &self,
+        id: &str,
+        wait: Duration,
+        read: impl std::future::Future<Output = Result<T, SecretError>>,
+        one_password: bool,
+    ) -> Result<T, SecretError> {
+        let result = match tokio::time::timeout(wait, read).await {
             Ok(result) => result,
             Err(_) if one_password => Err(OnePasswordError::NeedsOwner.into()),
             Err(_) => Err(SecretError::Storage),
@@ -638,6 +696,30 @@ impl SecretManager {
     /// wait) and then reads for itself; once the first one's waiter has
     /// given up, it is `Storage` at once.
     async fn keychain(&self, id: &str) -> Result<storage::VaultSecret, SecretError> {
+        self.flight(id, |store, id| async move {
+            store.vault_secret(&id).await?.ok_or(SecretError::NotSaved)
+        })
+        .await
+    }
+
+    /// An app token's keychain item, read as [`Self::keychain`] reads a
+    /// key's: one flight per entry.
+    async fn app_keychain(&self, id: &str) -> Result<AppSecret, SecretError> {
+        self.flight(id, |store, id| async move { store.app_secret(&id).await })
+            .await
+    }
+
+    /// Run `read` of entry `id`'s keychain item on its own task, joined to
+    /// a read of that item already in flight (see [`Self::keychain`]).
+    async fn flight<T, F>(
+        &self,
+        id: &str,
+        read: impl FnOnce(SecretStore, String) -> F,
+    ) -> Result<T, SecretError>
+    where
+        T: Send + 'static,
+        F: std::future::Future<Output = Result<T, SecretError>> + Send + 'static,
+    {
         let (flight, done) = loop {
             let mut done = {
                 let mut reading = self.reading.lock().unwrap_or_else(PoisonError::into_inner);
@@ -668,16 +750,14 @@ impl SecretManager {
             flight,
             _done: done,
         };
-        let store = self.store.clone();
-        let id = id.to_owned();
+        let read = read(self.store.clone(), id.to_owned());
         let read = tokio::spawn(async move {
             let _in_flight = in_flight;
-            store.vault_secret(&id).await
+            read.await
         })
         .await;
         starter.0 = None;
-        read.map_err(|_| SecretError::Catalog)??
-            .ok_or(SecretError::NotSaved)
+        read.map_err(|_| SecretError::Catalog)?
     }
 
     pub fn connections(&self) -> &crate::connections::Connections {

@@ -1217,3 +1217,377 @@ async fn older_kinds_and_app_tokens_round_trip_in_the_catalog() {
         Err(SecretError::NotSaved)
     ));
 }
+
+fn app_token(
+    name: &str,
+    scope: CredentialScope,
+    app: &str,
+    params: &[(&str, &str)],
+    token: &str,
+    key: Option<&str>,
+) -> VaultCreate {
+    VaultCreate {
+        name: name.into(),
+        scope,
+        secret: VaultSecretInput::AppToken {
+            app: app.into(),
+            account: "me@acme.test".into(),
+            params: params
+                .iter()
+                .map(|(id, value)| ((*id).to_owned(), (*value).to_owned()))
+                .collect(),
+            token: Some(token.into()),
+            key: key.map(Into::into),
+        },
+    }
+}
+
+fn app_update(
+    app: &str,
+    account: &str,
+    params: &[(&str, &str)],
+    token: Option<&str>,
+    key: Option<&str>,
+) -> VaultUpdate {
+    VaultUpdate {
+        secret: VaultSecretInput::AppToken {
+            app: app.into(),
+            account: account.into(),
+            params: params
+                .iter()
+                .map(|(id, value)| ((*id).to_owned(), (*value).to_owned()))
+                .collect(),
+            token: token.map(Into::into),
+            key: key.map(Into::into),
+        },
+    }
+}
+
+/// The stored token and key of an app token entry.
+async fn app_values(store: &SecretStore, id: &str) -> (String, Option<String>) {
+    let secret = store.app_secret(id).await.unwrap();
+    (
+        secret.token.as_str().to_owned(),
+        secret.key.as_deref().map(|key| key.as_str().to_owned()),
+    )
+}
+
+/// D8: an app token keeps one `{token, key}` blob in the keychain, stored
+/// trimmed, and only metadata in `vault.json`; the key and login read
+/// path never gives it out.
+#[tokio::test]
+async fn app_tokens_round_trip_without_values() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SecretStore(Backend::FileTest(
+        directory.path().into(),
+        MemoryKeys::default(),
+    ));
+    let (github_token, trello_token, trello_key) = (canary("ghp"), canary("trello"), canary("key"));
+    let github = store
+        .vault_create(app_token(
+            "GitHub",
+            CredentialScope::Global,
+            "github",
+            &[],
+            &format!("  {github_token}\n"),
+            None,
+        ))
+        .await
+        .unwrap();
+    let trello = store
+        .vault_create(app_token(
+            "Trello",
+            bruh("a"),
+            "trello",
+            &[],
+            &trello_token,
+            Some(&format!(" {trello_key} ")),
+        ))
+        .await
+        .unwrap();
+    for entry in [&github, &trello] {
+        assert!(entry.id.starts_with("v1-"), "{}", entry.id);
+        assert_eq!(entry.state, SavedCredentialState::Saved);
+    }
+    assert_eq!(
+        trello.kind,
+        VaultKind::AppToken(bruhs_models::vault::AppTokenMeta {
+            app: "trello".into(),
+            account: "me@acme.test".into(),
+            params: std::collections::BTreeMap::new(),
+        })
+    );
+    let mut expected = vec![
+        format!("vault:global:{}", github.id),
+        format!("vault:bruh:a:{}", trello.id),
+    ];
+    expected.sort();
+    assert_eq!(accounts(&store), expected);
+
+    let listed = serde_json::to_string(&store.vault_list().await.unwrap()).unwrap();
+    let file = fs::read_to_string(directory.path().join("vault.json")).unwrap();
+    for hidden in [&github_token, &trello_token, &trello_key] {
+        assert!(
+            !listed.contains(hidden.as_str()),
+            "the listing holds a value"
+        );
+        assert!(!file.contains(hidden.as_str()), "vault.json holds a value");
+    }
+    // One blob each, trimmed; the key only for Trello.
+    let blob: serde_json::Value =
+        serde_json::from_str(&item(&store, &format!("vault:global:{}", github.id)).unwrap())
+            .unwrap();
+    assert_eq!(blob, serde_json::json!({"token": github_token}));
+    let blob: serde_json::Value =
+        serde_json::from_str(&item(&store, &format!("vault:bruh:a:{}", trello.id)).unwrap())
+            .unwrap();
+    assert_eq!(
+        blob,
+        serde_json::json!({"token": trello_token, "key": trello_key})
+    );
+
+    assert_eq!(app_values(&store, &github.id).await, (github_token, None));
+    assert_eq!(
+        app_values(&store, &trello.id).await,
+        (trello_token, Some(trello_key))
+    );
+    // The key and login path never reads one, and the app path reads
+    // nothing else.
+    for id in [&github.id, &trello.id] {
+        assert!(matches!(
+            store.vault_secret(id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    let other = store
+        .vault_create(key("DEPLOY_KEY", CredentialScope::Global, &canary("value")))
+        .await
+        .unwrap();
+    for id in [other.id.as_str(), "v1-unknown"] {
+        assert!(matches!(
+            store.app_secret(id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    // A damaged blob is never used: not JSON, a short token, or a Trello
+    // blob without its key.
+    for damaged in [
+        "not json".to_owned(),
+        serde_json::json!({"token": "short"}).to_string(),
+        serde_json::json!({"token": canary("trello")}).to_string(),
+    ] {
+        memory_keys(&store)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                format!("vault:bruh:a:{}", trello.id),
+                Zeroizing::new(damaged),
+            );
+        assert!(matches!(
+            store.app_secret(&trello.id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    // Deleting one removes its row and item.
+    store.vault_delete(&github.id).await.unwrap();
+    assert!(item(&store, &format!("vault:global:{}", github.id)).is_none());
+}
+
+/// Ruling A Task 2: the account is capped at 64 characters, and a token
+/// never goes to a Project.
+#[tokio::test]
+async fn app_tokens_refuse_long_accounts_and_projects() {
+    let store = SecretStore::in_memory();
+    let mut long = app_token(
+        "GitHub",
+        CredentialScope::Global,
+        "github",
+        &[],
+        &canary("ghp"),
+        None,
+    );
+    if let VaultSecretInput::AppToken { account, .. } = &mut long.secret {
+        *account = "a".repeat(bruhs_models::vault::MAX_APP_ACCOUNT_CHARS + 1);
+    }
+    assert!(matches!(
+        store.vault_create(long).await,
+        Err(SecretError::Invalid(bruhs_models::vault::INVALID_ENTRY))
+    ));
+    assert!(matches!(
+        store
+            .vault_create(app_token(
+                "GitHub",
+                project("/p"),
+                "github",
+                &[],
+                &canary("ghp"),
+                None
+            ))
+            .await,
+        Err(SecretError::Invalid(bruhs_models::vault::APPS_NOT_PROJECTS))
+    ));
+    assert!(store.vault_list().await.unwrap().is_empty());
+    assert!(accounts(&store).is_empty());
+}
+
+#[tokio::test]
+async fn replacing_a_token_keeps_the_account_and_params() {
+    let store = SecretStore::in_memory();
+    let (token, key) = (canary("trello"), canary("key"));
+    let trello = store
+        .vault_create(app_token(
+            "Trello",
+            CredentialScope::Global,
+            "trello",
+            &[],
+            &token,
+            Some(&key),
+        ))
+        .await
+        .unwrap();
+    // A new token only: the key stays, and so does the metadata.
+    let replaced = canary("trello");
+    let updated = store
+        .vault_update(
+            &trello.id,
+            app_update(
+                "trello",
+                "me@acme.test",
+                &[],
+                Some(&format!(" {replaced} ")),
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.kind, trello.kind);
+    assert_eq!(updated.state, SavedCredentialState::Saved);
+    assert_eq!(
+        app_values(&store, &trello.id).await,
+        (replaced.clone(), Some(key.clone()))
+    );
+    // A new key only keeps the token.
+    let new_key = canary("key");
+    store
+        .vault_update(
+            &trello.id,
+            app_update("trello", "me@acme.test", &[], None, Some(&new_key)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        app_values(&store, &trello.id).await,
+        (replaced.clone(), Some(new_key.clone()))
+    );
+    // Neither changes nothing.
+    store
+        .vault_update(
+            &trello.id,
+            app_update("trello", "me@acme.test", &[], None, None),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        app_values(&store, &trello.id).await,
+        (replaced.clone(), Some(new_key.clone()))
+    );
+
+    // Jira's params are compared as stored: normalized, they must match.
+    let jira = store
+        .vault_create(app_token(
+            "Jira",
+            CredentialScope::Global,
+            "jira",
+            &[("email", " me@acme.test "), ("site", "Acme")],
+            &canary("jira"),
+            None,
+        ))
+        .await
+        .unwrap();
+    let VaultKind::AppToken(meta) = &jira.kind else {
+        panic!("an app token");
+    };
+    assert_eq!(meta.params["site"], "acme");
+    assert_eq!(meta.params["email"], "me@acme.test");
+    let jira_token = canary("jira");
+    let updated = store
+        .vault_update(
+            &jira.id,
+            app_update(
+                "jira",
+                "me@acme.test",
+                &[("email", "me@acme.test"), ("site", " ACME ")],
+                Some(&jira_token),
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.kind, jira.kind);
+    assert_eq!(
+        app_values(&store, &jira.id).await,
+        (jira_token.clone(), None)
+    );
+
+    // Another app, account or site is refused, and so is a param that
+    // isn't the app's.
+    let refused = [
+        (
+            app_update("github", "me@acme.test", &[], Some(&canary("x")), None),
+            KIND_FIXED,
+        ),
+        (
+            app_update(
+                "jira",
+                "other@acme.test",
+                &[("email", "me@acme.test"), ("site", "acme")],
+                Some(&canary("x")),
+                None,
+            ),
+            KIND_FIXED,
+        ),
+        (
+            app_update(
+                "jira",
+                "me@acme.test",
+                &[("email", "me@acme.test"), ("site", "other")],
+                Some(&canary("x")),
+                None,
+            ),
+            KIND_FIXED,
+        ),
+        (
+            app_update(
+                "jira",
+                "me@acme.test",
+                &[("email", "me@acme.test"), ("site", "acme"), ("key", "x")],
+                Some(&canary("x")),
+                None,
+            ),
+            bruhs_models::vault::INVALID_ENTRY,
+        ),
+    ];
+    for (update, expected) in refused {
+        let result = store.vault_update(&jira.id, update).await;
+        assert!(
+            matches!(result, Err(SecretError::Invalid(message)) if message == expected),
+            "{result:?}"
+        );
+    }
+    assert_eq!(app_values(&store, &jira.id).await, (jira_token, None));
+    assert_eq!(store.vault_entry(&jira.id).await.unwrap(), Some(jira));
+    // A Trello token with no stored blob can't keep its key.
+    memory_keys(&store)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(&format!("vault:global:{}", trello.id));
+    assert!(matches!(
+        store
+            .vault_update(
+                &trello.id,
+                app_update("trello", "me@acme.test", &[], Some(&canary("t")), None),
+            )
+            .await,
+        Err(SecretError::NotSaved)
+    ));
+}

@@ -10,12 +10,14 @@ use super::{
     read_catalog, storage_key, write_atomically, Backend, Catalog, Keys, SecretError, SecretStore,
     Vault,
 };
+use crate::secrets::AppSecret;
 use bruhs_models::{
+    apps::{AppConnector, AppParam},
     secrets::{SavedCredential, SavedCredentialState},
     vault::{
-        base32_decode, base32_encode, parse_totp_setup, CredentialScope, LoginFields, LoginInput,
-        LoginMeta, SavedSource, TotpAlgorithm, TotpInput, VaultCreate, VaultEntry, VaultKind,
-        VaultSecretInput, VaultUpdate, DUPLICATE_NAME, MANAGE_IN_APPS,
+        base32_decode, base32_encode, parse_totp_setup, AppTokenMeta, CredentialScope, LoginFields,
+        LoginInput, LoginMeta, SavedSource, TotpAlgorithm, TotpInput, VaultCreate, VaultEntry,
+        VaultKind, VaultSecretInput, VaultUpdate, DUPLICATE_NAME, INVALID_ENTRY, KIND_FIXED,
     },
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -238,14 +240,10 @@ impl LoginBlob {
                     algorithm: totp.algorithm,
                 }),
         };
-        // Sized up front (escapes take at most six bytes per byte), so the
-        // buffer never reallocates and leaves a copy behind.
-        let capacity = (self.password.len() + secret.as_ref().map_or(0, |s| s.len())) * 6 + 128;
-        let mut bytes = Zeroizing::new(Vec::with_capacity(capacity));
-        serde_json::to_writer(&mut *bytes, &blob).map_err(|_| SecretError::Storage)?;
-        String::from_utf8(std::mem::take(&mut *bytes))
-            .map(Zeroizing::new)
-            .map_err(|_| SecretError::Storage)
+        blob_json(
+            &blob,
+            self.password.len() + secret.as_ref().map_or(0, |s| s.len()),
+        )
     }
 
     fn parse(text: &str) -> Result<Self, SecretError> {
@@ -270,6 +268,83 @@ impl LoginBlob {
             }
         };
         Ok(Self { password, totp })
+    }
+}
+
+/// A keychain blob as JSON, its values `value_bytes` long in all. Sized up
+/// front (escapes take at most six bytes per byte), so the buffer never
+/// reallocates and leaves a copy behind.
+fn blob_json(blob: &impl Serialize, value_bytes: usize) -> Result<Zeroizing<String>, SecretError> {
+    let mut bytes = Zeroizing::new(Vec::with_capacity(value_bytes * 6 + 128));
+    serde_json::to_writer(&mut *bytes, blob).map_err(|_| SecretError::Storage)?;
+    String::from_utf8(std::mem::take(&mut *bytes))
+        .map(Zeroizing::new)
+        .map_err(|_| SecretError::Storage)
+}
+
+/// An app token's keychain blob as written (D8): borrowed, like a login's.
+#[derive(Serialize)]
+struct AppBlobOut<'a> {
+    token: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key: Option<&'a str>,
+}
+
+/// The blob as read; each string moves into `Zeroizing` once parsed.
+#[derive(Deserialize)]
+struct AppBlobIn {
+    token: String,
+    #[serde(default)]
+    key: Option<String>,
+}
+
+/// One of an app's secret params, by id (`token` or `key`).
+fn secret_param(connector: &AppConnector, id: &str) -> Option<&'static AppParam> {
+    connector
+        .params
+        .iter()
+        .find(|param| param.secret && param.id == id)
+}
+
+/// A token or key as stored: trimmed and checked by the app's rules
+/// ([`bruhs_models::apps::validate_param`]), and wiped when dropped.
+fn app_value(param: &AppParam, value: &str) -> Result<Zeroizing<String>, &'static str> {
+    bruhs_models::apps::validate_param(param, value).map(Zeroizing::new)
+}
+
+/// The connector an app token entry names.
+fn app_connector(app: &str) -> Result<&'static AppConnector, SecretError> {
+    bruhs_models::apps::connector(app).ok_or(SecretError::Invalid(INVALID_ENTRY))
+}
+
+impl AppSecret {
+    /// The keychain item for these values.
+    fn to_json(&self) -> Result<Item, SecretError> {
+        let blob = AppBlobOut {
+            token: &self.token,
+            key: self.key.as_deref().map(String::as_str),
+        };
+        let bytes = self.token.len() + self.key.as_ref().map_or(0, |key| key.len());
+        Ok(Item::Write(blob_json(&blob, bytes)?))
+    }
+
+    /// A stored blob, checked as a new one is, so a damaged item (not
+    /// JSON, a short token, a missing or stray key) is never used.
+    fn parse(connector: &AppConnector, text: &str) -> Result<Self, SecretError> {
+        let blob: AppBlobIn = serde_json::from_str(text).map_err(|_| SecretError::NotSaved)?;
+        let (token, key) = (Zeroizing::new(blob.token), blob.key.map(Zeroizing::new));
+        let checked = |id: &str, value: &str| {
+            secret_param(connector, id)
+                .and_then(|param| app_value(param, value).ok())
+                .ok_or(SecretError::NotSaved)
+        };
+        let token = checked("token", &token)?;
+        let key = match (secret_param(connector, "key"), key) {
+            (Some(_), Some(key)) => Some(checked("key", &key)?),
+            (None, None) => None,
+            (Some(_), None) | (None, Some(_)) => return Err(SecretError::NotSaved),
+        };
+        Ok(Self { token, key })
     }
 }
 
@@ -620,10 +695,6 @@ impl SecretStore {
             scrub(create.secret);
             return Err(SecretError::Invalid(error));
         }
-        if matches!(create.secret, VaultSecretInput::AppToken { .. }) {
-            scrub(create.secret);
-            return Err(SecretError::Invalid(MANAGE_IN_APPS));
-        }
         let kind = create.secret.kind_meta().unwrap_or(VaultKind::Value);
         let VaultCreate {
             name,
@@ -635,8 +706,9 @@ impl SecretStore {
                 value.ok_or(SecretError::Invalid(bruhs_models::vault::ENTER_VALUE))?,
             )),
             VaultSecretInput::OnePassword { .. } => Item::Keep,
-            // Refused above.
-            VaultSecretInput::AppToken { .. } => return Err(SecretError::Invalid(MANAGE_IN_APPS)),
+            VaultSecretInput::AppToken {
+                app, token, key, ..
+            } => new_app_blob(&app, token.map(Zeroizing::new), key.map(Zeroizing::new))?,
             VaultSecretInput::Login { fields, .. } => match fields {
                 LoginInput::OnePassword { .. } => Item::Keep,
                 LoginInput::Saved { password, totp, .. } => {
@@ -692,8 +764,7 @@ impl SecretStore {
         id: &str,
         update: VaultUpdate,
     ) -> Result<VaultEntry, SecretError> {
-        let store = self.clone();
-        let owned = id.to_owned();
+        let (store, owned) = (self.clone(), id.to_owned());
         let kept = move || async move {
             match tokio::time::timeout(crate::secrets::VAULT_READ_WAIT, store.vault_secret(&owned))
                 .await
@@ -702,22 +773,31 @@ impl SecretStore {
                 Err(_) => Err(SecretError::Storage),
             }
         };
-        self.vault_update_keeping(id, update, kept).await
+        let (store, owned) = (self.clone(), id.to_owned());
+        let kept_app = move || async move {
+            tokio::time::timeout(crate::secrets::VAULT_READ_WAIT, store.app_secret(&owned))
+                .await
+                .map_err(|_| SecretError::Storage)?
+        };
+        self.vault_update_keeping(id, update, kept, kept_app).await
     }
 
     /// [`Self::vault_update`] whose Saved login reads a part it keeps (the
-    /// stored password or setup key) with `kept`, after the snapshot, so
-    /// the revision check still catches a write that crossed it. The
-    /// manager passes its bounded read, which a stuck keychain prompt fails
-    /// within the read wait without parking another read (ruling A1 M1).
-    pub(in crate::secrets) async fn vault_update_keeping<F>(
+    /// stored password or setup key) with `kept`, and whose app token reads
+    /// its kept token or key with `kept_app`, after the snapshot, so the
+    /// revision check still catches a write that crossed it. The manager
+    /// passes its bounded reads, which a stuck keychain prompt fails within
+    /// the read wait without parking another read (ruling A1 M1).
+    pub(in crate::secrets) async fn vault_update_keeping<F, G>(
         &self,
         id: &str,
         update: VaultUpdate,
         kept: impl FnOnce() -> F,
+        kept_app: impl FnOnce() -> G,
     ) -> Result<VaultEntry, SecretError>
     where
         F: std::future::Future<Output = Result<VaultSecret, SecretError>>,
+        G: std::future::Future<Output = Result<AppSecret, SecretError>>,
     {
         let checked = match self.snapshot().await {
             Ok(snapshot) => match snapshot.entry(id) {
@@ -731,11 +811,6 @@ impl SecretStore {
             Err(error) => Err(error),
         };
         let (snapshot, existing) = match checked {
-            // App tokens change only through Settings, Apps.
-            Ok(_) if matches!(update.secret, VaultSecretInput::AppToken { .. }) => {
-                scrub(update.secret);
-                return Err(SecretError::Invalid(MANAGE_IN_APPS));
-            }
             Ok(checked) => checked,
             Err(error) => {
                 scrub(update.secret);
@@ -763,8 +838,17 @@ impl SecretStore {
                 fields: LoginInput::OnePassword { .. },
                 ..
             } => (kind, removal(&existing)),
-            // Refused above.
-            VaultSecretInput::AppToken { .. } => return Err(SecretError::Invalid(MANAGE_IN_APPS)),
+            VaultSecretInput::AppToken {
+                account,
+                params,
+                token,
+                key,
+                ..
+            } => {
+                let (token, key) = (token.map(Zeroizing::new), key.map(Zeroizing::new));
+                let item = app_token_change(&existing, &account, &params, token, key, kept_app);
+                (existing.kind.clone(), item.await?)
+            }
             VaultSecretInput::Login {
                 fields: LoginInput::Saved { password, totp, .. },
                 ..
@@ -871,6 +955,25 @@ impl SecretStore {
             }))
     }
 
+    /// An app token's values, read without the catalog lock (ruling F13).
+    /// Its own path: [`Self::vault_secret`] never gives one out. Any other
+    /// kind, an unknown entry, or a missing or damaged item is `NotSaved`.
+    pub(in crate::secrets) async fn app_secret(&self, id: &str) -> Result<AppSecret, SecretError> {
+        let snapshot = self.snapshot().await?;
+        let entry = snapshot.entry(id)?.ok_or(SecretError::NotSaved)?;
+        let VaultKind::AppToken(meta) = &entry.kind else {
+            return Err(SecretError::NotSaved);
+        };
+        let connector = app_connector(&meta.app).map_err(|_| SecretError::NotSaved)?;
+        let account = account(&entry);
+        let keys = snapshot.keys;
+        let text = tokio::task::spawn_blocking(move || keys.read(&account))
+            .await
+            .map_err(|_| SecretError::Catalog)??
+            .ok_or(SecretError::NotSaved)?;
+        AppSecret::parse(connector, &text)
+    }
+
     /// An entry's keychain values, read without the catalog lock (ruling
     /// F13). `Ok(None)` only for a 1Password kind, which keeps no item; an
     /// unknown entry, a key or Saved login whose item is missing, an app
@@ -970,6 +1073,97 @@ where
     }
     let password = password.or(stored_password).ok_or(SecretError::NotSaved)?;
     Ok((kind, new_login_blob(password, totp)?))
+}
+
+/// A new app token's keychain item: the token, and the key the app needs,
+/// stored trimmed (D8). Validation has checked both; this reads them again
+/// so only checked values are stored.
+fn new_app_blob(
+    app: &str,
+    token: Option<Zeroizing<String>>,
+    key: Option<Zeroizing<String>>,
+) -> Result<Item, SecretError> {
+    let connector = app_connector(app)?;
+    let checked = |id: &'static str, given: Option<Zeroizing<String>>| {
+        let param = secret_param(connector, id).ok_or(SecretError::Invalid(INVALID_ENTRY))?;
+        let given = given.ok_or(SecretError::Invalid(bruhs_models::apps::ENTER_TOKEN))?;
+        app_value(param, &given).map_err(SecretError::Invalid)
+    };
+    let token = checked("token", token)?;
+    let key = match (secret_param(connector, "key"), key) {
+        (None, None) => None,
+        (_, key) => Some(checked("key", key)?),
+    };
+    AppSecret { token, key }.to_json()
+}
+
+/// The keychain item of an app token update (the Apps page's replace). The
+/// account and params stay as stored: the update must name them as they
+/// are, params compared as validation normalizes them, or it is
+/// [`KIND_FIXED`]. A missing token or key keeps the stored one, read with
+/// `kept`; with neither the item stays.
+async fn app_token_change<G>(
+    existing: &VaultEntry,
+    account: &str,
+    params: &BTreeMap<String, String>,
+    token: Option<Zeroizing<String>>,
+    key: Option<Zeroizing<String>>,
+    kept: impl FnOnce() -> G,
+) -> Result<Item, SecretError>
+where
+    G: std::future::Future<Output = Result<AppSecret, SecretError>>,
+{
+    let VaultKind::AppToken(meta) = &existing.kind else {
+        return Err(SecretError::Invalid(KIND_FIXED));
+    };
+    let connector = app_connector(&meta.app)?;
+    if account != meta.account || !same_params(connector, meta, params) {
+        return Err(SecretError::Invalid(KIND_FIXED));
+    }
+    let checked = |id: &'static str, given: Option<Zeroizing<String>>| match given {
+        None => Ok(None),
+        Some(given) => {
+            let param = secret_param(connector, id).ok_or(SecretError::Invalid(INVALID_ENTRY))?;
+            app_value(param, &given)
+                .map(Some)
+                .map_err(SecretError::Invalid)
+        }
+    };
+    let (token, key) = (checked("token", token)?, checked("key", key)?);
+    let needs_key = secret_param(connector, "key").is_some();
+    let secret = match (token, key) {
+        (None, None) => return Ok(Item::Keep),
+        (Some(token), key) if key.is_some() || !needs_key => AppSecret { token, key },
+        (token, key) => {
+            let stored = kept().await?;
+            AppSecret {
+                token: token.unwrap_or(stored.token),
+                key: key.or(stored.key),
+            }
+        }
+    };
+    if needs_key && secret.key.is_none() {
+        return Err(SecretError::NotSaved);
+    }
+    secret.to_json()
+}
+
+/// Whether `params`, normalized as validation reads them, are the stored
+/// ones exactly.
+fn same_params(
+    connector: &AppConnector,
+    meta: &AppTokenMeta,
+    params: &BTreeMap<String, String>,
+) -> bool {
+    params.len() == meta.params.len()
+        && params.iter().all(|(id, value)| {
+            connector
+                .params
+                .iter()
+                .find(|param| !param.secret && param.id == id)
+                .and_then(|param| bruhs_models::apps::validate_param(param, value).ok())
+                .is_some_and(|value| meta.params.get(id) == Some(&value))
+        })
 }
 
 /// Move a refused input's values into `Zeroizing`, so dropping them wipes
