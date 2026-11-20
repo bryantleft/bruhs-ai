@@ -171,7 +171,7 @@ kbd, .kbd {
 .icon, .works-with img { flex: none; translate: 0 var(--icon-lift, -0.1em); }
 
 .bruh { display: block; width: 100%; }
-.bruh-hero { aspect-ratio: 1; max-width: min(340px, 38vh); }
+.bruh-hero { aspect-ratio: 1; max-width: min(184px, 20vh); }
 
 /* Command bar (hero and ⌘K dialog share the markup) */
 .palette { background: var(--longan-900); border-radius: var(--lychee); box-shadow: inset 0 0 0 1px var(--ring-10); overflow: hidden; }
@@ -391,15 +391,13 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
   .nav .hide-sm { display: none; }
   .hero { padding: 24px 0 48px; }
   .hero-stack { gap: 20px; }
-  .bruh-hero { max-width: min(200px, 22vh); }
+  .bruh-hero { max-width: min(96px, 14vh); }
 }
 /* Landscape phones: short, so the headline and Download come first. */
 @media (max-height: 500px) and (orientation: landscape) {
   .hero { padding: 24px 0 32px; }
   .hero .display { font-size: clamp(2.25rem, 7vh, 3rem); }
-  /* No room above the line on a ~390px-tall screen: the peek at the end
-     still shows the bruh. */
-  .bruh-hero { display: none; }
+  .bruh-hero { max-width: 48px; }
   .hero-stack { gap: 14px; }
 }
 @media (max-width: 560px) {
@@ -458,50 +456,4 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .window.revealing { mask-image: none; }
-}
-
-.memory-hero, .recall {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  align-items: center;
-  gap: clamp(2rem, 8vw, 7rem);
-}
-.memory-hero { padding-block: clamp(1rem, 4vw, 4rem); }
-.hero-copy { display: grid; justify-items: start; gap: 24px; }
-.hero-copy .get-row { justify-content: flex-start; }
-.field-note {
-  margin: 0;
-  padding: clamp(1.25rem, 3.5vw, 3rem);
-  color: var(--longan-950);
-  background: var(--rambutan-200);
-  border-top: 5px solid var(--persimmon-400);
-}
-.field-note figcaption { font: 500 .82rem/1.4 var(--argon); }
-.field-note blockquote {
-  margin: 1.4rem 0;
-  font: 500 clamp(1.15rem, 2vw, 1.65rem)/1.45 var(--xenon);
-}
-.field-note dl, .shortcuts { margin: 0; }
-.field-note dl div, .shortcuts div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-block: .55rem;
-  font-size: .85rem;
-}
-.field-note dl div { border-top: 1px dotted var(--longan-300); }
-.field-note dd, .shortcuts dd { margin: 0; text-align: end; }
-.tour-intro { max-width: 64ch; text-align: center; margin-bottom: 32px; }
-.tour-intro p, .recall p { color: var(--rambutan-400); }
-.shortcuts { max-width: 38ch; }
-.shortcuts div { border-bottom: 1px dotted var(--longan-700); }
-.shortcuts kbd { white-space: nowrap; font-family: var(--argon); }
-.concept { border-inline-start: 2px solid var(--durian-300); padding-inline-start: 1.5rem; }
-.concept h3 { color: var(--durian-300); }
-.concept p { margin-bottom: 0; }
-@media (max-width: 760px) {
-  .memory-hero, .recall { grid-template-columns: minmax(0, 1fr); }
-  .memory-hero { padding-block: .75rem; }
-  .tour-intro { text-align: start; }
 }
