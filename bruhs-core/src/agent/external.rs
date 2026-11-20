@@ -581,6 +581,7 @@ pub(super) async fn stream(mut options: Options, turn: TurnContext) {
             return;
         }
     };
+    turn.register_process(process.pid());
     let write = async {
         let mut stdin = process
             .take_stdin()

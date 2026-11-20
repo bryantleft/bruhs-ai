@@ -133,6 +133,10 @@ impl Drop for ProcessGroup {
 }
 
 impl CliProcess {
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     /// Spawn `cmd` with stdout and stderr piped and `kill_on_drop` set; stdin
     /// is left as the caller configured it.
     ///

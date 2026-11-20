@@ -204,6 +204,7 @@ async fn run_config(
         &[],
     );
     let mut child = process::CliProcess::spawn("ACP agent", &mut command)?;
+    turn.register_process(child.pid());
     let mut stdin = child
         .take_stdin()
         .ok_or_else(|| io::Error::other("ACP stdin unavailable."))?;

@@ -388,6 +388,11 @@ impl AppState {
         self.orchestrator.steer(thread_id, prompt).await
     }
 
+    /// Active local CLI, identified by turn generation and host PID.
+    pub fn thread_process(&self, thread_id: &ThreadId) -> Option<(u64, u32)> {
+        self.orchestrator.thread_process(thread_id)
+    }
+
     /// Whether `thread_id` has a turn in flight.
     pub fn thread_status(&self, thread_id: &ThreadId) -> ThreadStatus {
         self.orchestrator.thread_status(thread_id)

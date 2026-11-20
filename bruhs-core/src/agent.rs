@@ -417,6 +417,7 @@ impl Stream for OrchestratorEventStream {
 // ---------------------------------------------------------------------------
 
 struct ThreadSession {
+    process_id: Option<u32>,
     status: ThreadStatus,
     /// Number of the turn that set `status`; a guard from an older turn
     /// never touches a newer one.
@@ -452,6 +453,7 @@ impl Drop for TurnGuard {
         if let Some(session) = sessions.get_mut(&self.thread_id) {
             if session.turn == self.turn {
                 session.status = ThreadStatus::Idle;
+                session.process_id = None;
             }
         }
     }
@@ -707,6 +709,7 @@ impl AgentOrchestrator {
             let session = sessions
                 .entry(thread_id.clone())
                 .or_insert_with(|| ThreadSession {
+                    process_id: None,
                     status: ThreadStatus::Idle,
                     turn: 0,
                     session: None,
@@ -958,6 +961,13 @@ impl AgentOrchestrator {
             _threads: consumer_threads,
             _turn: consumer_guard,
         })
+    }
+
+    /// Active local CLI, identified by turn generation and host PID.
+    pub fn thread_process(&self, thread_id: &ThreadId) -> Option<(u64, u32)> {
+        let sessions = lock_sessions(&self.sessions);
+        let session = sessions.get(thread_id)?;
+        Some((session.turn, session.process_id?))
     }
 
     /// Whether `thread_id` has a turn in flight.
@@ -1614,6 +1624,7 @@ async fn stream_claude(
             return;
         }
     };
+    turn.register_process(stream.process_id);
     let responder = stream.responder();
     steers
         .lock()
@@ -1682,6 +1693,7 @@ async fn stream_codex(
             return;
         }
     };
+    turn.register_process(stream.process_id);
     let mut reported_error = false;
     let consumer_alive = loop {
         let event = tokio::select! {
@@ -1721,6 +1733,14 @@ async fn stream_codex(
 }
 
 impl TurnContext {
+    fn register_process(&self, pid: Option<u32>) {
+        if let Some(session) = lock_sessions(&self.sessions).get_mut(&self.owner.thread_id) {
+            if session.turn == self.owner.turn && session.status == ThreadStatus::Streaming {
+                session.process_id = pid;
+            }
+        }
+    }
+
     /// Report that the provider CLI could not be started.
     async fn send_start_error(&self, message: String) {
         // Best effort: if the caller already dropped the stream there is
@@ -3118,6 +3138,7 @@ mod tests {
         lock_sessions(&sessions).insert(
             thread.clone(),
             ThreadSession {
+                process_id: None,
                 status: ThreadStatus::Streaming,
                 turn: 2,
                 session: None,
@@ -3187,6 +3208,7 @@ mod tests {
         lock_sessions(&sessions).insert(
             thread.clone(),
             ThreadSession {
+                process_id: None,
                 status: ThreadStatus::Streaming,
                 turn: 1,
                 session: None,
@@ -3204,6 +3226,9 @@ mod tests {
             drop(guard);
         }
         let (new, _new_rx) = turn_context(&sessions, &registry, &thread, 2);
+        new.register_process(Some(42));
+        old.register_process(Some(41));
+        assert_eq!(lock_sessions(&sessions)[&thread].process_id, Some(42));
         assert!(new.forward(background_bash("new-task")).await);
         new.remember_session(&QueryEvent::Init {
             session_id: "new-session".into(),

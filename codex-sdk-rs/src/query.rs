@@ -62,6 +62,7 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
     let prompt = options.prompt;
 
     let (tx, rx) = mpsc::channel(256);
+    let process_id = process.pid();
     tokio::spawn(async move {
         let ending = pump(&mut process, &tx, stdin, prompt, &mut turn).await;
         let failure = process.finish(ending).await;
@@ -76,7 +77,7 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
         }
     });
 
-    Ok(QueryStream { rx })
+    Ok(QueryStream { process_id, rx })
 }
 
 /// The `codex` invocation for `options`, minus stdio setup.
@@ -460,6 +461,8 @@ fn parse_item_completed(json: serde_json::Value) -> QueryEvent {
 /// The events of one [`query()`]. Dropping it kills and reaps the CLI.
 #[derive(Debug)]
 pub struct QueryStream {
+    /// Host PID of the CLI spawned for this query.
+    pub process_id: Option<u32>,
     rx: mpsc::Receiver<QueryEvent>,
 }
 

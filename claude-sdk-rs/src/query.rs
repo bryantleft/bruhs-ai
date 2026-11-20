@@ -62,6 +62,7 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
     let first_message = streaming.then(|| user_message_line(&options.prompt));
 
     let (tx, rx) = mpsc::channel(256);
+    let process_id = process.pid();
     tokio::spawn(async move {
         let ending = pump(&mut process, &tx, &stdin_slot, first_message).await;
         // The turn is over either way; a CLI in streaming-input mode only
@@ -73,7 +74,11 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
         }
     });
 
-    Ok(QueryStream { rx, responder })
+    Ok(QueryStream {
+        process_id,
+        rx,
+        responder,
+    })
 }
 
 /// Send the first message (streaming-input mode), then forward parsed stdout
@@ -555,6 +560,8 @@ fn parse_result(json: &serde_json::Value, subtype: &str) -> QueryEvent {
 /// The events of one [`query()`]. Dropping it kills and reaps the CLI.
 #[derive(Debug)]
 pub struct QueryStream {
+    /// Host PID of the CLI spawned for this query.
+    pub process_id: Option<u32>,
     rx: mpsc::Receiver<QueryEvent>,
     responder: PermissionResponder,
 }
