@@ -27,7 +27,7 @@ fn format_error(e: std::io::Error) -> FormatError {
 }
 
 fn read_all(blob: &[u8], pw: &str) -> Result<Vec<u8>, FormatError> {
-    let mut d = Decryptor::open(blob, Secret::Password(pw))?;
+    let mut d = Decryptor::open(blob, Secret::Password(pw), Kind::Full)?;
     let mut out = Vec::new();
     d.read_to_end(&mut out).map_err(format_error)?;
     d.finish()?;
@@ -66,7 +66,7 @@ fn small_writes_round_trip_like_one_large_write() {
     let blob = e.finish().unwrap();
     assert_eq!(blob, sealed(&plain, &full()));
     let mut out = Vec::new();
-    let mut r = Decryptor::open(&blob[..], Secret::Password(PW)).unwrap();
+    let mut r = Decryptor::open(&blob[..], Secret::Password(PW), Kind::Full).unwrap();
     let mut small = [0u8; 777];
     loop {
         let n = r.read(&mut small).unwrap();
@@ -182,7 +182,7 @@ fn errors_stick_and_finish_needs_the_whole_stream() {
     let blob = sealed(&pattern(3 * c), &full());
     let mut body_flip = blob.clone();
     body_flip[HEADER_LEN + c + 40] ^= 1;
-    let mut d = Decryptor::open(&body_flip[..], Secret::Password(PW)).unwrap();
+    let mut d = Decryptor::open(&body_flip[..], Secret::Password(PW), Kind::Full).unwrap();
     let mut out = Vec::new();
     assert!(d.read_to_end(&mut out).is_err());
     let mut buf = [0u8; 8];
@@ -196,19 +196,19 @@ fn errors_stick_and_finish_needs_the_whole_stream() {
     ));
 
     // Stopping early: plaintext still follows.
-    let mut d = Decryptor::open(&blob[..], Secret::Password(PW)).unwrap();
+    let mut d = Decryptor::open(&blob[..], Secret::Password(PW), Kind::Full).unwrap();
     let mut first = vec![0u8; 10];
     d.read_exact(&mut first).unwrap();
     assert!(matches!(d.finish(), Err(FormatError::TrailingData)));
 
     // Stopping early on a cut stream reports the cut.
     let cut = &blob[..blob.len() - (c + 16)];
-    let d = Decryptor::open(cut, Secret::Password(PW)).unwrap();
+    let d = Decryptor::open(cut, Secret::Password(PW), Kind::Full).unwrap();
     assert!(matches!(d.finish(), Err(FormatError::Truncated)));
 
     // An empty backup has nothing to read and finishes.
     let empty = sealed(b"", &full());
-    let d = Decryptor::open(&empty[..], Secret::Password(PW)).unwrap();
+    let d = Decryptor::open(&empty[..], Secret::Password(PW), Kind::Full).unwrap();
     assert_eq!(d.header(), &full());
     assert_eq!(d.finish().unwrap(), &b""[..]);
 }
@@ -305,7 +305,7 @@ fn a_secret_must_match_the_key_method() {
     let key = Key::from_bytes([9; 32]);
     let set = seal(b"items", &key, R);
     assert!(matches!(
-        Decryptor::open(&set[..], Secret::Password(PW)),
+        Decryptor::open(&set[..], Secret::Password(PW), Kind::Sealed),
         Err(FormatError::NotABackup)
     ));
     let sealed_header = Header::parse(set[..HEADER_LEN].try_into().unwrap()).unwrap();
@@ -315,7 +315,7 @@ fn a_secret_must_match_the_key_method() {
     ));
     let backup = sealed(b"bruhs", &full());
     assert!(matches!(
-        Decryptor::open(&backup[..], Secret::Key(&key)),
+        Decryptor::open(&backup[..], Secret::Key(&key), Kind::Full),
         Err(FormatError::NotABackup)
     ));
     assert!(matches!(
@@ -350,4 +350,67 @@ fn a_known_answer_pins_the_format() {
     let blob = sealed(b"bruhs", &full());
     assert_eq!(hex(&blob[HEADER_LEN..HEADER_LEN + 16]), KNOWN_ANSWER);
     assert_eq!(blob.len(), HEADER_LEN + 5 + 16);
+}
+
+#[test]
+fn a_file_of_another_kind_is_refused_before_any_derivation() {
+    // A "web part" whose header says Full and asks for the most memory.
+    let most = KdfParams {
+        memory_kib: 1_048_576,
+        passes: 10,
+        lanes: 16,
+    };
+    let mut hostile = Header::new(Kind::Full, Kdf::Argon2id(most), R)
+        .to_bytes()
+        .to_vec();
+    hostile.extend_from_slice(&[0; 64]);
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        Decryptor::open(&hostile[..], Secret::Password(PW), Kind::WebPart),
+        Err(FormatError::NotABackup)
+    ));
+    // Deriving at these settings takes seconds and 1 GiB.
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+
+    // A full backup is not a web part or a sealed set, and the reverse.
+    let backup = sealed(b"bruhs", &full());
+    for expect in [Kind::WebPart, Kind::Sealed] {
+        assert!(matches!(
+            Decryptor::open(&backup[..], Secret::Password(PW), expect),
+            Err(FormatError::NotABackup)
+        ));
+    }
+    let web = Header::new(Kind::WebPart, Kdf::Argon2id(KdfParams::FLOOR), R);
+    let part = sealed(b"{}", &web);
+    assert!(matches!(read_all(&part, PW), Err(FormatError::NotABackup)));
+    let mut d = Decryptor::open(&part[..], Secret::Password(PW), Kind::WebPart).unwrap();
+    let mut out = Vec::new();
+    d.read_to_end(&mut out).unwrap();
+    assert_eq!(out, b"{}");
+    d.finish().unwrap();
+}
+
+#[test]
+fn a_full_size_last_chunk_tells_a_cut_from_damage() {
+    let c = chunk();
+    // One full chunk only: a wrong password is not reported as a cut.
+    let one = sealed(&pattern(c), &full());
+    assert_eq!(one.len(), HEADER_LEN + c + 16);
+    assert!(matches!(
+        read_all(&one, "wrong password!"),
+        Err(FormatError::WrongPasswordOrDamaged)
+    ));
+    // A changed byte in a full-size last chunk is damage.
+    let two = sealed(&pattern(2 * c), &full());
+    let mut flip = two.clone();
+    flip[HEADER_LEN + c + 16 + 40] ^= 1;
+    assert!(matches!(
+        read_all(&flip, PW),
+        Err(FormatError::WrongPasswordOrDamaged)
+    ));
+    // Cut after a middle chunk: that chunk opens as not last, so a cut.
+    assert!(matches!(
+        read_all(&two[..HEADER_LEN + c + 16], PW),
+        Err(FormatError::Truncated)
+    ));
 }

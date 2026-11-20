@@ -15,7 +15,8 @@ const TAG_LEN: usize = 16;
 type Stream = StreamBE32<Aes256Gcm>;
 
 /// A 32-byte AES-256 key. It is wiped on drop and never printed or copied.
-pub struct Key(Zeroizing<[u8; 32]>);
+/// It lives on the heap, so moving a `Key` doesn't leave copies behind.
+pub struct Key(Box<Zeroizing<[u8; 32]>>);
 
 impl Key {
     /// Runs Argon2id over `password` with the header's salt and parameters.
@@ -27,15 +28,18 @@ impl Key {
         header.validate()?;
         let params = Params::new(params.memory_kib, params.passes, params.lanes, Some(32))
             .map_err(|_| FormatError::BadParams)?;
-        let mut key = Zeroizing::new([0; 32]);
+        // Filled in place on the heap.
+        let mut key = Box::new(Zeroizing::new([0; 32]));
+        let out: &mut [u8; 32] = &mut key;
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-            .hash_password_into(password.as_bytes(), &header.salt, &mut key[..])
+            .hash_password_into(password.as_bytes(), &header.salt, out)
             .map_err(|_| FormatError::BadParams)?;
         Ok(Self(key))
     }
 
+    /// Takes a raw key. The caller wipes its own copy of `bytes`.
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(Zeroizing::new(bytes))
+        Self(Box::new(Zeroizing::new(bytes)))
     }
 
     /// The raw key, only for storing a sealed set's key.
@@ -111,8 +115,9 @@ impl<W: Write> Encryptor<W> {
         Ok(())
     }
 
-    /// Seals the last chunk (empty when the plaintext ended on a chunk
-    /// boundary) and hands back the writer.
+    /// Seals the buffered bytes as the last chunk and hands back the writer.
+    /// The last chunk is empty only for an empty plaintext; one that ends on
+    /// a chunk boundary seals its full final chunk as last.
     pub fn finish(mut self) -> io::Result<W> {
         self.seal_chunk(true)?;
         self.writer.flush()?;
@@ -169,7 +174,11 @@ pub struct Decryptor<R: Read> {
 }
 
 impl<R: Read> Decryptor<R> {
-    pub fn open(mut reader: R, secret: Secret<'_>) -> Result<Self, FormatError> {
+    /// Opens a stream of the kind the caller expects. Any other kind is
+    /// `NotABackup`, refused before any key is derived, so a file can't
+    /// claim another kind to dodge that kind's limits (the web part's memory
+    /// cap).
+    pub fn open(mut reader: R, secret: Secret<'_>, expect: Kind) -> Result<Self, FormatError> {
         let mut bytes = [0; HEADER_LEN];
         let got = read_up_to(&mut reader, &mut bytes)?;
         if got < HEADER_LEN {
@@ -181,6 +190,9 @@ impl<R: Read> Decryptor<R> {
             });
         }
         let header = Header::parse(&bytes)?;
+        if header.kind != expect {
+            return Err(FormatError::NotABackup);
+        }
         let derived;
         let key = match (secret, header.kdf) {
             (Secret::Password(password), Kdf::Argon2id(_)) => {
@@ -264,9 +276,15 @@ impl<R: Read> Decryptor<R> {
             self.ahead.copy_within(sealed..len, 0);
             self.ahead_len = len - sealed;
         } else if len == sealed {
-            // A full chunk with nothing after it must be the last.
-            self.decrypt(sealed, true)
-                .map_err(|_| FormatError::Truncated)?;
+            // A full chunk with nothing after it must be the last. If it
+            // opens only as a middle chunk, the stream was cut after it.
+            if self.decrypt(sealed, true).is_err() {
+                return Err(if self.decrypt(sealed, false).is_ok() {
+                    FormatError::Truncated
+                } else {
+                    FormatError::WrongPasswordOrDamaged
+                });
+            }
             self.finish_stream();
         } else if len == 0 {
             // The stream ended on a chunk boundary without a last chunk.
@@ -358,10 +376,7 @@ pub fn seal(plain: &[u8], key: &Key, random: [u8; 23]) -> Vec<u8> {
 
 /// Opens a sealed set made by `seal`. Any other kind is `NotABackup`.
 pub fn unseal(blob: &[u8], key: &Key) -> Result<Zeroizing<Vec<u8>>, FormatError> {
-    let mut decryptor = Decryptor::open(blob, Secret::Key(key))?;
-    if decryptor.header().kind != Kind::Sealed {
-        return Err(FormatError::NotABackup);
-    }
+    let mut decryptor = Decryptor::open(blob, Secret::Key(key), Kind::Sealed)?;
     let mut out = Zeroizing::new(Vec::with_capacity(blob.len()));
     loop {
         out.extend_from_slice(&decryptor.plain[decryptor.at..]);

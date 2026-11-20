@@ -16,6 +16,8 @@ workspace = true
 # random bytes).
 
 [dependencies]
+# Direct only to wipe the AES round keys on drop.
+aes = { version = "0.8", default-features = false, features = ["zeroize"] }
 aead = { version = "0.5", default-features = false, features = ["alloc", "stream"] }
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
