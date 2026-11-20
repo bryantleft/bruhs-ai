@@ -2,8 +2,11 @@
 //!
 //! `catalog.json` keeps project keys in the format older binaries read;
 //! every other vault entry lives in `vault.json` beside it (see [`vault`]).
-use super::{storage_key, SecretError};
-use bruhs_models::secrets::{SavedCredential, SavedCredentialState};
+use super::{items::check_item, storage_key, SecretError, SECRETS_SERVICE};
+use bruhs_models::{
+    backup::{rewrite_path, PathRewrite},
+    secrets::{SavedCredential, SavedCredentialState},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -19,7 +22,7 @@ use zeroize::Zeroizing;
 mod vault;
 
 /// The keychain account service every Bruhs secret is stored under.
-const KEYCHAIN_SERVICE: &str = "bruhs-ai-secrets";
+const KEYCHAIN_SERVICE: &str = SECRETS_SERVICE;
 
 type MemoryKeys = Arc<KeyMap>;
 
@@ -44,6 +47,17 @@ struct KeyHooks {
 }
 
 impl KeyMap {
+    /// The map key of an item: the account alone for Bruhs' secrets, as
+    /// before, and `service\0account` for every other service, so two
+    /// services never share a slot (accounts never hold NUL).
+    fn slot(service: &str, account: &str) -> String {
+        if service == KEYCHAIN_SERVICE {
+            account.to_owned()
+        } else {
+            format!("{service}\u{0}{account}")
+        }
+    }
+
     fn lock(&self) -> LockResult<MutexGuard<'_, HashMap<String, Zeroizing<String>>>> {
         self.values.lock()
     }
@@ -178,11 +192,28 @@ impl Keys {
     }
 
     fn read(&self, account: &str) -> Result<Option<Zeroizing<String>>, SecretError> {
+        self.read_in(KEYCHAIN_SERVICE, account)
+    }
+
+    fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
+        self.write_in(KEYCHAIN_SERVICE, account, value)
+    }
+
+    /// Remove an item. A missing one is already removed.
+    fn remove(&self, account: &str) -> Result<(), SecretError> {
+        self.remove_in(KEYCHAIN_SERVICE, account)
+    }
+
+    fn read_in(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<Option<Zeroizing<String>>, SecretError> {
         match self {
             #[cfg(test)]
             Self::Unavailable => Err(SecretError::Storage),
-            Self::Memory(keys) => Ok(keys.read(account)),
-            Self::Os => match keyring::Entry::new(KEYCHAIN_SERVICE, account)
+            Self::Memory(keys) => Ok(keys.read(&KeyMap::slot(service, account))),
+            Self::Os => match keyring::Entry::new(service, account)
                 .map_err(|_| SecretError::Storage)?
                 .get_password()
             {
@@ -193,24 +224,23 @@ impl Keys {
         }
     }
 
-    fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
+    fn write_in(&self, service: &str, account: &str, value: &str) -> Result<(), SecretError> {
         match self {
             #[cfg(test)]
             Self::Unavailable => Err(SecretError::Storage),
-            Self::Memory(keys) => keys.write(account, value),
-            Self::Os => keyring::Entry::new(KEYCHAIN_SERVICE, account)
+            Self::Memory(keys) => keys.write(&KeyMap::slot(service, account), value),
+            Self::Os => keyring::Entry::new(service, account)
                 .and_then(|entry| entry.set_password(value))
                 .map_err(|_| SecretError::Storage),
         }
     }
 
-    /// Remove an item. A missing one is already removed.
-    fn remove(&self, account: &str) -> Result<(), SecretError> {
+    fn remove_in(&self, service: &str, account: &str) -> Result<(), SecretError> {
         match self {
             #[cfg(test)]
             Self::Unavailable => Err(SecretError::Storage),
-            Self::Memory(keys) => keys.remove(account),
-            Self::Os => match keyring::Entry::new(KEYCHAIN_SERVICE, account)
+            Self::Memory(keys) => keys.remove(&KeyMap::slot(service, account)),
+            Self::Os => match keyring::Entry::new(service, account)
                 .map_err(|_| SecretError::Storage)?
                 .delete_credential()
             {
@@ -255,6 +285,37 @@ impl SecretStore {
     #[cfg(test)]
     pub(super) fn unavailable() -> Self {
         Self(Backend::Unavailable)
+    }
+
+    /// Catalog files in `directory` and keychain items in memory, for
+    /// tests that read or write the files a backup carries.
+    #[cfg(test)]
+    pub(crate) fn file_test(directory: PathBuf) -> Self {
+        Self(Backend::FileTest(directory, MemoryKeys::default()))
+    }
+
+    /// One of Bruhs' own keychain items ([`super::ITEM_SERVICES`]), read
+    /// without the catalog lock. It may wait on a keychain prompt, so call
+    /// it off the async runtime.
+    pub fn read_item(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<Option<Zeroizing<String>>, SecretError> {
+        check_item(service, account)?;
+        self.key_handle()?.read_in(service, account)
+    }
+
+    /// Write one of Bruhs' own keychain items. Blocks like [`Self::read_item`].
+    pub fn write_item(&self, service: &str, account: &str, value: &str) -> Result<(), SecretError> {
+        check_item(service, account)?;
+        self.key_handle()?.write_in(service, account, value)
+    }
+
+    /// Remove one of Bruhs' own keychain items; a missing one is fine.
+    pub fn remove_item(&self, service: &str, account: &str) -> Result<(), SecretError> {
+        check_item(service, account)?;
+        self.key_handle()?.remove_in(service, account)
     }
 
     async fn access<T: Send + 'static>(
@@ -325,6 +386,10 @@ impl SecretStore {
 
     /// A handle on this store's keychain items, taken without the catalog lock.
     async fn keys(&self) -> Result<Keys, SecretError> {
+        self.key_handle()
+    }
+
+    fn key_handle(&self) -> Result<Keys, SecretError> {
         Ok(match &self.0 {
             Backend::Os => Keys::Os,
             Backend::Memory(vault) => vault
@@ -459,7 +524,7 @@ impl SecretStore {
     }
 
     /// Remove a keychain item behind the catalog's back.
-    pub(super) fn remove_item(&self, account: &str) {
+    pub(super) fn drop_item(&self, account: &str) {
         self.memory_keys()
             .remove(account)
             .expect("test stores accept removals");
@@ -564,6 +629,51 @@ fn with_catalog<T>(
     });
     drop(lock);
     result
+}
+
+/// Every keychain account under `bruhs-ai-secrets` the catalogs in
+/// `directory` name: legacy ids, and `vault.json` rows with an item, a
+/// newer Bruhs' rows included. Reads both files without the lock, as
+/// [`SecretStore::list`] does; a missing file names nothing.
+pub(super) fn keychain_accounts(directory: &Path) -> Result<Vec<String>, SecretError> {
+    let mut accounts: Vec<String> = read_catalog(directory)?.entries.into_keys().collect();
+    accounts.extend(vault::item_accounts(directory)?);
+    Ok(accounts)
+}
+
+/// Move the staged catalogs in `directory` to this computer's paths
+/// (D12): each legacy entry's project path and id, and each `vault.json`
+/// Project scope. Answers each moved keychain account, old to new.
+/// Staged files have no other reader, so this takes no lock; it reads
+/// both files before it writes either. Two entries landing on one id is
+/// `Catalog`, with nothing written.
+pub(super) fn rekey(
+    directory: &Path,
+    rules: &[PathRewrite],
+) -> Result<BTreeMap<String, String>, SecretError> {
+    let mut moved = BTreeMap::new();
+    let mut catalog = Catalog::default();
+    for (id, mut entry) in read_catalog(directory)?.entries {
+        if let Some(path) = rewrite_path(&entry.project_path, rules) {
+            entry.id = storage_key(Path::new(&path), &entry.name);
+            entry.project_path = path;
+        }
+        if entry.id != id {
+            moved.insert(id, entry.id.clone());
+        }
+        if catalog.entries.insert(entry.id.clone(), entry).is_some() {
+            return Err(SecretError::Catalog);
+        }
+    }
+    let legacy_moved = !moved.is_empty();
+    let vault = vault::rekeyed(directory, rules, &mut moved)?;
+    if legacy_moved {
+        write_atomically(directory, "catalog.json", &catalog)?;
+    }
+    if let Some(vault) = vault {
+        vault::write_vault(directory, &vault)?;
+    }
+    Ok(moved)
 }
 
 pub(super) fn catalog_directory() -> Result<PathBuf, SecretError> {

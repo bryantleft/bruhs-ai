@@ -13,6 +13,7 @@ use super::{
 use crate::secrets::AppSecret;
 use bruhs_models::{
     apps::{AppConnector, AppParam},
+    backup::{rewrite_path, PathRewrite},
     secrets::{SavedCredential, SavedCredentialState},
     vault::{
         base32_decode, base32_encode, parse_totp_setup, AppTokenMeta, CredentialScope, LoginFields,
@@ -480,6 +481,74 @@ pub(super) fn read_vault_catalog(directory: &Path) -> Result<VaultCatalog, Secre
         kept.entry.attention = None;
     }
     Ok(catalog)
+}
+
+/// The keychain accounts of every `vault.json` row with an item, a newer
+/// Bruhs' rows included (their kind may keep one). Read without the lock.
+pub(super) fn item_accounts(directory: &Path) -> Result<Vec<String>, SecretError> {
+    let vault = read_vault_catalog(directory)?;
+    Ok(vault
+        .entries
+        .values()
+        .filter(|entry| has_item(&entry.kind))
+        .chain(vault.kept.values().map(|kept| &kept.entry))
+        .map(account)
+        .collect())
+}
+
+/// `vault.json` with each Project scope moved by `rules` (D12), a newer
+/// Bruhs' rows included, or `None` when no row moves. Adds each moved
+/// row's keychain account, old to new, to `moved`.
+pub(super) fn rekeyed(
+    directory: &Path,
+    rules: &[PathRewrite],
+    moved: &mut BTreeMap<String, String>,
+) -> Result<Option<VaultCatalog>, SecretError> {
+    fn rewrite(scope: &mut CredentialScope, rules: &[PathRewrite]) -> bool {
+        let CredentialScope::Project { path } = scope else {
+            return false;
+        };
+        rewrite_path(path, rules).is_some_and(|new| {
+            *path = new;
+            true
+        })
+    }
+    let mut vault = read_vault_catalog(directory)?;
+    let mut changed = false;
+    for entry in vault.entries.values_mut() {
+        let old = account(entry);
+        if rewrite(&mut entry.scope, rules) {
+            changed = true;
+            if has_item(&entry.kind) {
+                moved.insert(old, account(entry));
+            }
+        }
+    }
+    for kept in vault.kept.values_mut() {
+        let old = account(&kept.entry);
+        if rewrite(&mut kept.entry.scope, rules) {
+            let CredentialScope::Project { path } = &kept.entry.scope else {
+                continue;
+            };
+            // The row is written back as read; only its path moves.
+            let Some(stored) = kept
+                .row
+                .get_mut("scope")
+                .and_then(|scope| scope.get_mut("path"))
+            else {
+                return Err(SecretError::Catalog);
+            };
+            *stored = serde_json::Value::String(path.clone());
+            changed = true;
+            moved.insert(old, account(&kept.entry));
+        }
+    }
+    Ok(changed.then_some(vault))
+}
+
+/// Replace `vault.json` in `directory` with `vault`, atomically.
+pub(super) fn write_vault(directory: &Path, vault: &VaultCatalog) -> Result<(), SecretError> {
+    write_atomically(directory, VAULT_FILE, vault)
 }
 
 /// The keychain item for a new or updated entry's values.

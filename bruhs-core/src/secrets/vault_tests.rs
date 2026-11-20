@@ -237,7 +237,7 @@ async fn values_resolve_from_the_keychain_or_1password() {
         .unwrap();
     manager
         .store
-        .remove_item(&format!("vault:global:{}", gone.id));
+        .drop_item(&format!("vault:global:{}", gone.id));
     assert!(matches!(
         manager.resolve_value(&gone.id).await,
         Err(SecretError::NotSaved)
@@ -672,9 +672,7 @@ async fn app_tokens_resolve_and_never_serve_other_uses() {
 
     // A missing item needs a look, shown on the listing, and the next
     // good read clears it.
-    manager
-        .store
-        .remove_item(&format!("vault:global:{}", app.id));
+    manager.store.drop_item(&format!("vault:global:{}", app.id));
     assert!(matches!(
         manager.resolve_app_token(&app.id).await,
         Err(SecretError::NotSaved)

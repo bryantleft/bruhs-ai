@@ -2,6 +2,7 @@
 
 mod api_client;
 mod database;
+mod items;
 pub(crate) mod mcp;
 mod one_password;
 pub(crate) mod private;
@@ -14,6 +15,7 @@ mod trackers;
 #[cfg(unix)]
 mod vault_tests;
 
+pub use items::*;
 pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use one_password::{OnePassword, OnePasswordError};
 pub use storage::SecretStore;

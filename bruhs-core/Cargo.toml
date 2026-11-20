@@ -16,6 +16,7 @@ test-support = []
 
 [dependencies]
 bruhs-models = { workspace = true }
+bruhs-backup = { workspace = true }
 claude-sdk-rs = { path = "../claude-sdk-rs" }
 codex-sdk-rs = { path = "../codex-sdk-rs" }
 serde = { workspace = true }
@@ -49,7 +50,8 @@ iana-time-zone = "0.1"
 url = "2"
 tracing = { workspace = true }
 thiserror = { workspace = true }
-zeroize = { workspace = true }
+# `serde`: keychain items travel inside sealed sets and backups.
+zeroize = { workspace = true, features = ["serde"] }
 htmd = "0.6"
 dom_query = "0.27"
 html5ever = "0.27"
