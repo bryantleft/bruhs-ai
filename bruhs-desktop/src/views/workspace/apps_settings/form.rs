@@ -96,6 +96,23 @@ impl AppsSettings {
         self.open_form(Open::Connect(app), window, cx);
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=apps-connect:<app id>`: that app's Connect
+    /// form, once the listing is in (same-size captures). False when there
+    /// is no such app or no form opened.
+    #[cfg(debug_assertions)]
+    pub(in crate::views::workspace) fn smoke_open_connect(
+        &mut self,
+        app_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let Some(app) = bruhs_models::apps::connector(app_id) else {
+            return false;
+        };
+        self.open_connect(app.id, window, cx);
+        self.form.is_some()
+    }
+
     pub(super) fn open_replace(
         &mut self,
         id: String,

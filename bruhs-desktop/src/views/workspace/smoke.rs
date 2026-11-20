@@ -552,6 +552,34 @@ impl Workspace {
                     .vault_settings
                     .update(cx, |vault, cx| vault.smoke_open_new(source, window, cx));
             }
+            // Settings, Apps with an app's Connect form open (run after
+            // `settings-apps`, once the listing is in).
+            scene if scene.starts_with("apps-connect:") => {
+                let app = scene.trim_start_matches("apps-connect:").to_string();
+                return self
+                    .apps_settings
+                    .update(cx, |apps, cx| apps.smoke_open_connect(&app, window, cx));
+            }
+            // `bruh-routine:<agent id>:<subscription id>`: that routine's
+            // editor on the bruh's Routines tab.
+            scene if scene.starts_with("bruh-routine:") => {
+                let rest = scene.trim_start_matches("bruh-routine:");
+                let Some((agent_id, subscription_id)) = rest.split_once(':') else {
+                    return false;
+                };
+                let (agent_id, subscription_id) =
+                    (agent_id.to_string(), subscription_id.to_string());
+                self.activate_sidebar_view(
+                    AppView::Bruh {
+                        agent_id: agent_id.clone(),
+                    },
+                    window,
+                    cx,
+                );
+                return self.reactive_automations.update(cx, |panel, cx| {
+                    panel.smoke_edit_routine(&agent_id, &subscription_id, window, cx)
+                });
+            }
             // `settings-scroll:<px>`: Settings scrolled down by `px` from where
             // it is, after a section scene has settled (same-size captures).
             scene if scene.starts_with("settings-scroll:") => {

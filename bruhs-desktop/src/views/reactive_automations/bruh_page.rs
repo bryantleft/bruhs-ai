@@ -654,6 +654,34 @@ impl ReactiveAutomations {
         }
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=bruh-routine:<agent>:<subscription>`: the
+    /// Routines tab with that routine's editor open, as Edit automation
+    /// opens it. False when the snapshot has no such routine.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_edit_routine(
+        &mut self,
+        agent_id: &str,
+        subscription_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        self.show_bruh(Some(agent_id.to_string()), cx);
+        self.set_bruh_tab(BruhTab::Routines, cx);
+        let Some(setup) = self.snapshot.as_ref().and_then(|snapshot| {
+            snapshot
+                .subscriptions
+                .iter()
+                .find(|subscription| {
+                    subscription.id == subscription_id && subscription.agent_id == agent_id
+                })
+                .and_then(|subscription| AutomationSetup::from_subscription(snapshot, subscription))
+        }) else {
+            return false;
+        };
+        self.open_routine(Some(setup), agent_id, window, cx);
+        matches!(self.editor, Some(Editor::Automation(_)))
+    }
+
     /// The open page's bruh name, as the snapshot has it.
     #[cfg(debug_assertions)]
     pub(crate) fn smoke_bruh_name(&self) -> Option<String> {
@@ -3420,6 +3448,70 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("reactive-Enable automation").is_some());
+    }
+
+    /// `bruh-routine:<agent>:<subscription>` (same-size captures) opens that
+    /// routine's editor on the Routines tab, its App source filled in as
+    /// Edit automation fills it; a routine that isn't there opens nothing.
+    #[gpui::test]
+    fn the_routine_scene_opens_that_routines_editor(cx: &mut gpui::TestAppContext) {
+        use bruhs_models::apps::{AppQuery, PollWatch};
+        use bruhs_models::reactive::{BusyPolicy, EventSource, SourceKind, Subscription};
+        let mut snapshot = snapshot(BruhStatus::Asleep, Vec::new());
+        snapshot.protocol = APPS_PROTOCOL;
+        snapshot.sources.push(EventSource {
+            id: "src".into(),
+            name: "Issues in o/r".into(),
+            enabled: true,
+            kind: SourceKind::AppPoll {
+                app: "github".into(),
+                account: "v1-g".into(),
+                query: AppQuery::GithubIssues { repo: "o/r".into() },
+                poll_ms: 300_000,
+            },
+        });
+        snapshot.subscriptions.push(Subscription {
+            id: "sub".into(),
+            source_id: "src".into(),
+            agent_id: "a".into(),
+            instructions: "Triage.".into(),
+            enabled: true,
+            auto_run: false,
+            debounce_ms: 0,
+            throttle_ms: 0,
+            on_busy: BusyPolicy::Queue,
+        });
+        let (panel, cx) = open(cx, Some(snapshot), BruhTab::Chat);
+        let missing = panel.update_in(cx, |panel, window, cx| {
+            panel.smoke_edit_routine("a", "nope", window, cx)
+        });
+        assert!(!missing);
+        assert!(panel.read_with(cx, |panel, _| panel.editor.is_none()));
+        let opened = panel.update_in(cx, |panel, window, cx| {
+            panel.smoke_edit_routine("a", "sub", window, cx)
+        });
+        cx.run_until_parked();
+        assert!(opened);
+        panel.update(cx, |panel, cx| {
+            assert_eq!(
+                panel.bruh.as_ref().map(|page| page.tab),
+                Some(BruhTab::Routines)
+            );
+            let Some(Editor::Automation(editor)) = &mut panel.editor else {
+                panic!("automation editor");
+            };
+            assert_eq!(editor.locked_agent(), Some("a"));
+            let form = editor.poll_mut().form(cx);
+            assert_eq!(
+                (
+                    form.watch,
+                    form.account.as_str(),
+                    form.repo.as_str(),
+                    form.minutes.as_str()
+                ),
+                (PollWatch::GithubIssues, "v1-g", "o/r", "5")
+            );
+        });
     }
 
     #[test]

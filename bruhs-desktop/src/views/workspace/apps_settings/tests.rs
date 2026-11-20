@@ -479,3 +479,27 @@ fn a_client_on_another_address_is_told_the_exact_one(cx: &mut TestAppContext) {
         Some("Open Bruhs at http://127.0.0.1:9 to see and change apps.".to_string())
     );
 }
+
+/// `apps-connect:<app>` (same-size captures) opens that app's Connect form
+/// as its Connect button does, and nothing for an app that isn't listed.
+#[gpui::test]
+fn the_connect_scene_opens_that_apps_form(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx, Some(listing()));
+    let unknown = view.update_in(cx, |view, window, cx| {
+        view.smoke_open_connect("nope", window, cx)
+    });
+    assert!(!unknown);
+    assert!(!rendered(cx, "desktop-apps-form"));
+    let opened = view.update_in(cx, |view, window, cx| {
+        view.smoke_open_connect("jira", window, cx)
+    });
+    cx.run_until_parked();
+    assert!(opened);
+    assert!(rendered(cx, "desktop-apps-form"));
+    view.read_with(cx, |view, _| {
+        assert!(matches!(
+            view.form.as_ref().map(|form| &form.open),
+            Some(Open::Connect("jira"))
+        ));
+    });
+}
