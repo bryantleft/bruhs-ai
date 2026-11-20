@@ -2909,7 +2909,172 @@ async fn approving_an_app_source_run_takes_the_owner() {
         (runs[1].clone(), None),
         ("gone".to_owned(), None),
     ] {
-        let command = ReactiveCommand::ApproveRun { id };
+        // Re-review M3: a retry after a cancel starts it just the same.
+        for command in [
+            ReactiveCommand::ApproveRun { id: id.clone() },
+            ReactiveCommand::RetryRun { id: id.clone() },
+        ] {
+            assert_eq!(
+                runtime.owner_only_refusal(&command).await.unwrap(),
+                expected,
+                "{command:?}"
+            );
+        }
+    }
+}
+
+/// Re-review N1: a routine's setup saves its bruh too, so moving a bruh
+/// that holds apps to Claude, or one whose Computer is switched on to a
+/// model that runs it, through `save_automation` takes the owner, applied
+/// or approved as a proposal.
+#[tokio::test]
+async fn a_routine_that_raises_its_bruh_takes_the_owner() {
+    let codex = |id: &str| ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..agent(id)
+    };
+    let (_dir, runtime) = runtime_with(&[codex("c"), codex("k"), codex("d")]).await;
+    let full = BruhAccess {
+        level: AccessLevel::Full,
+        send_as_me: true,
+        ..BruhAccess::default()
+    };
+    for id in ["c", "k", "d"] {
+        runtime
+            .command(ReactiveCommand::SetBruh {
+                agent_id: id.into(),
+                look: pandan(),
+                access: full.clone(),
+                effort: None,
+            })
+            .await
+            .unwrap();
+    }
+    runtime
+        .command(app_grant(
+            "c",
+            AppGrant::Mailbox {
+                mailbox_id: "m".into(),
+            },
+            true,
+        ))
+        .await
+        .unwrap();
+    // A Codex bruh's Computer switch is on, but Codex can't run it.
+    runtime
+        .command(ReactiveCommand::SetComputer {
+            agent_id: "k".into(),
+            on: true,
+        })
+        .await
+        .unwrap();
+    let routine = |id: &str, model: &str| ReactiveChange::SaveAutomation {
+        automation: Box::new(AutomationSetup {
+            agent: ReactiveAgent {
+                model: model.into(),
+                ..codex(id)
+            },
+            source: EventSource {
+                kind: SourceKind::Schedule { every_ms: 60_000 },
+                enabled: false,
+                ..app_poll_source(&format!("t-{id}"), "o/r")
+            },
+            subscription: subscription_to(&format!("s-{id}"), &format!("t-{id}"), id, false),
+        }),
+    };
+    let claude = "claude-sonnet-4-6";
+    let mut proposals = Vec::new();
+    for id in ["c", "k"] {
+        let snapshot = runtime
+            .command(ReactiveCommand::Propose {
+                change: routine(id, claude),
+            })
+            .await
+            .unwrap();
+        proposals.push(snapshot.proposals.last().unwrap().id.clone());
+    }
+    for (command, expected) in [
+        (
+            ReactiveCommand::Apply {
+                change: routine("c", claude),
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            ReactiveCommand::Apply {
+                change: routine("k", claude),
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposals[0].clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposals[1].clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        // The same model, or a bruh with nothing to turn on, stays open.
+        (
+            ReactiveCommand::Apply {
+                change: routine("c", "gpt-5.3-codex"),
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::Apply {
+                change: routine("d", claude),
+            },
+            None,
+        ),
+    ] {
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+}
+
+/// Re-review M1: a new bruh at Full, or with Send as me or Can deliver,
+/// takes the owner, so a page can't make one that the owner's later grant
+/// would turn into a sender without a card. Ask first and read only stay
+/// open: every send there asks the owner.
+#[tokio::test]
+async fn creating_a_raised_bruh_takes_the_owner() {
+    let (_dir, runtime) = runtime_with(&[]).await;
+    let create = |level, send_as_me, can_deliver| ReactiveCommand::CreateBruh {
+        agent: agent("n"),
+        look: BruhLook::default(),
+        access: BruhAccess {
+            level,
+            send_as_me,
+            can_deliver,
+        },
+        effort: None,
+    };
+    for (command, expected) in [
+        (
+            create(AccessLevel::Full, false, false),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (create(AccessLevel::Ask, false, false), None),
+        (
+            create(AccessLevel::ReadOnly, true, false),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (
+            create(AccessLevel::ReadOnly, false, true),
+            Some(OWNER_ONLY_ACCESS),
+        ),
+        (create(AccessLevel::ReadOnly, false, false), None),
+    ] {
         assert_eq!(
             runtime.owner_only_refusal(&command).await.unwrap(),
             expected,

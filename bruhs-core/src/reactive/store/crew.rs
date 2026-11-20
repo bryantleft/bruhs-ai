@@ -295,7 +295,8 @@ pub(in crate::reactive) fn model_unlocks(
     })
 }
 
-/// The agent proposal `id` saves when approved, if it saves one.
+/// The agent proposal `id` saves when approved, if it saves one, alone or
+/// in a routine's setup (re-review N1).
 pub(in crate::reactive) fn proposal_saves_agent(
     connection: &Connection,
     id: &str,
@@ -304,6 +305,7 @@ pub(in crate::reactive) fn proposal_saves_agent(
         get::<ReactiveProposal>(connection, "reactive_proposals", id)?.and_then(|proposal| {
             match proposal.change {
                 ReactiveChange::SaveAgent { agent } => Some(agent),
+                ReactiveChange::SaveAutomation { automation } => Some(automation.agent),
                 _ => None,
             }
         }),

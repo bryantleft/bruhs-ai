@@ -14,9 +14,9 @@ use crate::{
 };
 use bruhs_models::{
     crew::{
-        usable_by, LoginTarget, KEYCHAIN_NEEDS_OWNER, LOGIN_NOT_GRANTED, LOGIN_NO_FIELD,
-        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, OWNER_ONLY_ACCESS,
-        OWNER_ONLY_APPS, PAGE_UNKNOWN, VAULT_READ_FAILED,
+        usable_by, AccessLevel, LoginTarget, KEYCHAIN_NEEDS_OWNER, LOGIN_NOT_GRANTED,
+        LOGIN_NO_FIELD, LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE,
+        OWNER_ONLY_ACCESS, OWNER_ONLY_APPS, PAGE_UNKNOWN, VAULT_READ_FAILED,
     },
     local_tools::SecretRef,
     reactive::{ReactiveChange, ReactiveCommand},
@@ -265,7 +265,9 @@ impl ReactiveRuntime {
     /// or dismissing one of those cards and approving a run an app poll
     /// started take the owner too (final review BC M1). So does anything that
     /// raises a bruh: its access, its Computer, or a model change that turns
-    /// on its app grants or Computer (A2 I1); lowering stays open.
+    /// on its app grants or Computer, applied directly or through a
+    /// routine's setup (A2 I1, re-review N1), and creating a bruh at Full or
+    /// with Send as me or Can deliver (M1); lowering stays open.
     ///
     /// # Errors
     ///
@@ -311,6 +313,16 @@ impl ReactiveRuntime {
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAgent { agent },
             } => self.save_agent_refusal(agent.clone()).await?,
+            // A routine's setup saves its bruh too (re-review N1).
+            ReactiveCommand::Apply {
+                change: ReactiveChange::SaveAutomation { automation },
+            } => self.save_agent_refusal(automation.agent.clone()).await?,
+            // A new bruh that could send or deliver without a card once the
+            // owner grants it something (re-review M1).
+            ReactiveCommand::CreateBruh { access, .. } => {
+                (access.level == AccessLevel::Full || access.send_as_me || access.can_deliver)
+                    .then_some(OWNER_ONLY_ACCESS)
+            }
             ReactiveCommand::SetBruh {
                 agent_id, access, ..
             } => {
@@ -331,7 +343,8 @@ impl ReactiveRuntime {
                 .is_owner_only_approval(id)
                 .await?
                 .then_some(OWNER_ONLY_CARD),
-            ReactiveCommand::ApproveRun { id } => {
+            // A retry after a cancel starts the run just the same (M3).
+            ReactiveCommand::ApproveRun { id } | ReactiveCommand::RetryRun { id } => {
                 let id = id.clone();
                 self.call(move |connection| store::crew::run_polls_app(connection, &id))
                     .await?
