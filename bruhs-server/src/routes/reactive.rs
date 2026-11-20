@@ -67,12 +67,20 @@ pub async fn command(
     Json(command): Json<ReactiveCommand>,
 ) -> Result<Json<ReactiveSnapshot>, AppError> {
     let runtime = runtime(value)?;
-    if !config.access.owner_request(&headers) {
+    let owner = config.access.owner_request(&headers);
+    if !owner {
         if let Some(refusal) = runtime.owner_only_refusal(&command).await? {
             return Err(AppError::Forbidden(refusal.into()));
         }
     }
-    Ok(Json(runtime.command(command).await?))
+    let snapshot = runtime.command(command).await?;
+    // The answer is the snapshot, so it leaves out owner card details the
+    // same way `GET /api/reactive` does (re-review N3).
+    Ok(Json(if owner {
+        snapshot
+    } else {
+        snapshot.without_owner_details()
+    }))
 }
 
 #[derive(serde::Deserialize)]

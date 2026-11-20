@@ -127,11 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let outlook = Arc::new(bruhs_core::mail::outlook::OutlookClient::new()?);
     // Claim the port before any configured source command or agent can run.
     // Owner refusals name this host (`SERVER_BIND_HOST`).
-    let addr = format!(
-        "{}:{}",
-        bruhs_models::api::SERVER_BIND_HOST,
-        config.port
-    );
+    let addr = format!("{}:{}", bruhs_models::api::SERVER_BIND_HOST, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     bruhs_core::workbench_tools::set_endpoint(format!("http://{}", listener.local_addr()?))?;
     // Bruh browsers: the host gets every bruh whose Computer is on, before

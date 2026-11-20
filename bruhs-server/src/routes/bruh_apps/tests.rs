@@ -769,4 +769,29 @@ async fn other_pages_never_read_an_owner_card_detail() {
             "{path}: {other}"
         );
     }
+
+    // Re-review N3: a command any page may send answers with the snapshot,
+    // which is left out the same way.
+    let harmless = json!({"action": "mark_outbox_read", "ids": []});
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(Body::Json(harmless.clone())),
+            Some(OTHER_PAGE),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert_eq!(detail_of(&text), Value::Null);
+    assert!(!text.contains("octo-work") && !text.contains("Secret plan"));
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(Body::Json(harmless)),
+            Some(&own),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(detail_of(&text).as_str().unwrap().contains("octo-work"));
 }
