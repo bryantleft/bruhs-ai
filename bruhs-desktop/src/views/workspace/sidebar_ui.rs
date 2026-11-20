@@ -96,7 +96,7 @@ const THREAD_MENU_WIDTH_PX: f32 = 208.0;
 const THREAD_MENU_ROW_PX: f32 = theme::CONTROL_PX;
 const THREAD_MENU_ROW_X_PADDING_PX: f32 = 8.0;
 /// Focus slots: one per `ThreadMenuItem`.
-pub(super) const THREAD_MENU_MAX_ITEMS: usize = 10;
+pub(super) const THREAD_MENU_MAX_ITEMS: usize = 11 + super::snooze_options::MAX_OPTIONS;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
@@ -169,17 +169,19 @@ enum ThreadMenuItem {
     Pin,
     Settle,
     Wake,
+    UserSnooze(usize),
     InAnHour,
     LaterToday,
     Tomorrow,
     NextWeek,
     Regenerate,
     Discard,
+    Archive,
     Custom,
 }
 
 impl ThreadMenuItem {
-    const ALL: [Self; THREAD_MENU_MAX_ITEMS] = [
+    const ALL: [Self; 11] = [
         Self::Pin,
         Self::Settle,
         Self::Wake,
@@ -190,6 +192,7 @@ impl ThreadMenuItem {
         Self::Regenerate,
         Self::Discard,
         Self::Custom,
+        Self::Archive,
     ];
 
     /// The slot for a shared menu row. Separators have none.
@@ -213,6 +216,7 @@ impl ThreadMenuItem {
 
     /// Index into `Workspace::thread_menu_items`.
     fn slot(self) -> usize {
+        if let Self::UserSnooze(index)=self {return Self::ALL.len()+index;}
         Self::ALL
             .iter()
             .position(|item| *item == self)
@@ -222,6 +226,8 @@ impl ThreadMenuItem {
     /// Element id and debug selector.
     fn id(self) -> &'static str {
         match self {
+            Self::UserSnooze(i) => ["desktop-thread-snooze-0","desktop-thread-snooze-1","desktop-thread-snooze-2","desktop-thread-snooze-3","desktop-thread-snooze-4","desktop-thread-snooze-5","desktop-thread-snooze-6","desktop-thread-snooze-7"][i],
+            Self::Archive => "desktop-thread-menu-archive",
             Self::Pin => "desktop-thread-menu-pin",
             Self::Settle => "desktop-thread-menu-settle",
             Self::Wake => "desktop-thread-menu-wake",
@@ -240,8 +246,8 @@ impl ThreadMenuItem {
 /// click, not from when the menu opened.
 fn thread_menu_action(entry: ThreadMenuEntry) -> ThreadMenuAction {
     match entry {
-        ThreadMenuEntry::Pin { .. } => menu_action(|this, id, _window, cx| {
-            this.toggle_pinned_by_id(id, cx);
+        ThreadMenuEntry::Pin { .. } => menu_action(|this, id, window, cx| {
+            this.request_thread_pin(id, window, cx);
         }),
         ThreadMenuEntry::Settle { .. } => menu_action(|this, id, _window, cx| {
             this.toggle_settled_by_id(id, cx);
@@ -330,6 +336,7 @@ impl Workspace {
                     .text_color(theme::rambutan_100())
                     .child(SIDEBAR_BRAND_LABEL),
             )
+            .children(self.environment_mark())
             .into_any_element()
     }
 
@@ -451,12 +458,38 @@ impl Workspace {
         let content = list(
             state.clone(),
             cx.processor(move |this, index: usize, _, cx| {
-                let row = rows[index];
+                let row = rows[index].clone();
                 let element = match row {
                     viewport::SidebarRow::Thread {
-                        index: thread_index,
+                        index: thread_index, folder,
                         ..
-                    } => this.render_thread_card(&this.threads[thread_index], &focus[index], cx),
+                    } => this.render_thread_card(&this.threads[thread_index], folder, &focus[index], cx),
+                    viewport::SidebarRow::Folder {path,name,count,open} => {
+                        let tooltip=path.clone();
+                        let debug_path=path.clone();
+                        let searching=!this.sidebar_query(cx).trim().is_empty();
+                        let folder=div().id(SharedString::from(format!("sidebar-folder-{path}")))
+                            .debug_selector(move||format!("desktop-sidebar-folder-{debug_path}"))
+                            .track_focus(&focus[index].card).tab_index(0).role(Role::Button)
+                            .aria_expanded(open).aria_label(format!("{name}, {count} threads")).cursor_pointer()
+                            .border_1().border_color(gpui::transparent_black()).rounded(px(6.))
+                            .focus_visible(|el|el.border_color(theme::persimmon_400()))
+                            .flex().items_center().gap_2().px_2().py_1().text_size(px(SIDEBAR_LABEL_TEXT_PX))
+                            .text_color(theme::rambutan_400())
+                            .when(!tooltip.is_empty(),|el|el.tooltip(move|w,cx|bruhs_ui::tooltip::Tooltip::new(tooltip.clone()).build(w,cx)))
+                            .child(this.project_icon(path.as_ref(),SIDEBAR_SMALL_ICON_PX))
+                            .child(div().min_w_0().flex_1().truncate().child(name)).child(count.to_string())
+                            .child(icon(assets::CHEVRON_DOWN_ICON_PATH,SIDEBAR_SMALL_ICON_PX,theme::rambutan_500())
+                                .when(!open,|el|el.with_transformation(Transformation::rotate(Radians(-std::f32::consts::FRAC_PI_2)))));
+                        on_press_view(folder,cx,move|this,_,cx|{
+                            if !searching {
+                                if !this.labs_sidebar.collapsed.remove(path.as_ref()) {
+                                    this.labs_sidebar.collapsed.insert(path.to_string());
+                                }
+                                this.persist_and_notify(cx);
+                            }
+                        }).into_any_element()
+                    }
                     viewport::SidebarRow::Shelf {
                         section,
                         count,
@@ -617,6 +650,7 @@ impl Workspace {
     fn render_thread_card(
         &self,
         thread: &DesktopThread,
+        folder: bool,
         focus: &viewport::SidebarRowFocus,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -633,7 +667,9 @@ impl Workspace {
         let menu_group: SharedString = format!("desktop-thread-actions-{key}").into();
         let delete_group: SharedString = format!("desktop-thread-delete-{key}").into();
         let age = relative_age(thread.updated_at_ms, EpochMs::now());
-        let project_label = if thread.project_name.is_empty() {
+        let project_label = if thread.chat.read(cx).scratch_folder().is_some() {
+            "Scratch".to_owned()
+        } else if thread.project_name.is_empty() {
             SIDEBAR_NO_PROJECT_LABEL.to_string()
         } else {
             thread.project_name.clone()
@@ -720,9 +756,8 @@ impl Workspace {
                             theme::rambutan_500(),
                         )),
                 )
-            })
-            .child(
-                div()
+            });
+        let status_line = div()
                     .flex_shrink_0()
                     .flex()
                     .items_center()
@@ -730,8 +765,8 @@ impl Workspace {
                     .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
                     .group_hover(row_group.clone(), |el| el.invisible())
                     .when(menu_open, |el| el.invisible())
-                    .child(status_slot),
-            );
+                    .child(status_slot);
+
 
         let title_line = div()
             .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
@@ -743,7 +778,12 @@ impl Workspace {
             })
             .truncate()
             .debug_selector(move || format!("desktop-thread-card-title-{debug_key}"))
-            .child(title);
+            .child(title)
+            .when(self.title_requests.contains_key(&thread.id), |row| row.child(
+                div().id(("regenerating-title", key)).absolute().role(Role::Status)
+                    .aria_label("Regenerating title")
+                    .a11y_synthetic_children(|tree| tree.parent_node().set_live(gpui::accesskit::Live::Polite))
+            ));
 
         let branch = thread.branch.clone();
         // Web: the third line exists once the thread has a branch or a turn
@@ -753,7 +793,7 @@ impl Workspace {
         // role leaves the name out (web).
         let role = chat.role_profile.as_ref().map(|role| role.name.clone());
         let has_meta = branch.is_some() || has_turns || chat.role.is_some();
-        let meta_line = has_meta.then(|| {
+        let meta_line = (if folder {self.labs_sidebar.two_lines} else {has_meta}).then(|| {
             div()
                 .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
                 .h(px(SIDEBAR_CARD_META_HEIGHT_PX))
@@ -792,7 +832,9 @@ impl Workspace {
                             .child(role),
                     )
                 })
-                .when(has_turns, |el| el.child(provider_mark(provider, cx)))
+                .when_some(folder.then(|| self.known_thread_pulls.get(&thread.id)).flatten()
+                    .filter(|p| thread.branch.as_ref() == Some(&p.branch) && super::labs::folder(thread,cx) == p.project), |el,p|el.child(format!("#{}",p.number)))
+                .when(folder || has_turns, |el| el.child(provider_mark(provider, cx)))
         });
 
         let delete_button = div()
@@ -820,8 +862,8 @@ impl Workspace {
             .focus_visible(|el| el.visible().border_color(theme::persimmon_400()))
             .cursor_pointer()
             .map(|el| {
-                on_press_view(el, cx, move |this, _window, cx| {
-                    this.delete_thread_by_id(&id_for_delete, cx);
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.request_thread_delete(&id_for_delete, window, cx);
                 })
             })
             .child(
@@ -937,8 +979,9 @@ impl Workspace {
                     this.select_thread_by_id(&id_for_select, cx);
                 })
             })
-            .child(top_line)
-            .child(title_line)
+            .child(if folder {
+                div().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(title_line)).child(status_line)
+            } else {div().child(top_line.child(status_line)).child(title_line)})
             .children(meta_line)
             .child(menu_button)
             .child(delete_button)
@@ -1009,7 +1052,7 @@ impl Workspace {
             pinned: thread.pinned,
             settled: thread.settled,
             snoozed: thread.snoozed_until_ms.is_some_and(|until| until > now),
-            streaming: chat.is_streaming,
+            title_action_disabled: self.title_requests.contains_key(&id),
             has_draft: self.active_thread_id.as_deref() == Some(id.as_str())
                 && !chat.input_state.read(cx).value().is_empty(),
         };
@@ -1017,6 +1060,24 @@ impl Workspace {
         let mut enabled: Vec<ThreadMenuItem> = Vec::new();
         let mut rows: Vec<AnyElement> = Vec::new();
         for entry in thread_menu(facts, now, threads_ui::utc_offset_minutes_east()) {
+            if let Some(choices)=self.snooze_choices(chat.settings_project_path()) {
+                if let ThreadMenuEntry::Snooze(preset) = &entry {
+                    if preset.when == SnoozeWhen::InAnHour {
+                        let mut available: Vec<_> = choices.iter().take(super::snooze_options::MAX_OPTIONS).enumerate()
+                            .filter_map(|(i,c)|c.until(now).map(|t|(t,i,c))).collect();
+                        available.sort_by_key(|(time,_,_)|*time);
+                        for (_,index,choice) in available {
+                            let item=ThreadMenuItem::UserSnooze(index);
+                            let choice=choice.clone();
+                            enabled.push(item);
+                            rows.push(self.thread_menu_item(item,choice.label(),true,&id,cx,menu_action(move|this,id,_,cx|{
+                                if let Some(until)=choice.until(EpochMs::now().as_millis()){this.snooze_thread_by_id(id,until,cx);}
+                            })));
+                        }
+                    }
+                    continue;
+                }
+            }
             let Some(item) = ThreadMenuItem::for_entry(&entry) else {
                 rows.push(thread_menu_separator());
                 continue;
@@ -1025,8 +1086,19 @@ impl Workspace {
             if on {
                 enabled.push(item);
             }
-            let label = entry.label();
+            let label = if matches!(entry, ThreadMenuEntry::RegenerateTitle { enabled: false }) {
+                "Regenerating…"
+            } else { entry.label() };
             rows.push(self.thread_menu_item(item, label, on, &id, cx, thread_menu_action(entry)));
+        }
+        let can_archive = !chat.is_streaming;
+        rows.push(thread_menu_separator());
+        rows.push(self.thread_menu_item(
+            ThreadMenuItem::Archive, "Archive thread", can_archive, &id, cx,
+            menu_action(|this, id, window, cx| this.request_thread_archive(id, window, cx)),
+        ));
+        if can_archive {
+            enabled.push(ThreadMenuItem::Archive);
         }
         div()
             .id("desktop-thread-menu")
@@ -1071,12 +1143,13 @@ impl Workspace {
     fn thread_menu_item(
         &self,
         item: ThreadMenuItem,
-        label: &'static str,
+        label: impl Into<SharedString>,
         enabled: bool,
         thread_id: &str,
         cx: &Context<'_, Self>,
         action: ThreadMenuAction,
     ) -> AnyElement {
+        let label=label.into();
         let id = item.id();
         let thread_id = thread_id.to_string();
         let run =
@@ -1103,7 +1176,7 @@ impl Workspace {
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
             .role(Role::MenuItem)
-            .aria_label(label)
+            .aria_label(label.clone())
             .when(!enabled, |el| el.opacity(0.5).cursor_not_allowed())
             .when(enabled, |el| {
                 el.track_focus(&focus)
@@ -1441,6 +1514,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        self.task_thread_view = None;
         match view {
             AppView::Today
             | AppView::Chat

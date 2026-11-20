@@ -10,7 +10,7 @@ use bruhs_models::meeting_suggestions::{
     event_in_window, ContextItem, LiveInput, LiveSuggestions, MeetingSuggestionPrefs, Proactivity,
     Round, RoundStatus, SuggestionState,
 };
-use bruhs_models::{CalendarEvent, EpochMs, Meeting, WorkItemPlanning};
+use bruhs_models::{CalendarEvent, EpochMs, Meeting, WorkItemPlanning, WorkItemSource};
 use chrono::TimeZone;
 
 use super::*;
@@ -22,6 +22,9 @@ use bruhs_ui::press::on_press_view;
 /// How often the automatic loop checks the transcript; the shared rules
 /// decide whether a round is due.
 const TICK: Duration = Duration::from_secs(2);
+
+#[cfg(test)]
+mod source_tests;
 
 /// One live meeting's suggestion session and its saved preferences.
 #[derive(Default)]
@@ -260,6 +263,11 @@ impl Workspace {
         decision: SuggestionState,
         cx: &mut Context<'_, Self>,
     ) {
+        let meeting_id = self
+            .meeting_suggestions
+            .live
+            .meeting_id()
+            .map(str::to_string);
         let Some(outcome) = self.meeting_suggestions.live.decide(id, decision) else {
             return;
         };
@@ -269,16 +277,19 @@ impl Workspace {
         }
         let note = match decision {
             SuggestionState::Added => {
-                let meeting = self
-                    .meetings_hub
-                    .read(cx)
-                    .live_meeting()
-                    .map(|meeting| meeting.title.clone());
+                let meeting = meeting_id.as_ref().and_then(|id| {
+                    self.meetings_hub
+                        .read(cx)
+                        .meetings
+                        .iter()
+                        .find(|meeting| &meeting.id == id)
+                        .map(|meeting| meeting.title.clone())
+                });
                 self.work_items.push(DesktopWorkItem {
                     id: uuid::Uuid::new_v4().to_string(),
                     project_id: None,
                     title: suggestion.text,
-                    description: Some(match meeting {
+                    description: Some(match &meeting {
                         Some(title) => format!("Suggested during the meeting {title}."),
                         None => "Suggested during a meeting.".to_string(),
                     }),
@@ -286,8 +297,15 @@ impl Workspace {
                     priority: DesktopPriority::None,
                     due_date: None,
                     planning: WorkItemPlanning::default(),
+                    source: meeting_id.map(|meeting_id| WorkItemSource::Meeting {
+                        meeting_id,
+                        title: meeting.unwrap_or_else(|| "Meeting".into()),
+                    }),
                     updated_at: EpochMs::now(),
                 });
+                if let Some(view) = self.meeting_transcript_view.borrow().as_ref() {
+                    view.invalidate_footer();
+                }
                 Some("Task added.".to_string())
             }
             SuggestionState::Copied => {

@@ -72,8 +72,13 @@ impl MobileUi {
 }
 impl Workspace {
     pub(super) fn sync_mobile_offer(&mut self) {
+        let pairing_visible = if self.settings_visible() {
+            self.settings_section == SettingsSection::Access
+        } else {
+            self.active_view == AppView::Automations
+        };
         let expired = self.mobile.offer.as_ref().is_some_and(|(offer, _)| {
-            self.active_view != AppView::Automations
+            !pairing_visible
                 || !self
                     .mobile
                     .host()

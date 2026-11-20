@@ -41,19 +41,17 @@ struct HostWidget {
 }
 
 fn widget_theme(app: &App) -> std::collections::BTreeMap<String, String> {
-    let dark = app.theme().is_dark();
+    let scheme = if app.theme().is_dark() { "dark" } else { "light" };
+    let css_color = |color: Hsla| format!("#{:06x}", u32::from(color.to_rgb()) >> 8);
     [
-        ("color-scheme", if dark { "dark" } else { "light" }),
-        (
-            "--bruhs-background",
-            if dark { "#141210" } else { "#faf6f1" },
-        ),
-        ("--bruhs-text", if dark { "#dfcfc3" } else { "#241e19" }),
-        ("--bruhs-accent", "#a8b8ef"),
-        ("--bruhs-font", "ui-monospace,monospace"),
+        ("color-scheme", scheme.to_owned()),
+        ("--bruhs-background", css_color(app.theme().background)),
+        ("--bruhs-text", css_color(theme::rambutan_300())),
+        ("--bruhs-accent", css_color(theme::persimmon_400())),
+        ("--bruhs-font", "ui-monospace,monospace".to_owned()),
     ]
     .into_iter()
-    .map(|(key, value)| (key.into(), value.into()))
+    .map(|(key, value)| (key.into(), value))
     .collect()
 }
 

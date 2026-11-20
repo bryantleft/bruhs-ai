@@ -102,6 +102,7 @@ fn saved_state(
             name: format!("Project {index}"),
         });
         state.work_items.push(super::super::PersistedWorkItem {
+            source: None,
             id: format!("task-{index}"),
             project_id: Some(format!("project-{index}")),
             title: format!("Task {index}"),

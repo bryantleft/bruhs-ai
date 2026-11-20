@@ -63,6 +63,7 @@ fn populate(workspace: &mut Workspace, records: usize) {
             body.push_str(" LastQuArtZ");
         }
         workspace.work_items.push(DesktopWorkItem {
+            source: None,
             id: id.clone(),
             project_id: None,
             title: format!("Task {index}"),

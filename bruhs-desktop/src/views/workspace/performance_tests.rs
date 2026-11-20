@@ -68,6 +68,7 @@ fn print_samples(label: &str, mut samples: Vec<std::time::Duration>) {
 fn tasks(count: usize) -> Vec<DesktopWorkItem> {
     (0..count)
         .map(|index| DesktopWorkItem {
+            source: None,
             id: format!("task-{index}"),
             project_id: None,
             title: format!("Task {index}"),

@@ -191,6 +191,7 @@ pub(super) fn populate(
                         error: "Stored synthetic interruption".into(),
                     };
                     last.tool_calls = vec![DesktopToolCall {
+                        text_offset: None,
                         id: "stored-tool".into(),
                         tool: "read".into(),
                         input: serde_json::json!({"path":"synthetic"}),

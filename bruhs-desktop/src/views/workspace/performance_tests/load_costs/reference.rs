@@ -22,6 +22,7 @@ impl RestoredRecords {
                     .work_items
                     .iter()
                     .map(|item| DesktopWorkItem {
+                        source: None,
                         id: item.id.clone(),
                         project_id: item.project_id.clone(),
                         title: item.title.clone(),

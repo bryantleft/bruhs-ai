@@ -228,7 +228,7 @@ fn slash_command_filter_should_match_web_contains_behavior() {
 
 #[test]
 fn desktop_chat_shell_layout_should_match_web_reference() {
-    assert_eq!(CHAT_MESSAGE_LIST_MAX_WIDTH_PX, 768.0);
+    assert_eq!(CHAT_MESSAGE_LIST_MAX_WIDTH_PX, 736.0);
     assert_eq!(CHAT_MESSAGE_LIST_X_PADDING_PX, 16.0);
     assert_eq!(CHAT_MESSAGE_LIST_Y_PADDING_PX, 16.0);
     assert_eq!(CHAT_MESSAGE_LIST_GAP_PX, 0.0);
@@ -835,6 +835,7 @@ fn finished_assistant(content: &str, tool_id: &str, secs: i64) -> Message {
         started_at_ms: Some(1_000),
         completed_at_ms: Some(1_000 + secs * 1_000),
         tool_calls: vec![DesktopToolCall {
+            text_offset: None,
             id: tool_id.to_string(),
             tool: "Bash".to_string(),
             input: json!({ "command": "ls" }),
@@ -1061,7 +1062,7 @@ fn desktop_thread_rename_should_match_web_header(cx: &mut gpui::TestAppContext) 
     let counted = saves.clone();
     cx.update(|_, cx| {
         cx.subscribe(&chat, move |_, event: &super::ChatViewEvent, _| {
-            if matches!(event, super::ChatViewEvent::MessagesChanged) {
+            if matches!(event, super::ChatViewEvent::TitleRenamed) {
                 counted.set(counted.get() + 1);
             }
         })
@@ -1241,6 +1242,7 @@ fn desktop_tool_call_cards_expand_should_match_web_body_renderers(cx: &mut gpui:
                 checkpoint: None,
                 tool_calls: vec![
                     DesktopToolCall {
+                        text_offset: None,
                         id: "tool-bash".to_string(),
                         tool: "Bash".to_string(),
                         input: json!({ "command": "cargo test -p bruhs-desktop" }),
@@ -1248,6 +1250,7 @@ fn desktop_tool_call_cards_expand_should_match_web_body_renderers(cx: &mut gpui:
                         is_error: true,
                     },
                     DesktopToolCall {
+                        text_offset: None,
                         id: "tool-edit".to_string(),
                         tool: "Edit".to_string(),
                         input: json!({
@@ -1259,6 +1262,7 @@ fn desktop_tool_call_cards_expand_should_match_web_body_renderers(cx: &mut gpui:
                         is_error: false,
                     },
                     DesktopToolCall {
+                        text_offset: None,
                         id: "tool-question".to_string(),
                         tool: "AskUserQuestion".to_string(),
                         input: json!({
@@ -1730,6 +1734,24 @@ fn desktop_composer_hints_and_git_branch_menu_should_match_web_flow(cx: &mut gpu
         assert!(!chat.branch_menu_open);
     });
 
+    let skill_dir=root.join(".agents/skills/settings-fixture");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(skill_dir.join("SKILL.md"),"---\nname: settings-fixture\ndescription: Exercise slash menu selection\n---\n").unwrap();
+    chat.update_in(cx,|chat,window,cx|{
+        chat.slash_skills=true;
+        chat.input_state.update(cx,|input,cx|{
+            input.set_value("/settings-fixture",window,cx);
+            input.set_selected_range(17..17,cx);
+            input.focus(window,cx);
+        });
+        chat.refresh_mention_hints(cx);
+    });
+    cx.executor().advance_clock(super::MENTION_SEARCH_DEBOUNCE);
+    cx.run_until_parked();
+    assert_chat_rendered_bounds(cx,"desktop-slash-command-row-$settings-fixture");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    chat.update(cx,|chat,cx|assert_eq!(chat.input_state.read(cx).value().as_ref(),"$settings-fixture "));
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -1887,6 +1909,7 @@ fn desktop_tool_output_truncation_should_match_web_reference() {
 #[test]
 fn desktop_tool_body_text_should_render_edit_diff_inputs() {
     let tool_call = DesktopToolCall {
+        text_offset: None,
         id: "tool-1".to_string(),
         tool: "Edit".to_string(),
         input: json!({

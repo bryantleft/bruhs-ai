@@ -337,6 +337,7 @@ fn a_focus_block_opens_its_source_task(cx: &mut gpui::TestAppContext) {
             dt(2026, 5, 12, 14, 0),
         )];
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-1".into(),
             project_id: None,
             title: "Write the calendar audit".into(),
@@ -427,8 +428,10 @@ fn the_week_fits_a_640_window_and_opens_near_now_like_web(cx: &mut gpui::TestApp
         &chrono::Local::now(),
     ));
     workspace.update(cx, |workspace, _| {
-        let offset = workspace.calendar_timegrid_scroll.offset().y;
-        assert_eq!(f32::from(-offset), expected, "the grid opened near now");
+        let scroll = &workspace.calendar_timegrid_scroll;
+        // Late in the day the last hour reaches the bottom of the viewport.
+        let reachable = expected.min(f32::from(scroll.max_offset().y));
+        assert_eq!(f32::from(-scroll.offset().y), reachable, "the grid opened near now");
     });
 }
 
@@ -481,6 +484,7 @@ fn hidden_month_records_are_reachable_through_the_day_list(cx: &mut gpui::TestAp
             )];
         });
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-hidden".into(),
             project_id: None,
             title: "Hidden due task".into(),
@@ -563,6 +567,7 @@ fn due_task(id: &str, title: &str, due: &str) -> DesktopWorkItem {
         priority: DesktopPriority::Medium,
         due_date: Some(due.into()),
         planning: WorkItemPlanning::default(),
+        source: None,
         updated_at: EpochMs::UNIX_EPOCH,
     }
 }

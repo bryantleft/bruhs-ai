@@ -2,8 +2,10 @@
 
 mod app_state;
 mod assets;
+mod clock_format;
 mod helpers;
 mod logging;
+mod launcher;
 mod motion;
 #[cfg(feature = "native-performance")]
 mod native_performance;
@@ -23,9 +25,9 @@ mod webview_platform;
 mod whiteboard_performance;
 mod zoom;
 
+use gpui::*;
 use bruhs_ui::zoom::px;
 use bruhs_ui::{Root, TitleBar};
-use gpui::*;
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
@@ -90,6 +92,7 @@ const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 actions!(bruhs, [Quit]);
 
 fn main() {
+    if let Some(code) = launcher::cli() { std::process::exit(code); }
     if bruhs_core::workbench_tools::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -218,9 +221,28 @@ fn main() {
         .with_app_links(link_tx)
         .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+            // The workspace handles the configurable keyboard quit gesture.
+            // ---- bruhs-ui setup: the theme and the root, text field and
+            // text selection key bindings ----
+            bruhs_ui::init(cx);
+            // Native selectors route editing to an embedded WebKit first
+            // responder; gpui-component handles the same actions in its inputs.
             cx.set_menus([
-                Menu::new("bruhs.ai").items([MenuItem::action("Quit bruhs.ai", Quit)]),
+                Menu::new("bruhs.ai").items([MenuItem::action("Settings…", OpenSettings), MenuItem::separator(), MenuItem::action("Quit bruhs.ai", Quit)]),
+                Menu::new("Edit").items([
+                    MenuItem::os_action("Undo", bruhs_ui::input::Undo, OsAction::Undo),
+                    MenuItem::os_action("Redo", bruhs_ui::input::Redo, OsAction::Redo),
+                    MenuItem::separator(),
+                    MenuItem::os_action("Cut", bruhs_ui::input::Cut, OsAction::Cut),
+                    MenuItem::os_action("Copy", bruhs_ui::input::Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", bruhs_ui::input::Paste, OsAction::Paste),
+                    MenuItem::separator(),
+                    MenuItem::os_action(
+                        "Select All",
+                        bruhs_ui::input::SelectAll,
+                        OsAction::SelectAll,
+                    ),
+                ]),
                 // The web app's browser zoom, as a browser's View menu offers it.
                 Menu::new("View").items([
                     MenuItem::action("Zoom In", ZoomIn),
@@ -228,9 +250,6 @@ fn main() {
                     MenuItem::action("Actual Size", ResetZoom),
                 ]),
             ]);
-            // ---- bruhs-ui setup: the theme and the root, text field and
-            // text selection key bindings ----
-            bruhs_ui::init(cx);
             motion::init(cx);
 
             // The bruhs type stack is all Monaspace. The web loads it as a
@@ -299,6 +318,11 @@ fn main() {
             ));
             // Cmd+F: chat searches the open thread. A focused diff
             // searches that diff. The terminal keeps the key (its own context).
+            bindings.push(KeyBinding::new(
+                if cfg!(target_os = "macos") { "cmd-shift-enter" } else { "ctrl-shift-enter" },
+                bruhs_ui::input::Enter { secondary: true, shift: true },
+                Some("ChatComposer"),
+            ));
             bindings.push(KeyBinding::new("cmd-f", FindInThread, Some("Chat")));
             bindings.push(KeyBinding::new("cmd-f", FindInDiff, Some("Diff")));
             bindings.push(KeyBinding::new(

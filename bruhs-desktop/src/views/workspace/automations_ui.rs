@@ -601,6 +601,7 @@ impl Workspace {
             }
             WorkflowOperation::CreateTask { title } => {
                 AutomationRecord::WorkItem(DesktopWorkItem {
+                    source: None,
                     id: uuid::Uuid::new_v4().to_string(),
                     project_id: None,
                     title,
@@ -804,9 +805,20 @@ impl Workspace {
             _ => (None, None),
         };
         let panel = self.reactive_automations.read(cx);
-        if panel.bruh_page_agent() != bruh.as_deref() || panel.room_page_id() != room.as_deref() {
+        let destination = self
+            .task_thread_view
+            .as_ref()
+            .filter(|t| Some(t.agent_id.as_str()) == bruh.as_deref());
+        if panel.bruh_page_agent() != bruh.as_deref()
+            || panel.room_page_id() != room.as_deref()
+            || panel.task_thread() != destination
+        {
             self.reactive_automations.update(cx, |panel, cx| {
-                panel.show_bruh(bruh, cx);
+                if let Some(destination) = destination {
+                    panel.show_task_thread(destination.clone(), cx);
+                } else {
+                    panel.show_bruh(bruh, cx);
+                }
                 panel.show_room(room, cx);
             });
         }
@@ -949,7 +961,7 @@ impl Workspace {
                                     .child(self.render_workflow_history(cx)),
                             ),
                     )
-                    .child(self.render_mobile(cx).mt_3())
+                    .when(!self.settings_visible(), |body| body.child(self.render_mobile(cx).mt_3()))
                     .vertical_scrollbar(&self.automations_scroll),
             )
     }
@@ -1266,5 +1278,73 @@ mod durability_tests {
             assert_eq!(saved.automation_state, workspace.automation_state);
         });
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+impl Workspace {
+    pub(super) fn task_thread_deletion(
+        &mut self,
+        event: &crate::views::reactive_automations::TaskThreadDeletion,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        use crate::views::reactive_automations::TaskThreadDeletion;
+        match event {
+            TaskThreadDeletion::Requested {
+                thread_id,
+                title,
+                tasks,
+            } => {
+                let panel = self.reactive_automations.clone();
+                let id = thread_id.clone();
+                let linked = tasks.keys().cloned().collect();
+                if !self.confirm_thread_delete {
+                    panel.update(cx, |panel, cx| panel.delete_task_thread(id, linked, cx));
+                    return;
+                }
+                let detail = match tasks.len() {
+                    0 => "This deletes the thread and its chat history.".into(),
+                    1 => format!(
+                        "This deletes the chat history and the linked scheduled task “{}”.",
+                        tasks.values().next().unwrap()
+                    ),
+                    count => format!(
+                        "This deletes the chat history and {count} linked scheduled tasks.\n\n{}",
+                        tasks.values().cloned().collect::<Vec<_>>().join("\n")
+                    ),
+                };
+                let response = window.prompt(
+                    gpui::PromptLevel::Warning,
+                    &format!("Delete “{title}”?"),
+                    Some(&detail),
+                    &[
+                        gpui::PromptButton::Cancel("Cancel".into()),
+                        gpui::PromptButton::Other("Delete".into()),
+                    ],
+                    cx,
+                );
+                cx.spawn(async move |_, cx| {
+                    if response.await == Ok(1) {
+                        panel.update(cx, |panel, cx| panel.delete_task_thread(id, linked, cx));
+                    }
+                })
+                .detach();
+            }
+            TaskThreadDeletion::Deleted(id) => {
+                if let Some(loc) = self
+                    .task_thread_view
+                    .as_ref()
+                    .filter(|t| &t.thread_id == id)
+                {
+                    let here = matches!(&self.active_view, AppView::Bruh {agent_id} if agent_id==&loc.agent_id);
+                    self.task_thread_view = None;
+                    if here && self.overlay.is_none() && self.top_layer.is_none() {
+                        self.open_settings(&OpenSettings, window, cx);
+                        self.set_settings_section(SettingsSection::ScheduledTasks, cx);
+                    }
+                    self.persist_and_notify(cx);
+                }
+            }
+        }
     }
 }

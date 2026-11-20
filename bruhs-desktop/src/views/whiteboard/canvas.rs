@@ -322,7 +322,7 @@ impl BoardPainter {
                                     px(font_size),
                                     &[TextRun {
                                         len,
-                                        font: font("Monaspace Argon"),
+                                        font: font(crate::theme::FontFace::Interface),
                                         color: color(shape.style.stroke),
                                         ..Default::default()
                                     }],

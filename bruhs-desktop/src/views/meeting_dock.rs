@@ -242,7 +242,7 @@ impl Render for MeetingDock {
             .bg(theme::longan_900())
             .border_1()
             .border_color(theme::longan_700())
-            .font_family("Monaspace Argon")
+            .font_family(crate::theme::FontFace::Interface)
             .text_size(px(12.0))
             .text_color(theme::rambutan_200())
             .child(

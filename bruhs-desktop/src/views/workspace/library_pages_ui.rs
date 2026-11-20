@@ -9,6 +9,7 @@ pub(super) enum LibraryPage {
     TaskColumn(usize),
     Documents,
     Sources,
+    MeetingTasks,
 }
 
 impl LibraryPage {
@@ -18,6 +19,7 @@ impl LibraryPage {
             Self::TaskColumn(column) => format!("task-column-{column}"),
             Self::Documents => "knowledge-documents".into(),
             Self::Sources => "knowledge-sources".into(),
+            Self::MeetingTasks => "meeting-tasks".into(),
         }
     }
 }
@@ -28,6 +30,7 @@ pub(super) struct LibraryPages {
     pub columns: [usize; 4],
     pub documents: usize,
     pub sources: usize,
+    pub meeting_tasks: usize,
     pub task_scroll: ScrollHandle,
     pub column_scroll: [ScrollHandle; 4],
     pub knowledge_scroll: ScrollHandle,
@@ -40,6 +43,7 @@ impl LibraryPages {
             LibraryPage::TaskColumn(column) => self.columns[column],
             LibraryPage::Documents => self.documents,
             LibraryPage::Sources => self.sources,
+            LibraryPage::MeetingTasks => self.meeting_tasks,
         };
         page.min(total.saturating_sub(1) / size) * size
     }
@@ -64,11 +68,27 @@ impl LibraryPages {
                 // After the search box and the documents.
                 self.knowledge_scroll.scroll_to_top_of_item(2);
             }
+            LibraryPage::MeetingTasks => self.meeting_tasks = page,
         }
     }
 }
 
 impl Workspace {
+    fn select_library_page(
+        &mut self,
+        target: LibraryPage,
+        page: usize,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.library_pages.select(target, page);
+        if matches!(target, LibraryPage::MeetingTasks) {
+            if let Some(view) = self.meeting_transcript_view.borrow().as_ref() {
+                view.invalidate_footer();
+            }
+        }
+        cx.notify();
+    }
+
     pub(super) fn render_library_pages(
         &self,
         target: LibraryPage,
@@ -162,8 +182,7 @@ impl Workspace {
         .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
             on_press_view(button, cx, move |this, _, cx| {
-                this.library_pages.select(target, next_page);
-                cx.notify();
+                this.select_library_page(target, next_page, cx);
             })
         })
         .child(if next { "Next" } else { "Previous" })

@@ -21,6 +21,7 @@ pub const SETTLED_AFTER_MS: i64 = bruhs_models::logic::sidebar::SETTLED_AFTER_MS
 pub struct ThreadMeta<'a> {
     pub id: &'a str,
     pub updated_at_ms: EpochMs,
+    pub idle_settle_after_ms: Option<i64>,
     pub pinned: bool,
     pub settled: bool,
     pub pin_rank: Option<i64>,
@@ -61,6 +62,7 @@ fn facts<'a>(
     SidebarFacts {
         id: thread.id,
         updated_at_ms: thread.updated_at_ms.as_millis(),
+        idle_settle_after_ms: thread.idle_settle_after_ms,
         pinned: thread.pinned,
         settled: thread.settled,
         pin_rank: thread.pin_rank,
@@ -168,6 +170,7 @@ mod tests {
         ThreadMeta {
             id,
             updated_at_ms: ago(age_ms),
+            idle_settle_after_ms: Some(SETTLED_AFTER_MS),
             pinned,
             settled,
             pin_rank: None,

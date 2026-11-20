@@ -130,6 +130,7 @@ fn task_detail_keeps_its_footer_visible_and_planning_reachable(cx: &mut TestAppC
         cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
         workspace.update_in(cx, |workspace, window, cx| {
             let item = super::DesktopWorkItem {
+                source: None,
                 id: "layout-fixture".into(),
                 project_id: None,
                 title: "Review planning controls".into(),
@@ -211,6 +212,7 @@ fn settings_scrollbar_drag_reaches_the_end_of_the_page(cx: &mut TestAppContext) 
         cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
         workspace.update_in(cx, |workspace, window, cx| {
             workspace.open_settings(&super::OpenSettings, window, cx);
+            workspace.set_settings_section(super::SettingsSection::Threads, cx);
         });
         cx.run_until_parked();
         let bounds = cx
@@ -234,7 +236,7 @@ fn settings_scrollbar_drag_reaches_the_end_of_the_page(cx: &mut TestAppContext) 
                 -workspace.settings_scroll.max_offset().y,
                 "dragging the visible settings scrollbar must reach the page end"
             );
-            assert_eq!(workspace.settings_section, super::SettingsSection::About);
+            assert_eq!(workspace.settings_section, super::SettingsSection::Threads);
         });
     }
 }

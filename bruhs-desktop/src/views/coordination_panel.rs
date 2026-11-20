@@ -11,6 +11,7 @@ impl CoordinationPanel {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let preview = cx.new(|cx| {
             let mut view = PreviewPanelView::new(window, cx);
+            view.use_application_session();
             let base = std::env::var("BRUHS_SERVER_URL")
                 .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());
             view.go_to(

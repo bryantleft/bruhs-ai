@@ -288,7 +288,7 @@ struct InitialAuthChecks {
 
 impl Global for InitialAuthChecks {}
 
-fn auth_check_program(cx: &App) -> Option<Cow<'static, str>> {
+pub(super) fn auth_check_program(cx: &App) -> Option<Cow<'static, str>> {
     #[cfg(feature = "native-performance")]
     if let Some(program) = crate::native_performance::auth_fixture_program(cx) {
         return Some(Cow::Owned(program));
@@ -580,7 +580,7 @@ impl ChatView {
             .border_color(theme::durian_400().opacity(AUTH_BANNER_BORDER_OPACITY))
             .bg(theme::durian_500().opacity(AUTH_BANNER_BG_OPACITY))
             .p(px(AUTH_BANNER_PADDING_PX))
-            .font_family(AUTH_BANNER_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Code.with_default(AUTH_BANNER_FONT_FAMILY))
             .text_size(px(AUTH_BANNER_TEXT_SIZE_PX))
             .text_color(theme::durian_100())
             .child(

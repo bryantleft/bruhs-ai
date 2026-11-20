@@ -51,7 +51,7 @@ impl ChatView {
         let draft = rename.input.read(cx).value().to_string();
         if let Some(title) = resolve_rename(&draft, &self.thread_title) {
             self.thread_title = title;
-            cx.emit(ChatViewEvent::MessagesChanged);
+            cx.emit(ChatViewEvent::TitleRenamed);
         }
         cx.notify();
     }

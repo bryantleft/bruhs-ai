@@ -6,6 +6,37 @@ use bruhs_models::reactive::NOTIFICATIONS_NOTE;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 
+/// The same notification form is available in Settings and on the Automations page.
+#[derive(IntoElement)]
+pub(crate) struct AgentNotificationSettings(pub Entity<ReactiveAutomations>);
+
+impl RenderOnce for AgentNotificationSettings {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.0.update(cx, |panel, cx| {
+            if !panel.loaded {
+                panel.refresh_snapshot(cx);
+            }
+            panel.ensure_notification_form(window, cx);
+            if panel.notify_form.is_some() {
+                return panel.render_notifications(cx);
+            }
+            card()
+                .child(heading("Agent notifications"))
+                .child(muted(if panel.reading {
+                    "Loading notification preferences…"
+                } else {
+                    "Connect the local automation server to manage agent notifications."
+                }))
+                .when(!panel.reading, |el| {
+                    el.child(
+                        ghost_control("settings-retry-notifications", "Retry", panel.busy)
+                            .on_activate(cx, |this, _, cx| this.refresh_snapshot(cx)),
+                    )
+                })
+        })
+    }
+}
+
 pub(super) struct NotificationForm {
     /// The settings this form was opened from.
     pub(super) base: NotificationSettings,

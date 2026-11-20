@@ -1256,7 +1256,7 @@ pub(super) fn inbox_date(timestamp_ms: i64) -> String {
         |date| {
             let date = date.with_timezone(&Local);
             date.format(if date.date_naive() == Local::now().date_naive() {
-                "%H:%M"
+                crate::clock_format::pattern()
             } else {
                 "%Y-%m-%d"
             })

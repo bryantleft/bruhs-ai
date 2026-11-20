@@ -116,7 +116,7 @@ pub(super) async fn run_codex_login_with(program: &str, timing: LoginTiming) -> 
 
 /// The program to check with: `codex`, a fixture under test, or nothing
 /// when a test installed none or a performance run blocks auth.
-fn codex_program(cx: &App) -> Option<String> {
+pub(super) fn codex_program(cx: &App) -> Option<String> {
     #[cfg(feature = "native-performance")]
     if crate::native_performance::block_service(cx, crate::native_performance::Service::Auth) {
         return None;

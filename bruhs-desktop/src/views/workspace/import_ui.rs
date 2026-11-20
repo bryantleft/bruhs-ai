@@ -10,13 +10,13 @@ use super::*;
 use bruhs_core::import::ImportRoots;
 use bruhs_models::agent::Role as AgentRole;
 use bruhs_models::logic::portable::{
-    import_model, resume_command, transcript_markdown, ImportCandidate, ImportSource,
-    ImportedThread, PortableMessage, PortablePart, PortableToolCall, IMPORT_CONTEXT_MAX_CHARS,
+    IMPORT_CONTEXT_MAX_CHARS, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
+    PortablePart, PortableToolCall, import_model, resume_command, transcript_markdown,
 };
-use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
+use bruhs_models::time::{RelativeTimeStyle, format_relative_ms};
+use bruhs_ui::Sizable as _;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
-use bruhs_ui::Sizable as _;
 use std::time::Duration;
 
 pub(super) const IMPORT_DIALOG_LABEL: &str = "Import thread";
@@ -175,17 +175,26 @@ pub(super) fn visible_candidates<'a>(
 /// thinking parts the thinking, tool calls the tool rows. Empty messages are
 /// dropped.
 pub(super) fn imported_message(message: &PortableMessage) -> Option<Message> {
-    let content = message.text();
+    let mut content = String::new();
     let mut thinking = Vec::new();
     let mut tool_calls = Vec::new();
     for part in &message.parts {
         match part {
-            PortablePart::Text(_) => {}
+            PortablePart::Text(text) => {
+                let text = text.trim();
+                if !text.is_empty() {
+                    if !content.is_empty() {
+                        content.push_str("\n\n")
+                    }
+                    content.push_str(text);
+                }
+            }
             PortablePart::Thinking(text) if !text.trim().is_empty() => {
                 thinking.push(text.trim().to_string());
             }
             PortablePart::Thinking(_) => {}
             PortablePart::ToolCall(call) => tool_calls.push(DesktopToolCall {
+                text_offset: Some(content.len()),
                 id: call.id.clone(),
                 tool: call.tool.clone(),
                 input: call.input.clone(),
@@ -234,32 +243,34 @@ pub(crate) fn portable_messages(messages: &[Message]) -> Vec<PortableMessage> {
         .iter()
         .filter(|message| matches!(message.role, MessageRole::User | MessageRole::Assistant))
         .filter(|message| matches!(message.state, TurnState::Finished | TurnState::Stopped))
-        .map(|message| {
-            let mut parts = Vec::new();
-            if !message.thinking.trim().is_empty() {
-                parts.push(PortablePart::Thinking(message.thinking.clone()));
-            }
-            parts.extend(message.tool_calls.iter().map(|call| {
-                PortablePart::ToolCall(PortableToolCall {
-                    id: call.id.clone(),
-                    tool: call.tool.clone(),
-                    input: call.input.clone(),
-                    output: call.output.clone(),
-                    is_error: call.is_error,
-                })
-            }));
-            if !message.content.trim().is_empty() {
-                parts.push(PortablePart::Text(message.content.clone()));
-            }
-            PortableMessage {
-                role: message.role,
-                parts,
-                started_at_ms: message.started_at_ms,
-                model: message.model.clone(),
-            }
-        })
+        .map(|message| portable_message(message, &message.content))
         .filter(|message| !message.parts.is_empty())
         .collect()
+}
+
+pub(super) fn portable_message(message: &Message, text: &str) -> PortableMessage {
+    let mut parts = Vec::new();
+    if !message.thinking.trim().is_empty() {
+        parts.push(PortablePart::Thinking(message.thinking.clone()));
+    }
+    parts.extend(message.tool_calls.iter().map(|call| {
+        PortablePart::ToolCall(PortableToolCall {
+            id: call.id.clone(),
+            tool: call.tool.clone(),
+            input: call.input.clone(),
+            output: call.output.clone(),
+            is_error: call.is_error,
+        })
+    }));
+    if !text.trim().is_empty() {
+        parts.push(PortablePart::Text(text.to_owned()));
+    }
+    PortableMessage {
+        role: message.role,
+        parts,
+        started_at_ms: message.started_at_ms,
+        model: message.model.clone(),
+    }
 }
 
 impl Workspace {
@@ -521,10 +532,12 @@ impl Workspace {
     fn active_thread_markdown(&self, cx: &App) -> Option<(String, String, String, String)> {
         let thread = self.active_thread()?;
         let chat = thread.chat.read(cx);
+        let local = portable_messages(&chat.messages);
+        let inherited = chat.fork.as_ref().into_iter().flat_map(|fork|&fork.history);
         let markdown = transcript_markdown(
             &chat.thread_title,
             "bruhs",
-            &portable_messages(&chat.messages),
+            inherited.chain(&local),
             IMPORT_CONTEXT_MAX_CHARS,
         );
         let project = if thread.project_name.is_empty() {
@@ -570,6 +583,7 @@ impl Workspace {
             &path,
             &model,
             chat.permission_mode,
+            chat.claude_effort.as_deref(),
             &markdown,
         ) {
             Ok(task) => task,

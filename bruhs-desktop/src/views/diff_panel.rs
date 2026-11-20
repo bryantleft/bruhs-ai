@@ -313,6 +313,9 @@ impl DiffScope {
 
 // ── View ─────────────────────────────────────────────────────────────────
 
+mod preferences;
+pub(crate) use preferences::DiffPreferences;
+
 pub enum DiffPanelEvent {
     OpenInEditor { path: String, line: Option<u32> },
 }
@@ -322,7 +325,8 @@ pub struct DiffPanelView {
     status: Option<GitStatus>,
     files: Vec<DesktopDiffFile>,
     truncated: bool,
-    collapsed: HashSet<String>,
+    pub(crate) prefs: DiffPreferences,
+    fold_exceptions: HashSet<String>,
     review_filter: DiffReviewFilter,
     viewed_book: ViewedBook,
     loading: bool,
@@ -356,7 +360,8 @@ impl DiffPanelView {
             status: None,
             files: Vec::new(),
             truncated: false,
-            collapsed: HashSet::new(),
+            prefs: DiffPreferences::default(),
+            fold_exceptions: HashSet::new(),
             review_filter: DiffReviewFilter::All,
             viewed_book: load_viewed(),
             loading: false,
@@ -451,7 +456,10 @@ impl DiffPanelView {
 
     /// Replace the per-turn scopes; a selected turn that vanished falls back
     /// to the working tree.
-    pub fn set_turns(&mut self, turns: Vec<DesktopTurnFiles>, cx: &mut Context<'_, Self>) {
+    pub fn set_turns(&mut self, mut turns: Vec<DesktopTurnFiles>, cx: &mut Context<'_, Self>) {
+        if self.prefs.hide_whitespace {
+            preferences::ignore_turn_whitespace(&mut turns);
+        }
         self.turns = turns;
         cx.notify();
     }
@@ -530,11 +538,7 @@ impl DiffPanelView {
     ) {
         let key = self.scope_key();
         set_viewed(&mut self.viewed_book, &key, path, fingerprint, viewed);
-        if viewed {
-            self.collapsed.insert(path.to_string());
-        } else {
-            self.collapsed.remove(path);
-        }
+        self.fold_file(path, viewed);
         persist_viewed(&self.viewed_book);
         cx.notify();
     }
@@ -547,15 +551,9 @@ impl DiffPanelView {
             .iter()
             .map(|file| file.path.clone())
             .collect();
-        let expand = !paths.is_empty() && paths.iter().all(|path| self.collapsed.contains(path));
-        if expand {
-            for path in &paths {
-                self.collapsed.remove(path);
-            }
-        } else {
-            for path in paths {
-                self.collapsed.insert(path);
-            }
+        let expand = !paths.is_empty() && paths.iter().all(|path| self.is_collapsed(path));
+        for path in paths {
+            self.fold_file(&path, !expand);
         }
         cx.notify();
     }
@@ -628,7 +626,7 @@ impl DiffPanelView {
         self.status = None;
         self.error = None;
         self.truncated = false;
-        self.collapsed.clear();
+        self.fold_exceptions.clear();
         cx.notify();
     }
 
@@ -669,9 +667,13 @@ impl DiffPanelView {
         cx.notify();
 
         let (tx, rx) = async_channel::bounded::<Result<(GitStatus, GitDiff), String>>(1);
+        let hide_whitespace = self.prefs.hide_whitespace;
         runtime.spawn(async move {
             let dir = PathBuf::from(&path);
-            let result = match (git::status(&dir).await, git::diff(&dir).await) {
+            let result = match (
+                git::status(&dir).await,
+                git::diff_with_whitespace(&dir, hide_whitespace).await,
+            ) {
                 (Ok(status), Ok(diff)) => Ok((status, diff)),
                 (Err(e), _) | (_, Err(e)) => Err(e.to_string()),
             };
@@ -717,9 +719,7 @@ impl DiffPanelView {
     }
 
     fn toggle_file(&mut self, path: &str, cx: &mut Context<'_, Self>) {
-        if !self.collapsed.remove(path) {
-            self.collapsed.insert(path.to_string());
-        }
+        self.fold_file(path, !self.is_collapsed(path));
         cx.notify();
     }
 
@@ -749,7 +749,7 @@ impl DiffPanelView {
             .flex_shrink_0()
             .border_b_1()
             .border_color(theme::longan_800().opacity(DIVIDER_OPACITY))
-            .font_family(PANEL_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
             .text_size(px(TOOLBAR_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_400())
@@ -811,12 +811,12 @@ impl DiffPanelView {
                         .font_features(theme::tabular_nums())
                         .child(
                             div()
-                                .text_color(theme::pandan_400())
+                                .text_color(self.added_color())
                                 .child(format!("+{additions}")),
                         )
                         .child(
                             div()
-                                .text_color(theme::lychee_400())
+                                .text_color(self.removed_color())
                                 .child(format!("−{deletions}")),
                         ),
                 )
@@ -907,8 +907,7 @@ impl DiffPanelView {
             .collect();
         let viewed_n = viewed_count(&self.viewed_book, &key, &refs);
         let total = files.len();
-        let expand =
-            !files.is_empty() && files.iter().all(|file| self.collapsed.contains(&file.path));
+        let expand = !files.is_empty() && files.iter().all(|file| self.is_collapsed(&file.path));
         let fold_label = if expand { "Expand all" } else { "Collapse all" };
         div()
             .id("desktop-diff-review")
@@ -938,7 +937,7 @@ impl DiffPanelView {
                     .min_w_0()
                     .truncate()
                     .text_size(px(TOOLBAR_TEXT_SIZE_PX))
-                    .font_family(PANEL_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
                     .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(format!("{viewed_n} of {total} viewed")),
@@ -963,7 +962,7 @@ impl DiffPanelView {
             .flex_shrink_0()
             .items_center()
             .text_size(px(TOOLBAR_TEXT_SIZE_PX))
-            .font_family(PANEL_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
             .when(active, |el| {
                 el.bg(theme::longan_800()).text_color(theme::rambutan_100())
             })
@@ -1003,7 +1002,7 @@ impl DiffPanelView {
             .flex_shrink_0()
             .items_center()
             .text_size(px(TOOLBAR_TEXT_SIZE_PX))
-            .font_family(PANEL_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
             .text_color(theme::rambutan_400())
             .tab_index(0)
             .role(Role::Button)
@@ -1062,7 +1061,7 @@ impl DiffPanelView {
                     .flex_1()
                     .min_w_0()
                     .text_size(px(14.0))
-                    .font_family(PANEL_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
                     .text_color(if self.find_query.is_empty() {
                         theme::rambutan_500()
                     } else {
@@ -1078,7 +1077,7 @@ impl DiffPanelView {
                 div()
                     .flex_shrink_0()
                     .text_size(px(12.0))
-                    .font_family(PANEL_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
                     .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(count_label),
@@ -1094,7 +1093,7 @@ impl DiffPanelView {
                     .justify_center()
                     .rounded(px(4.0))
                     .text_size(px(12.0))
-                    .font_family(PANEL_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
                     .text_color(theme::rambutan_400())
                     .cursor_pointer()
                     .hover(|el| {
@@ -1143,7 +1142,7 @@ impl DiffPanelView {
             .justify_center()
             .rounded(px(4.0))
             .text_size(px(12.0))
-            .font_family(PANEL_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
             .text_color(theme::rambutan_400())
             .cursor_pointer()
             .hover(|el| {
@@ -1189,12 +1188,12 @@ impl DiffPanelView {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let key = element_key(&file.path);
-        let expanded = !self.collapsed.contains(&file.path);
+        let expanded = !self.is_collapsed(&file.path);
         let (dir, name) = split_path(&file.path);
         let (badge, badge_color) = if file.added {
-            ("A", theme::pandan_400())
+            ("A", self.added_color())
         } else if file.deleted {
-            ("D", theme::lychee_400())
+            ("D", self.removed_color())
         } else {
             ("M", theme::durian_400())
         };
@@ -1298,7 +1297,7 @@ impl DiffPanelView {
                     div()
                         .flex_shrink_0()
                         .text_size(px(12.0))
-                        .font_family(PANEL_LABEL_FONT_FAMILY)
+                        .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
                         .text_color(theme::durian_400())
                         .child("Changed"),
                 )
@@ -1322,7 +1321,7 @@ impl DiffPanelView {
                     .min_w_0()
                     .flex_1()
                     .flex()
-                    .font_family(PANEL_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
                     .child(
                         div()
                             .min_w_0()
@@ -1346,12 +1345,12 @@ impl DiffPanelView {
                     .font_features(theme::tabular_nums())
                     .child(
                         div()
-                            .text_color(theme::pandan_400())
+                            .text_color(self.added_color())
                             .child(format!("+{additions}")),
                     )
                     .child(
                         div()
-                            .text_color(theme::lychee_400())
+                            .text_color(self.removed_color())
                             .child(format!("−{deletions}")),
                     ),
             )
@@ -1450,17 +1449,22 @@ impl DiffPanelView {
                             .bg(theme::longan_800().opacity(0.4))
                             .px_3()
                             .py(px(2.0))
-                            .font_family(PANEL_BODY_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
                             .text_size(px(GAP_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .child(header)
                             .into_any_element(),
                     );
                 }
+                if self.prefs.split {
+                    blocks.extend(self.render_split_lines(&hunk.lines, line_index, highlight));
+                    line_index += hunk.lines.len();
+                    continue;
+                }
                 for line in &hunk.lines {
                     let current = highlight == Some(Some(line_index));
                     line_index += 1;
-                    blocks.push(self.render_row(line, current).into_any_element());
+                    blocks.push(self.render_row(line, current, None).into_any_element());
                 }
             }
             Some(
@@ -1470,7 +1474,7 @@ impl DiffPanelView {
                     .w_full()
                     .h_auto()
                     .py_1()
-                    .font_family(PANEL_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
                     .children(blocks)
                     .map(|body| {
                         if self.wrap {
@@ -1492,17 +1496,25 @@ impl DiffPanelView {
             .into_any_element()
     }
 
-    fn render_row(&self, line: &DiffLine, current: bool) -> Div {
+    fn render_row(&self, line: &DiffLine, current: bool, right_side: Option<bool>) -> Div {
         let (sign, color, background) = match line.kind {
             LineKind::Add => (
                 "+",
-                theme::pandan_300(),
-                Some(theme::pandan_400().opacity(ROW_BG_OPACITY)),
+                if self.prefs.blue_orange {
+                    theme::blueberry_300()
+                } else {
+                    theme::pandan_300()
+                },
+                Some(self.added_color().opacity(ROW_BG_OPACITY)),
             ),
             LineKind::Remove => (
                 "−",
-                theme::lychee_300(),
-                Some(theme::lychee_400().opacity(ROW_BG_OPACITY)),
+                if self.prefs.blue_orange {
+                    theme::persimmon_300()
+                } else {
+                    theme::lychee_300()
+                },
+                Some(self.removed_color().opacity(ROW_BG_OPACITY)),
             ),
             LineKind::Context => (" ", theme::rambutan_400(), None),
         };
@@ -1526,8 +1538,10 @@ impl DiffPanelView {
             .py(px(ROW_Y_PADDING_PX))
             .text_size(px(ROW_TEXT_SIZE_PX))
             .text_color(color)
-            .child(gutter(line.old_no))
-            .child(gutter(line.new_no))
+            .when(right_side != Some(true), |el| el.child(gutter(line.old_no)))
+            .when(right_side != Some(false), |el| {
+                el.child(gutter(line.new_no))
+            })
             .child(
                 div()
                     .w(px(SIGN_WIDTH_PX))
@@ -1550,7 +1564,7 @@ impl Render for DiffPanelView {
         let turn_scope = matches!(self.effective_scope(), DiffScope::Turn(_));
         let current = self.find_open.then(|| self.current_find()).flatten();
         if let Some((_, hit)) = &current {
-            self.collapsed.remove(&hit.path);
+            self.fold_file(&hit.path, false);
         }
         let scope_files = self.visible_files().to_vec();
         let reviewed = self.reviewed_files();
@@ -1664,7 +1678,7 @@ impl Render for DiffPanelView {
             .h_full()
             .bg(theme::longan_950())
             .text_color(theme::rambutan_300())
-            .font_family(PANEL_BODY_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
             .flex()
             .flex_col()
             .child(self.render_toolbar(cx))
@@ -1823,6 +1837,7 @@ mod tests {
 
     fn call(tool: &str, input: serde_json::Value) -> DesktopToolCall {
         DesktopToolCall {
+            text_offset: None,
             id: format!("{tool}-{}", input.to_string().len()),
             tool: tool.to_string(),
             input,

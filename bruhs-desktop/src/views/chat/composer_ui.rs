@@ -6,12 +6,12 @@
 //! context strip under it, and the `/ commands · @ files · ⌘K palette`
 //! hints. Sizes are the web's Tailwind values in px.
 
+use gpui::prelude::*;
+use gpui::*;
 use bruhs_ui::input::{Input, Textarea};
 use bruhs_ui::scroll::ScrollableElement as _;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
-use gpui::prelude::*;
-use gpui::*;
 
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
@@ -58,7 +58,6 @@ pub const CHAT_HEADER_TOGGLE_ACTIVE_BG_OPACITY: f32 = 0.60;
 pub const CHAT_HEADER_TOGGLE_HOVER_BG_OPACITY: f32 = 0.40;
 
 // Composer.
-pub const CHAT_COMPOSER_MAX_WIDTH_PX: f32 = 768.0;
 pub const CHAT_COMPOSER_RADIUS_PX: f32 = 16.0;
 pub const CHAT_COMPOSER_RING_OPACITY: f32 = 0.10;
 /// Web `focus-within:inset-ring-persimmon-400/40` on the composer surface.
@@ -551,7 +550,8 @@ impl ChatView {
 
     /// `project / title` with the Diff · Tasks · panel toggles at the right.
     pub(super) fn render_header(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let project = self.breadcrumb_project();
+        let project = self.breadcrumb_project().or_else(|| self.scratch_folder().map(|_| "Scratch".to_owned()));
+        let details_bounds = self.details_trigger_bounds.clone();
         let running = self.running_tasks_count;
         // The thread's role, by its current name. A deleted role shows nothing.
         let role = self.role_profile.as_ref().map(|role| role.name.clone());
@@ -677,6 +677,12 @@ impl ChatView {
                     .items_center()
                     .gap(px(CHAT_HEADER_TOGGLE_GAP_PX))
                     .flex_shrink_0()
+                    .child(div().on_children_prepainted(move |bounds, _, _| {
+                        if let Some(bounds) = bounds.first() { details_bounds.set(*bounds); }
+                    }).child(self.render_header_toggle(HeaderToggle {
+                        id: "details-toggle", selector:"desktop-thread-details-toggle", icon_path:assets::CLIPBOARD_LIST_ICON_PATH,
+                        label:None, aria:"Thread details",active:self.details_open,badge:None
+                    },|_,_,cx|cx.emit(ChatViewEvent::ToggleThreadDetails),cx).track_focus(&self.details_trigger).aria_expanded(self.details_open)))
                     .child(self.render_header_toggle(
                         HeaderToggle {
                             id: "diff-toggle",
@@ -876,7 +882,7 @@ impl ChatView {
             .id("composer-block")
             .debug_selector(|| "desktop-composer".to_string())
             .w_full()
-            .max_w(px(CHAT_COMPOSER_MAX_WIDTH_PX))
+            .when_some(self.chat_width.limit(), |el, limit| el.max_w(px(limit)))
             .mx_auto()
             .flex_shrink_0()
             .flex()
@@ -945,7 +951,7 @@ impl ChatView {
             .relative()
             .w_full()
             .rounded(px(CHAT_COMPOSER_RADIUS_PX))
-            .bg(theme::longan_900())
+            .bg(theme::glass_surface(theme::longan_900()))
             .border_1()
             .map(|el| {
                 if focused {
@@ -963,8 +969,8 @@ impl ChatView {
                 this.enqueue_paths(paths.paths(), cx);
             }))
             .when(self.composer_hint_popover_open(cx), |el| {
-                let width = (self.measured_width.get() - CHAT_COMPOSER_PAGE_X_PADDING_PX * 2.0)
-                    .clamp(1.0, CHAT_COMPOSER_MAX_WIDTH_PX);
+                let available = (self.measured_width.get() - CHAT_COMPOSER_PAGE_X_PADDING_PX * 2.0).max(1.0);
+                let width = available.min(self.chat_width.limit().unwrap_or(available));
                 el.child(
                     div()
                         .absolute()
@@ -1062,6 +1068,7 @@ impl ChatView {
         // a11y-exempt: like the web's textarea, the input draws no ring of its
         // own — `render_composer_surface` rings the whole composer instead.
         div()
+            .key_context("ChatComposer")
             .debug_selector(|| "desktop-composer-input".to_string())
             .capture_action(cx.listener(|this, _: &InputMoveUp, window, cx| {
                 if this.handle_composer_hint_key("up", window, cx) {
@@ -1090,12 +1097,22 @@ impl ChatView {
                 }
             }))
             .capture_action(cx.listener(|this, action: &InputEnter, window, cx| {
-                if this.queue_edit.is_some() {
-                    cx.stop_propagation();
+                if !action.secondary && action.shift {
+                    return; // The text field inserts the line break.
+                }
+                cx.stop_propagation();
+                if this.dictation.active() {
                     return;
                 }
-                if !action.secondary && this.apply_selected_composer_hint(window, cx) {
-                    cx.stop_propagation();
+                let needs_modifier = this.send_shortcut.requires_modifier(&this.input_state.read(cx).value());
+                if !action.secondary && needs_modifier {
+                    this.input_state.update(cx, |field, cx| field.insert("\n", window, cx));
+                } else if !(action.secondary && action.shift && !needs_modifier) {
+                    if this.queue_edit.is_none() && !action.secondary && this.apply_selected_composer_hint(window, cx) {
+                        return;
+                    }
+                    let opposite = action.secondary && (!needs_modifier || action.shift);
+                    this.send_follow_up(opposite, window, cx);
                 }
             }))
             .child(
@@ -1116,7 +1133,7 @@ impl ChatView {
                     })
                     .bordered(false)
                     .focus_bordered(false)
-                    .font_family(theme::CODE_FONT_FAMILY)
+                    .font_family(theme::FontFace::Prompt)
                     .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
                     .disabled(
                         composer_input_disabled_like_web(self.is_streaming)
@@ -1227,6 +1244,20 @@ impl ChatView {
         .into_any_element()
     }
 
+    fn effort_indicator(&self, effort: Option<&str>) -> AnyElement {
+        if self.effort_label {
+            return div().debug_selector(|| "desktop-effort-label".into()).text_size(px(CHIP_TEXT_SIZE_PX))
+                .child(effort.unwrap_or("Auto").to_owned()).into_any_element();
+        }
+        let levels = bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+        let strength = levels.iter().position(|level| Some(*level) == effort).map_or(0, |i| i + 1);
+        div().debug_selector(|| "desktop-effort-bars".into()).flex().items_end().gap(px(1.))
+            .children((0..levels.len()).map(|i| {
+                div().w(px(2.)).h(px(3. + 2. * i as f32)).rounded(px(1.))
+                    .bg(if i < strength { theme::rambutan_300() } else { theme::longan_700() })
+            })).into_any_element()
+    }
+
     fn render_composer_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         let draft_empty = self.input_state.read(cx).value().trim().is_empty();
         let separate_stop = self.is_streaming && !draft_empty;
@@ -1256,6 +1287,7 @@ impl ChatView {
             (PermissionMode::AcceptEdits, false) => "Accept edits",
             _ => "",
         };
+        let effort = self.claude_send_effort();
         let tooltip = format!(
             "Composer options. Build access: {}. Mode: {}. Effort: {}",
             composer_access_label(access),
@@ -1264,7 +1296,7 @@ impl ChatView {
             } else {
                 "Build"
             },
-            self.claude_effort.as_deref().unwrap_or("Default"),
+            effort.as_deref().unwrap_or("Default"),
         );
         let trigger_bounds = self.composer_options_trigger_bounds.clone();
         let view_id = cx.entity_id();
@@ -1290,6 +1322,13 @@ impl ChatView {
                         |this, window, cx| this.attach_files(window, cx),
                         cx,
                     ))
+                    .when(cfg!(target_os = "macos"), |row| row.child(self.footer_icon_button(
+                        "desktop-capture-window",
+                        "Capture a window",
+                        assets::CAMERA_ICON_PATH,
+                        |_, window, cx| window.dispatch_action(Box::new(crate::views::workspace::CaptureWindow), cx),
+                        cx,
+                    )))
                     .child(
                         div()
                             .min_w_0()
@@ -1314,6 +1353,9 @@ impl ChatView {
                                     |this, window, cx| this.toggle_composer_options(window, cx),
                                     cx,
                                 )
+                                .when(self.effort_chip_visible(), |button| {
+                                    button.w_auto().px_1().gap_1().child(self.effort_indicator(effort.as_deref()))
+                                })
                                 .track_focus(&self.composer_options_trigger_focus)
                                 .aria_expanded(self.composer_options_open),
                             ),
@@ -1762,14 +1804,14 @@ impl ChatView {
                                 "composer-dictate",
                                 WebButtonVariant::Outline,
                                 WebButtonSize::Small,
-                                ButtonState::Enabled,
+                                ButtonState::disabled_if(self.dictation_prefs.destination == crate::voice_capture::Destination::Off),
                             )
                             .debug_selector(|| "desktop-composer-dictate".to_string())
                             .tab_index(0)
                             .role(Role::Button)
-                            .aria_label("Dictate locally")
+                            .aria_label(self.dictation_prefs.destination.action())
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .child("Dictate locally"),
+                            .child(self.dictation_prefs.destination.action()),
                             |this, _, cx| {
                                 this.start_dictation(cx);
                                 this.composer_options_open = false;
@@ -1784,7 +1826,7 @@ impl ChatView {
                     .text_size(px(COMPOSER_PANEL_TEXT_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_400())
-                    .child(CHAT_DICTATION_HINT),
+                    .child(match self.dictation_prefs.destination {crate::voice_capture::Destination::Local => CHAT_DICTATION_HINT,crate::voice_capture::Destination::Cloud(provider)=>provider.label(),crate::voice_capture::Destination::Compatible=>"The configured transcription server receives recorded audio when you stop. Review the transcript in your draft.",crate::voice_capture::Destination::Off=>"Choose a transcription destination in Voice settings."}),
             );
         let has_usage = self.messages.iter().any(|message| message.usage.is_some());
         let reading = self.latest_context_reading();
@@ -1851,7 +1893,7 @@ impl ChatView {
             .rounded(px(8.0))
             .border_1()
             .border_color(theme::ring_floating())
-            .bg(theme::longan_700())
+            .bg(theme::glass_surface(theme::longan_700()))
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -1879,6 +1921,7 @@ impl ChatView {
     }
 
     fn render_dictation_status(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let cleaning=matches!(self.dictation.phase,super::dictation::DictationPhase::Cleaning(_));
         let recording = self.dictation.recording();
         div()
             .id("desktop-dictation-status")
@@ -1900,8 +1943,8 @@ impl ChatView {
                                 .text_color(theme::rambutan_300())
                                 .child(if recording {
                                     "Recording microphone"
-                                } else {
-                                    "Transcribing locally"
+                                } else if cleaning { "Cleaning up transcript" } else {
+                                    "Transcribing recording"
                                 }),
                         )
                         .when(recording, |el| {
@@ -1914,6 +1957,7 @@ impl ChatView {
                                 cx,
                             ))
                         })
+                        .when(cleaning,|el|el.child(self.composer_option("dictation-skip-cleanup".into(),"desktop-dictation-skip-cleanup".into(),"Skip cleanup",None,|this,_,cx|this.skip_dictation_cleanup(cx),cx)))
                         .child(self.composer_option(
                             "dictation-cancel".into(),
                             "desktop-dictation-cancel".into(),
@@ -1924,6 +1968,9 @@ impl ChatView {
                         )),
                 )
             })
+            .when(self.dictation.active() && !self.dictation.preview.is_empty(),|el| el.child(div()
+                .id("dictation-live-preview").role(Role::Status).aria_label("Live transcript")
+                .text_size(px(13.)).text_color(theme::rambutan_300()).child(self.dictation.preview.clone())))
             .when_some(self.dictation.error.clone(), |el, error| {
                 el.child(
                     div()
@@ -1971,7 +2018,7 @@ impl ChatView {
     /// keeps the unavailable notice.
     /// Web `last_usage`: the latest assistant reply that reported usage,
     /// read against the window of the model that wrote it.
-    pub(super) fn latest_context_reading(&self) -> Option<ContextReading> {
+    pub(crate) fn latest_context_reading(&self) -> Option<ContextReading> {
         self.messages
             .iter()
             .rev()
@@ -1992,7 +2039,7 @@ impl ChatView {
     }
 
     fn render_compact_control(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let title = if self.effort_chip_visible() {
+        let title = if self.is_claude_model() {
             "Summarize this Claude thread"
         } else {
             COMPACT_UNAVAILABLE
@@ -2836,6 +2883,7 @@ impl ChatView {
 
     /// Project + branch shoulder under the composer (project threads only).
     fn render_context_strip(&self, window: &Window, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        if !theme::show_composer_context() && !self.messages.is_empty(){return None;}
         let project = self.breadcrumb_project()?;
         let branch = self.branch_chip_label();
         let show_dirty = (self.thread_has_place() || self.run_choice == WorkspaceChoice::Checkout)

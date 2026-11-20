@@ -61,20 +61,7 @@ pub(super) struct RoleInputs {
     project_instructions: Entity<TextareaState>,
 }
 
-/// A dropdown value is `'static` and a project's name is not, so each
-/// distinct name is kept once for the life of the app.
-pub(super) fn project_value(name: &str) -> &'static str {
-    use std::collections::BTreeSet;
-    use std::sync::{Mutex, PoisonError};
-    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(known) = values.get(name) {
-        return known;
-    }
-    let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
-    values.insert(kept);
-    kept
-}
+pub(super) use bruhs_ui::dropdown::saved_option_value as project_value;
 
 /// Web `FIELD_LABEL`: `text-label-sm text-rambutan-300`.
 fn field_label(text: &'static str) -> Div {
@@ -617,7 +604,7 @@ impl Workspace {
         true
     }
 
-    fn set_task_models(
+    pub(super) fn set_task_models(
         &mut self,
         cx: &mut Context<'_, Self>,
         change: impl FnOnce(&mut bruhs_models::roles::TaskModels),

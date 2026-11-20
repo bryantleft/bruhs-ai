@@ -417,8 +417,8 @@ impl ComputerView {
         if !self.controls(cx).navigate {
             return;
         }
-        let url = self.address.read(cx).value().trim().to_string();
-        if !url.is_empty() {
+        let address = self.address.read(cx).value();
+        if let Some(url) = crate::views::browser_preferences::BrowserPreferences::get(cx).address(&address) {
             self.send(ComputerInput::Navigate { url }, cx);
         }
     }

@@ -18,18 +18,19 @@ use bruhs_models::{
     PersonProfile, RelationshipItemKind, RelationshipProfile, SearchDocument, SearchHit,
     SearchIndex, SearchKind, Speaker, SpeakerIdentity,
 };
+use gpui::prelude::*;
+use gpui::*;
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::{
     Escape as InputEscape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
-use gpui::prelude::*;
-use gpui::*;
 use std::sync::Arc;
 
 use super::{
     element_key, meetings_client, redraw_on_edit, DesktopLifeTab, PersistedWorkspaceState,
     Workspace,
 };
+use super::{library_pages_ui::LibraryPage, tasks_ui::TASK_LIST_PAGE_SIZE};
 use crate::app_state::DesktopState;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
@@ -113,7 +114,7 @@ impl SpeakerRef {
 /// Web `text-label*`: Argon at weight 500, with the web's 1.5 line height.
 fn label(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
     div()
-        .font_family(LABEL_FONT)
+        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
         // Web `text-label-sm` is tracked .025em; the wider Argon instance matches it.
         .when(size <= 12.0, |el| {
             el.font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -128,7 +129,7 @@ fn label(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
 /// Web `text-body*`: Neon, with the web's 1.5 line height.
 fn body(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
     div()
-        .font_family(BODY_FONT)
+        .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
         .text_size(px(size))
         .line_height(relative(1.5))
         .text_color(color)
@@ -187,7 +188,7 @@ fn ring_text_button(
         .border_color(theme::longan_700())
         .px_2()
         .py(px(2.0))
-        .font_family(LABEL_FONT)
+        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
         .text_size(px(LABEL_PX))
         .text_color(color)
         .tab_index(0)
@@ -280,6 +281,10 @@ impl Workspace {
     }
 
     pub(super) fn open_meeting_detail(&mut self, meeting_id: String, cx: &mut Context<'_, Self>) {
+        self.library_pages.meeting_tasks = 0;
+        if let Some(view) = self.meeting_transcript_view.borrow().as_ref() {
+            view.invalidate_footer();
+        }
         self.meetings_hub.update(cx, |hub, cx| {
             hub.ensure_segments(&meeting_id, cx);
             hub.load_local_focus(&meeting_id);
@@ -422,7 +427,7 @@ impl Workspace {
                 .border_color(theme::lychee_500().opacity(0.6))
                 .px_3()
                 .py_2()
-                .font_family(LABEL_FONT)
+                .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                 .text_size(px(LABEL_PX))
                 .text_color(theme::rambutan_300())
                 .child(format!(
@@ -546,6 +551,68 @@ impl Workspace {
     }
 
     // ── Meeting detail ───────────────────────────────────────────────────
+
+    fn render_meeting_tasks(&self, meeting_id: &str, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let related = self.work_items.iter().filter(|item| {
+            item.source
+                .as_ref()
+                .is_some_and(|source| source.is_meeting(meeting_id))
+        });
+        let total = related.clone().count();
+        if total == 0 {
+            return None;
+        }
+        let start = self
+            .library_pages
+            .start(LibraryPage::MeetingTasks, total, TASK_LIST_PAGE_SIZE);
+        let rows = related
+            .skip(start)
+            .take(TASK_LIST_PAGE_SIZE)
+            .map(|item| {
+                let id = item.id.clone();
+                let title = format!("{} · {}", item.title, item.status.label());
+                web_button(
+                    SharedString::from(format!("meeting-task-{}", item.id)),
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Default,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-meeting-linked-task".into())
+                .aria_label(title.clone())
+                .w_full()
+                .min_w_0()
+                .justify_start()
+                .child(div().min_w_0().text_ellipsis().child(title))
+                .map(|el| {
+                    on_press_view(el, cx, move |this, window, cx| {
+                        this.active_view = AppView::Tasks;
+                        this.select_work_item_by_id(&id, window, cx);
+                    })
+                })
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(label(
+                    "Tasks from this meeting",
+                    LABEL_SM_PX,
+                    theme::rambutan_400(),
+                ))
+                .children(rows)
+                .children(self.render_library_pages(
+                    LibraryPage::MeetingTasks,
+                    total,
+                    TASK_LIST_PAGE_SIZE,
+                    "Meeting tasks",
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
 
     /// Web `MeetingDetailPage`.
     pub(super) fn render_meeting_detail(
@@ -798,7 +865,7 @@ impl Workspace {
                             .bg(theme::longan_900().opacity(0.3))
                             .px_3()
                             .py_2()
-                            .font_family(BODY_FONT)
+                            .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
                             .text_size(px(BODY_SM_PX))
                             .text_color(theme::rambutan_200())
                             .child(s.tldr.clone()),
@@ -814,7 +881,7 @@ impl Workspace {
                                     s.action_items.iter().map(|a| {
                                         let mut row = div()
                                             .flex()
-                                            .font_family(LABEL_FONT)
+                                            .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                                             .text_size(px(LABEL_PX))
                                             .text_color(theme::rambutan_300())
                                             .child(a.text.clone());
@@ -879,6 +946,8 @@ impl Workspace {
                 column = column.child(self.render_meeting_action_status(meeting_id, status, cx));
             }
 
+            column = column.children(self.render_meeting_tasks(meeting_id, cx));
+
             // Observation extraction
             let skip = m.skip_observations;
             let has_summary = m.summary.is_some();
@@ -935,7 +1004,7 @@ impl Workspace {
                 .border_color(theme::longan_700())
                 .px_2()
                 .py_1()
-                .font_family(LABEL_FONT)
+                .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                 .text_size(px(LABEL_PX))
                 .text_color(theme::rambutan_200())
                 .tab_index(0)
@@ -991,7 +1060,7 @@ impl Workspace {
             .bg(theme::longan_900().opacity(0.4))
             .px_3()
             .py_2()
-            .font_family(BODY_FONT)
+            .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
             .text_size(px(BODY_SM_PX))
             .text_color(theme::rambutan_500())
             .child(text)
@@ -1023,7 +1092,7 @@ impl Workspace {
                 .px_2()
                 .py(px(2.0))
                 .opacity(0.6)
-                .font_family(LABEL_FONT)
+                .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                 .text_size(px(LABEL_PX))
                 .text_color(text_color)
                 .child(label_text)
@@ -1077,7 +1146,7 @@ impl Workspace {
                     .border_color(ring_color)
                     .px_2()
                     .py(px(2.0))
-                    .font_family(LABEL_FONT)
+                    .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                     .text_size(px(LABEL_PX))
                     .text_color(text_color)
                     .tab_index(0)
@@ -1105,7 +1174,7 @@ impl Workspace {
                         .id(("desktop-speaker-link", group_index))
                         .debug_selector(move || format!("desktop-speaker-link-{group_index}"))
                         .px(px(2.0))
-                        .font_family(LABEL_FONT)
+                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                         .text_size(px(LABEL_SM_PX))
                         .text_color(text_color)
                         .opacity(0.6)
@@ -1176,7 +1245,7 @@ impl Workspace {
                         .w_full()
                         .px_2()
                         .py_1()
-                        .font_family(LABEL_FONT)
+                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                         .text_size(px(LABEL_PX))
                         .text_color(theme::rambutan_200())
                         .tab_index(0)
@@ -1205,7 +1274,7 @@ impl Workspace {
                 .px_2()
                 .py_1()
                 .mt_1()
-                .font_family(LABEL_FONT)
+                .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                 .text_size(px(LABEL_PX))
                 .text_color(theme::rambutan_500())
                 .tab_index(0)
@@ -2286,7 +2355,7 @@ impl Workspace {
                 .gap_3()
                 .child(
                     div()
-                        .font_family("Monaspace Xenon")
+                        .font_family(crate::theme::FontFace::Heading)
                         .text_size(px(DISPLAY_SM_PX))
                         .line_height(relative(1.0))
                         .text_color(theme::persimmon_400())
@@ -2392,7 +2461,7 @@ impl Workspace {
                         div()
                             .flex()
                             .flex_wrap()
-                            .font_family(LABEL_FONT)
+                            .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                             .text_size(px(LABEL_PX))
                             .text_color(theme::rambutan_400())
                             .child("Record a clean 5-second voice sample for ")
@@ -2424,7 +2493,7 @@ impl Workspace {
                                         .px_3()
                                         .py_1()
                                         .rounded(px(4.0))
-                                        .font_family(LABEL_FONT)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_400())
                                         .tab_index(0)
@@ -2451,7 +2520,7 @@ impl Workspace {
                                         .py_1()
                                         .rounded(px(4.0))
                                         .bg(theme::persimmon_600())
-                                        .font_family(LABEL_FONT)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                                         .text_size(px(LABEL_PX))
                                         .text_color(gpui::white())
                                         .tab_index(0)
@@ -2477,7 +2546,7 @@ impl Workspace {
                                         .py_1()
                                         .rounded(px(4.0))
                                         .bg(theme::longan_800())
-                                        .font_family(LABEL_FONT)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_200())
                                         .tab_index(0)
@@ -2652,6 +2721,7 @@ impl Workspace {
         self.meetings_hub
             .update(cx, |hub, cx| hub.dismiss_notice(cx));
         match action {
+            crate::views::meetings_hub::NoticeAction::OpenThread(id) => self.select_thread_by_id(&id, cx),
             crate::views::meetings_hub::NoticeAction::OpenAutomations => {
                 self.activate_sidebar_view(AppView::Automations, window, cx);
             }
@@ -2716,7 +2786,7 @@ impl Workspace {
                         .flex()
                         .items_center()
                         .gap_3()
-                        .font_family(LABEL_FONT)
+                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                         .text_size(px(LABEL_PX))
                         .text_color(fg)
                         .child(div().min_w_0().flex_1().child(notice.message))
@@ -2737,7 +2807,7 @@ impl Workspace {
                             .justify_center()
                             .map(|el| {
                                 on_press_view(el, cx, move |this, window, cx| {
-                                    this.run_notice_action(action, window, cx);
+                                    this.run_notice_action(action.clone(), window, cx);
                                 })
                             })
                         }))

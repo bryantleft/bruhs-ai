@@ -176,6 +176,7 @@ impl Workspace {
             Some(due_date)
         };
         let item = DesktopWorkItem {
+            source: None,
             id: uuid::Uuid::new_v4().to_string(),
             project_id: self.task_create_project_id.clone(),
             title: title.to_string(),
@@ -252,7 +253,7 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(TASK_DETAIL_STATUS_CHIP_GAP_PX))
-                    .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(px(TASK_DETAIL_STATUS_CHIP_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -328,7 +329,7 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .tab_index(0)
@@ -389,7 +390,7 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if none_selected {
                     theme::rambutan_100()
@@ -433,7 +434,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -492,7 +493,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -551,7 +552,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -609,7 +610,7 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if selected {
                     theme::rambutan_100()
@@ -745,7 +746,7 @@ impl Workspace {
             .border_1()
             .border_color(theme::ring_panel())
             .text_color(theme::rambutan_300())
-            .font_family(TASK_DIALOG_BODY_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
             .flex()
             .flex_col()
             .child(
@@ -760,7 +761,7 @@ impl Workspace {
                     .border_color(theme::ring_panel())
                     .child(
                         div()
-                            .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
                             .text_size(px(TASK_DETAIL_TITLE_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_100())
@@ -825,6 +826,8 @@ impl Workspace {
                                     ),
                             ),
                     )
+                    .children(self.render_task_source(&item, cx))
+                    .child(self.render_work_item_handoff(&item, cx))
                     .child(
                         div()
                             .flex()
@@ -888,7 +891,7 @@ impl Workspace {
                             .gap_3()
                             .child(
                                 div()
-                                    .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme::rambutan_200())
@@ -1027,7 +1030,7 @@ impl Workspace {
 
     pub(super) fn task_create_field_label(&self, label: &'static str) -> Div {
         div()
-            .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
             .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_400())
@@ -1068,7 +1071,7 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .tab_index(0)
@@ -1123,7 +1126,7 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if no_project_selected {
                     theme::rambutan_100()
@@ -1163,7 +1166,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1218,7 +1221,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1277,7 +1280,7 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1347,7 +1350,7 @@ impl Workspace {
                                 .debug_selector(|| "desktop-task-create-title-error".to_string())
                                 .role(Role::Alert)
                                 .aria_label(error.clone())
-                                .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                                .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
                                 .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
                                 .font_family(theme::UI_SMALL_FONT_FAMILY)
                                 .text_color(theme::lychee_300())
@@ -1432,7 +1435,7 @@ impl Workspace {
                     .border_color(theme::ring_modal())
                     .bg(theme::longan_800())
                     .text_color(cx.theme().popover_foreground)
-                    .font_family(TASK_DIALOG_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
                     .flex()
                     .flex_col()
                     .track_focus(&self.modal_start_focus_handle)
@@ -1545,6 +1548,74 @@ impl Workspace {
                     .child(self.render_modal_focus_sentinel()),
             )
             .into_any_element()
+    }
+}
+
+impl Workspace {
+    fn render_task_source(
+        &self,
+        item: &DesktopWorkItem,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
+        let WorkItemSource::Meeting { meeting_id, title } = item.source.as_ref()?;
+        let current = self
+            .meetings_hub
+            .read(cx)
+            .meetings
+            .iter()
+            .find(|meeting| &meeting.id == meeting_id);
+        let available = current.is_some();
+        let title = current.map_or(title.as_str(), |meeting| meeting.title.as_str());
+        let button_label = format!("Open source meeting: {title}");
+        let id = meeting_id.clone();
+        let key_id = id.clone();
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(FORM_FIELD_GAP_PX))
+                .child(self.task_create_field_label("Source"))
+                .child(
+                    web_button(
+                        "desktop-task-source-meeting",
+                        WebButtonVariant::Ghost,
+                        WebButtonSize::Default,
+                        if available {
+                            ButtonState::Enabled
+                        } else {
+                            ButtonState::Disabled
+                        },
+                    )
+                    .debug_selector(|| "desktop-task-source-meeting".into())
+                    .aria_label(button_label.clone())
+                    .w_full()
+                    .min_w_0()
+                    .justify_start()
+                    .child(div().min_w_0().text_ellipsis().child(button_label))
+                    .on_click(cx.listener(move |this, _event, _window, cx| {
+                        if available {
+                            this.selected_work_item_id = None;
+                            this.open_meeting_detail(id.clone(), cx);
+                        }
+                    }))
+                    .on_key_down(cx.listener(
+                        move |this, event: &KeyDownEvent, window, cx| {
+                            if available
+                                && is_web_button_activation_key(event.keystroke.key.as_str())
+                            {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                this.selected_work_item_id = None;
+                                this.open_meeting_detail(key_id.clone(), cx);
+                            }
+                        },
+                    )),
+                )
+                .when(!available, |element| {
+                    element.child(self.task_create_field_label("Source meeting is unavailable."))
+                })
+                .into_any_element(),
+        )
     }
 }
 

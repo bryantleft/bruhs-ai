@@ -22,6 +22,7 @@ enum Editor {
 
 pub(super) struct CredentialSettings {
     connections: Entity<crate::views::service_connections::ServiceConnections>,
+    sources: Entity<super::secret_source_settings::SourceSettings>,
     rows: Vec<SavedCredential>,
     load: Load,
     search: Entity<InputState>,
@@ -48,6 +49,7 @@ impl CredentialSettings {
             connections: cx.new(|cx| {
                 crate::views::service_connections::ServiceConnections::new(None, None, cx)
             }),
+            sources: cx.new(|cx| super::secret_source_settings::SourceSettings::new(cx)),
             rows: Vec::new(),
             load: Load::Idle,
             search,
@@ -59,6 +61,10 @@ impl CredentialSettings {
             notice: None,
             task: None,
         }
+    }
+
+    pub(super) fn secret_sources(&self) -> Entity<super::secret_source_settings::SourceSettings> {
+        self.sources.clone()
     }
 
     pub(super) fn has_editor(&self) -> bool {
@@ -77,6 +83,7 @@ impl CredentialSettings {
         self.clear_editor();
         self.connections
             .update(cx, |connections, cx| connections.refresh(cx));
+        self.sources.update(cx, |sources,cx| sources.reload(cx));
         self.notice = None;
         self.load = Load::Loading;
         self.busy = true;
@@ -363,6 +370,7 @@ impl Render for CredentialSettings {
             .map(|row| self.row(row, cx))
             .collect();
         div().id("credential-manager").p_4().min_w_0().font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_3()
+            .child(self.sources.clone())
             .child(self.connections.clone())
             .child(Input::new(&self.search).aria_label("Search saved credentials"))
             .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(theme::CONTROL_PX)).aria_label("Refresh credentials").child("Refresh credentials")

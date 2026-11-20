@@ -11,12 +11,14 @@ pub(super) enum DictationPhase {
     Idle,
     Recording(mpsc::Sender<bool>),
     Transcribing,
+    Cleaning(crate::voice_capture::SkipCleanup),
 }
 
 #[derive(Default)]
 pub(super) struct ComposerDictation {
     pub phase: DictationPhase,
     pub error: Option<String>,
+    pub preview: String,
     generation: u64,
     task: Option<Task<()>>,
 }
@@ -33,11 +35,36 @@ impl ComposerDictation {
             let _ = stop.send(false);
         }
         self.generation = self.generation.wrapping_add(1);
+        self.preview.clear();
         self.task = None;
     }
 }
 
 impl ChatView {
+    pub(crate) fn begin_dictation_shortcut(&mut self, cx: &mut Context<'_, Self>) -> Option<u64> {
+        if self.dictation.recording() {
+            self.stop_dictation(cx);
+            return None;
+        }
+        if self.dictation.active() {
+            return None;
+        }
+        self.start_dictation(cx);
+        self.dictation
+            .recording()
+            .then_some(self.dictation.generation)
+    }
+
+    pub(crate) fn finish_dictation_shortcut(
+        &mut self,
+        generation: u64,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.dictation.generation == generation {
+            self.stop_dictation(cx);
+        }
+    }
+
     pub(crate) fn cancel_dictation(&mut self, cx: &mut Context<'_, Self>) {
         let active = self.dictation.active();
         if !active {
@@ -49,6 +76,16 @@ impl ChatView {
         }
     }
 
+    pub(super) fn skip_dictation_cleanup(&mut self, cx: &mut Context<'_, Self>) {
+        if matches!(self.dictation.phase, DictationPhase::Cleaning(_)) {
+            if let DictationPhase::Cleaning(skip) =
+                std::mem::replace(&mut self.dictation.phase, DictationPhase::Transcribing)
+            {
+                let _ = skip.send(());
+                cx.notify();
+            }
+        }
+    }
     pub(super) fn stop_dictation(&mut self, cx: &mut Context<'_, Self>) {
         if !self.dictation.recording() {
             return;
@@ -67,51 +104,158 @@ impl ChatView {
         }
         self.dismiss_prompt_suggestion(cx);
         let input = self.input_state.read(cx);
+        if let Err(message) = self.dictation_prefs.selected_service() {
+            self.dictation.error = Some(message.into());
+            cx.notify();
+            return;
+        }
         let original = input.value().to_string();
         let selection = input.selected_range();
+        let cleanup_model = self.text_generation_model.clone();
+        let nearby = if self.dictation_prefs.cleanup.enabled {
+            bruhs_core::dictation_cleanup::DraftContext::around(&original, selection.clone())
+        } else {
+            Default::default()
+        };
         let thread = self.thread_id.clone();
+        let microphone = self.dictation_prefs.ordered_microphones();
+        let preferences = self.dictation_prefs.clone();
+        let project = self
+            .project_scoped
+            .then(|| self.settings_project_path().to_owned());
         self.dictation.error = None;
+        self.dictation.preview.clear();
         self.dictation.generation = self.dictation.generation.wrapping_add(1);
         let generation = self.dictation.generation;
         let (stop, receiver) = mpsc::channel();
         self.dictation.phase = DictationPhase::Recording(stop);
+        let (chunks, preview_worker) = if preferences.streaming
+            && preferences.destination == crate::voice_capture::Destination::Local
+        {
+            let (chunks, audio) = tokio::sync::mpsc::channel(1);
+            let (updates, mut previews) = tokio::sync::watch::channel(String::new());
+            let preview_worker = crate::app_state::spawn_tokio(
+                cx,
+                crate::voice_capture::preview::transcribe(audio, preferences.options(), updates),
+            );
+            cx.spawn(async move |this, cx| {
+                while previews.changed().await.is_ok() {
+                    let preview = previews.borrow_and_update().clone();
+                    if !this
+                        .update(cx, |this, cx| {
+                            if this.dictation.generation != generation
+                                || !this.dictation.recording()
+                            {
+                                return false;
+                            }
+                            this.dictation.preview = preview;
+                            cx.notify();
+                            true
+                        })
+                        .unwrap_or(false)
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+            (Some(chunks), Some(preview_worker))
+        } else {
+            (None, None)
+        };
         let capture = crate::app_state::spawn_tokio(cx, async move {
             tokio::task::spawn_blocking(move || {
-                crate::voice_capture::capture_voice_until_stop(receiver, MAX_RECORDING)
+                crate::voice_capture::capture_voice_until_stop(
+                    receiver,
+                    MAX_RECORDING,
+                    &microphone,
+                    chunks,
+                )
             })
             .await
             .map_err(|error| format!("Microphone worker stopped: {error}"))?
         });
-        self.dictation.task=Some(cx.spawn(async move |this,cx| {
-            let audio=match capture.await {
-                Ok(audio)=>audio,
-                Err(error)=>{let _=this.update(cx,|this,cx|{if this.dictation.generation==generation {this.dictation.phase=DictationPhase::Idle;this.dictation.error=Some(error);cx.notify();}});return;},
+        self.dictation.task = Some(cx.spawn(async move |this, cx| {
+            let audio = match capture.await {
+                Ok(audio) => audio,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.dictation.generation == generation {
+                            this.dictation.phase = DictationPhase::Idle;
+                            this.dictation.error = Some(error);
+                            cx.notify();
+                        }
+                    });
+                    return;
+                }
             };
-            let request=this.update(cx,|this,cx| {
-                if this.dictation.generation!=generation || this.thread_id!=thread {return None;}
-                this.dictation.phase=DictationPhase::Transcribing;
+            // The capture host serializes Whisper inference. Let an already-running
+            // preview finish before submitting the full audio for the final pass.
+            if let Some(worker) = preview_worker {
+                worker.await;
+            }
+            let request = this.update(cx, |this, cx| {
+                if this.dictation.generation != generation || this.thread_id != thread {
+                    return None;
+                }
+                this.dictation.phase = DictationPhase::Transcribing;
                 cx.notify();
-                Some(crate::app_state::spawn_tokio(cx,async move {
-                    bruhs_core::capture_client::transcribe_dictation(
-                        bruhs_core::capture_client::endpoint(),
-                        &bruhs_models::local_tools::DictationOptions{model:bruhs_models::WhisperModel::BaseEn,language:Some("en".into())},audio,
-                    ).await.map_err(|error|format!("Local dictation failed: {error}. Start the capture daemon and check the local Whisper model."))
+                let control = if preferences.cleanup.enabled {
+                    let (ready, signal) = tokio::sync::oneshot::channel();
+                    cx.spawn(async move |this, cx| {
+                        if let Ok(skip) = signal.await {
+                            let _ = this.update(cx, |this, cx| {
+                                if this.dictation.generation == generation
+                                    && matches!(this.dictation.phase, DictationPhase::Transcribing)
+                                {
+                                    this.dictation.phase = DictationPhase::Cleaning(skip);
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    })
+                    .detach();
+                    Some(ready)
+                } else {
+                    None
+                };
+                Some(crate::app_state::spawn_tokio(cx, async move {
+                    preferences
+                        .transcribe(audio, project.as_deref(), &cleanup_model, nearby, control)
+                        .await
                 }))
             });
-            let Ok(Some(request))=request else{return;};
-            let result=request.await;
-            let _=this.update(cx,|this,cx| {
-                if this.dictation.generation!=generation || this.thread_id!=thread {return;}
-                this.dictation.phase=DictationPhase::Idle;
+            let Ok(Some(request)) = request else {
+                return;
+            };
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.dictation.generation != generation || this.thread_id != thread {
+                    return;
+                }
+                this.dictation.phase = DictationPhase::Idle;
+                this.dictation.preview.clear();
                 match result {
-                    Ok(reply)=> {
-                        let current=this.pending_composer.clone().unwrap_or_else(||this.input_state.read(cx).value().to_string());
-                        match bruhs_models::local_tools::insert_dictation(&current,&original,selection,&reply.text) {
-                            Ok(draft)=>{this.pending_composer=Some(draft);this.focus_pending_composer=true;},
-                            Err(error)=>this.dictation.error=Some(format!("{error} Transcript: {}",reply.text)),
+                    Ok(result) => {
+                        let text = result.text;
+                        this.dictation.error = result.warning.map(String::from);
+                        let current = this
+                            .pending_composer
+                            .clone()
+                            .unwrap_or_else(|| this.input_state.read(cx).value().to_string());
+                        match bruhs_models::local_tools::insert_dictation(
+                            &current, &original, selection, &text,
+                        ) {
+                            Ok(draft) => {
+                                this.pending_composer = Some(draft);
+                                this.focus_pending_composer = true;
+                            }
+                            Err(error) => {
+                                this.dictation.error = Some(format!("{error} Transcript: {text}"))
+                            }
                         }
-                    },
-                    Err(error)=>this.dictation.error=Some(error),
+                    }
+                    Err(error) => this.dictation.error = Some(error),
                 }
                 cx.notify();
             });

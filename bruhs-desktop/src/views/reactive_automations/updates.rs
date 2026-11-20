@@ -29,9 +29,12 @@ pub(super) fn local_time(at: EpochMs) -> String {
     chrono::DateTime::from_timestamp_millis(at.as_millis()).map_or_else(
         || at.to_string(),
         |time| {
-            time.with_timezone(&chrono::Local)
-                .format("%b %-d, %Y, %-I:%M %p")
-                .to_string()
+            let date = time.with_timezone(&chrono::Local);
+            format!(
+                "{}, {}",
+                date.format("%b %-d, %Y"),
+                date.format(crate::clock_format::pattern())
+            )
         },
     )
 }
@@ -471,6 +474,13 @@ mod tests {
             auto_run: true,
             debounce_ms: 0,
             throttle_ms: 0,
+            webhook_filters: Vec::new(),
+            webhook_prompt: None,
+            webhook_security: Default::default(),
+            webhook_dedupe: Default::default(),
+            task_title: None,
+            task_conversation: Default::default(),
+            task_checkout: Default::default(),
             on_busy: BusyPolicy::Restart,
         };
         let mut question = item("question-1", false);

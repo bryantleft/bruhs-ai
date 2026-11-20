@@ -73,7 +73,7 @@ impl Render for Fixture {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let ended = self.hub.read(cx).live_meeting_id.is_none();
         div().id("synthetic-fixture").size_full().p_6().bg(theme::longan_950()).text_color(theme::rambutan_200())
-            .font_family("Monaspace Argon").text_size(px(14.0)).flex().flex_col().gap_4()
+            .font_family(crate::theme::FontFace::Interface).text_size(px(14.0)).flex().flex_col().gap_4()
             .child("Synthetic meeting dock acceptance")
             .child("No audio, screen capture, focused-app monitoring, saved workspace or service connections.")
             .child("The dock’s Stop control is intentionally disabled. Test Move, Open and close/restore only.")

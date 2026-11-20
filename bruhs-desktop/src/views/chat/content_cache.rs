@@ -3,8 +3,9 @@
 //! Cache block boundaries separately from background SVG preparation. Prose
 //! and stable block IDs remain available while cold renderers work.
 
+use super::assistant_content::parse_content_with_math;
 use super::svg_cache::SvgKind;
-use super::{parse_assistant_content, ParsedAssistantBlock};
+use super::ParsedAssistantBlock;
 use bruhs_models::logic::rich_response::ResponseBlock;
 use gpui::{Image, ImageFormat, SharedString};
 use std::cell::RefCell;
@@ -110,6 +111,7 @@ impl ContentKey {
 /// Prepared blocks per message index.
 #[derive(Default)]
 pub(super) struct ContentBlockCache {
+    math_disabled: bool,
     entries: RefCell<HashMap<usize, (ContentKey, PreparedBlocks)>>,
     pub(super) svg: super::svg_cache::SvgCache,
     #[cfg(test)]
@@ -117,6 +119,15 @@ pub(super) struct ContentBlockCache {
 }
 
 impl ContentBlockCache {
+    pub(super) fn set_render_math(&mut self, enabled: bool) -> bool {
+        if self.math_disabled != enabled {
+            return false;
+        }
+        self.math_disabled = !enabled;
+        self.clear();
+        true
+    }
+
     /// The blocks of message `index` with text `content`, built only when
     /// they are not cached for exactly this text and streaming state.
     pub(super) fn blocks(&self, index: usize, content: &str, streaming: bool) -> PreparedBlocks {
@@ -128,11 +139,12 @@ impl ContentBlockCache {
         }
         #[cfg(test)]
         self.builds.set(self.builds.get() + 1);
-        let blocks: PreparedBlocks = parse_assistant_content(content, streaming)
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, block)| prepare(block).map(|block| (index, block)))
-            .collect();
+        let blocks: PreparedBlocks =
+            parse_content_with_math(content, streaming, !self.math_disabled)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, block)| prepare(block).map(|block| (index, block)))
+                .collect();
         let previous = self
             .entries
             .borrow_mut()
@@ -240,6 +252,26 @@ impl<K: Clone + Eq + Hash, V: Clone> BoundedCache<K, V> {
 #[cfg(test)]
 mod tests {
     use super::{BoundedCache, ContentBlockCache, PreparedBlock};
+
+    #[test]
+    fn math_preference_keeps_the_original_inline_source_and_rebuilds_cached_messages() {
+        let mut cache = ContentBlockCache::default();
+        let raw = "Use $x^2$ here.";
+        assert!(cache
+            .blocks(0, raw, false)
+            .iter()
+            .any(|(_, block)| matches!(block, PreparedBlock::Math { .. })));
+        assert!(cache.set_render_math(false));
+        let blocks = cache.blocks(0, raw, false);
+        assert!(
+            matches!(&blocks[..], [(_, PreparedBlock::Markdown(text))] if text.as_ref() == raw)
+        );
+        assert!(cache.set_render_math(true));
+        assert!(cache
+            .blocks(0, raw, false)
+            .iter()
+            .any(|(_, block)| matches!(block, PreparedBlock::Math { .. })));
+    }
 
     #[test]
     fn bounded_cache_evicts_the_least_recently_used_entry() {

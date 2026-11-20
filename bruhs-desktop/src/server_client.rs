@@ -155,7 +155,16 @@ impl ServerClient {
     /// Private metadata may only reach a literal loopback address. Do not follow
     /// redirects or environment proxies, including on readback.
     pub fn local_context_url(&self, id: &str) -> Result<reqwest::Url, ServerError> {
-        let mut url = reqwest::Url::parse(&self.base)
+        let mut url = self.local_owner_base()?;
+        url.path_segments_mut()
+            .map_err(|()| ServerError::Invalid("Invalid server URL"))?
+            .pop_if_empty()
+            .extend(["api", "meetings", id, "local-focus"]);
+        Ok(url)
+    }
+
+    fn local_owner_base(&self) -> Result<reqwest::Url, ServerError> {
+        let url = reqwest::Url::parse(&self.base)
             .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
         if url.scheme() != "http"
             || !matches!(url.host_str(), Some("127.0.0.1" | "[::1]"))
@@ -168,21 +177,11 @@ impl ServerClient {
         {
             return Err(ServerError::Invalid("Local app context requires an HTTP server on 127.0.0.1 or [::1] with an explicit port."));
         }
-        url.path_segments_mut()
-            .map_err(|()| ServerError::Invalid("Invalid server URL"))?
-            .pop_if_empty()
-            .extend(["api", "meetings", id, "local-focus"]);
         Ok(url)
     }
 
-    async fn local_context_request(
-        &self,
-        id: &str,
-        sample: Option<&bruhs_models::LocalFocusObservation>,
-    ) -> Result<reqwest::Response, ServerError> {
-        const REQUEST: &str = "Local context request";
-        let url = self.local_context_url(id)?;
-        let client = self
+    async fn local_owner_http(&self) -> Result<&reqwest::Client, ServerError> {
+        self
             .local_context_http
             .get_or_try_init(|| async {
                 reqwest::Client::builder()
@@ -192,7 +191,17 @@ impl ServerClient {
                     .build()
             })
             .await
-            .map_err(|error| ServerError::Client(Arc::new(error)))?;
+            .map_err(|error| ServerError::Client(Arc::new(error)))
+    }
+
+    async fn local_context_request(
+        &self,
+        id: &str,
+        sample: Option<&bruhs_models::LocalFocusObservation>,
+    ) -> Result<reqwest::Response, ServerError> {
+        const REQUEST: &str = "Local context request";
+        let url = self.local_context_url(id)?;
+        let client = self.local_owner_http().await?;
         let request = if let Some(sample) = sample {
             client.post(url).json(sample)
         } else {
@@ -372,6 +381,19 @@ impl ServerClient {
             })
     }
 
+    pub async fn voice_dictionaries(
+        &self,
+        req: &bruhs_models::voice_dictionary::DictionaryRequest,
+    ) -> Result<bruhs_models::voice_dictionary::HostDictionaries, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/voice/dictionaries");
+        let request = self.local_owner_http().await?
+            .post(url)
+            .timeout(Duration::from_secs(5))
+            .json(req);
+        let response = Self::check(request.send().await, "Host voice dictionaries").await?;
+        Self::decode(response, "Host voice dictionaries").await
+    }
     async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, ServerError> {
         let request = format!("GET {path}");
         let resp = Self::check(self.http()?.get(self.url(path)).send().await, &request).await?;

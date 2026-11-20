@@ -9,10 +9,6 @@
 use std::path::PathBuf;
 
 const APP_DIR: &str = "bruhs-ai";
-/// Overrides the state file (tests, side-by-side profiles); attachments then
-/// live beside it.
-const DESKTOP_STATE_FILE_ENV: &str = "BRUHS_DESKTOP_STATE_FILE";
-const STATE_FILE_NAME: &str = "desktop-state.json";
 const ATTACHMENTS_DIR: &str = "knowledge-attachments";
 const LOGS_DIR: &str = "logs";
 
@@ -23,10 +19,7 @@ pub fn app_data_dir() -> Option<PathBuf> {
 
 /// The desktop's saved workspace state.
 pub fn desktop_state_file() -> Option<PathBuf> {
-    match std::env::var_os(DESKTOP_STATE_FILE_ENV) {
-        Some(path) => Some(PathBuf::from(path)),
-        None => app_data_dir().map(|dir| dir.join(STATE_FILE_NAME)),
-    }
+    bruhs_core::delivery::writer::desktop_state_file()
 }
 
 /// Where knowledge attachment payloads are copied (beside the state file).

@@ -306,6 +306,7 @@ impl PaletteItem {
     pub(super) fn group(&self) -> &'static str {
         match self {
             Self::Action(action) => action.group,
+            Self::Project{..} => "Projects",
             Self::Thread { .. } => "Threads",
             Self::Server { .. } => preview::LOCAL_SERVERS_GROUP,
             Self::Record(_) => "Records",
@@ -315,6 +316,7 @@ impl PaletteItem {
     pub(super) fn label(&self) -> String {
         match self {
             Self::Action(action) => action.label.to_string(),
+            Self::Project{name,..} => name.clone(),
             Self::Thread { title, .. } => title.clone(),
             Self::Server { port, .. } => preview::local_server_label(*port),
             Self::Record(hit) => format!("{}: {}", hit.document.kind.label(), hit.document.title),
@@ -324,6 +326,7 @@ impl PaletteItem {
     pub(super) fn hint(&self) -> String {
         match self {
             Self::Action(action) => action.hint.to_string(),
+            Self::Project{path,..} => path.clone(),
             Self::Thread { hint, .. } => hint.clone(),
             Self::Server { command, .. } => command.clone(),
             Self::Record(hit) => hit.document.subtitle.clone(),
@@ -333,6 +336,7 @@ impl PaletteItem {
     pub(super) fn selector(&self) -> String {
         match self {
             Self::Action(action) => format!("desktop-command-action-{}", action.id),
+            Self::Project{path,..} => format!("desktop-command-project-{}",element_key(path)),
             Self::Thread { id, .. } => format!("desktop-command-thread-{}", element_key(id)),
             Self::Server { port, .. } => format!("desktop-command-server-{port}"),
             Self::Record(hit) => format!(
@@ -586,7 +590,7 @@ impl Workspace {
             "open-in-editor" => {
                 self.open_project_in_editor_action(&OpenProjectInEditor, window, cx);
             }
-            "pin-thread" => self.toggle_pin_active(cx),
+            "pin-thread" => self.toggle_pin_active(window, cx),
             "settle-thread" => self.toggle_settle_active(cx),
             "copy-thread-link" => self.copy_active_thread_link(cx),
             "copy-resume-command" => {
@@ -783,6 +787,7 @@ impl Workspace {
                     .map(PaletteItem::Action)
                     .collect();
                 if !query.is_empty() {
+                    items.extend(self.listed_projects().into_iter().filter(|p|text_matches_query(&format!("project {} {}",p.name,p.path),&query)).map(|p|PaletteItem::Project{path:p.path,name:p.name}));
                     items.extend(self.matching_thread_items(&query, cx));
                     let thread_ids: HashSet<_> = items
                         .iter()
@@ -819,6 +824,7 @@ impl Workspace {
     ) {
         match item {
             PaletteItem::Action(action) => self.execute_command_action(action.id, window, cx),
+            PaletteItem::Project{path,name} => self.open_palette_project(path,name,window,cx),
             PaletteItem::Thread { id, .. } => {
                 self.close_transient_surfaces();
                 self.select_thread_by_id(&id, cx);
@@ -857,7 +863,7 @@ impl Workspace {
                 .flex()
                 .items_center()
                 .gap_2()
-                .font_family(COMMAND_BAR_BODY_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
                 .text_size(px(COMMAND_BAR_GROUP_TEXT_SIZE_PX))
                 .text_color(theme::rambutan_500())
                 .child(
@@ -889,7 +895,7 @@ impl Workspace {
                 .px(px(COMMAND_BAR_EMPTY_X_PADDING_PX))
                 .py(px(COMMAND_BAR_EMPTY_Y_PADDING_PX))
                 .text_center()
-                .font_family(COMMAND_BAR_LABEL_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
                 .font_weight(FontWeight::MEDIUM)
                 .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
                 .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -957,7 +963,7 @@ impl Workspace {
             .rounded(px(COMMAND_BAR_ACTION_RADIUS_PX))
             .px(px(COMMAND_BAR_ACTION_X_PADDING_PX))
             .py(px(COMMAND_BAR_ACTION_Y_PADDING_PX))
-            .font_family(COMMAND_BAR_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
             .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
@@ -1020,7 +1026,7 @@ impl Workspace {
             .rounded(px(COMMAND_BAR_ACTION_RADIUS_PX))
             .px(px(COMMAND_BAR_ACTION_X_PADDING_PX))
             .py(px(COMMAND_BAR_ACTION_Y_PADDING_PX))
-            .font_family(COMMAND_BAR_LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
             .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
@@ -1094,7 +1100,7 @@ impl Workspace {
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
+                    .bg(theme::glass_surface(theme::longan_800()))
                     .text_color(cx.theme().popover_foreground)
                     .flex()
                     .flex_col()
@@ -1156,7 +1162,7 @@ impl Workspace {
                                     .bordered(false)
                                     .focus_bordered(false)
                                     .cleanable(false)
-                                    .font_family(COMMAND_BAR_BODY_FONT_FAMILY)
+                                    .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
                                     .text_size(px(COMMAND_BAR_INPUT_TEXT_SIZE_PX))
                                     // Web `px-4 py-3` belong to the wrapper:
                                     // the field is only its line of text.
@@ -1180,7 +1186,7 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .justify_between()
-                            .font_family(COMMAND_BAR_BODY_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
                             .text_size(px(COMMAND_BAR_FOOTER_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .child(
@@ -1226,7 +1232,7 @@ impl Workspace {
         div()
             .px(px(COMMAND_BAR_GROUP_X_PADDING_PX))
             .pb(px(COMMAND_BAR_GROUP_BOTTOM_PADDING_PX))
-            .font_family(COMMAND_BAR_BODY_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
             .text_size(px(COMMAND_BAR_GROUP_TEXT_SIZE_PX))
             .font_weight(FontWeight::MEDIUM)
             .text_color(theme::rambutan_300())

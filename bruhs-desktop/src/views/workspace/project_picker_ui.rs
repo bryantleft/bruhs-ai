@@ -161,6 +161,38 @@ pub(super) fn project_picker_directory_error_like_web(_error: &str) -> String {
     PROJECT_PICKER_LIST_ERROR.to_string()
 }
 
+fn projectless_option(id: &'static str, label: &'static str, icon: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.to_owned())
+        .mx(px(16.0))
+        .my(px(4.0))
+        .px(px(8.0))
+        .h(px(32.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded(px(8.0))
+        .text_size(px(12.0))
+        .text_color(theme::rambutan_300())
+        .role(Role::Button)
+        .aria_label(label)
+        .tab_index(0)
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .hover(|el| el.bg(theme::longan_800().opacity(0.5)))
+        .cursor_pointer()
+        .child(
+            svg()
+                .path(icon)
+                .size(px(PROJECT_PICKER_ICON_SIZE_PX))
+                .flex_shrink_0()
+                .text_color(theme::rambutan_500()),
+        )
+        .child(label)
+}
+
 impl Workspace {
     /// List `path` (home when `None`) in the project picker. The directory
     /// is read off the UI thread; a newer request replaces an older one.
@@ -184,6 +216,7 @@ impl Workspace {
         &mut self,
         listing: Result<DesktopDirectoryListing, String>,
     ) {
+        self.project_picker_start_warning = None;
         match listing {
             Ok(listing) => {
                 self.project_picker_scroll.set_offset(Point::default());
@@ -205,16 +238,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let scoped_access=self.project_defaults.get(&project.path).is_some_and(|p|p.permissions.is_some());
+        let (model, permissions) = self.new_thread_defaults(&project.path);
         let thread = Self::create_thread(
             project.name.clone(),
             project.path.clone(),
-            self.current_model.clone(),
-            self.permission_mode,
+            model,
+            permissions,
             window,
             cx,
         );
         self.stamp_chat_run_prefs(&thread.chat, cx);
         thread.chat.update(cx, |chat, cx| {
+            chat.project_permission_override=scoped_access;
             chat.tasks_panel_visible = self.tasks_panel_visible;
             chat.diff_panel_visible = self.diff_panel_visible;
             cx.notify();
@@ -224,7 +260,7 @@ impl Workspace {
         self.active_view = AppView::Chat;
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());
-        push_recent_project(&mut self.recent_projects, project);
+        self.remember_project(project);
         self.persist_and_notify(cx);
     }
 
@@ -296,7 +332,7 @@ impl Workspace {
         }
         if let Some(project) = project {
             self.active_project = Some(project.clone());
-            push_recent_project(&mut self.recent_projects, project);
+            self.remember_project(project);
         }
         self.persist_and_notify(cx);
     }
@@ -332,6 +368,38 @@ impl Workspace {
         }));
     }
 
+    pub(super) fn project_start_folder(&self, cx: &App) -> Option<String> {
+        let input = self.project_start_folder_input.read(cx).value();
+        let value = input.trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    }
+
+    fn load_project_start_folder(&mut self, folder: String, cx: &mut Context<'_, Self>) {
+        let read = cx.background_spawn(async move {
+            let home = project_picker_start_path();
+            let path = match folder.trim() {
+                "~" => home,
+                value => home.join(value.strip_prefix("~/").unwrap_or(value)),
+            };
+            match read_project_directory(path.to_str()) {
+                Ok(listing) => (Ok(listing), None),
+                Err(error) => (read_project_directory(None), Some(format!(
+                    "Couldn’t open {folder}. {error}. Showing your home folder."
+                ))),
+            }
+        });
+        self.project_picker_task = Some(cx.spawn(async move |this, cx| {
+            let (listing, warning) = read.await;
+            let _ = this.update(cx, |this, cx| {
+                this.apply_project_directory(listing);
+                if this.project_picker_error.is_none() {
+                    this.project_picker_start_warning = warning;
+                }
+                cx.notify();
+            });
+        }));
+    }
+
     pub(super) fn open_project_picker(
         &mut self,
         _: &OpenProjectPicker,
@@ -339,6 +407,7 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         self.project_picker_task.take();
+        self.project_picker_start_warning = None;
         let thread = self.active_thread().map(|thread| thread.chat.entity_id());
         self.project_picker_error = None;
         self.open_top_layer(TopLayer::ProjectPicker {
@@ -346,10 +415,10 @@ impl Workspace {
             thread,
         });
         self.focus_first_modal_tab_stop(window, cx);
-        if self.project_picker_current_path.is_empty() {
-            self.load_project_directory(None, cx);
+        if let Some(folder) = self.project_start_folder(cx) {
+            self.load_project_start_folder(folder, cx);
         } else {
-            cx.notify();
+            self.load_project_directory(None, cx);
         }
     }
 
@@ -366,7 +435,7 @@ impl Workspace {
         let select_current_name = current_name;
 
         let mut recent_rows = Vec::new();
-        for project in &self.recent_projects {
+        for project in self.listed_projects() {
             let path = project.path.clone();
             let name = project.name.clone();
             let debug_key = element_key(&project.path);
@@ -381,7 +450,7 @@ impl Workspace {
                     .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
                     .px(px(PROJECT_PICKER_RECENT_ROW_X_PADDING_PX))
                     .py(px(PROJECT_PICKER_RECENT_ROW_Y_PADDING_PX))
-                    .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                     .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_400())
@@ -403,13 +472,7 @@ impl Workspace {
                             this.select_project_location(path.clone(), name.clone(), window, cx);
                         })
                     })
-                    .child(
-                        svg()
-                            .path(assets::FOLDER_ICON_PATH)
-                            .size(px(PROJECT_PICKER_ICON_SIZE_PX))
-                            .text_color(theme::rambutan_500())
-                            .flex_shrink_0(),
-                    )
+                    .child(self.project_icon(&project.path,PROJECT_PICKER_ICON_SIZE_PX))
                     .child(
                         div()
                             .min_w_0()
@@ -420,7 +483,7 @@ impl Workspace {
                     .into_any_element(),
             );
         }
-        let show_recents = !has_current_path && !recent_rows.is_empty();
+        let show_recents = !recent_rows.is_empty();
 
         let mut directory_rows = Vec::new();
         if let Some(parent_path) = &self.project_picker_parent_path {
@@ -435,7 +498,7 @@ impl Workspace {
                     .gap(px(PROJECT_PICKER_ROW_GAP_PX))
                     .px(px(PROJECT_PICKER_ROW_X_PADDING_PX))
                     .py(px(PROJECT_PICKER_ROW_Y_PADDING_PX))
-                    .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                     .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_500())
@@ -480,7 +543,7 @@ impl Workspace {
                     .gap(px(PROJECT_PICKER_ROW_GAP_PX))
                     .px(px(PROJECT_PICKER_ROW_X_PADDING_PX))
                     .py(px(PROJECT_PICKER_ROW_Y_PADDING_PX))
-                    .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                     .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_400())
@@ -535,7 +598,7 @@ impl Workspace {
                     .px(px(PROJECT_PICKER_EMPTY_X_PADDING_PX))
                     .py(px(PROJECT_PICKER_EMPTY_Y_PADDING_PX))
                     .text_center()
-                    .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                     .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_500())
@@ -575,9 +638,9 @@ impl Workspace {
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
+                    .bg(theme::glass_surface(theme::longan_800()))
                     .text_color(cx.theme().popover_foreground)
-                    .font_family(PROJECT_PICKER_BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_BODY_FONT_FAMILY))
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -606,7 +669,7 @@ impl Workspace {
                                     .flex_1()
                                     .child(
                                         div()
-                                            .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                                            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                                             .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                                             .font_weight(FontWeight::MEDIUM)
@@ -620,7 +683,7 @@ impl Workspace {
                                                 .truncate()
                                                 .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                                                 .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .font_family(PROJECT_PICKER_PATH_FONT_FAMILY)
+                                                .font_family(crate::theme::FontFace::Code.with_default(PROJECT_PICKER_PATH_FONT_FAMILY))
                                                 .text_color(theme::rambutan_500())
                                                 .child(header_path.clone()),
                                         )
@@ -640,7 +703,7 @@ impl Workspace {
                                             .opacity(PROJECT_PICKER_SELECT_BG_OPACITY))
                                         .px(px(PROJECT_PICKER_SELECT_X_PADDING_PX))
                                         .py(px(PROJECT_PICKER_SELECT_Y_PADDING_PX))
-                                        .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                                         .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                                         .font_family(theme::UI_SMALL_FONT_FAMILY)
                                         .font_weight(FontWeight::MEDIUM)
@@ -670,43 +733,16 @@ impl Workspace {
                                 )
                             }),
                     )
+                    .when(!self.project_picker_for_terminal() && has_current_path, |el| el.child(self.clone_project_controls(cx)))
                     .when(!self.project_picker_for_terminal(), |el| {
-                        el.child(
-                            div()
-                                .id("desktop-project-none")
-                                .debug_selector(|| "desktop-project-none".to_string())
-                                .mx(px(16.0))
-                                .my(px(4.0))
-                                .px(px(8.0))
-                                .h(px(32.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .rounded(px(8.0))
-                                .text_size(px(12.0))
-                                .text_color(theme::rambutan_300())
-                                .role(Role::Button)
-                                .aria_label("No project")
-                                .tab_index(0)
-                                .border_1()
-                                .border_color(gpui::transparent_black())
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .hover(|el| el.bg(theme::longan_800().opacity(0.5)))
-                                .cursor_pointer()
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, window, cx| {
-                                        this.apply_thread_project(None, window, cx)
-                                    })
-                                })
-                                .child(
-                                    svg()
-                                        .path(assets::MESSAGE_SQUARE_ICON_PATH)
-                                        .size(px(PROJECT_PICKER_ICON_SIZE_PX))
-                                        .flex_shrink_0()
-                                        .text_color(theme::rambutan_500()),
-                                )
-                                .child("No project"),
-                        )
+                        let general = projectless_option("desktop-project-none", "No project", assets::MESSAGE_SQUARE_ICON_PATH);
+                        let scratch = projectless_option("new-scratch-chat", "New scratch chat", assets::SQUARE_PEN_ICON_PATH)
+                            .tooltip(|window, cx| Tooltip::new("Start a new chat in its own folder.").build(window, cx));
+                        el.child(on_press_view(general, cx, |this, window, cx| {
+                            this.apply_thread_project(None, window, cx)
+                        })).child(on_press_view(scratch, cx, |this, window, cx| {
+                            this.new_scratch_thread(window, cx)
+                        }))
                     })
                     .when(show_recents, |el| {
                         el.child(
@@ -724,13 +760,13 @@ impl Workspace {
                                 .child(
                                     div()
                                         .mb(px(PROJECT_PICKER_RECENTS_LABEL_BOTTOM_MARGIN_PX))
-                                        .font_family(PROJECT_PICKER_BODY_FONT_FAMILY)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_BODY_FONT_FAMILY))
                                         .text_size(px(PROJECT_PICKER_SECTION_TEXT_SIZE_PX))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(theme::rambutan_500())
-                                        .child("RECENT"),
+                                        .child("PROJECTS"),
                                 )
-                                .children(recent_rows),
+                                .child(div().id("desktop-project-list").max_h(px(132.)).min_h_0().overflow_y_scroll().children(recent_rows)),
                         )
                     })
                     .child(
@@ -740,13 +776,13 @@ impl Workspace {
                             .min_h_0()
                             .overflow_y_scroll()
                             .track_scroll(&self.project_picker_scroll)
-                            .when_some(self.project_picker_error.clone(), |el, error| {
+                            .when_some(self.project_picker_error.clone().or_else(|| self.project_picker_start_warning.clone()), |el, error| {
                                 el.child(
                                     div()
                                         .px(px(PROJECT_PICKER_EMPTY_X_PADDING_PX))
                                         .py(px(PROJECT_PICKER_EMPTY_Y_PADDING_PX))
                                         .text_center()
-                                        .font_family(PROJECT_PICKER_LABEL_FONT_FAMILY)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
                                         .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
                                         .font_family(theme::UI_SMALL_FONT_FAMILY)
                                         .text_color(theme::lychee_400())
@@ -775,7 +811,7 @@ impl Workspace {
                             .items_center()
                             .justify_between()
                             .gap(px(PROJECT_PICKER_FOOTER_GAP_PX))
-                            .font_family(PROJECT_PICKER_BODY_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_BODY_FONT_FAMILY))
                             .text_size(px(PROJECT_PICKER_FOOTER_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .child("Click to browse, double click to select")

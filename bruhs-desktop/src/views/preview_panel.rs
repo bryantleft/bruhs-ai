@@ -9,10 +9,10 @@
 
 use bruhs_core::preview::LocalServer;
 use bruhs_models::logic::preview::normalize_preview_url;
-use bruhs_ui::input::{Input, InputEvent, InputState};
-use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
 
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
@@ -47,9 +47,75 @@ pub enum PreviewPanelEvent {
 }
 
 #[cfg(target_os = "macos")]
+mod native_accessibility;
+
+/// GPUI tracks virtual focus separately from AppKit's first responder. A
+/// shell pointer/focus change must return native typing to GPUI's host view.
+pub(crate) fn focus_native_shell(window: &Window) {
+    #[cfg(target_os = "macos")]
+    {
+        use raw_window_handle::RawWindowHandle;
+        let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
+            return;
+        };
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return;
+        };
+        // SAFETY: GPUI owns this main-thread AppKit NSView for the lifetime of
+        // the borrowed Window; the raw handle points to that native host view.
+        let view = unsafe { handle.ns_view.cast::<objc2_app_kit::NSView>().as_ref() };
+        if let Some(native_window) = view.window() {
+            native_window.makeFirstResponder(Some(view));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
+/// Use WebKit's undo manager only while a visible embedded view owns native
+/// focus. The caller routes other inputs through gpui-component's own history.
+#[cfg(target_os = "macos")]
+pub(crate) fn edit_native_history(redo: bool) -> bool {
+    if !native_accessibility::has_focused_view() {
+        return false;
+    }
+    let Some(main_thread) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    let application = objc2_app_kit::NSApplication::sharedApplication(main_thread);
+    // Address the focused input's manager directly. An empty native history
+    // must not fall through to application menu actions or another input.
+    if let Some(manager) = application
+        .keyWindow()
+        .and_then(|window| window.firstResponder())
+        .and_then(|responder| responder.undoManager())
+    {
+        if redo && manager.canRedo() {
+            manager.redo();
+        } else if !redo && manager.canUndo() {
+            manager.undo();
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "macos")]
 mod host {
     use wry::dpi::{LogicalPosition, LogicalSize};
-    use wry::{Rect, WebView, WebViewBuilder};
+    use wry::{Rect, WebView, WebViewBuilder, WebViewExtMacOS};
+    use crate::views::browser_preferences::{BrowserAppearance, PagePreferences};
+
+    fn set_appearance(webview: &WebView, appearance: BrowserAppearance) {
+        use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua};
+        // AppKit exports these immutable names for the lifetime of the process.
+        let named = match appearance {
+            BrowserAppearance::System => None,
+            BrowserAppearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
+            BrowserAppearance::Dark => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }),
+        };
+        webview.webview().setAppearance(named.as_deref());
+    }
+
 
     /// Longan-950 behind the page while it loads.
     const BACKGROUND: (u8, u8, u8, u8) = (0x14, 0x12, 0x10, 0xff);
@@ -57,9 +123,12 @@ mod host {
     /// Owns the native child view. Dropping it removes the view.
     #[derive(Default)]
     pub struct WebViewHost {
+        accessibility: Option<super::native_accessibility::NativeAccessibility>,
         webview: Option<WebView>,
         url: Option<String>,
         visible: bool,
+        appearance: BrowserAppearance,
+        profile: Option<uuid::Uuid>,
         /// Placed content bounds and the zoom they were placed at.
         bounds: Option<(f32, f32, f32, f32, f32)>,
         /// A hide failed and was logged; quiet until one succeeds.
@@ -88,6 +157,8 @@ mod host {
         pub fn new() -> Self {
             Self::default()
         }
+
+        pub fn uses_profile(&self, profile: uuid::Uuid) -> bool { self.profile == Some(profile) }
 
         pub fn available() -> bool {
             true
@@ -118,10 +189,31 @@ mod host {
             window: &gpui::Window,
             url: &str,
             bounds: gpui::Bounds<gpui::Pixels>,
+            page: PagePreferences,
         ) -> Result<(), String> {
             // The page's content zooms with the window's (see
             // `bruhs_ui::zoom`); its frame is already in window points.
-            let zoom = bruhs_ui::zoom::zoom();
+            let appearance = page.appearance;
+            if page.profile.is_some() && !objc2::available!(macos = 14.0) {
+                return Err("Named browser profiles require macOS 14 or later.".into());
+            }
+            if self.profile != page.profile {
+                self.clear();
+                self.profile = page.profile;
+            }
+            let mut bounds=bounds;
+            let scale=if let Some((w,h))=page.viewport {
+                let width=f32::from(bounds.size.width);
+                let height=f32::from(bounds.size.height);
+                let scale=(width/f32::from(w)).min(height/f32::from(h)).max(0.001);
+                let display_width=f32::from(w)*scale;
+                let display_height=f32::from(h)*scale;
+                bounds.origin.x += gpui::px((width-display_width)*0.5);
+                bounds.origin.y += gpui::px((height-display_height)*0.5);
+                bounds.size=gpui::size(gpui::px(display_width),gpui::px(display_height));
+                scale
+            } else {bruhs_ui::zoom::zoom()};
+            let zoom=scale*f32::from(page.zoom_percent.unwrap_or(100))/100.;
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
@@ -135,6 +227,10 @@ mod host {
                         .with_url(url)
                         .with_bounds(rect(bounds))
                         .with_background_color(BACKGROUND);
+                    if let Some(profile) = page.profile {
+                        use wry::WebViewBuilderExtDarwin;
+                        builder = builder.with_data_store_identifier(*profile.as_bytes());
+                    }
                     if let Some(sender) = self.messages.clone() {
                         builder =
                             builder.with_ipc_handler(move |request: wry::http::Request<String>| {
@@ -143,19 +239,31 @@ mod host {
                             });
                     }
                     let webview = builder.build_as_child(window).map_err(|e| e.to_string())?;
+                    self.accessibility = Some(
+                        super::native_accessibility::NativeAccessibility::new(&webview),
+                    );
                     webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
+                    set_appearance(&webview, appearance);
+                    self.appearance = appearance;
                     self.webview = Some(webview);
                     self.url = Some(url.to_string());
                     self.visible = true;
                     self.bounds = Some(key);
                 }
                 Some(webview) => {
+                    if self.appearance != appearance {
+                        set_appearance(webview, appearance);
+                        self.appearance = appearance;
+                    }
                     if self.url.as_deref() != Some(url) {
                         webview.load_url(url).map_err(|e| e.to_string())?;
                         self.url = Some(url.to_string());
                     }
                     if !self.visible {
                         webview.set_visible(true).map_err(|e| e.to_string())?;
+                        self.accessibility = Some(
+                            super::native_accessibility::NativeAccessibility::new(webview),
+                        );
                         self.visible = true;
                     }
                     if self.bounds != Some(key) {
@@ -179,6 +287,7 @@ mod host {
             if let (Some(webview), true) = (&self.webview, self.visible) {
                 match webview.set_visible(false) {
                     Ok(()) => {
+                        self.accessibility = None;
                         self.visible = false;
                         self.hide_failing = false;
                     }
@@ -201,6 +310,7 @@ mod host {
         }
 
         pub fn clear(&mut self) {
+            self.accessibility = None;
             self.webview = None;
             self.url = None;
             self.visible = false;
@@ -236,6 +346,7 @@ mod host {
             _window: &gpui::Window,
             _url: &str,
             _bounds: gpui::Bounds<gpui::Pixels>,
+            _page: super::super::browser_preferences::PagePreferences,
         ) -> Result<(), String> {
             Err("no embedded browser on this platform".to_string())
         }
@@ -249,6 +360,7 @@ pub use host::WebViewHost;
 
 pub struct PreviewPanelView {
     url: Option<String>,
+    browser_settings_enabled: bool,
     url_input: Entity<InputState>,
     _url_input_subscription: Subscription,
     servers: Vec<LocalServer>,
@@ -280,7 +392,9 @@ impl PreviewPanelView {
             |this: &mut Self, input, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = event {
                     let raw = input.read(cx).value().to_string();
-                    this.go_to(&raw, window, cx);
+                    if let Some(url) = super::browser_preferences::BrowserPreferences::get(cx).address(&raw) {
+                        this.go_to(&url, window, cx);
+                    }
                 }
             },
         );
@@ -293,6 +407,7 @@ impl PreviewPanelView {
             servers_generation: 0,
             shown: false,
             host: WebViewHost::new(),
+            browser_settings_enabled: true,
             host_error: None,
             place_attempts: 0,
             url_row: true,
@@ -344,7 +459,7 @@ impl PreviewPanelView {
             origin: point(px(0.0), px(0.0)),
             size: size(px(480.0), px(320.0)),
         };
-        let result = self.host.place(window, &url, bounds);
+        let result = self.host.place(window, &url, bounds, self.page_settings(cx));
         self.host_error = result.as_ref().err().cloned();
         cx.notify();
         result
@@ -357,6 +472,22 @@ impl PreviewPanelView {
 
     /// Show or hide the URL row. Where no page can be embedded the row stays,
     /// since its Open in browser is the way to the page.
+    fn page_settings(&self, cx: &App) -> super::browser_preferences::PagePreferences {
+        if self.browser_settings_enabled && self.url_row {
+            cx.try_global::<super::browser_preferences::BrowserPreferences>()
+                .map(|prefs| prefs.page_settings()).unwrap_or_default()
+        } else { Default::default() }
+    }
+
+    pub fn use_application_session(&mut self) {
+        self.browser_settings_enabled = false;
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn release_profile(&mut self, profile: uuid::Uuid) {
+        if self.host.uses_profile(profile) { self.host.clear(); }
+    }
+
     pub fn set_url_row(&mut self, shown: bool) {
         self.url_row = shown || !WebViewHost::available();
     }
@@ -483,7 +614,7 @@ impl PreviewPanelView {
         if !self.shown || cfg!(test) {
             return;
         }
-        match self.host.place(window, &url, bounds) {
+        match self.host.place(window, &url, bounds, self.page_settings(cx)) {
             Ok(()) => {
                 if self.host_error.take().is_some() {
                     cx.notify();
@@ -596,7 +727,7 @@ impl PreviewPanelView {
                             .bordered(false)
                             .focus_bordered(false)
                             .cleanable(false)
-                            .font_family(INPUT_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY))
                             .text_size(px(HEADER_TEXT_SIZE_PX)),
                     ),
             )
@@ -613,7 +744,9 @@ impl PreviewPanelView {
                 .on_click(cx.listener(|this, _ev, window, cx| {
                     cx.stop_propagation();
                     let raw = this.url_input.read(cx).value().to_string();
-                    this.go_to(&raw, window, cx);
+                    if let Some(url) = super::browser_preferences::BrowserPreferences::get(cx).address(&raw) {
+                        this.go_to(&url, window, cx);
+                    }
                 }))
                 .child("Go"),
             )
@@ -669,7 +802,7 @@ impl PreviewPanelView {
                 cx.stop_propagation();
                 this.go_to(&target, window, cx);
             }))
-            .child(div().font_family(INPUT_FONT_FAMILY).child(label))
+            .child(div().font_family(crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY)).child(label))
             .child(
                 div()
                     .min_w_0()

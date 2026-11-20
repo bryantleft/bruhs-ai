@@ -439,6 +439,7 @@ impl Workspace {
                     priority: item.priority,
                     due_date: item.due_date.clone(),
                     planning: item.planning.clone(),
+                    source: item.source.clone(),
                     updated_at: item.updated_at,
                 })
                 .collect(),
@@ -461,6 +462,22 @@ impl Workspace {
             scheduling_preferences: self.scheduling_preferences.clone(),
             life_context: self.life_context.clone(),
             automation_state: self.automation_state.clone(),
+            browser_preferences: cx.try_global::<crate::views::browser_preferences::BrowserPreferences>().filter(|p| **p != Default::default()).cloned(),
+            project_start_folder: self.project_start_folder(cx),
+            clone_host_folders: self.clone_host_folders,
+            idle_settle_days: Some(self.idle_settle_days),
+            pull_preferences:self.pull_preferences,
+            known_thread_pulls:self.known_thread_pulls.clone(),
+            maintenance:(self.maintenance.prefs!=Default::default()).then(||self.maintenance.prefs.clone()),
+            project_defaults: self.project_defaults.clone(),
+            project_actions:self.project_actions.clone(),
+            snooze_options:self.snooze_options.clone(),
+            project_list:self.project_list.clone(),
+            text_generation_model:self.text_generation_model.clone(),
+            response_stream:(self.response_stream!=Default::default()).then_some(self.response_stream),
+            fallback_model:self.fallback_model.clone(),
+            provider_resets:self.provider_resets.clone(),
+            quota_prefs:(self.quota_prefs!=Default::default()).then_some(self.quota_prefs),
             active_project: self
                 .active_project
                 .as_ref()
@@ -481,7 +498,15 @@ impl Workspace {
             sidebar_snoozed_open: Some(self.sidebar_snoozed_open),
             crew_rail_open: Some(self.crew_rail_open),
             sidebar_working_section: Some(self.sidebar_working_section),
+            labs_sidebar: self.labs_sidebar.clone(),
+            archived_threads: self.archived_threads.iter().map(|thread| thread.snapshot(cx)).collect(),
+            thread_notifications: (self.thread_notifications != Default::default()).then_some(self.thread_notifications),
+            confirm_thread_archive: self.confirm_thread_archive.then_some(true),
+            confirm_thread_unpin: self.confirm_thread_unpin.then_some(true),
+            quit_mode:self.quit_gesture.mode,
+            confirm_thread_delete: (!self.confirm_thread_delete).then_some(false),
             update_checks: Some(self.updates.read(cx).enabled),
+            update_track: Some(self.updates.read(cx).track),
             title_instructions: Some(self.title_instructions.clone()),
             title_instructions_by_project: self.title_instructions_by_project.clone(),
             editor_id: Some(self.editor_id.clone()),
@@ -491,6 +516,28 @@ impl Workspace {
             meeting_prefs: Some(self.meetings_hub.read(cx).prefs.clone()),
             run_choice: self.run_choice.as_str().to_string(),
             claude_effort: self.claude_effort.clone(),
+            diff_preferences: Some(self.diff_panel.read(cx).prefs).filter(|p| *p != Default::default()),
+            branch_naming:self.branch_naming.clone(),
+            health_interval:self.health_interval,
+            pending_scratch_cleanups: self.pending_scratch_cleanups.clone(),
+            cleanup_keep_when: self.cleanup_keep_when,
+            cleanup_deleted_worktrees:self.cleanup_deleted_worktrees,
+            worktree_retention:self.worktree_retention,
+            worktree_prefs: (self.worktree_prefs != Default::default()).then_some(self.worktree_prefs),
+            dictation_prefs: (self.dictation_prefs != Default::default()).then(|| self.dictation_prefs.clone()),
+            snapshots: (self.snapshots != Default::default()).then_some(self.snapshots),
+            fonts:(self.fonts!=Default::default()).then(||self.fonts.clone()),
+            thread_origins: self.thread_origins.clone(),
+            title_requests: self.title_requests.clone(),
+            task_thread_view: self.task_thread_view.as_ref().filter(|t| matches!(&self.active_view, AppView::Bruh { agent_id } if agent_id == &t.agent_id)).cloned(),
+            hidden_inline_thread_details: self.details.hidden_inline.clone(),
+            custom_themes: (!self.custom_themes.empty()).then(|| self.custom_themes.clone()),
+            appearance: (self.appearance != Default::default()).then_some(self.appearance),
+            chat_width: (self.chat_width != ChatWidth::default()).then_some(self.chat_width),
+            screen_reader: (self.screen_reader != Default::default()).then_some(self.screen_reader),
+            slash_skills:(!self.slash_skills).then_some(false),
+            tool_visibility:self.tool_visibility,
+            send_shortcut: (self.send_shortcut != SendShortcut::Enter).then(|| self.send_shortcut.id().to_owned()),
             follow_up: self.follow_up_steer.then(|| "steer".to_string()),
             claude_autocompact: self.claude_autocompact.clone(),
             compact_idle: (self.compact_idle != IdleCompact::Return)
@@ -505,6 +552,7 @@ impl Workspace {
                 .then(|| self.meeting_suggestions.prefs.clone()),
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
+            keybinding_schema: 1,
         }
     }
 
@@ -568,6 +616,7 @@ impl Workspace {
                 else {
                     return;
                 };
+                let scratch = state.pending_scratch_cleanups.clone();
                 let result = cx
                     .background_spawn(async move {
                         save_desktop_state(path, state, coordinator, generation)
@@ -584,6 +633,7 @@ impl Workspace {
                             hub.meeting_actions_save_failed(meeting_action_receipts, cx);
                         }
                     });
+                    if saved { this.dispatch_saved_scratch(scratch, cx); }
                     if saved && dirty {
                         this.persist(cx);
                     }
@@ -644,6 +694,7 @@ impl RestoredRecords {
                         priority: item.priority,
                         due_date: item.due_date,
                         planning: item.planning,
+                        source: item.source,
                         updated_at: item.updated_at,
                     })
                     .collect(),

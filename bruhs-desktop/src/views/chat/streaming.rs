@@ -65,11 +65,20 @@ pub(super) fn prompt_with_import_context(context: Option<&str>, prompt: String) 
 
 impl ChatView {
     /// `messages` as context for a turn whose session does not hold them.
-    pub(super) fn conversation_context(&self, messages: &[Message]) -> Option<String> {
-        bruhs_models::logic::portable::thread_context(
-            &self.thread_title,
-            &crate::views::workspace::portable_messages(messages),
-        )
+    pub(crate) fn conversation_context(&self, messages: &[Message]) -> Option<String> {
+        use bruhs_models::logic::portable::{
+            thread_context, transcript_markdown, IMPORT_CONTEXT_MAX_CHARS,
+        };
+        let local = crate::views::workspace::portable_messages(messages);
+        match self.fork.as_deref() {
+            Some(fork) => Some(transcript_markdown(
+                &self.thread_title,
+                "bruhs",
+                fork.history.iter().chain(&local),
+                IMPORT_CONTEXT_MAX_CHARS,
+            )),
+            None => thread_context(&self.thread_title, &local),
+        }
     }
 
     /// The prompt for a cold retry of `turn` (it resumes a session the
@@ -257,10 +266,11 @@ pub(super) async fn stream_agent_response(
             }
         };
         let mut saw_session = false;
-        let Some(message) = forward_turn_events(&mut stream, &tx, &mut saw_session).await else {
+        let mut limited = false;
+        let Some(message) = forward_turn_events(&mut stream, &tx, &mut saw_session, &mut limited).await else {
             break;
         };
-        if resumed && !saw_session && !cold_retried {
+        if resumed && !saw_session && !cold_retried && !limited {
             // Dropping the stream frees the thread for the retry.
             drop(stream);
             cold_retried = true;
@@ -278,6 +288,12 @@ pub(super) async fn stream_agent_response(
     let _ = tx.send(AgentUiEvent::Done);
 }
 
+// A textual error only triggers a quota metadata check. It cannot supply a reset time.
+fn quota_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    ["usage limit", "quota exceeded", "exceeded your quota", "rate limit", "rate_limit_exceeded"].iter().any(|s|message.contains(s))
+}
+
 /// Forward one attempt's events until it ends. Returns the error that ended
 /// it, if one did; `saw_session` records whether the provider announced a
 /// session first.
@@ -285,6 +301,7 @@ async fn forward_turn_events(
     stream: &mut bruhs_core::OrchestratorEventStream,
     tx: &UnboundedSender<AgentUiEvent>,
     saw_session: &mut bool,
+    limited: &mut bool,
 ) -> Option<String> {
     while let Some(event) = stream.next().await {
         match event {
@@ -338,7 +355,14 @@ async fn forward_turn_events(
                     let _ = tx.send(AgentUiEvent::Session(session_id));
                 }
             }
+            OrchestratorEvent::ExecutionBudgetExceeded { seconds } => {
+                return Some(bruhs_core::agent::execution_budget_message(seconds));
+            }
             OrchestratorEvent::Query(QueryEvent::Error(message)) => {
+                if !*limited && quota_error(&message) {
+                    *limited = true;
+                    let _ = tx.send(AgentUiEvent::QuotaBlocked(None));
+                }
                 return Some(message);
             }
             OrchestratorEvent::Query(QueryEvent::PermissionRequest {
@@ -354,6 +378,11 @@ async fn forward_turn_events(
                 let _ = tx.send(AgentUiEvent::PermissionCancelled(id));
             }
             OrchestratorEvent::Query(QueryEvent::Raw(value)) => {
+                if value["type"] == "rate_limit_event" && value["rate_limit_info"]["status"] == "rejected" {
+                    *limited = true;
+                    let reset = value["rate_limit_info"]["resetsAt"].as_i64().and_then(|s|s.checked_mul(1000));
+                    let _ = tx.send(AgentUiEvent::QuotaBlocked(reset));
+                }
                 if value.get("type").and_then(serde_json::Value::as_str) == Some("response_media") {
                     if let Some(bindings) = value
                         .get("bindings")
@@ -716,7 +745,7 @@ impl ChatView {
     }
 
     pub(super) fn return_chip_visible(&self) -> bool {
-        if self.is_streaming || !self.effort_chip_visible() {
+        if self.is_streaming || !self.is_claude_model() {
             return false;
         }
         let Some(tokens) = self.latest_context_tokens() else {
@@ -733,7 +762,7 @@ impl ChatView {
     /// Compact this thread in the lead time before its prompt cache expires.
     /// The draft stays in the composer.
     pub(crate) fn compact_idle_if_due(&mut self, cx: &mut Context<'_, Self>) {
-        if self.is_streaming || self.placing || self.queue_held || !self.effort_chip_visible() {
+        if self.is_streaming || self.placing || self.queue_held || !self.is_claude_model() {
             return;
         }
         if self
@@ -1231,6 +1260,42 @@ impl ChatView {
         self.pending_composer = None;
     }
 
+    #[cfg(test)]
+    pub(crate) fn generation_for_test(&self) -> u64 { self.turn_generation }
+
+    pub(crate) fn is_quota_turn(&self, generation:u64)->bool {
+        self.turn_generation == generation && !self.is_streaming && !self.placing
+    }
+
+    pub(crate) fn resume_quota_turn(&mut self, generation:u64,cx:&mut Context<'_,Self>) -> bool {
+        if !self.is_quota_turn(generation) || self.session_id.is_none() || self.session_provider != Some(self.turn_provider) ||
+            self.turn_provider != bruhs_models::agent::provider_for_model_id(&self.model_id) ||
+            self.queue_held || !self.prompt_queue.is_empty() || self.pending_composer.is_some() ||
+            !self.input_state.read(cx).value().is_empty() || !self.file_offers.is_empty() ||
+            !self.text_attachments.is_empty() || !self.context_chips.is_empty() {return false;}
+        self.submit_prompt("Continue the interrupted task after the provider usage reset. Check what already completed before taking the next step.".into(),cx);
+        self.is_streaming || self.placing
+    }
+
+    /// Smoke launches follow the same restored worktree preferences and initial branch discovery as typing a prompt.
+    #[cfg(debug_assertions)]
+    pub(crate) fn submit_startup_smoke_prompt(&mut self, content:String,cx:&mut Context<'_,Self>){
+        if self.project_scoped && !self.run_locked && self.run_choice==bruhs_models::logic::run_place::WorkspaceChoice::NewWorktree
+            && self.base_branch.is_empty() && self.git_current_branch.is_none(){
+            let project=self.project_path.clone();
+            let lookup=spawn_tokio(cx,async move{bruhs_core::git::branches(std::path::Path::new(&project)).await});
+            cx.spawn(async move|this,cx|{
+                let result=lookup.await;
+                let _=this.update(cx,|this,cx|{
+                    if let Ok(info)=result{this.git_current_branch=info.current;}
+                    this.submit_prompt(content,cx);
+                });
+            }).detach();
+            return;
+        }
+        self.submit_prompt(content,cx);
+    }
+
     pub fn submit_prompt(&mut self, content: String, cx: &mut Context<'_, Self>) {
         self.finish_submit(content, Vec::new(), Vec::new(), Vec::new(), cx);
     }
@@ -1262,8 +1327,8 @@ impl ChatView {
         self.place_then_send(content, attachments, chips, uploads, cx);
     }
 
-    /// Claude `--effort` for this send. Codex, and Default, omit the flag.
-    fn claude_send_effort(&self) -> Option<String> {
+    /// Native reasoning effort for this send. Default preserves CLI settings.
+    pub(super) fn claude_send_effort(&self) -> Option<String> {
         if !self.effort_chip_visible() {
             return None;
         }
@@ -1332,21 +1397,19 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) {
         let repo = std::path::PathBuf::from(&self.project_path);
-        let dest = match bruhs_core::git::worktree_dest(&repo, &branch) {
-            Ok(dest) => dest,
-            Err(error) => {
-                self.fail_place(content, attachments, chips, uploads, &error.to_string(), cx);
-                return;
-            }
-        };
         self.placing = true;
-        let create = spawn_tokio(cx, {
-            let branch = branch.clone();
-            async move {
-                bruhs_core::git::add_worktree(&repo, &base, &dest, &branch)
-                    .await
-                    .map(|()| dest)
-            }
+        let prefs = self.worktree_prefs;
+        let naming = self.branch_naming.clone();
+        let setup=self.setup_actions.clone();
+        let visible = bruhs_models::logic::context_chip::expand_prompt(&content, &chips);
+        let prompt = bruhs_models::logic::composer_text::visible_prompt(&visible, &attachments);
+        let naming_files = uploads.clone();
+        let model = self.text_generation_model.clone();
+        let create = spawn_tokio(cx, async move {
+            let first_message = bruhs_core::thread_title::FirstMessage { text: &prompt, files: &naming_files };
+            let checkout = bruhs_core::git::prepare_thread_worktree(&repo, &base, &branch, prefs, &naming, first_message, &model).await?;
+            bruhs_core::git::run_project_setup(&checkout.path, &setup).await?;
+            Ok::<_, bruhs_core::git::GitError>(checkout)
         });
         let project_label = self.project_name.clone();
         self.place_task = Some(cx.spawn(async move |this, cx| {
@@ -1354,8 +1417,10 @@ impl ChatView {
             let _closed = this.update(cx, |this, cx| {
                 this.placing = false;
                 match created {
-                    Ok(dest) => {
-                        let path = dest.to_string_lossy().into_owned();
+                    Ok(checkout) => {
+                        if let Some(notice) = checkout.naming_notice { cx.emit(ChatViewEvent::Notice(notice)); }
+                        let branch = checkout.branch;
+                        let path = checkout.path.to_string_lossy().into_owned();
                         let remembered = RememberedWorktree {
                             path: path.clone(),
                             branch: branch.clone(),
@@ -1364,6 +1429,7 @@ impl ChatView {
                         this.previous_worktree = Some(remembered);
                         this.emit_run_prefs(cx);
                         this.lock_place(Some(path), Some(branch), cx);
+                        cx.emit(ChatViewEvent::WorktreeReady);
                         this.launch_turn(content, attachments, chips, uploads, cx);
                     }
                     Err(error) => {
@@ -1383,7 +1449,7 @@ impl ChatView {
     }
 
     /// Remember that this thread has a place. A worktree also becomes the cwd.
-    fn lock_place(
+    pub(crate) fn lock_place(
         &mut self,
         worktree: Option<String>,
         branch: Option<String>,
@@ -1391,9 +1457,13 @@ impl ChatView {
     ) {
         self.run_locked = true;
         if let Some(path) = worktree {
+            let scratch = branch.is_none() && bruhs_core::worktrees::scratch::is_managed_path(std::path::Path::new(&path));
+            if !scratch {
+                self.project_settings_root.get_or_insert_with(||self.project_path.clone());
+            }
             self.worktree_path = Some(path.clone());
             self.project_path = path.clone();
-            self.project_scoped = true;
+            self.project_scoped = !scratch;
             if let Some(branch) = branch.clone() {
                 self.git_current_branch = Some(branch);
             }
@@ -1401,7 +1471,7 @@ impl ChatView {
                 project_path: path,
                 branch,
             });
-            self.refresh_git_branches(cx);
+            if !scratch { self.refresh_git_branches(cx); }
         }
     }
 
@@ -1429,6 +1499,7 @@ impl ChatView {
         self.messages
             .push(Message::assistant_failed(Some(model_id.clone()), error));
         self.scroll_messages_to_bottom();
+        self.readout.status("Turn started");
         cx.emit(ChatViewEvent::TurnStarted {
             model_id,
             branch: self.git_current_branch.clone(),
@@ -1555,6 +1626,7 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> Result<AgentTurn, IdError> {
         self.response_media_bindings.clear();
+        self.paragraph_progress=Default::default();
         self.dismiss_prompt_suggestion(cx);
         let expanded = expand_prompt(&content, &chips);
         let visible = super::files::visible_with_files(&expanded, &pastes.items, &uploads);
@@ -1617,7 +1689,7 @@ impl ChatView {
         self.turn_stamp = resume.is_none().then_some(stamp);
         let carried = if self.handoff_pending {
             None
-        } else if other_provider || other_instructions {
+        } else if other_provider || other_instructions || (resume.is_none() && self.fork.is_some()) {
             self.conversation_context(&self.messages)
         } else {
             self.import_context.clone()
@@ -1633,6 +1705,7 @@ impl ChatView {
         self.start_streaming_spinner(cx);
         self.stream_started_at = Some(Instant::now());
         self.pending_permission = None;
+        self.readout.status("Turn started");
         cx.emit(ChatViewEvent::TurnStarted {
             model_id: model_id.clone(),
             branch: self.git_current_branch.clone(),
@@ -1648,7 +1721,7 @@ impl ChatView {
         let send_effort = self.claude_send_effort();
         self.effort = send_effort.clone();
         let autocompact = self
-            .effort_chip_visible()
+            .is_claude_model()
             .then_some(self.claude_autocompact.as_deref())
             .flatten();
         ThreadId::try_from(thread_id).map(|thread_id| {
@@ -1688,6 +1761,7 @@ impl ChatView {
         let generation = self.turn_generation;
         self.agent_task = Some(agent_task);
         self.stream_task = Some(cx.spawn(async move |entity, cx| {
+            let mut blocked: Option<Option<i64>> = None;
             while let Some(event) = rx.recv().await {
                 let done = event.is_terminal();
                 let applied = entity.update(cx, |view, cx| {
@@ -1695,6 +1769,13 @@ impl ChatView {
                         return false;
                     }
                     let event = match event {
+                        AgentUiEvent::QuotaBlocked(reset) => {
+                            blocked = Some(match (blocked.flatten(), reset) {
+                                (Some(a), Some(b)) => Some(a.max(b)),
+                                (previous, latest) => previous.or(latest),
+                            });
+                            return true;
+                        }
                         AgentUiEvent::ThreadRequest(request) => {
                             if view.thread_id.as_deref() == Some(request.thread_id.as_str()) {
                                 cx.emit(ChatViewEvent::ThreadRequest(request));
@@ -1704,6 +1785,11 @@ impl ChatView {
                         event => event,
                     };
                     let saved = (view.session_id.clone(), view.import_context.is_some());
+                    match &event {
+                        AgentUiEvent::PermissionRequest(request) if view.pending_permission.as_ref().is_none_or(|pending| pending.id != request.id) => cx.emit(ChatViewEvent::ThreadAttention("Approval needed")),
+                        AgentUiEvent::SecretRequest(_) => cx.emit(ChatViewEvent::ThreadAttention("Input needed")),
+                        _ => {}
+                    }
                     let media_update = matches!(&event, AgentUiEvent::ResponseMedia(_));
                     view.apply_agent_event(event);
                     if media_update
@@ -1714,11 +1800,16 @@ impl ChatView {
                     }
                     if done {
                         cx.emit(ChatViewEvent::TurnFinished);
+                        if let Some(reset_ms) = blocked {
+                            cx.emit(ChatViewEvent::UsageLimitReached{reset_ms,generation});
+                        }
                         if let Some(brief) = view.take_handoff_brief() {
                             cx.emit(ChatViewEvent::Handoff { brief });
                         }
-                        view.schedule_drain(cx);
-                        view.request_prompt_suggestion(cx);
+                        if blocked.is_none() || !view.wait_on_quota {
+                            view.schedule_drain(cx);
+                            view.request_prompt_suggestion(cx);
+                        }
                     }
                     cx.notify();
                     true
@@ -1852,6 +1943,7 @@ impl ChatView {
         self.pending_permission = None;
         self.scroll_messages_to_bottom();
         smoke_log("done", "stopped");
+        self.readout.status("Turn stopped");
         cx.emit(ChatViewEvent::TurnFinished);
         cx.notify();
     }
@@ -1864,6 +1956,17 @@ impl ChatView {
     }
 
     pub(super) fn apply_agent_event(&mut self, event: AgentUiEvent) {
+        match &event {
+            AgentUiEvent::ToolCall {tool,..} => {
+                let content = self.messages.last().filter(|m|m.role==MessageRole::Assistant).map_or("", |m|m.content.as_str());
+                self.readout.tool_start(content,tool);
+            }
+            AgentUiEvent::PermissionRequest(_) => self.readout.latest_status("Needs approval"),
+            AgentUiEvent::SecretRequest(_) => self.readout.latest_status("Needs input"),
+            AgentUiEvent::Done => self.readout.status("Turn completed"),
+            AgentUiEvent::Error(_) => self.readout.status("Turn failed"),
+            _ => {}
+        }
         match event {
             AgentUiEvent::SecretRequest(request) => {
                 if self.thread_id.as_deref() == Some(request.thread_id.as_str()) {
@@ -1886,6 +1989,7 @@ impl ChatView {
                 if let Some(message) = self.active_assistant_message_mut() {
                     message.content.push_str(&text);
                 }
+                self.refresh_paragraph_progress(false);
                 smoke_log("text", &text);
             }
             AgentUiEvent::Thinking(text) => {
@@ -1898,6 +2002,7 @@ impl ChatView {
                 smoke_log("tool_call", &format!("{tool} {summary}"));
                 if let Some(message) = self.active_assistant_message_mut() {
                     message.tool_calls.push(DesktopToolCall {
+                        text_offset: Some(message.content.len()),
                         id,
                         tool,
                         input,
@@ -1929,6 +2034,7 @@ impl ChatView {
                         tool_call.is_error = is_error;
                     } else {
                         message.tool_calls.push(DesktopToolCall {
+                            text_offset: Some(message.content.len()),
                             id: tool_use_id,
                             tool: "Tool result".to_string(),
                             input: serde_json::Value::Null,
@@ -1952,6 +2058,7 @@ impl ChatView {
                         &bindings,
                     );
                 }
+                self.refresh_paragraph_progress(true);
             }
             AgentUiEvent::Result {
                 result,
@@ -1977,6 +2084,7 @@ impl ChatView {
                         })
                         .or_else(|| Some(EpochMs::now().as_millis()));
                 }
+                self.refresh_paragraph_progress(true);
             }
             AgentUiEvent::PermissionRequest(request) => {
                 smoke_log("permission_request", &request.tool);
@@ -1987,6 +2095,7 @@ impl ChatView {
                     smoke_log("permission_cancelled", &id);
                 }
             }
+            AgentUiEvent::QuotaBlocked(_) => {},
             AgentUiEvent::Session(id) => self.record_session(id),
             AgentUiEvent::SessionRejected => {
                 self.session_id = None;

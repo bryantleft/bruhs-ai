@@ -106,6 +106,7 @@ impl Workspace {
             updated_at_ms: EpochMs::now(),
             pinned: false,
             settled: false,
+            settled_at_ms: None,
             pin_rank: None,
             active_rank: None,
             snoozed_until_ms: None,
@@ -137,7 +138,11 @@ impl Workspace {
             .filter(|path| !path.is_empty())
             .unwrap_or_else(current_dir_string);
         let permission_mode =
-            restored_thread_permission_mode(current_permission_mode, persisted.permission_mode);
+            if persisted.project_permission_override && !persisted.project_name.is_empty() {
+                persisted.permission_mode
+            } else {
+                restored_thread_permission_mode(current_permission_mode, persisted.permission_mode)
+            };
         let (session_id, session_provider) =
             restored_owned_session(persisted.session_id, persisted.session_provider.as_deref());
         let messages = persisted
@@ -169,10 +174,14 @@ impl Workspace {
             );
             view.start_thread(chat_id, title, cx);
             view.fresh_session = persisted.fresh_session;
+            view.project_permission_override =
+                persisted.project_permission_override && !persisted.project_name.is_empty();
             (view.session_id, view.session_provider) = (session_id, session_provider);
             view.import_context = persisted.import_context;
+            view.fork = persisted.fork;
             view.goal = persisted.goal;
             view.worktree_path = persisted.worktree_path;
+            view.project_settings_root=persisted.project_settings_root;
             view.effort = persisted.effort;
             view.run_locked = persisted.run_locked;
             view.role = persisted.role;
@@ -212,6 +221,7 @@ impl Workspace {
             },
             pinned: persisted.pinned,
             settled: persisted.settled,
+            settled_at_ms: persisted.settled_at_ms,
             pin_rank: persisted.pin_rank,
             active_rank: persisted.active_rank,
             snoozed_until_ms: persisted.snoozed_until_ms,
@@ -246,10 +256,20 @@ impl Workspace {
                 ChatViewEvent::OpenSettings => {
                     this.open_settings(&OpenSettings, window, cx);
                 }
+                ChatViewEvent::TitleRenamed => {
+                    if let Some(id) = &chat.read(cx).thread_id {
+                        this.title_requests.remove(id);
+                    }
+                    this.persist_and_notify(cx);
+                }
                 ChatViewEvent::MessagesChanged => {
                     // A queued message another thread waits on may be gone.
                     this.settle_thread_waits(chat, cx);
                     this.persist_and_notify(cx);
+                }
+                ChatViewEvent::UsageLimitReached {reset_ms,generation} => {
+                    chat.update(cx,|view,cx|{view.reported_limit=Some((*generation,*reset_ms));cx.notify();});
+                    this.handle_quota_limit(chat, *reset_ms, *generation, cx);
                 }
                 ChatViewEvent::Notice(message) => {
                     let message = message.clone();
@@ -260,12 +280,24 @@ impl Workspace {
                     this.apply_role_command(chat, argument, cx);
                 }
                 ChatViewEvent::TurnStarted { model_id, branch } => {
+                    this.register_project_message(chat,cx);
+                    let view = chat.read(cx);
+                    let fork_seed = view.fork.as_ref().is_some_and(|fork| view.thread_title == fork.placeholder());
+                    if (view.thread_title == THREAD_TITLE_GENERAL || fork_seed)
+                        && view.messages.iter().filter(|m| m.role == MessageRole::User).take(2).count() == 1
+                    {
+                        if let Some(id) = view.thread_id.clone() {
+                            this.generate_thread_title(&id, false, cx);
+                        }
+                    }
+                    this.update_sleep_prevention(cx);
                     let chat_id = chat.entity_id();
                     if let Some(thread) = this
                         .threads
                         .iter_mut()
                         .find(|thread| thread.chat.entity_id() == chat_id)
                     {
+                        this.quota_timers.remove(&thread.id);
                         thread.model_id = model_id.clone();
                         thread.branch = branch.clone();
                         thread.updated_at_ms = EpochMs::now();
@@ -284,7 +316,23 @@ impl Workspace {
                     }
                     this.persist_and_notify(cx);
                 }
+                ChatViewEvent::ThreadAttention(reason) => {
+                    this.notify_thread(chat, reason, window, cx)
+                }
                 ChatViewEvent::TurnFinished => {
+                    this.update_sleep_prevention(cx);
+                    let reason =
+                        chat.read(cx)
+                            .messages
+                            .last()
+                            .and_then(|message| match message.state {
+                                TurnState::Finished => Some("Thread completed"),
+                                TurnState::Failed { .. } => Some("Thread failed"),
+                                _ => None,
+                            });
+                    if let Some(reason) = reason {
+                        this.notify_thread(chat, reason, window, cx);
+                    }
                     let chat_id = chat.entity_id();
                     let active = this.active_thread_id.clone();
                     if let Some(thread) = this
@@ -305,7 +353,10 @@ impl Workspace {
                         .active_thread()
                         .is_some_and(|thread| thread.chat.entity_id() == chat.entity_id());
                     if chat_is_active {
-                        this.refresh_branch_pull(cx);
+                        this.refresh_pull_or_changes(
+                            chat.read(cx).messages.len().checked_sub(1),
+                            cx,
+                        );
                     }
                     this.settle_thread_waits(chat, cx);
                     this.persist_and_notify(cx);
@@ -325,9 +376,16 @@ impl Workspace {
                 ChatViewEvent::Handoff { brief } => {
                     this.open_handoff(chat, brief.clone(), window, cx);
                 }
+                ChatViewEvent::ForkFromReply { index } => this.fork_from_reply(chat, *index, window, cx),
+                ChatViewEvent::OpenForkSource => {
+                    if let Some(id) = chat.read(cx).fork.as_ref().map(|fork|fork.parent.clone()) {
+                        this.select_thread_by_id(&id, cx);
+                    }
+                }
                 ChatViewEvent::ThreadRequest(request) => {
                     this.answer_thread_request(chat, request, window, cx);
                 }
+                ChatViewEvent::ToggleThreadDetails => this.toggle_thread_details(window,cx),
                 ChatViewEvent::ToggleTasks => {
                     this.set_tasks_panel_visible(
                         tasks_panel_visibility_after_toggle(this.tasks_panel_visible),
@@ -356,6 +414,7 @@ impl Workspace {
                     this.stamp_run_prefs_on_threads(cx);
                     this.persist_and_notify(cx);
                 }
+                ChatViewEvent::WorktreeReady=>{if let Some(id)=chat.read(cx).thread_id.clone(){this.launch_thread_hooks(&id,false,cx);}}
                 ChatViewEvent::ThreadPlaced {
                     project_path,
                     branch,
@@ -448,6 +507,30 @@ impl Workspace {
         };
         chat.update(cx, |chat, cx| {
             chat.role_profile = role;
+            chat.dictation_prefs.clone_from(&self.dictation_prefs);
+            chat.text_generation_model=self.effective_text_model(Some(chat.settings_project_path()),&chat.model_id);
+            chat.worktree_prefs = self.worktree_prefs;
+            chat.setup_actions=if chat.project_scoped {self.setup_steps(chat.settings_project_path())}else{Vec::new()};
+            chat.branch_naming = self.effective_branch_naming(chat.settings_project_path());
+            chat.effort_label = self.appearance.effort_label;
+            if chat.project_scoped {
+                if let Some(prefs) = self.project_defaults.get(chat.settings_project_path()) {
+                    if let Some(mode) = prefs.submodules {
+                        chat.worktree_prefs.submodules = mode;
+                    }
+                    if let Some(remote) = prefs.start_from_remote {
+                        chat.worktree_prefs.start_from_remote = remote;
+                    }
+                }
+            }
+            chat.wait_on_quota = self.should_wait_on_quota(chat.settings_project_path());
+            chat.set_response_stream(self.project_defaults.get(chat.settings_project_path()).and_then(|p|p.response_stream).unwrap_or(self.response_stream));
+            chat.set_chat_width(self.chat_width);
+            chat.set_render_math(self.appearance.render_math);
+            chat.send_shortcut = self.send_shortcut;
+            chat.tool_visibility=self.tool_visibility;
+            if chat.slash_skills != self.slash_skills {chat.slash_skills=self.slash_skills;chat.refresh_mention_hints(cx); }
+            chat.set_announcements(self.screen_reader.announcements);
             chat.apply_run_prefs(choice, effort, previous, base, composer, cx);
         });
     }
@@ -516,17 +599,23 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let scoped_access = self
+            .project_defaults
+            .get(&project_path)
+            .is_some_and(|p| p.permissions.is_some());
+        let (model, permissions) = self.new_thread_defaults(&project_path);
         let thread = Self::create_thread_with_title(
             project_name,
             project_path,
-            self.current_model.clone(),
-            self.permission_mode,
+            model,
+            permissions,
             THREAD_TITLE_GENERAL,
             window,
             cx,
         );
         self.stamp_chat_run_prefs(&thread.chat, cx);
         thread.chat.update(cx, |chat, cx| {
+            chat.project_permission_override = scoped_access;
             chat.tasks_panel_visible = self.tasks_panel_visible;
             chat.diff_panel_visible = self.diff_panel_visible;
             cx.notify();
@@ -559,6 +648,7 @@ impl Workspace {
             });
             return;
         }
+        let parent=self.active_thread_id.clone();
         let project = self
             .threads
             .iter()
@@ -567,6 +657,10 @@ impl Workspace {
         match project.filter(|(name, _)| !name.is_empty()) {
             Some((name, path)) => self.new_thread_in_project(name, path, window, cx),
             None => self.new_general_thread(window, cx),
+        }
+        if let (Some(parent),Some(child))=(parent,self.active_thread_id.clone()) {
+            self.thread_origins.insert(child,thread_details::Origin::Handoff(parent));
+            self.persist_and_notify(cx);
         }
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| {
@@ -679,6 +773,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.active_thread().is_some_and(|thread| thread.chat.read(cx).scratch_folder().is_some()) {
+            self.new_scratch_thread(window, cx);
+            return;
+        }
         let current = self
             .active_thread()
             .filter(|thread| !thread.project_name.is_empty())
@@ -691,14 +789,49 @@ impl Workspace {
 
     /// The sidebar's "New chat": a general (project-less) thread.
     pub(super) fn new_general_thread(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let thread = Self::create_thread(
+        self.new_projectless_thread(false, window, cx);
+    }
+
+    pub(super) fn new_scratch_thread(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.new_projectless_thread(true, window, cx);
+    }
+
+    fn new_projectless_thread(
+        &mut self,
+        scratch: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let mut thread = Self::create_thread(
             String::new(),
             path_to_string(&project_picker_start_path()),
-            self.current_model.clone(),
+            self.model_for_new_thread(&self.current_model).to_owned(),
             self.permission_mode,
             window,
             cx,
         );
+        if scratch {
+            let path = match bruhs_core::worktrees::scratch::create(&thread.id) {
+                Ok(dir) => path_to_string(&dir),
+                Err(error) => {
+                    let message = format!("Could not create the scratch folder. {error}");
+                    if self.project_picker_visible() {
+                        self.project_picker_error = Some(message);
+                    } else {
+                        self.meetings_hub
+                            .update(cx, |hub, cx| hub.show_notice(message, true, cx));
+                    }
+                    cx.notify();
+                    return;
+                }
+            };
+            thread.project_path = path.clone();
+            thread.chat.update(cx, |chat, cx| {
+                chat.set_project_context(path.clone(), String::new(), false, cx);
+                chat.worktree_path = Some(path);
+                chat.run_locked = true;
+            });
+        }
         self.stamp_chat_run_prefs(&thread.chat, cx);
         thread.chat.update(cx, |chat, cx| {
             chat.tasks_panel_visible = self.tasks_panel_visible;
@@ -719,7 +852,8 @@ impl Workspace {
             self.active_thread_id = Some(id.to_string());
             self.active_view = AppView::Chat;
             self.compact_sidebar_open = false;
-            self.unread_thread_ids.remove(id);
+            self.quota_timers.remove(id);
+        self.unread_thread_ids.remove(id);
             thread.chat.update(cx, |chat, cx| {
                 chat.tasks_panel_visible = self.tasks_panel_visible;
                 chat.diff_panel_visible = self.diff_panel_visible;
@@ -737,12 +871,90 @@ impl Workspace {
         }
     }
 
+    pub(super) fn request_thread_delete(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.confirm_thread_delete {
+            self.delete_thread_by_id(id, cx);
+            return;
+        }
+        let Some(thread) = self.threads.iter().find(|t| t.id == id) else {
+            return;
+        };
+        let title = thread.chat.read(cx).thread_title.clone();
+        let answer = window.prompt(
+            gpui::PromptLevel::Warning,
+            &format!("Delete “{title}”?"),
+            Some("This deletes the thread and its chat history."),
+            &[
+                gpui::PromptButton::Cancel("Cancel".into()),
+                gpui::PromptButton::Other("Delete".into()),
+            ],
+            cx,
+        );
+        let id = id.to_owned();
+        cx.spawn(async move |this, cx| {
+            if answer.await == Ok(1) {
+                let _ = this.update(cx, |this, cx| this.delete_thread_by_id(&id, cx));
+            }
+        })
+        .detach();
+    }
+
+    pub(super) fn request_thread_pin(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(thread) = self.threads.iter().find(|t| t.id == id) else {
+            return;
+        };
+        if !thread.pinned || !self.confirm_thread_unpin {
+            self.toggle_pinned_by_id(id, cx);
+            return;
+        }
+        let title = thread.chat.read(cx).thread_title.clone();
+        let answer = window.prompt(
+            gpui::PromptLevel::Info,
+            &format!("Unpin “{title}”?"),
+            None,
+            &[
+                gpui::PromptButton::Cancel("Cancel".into()),
+                gpui::PromptButton::Ok("Unpin".into()),
+            ],
+            cx,
+        );
+        let id = id.to_owned();
+        cx.spawn(async move |this, cx| {
+            if answer.await == Ok(1) {
+                let _ = this.update(cx, |this, cx| {
+                    if this.threads.iter().any(|t| t.id == id && t.pinned) {
+                        this.toggle_pinned_by_id(&id, cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     pub(super) fn delete_thread_by_id(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        let checkout=self.threads.iter().find(|t|t.id==id).and_then(|t|self.deleted_checkout(t,cx));
+        self.title_requests.remove(id);
         self.end_thread_waits_on(id, cx);
         self.threads.retain(|thread| thread.id != id);
+        self.details.hidden_inline.remove(id);
+        self.thread_origins.retain(|child, origin| child != id && origin.parent() != id);
+        self.known_thread_pulls.remove(id);
+        self.pull_check_times.remove(id);
+        self.update_sleep_prevention(cx);
         self.unread_thread_ids.remove(id);
         self.active_thread_id = thread_selection_after_delete(self.active_thread_id.clone(), id);
         self.persist_and_notify(cx);
+        if let Some(checkout) = checkout { self.cleanup_deleted_checkout(checkout, cx); }
     }
 
     /// Flip `pinned` on thread `id`; returns the new state. Unpinning can be undone.
@@ -776,6 +988,7 @@ impl Workspace {
         if settled {
             self.unread_thread_ids.remove(id);
             self.push_sidebar_undo("Thread settled", SidebarUndoRestore::Shelf(previous), cx);
+            self.launch_thread_hooks(id,true,cx);
         }
         self.persist_and_notify(cx);
         Some(settled)
@@ -790,6 +1003,7 @@ impl Workspace {
         let Some(previous) = self.shelf_snapshot(id) else {
             return;
         };
+        self.quota_timers.remove(id);
         if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id) {
             thread.snoozed_until_ms = Some(until_ms);
         }
@@ -799,6 +1013,7 @@ impl Workspace {
     }
 
     pub(super) fn wake_thread_by_id(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        self.quota_timers.remove(id);
         if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id) {
             thread.snoozed_until_ms = None;
             thread.settled = false;
@@ -808,35 +1023,12 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// Apply saved title instructions to the first user message, or the current title.
+    /// Regenerate a title from the completed conversation using the saved title preferences.
     pub(super) fn regenerate_title_by_id(&mut self, id: &str, cx: &mut Context<'_, Self>) {
-        let streaming = self
-            .threads
-            .iter()
-            .find(|thread| thread.id == id)
-            .is_some_and(|thread| thread.chat.read(cx).is_streaming);
-        if streaming {
+        if self.title_requests.contains_key(id) {
             return;
         }
-        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
-            return;
-        };
-        let chat = thread.chat.clone();
-        let project = thread.project_name.clone();
-        let current = chat.read(cx).thread_title.clone();
-        let prompt = chat.read(cx).messages.iter().find_map(|message| {
-            (message.role == MessageRole::User).then(|| message.content.clone())
-        });
-        let instructions = title_instructions_text(
-            &self.title_instructions,
-            &self.title_instructions_by_project,
-            &project,
-        );
-        let title = titled_like_web(&current, prompt.as_deref(), &instructions);
-        chat.update(cx, |chat, cx| {
-            chat.thread_title = title;
-            cx.notify();
-        });
+        self.generate_thread_title(id, true, cx);
         self.thread_menu_id = None;
         self.persist_and_notify(cx);
     }
@@ -909,6 +1101,7 @@ impl Workspace {
                 {
                     thread.pinned = previous.pinned;
                     thread.settled = previous.settled;
+                    thread.settled_at_ms = previous.settled_at_ms;
                     thread.pin_rank = previous.pin_rank;
                     thread.active_rank = previous.active_rank;
                     thread.snoozed_until_ms = previous.snoozed_until_ms;
@@ -920,9 +1113,9 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn toggle_pin_active(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn toggle_pin_active(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if let Some(id) = self.active_thread_id.clone() {
-            self.toggle_pinned_by_id(&id, cx);
+            self.request_thread_pin(&id, window, cx);
         }
     }
 
@@ -944,7 +1137,7 @@ impl Workspace {
     pub(super) fn copy_open_pull(&mut self, link: bool, cx: &mut Context<'_, Self>) {
         let shown = self
             .pull_panel_visible
-            .then(|| self.branch_pull.clone())
+            .then(|| self.displayed_pull().cloned())
             .flatten();
         let result = match shown.as_ref() {
             Some(pull) => bruhs_models::logic::branch_pull::pull_copy_text(
@@ -1070,10 +1263,10 @@ impl Workspace {
     pub(super) fn pin_thread(
         &mut self,
         _: &PinThread,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.toggle_pin_active(cx);
+        self.toggle_pin_active(window, cx);
     }
 
     pub(super) fn settle_thread(
@@ -1150,6 +1343,7 @@ impl Workspace {
             .map(|thread| ThreadMeta {
                 id: thread.id.as_str(),
                 updated_at_ms: thread.updated_at_ms,
+                idle_settle_after_ms: self.thread_settle_delay(thread,cx),
                 pinned: thread.pinned,
                 settled: thread.settled,
                 pin_rank: thread.pin_rank,
@@ -1180,7 +1374,7 @@ impl Workspace {
             &working,
             &needs_you,
             &unread,
-            self.sidebar_working_section,
+            self.sidebar_working_section && !self.labs_sidebar.enabled,
         );
         let lookup = |ids: &[&str]| ids.iter().filter_map(|id| by_id.get(id).copied()).collect();
         SidebarShelves {
@@ -1200,16 +1394,27 @@ impl Workspace {
             SidebarSection::Working => self.sidebar_working_open = true,
             SidebarSection::Snoozed => self.sidebar_snoozed_open = true,
             SidebarSection::Settled => self.sidebar_settled_open = true,
+            SidebarSection::Active if self.labs_sidebar.enabled => {
+                if let Some(thread) = self.threads.iter().find(|t| t.id == id) {
+                    self.labs_sidebar.collapsed.remove(labs::folder(thread, cx));
+                }
+            }
             SidebarSection::Pinned | SidebarSection::Active => {}
         }
     }
 
     fn thread_section(&self, id: &str, cx: &App) -> Option<SidebarSection> {
         let thread = self.threads.iter().find(|thread| thread.id == id)?;
+        Some(self.section_for_thread(thread, cx))
+    }
+
+    pub(super) fn section_for_thread(&self, thread: &DesktopThread, cx: &App) -> SidebarSection {
+        let id = thread.id.as_str();
         let chat = thread.chat.read(cx);
         let facts = bruhs_models::logic::sidebar::SidebarFacts {
             id: thread.id.as_str(),
             updated_at_ms: thread.updated_at_ms.as_millis(),
+            idle_settle_after_ms: self.thread_settle_delay(thread,cx),
             pinned: thread.pinned,
             settled: thread.settled,
             pin_rank: thread.pin_rank,
@@ -1220,11 +1425,11 @@ impl Workspace {
             active: self.active_thread_id.as_deref() == Some(id),
             unread: self.unread_thread_ids.contains(id),
         };
-        Some(bruhs_models::logic::sidebar::section(
+        bruhs_models::logic::sidebar::section(
             &facts,
             EpochMs::now().as_millis(),
-            self.sidebar_working_section,
-        ))
+            self.sidebar_working_section && !self.labs_sidebar.enabled,
+        )
     }
 
     fn shelf_snapshot(&self, id: &str) -> Option<ShelfSnapshot> {
@@ -1233,6 +1438,7 @@ impl Workspace {
             id: thread.id.clone(),
             pinned: thread.pinned,
             settled: thread.settled,
+            settled_at_ms: thread.settled_at_ms,
             pin_rank: thread.pin_rank,
             active_rank: thread.active_rank,
             snoozed_until_ms: thread.snoozed_until_ms,
@@ -1279,6 +1485,7 @@ fn set_thread_pinned(thread: &mut DesktopThread, pinned: bool) {
 }
 
 fn set_thread_settled(thread: &mut DesktopThread, settled: bool) {
+    thread.settled_at_ms = settled.then(EpochMs::now);
     if settled {
         thread.settled = true;
         thread.pinned = false;
@@ -1291,7 +1498,7 @@ fn set_thread_settled(thread: &mut DesktopThread, settled: bool) {
     }
 }
 
-fn title_instructions_text(
+pub(super) fn title_instructions_text(
     global: &str,
     by_project: &BTreeMap<String, String>,
     project: &str,
@@ -1308,7 +1515,7 @@ fn title_instructions_text(
     }
 }
 
-fn titled_like_web(current: &str, prompt: Option<&str>, instructions: &str) -> String {
+pub(super) fn titled_like_web(current: &str, prompt: Option<&str>, instructions: &str) -> String {
     let from_prompt = prompt.and_then(|prompt| {
         let first = prompt.trim().lines().next().unwrap_or("").trim();
         if first.is_empty() {
@@ -1388,18 +1595,6 @@ impl Workspace {
         let active_thread_id =
             initial_active_thread_id_after_start(saved_active_thread_id, &thread_ids);
 
-        // `BRUHS_DESKTOP_SMOKE_PROMPT` auto-submits into a real thread under
-        // its saved permission mode, so it exists only in debug builds.
-        #[cfg(debug_assertions)]
-        if let Some(prompt) = crate::views::chat::desktop_smoke_prompt() {
-            if let Some(active_id) = active_thread_id.as_deref() {
-                if let Some(thread) = threads.iter().find(|thread| thread.id == active_id) {
-                    thread.chat.update(cx, |chat, cx| {
-                        chat.submit_prompt(prompt, cx);
-                    });
-                }
-            }
-        }
         (threads, active_thread_id)
     }
 }

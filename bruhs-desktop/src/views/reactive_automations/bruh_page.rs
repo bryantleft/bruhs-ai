@@ -4,6 +4,9 @@
 //! the panel for `AppView::Bruh` and tells it which bruh; the panel owns the
 //! page's state. Save sends `settings_commands`, so a face edit never
 //! touches the agent.
+mod task_thread_actions;
+pub(crate) use task_thread_actions::TaskThreadDeletion;
+use task_thread_actions::TaskThreadMenu;
 use super::computer_view::ComputerView;
 use super::create_bruh::{
     hint, labelled, text_field, ERROR_FILL_OPACITY, FIELD_RADIUS_PX, FIELD_TEXT_PX,
@@ -305,9 +308,19 @@ impl SettingsForm {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TaskThreadLocation {
+    pub task_id: String,
+    pub agent_id: String,
+    pub thread_id: bruhs_models::ids::ThreadId,
+    pub title: String,
+}
+
 /// The bruh page while it is on screen.
 pub(super) struct BruhPage {
     agent_id: String,
+    task_thread: Option<TaskThreadLocation>,
+    thread_menu: Option<TaskThreadMenu>,
     tab: BruhTab,
     message: Option<Entity<TextareaState>>,
     runs: RunsPage,
@@ -344,6 +357,8 @@ impl BruhPage {
     fn new(agent_id: String) -> Self {
         Self {
             agent_id,
+            task_thread: None,
+            thread_menu: None,
             tab: BruhTab::Chat,
             message: None,
             runs: RunsPage::default(),
@@ -589,9 +604,25 @@ impl ReactiveAutomations {
         self.bruh.as_ref().map(|page| page.agent_id.as_str())
     }
 
+    pub(crate) fn task_thread(&self) -> Option<&TaskThreadLocation> {
+        self.bruh.as_ref()?.task_thread.as_ref()
+    }
+
+    pub(crate) fn show_task_thread(
+        &mut self,
+        location: TaskThreadLocation,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let mut page = BruhPage::new(location.agent_id.clone());
+        page.task_thread = Some(location);
+        page.thread_menu = Some(TaskThreadMenu::new(cx));
+        self.bruh = Some(page);
+        cx.notify();
+    }
+
     /// Show `agent_id`'s page, or none. Another bruh starts on its Chat tab.
     pub(crate) fn show_bruh(&mut self, agent_id: Option<String>, cx: &mut Context<'_, Self>) {
-        if self.bruh_page_agent() == agent_id.as_deref() {
+        if self.bruh_page_agent() == agent_id.as_deref() && self.task_thread().is_none() {
             return;
         }
         self.bruh = agent_id.map(BruhPage::new);
@@ -718,14 +749,16 @@ impl ReactiveAutomations {
         let revision = page.runs_revision;
         let agent_id = page.agent_id.clone();
         let requested = agent_id.clone();
-        let operation = spawn_tokio(cx, async move { client.agent_runs(&requested, None).await });
+        let destination = page.task_thread.clone();
+        let filter = destination.as_ref().map(|d| d.thread_id.to_string());
+        let operation = spawn_tokio(cx, async move { client.agent_thread_runs(&requested, None, filter.as_deref()).await });
         page.newest_request = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             let _ = this.update(cx, |this, cx| {
                 let Some(page) = this
                     .bruh
                     .as_mut()
-                    .filter(|page| page.agent_id == agent_id && page.runs_revision == revision)
+                    .filter(|page| page.agent_id == agent_id && page.runs_revision == revision && page.task_thread == destination)
                 else {
                     return;
                 };
@@ -753,13 +786,15 @@ impl ReactiveAutomations {
         page.loading_earlier = true;
         let agent_id = page.agent_id.clone();
         let requested = agent_id.clone();
+        let destination = page.task_thread.clone();
+        let filter = destination.as_ref().map(|d| d.thread_id.to_string());
         let operation = spawn_tokio(cx, async move {
-            client.agent_runs(&requested, Some(&before)).await
+            client.agent_thread_runs(&requested, Some(&before), filter.as_deref()).await
         });
         page.earlier_request = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             let _ = this.update(cx, |this, cx| {
-                let Some(page) = this.bruh.as_mut().filter(|page| page.agent_id == agent_id) else {
+                let Some(page) = this.bruh.as_mut().filter(|page| page.agent_id == agent_id && page.task_thread == destination) else {
                     return;
                 };
                 page.loading_earlier = false;
@@ -826,6 +861,19 @@ impl ReactiveAutomations {
         let Some(page) = self.bruh.as_mut() else {
             return;
         };
+        // Outbox events belong to an agent. In a task thread, show only events for this transcript.
+        let scoped_outbox;
+        let outbox = if page.task_thread.is_some() {
+            let ids: HashSet<_> = page.runs.runs.iter().map(|run| run.id.as_str()).collect();
+            scoped_outbox = outbox
+                .iter()
+                .filter(|item| ids.contains(item.run_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            scoped_outbox.as_slice()
+        } else {
+            outbox
+        };
         page.built_for = Some(stamp);
         if page.message.is_none() {
             let message = cx.new(|cx| {
@@ -845,6 +893,9 @@ impl ReactiveAutomations {
                     _ => {}
                 },
             ));
+            if page.task_thread.is_some() {
+                message.update(cx, |input, cx| input.focus(window, cx));
+            }
             page.message = Some(message);
         }
         if let Some(saved) = saved {
@@ -871,7 +922,11 @@ impl ReactiveAutomations {
                     .insert(item.id.clone(), reply_field(window, cx));
             }
         }
-        page.lines = Rc::new(transcript(&agent_id, &page.runs.runs, outbox));
+        page.lines = Rc::new(if page.task_thread.is_some() {
+            bruhs_models::crew::task_transcript(&agent_id, &page.runs.runs, outbox)
+        } else {
+            transcript(&agent_id, &page.runs.runs, outbox)
+        });
         page.prose = page
             .lines
             .iter()
@@ -893,6 +948,13 @@ impl ReactiveAutomations {
         }
     }
 
+    fn task_thread_block(&self) -> Option<&'static str> {
+        let location = self.task_thread()?;
+        let snapshot = self.snapshot.as_ref()?;
+        (snapshot.task_threads.get(&location.task_id) != Some(&location.thread_id))
+            .then_some("This task no longer uses this thread.")
+    }
+
     fn send_bruh_chat(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let Some(page) = self.bruh.as_ref() else {
             return;
@@ -902,19 +964,25 @@ impl ReactiveAutomations {
         };
         let agent_id = page.agent_id.clone();
         let text = value(&message, cx);
-        let blocked = composer_block(self.bruh_state(&agent_id).map(|state| state.status));
+        let blocked = self
+            .task_thread_block()
+            .or_else(|| composer_block(self.bruh_state(&agent_id).map(|state| state.status)));
         if text.trim().is_empty() || blocked.is_some() {
             return;
         }
-        self.send_all(
-            vec![ReactiveCommand::Chat {
+        let command = match &page.task_thread {
+            Some(location) => ReactiveCommand::ChatInTaskThread {
+                task_id: location.task_id.clone(),
+                thread_id: location.thread_id.clone(),
+                message: text,
+            },
+            None => ReactiveCommand::Chat {
                 agent_id,
                 message: text,
                 run_id: None,
-            }],
-            Scope::General,
-            cx,
-        );
+            },
+        };
+        self.send_all(vec![command], Scope::General, cx);
         message.update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
@@ -1169,8 +1237,21 @@ impl ReactiveAutomations {
             ),
         };
         let error = self.error.clone().or_else(|| self.load_error.clone());
-        root.child(self.render_bruh_header(state, &job, layout, cx))
-            .child(self.render_bruh_tabs(tab, layout, cx))
+        let header = if let Some(location) = self.task_thread() {
+            let title=snapshot.selected_task_threads.as_ref().and_then(|all|all.get(&location.task_id))
+                .filter(|c|c.thread_id==location.thread_id).map(|c|c.title.clone())
+                .or_else(|| snapshot.subscriptions.iter().find(|sub| sub.id==location.task_id &&
+                    snapshot.task_threads.get(&sub.id)==Some(&location.thread_id)).and_then(|sub|sub.task_title.clone()))
+                .unwrap_or_else(|| location.title.clone());
+            let heading=div().id("task-thread-header").debug_selector(|| "task-thread-header".into())
+                .role(Role::Heading).aria_label(title.clone()).flex_1().min_w_0().truncate()
+                .text_color(theme::rambutan_100()).font_weight(FontWeight::SEMIBOLD).child(title.clone());
+            div().flex().items_center().gap_2().px(px(layout.padding)).py_2().border_b_1()
+                .border_color(theme::ring_modal()).child(heading)
+                .when(snapshot.can_delete_task_threads, |el|el.child(self.thread_actions(location,&title,snapshot,cx))).into_any_element()
+        } else { self.render_bruh_header(state, &job, layout, cx).into_any_element() };
+        root.child(header)
+            .when(self.task_thread().is_none(), |root| root.child(self.render_bruh_tabs(tab, layout, cx)))
             .child(
                 div()
                     .id("desktop-bruh-tabpanel")
@@ -1356,7 +1437,7 @@ impl ReactiveAutomations {
         let Some(page) = self.bruh.as_ref() else {
             return div();
         };
-        let blocked = composer_block(Some(state.status));
+        let blocked = self.task_thread_block().or_else(|| composer_block(Some(state.status)));
         let empty = page
             .message
             .as_ref()

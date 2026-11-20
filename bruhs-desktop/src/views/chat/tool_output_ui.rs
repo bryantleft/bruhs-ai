@@ -368,7 +368,7 @@ impl ChatView {
             .border_color(theme::ring_panel())
             .bg(theme::longan_950())
             .overflow_hidden()
-            .font_family(TOOL_CODE_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Code.with_default(TOOL_CODE_FONT_FAMILY))
             .when(!command.is_empty(), |el| {
                 el.child(
                     div()
@@ -416,7 +416,7 @@ impl ChatView {
             .border_color(theme::ring_panel())
             .bg(theme::longan_950())
             .overflow_hidden()
-            .font_family(TOOL_CODE_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Code.with_default(TOOL_CODE_FONT_FAMILY))
             .text_size(px(TOOL_CODE_TEXT_SIZE_PX))
             .when(!file_path.is_empty(), |el| {
                 el.child(
@@ -510,7 +510,7 @@ impl ChatView {
             .border_color(theme::ring_panel())
             .bg(theme::longan_950())
             .overflow_hidden()
-            .font_family(TOOL_CODE_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Code.with_default(TOOL_CODE_FONT_FAMILY))
             .when(!file_path.is_empty(), |el| {
                 el.child(
                     div()
@@ -635,7 +635,7 @@ impl ChatView {
                             .flex()
                             .items_center()
                             .gap(px(PERMISSION_PROMPT_Y_PADDING_PX))
-                            .font_family(PERMISSION_PROMPT_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
                             .font_weight(FontWeight::MEDIUM)
                             .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -659,7 +659,7 @@ impl ChatView {
                             .py(px(PERMISSION_PROMPT_Y_PADDING_PX))
                             .flex()
                             .items_center()
-                            .font_family(PERMISSION_PROMPT_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
                             .font_weight(FontWeight::MEDIUM)
                             .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -721,7 +721,7 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .gap(px(PERMISSION_PROMPT_ACTION_GAP_PX))
-                                    .font_family(PERMISSION_PROMPT_FONT_FAMILY)
+                                    .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -770,7 +770,7 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .gap(px(PERMISSION_PROMPT_ACTION_GAP_PX))
-                                    .font_family(PERMISSION_PROMPT_FONT_FAMILY)
+                                    .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -815,7 +815,7 @@ impl ChatView {
             .px(px(TOOL_OUTPUT_X_PADDING_PX))
             .py(px(TOOL_OUTPUT_Y_PADDING_PX))
             .text_size(px(TOOL_CODE_TEXT_SIZE_PX))
-            .font_family(TOOL_CODE_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Code.with_default(TOOL_CODE_FONT_FAMILY))
             .text_color(theme::rambutan_300())
             .child(text)
             .into_any_element()

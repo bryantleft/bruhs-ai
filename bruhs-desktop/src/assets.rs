@@ -29,11 +29,13 @@ pub const TOOL_MESSAGE_QUESTION_ICON_PATH: &str = "icons/message-circle-question
 // Sidebar / composer icons (same lucide paths as bruhs-web/src/ui/icon.rs).
 pub const SQUARE_PEN_ICON_PATH: &str = "icons/square-pen.svg";
 /// The composer's Attach control, as on the web.
+pub const CAMERA_ICON_PATH: &str = "icons/camera.svg";
 pub const PAPERCLIP_ICON_PATH: &str = "icons/paperclip.svg";
 pub const FOLDER_PLUS_ICON_PATH: &str = "icons/folder-plus.svg";
 pub const LIST_CHECKS_ICON_PATH: &str = "icons/list-checks.svg";
 pub const MIC_ICON_PATH: &str = "icons/mic.svg";
 pub const USERS_ICON_PATH: &str = "icons/users.svg";
+pub const CLOCK_ICON_PATH: &str = "icons/clock.svg";
 pub const CALENDAR_ICON_PATH: &str = "icons/calendar.svg";
 pub const PLUS_ICON_PATH: &str = "icons/plus.svg";
 // The capture dialog's destinations (`CaptureKind::icon`).
@@ -224,6 +226,7 @@ impl AssetSource for DesktopAssets {
             "icons/square-terminal.svg" => Ok(Some(Cow::Borrowed(TOP_BAR_TERMINAL_ICON))),
             EXTERNAL_LINK_ICON_PATH => Ok(Some(Cow::Borrowed(EXTERNAL_LINK_ICON))),
             SQUARE_PEN_ICON_PATH => Ok(Some(Cow::Borrowed(SQUARE_PEN_ICON))),
+            CAMERA_ICON_PATH => Ok(Some(Cow::Borrowed(include_bytes!("../assets/camera.svg")))),
             PAPERCLIP_ICON_PATH => Ok(Some(Cow::Borrowed(PAPERCLIP_ICON))),
             FOLDER_PLUS_ICON_PATH => Ok(Some(Cow::Borrowed(FOLDER_PLUS_ICON))),
             LIST_CHECKS_ICON_PATH => Ok(Some(Cow::Borrowed(LIST_CHECKS_ICON))),
@@ -241,6 +244,7 @@ impl AssetSource for DesktopAssets {
             EYE_ICON_PATH => Ok(Some(Cow::Borrowed(EYE_ICON))),
             WRENCH_ICON_PATH => Ok(Some(Cow::Borrowed(WRENCH_ICON))),
             HAMMER_ICON_PATH => Ok(Some(Cow::Borrowed(HAMMER_ICON))),
+            CLOCK_ICON_PATH => Ok(Some(Cow::Borrowed(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>"#))),
             CHEVRON_LEFT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_LEFT_ICON))),
             CHEVRON_RIGHT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_RIGHT_ICON))),
             CIRCLE_ALERT_ICON_PATH => Ok(Some(Cow::Borrowed(CIRCLE_ALERT_ICON))),
@@ -269,6 +273,7 @@ impl AssetSource for DesktopAssets {
             "icons" => Ok(vec![
                 "activity.svg".into(),
                 "paperclip.svg".into(),
+                "camera.svg".into(),
                 "sun.svg".into(),
                 "inbox.svg".into(),
                 "arrow-up.svg".into(),

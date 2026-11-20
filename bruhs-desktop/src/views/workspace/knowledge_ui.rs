@@ -1848,7 +1848,7 @@ fn library_mark(
 }
 
 /// One truncated line of a library card (web `block truncate`).
-fn library_line(text: String, family: &'static str, size: f32, color: Hsla) -> Div {
+fn library_line(text: String, family: theme::FontFace, size: f32, color: Hsla) -> Div {
     div()
         .font_family(family)
         .when(family != theme::CODE_FONT_FAMILY, |line| {
@@ -1902,7 +1902,7 @@ fn format_epoch_ms(timestamp_ms: i64) -> String {
         .single()
         .map_or_else(
             || "Earlier".to_string(),
-            |date| date.format("%b %-d, %-I:%M%P").to_string(),
+            |date| format!("{}, {}", date.format("%b %-d"), date.format(crate::clock_format::pattern())),
         )
 }
 

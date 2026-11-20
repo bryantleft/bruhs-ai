@@ -101,6 +101,7 @@ mod tests {
             result: None,
             error: None,
             trigger: None,
+            task_checkout: Default::default(),
             merged_runs: Vec::new(),
             merged_into: None,
             report: None,
