@@ -18,6 +18,11 @@ fn default_true() -> bool {
     true
 }
 
+/// The only address bruhs-server listens on. Owner refusals name it with
+/// the server's port, so the copy matches what the server binds (re-review
+/// M5).
+pub const SERVER_BIND_HOST: &str = "127.0.0.1";
+
 // ── Live events ────────────────────────────────────────────────────────────
 
 /// `GET /api/events/stream`: the web app's one live connection. Each frame's

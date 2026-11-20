@@ -62,7 +62,12 @@ pub const OPEN_APPS_FROM_OWN_ADDRESS: &str =
 pub fn open_apps_from_own_address(server: &str) -> String {
     server_port(server).map_or_else(
         || OPEN_APPS_FROM_OWN_ADDRESS.to_owned(),
-        |port| format!("Open Bruhs at http://127.0.0.1:{port} to see and change apps."),
+        |port| {
+            format!(
+                "Open Bruhs at http://{}:{port} to see and change apps.",
+                crate::api::SERVER_BIND_HOST
+            )
+        },
     )
 }
 

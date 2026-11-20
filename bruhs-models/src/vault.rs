@@ -14,6 +14,7 @@ mod totp;
 pub use form::*;
 pub use totp::*;
 
+use crate::api::SERVER_BIND_HOST;
 use crate::secrets::{review_text, SavedCredentialState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -111,7 +112,9 @@ pub const OPEN_FROM_OWN_ADDRESS: &str =
 pub fn open_from_own_address(server: &str) -> String {
     server_port(server).map_or_else(
         || OPEN_FROM_OWN_ADDRESS.to_owned(),
-        |port| format!("Open Bruhs at http://127.0.0.1:{port} to see and change the vault."),
+        |port| {
+            format!("Open Bruhs at http://{SERVER_BIND_HOST}:{port} to see and change the vault.")
+        },
     )
 }
 
@@ -145,7 +148,9 @@ pub fn at_own_address(message: &str, server: &str) -> String {
         message.strip_prefix(FROM_OWN_ADDRESS),
         server_port(server),
     ) {
-        (true, Some(rest), Some(port)) => format!("Open Bruhs at http://127.0.0.1:{port} {rest}"),
+        (true, Some(rest), Some(port)) => {
+            format!("Open Bruhs at http://{SERVER_BIND_HOST}:{port} {rest}")
+        }
         _ => message.to_owned(),
     }
 }
@@ -1120,9 +1125,11 @@ mod tests {
     use super::*;
 
     /// Rereview I1: the notice names `127.0.0.1` and the server's own port,
-    /// whichever loopback name the client calls it by.
+    /// whichever loopback name the client calls it by. Re-review M5: that
+    /// host is the one the server binds, from one constant.
     #[test]
     fn the_own_address_notice_names_127_0_0_1_and_the_servers_port() {
+        assert_eq!(crate::api::SERVER_BIND_HOST, "127.0.0.1");
         for (server, notice) in [
             (
                 "http://127.0.0.1:3001",
