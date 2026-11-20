@@ -263,6 +263,45 @@ pub fn poll_account_choices(watch: PollWatch, listing: &AppsListing) -> Vec<(Str
         .collect()
 }
 
+/// The account picker's choices as `(id, label)`: "Choose an account."
+/// first, then the watch's accounts. An account the form holds that the
+/// listing no longer offers shows as gone, so the picker never claims a
+/// choice it doesn't have.
+#[must_use]
+pub fn poll_account_options(form: &AppPollForm, listing: &AppsListing) -> Vec<(String, String)> {
+    let choices = poll_account_choices(form.watch, listing);
+    let gone = (!form.account.is_empty() && !choices.iter().any(|(id, _)| *id == form.account))
+        .then(|| (form.account.clone(), APP_POLL_ACCOUNT_GONE.to_owned()));
+    std::iter::once((String::new(), POLL_ACCOUNT_NEEDED.to_owned()))
+        .chain(gone)
+        .chain(choices)
+        .collect()
+}
+
+/// `form` with `watch` chosen. The account stays only while the new watch
+/// still offers it, since a GitHub account can't watch mail.
+#[must_use]
+pub fn poll_form_with_watch(
+    form: &AppPollForm,
+    watch: PollWatch,
+    listing: Option<&AppsListing>,
+) -> AppPollForm {
+    let keeps = listing.is_some_and(|listing| {
+        poll_account_choices(watch, listing)
+            .iter()
+            .any(|(id, _)| *id == form.account)
+    });
+    AppPollForm {
+        watch,
+        account: if keeps {
+            form.account.clone()
+        } else {
+            String::new()
+        },
+        ..form.clone()
+    }
+}
+
 /// Refuses a poll whose account the loaded listing no longer offers for
 /// its watch, before it is saved (a gone or another kind of account).
 /// Without a listing nothing can be told, so it passes; an empty account
@@ -462,6 +501,56 @@ mod tests {
         assert_eq!(
             check_poll_account(&form(PollWatch::GithubIssues, ""), Some(&listing)),
             Ok(())
+        );
+    }
+
+    /// The account picker offers the watch's accounts after "Choose an
+    /// account."; an account the form holds that the listing lacks shows
+    /// as gone. A watch change keeps the account only where it still fits.
+    #[test]
+    fn the_account_picker_follows_the_watch() {
+        let listing = listing();
+        let mut form = AppPollForm::default();
+        assert_eq!(
+            poll_account_options(&form, &listing),
+            [
+                (String::new(), POLL_ACCOUNT_NEEDED.to_owned()),
+                ("v1-a".to_owned(), "alt".to_owned()),
+                ("v1-w".to_owned(), "Work".to_owned()),
+            ]
+        );
+        form.watch = PollWatch::NewMail;
+        assert_eq!(
+            poll_account_options(&form, &listing),
+            [
+                (String::new(), POLL_ACCOUNT_NEEDED.to_owned()),
+                ("m1".to_owned(), "me@x.test, Gmail".to_owned()),
+            ]
+        );
+        form.account = "m9".into();
+        assert_eq!(
+            poll_account_options(&form, &listing)[1],
+            ("m9".to_owned(), APP_POLL_ACCOUNT_GONE.to_owned())
+        );
+        let github = AppPollForm {
+            watch: PollWatch::GithubIssues,
+            account: "v1-w".into(),
+            repo: "o/r".into(),
+            minutes: "5".into(),
+        };
+        let pulls = poll_form_with_watch(&github, PollWatch::GithubPulls, Some(&listing));
+        assert_eq!(
+            (pulls.account.as_str(), pulls.repo.as_str()),
+            ("v1-w", "o/r")
+        );
+        let mail = poll_form_with_watch(&github, PollWatch::NewMail, Some(&listing));
+        assert_eq!(
+            (mail.watch, mail.account.as_str()),
+            (PollWatch::NewMail, "")
+        );
+        assert_eq!(
+            poll_form_with_watch(&github, PollWatch::GithubPulls, None).account,
+            ""
         );
     }
 

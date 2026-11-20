@@ -1,4 +1,5 @@
 //! One review and one atomic command activate a complete automation.
+use super::app_poll::{app_poll_source, ask_before_kind, automation_kind, AppPollEditor};
 use super::*;
 use bruhs_models::apps::{describe_app_poll, FROM_NEWER_SOURCE};
 use bruhs_models::crew::{
@@ -10,6 +11,8 @@ pub(super) struct AutomationEditor {
     agent: AgentEditor,
     source: SourceEditor,
     subscription: SubscriptionEditor,
+    /// The App source's fields, kept while another type is chosen.
+    poll: AppPollEditor,
     review: Option<AutomationSetup>,
     advanced: bool,
     /// Opened on a bruh's page: the routine runs as that bruh, so its agent
@@ -23,6 +26,9 @@ impl AutomationEditor {
     }
     pub(super) fn subscription_mut(&mut self) -> &mut SubscriptionEditor {
         &mut self.subscription
+    }
+    pub(super) fn poll_mut(&mut self) -> &mut AppPollEditor {
+        &mut self.poll
     }
     #[cfg(test)]
     pub(super) fn review(&self) -> Option<&AutomationSetup> {
@@ -136,20 +142,26 @@ impl ReactiveAutomations {
             subscription.subscription.auto_run = true;
             subscription.instructions.update(cx,|input,cx|input.set_value("Follow the automation's purpose for this event. Prepare a draft and flag uncertainty. Never perform writes or payments.",window,cx));
         }
+        let poll = AppPollEditor::new(&source.source.kind, window, cx);
         self.editor = Some(Editor::Automation(Box::new(AutomationEditor {
             agent,
             source,
             subscription,
+            poll,
             review: None,
             advanced: false,
             agent_locked,
         })));
         self.error = None;
+        // The App source offers the owner's accounts as they are now.
+        self.load_poll_apps(cx);
         cx.notify();
     }
     pub(super) fn review_automation(&mut self, cx: &mut Context<'_, Self>) {
         let result = match self.editor.as_ref() {
-            Some(Editor::Automation(editor)) => editor.build(cx),
+            Some(Editor::Automation(editor)) => {
+                editor.build(self.app_source_block(), self.poll_apps.listing(), cx)
+            }
             _ => return,
         };
         match result {
@@ -172,7 +184,8 @@ impl ReactiveAutomations {
             let mut body = card().child(heading("Review automation"));
             let level =
                 agent_run_level(self.snapshot.as_ref(), &setup.agent.id, &setup.agent.model);
-            for (label, text) in review_fields(setup, level) {
+            let account = self.poll_label(&setup.source.kind);
+            for (label, text) in review_fields_with(setup, level, account.as_deref()) {
                 body = body.child(
                     div().flex().flex_col().gap_1().child(muted(label)).child(
                         div()
@@ -222,7 +235,8 @@ impl ReactiveAutomations {
         let mut body=card().child(heading("Set up an automation")).child(muted("Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."))
             .when(editor.agent_locked,|body|body.child(muted("This routine runs as this bruh. Change its job and model in Settings.").debug_selector(||"automation-runs-as-bruh".to_string())))
             .when(!editor.agent_locked,|body|body.child(field("Automation name",&editor.agent.name,false,self.busy)).child(field("What should this automation do?",&editor.agent.instructions,true,self.busy)).child(field("Automation working folder",&editor.agent.path,false,self.busy)).child(field("Model",&editor.agent.model,false,self.busy))).child(muted("Starts when"))
-            .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_field(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
+            .child(div().flex().flex_wrap().gap_2().children(super::app_poll::starts_when_options(self.apps_ready(),editor.source.kind).into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{if !ask_before_kind(&mut editor.source,kind){automation_kind(&mut editor.source,kind,window,cx);}}cx.notify();}))))
+            .children(self.render_newer_source_confirm(&editor.source, cx));
         body=match editor.source.kind {
             "folder"=>body.child(field("Folder to watch",&editor.source.value,false,self.busy)).child(field("File pattern",&editor.source.pattern,false,self.busy)),
             "http"=>body.child(field("Website URL",&editor.source.value,false,self.busy)),
@@ -231,7 +245,8 @@ impl ReactiveAutomations {
             "app_event"=>body.child(div().flex().flex_wrap().gap_2().children([("meeting.completed","Meeting completed"),("meeting.transcribed","Final transcript updated"),("meeting.summary","Summary ready")].into_iter().map(|(topic,label)|{let selected=value(&editor.source.value,cx)==topic;control(SharedString::from(format!("automation-topic-{topic}")),label,self.busy).aria_selected(selected).when(selected,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.value.set_value(topic,window,cx);}cx.notify();})}))),
             "calendar"=>body.child(self.render_calendar_fields(&editor.source, cx)),
             "webhook"=>body.child(muted("A private endpoint is created when you enable this automation. Reveal its token in Advanced settings.")),
-            "app_poll"|"other"=>body.child(muted(source_summary(&editor.source.source.kind))),
+            "app_poll"=>body.child(self.render_app_poll(&editor.poll, cx)),
+            "other"=>body.child(muted(FROM_NEWER_SOURCE)),
             _=>body.child(muted("Device bridges can publish through the local API. Use a watched folder for FTP uploads.")),
         };
         body = body.child(
@@ -417,7 +432,10 @@ impl ReactiveAutomations {
                         .child(heading(setup.agent.name.clone())),
                 )
                 .child(muted(setup.agent.instructions.clone()))
-                .child(muted(source_summary(&setup.source.kind)))
+                .child(muted(source_summary(
+                    &setup.source.kind,
+                    self.poll_label(&setup.source.kind).as_deref(),
+                )))
                 .child(muted(automation_status(
                     &setup,
                     agent_run_level(self.snapshot.as_ref(), &setup.agent.id, &setup.agent.model),
@@ -521,7 +539,14 @@ impl ReactiveAutomations {
 }
 
 impl AutomationEditor {
-    fn build(&self, cx: &App) -> Result<AutomationSetup, String> {
+    /// `blocked` says why an App source can't be saved, and `listing` is
+    /// the accounts it may poll with, once read.
+    fn build(
+        &self,
+        blocked: Option<&'static str>,
+        listing: Option<&bruhs_models::apps::AppsListing>,
+        cx: &App,
+    ) -> Result<AutomationSetup, String> {
         let fields = AgentFields {
             name: value(&self.agent.name, cx),
             purpose: value(&self.agent.instructions, cx),
@@ -573,9 +598,8 @@ impl AutomationEditor {
             "webhook" => SourceKind::Webhook,
             "app_event" => SourceKind::AppEvent { topic: text },
             "custom" => SourceKind::Custom,
-            // An App source keeps its definition until its editor lands; a
-            // newer Bruhs' source is never saved (ruling F3).
-            "app_poll" => self.source.source.kind.clone(),
+            "app_poll" => app_poll_source(&self.poll.form(cx), listing, blocked)?,
+            // A newer Bruhs' source is never saved (ruling F3).
             "other" => return Err(bruhs_models::apps::FROM_NEWER_SOURCE.into()),
             _ => return Err("Choose a supported source type.".into()),
         };
@@ -600,7 +624,8 @@ pub(super) fn automation_agent_ids(snapshot: &ReactiveSnapshot) -> HashSet<Strin
         .map(|setup| setup.agent.id)
         .collect()
 }
-fn source_summary(kind: &SourceKind) -> String {
+/// `account` names a new mail routine's mailbox.
+fn source_summary(kind: &SourceKind, account: Option<&str>) -> String {
     match kind {
         SourceKind::Folder { path, pattern, .. } => format!("Folder: {path} ({pattern})"),
         SourceKind::Http { url, .. } => format!("Website: {url}"),
@@ -614,7 +639,7 @@ fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
-        SourceKind::AppPoll { query, .. } => describe_app_poll(query, None),
+        SourceKind::AppPoll { query, .. } => describe_app_poll(query, account),
         SourceKind::Other => FROM_NEWER_SOURCE.into(),
     }
 }
@@ -632,7 +657,7 @@ fn automation_status(setup: &AutomationSetup, level: AccessLevel) -> String {
         "Enabled: review each event".into()
     }
 }
-fn source_details(kind: &SourceKind) -> String {
+fn source_details(kind: &SourceKind, account: Option<&str>) -> String {
     match kind {
         SourceKind::Folder{path,pattern,recursive,settle_ms,poll_ms}=>format!("Folder: {path}\nFiles: {pattern}\nSubfolders: {}\nFile settle time: {} seconds\nCheck interval: {} seconds",if *recursive{"Included"}else{"Excluded"},seconds(*settle_ms),seconds(*poll_ms)),
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
@@ -642,7 +667,7 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),
-        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,None),seconds(*poll_ms)),
+        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,account),seconds(*poll_ms)),
         SourceKind::Other=>FROM_NEWER_SOURCE.into(),
     }
 }
@@ -651,6 +676,15 @@ fn source_details(kind: &SourceKind) -> String {
 pub(super) fn review_fields(
     setup: &AutomationSetup,
     level: AccessLevel,
+) -> Vec<(&'static str, String)> {
+    review_fields_with(setup, level, None)
+}
+
+/// [`review_fields`], with `account` naming a new mail routine's mailbox.
+fn review_fields_with(
+    setup: &AutomationSetup,
+    level: AccessLevel,
+    account: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     vec![
         ("Name", setup.agent.name.clone()),
@@ -687,10 +721,10 @@ pub(super) fn review_fields(
             "Event policy",
             event_policy_line(setup.subscription.auto_run, level),
         ),
-        ("Starts when", source_summary(&setup.source.kind)),
+        ("Starts when", source_summary(&setup.source.kind, account)),
         (
             "Complete source settings",
-            source_details(&setup.source.kind),
+            source_details(&setup.source.kind, account),
         ),
         ("Working folder", setup.agent.project_path.clone()),
         ("Model", setup.agent.model.clone()),
@@ -811,12 +845,26 @@ mod tests {
             query: bruhs_models::apps::AppQuery::GithubPulls { repo: "o/r".into() },
             poll_ms: 60_000,
         };
-        assert_eq!(source_summary(&app), "GitHub: new pull requests in o/r");
         assert_eq!(
-            source_details(&app),
+            source_summary(&app, None),
+            "GitHub: new pull requests in o/r"
+        );
+        assert_eq!(
+            source_details(&app, None),
             "GitHub: new pull requests in o/r\nCheck interval: 60 seconds"
         );
-        assert_eq!(source_summary(&SourceKind::Other), FROM_NEWER_SOURCE);
-        assert_eq!(source_details(&SourceKind::Other), FROM_NEWER_SOURCE);
+        let mail = SourceKind::AppPoll {
+            app: "mail".into(),
+            account: "m1".into(),
+            query: bruhs_models::apps::AppQuery::NewMail,
+            poll_ms: 300_000,
+        };
+        assert_eq!(source_summary(&mail, None), "Email: new mail in your mail");
+        assert_eq!(
+            source_summary(&mail, Some("me@x.test")),
+            "Email: new mail in me@x.test"
+        );
+        assert_eq!(source_summary(&SourceKind::Other, None), FROM_NEWER_SOURCE);
+        assert_eq!(source_details(&SourceKind::Other, None), FROM_NEWER_SOURCE);
     }
 }

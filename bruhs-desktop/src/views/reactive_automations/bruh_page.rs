@@ -4,6 +4,7 @@
 //! the panel for `AppView::Bruh` and tells it which bruh; the panel owns the
 //! page's state. Save sends `settings_commands`, so a face edit never
 //! touches the agent.
+use super::app_grants::{app_grants, AppGrantsState};
 use super::computer_view::ComputerView;
 use super::create_bruh::{
     hint, labelled, text_field, ERROR_FILL_OPACITY, FIELD_RADIUS_PX, FIELD_TEXT_PX,
@@ -22,12 +23,12 @@ use crate::views::dropdown::{
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
-    access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
-    computer_switch_follows, computer_switch_off, computer_switch_reason, current_settings,
-    job_line, line_key, may_have_more, merge_runs, settings_commands_for, status_line, transcript,
-    vault_grants_follow, vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings,
-    BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX,
-    RAIL_FACE_PX, SEND_AS_ME_HINT,
+    access_options, approval_outcome, apps_unavailable, chat_follow_key, chat_markdown,
+    clamp_level, composer_block, computer_switch_follows, computer_switch_off,
+    computer_switch_reason, current_settings, job_line, line_key, may_have_more, merge_runs,
+    settings_commands_for, status_line, transcript, vault_grants_follow, vault_unavailable,
+    AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT,
+    COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -365,6 +366,8 @@ pub(super) struct BruhPage {
     hold_computer: bool,
     /// The vault listing behind Settings' Vault section, while it shows.
     vault: VaultGrantsState,
+    /// The Apps listing behind Settings' Apps section, while it shows.
+    apps: AppGrantsState,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -391,6 +394,7 @@ impl BruhPage {
             computer: None,
             hold_computer: false,
             vault: VaultGrantsState::default(),
+            apps: AppGrantsState::default(),
             _subscriptions: Vec::new(),
         }
     }
@@ -723,6 +727,15 @@ impl ReactiveAutomations {
         self.bruh.as_mut().map(|page| &mut page.vault)
     }
 
+    #[cfg(test)]
+    pub(super) fn bruh_apps(&self) -> Option<&AppGrantsState> {
+        self.bruh.as_ref().map(|page| &page.apps)
+    }
+
+    pub(super) fn bruh_apps_mut(&mut self) -> Option<&mut AppGrantsState> {
+        self.bruh.as_mut().map(|page| &mut page.apps)
+    }
+
     /// Grant entry `id` to the open bruh, or take it back, in the form.
     pub(super) fn toggle_bruh_grant(&mut self, id: &str, on: bool, cx: &mut Context<'_, Self>) {
         self.edit_bruh_settings(
@@ -840,6 +853,11 @@ impl ReactiveAutomations {
         match self.bruh.as_mut() {
             Some(page) if page.tab != BruhTab::Settings => page.vault.reset(),
             Some(page) if page.vault.idle() => self.load_bruh_vault(cx),
+            _ => {}
+        }
+        match self.bruh.as_mut() {
+            Some(page) if page.tab != BruhTab::Settings => page.apps.reset(),
+            Some(page) if page.apps.idle() => self.load_bruh_apps(cx),
             _ => {}
         }
         let client = self.client.clone();
@@ -1902,6 +1920,11 @@ impl ReactiveAutomations {
         let saved = self
             .bruh_page_agent()
             .and_then(|agent_id| current_settings(self.snapshot.as_ref()?, agent_id));
+        // The stored level and model decide the Apps section's notice,
+        // since its switches save at once.
+        let apps_need_ask = saved.as_ref().and_then(|saved| {
+            apps_unavailable(saved.access.level, AgentProvider::for_model(&saved.model))
+        });
         let edited = form.edited(cx);
         let dirty = saved.is_some_and(|saved| saved != edited);
         let section = |heading_text: &'static str| {
@@ -2151,6 +2174,14 @@ impl ReactiveAutomations {
                 vault_block,
                 self.client.base_url(),
                 cx,
+            ))
+            .child(app_grants(
+                &page.apps,
+                &page.agent_id,
+                self.apps_reason(),
+                apps_need_ask,
+                self.client.base_url(),
+                cx,
             ));
         let face = section("Face").child(self.render_face_editor(&form.look, cx));
         div()
@@ -2240,7 +2271,7 @@ mod tests {
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::crew::{
         computer_unavailable, AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus,
-        ServiceNotice, CREW_PROTOCOL,
+        ServiceNotice, APPS_PROTOCOL, CREW_PROTOCOL, VAULT_PROTOCOL,
     };
     use bruhs_models::reactive::{
         OutboxItem, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, ReactiveSnapshot,
@@ -2815,6 +2846,229 @@ mod tests {
         assert_eq!(
             panel
                 .read_with(cx, |panel, _| panel.bruh_vault_requests_for_test())
+                .len(),
+            3
+        );
+    }
+
+    fn apps_listing(protocol: u32) -> bruhs_models::apps::AppsListing {
+        use bruhs_models::apps::{AppAccount, AppMailbox, AppsBruh};
+        use bruhs_models::secrets::SavedCredentialState;
+        use bruhs_models::vault::CredentialScope;
+        let account = |id: &str, app: &str, name: &str, scope: CredentialScope| AppAccount {
+            id: id.into(),
+            app: app.into(),
+            name: name.into(),
+            account: "octo".into(),
+            scope,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        };
+        let own = |agent_id: &str| CredentialScope::Bruh {
+            agent_id: agent_id.into(),
+        };
+        bruhs_models::apps::AppsListing {
+            accounts: vec![
+                account("v1-n", "notion", "Notion ws", CredentialScope::Global),
+                AppAccount {
+                    state: SavedCredentialState::NeedsAttention,
+                    ..account("v1-l", "linear", "Ops", CredentialScope::Global)
+                },
+                account("v1-o", "github", "GitHub octo", own("a")),
+                account("v1-t", "github", "Theirs", own("b")),
+            ],
+            mailboxes: vec![AppMailbox {
+                mailbox_id: "mailbox-v1-gmail".into(),
+                provider: bruhs_models::connections::ServiceProvider::Gmail,
+                account: "me@x.test".into(),
+            }],
+            bruhs: vec![AppsBruh {
+                agent_id: "a".into(),
+                name: "Ada".into(),
+                apps: vec!["v1-n".into()],
+                mail: Vec::new(),
+                unavailable: None,
+            }],
+            protocol,
+        }
+    }
+
+    fn answer_apps(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+        result: Result<bruhs_models::apps::AppsListing, crate::server_client::ServerError>,
+    ) {
+        panel.update(cx, |panel, cx| panel.answer_bruh_apps_for_test(result, cx));
+        cx.run_until_parked();
+    }
+
+    fn set_app_grants(sent: &[ReactiveCommand]) -> Vec<ReactiveCommand> {
+        sent.iter()
+            .filter(|command| matches!(command, ReactiveCommand::SetAppGrant { .. }))
+            .cloned()
+            .collect()
+    }
+
+    /// D22: own accounts draw as lines, shared ones and mailboxes as
+    /// switches; each flip sends one `SetAppGrant` at once and reads the
+    /// listing again. A Read only bruh says it can't use apps yet, and its
+    /// switches still send.
+    #[gpui::test]
+    fn app_grants_draw_own_lines_and_send_one_command_per_switch(cx: &mut gpui::TestAppContext) {
+        use bruhs_models::crew::{AppGrant, APPS_NEED_ASK};
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::ReadOnly, CREW_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.bruh_apps_requests_for_test()),
+            vec!["GET /api/apps".to_string()]
+        );
+        assert!(cx.debug_bounds("desktop-bruh-apps-loading").is_some());
+        answer_apps(&panel, cx, Ok(apps_listing(APPS_PROTOCOL)));
+        assert!(cx.debug_bounds("desktop-bruh-apps").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-apps-off").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-apps-need-ask").is_some());
+        assert_eq!(
+            bruhs_models::crew::apps_unavailable(AccessLevel::ReadOnly, AgentProvider::Claude),
+            Some(APPS_NEED_ASK)
+        );
+        // Its own account is a line; another bruh's never shows.
+        assert!(cx.debug_bounds("desktop-bruh-app-own-0").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-app-own-1").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-app-grant-v1-o").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-app-grant-v1-t").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-apps-none").is_none());
+        // An account that needs attention shows, with its state.
+        assert!(cx.debug_bounds("desktop-bruh-app-grant-v1-l").is_some());
+        // The section sits under Vault.
+        let vault = cx.debug_bounds("desktop-bruh-vault").unwrap();
+        let apps = cx.debug_bounds("desktop-bruh-apps").unwrap();
+        assert!(apps.top() >= vault.bottom());
+        click(cx, "desktop-bruh-app-grant-v1-n");
+        let mailbox = AppGrant::Mailbox {
+            mailbox_id: "mailbox-v1-gmail".into(),
+        };
+        assert_eq!(
+            set_app_grants(&sent(&panel, cx)),
+            vec![ReactiveCommand::SetAppGrant {
+                agent_id: "a".into(),
+                grant: AppGrant::Token {
+                    entry_id: "v1-n".into(),
+                },
+                granted: false,
+            }]
+        );
+        assert!(cx.debug_bounds("desktop-bruh-apps-wait").is_some());
+        // Nothing else goes while it waits.
+        click(cx, "desktop-bruh-app-grant-mailbox-v1-gmail");
+        assert_eq!(set_app_grants(&sent(&panel, cx)).len(), 1);
+        let mut after = apps_listing(APPS_PROTOCOL);
+        after.bruhs[0].apps.clear();
+        panel.update(cx, |panel, cx| {
+            panel.answer_bruh_app_flip_for_test(Ok(()), Some(Ok(after)), cx)
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-bruh-apps-wait").is_none());
+        click(cx, "desktop-bruh-app-grant-mailbox-v1-gmail");
+        let grants = set_app_grants(&sent(&panel, cx));
+        assert_eq!(
+            grants.last(),
+            Some(&ReactiveCommand::SetAppGrant {
+                agent_id: "a".into(),
+                grant: mailbox,
+                granted: true,
+            })
+        );
+        assert_eq!(grants.len(), 2);
+        // Save never carries app grants.
+        assert!(panel
+            .read_with(cx, |panel, _| panel.sent_for_test().iter().all(
+                |command| matches!(command, ReactiveCommand::SetAppGrant { .. })
+            )));
+        // A refusal says why; an unanswered flip says it may have landed.
+        panel.update(cx, |panel, cx| {
+            panel.answer_bruh_app_flip_for_test(
+                Err(refused(reqwest::StatusCode::CONFLICT)),
+                None,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-bruh-apps-alert").is_some());
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.bruh_apps_requests_for_test()),
+            vec![
+                "GET /api/apps".to_string(),
+                "POST /api/reactive/commands".to_string(),
+                "POST /api/reactive/commands".to_string(),
+            ]
+        );
+    }
+
+    /// D10: protocol 4 shows `apps_reason` and a flip sends nothing.
+    #[gpui::test]
+    fn an_older_service_disables_the_apps_section(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, VAULT_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        // A listing from somewhere still draws its switches, all off.
+        answer_apps(&panel, cx, Ok(apps_listing(APPS_PROTOCOL)));
+        let reason = bruhs_models::crew::apps_reason(Some(VAULT_PROTOCOL));
+        assert!(reason.is_some());
+        assert_eq!(panel.read_with(cx, |panel, _| panel.apps_reason()), reason);
+        assert!(cx.debug_bounds("desktop-bruh-apps-off").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-apps-need-ask").is_none());
+        click(cx, "desktop-bruh-app-grant-v1-n");
+        assert!(set_app_grants(&sent(&panel, cx)).is_empty());
+        // The older server has no listing; the reason already says why.
+        answer_apps(&panel, cx, Err(refused(reqwest::StatusCode::NOT_FOUND)));
+        assert!(cx.debug_bounds("desktop-bruh-apps-notice").is_none());
+        assert!(cx.debug_bounds("desktop-bruh-apps-off").is_some());
+        // A listing whose own protocol predates grants turns them off too.
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[]), cx)
+        });
+        answer_apps(&panel, cx, Ok(apps_listing(APPS_PROTOCOL)));
+        assert!(cx.debug_bounds("desktop-bruh-apps-off").is_none());
+        answer_apps(&panel, cx, Ok(apps_listing(VAULT_PROTOCOL)));
+        assert!(cx.debug_bounds("desktop-bruh-apps-off").is_some());
+        click(cx, "desktop-bruh-app-grant-v1-n");
+        assert!(set_app_grants(&sent(&panel, cx)).is_empty());
+    }
+
+    /// Why the section has no list: a client on another address, or a
+    /// failure with Refresh. Leaving Settings forgets it.
+    #[gpui::test]
+    fn the_apps_section_shows_why_it_has_no_list(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        answer_apps(&panel, cx, Err(refused(reqwest::StatusCode::FORBIDDEN)));
+        assert!(cx.debug_bounds("desktop-bruh-apps-notice").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-apps-refresh").is_none());
+        answer_apps(
+            &panel,
+            cx,
+            Err(refused(reqwest::StatusCode::INTERNAL_SERVER_ERROR)),
+        );
+        assert!(cx.debug_bounds("desktop-bruh-apps-error").is_some());
+        click(cx, "desktop-bruh-apps-refresh");
+        assert!(cx.debug_bounds("desktop-bruh-apps-loading").is_some());
+        answer_apps(&panel, cx, Ok(bruhs_models::apps::AppsListing::default()));
+        assert!(cx.debug_bounds("desktop-bruh-apps-none").is_some());
+        panel.update(cx, |panel, cx| panel.set_bruh_tab(BruhTab::Chat, cx));
+        cx.run_until_parked();
+        panel.update(cx, |panel, cx| panel.set_bruh_tab(BruhTab::Settings, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            panel
+                .read_with(cx, |panel, _| panel.bruh_apps_requests_for_test())
                 .len(),
             3
         );

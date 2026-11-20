@@ -8,9 +8,9 @@
 //! newer Bruhs' source, which replaces what that Bruhs saved.
 
 use bruhs_models::apps::{
-    poll_account_choices, watch_label, AppPollForm, AppsListing, PollWatch, APPS_LOADING,
-    APP_POLL_ACCOUNT_GONE, CHANGE_NEWER_SOURCE, CHANGE_TYPE, MINUTES_LABEL, NO_GITHUB_ACCOUNTS,
-    NO_MAILBOXES, POLL_ACCOUNT_LABEL, POLL_ACCOUNT_NEEDED, REPO_HINT, REPO_LABEL, WATCH_LABEL,
+    poll_account_choices, poll_account_options, poll_form_with_watch, watch_label, AppPollForm,
+    AppsListing, PollWatch, APPS_LOADING, CHANGE_NEWER_SOURCE, CHANGE_TYPE, MINUTES_LABEL,
+    NO_GITHUB_ACCOUNTS, NO_MAILBOXES, POLL_ACCOUNT_LABEL, REPO_HINT, REPO_LABEL, WATCH_LABEL,
 };
 use bruhs_models::vault::KEEP;
 use leptos::prelude::*;
@@ -42,39 +42,6 @@ fn watch_for(key: &str) -> PollWatch {
         .unwrap_or_default()
 }
 
-/// The account select's options as `(id, label)`: "Choose an account."
-/// first, then the watch's accounts. An account the form holds that the
-/// listing no longer offers shows as gone, so the select never claims a
-/// choice it doesn't have.
-fn account_options(form: &AppPollForm, listing: &AppsListing) -> Vec<(String, String)> {
-    let choices = poll_account_choices(form.watch, listing);
-    let gone = (!form.account.is_empty() && !choices.iter().any(|(id, _)| *id == form.account))
-        .then(|| (form.account.clone(), APP_POLL_ACCOUNT_GONE.to_owned()));
-    std::iter::once((String::new(), POLL_ACCOUNT_NEEDED.to_owned()))
-        .chain(gone)
-        .chain(choices)
-        .collect()
-}
-
-/// `form` with `watch` chosen. The account stays only while the new watch
-/// still offers it, since a GitHub account can't watch mail.
-fn with_watch(form: &AppPollForm, watch: PollWatch, listing: Option<&AppsListing>) -> AppPollForm {
-    let keeps = listing.is_some_and(|listing| {
-        poll_account_choices(watch, listing)
-            .iter()
-            .any(|(id, _)| *id == form.account)
-    });
-    AppPollForm {
-        watch,
-        account: if keeps {
-            form.account.clone()
-        } else {
-            String::new()
-        },
-        ..form.clone()
-    }
-}
-
 #[component]
 pub fn AppPollFields(
     form: RwSignal<AppPollForm>,
@@ -93,7 +60,7 @@ pub fn AppPollFields(
         listing.with(|listing| {
             listing
                 .as_ref()
-                .map(|listing| form.with(|form| account_options(form, listing)))
+                .map(|listing| form.with(|form| poll_account_options(form, listing)))
         })
     });
     // Nothing to choose: say where accounts come from.
@@ -134,7 +101,7 @@ pub fn AppPollFields(
                     on:change=move |event| {
                         let next = watch_for(&event_target_value(&event));
                         let current = form.get_untracked();
-                        form.set(listing.with_untracked(|listing| with_watch(&current, next, listing.as_ref())));
+                        form.set(listing.with_untracked(|listing| poll_form_with_watch(&current, next, listing.as_ref())));
                     }
                 >
                     {WATCHES.into_iter().map(|option| view! { <option value=watch_key(option) selected=move || watch.get() == option>{watch_label(option)}</option> }).collect_view()}
@@ -216,91 +183,12 @@ pub fn NewerSourceConfirm(
 
 #[cfg(test)]
 mod tests {
+    // The account choices and watch changes are `bruhs_models::apps`',
+    // tested there.
     use super::*;
-    use bruhs_models::apps::{AppAccount, AppMailbox};
-    use bruhs_models::connections::ServiceProvider;
-    use bruhs_models::secrets::SavedCredentialState;
-    use bruhs_models::vault::CredentialScope;
-
-    fn listing() -> AppsListing {
-        let account = |id: &str, app: &str, name: &str, scope: CredentialScope| AppAccount {
-            id: id.into(),
-            app: app.into(),
-            name: name.into(),
-            account: "octo".into(),
-            scope,
-            state: SavedCredentialState::Saved,
-            attention: None,
-        };
-        AppsListing {
-            accounts: vec![
-                account("v1-g", "github", "GitHub octo", CredentialScope::Global),
-                account(
-                    "v1-o",
-                    "github",
-                    "Own",
-                    CredentialScope::Bruh {
-                        agent_id: "a".into(),
-                    },
-                ),
-                account("v1-n", "notion", "Notes", CredentialScope::Global),
-            ],
-            mailboxes: vec![AppMailbox {
-                mailbox_id: "m1".into(),
-                provider: ServiceProvider::Gmail,
-                account: "me@x.test".into(),
-            }],
-            ..AppsListing::default()
-        }
-    }
 
     #[test]
-    fn the_app_source_offers_the_accounts_its_watch_needs() {
-        let listing = listing();
-        let mut form = AppPollForm::default();
-        assert_eq!(
-            account_options(&form, &listing),
-            [
-                (String::new(), POLL_ACCOUNT_NEEDED.to_owned()),
-                ("v1-g".to_owned(), "GitHub octo".to_owned()),
-            ]
-        );
-        form.watch = PollWatch::NewMail;
-        assert_eq!(
-            account_options(&form, &listing),
-            [
-                (String::new(), POLL_ACCOUNT_NEEDED.to_owned()),
-                ("m1".to_owned(), "me@x.test, Gmail".to_owned()),
-            ]
-        );
-        // A gone account shows as gone instead of as a choice it isn't.
-        form.account = "m9".into();
-        assert_eq!(
-            account_options(&form, &listing)[1],
-            ("m9".to_owned(), APP_POLL_ACCOUNT_GONE.to_owned())
-        );
-    }
-
-    #[test]
-    fn a_watch_change_keeps_only_an_account_it_offers() {
-        let listing = listing();
-        let form = AppPollForm {
-            watch: PollWatch::GithubIssues,
-            account: "v1-g".into(),
-            repo: "o/r".into(),
-            minutes: "5".into(),
-        };
-        let pulls = with_watch(&form, PollWatch::GithubPulls, Some(&listing));
-        assert_eq!(
-            (pulls.account.as_str(), pulls.repo.as_str()),
-            ("v1-g", "o/r")
-        );
-        let mail = with_watch(&form, PollWatch::NewMail, Some(&listing));
-        assert_eq!(
-            (mail.watch, mail.account.as_str()),
-            (PollWatch::NewMail, "")
-        );
-        assert_eq!(with_watch(&form, PollWatch::GithubPulls, None).account, "");
+    fn watch_keys_round_trip() {
         for watch in WATCHES {
             assert_eq!(watch_for(watch_key(watch)), watch);
         }

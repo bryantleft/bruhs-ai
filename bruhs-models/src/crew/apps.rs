@@ -200,6 +200,27 @@ pub fn toggle_grant(
     Ok(set)
 }
 
+/// `grant` set on or off for bruh `agent_id` in `listing`, as the service
+/// keeps it ([`toggle_grant`]: sorted, deduped and bounded). For a grant
+/// the service took while its listing couldn't be read again. A bruh the
+/// listing doesn't name is left alone.
+pub fn set_listing_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bool) {
+    let Some(bruh) = listing
+        .bruhs
+        .iter_mut()
+        .find(|bruh| bruh.agent_id == agent_id)
+    else {
+        return;
+    };
+    let (list, id, max) = match grant {
+        AppGrant::Token { entry_id } => (&mut bruh.apps, entry_id, MAX_APP_GRANTS),
+        AppGrant::Mailbox { mailbox_id } => (&mut bruh.mail, mailbox_id, MAX_MAIL_GRANTS),
+    };
+    if let Ok(next) = toggle_grant(list, id, on, max) {
+        *list = next;
+    }
+}
+
 /// Whether bruh `agent_id` may call an app with `entry` (D9): an app token
 /// that is its own, or a Global one in its `apps` grants. Never another
 /// kind, a Project entry or another bruh's token.
@@ -774,6 +795,37 @@ mod tests {
     /// D22: its own accounts as lines, then the shared ones, then the
     /// mailboxes, each switch on as the listing's grants say. Other bruhs'
     /// and Project accounts never show; names show escaped.
+    /// A grant the service took while its listing can't be read shows as
+    /// the service keeps it: sorted, deduped, and only for a known bruh.
+    #[test]
+    fn a_listing_grant_is_set_as_the_service_keeps_it() {
+        let mut listing = AppsListing {
+            bruhs: vec![AppsBruh {
+                agent_id: "a".into(),
+                name: "Ada".into(),
+                apps: vec!["v1-c".into()],
+                mail: Vec::new(),
+                unavailable: None,
+            }],
+            ..AppsListing::default()
+        };
+        let token = |id: &str| AppGrant::Token {
+            entry_id: id.into(),
+        };
+        set_listing_grant(&mut listing, "a", &token("v1-a"), true);
+        set_listing_grant(&mut listing, "a", &token("v1-a"), true);
+        assert_eq!(listing.bruhs[0].apps, ["v1-a", "v1-c"]);
+        set_listing_grant(&mut listing, "a", &token("v1-c"), false);
+        assert_eq!(listing.bruhs[0].apps, ["v1-a"]);
+        let mailbox = AppGrant::Mailbox {
+            mailbox_id: "m1".into(),
+        };
+        set_listing_grant(&mut listing, "a", &mailbox, true);
+        assert_eq!(listing.bruhs[0].mail, ["m1"]);
+        set_listing_grant(&mut listing, "gone", &mailbox, false);
+        assert_eq!(listing.bruhs[0].mail, ["m1"]);
+    }
+
     #[test]
     fn app_grant_rows_read_the_listing_for_one_bruh() {
         let listing = AppsListing {

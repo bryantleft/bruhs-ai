@@ -14,6 +14,8 @@ use bruhs_models::crew::{
 use bruhs_models::local_tools::{ComputerInput, ComputerRequest, ComputerState};
 use bruhs_models::reactive::*;
 use bruhs_ui::zoom::px;
+mod app_grants;
+mod app_poll;
 mod bruh_page;
 mod computer_view;
 mod create_bruh;
@@ -178,6 +180,8 @@ struct SourceEditor {
     times: Entity<InputState>,
     weekdays: Vec<u8>,
     time_zone: Entity<InputState>,
+    /// The type picked for a newer Bruhs' source, waiting on Change type.
+    change_type: Option<&'static str>,
 }
 struct SubscriptionEditor {
     subscription: bruhs_models::reactive::Subscription,
@@ -283,6 +287,8 @@ pub(crate) struct ReactiveAutomations {
     /// Bumped whenever the snapshot changes.
     snapshot_rev: u64,
     agent_delete: AgentDelete,
+    /// The owner's app accounts and mailboxes, for App sources.
+    poll_apps: app_poll::PollApps,
     /// Every command sent, in order; tests never reach a server.
     #[cfg(test)]
     sent: Vec<ReactiveCommand>,
@@ -611,6 +617,7 @@ impl ReactiveAutomations {
                 new_agent_focus: cx.focus_handle().tab_index(0).tab_stop(true),
                 focus_new_agent: false,
             },
+            poll_apps: app_poll::PollApps::default(),
             #[cfg(test)]
             sent: Vec::new(),
             #[cfg(test)]
@@ -728,6 +735,7 @@ impl ReactiveAutomations {
         if changed {
             self.reload_bruh_runs(cx);
         }
+        self.note_poll_sources(cx);
         let settings = self.snapshot.as_ref().map(|s| &s.notification_settings);
         if self
             .notify_form
@@ -1084,6 +1092,7 @@ impl ReactiveAutomations {
             times: edit_input("08:00", window, cx),
             weekdays: Vec::new(),
             time_zone: edit_input(&editor_fields::local_zone(), window, cx),
+            change_type: None,
         };
         let (kind, text) = match &source.kind {
             SourceKind::Folder {
@@ -1334,20 +1343,9 @@ impl ReactiveAutomations {
                     .child(heading("Event source settings"))
                     .child(field("Source name", &editor.name, false, self.busy))
                     .child(muted("Source type"))
-                    .child(
-                        div().flex().flex_wrap().gap_2().children(
-                            [
-                                ("folder", "Folder"),
-                                ("http", "Website"),
-                                ("command", "Command"),
-                                ("schedule", "Schedule"),
-                                ("calendar", "Calendar"),
-                                ("webhook", "Webhook"),
-                                ("app_event", "App event"),
-                                ("custom", "Custom event"),
-                            ]
-                            .into_iter()
-                            .map(|(kind, label)| {
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        app_poll::source_type_options(editor.kind).into_iter().map(
+                            |(kind, label)| {
                                 control(
                                     SharedString::from(format!("reactive-source-kind-{kind}")),
                                     label,
@@ -1360,14 +1358,17 @@ impl ReactiveAutomations {
                                     cx,
                                     move |this, _, cx| {
                                         if let Some(Editor::Source(editor)) = &mut this.editor {
-                                            editor.kind = kind;
+                                            if !app_poll::ask_before_kind(editor, kind) {
+                                                editor.kind = kind;
+                                            }
                                         }
                                         cx.notify();
                                     },
                                 )
-                            }),
+                            },
                         ),
-                    );
+                    ))
+                    .children(self.render_newer_source_confirm(editor, cx));
                 body=match editor.kind {
                     "folder"=>body.child(field("Folder to watch", &editor.value, false, self.busy)).child(field("File pattern", &editor.pattern, false, self.busy)).child(field("File settle time in seconds", &editor.settle, false, self.busy)).child(control("reactive-source-recursive",if editor.recursive{"Include subfolders: On"}else{"Include subfolders: Off"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Source(editor))=&mut this.editor{editor.recursive= !editor.recursive;}cx.notify();})),
                     "http"=>body.child(field("Website URL", &editor.value, false, self.busy)),
@@ -1619,6 +1620,21 @@ impl ReactiveAutomations {
             return None;
         }
         bruhs_models::crew::vault_reason(self.crew.protocol)
+    }
+    /// Whether the service keeps app grants and App sources. Unknown counts
+    /// as not yet.
+    pub(crate) fn apps_ready(&self) -> bool {
+        self.crew
+            .protocol
+            .is_some_and(bruhs_models::crew::apps_ready)
+    }
+    /// Why app grants and App sources are off, once the service is known
+    /// to be older. Empty while they work.
+    pub(crate) fn apps_reason(&self) -> Option<&'static str> {
+        if self.apps_ready() {
+            return None;
+        }
+        bruhs_models::crew::apps_reason(self.crew.protocol)
     }
     /// Whether the service runs bruh Computers. Unknown counts as not yet.
     pub(crate) fn computer_ready(&self) -> bool {
@@ -2301,12 +2317,14 @@ impl Render for ReactiveAutomations {
                                         },
                                     ),
                                 )
-                                .child(self.command(
-                                    format!("reactive-toggle-source-{}", source.id),
-                                    if source.enabled { "Pause" } else { "Enable" },
-                                    apply(ReactiveChange::SaveSource { source: toggle }),
-                                    cx,
-                                ))
+                                .when(source.kind != SourceKind::Other, |el| {
+                                    el.child(self.command(
+                                        format!("reactive-toggle-source-{}", source.id),
+                                        if source.enabled { "Pause" } else { "Enable" },
+                                        apply(ReactiveChange::SaveSource { source: toggle }),
+                                        cx,
+                                    ))
+                                })
                                 .child(self.command(
                                     format!("reactive-delete-source-{}", source.id),
                                     "Delete source",

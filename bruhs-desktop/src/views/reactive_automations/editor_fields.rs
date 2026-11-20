@@ -58,7 +58,7 @@ pub(super) fn busy_label(policy: BusyPolicy) -> &'static str {
 
 impl ReactiveAutomations {
     /// The source fields being edited, alone or inside a complete automation.
-    fn source_editor_mut(&mut self) -> Option<&mut SourceEditor> {
+    pub(super) fn source_editor_mut(&mut self) -> Option<&mut SourceEditor> {
         match self.editor.as_mut()? {
             Editor::Source(editor) => Some(editor),
             Editor::Automation(editor) => Some(editor.source_mut()),
