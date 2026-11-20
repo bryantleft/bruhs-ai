@@ -3,8 +3,9 @@
 //! - The catalog ([`CONNECTORS`]): the fourteen connectors, their hosts, auth
 //!   forms, per-account values, test calls and guides (D3, D4).
 //! - The rules ([`classify`]): the call a bruh writes ([`AppCall`]), its limits,
-//!   path normalizing, refused credential endpoints and how each call is
-//!   classified as a read, write, send or delivery (D5, D6, D12, F4 to F6).
+//!   path normalizing, and the allowlist that refuses every endpoint an app
+//!   doesn't name and classifies the rest as a read, write, send or delivery
+//!   (D5, D6, D12, F4, ruling A).
 //!
 //! Nothing here holds a token: tokens live in the vault and core adds them
 //! when it sends a call. Model-facing text (refusals, guides) is not app copy.
@@ -65,6 +66,8 @@ pub const MAX_QUERY_ITEM_BYTES: usize = 1024;
 /// The whole query as compact JSON.
 pub const MAX_QUERY_BYTES: usize = 4 * 1024;
 pub const MAX_PATH_BYTES: usize = 1024;
+/// The longest account name a call may give.
+pub const MAX_ACCOUNT_CHARS: usize = 64;
 /// App calls that may run at once.
 pub const MAX_APP_CALLS: usize = 4;
 /// The reply headers a bruh sees; every other header is dropped.
@@ -91,10 +94,10 @@ pub const APP_QUERY_METHOD: &str = "Pass the method as method, not in the query.
 pub const APP_GET_BODY: &str = "GET and DELETE calls take no body.";
 pub const APP_BODY_TOO_LARGE: &str = "Keep the body under 16 KB.";
 pub const UNKNOWN_APP: &str = "There is no such app. list_apps lists the ones you may use.";
-/// A call to an endpoint that makes, reads or changes a credential, key or
-/// webhook (F6). Refused at every level.
-pub const APP_CREDENTIAL_REFUSED: &str =
-    "Bruhs doesn't let a bruh make, read or change app credentials, keys or webhooks. Ask the owner.";
+/// A GraphQL call with another method or a URL query (ruling A, C2).
+pub const APP_GRAPHQL_SHAPE: &str =
+    "Send GraphQL as a POST with the document in the body and no URL query.";
+pub const APP_ACCOUNT_SHAPE: &str = "Name the account in 1 to 64 characters.";
 pub const APP_CUT_NOTE: &str = "Cut at 32 KB. Ask for less: fewer fields or a smaller page.";
 pub const APP_TOO_LARGE: &str =
     "The app's answer is over 1 MB. Ask for less: fewer fields or a smaller page.";
@@ -115,7 +118,8 @@ pub const PARAM_SHOP: &str = "Shop";
 pub const SITE_HINT: &str = "The name before .atlassian.net.";
 pub const SHOP_HINT: &str = "The name before .myshopify.com.";
 pub const ENTER_TOKEN: &str = "Paste the token.";
-pub const TOKEN_SHAPE: &str = "Tokens are one line under 4 KB.";
+pub const TOKEN_SHAPE: &str =
+    "Tokens are one line of 8 characters to 4 KB, with no spaces or quotes.";
 pub const SITE_SHAPE: &str = "Use one name of letters, digits and hyphens.";
 pub const EMAIL_SHAPE: &str = "Enter the account's email address.";
 

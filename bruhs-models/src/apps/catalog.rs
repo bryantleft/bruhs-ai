@@ -1,6 +1,13 @@
 //! The fourteen connectors (D3, D4): where each app lives, how its token is
 //! sent, the values an account needs, the call that tests a token, and the
-//! rules that classify its calls (D5, F6).
+//! allowlist of endpoints a bruh may call, each with its class (ruling A).
+//!
+//! The allowlist is default deny: an endpoint no row names is refused, so
+//! aliases (GitHub `/repositories/{id}`, Jira `/rest/api/2`), credential,
+//! key and webhook endpoints, and money or delivery actions the catalog
+//! doesn't name never reach an app. Each list starts with the common reads
+//! plus the writes and sends its guide documents; growing one is a catalog
+//! change with its test.
 //!
 //! Step 3 of the plan checked each row against the app's public docs on
 //! 2026-11-19. Changes from the plan: Shopify's version is 2026-10 (F27),
@@ -66,7 +73,8 @@ pub struct AppTest {
     pub ok: Option<&'static str>,
 }
 
-/// Methods plus a path glob ([`super::path_glob`]) and what a match does.
+/// One allowlisted endpoint: upper-case methods plus a path glob
+/// ([`super::path_glob`]), and the class a matching call has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EndpointRule {
     pub methods: &'static [&'static str],
@@ -74,8 +82,8 @@ pub struct EndpointRule {
     pub action: AppAction,
 }
 
-/// The app's GraphQL path. A POST query there is a read; a mutation, or any
-/// other method, is `mutation`.
+/// The app's GraphQL path. It takes only a POST with no URL query; a query
+/// operation is a read and anything else is `mutation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GraphqlRule {
     pub path: &'static str,
@@ -95,19 +103,21 @@ pub struct AppConnector {
     /// App copy: the least the token needs.
     pub scopes_hint: &'static str,
     pub test: AppTest,
-    /// First match wins (D5).
-    pub rules: &'static [EndpointRule],
-    /// Endpoints that make, read or change credentials, keys or webhooks,
-    /// refused before any rule (F6). Their `action` is ignored.
-    pub refused: &'static [EndpointRule],
+    /// The endpoints a bruh may call; first match wins, anything else is
+    /// refused with `unlisted`.
+    pub endpoints: &'static [EndpointRule],
     pub graphql: Option<GraphqlRule>,
-    /// Whether a GET is a read. Slack's Web API takes GET for every method,
-    /// posting included, so Slack reads by method name only.
-    pub get_is_read: bool,
-    /// An unmatched call that isn't a read.
-    pub default_write: AppAction,
+    /// Model-facing: "Bruhs can't call that endpoint of {name} yet."
+    pub unlisted: &'static str,
     /// Model-facing; at most 800 bytes.
     pub guide: &'static str,
+}
+
+/// The shared refusal for an endpoint an app's allowlist doesn't name.
+macro_rules! unlisted {
+    ($name:literal) => {
+        concat!("Bruhs can't call that endpoint of ", $name, " yet.")
+    };
 }
 
 const TOKEN: AppParam = AppParam {
@@ -141,15 +151,14 @@ const SHOP: AppParam = AppParam {
     hint: SHOP_HINT,
 };
 
+const GET: &[&str] = &["GET"];
 const GET_POST: &[&str] = &["GET", "POST"];
 const POST: &[&str] = &["POST"];
 const PUT: &[&str] = &["PUT"];
+const PATCH: &[&str] = &["PATCH"];
 const DELETE: &[&str] = &["DELETE"];
-const POST_PUT: &[&str] = &["POST", "PUT"];
-const POST_PATCH: &[&str] = &["POST", "PATCH"];
-const PUT_DELETE: &[&str] = &["PUT", "DELETE"];
-const PATCH_DELETE: &[&str] = &["PATCH", "DELETE"];
-const ANY: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE"];
+const POST_DELETE: &[&str] = &["POST", "DELETE"];
+const PUT_PATCH_DELETE: &[&str] = &["PUT", "PATCH", "DELETE"];
 
 const fn rule(
     methods: &'static [&'static str],
@@ -167,6 +176,14 @@ const fn read(methods: &'static [&'static str], path: &'static str) -> EndpointR
     rule(methods, path, AppAction::Read)
 }
 
+const fn get(path: &'static str) -> EndpointRule {
+    read(GET, path)
+}
+
+const fn write(methods: &'static [&'static str], path: &'static str) -> EndpointRule {
+    rule(methods, path, AppAction::Write)
+}
+
 const fn send(methods: &'static [&'static str], path: &'static str) -> EndpointRule {
     rule(methods, path, AppAction::SendAsOwner)
 }
@@ -175,12 +192,7 @@ const fn deliver(methods: &'static [&'static str], path: &'static str) -> Endpoi
     rule(methods, path, AppAction::Delivery)
 }
 
-/// A refused endpoint; the action is never read.
-const fn refuse(methods: &'static [&'static str], path: &'static str) -> EndpointRule {
-    rule(methods, path, AppAction::Delivery)
-}
-
-const fn get(path: &'static str, account: &'static [&'static str]) -> AppTest {
+const fn test_get(path: &'static str, account: &'static [&'static str]) -> AppTest {
     AppTest {
         method: "GET",
         path,
@@ -200,50 +212,60 @@ pub const CONNECTORS: [AppConnector; 14] = [
         name: "GitHub",
         host: AppHost::Fixed("api.github.com"),
         auth: AppAuth::Bearer,
-        headers: &[("Accept", "application/vnd.github+json"), ("X-GitHub-Api-Version", "2022-11-28")],
+        headers: &[
+            ("Accept", "application/vnd.github+json"),
+            ("X-GitHub-Api-Version", "2022-11-28"),
+        ],
         params: &[TOKEN],
         token_help_url: "https://github.com/settings/personal-access-tokens",
         scopes_hint: "A fine-grained token for the repositories a bruh works on: issues and pull requests, read or write as you choose. It's separate from the GitHub sign-in in Settings, Vault.",
-        test: get("/user", &["/login"]),
-        rules: &[
+        test: test_get("/user", &["/login"]),
+        endpoints: &[
+            get("/user"),
+            get("/user/repos"),
+            get("/orgs/*/repos"),
+            get("/notifications"),
+            get("/search/issues"),
+            get("/search/code"),
+            get("/search/repositories"),
+            get("/repos/*/*"),
+            get("/repos/*/*/issues"),
+            get("/repos/*/*/issues/*"),
+            get("/repos/*/*/issues/*/comments"),
+            get("/repos/*/*/pulls"),
+            get("/repos/*/*/pulls/*"),
+            get("/repos/*/*/pulls/*/files"),
+            get("/repos/*/*/pulls/*/commits"),
+            get("/repos/*/*/pulls/*/reviews"),
+            get("/repos/*/*/pulls/*/comments"),
+            get("/repos/*/*/commits"),
+            get("/repos/*/*/commits/*"),
+            get("/repos/*/*/branches"),
+            get("/repos/*/*/branches/*"),
+            get("/repos/*/*/contents/**"),
+            get("/repos/*/*/labels"),
+            get("/repos/*/*/milestones"),
+            get("/repos/*/*/releases"),
+            get("/repos/*/*/releases/*"),
+            get("/repos/*/*/actions/runs"),
+            get("/repos/*/*/actions/runs/*"),
+            send(POST, "/repos/*/*/issues"),
+            send(PATCH, "/repos/*/*/issues/*"),
+            send(POST, "/repos/*/*/issues/*/comments"),
+            send(POST, "/repos/*/*/issues/*/labels"),
+            send(POST, "/repos/*/*/pulls/*/reviews"),
+            deliver(POST, "/repos/*/*/pulls"),
             deliver(PUT, "/repos/*/*/pulls/*/merge"),
             deliver(PUT, "/repos/*/*/pulls/*/update-branch"),
-            deliver(POST, "/repos/*/*/pulls"),
-            deliver(POST, "/repos/*/*/merges"),
-            deliver(PUT_DELETE, "/repos/*/*/contents/**"),
+            deliver(PUT, "/repos/*/*/contents/**"),
             deliver(POST, "/repos/*/*/git/refs"),
-            deliver(PATCH_DELETE, "/repos/*/*/git/refs/**"),
-            deliver(PUT, "/repos/*/*/collaborators/*"),
-            deliver(PATCH_DELETE, "/repos/*/*"),
-            deliver(POST, "/repos/*/*/transfer"),
-            deliver(POST, "/repos/*/*/dispatches"),
-            deliver(POST, "/repos/*/*/actions/workflows/*/dispatches"),
+            deliver(PATCH, "/repos/*/*/git/refs/**"),
         ],
-        refused: &[
-            refuse(POST, "/user/keys"),
-            refuse(POST, "/user/gpg_keys"),
-            refuse(POST, "/user/ssh_signing_keys"),
-            refuse(POST, "/repos/*/*/keys"),
-            refuse(POST_PATCH, "/repos/*/*/hooks"),
-            refuse(POST_PATCH, "/repos/*/*/hooks/**"),
-            refuse(POST_PATCH, "/orgs/*/hooks"),
-            refuse(POST_PATCH, "/orgs/*/hooks/**"),
-            refuse(PUT, "/repos/*/*/actions/secrets/*"),
-            refuse(PUT, "/orgs/*/actions/secrets/*"),
-            refuse(PUT, "/repos/*/*/environments/*/secrets/*"),
-            refuse(PUT, "/repos/*/*/dependabot/secrets/*"),
-            refuse(PUT, "/orgs/*/dependabot/secrets/*"),
-            refuse(PUT, "/user/codespaces/secrets/*"),
-            refuse(POST, "/repos/*/*/actions/runners/registration-token"),
-            refuse(POST, "/orgs/*/actions/runners/registration-token"),
-            refuse(POST, "/repos/*/*/actions/runners/remove-token"),
-            refuse(POST, "/orgs/*/actions/runners/remove-token"),
-            refuse(POST, "/repos/*/*/actions/runners/generate-jitconfig"),
-            refuse(POST, "/orgs/*/actions/runners/generate-jitconfig"),
-        ],
-        graphql: Some(GraphqlRule { path: "/graphql", mutation: AppAction::Delivery }),
-        get_is_read: true,
-        default_write: AppAction::SendAsOwner,
+        graphql: Some(GraphqlRule {
+            path: "/graphql",
+            mutation: AppAction::Delivery,
+        }),
+        unlisted: unlisted!("GitHub"),
         guide: guides::GITHUB,
     },
     AppConnector {
@@ -255,17 +277,29 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://www.notion.so/profile/integrations",
         scopes_hint: "An internal integration's secret. Share only the pages and databases a bruh needs with the integration, and leave out comment access unless it should comment.",
-        test: get("/v1/users/me", &["/name"]),
-        rules: &[
+        test: test_get("/v1/users/me", &["/name"]),
+        endpoints: &[
+            get("/v1/users"),
+            get("/v1/users/*"),
+            get("/v1/pages/*"),
+            get("/v1/pages/*/properties/*"),
+            get("/v1/blocks/*"),
+            get("/v1/blocks/*/children"),
+            get("/v1/databases/*"),
+            get("/v1/data_sources/*"),
+            get("/v1/comments"),
             read(POST, "/v1/search"),
             read(POST, "/v1/databases/*/query"),
             read(POST, "/v1/data_sources/*/query"),
+            write(POST, "/v1/pages"),
+            write(PATCH, "/v1/pages/*"),
+            write(PATCH, "/v1/blocks/*"),
+            write(PATCH, "/v1/blocks/*/children"),
+            write(DELETE, "/v1/blocks/*"),
             send(POST, "/v1/comments"),
         ],
-        refused: &[],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Notion"),
         guide: guides::NOTION,
     },
     AppConnector {
@@ -284,11 +318,12 @@ pub const CONNECTORS: [AppConnector; 14] = [
             account: &["/data/viewer/email"],
             ok: None,
         },
-        rules: &[],
-        refused: &[],
-        graphql: Some(GraphqlRule { path: "/graphql", mutation: AppAction::SendAsOwner }),
-        get_is_read: true,
-        default_write: AppAction::SendAsOwner,
+        endpoints: &[],
+        graphql: Some(GraphqlRule {
+            path: "/graphql",
+            mutation: AppAction::SendAsOwner,
+        }),
+        unlisted: unlisted!("Linear"),
         guide: guides::LINEAR,
     },
     AppConnector {
@@ -300,12 +335,22 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://airtable.com/create/tokens",
         scopes_hint: "A personal access token with data.records:read and schema.bases:read on only the bases a bruh needs. Add data.records:write if it changes records, and user.email:read to show your email here.",
-        test: get("/v0/meta/whoami", &["/email", "/id"]),
-        rules: &[read(POST, "/v0/*/*/listRecords")],
-        refused: &[refuse(POST, "/v0/bases/*/webhooks")],
+        test: test_get("/v0/meta/whoami", &["/email", "/id"]),
+        // Base ids start with `app`, which keeps `/v0/bases/…` (webhooks) out.
+        endpoints: &[
+            get("/v0/meta/whoami"),
+            get("/v0/meta/bases"),
+            get("/v0/meta/bases/app*/tables"),
+            get("/v0/app*/*"),
+            get("/v0/app*/*/*"),
+            read(POST, "/v0/app*/*/listRecords"),
+            write(POST, "/v0/app*/*"),
+            write(PATCH, "/v0/app*/*"),
+            write(PATCH, "/v0/app*/*/*"),
+            write(DELETE, "/v0/app*/*/*"),
+        ],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Airtable"),
         guide: guides::AIRTABLE,
     },
     AppConnector {
@@ -317,12 +362,25 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://app.todoist.com/app/settings/integrations/developer",
         scopes_hint: "Your API token from Settings, Integrations, Developer. Todoist tokens can't be narrowed, so a bruh can change anything you can.",
-        test: get("/api/v1/user", &["/email"]),
-        rules: &[send(POST, "/api/v1/comments")],
-        refused: &[],
+        test: test_get("/api/v1/user", &["/email"]),
+        endpoints: &[
+            get("/api/v1/user"),
+            get("/api/v1/tasks"),
+            get("/api/v1/tasks/*"),
+            get("/api/v1/projects"),
+            get("/api/v1/projects/*"),
+            get("/api/v1/sections"),
+            get("/api/v1/labels"),
+            get("/api/v1/comments"),
+            write(POST, "/api/v1/tasks"),
+            write(POST, "/api/v1/tasks/*"),
+            write(POST, "/api/v1/tasks/*/close"),
+            write(POST, "/api/v1/tasks/*/reopen"),
+            write(DELETE, "/api/v1/tasks/*"),
+            send(POST, "/api/v1/comments"),
+        ],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Todoist"),
         guide: guides::TODOIST,
     },
     AppConnector {
@@ -334,16 +392,22 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN, KEY],
         token_help_url: "https://trello.com/power-ups/admin",
         scopes_hint: "A Power-Up's API key and a token you generate for it. Ask for read only if a bruh only reads boards.",
-        test: get("/1/members/me", &["/username"]),
-        rules: &[send(POST, "/1/cards/*/actions/comments")],
-        refused: &[
-            refuse(POST_PUT, "/1/webhooks"),
-            refuse(POST_PUT, "/1/webhooks/**"),
-            refuse(POST_PUT, "/1/tokens/**"),
+        test: test_get("/1/members/me", &["/username"]),
+        endpoints: &[
+            get("/1/members/me"),
+            get("/1/members/me/boards"),
+            get("/1/boards/*"),
+            get("/1/boards/*/lists"),
+            get("/1/boards/*/cards"),
+            get("/1/lists/*/cards"),
+            get("/1/cards/*"),
+            get("/1/cards/*/actions"),
+            write(POST, "/1/cards"),
+            write(PUT, "/1/cards/*"),
+            send(POST, "/1/cards/*/actions/comments"),
         ],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Trello"),
         guide: guides::TRELLO,
     },
     AppConnector {
@@ -355,17 +419,27 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://app.clickup.com/settings/apps",
         scopes_hint: "Your personal API token from Settings, Apps. ClickUp tokens can't be narrowed, so a bruh can change anything you can.",
-        test: get("/api/v2/user", &["/user/email"]),
-        rules: &[
+        test: test_get("/api/v2/user", &["/user/email"]),
+        endpoints: &[
+            get("/api/v2/user"),
+            get("/api/v2/team"),
+            get("/api/v2/team/*/space"),
+            get("/api/v2/space/*/folder"),
+            get("/api/v2/space/*/list"),
+            get("/api/v2/folder/*/list"),
+            get("/api/v2/list/*"),
+            get("/api/v2/list/*/task"),
+            get("/api/v2/task/*"),
+            get("/api/v2/task/*/comment"),
+            write(POST, "/api/v2/list/*/task"),
+            write(PUT, "/api/v2/task/*"),
             send(POST, "/api/v2/task/*/comment"),
             send(POST, "/api/v2/list/*/comment"),
             send(POST, "/api/v2/view/*/comment"),
-            send(POST, "/api/v3/workspaces/**"),
+            send(POST, "/api/v3/workspaces/*/chat/channels/*/messages"),
         ],
-        refused: &[refuse(POST, "/api/v2/team/*/webhook"), refuse(PUT, "/api/v2/webhook/*")],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("ClickUp"),
         guide: guides::CLICKUP,
     },
     AppConnector {
@@ -377,70 +451,95 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://app.hubspot.com/private-apps",
         scopes_hint: "A private app's access token with only the scopes a bruh needs, such as crm.objects.contacts.read.",
-        test: get("/account-info/v3/details", &["/portalId"]),
-        rules: &[
+        test: test_get("/account-info/v3/details", &["/portalId"]),
+        endpoints: &[
+            get("/account-info/v3/details"),
+            get("/crm/v3/owners"),
+            get("/crm/v3/properties/*"),
+            get("/crm/v3/objects/*"),
+            get("/crm/v3/objects/*/*"),
             read(POST, "/crm/v3/objects/*/search"),
             read(POST, "/crm/v3/objects/*/batch/read"),
+            write(POST, "/crm/v3/objects/*"),
+            write(PATCH, "/crm/v3/objects/*/*"),
             send(POST, "/marketing/v3/transactional/single-email/send"),
             send(POST, "/conversations/v3/conversations/threads/*/messages"),
         ],
-        refused: &[],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("HubSpot"),
         guide: guides::HUBSPOT,
     },
     AppConnector {
         id: "jira",
         name: "Jira",
-        host: AppHost::Account { param: "site", suffix: ".atlassian.net" },
+        host: AppHost::Account {
+            param: "site",
+            suffix: ".atlassian.net",
+        },
         auth: AppAuth::Basic,
         headers: &[("Accept", "application/json")],
         params: &[TOKEN, EMAIL, SITE],
         token_help_url: "https://id.atlassian.com/manage-profile/security/api-tokens",
         scopes_hint: "An API token for your Atlassian account, with scopes for the Jira work a bruh does if you can choose them. Use the email you sign in with.",
-        test: get("/rest/api/3/myself", &["/emailAddress", "/displayName"]),
-        rules: &[
-            read(POST, "/rest/api/3/search"),
+        test: test_get("/rest/api/3/myself", &["/emailAddress", "/displayName"]),
+        // Only `/rest/api/3`: `/rest/api/2` and `/rest/api/latest` are refused.
+        endpoints: &[
+            get("/rest/api/3/myself"),
+            get("/rest/api/3/search/jql"),
+            get("/rest/api/3/issue/*"),
+            get("/rest/api/3/issue/*/comment"),
+            get("/rest/api/3/issue/*/transitions"),
+            get("/rest/api/3/project/search"),
+            get("/rest/api/3/project/*"),
             read(POST, "/rest/api/3/search/jql"),
             read(POST, "/rest/api/3/issue/bulkfetch"),
+            write(PUT, "/rest/api/3/issue/*"),
+            write(POST, "/rest/api/3/issue/*/transitions"),
+            send(POST, "/rest/api/3/issue"),
             send(POST, "/rest/api/3/issue/*/comment"),
             send(POST, "/rest/api/3/issue/*/notify"),
-            send(POST, "/rest/api/3/issue"),
         ],
-        refused: &[refuse(POST_PUT, "/rest/api/3/webhook"), refuse(POST_PUT, "/rest/api/3/webhook/**")],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Jira"),
         guide: guides::JIRA,
     },
     AppConnector {
         id: "shopify",
         name: "Shopify",
-        host: AppHost::Account { param: "shop", suffix: ".myshopify.com" },
+        host: AppHost::Account {
+            param: "shop",
+            suffix: ".myshopify.com",
+        },
         auth: AppAuth::Header("X-Shopify-Access-Token"),
         headers: &[],
         params: &[TOKEN, SHOP],
         token_help_url: "https://help.shopify.com/en/manual/apps/app-types/custom-apps",
         scopes_hint: "A custom app's Admin API access token with only the scopes a bruh needs, such as read_orders.",
-        test: get("/admin/api/2026-10/shop.json", &["/shop/name"]),
-        rules: &[
-            send(POST, "/admin/api/*/orders/*/refunds.json"),
-            send(POST, "/admin/api/*/draft_orders/*/send_invoice.json"),
-            send(POST, "/admin/api/*/orders/*/fulfillments.json"),
+        test: test_get("/admin/api/2026-10/shop.json", &["/shop/name"]),
+        // REST only under a version; GraphQL at any `/admin/…/graphql.json`.
+        endpoints: &[
+            get("/admin/api/*/shop.json"),
+            get("/admin/api/*/orders.json"),
+            get("/admin/api/*/orders/*.json"),
+            get("/admin/api/*/products.json"),
+            get("/admin/api/*/products/*.json"),
+            get("/admin/api/*/customers.json"),
+            get("/admin/api/*/customers/*.json"),
+            write(POST, "/admin/api/*/products.json"),
+            write(PUT, "/admin/api/*/products/*.json"),
             send(POST, "/admin/api/*/orders.json"),
             send(POST, "/admin/api/*/orders/*/cancel.json"),
+            send(POST, "/admin/api/*/orders/*/refunds.json"),
             send(POST, "/admin/api/*/orders/*/transactions.json"),
+            send(POST, "/admin/api/*/fulfillments.json"),
+            send(POST, "/admin/api/*/draft_orders/*/send_invoice.json"),
             send(POST, "/admin/api/*/customers/*/send_invite.json"),
         ],
-        refused: &[
-            refuse(POST, "/admin/api/*/storefront_access_tokens.json"),
-            refuse(POST_PUT, "/admin/api/*/webhooks.json"),
-            refuse(POST_PUT, "/admin/api/*/webhooks/*.json"),
-        ],
-        graphql: Some(GraphqlRule { path: "/admin/api/*/graphql.json", mutation: AppAction::SendAsOwner }),
-        get_is_read: true,
-        default_write: AppAction::Write,
+        graphql: Some(GraphqlRule {
+            path: "/admin/**/graphql.json",
+            mutation: AppAction::SendAsOwner,
+        }),
+        unlisted: unlisted!("Shopify"),
         guide: guides::SHOPIFY,
     },
     AppConnector {
@@ -452,36 +551,56 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://dashboard.stripe.com/apikeys",
         scopes_hint: "A restricted key with Read on your account and only the resources a bruh needs. Leave the rest at None.",
-        test: get("/v1/account", &["/email", "/id"]),
-        rules: &[
+        test: test_get("/v1/account", &["/email", "/id"]),
+        endpoints: &[
+            get("/v1/account"),
+            get("/v1/balance"),
+            get("/v1/balance_transactions"),
+            get("/v1/customers"),
+            get("/v1/customers/*"),
+            get("/v1/charges"),
+            get("/v1/charges/*"),
+            get("/v1/payment_intents"),
+            get("/v1/payment_intents/*"),
+            get("/v1/invoices"),
+            get("/v1/invoices/*"),
+            get("/v1/subscriptions"),
+            get("/v1/subscriptions/*"),
+            get("/v1/products"),
+            get("/v1/products/*"),
+            get("/v1/prices"),
+            get("/v1/prices/*"),
+            get("/v1/refunds"),
+            get("/v1/refunds/*"),
+            get("/v1/payouts"),
+            get("/v1/disputes"),
+            write(POST, "/v1/customers"),
+            write(POST, "/v1/customers/*"),
+            write(POST, "/v1/products"),
+            write(POST, "/v1/products/*"),
+            write(POST, "/v1/prices"),
+            write(POST, "/v1/invoiceitems"),
+            write(POST, "/v1/invoices"),
+            write(POST, "/v1/invoices/*"),
             send(POST, "/v1/charges"),
+            send(POST, "/v1/charges/*/capture"),
             send(POST, "/v1/payment_intents"),
             send(POST, "/v1/payment_intents/*/confirm"),
             send(POST, "/v1/payment_intents/*/capture"),
-            send(POST, "/v1/charges/*/capture"),
             send(POST, "/v1/refunds"),
             send(POST, "/v1/payouts"),
             send(POST, "/v1/transfers"),
             send(POST, "/v1/transfers/*/reversals"),
             send(POST, "/v1/subscriptions"),
-            send(POST, "/v1/subscriptions/*"),
-            send(DELETE, "/v1/subscriptions/*"),
+            send(POST_DELETE, "/v1/subscriptions/*"),
             send(POST, "/v1/invoices/*/send"),
             send(POST, "/v1/invoices/*/pay"),
             send(POST, "/v1/invoices/*/finalize"),
             send(POST, "/v1/invoices/*/void"),
             send(POST, "/v1/credit_notes"),
         ],
-        refused: &[
-            refuse(POST, "/v1/webhook_endpoints"),
-            refuse(POST, "/v1/webhook_endpoints/*"),
-            refuse(POST, "/v1/ephemeral_keys"),
-            refuse(ANY, "/v1/apps/secrets"),
-            refuse(ANY, "/v1/apps/secrets/**"),
-        ],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Stripe"),
         guide: guides::STRIPE,
     },
     AppConnector {
@@ -493,19 +612,20 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://dash.cloudflare.com/profile/api-tokens",
         scopes_hint: "A user API token with only the permissions and zones a bruh needs, such as Zone DNS Read.",
-        test: get("/client/v4/user/tokens/verify", &["/result/id"]),
-        rules: &[],
-        refused: &[
-            refuse(POST, "/client/v4/user/tokens"),
-            refuse(PUT, "/client/v4/user/tokens/*/value"),
-            refuse(POST, "/client/v4/accounts/*/tokens"),
-            refuse(PUT, "/client/v4/accounts/*/tokens/*/value"),
-            refuse(POST_PUT, "/client/v4/accounts/*/alerting/v3/destinations/webhooks"),
-            refuse(POST_PUT, "/client/v4/accounts/*/alerting/v3/destinations/webhooks/*"),
+        test: test_get("/client/v4/user/tokens/verify", &["/result/id"]),
+        endpoints: &[
+            get("/client/v4/user/tokens/verify"),
+            get("/client/v4/accounts"),
+            get("/client/v4/accounts/*"),
+            get("/client/v4/zones"),
+            get("/client/v4/zones/*"),
+            get("/client/v4/zones/*/dns_records"),
+            get("/client/v4/zones/*/dns_records/*"),
+            write(POST, "/client/v4/zones/*/dns_records"),
+            write(PUT_PATCH_DELETE, "/client/v4/zones/*/dns_records/*"),
         ],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Cloudflare"),
         guide: guides::CLOUDFLARE,
     },
     AppConnector {
@@ -524,27 +644,32 @@ pub const CONNECTORS: [AppConnector; 14] = [
             account: &["/user"],
             ok: Some("/ok"),
         },
-        rules: &[
+        // Slack's Web API takes GET or POST for every method, posting
+        // included, so each method is named with both.
+        endpoints: &[
             read(GET_POST, "/api/auth.test"),
-            read(GET_POST, "/api/search.*"),
-            read(GET_POST, "/api/*.list"),
-            read(GET_POST, "/api/*.history"),
-            read(GET_POST, "/api/*.info"),
-            read(GET_POST, "/api/*.replies"),
-            read(GET_POST, "/api/*.members"),
-            read(GET_POST, "/api/*.lookupByEmail"),
-            read(GET_POST, "/api/*.getPresence"),
-            read(GET_POST, "/api/*.get"),
-        ],
-        refused: &[
-            refuse(ANY, "/api/apps.*"),
-            refuse(ANY, "/api/oauth.*"),
-            refuse(ANY, "/api/openid.*"),
-            refuse(ANY, "/api/auth.revoke"),
+            read(GET_POST, "/api/conversations.list"),
+            read(GET_POST, "/api/conversations.history"),
+            read(GET_POST, "/api/conversations.replies"),
+            read(GET_POST, "/api/conversations.info"),
+            read(GET_POST, "/api/conversations.members"),
+            read(GET_POST, "/api/users.list"),
+            read(GET_POST, "/api/users.info"),
+            read(GET_POST, "/api/users.lookupByEmail"),
+            read(GET_POST, "/api/users.getPresence"),
+            read(GET_POST, "/api/search.messages"),
+            read(GET_POST, "/api/search.files"),
+            read(GET_POST, "/api/team.info"),
+            read(GET_POST, "/api/reactions.get"),
+            read(GET_POST, "/api/pins.list"),
+            send(GET_POST, "/api/chat.postMessage"),
+            send(GET_POST, "/api/chat.update"),
+            send(GET_POST, "/api/chat.scheduleMessage"),
+            send(GET_POST, "/api/reactions.add"),
+            send(GET_POST, "/api/reactions.remove"),
         ],
         graphql: None,
-        get_is_read: false,
-        default_write: AppAction::SendAsOwner,
+        unlisted: unlisted!("Slack"),
         guide: guides::SLACK,
     },
     AppConnector {
@@ -556,15 +681,21 @@ pub const CONNECTORS: [AppConnector; 14] = [
         params: &[TOKEN],
         token_help_url: "https://developers.figma.com/docs/rest-api/personal-access-tokens/",
         scopes_hint: "A personal access token with current_user:read and only the file scopes a bruh needs, read only if it only reads.",
-        test: get("/v1/me", &["/email"]),
-        rules: &[
+        test: test_get("/v1/me", &["/email"]),
+        endpoints: &[
+            get("/v1/me"),
+            get("/v1/files/*"),
+            get("/v1/files/*/nodes"),
+            get("/v1/files/*/versions"),
+            get("/v1/files/*/comments"),
+            get("/v1/images/*"),
+            get("/v1/teams/*/projects"),
+            get("/v1/projects/*/files"),
             send(POST, "/v1/files/*/comments"),
             send(POST, "/v1/files/*/comments/*/reactions"),
         ],
-        refused: &[refuse(POST, "/v2/webhooks"), refuse(PUT, "/v2/webhooks/*")],
         graphql: None,
-        get_is_read: true,
-        default_write: AppAction::Write,
+        unlisted: unlisted!("Figma"),
         guide: guides::FIGMA,
     },
 ];
@@ -617,9 +748,10 @@ pub fn host_declared(host: &str) -> bool {
     })
 }
 
-/// Checks and normalizes one account value (D4): a token or key is one line
-/// of 8 bytes to 4 KiB, trimmed; an email is trimmed; a site or shop is one
-/// DNS label, lower-cased.
+/// Checks and normalizes one account value (D4): a token or key is trimmed,
+/// then 8 bytes to 4 KiB of visible ASCII with no `"` or `\` (Trello quotes
+/// both values in its header, and a header takes nothing else); an email
+/// is trimmed; a site or shop is one DNS label, lower-cased.
 pub fn validate_param(param: &AppParam, value: &str) -> Result<String, &'static str> {
     let value = value.trim();
     match param.id {
@@ -629,10 +761,10 @@ pub fn validate_param(param: &AppParam, value: &str) -> Result<String, &'static 
         "site" | "shop" => dns_label(value).ok_or(SITE_SHAPE),
         _ if value.is_empty() => Err(ENTER_TOKEN),
         _ => {
-            let one_line = value
+            let plain = value
                 .bytes()
-                .all(|byte| byte.is_ascii() && !byte.is_ascii_control());
-            if (MIN_TOKEN_BYTES..=MAX_TOKEN_BYTES).contains(&value.len()) && one_line {
+                .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'"' | b'\\'));
+            if (MIN_TOKEN_BYTES..=MAX_TOKEN_BYTES).contains(&value.len()) && plain {
                 Ok(value.to_string())
             } else {
                 Err(TOKEN_SHAPE)
@@ -675,6 +807,7 @@ fn dns_label(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{classify, validate_path, AppCall, APP_METHODS};
     use super::*;
 
     #[test]
@@ -744,9 +877,24 @@ mod tests {
             && c.token_help_url.starts_with("https://")
             && !c.scopes_hint.contains(" - ")
             && c.params.iter().any(|p| p.id == "token")));
-        assert!(
-            !connector("slack").unwrap().get_is_read && connector("github").unwrap().get_is_read
+        // Ruling A replaced `get_is_read` with allowlists: a Slack GET may
+        // post, a GitHub GET of a listed endpoint is a read.
+        let get = |app: &str, path: &str| {
+            let call = AppCall {
+                app: app.into(),
+                account: None,
+                method: "GET".into(),
+                path: path.into(),
+                query: BTreeMap::new(),
+                body: None,
+            };
+            classify(connector(app).unwrap(), &call)
+        };
+        assert_eq!(
+            get("slack", "/api/chat.postMessage"),
+            Ok(AppAction::SendAsOwner)
         );
+        assert_eq!(get("github", "/user"), Ok(AppAction::Read));
     }
 
     #[test]
@@ -796,20 +944,38 @@ mod tests {
         assert!(row("github")
             .scopes_hint
             .contains("separate from the GitHub sign-in"));
+    }
+
+    #[test]
+    fn every_allowlist_is_well_formed_and_passes_its_own_test_call() {
         for c in &CONNECTORS {
-            assert!(
-                c.test.path.starts_with('/') && super::super::validate_path(c.test.path).is_ok(),
-                "{}",
-                c.id
+            assert_eq!(
+                c.unlisted,
+                format!("Bruhs can't call that endpoint of {} yet.", c.name)
             );
-            assert!(
-                c.rules
-                    .iter()
-                    .chain(c.refused)
-                    .all(|r| !r.methods.is_empty()),
-                "{}",
-                c.id
-            );
+            assert!(!c.endpoints.is_empty() || c.graphql.is_some(), "{}", c.id);
+            for endpoint in c.endpoints {
+                assert!(!endpoint.methods.is_empty(), "{} {}", c.id, endpoint.path);
+                assert!(
+                    endpoint.methods.iter().all(|m| APP_METHODS.contains(m)),
+                    "{} {}",
+                    c.id,
+                    endpoint.path
+                );
+                // A pattern with its wildcards filled in is a valid path.
+                let filled = endpoint.path.replace("**", "x").replace('*', "x");
+                assert!(validate_path(&filled).is_ok(), "{} {}", c.id, endpoint.path);
+            }
+            // The test call is itself an allowed read.
+            let call = AppCall {
+                app: c.id.into(),
+                account: None,
+                method: c.test.method.into(),
+                path: c.test.path.into(),
+                query: BTreeMap::new(),
+                body: c.test.body.map(|body| serde_json::from_str(body).unwrap()),
+            };
+            assert_eq!(classify(c, &call), Ok(AppAction::Read), "{}", c.id);
         }
     }
 
@@ -865,12 +1031,25 @@ mod tests {
         assert_eq!(validate_param(&TOKEN, "short"), Err(TOKEN_SHAPE));
         assert_eq!(validate_param(&TOKEN, "abcd\nefgh"), Err(TOKEN_SHAPE));
         assert_eq!(validate_param(&TOKEN, "abcd\tefgh"), Err(TOKEN_SHAPE));
+        assert_eq!(validate_param(&TOKEN, "abcd efgh"), Err(TOKEN_SHAPE));
         assert_eq!(validate_param(&TOKEN, "abcdéfghij"), Err(TOKEN_SHAPE));
+        // M5: Trello quotes both values in its header, so neither may hold a
+        // quote or a backslash to break out of it.
+        for value in ["abcd\"efgh", "abcdefgh\", oauth_token=\"x", "abcd\\efgh"] {
+            assert_eq!(validate_param(&TOKEN, value), Err(TOKEN_SHAPE), "{value}");
+            assert_eq!(validate_param(&KEY, value), Err(TOKEN_SHAPE), "{value}");
+        }
+        assert_eq!(
+            validate_param(&KEY, "0123456789abcdef"),
+            Ok("0123456789abcdef".into())
+        );
         assert_eq!(
             validate_param(&TOKEN, &"x".repeat(4096)).map(|t| t.len()),
             Ok(4096)
         );
         assert_eq!(validate_param(&TOKEN, &"x".repeat(4097)), Err(TOKEN_SHAPE));
+        // M1: the copy names the minimum.
+        assert!(TOKEN_SHAPE.contains("8 characters"));
         assert_eq!(
             validate_param(&EMAIL, " me@acme.test "),
             Ok("me@acme.test".into())

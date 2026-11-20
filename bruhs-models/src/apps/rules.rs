@@ -1,18 +1,21 @@
 //! The call a bruh writes and the rules it follows before it reaches an app:
-//! method, path and query limits (D12), one normalized path for every check
-//! (F4), refused credential endpoints (F6), and how a call is classified
-//! (D5, D6, F5).
+//! method, path, query and account limits (D12), one normalized path for
+//! every check (F4), and the one entry point, [`classify`], that refuses any
+//! endpoint the app's allowlist doesn't name and returns the class of the
+//! rest (D5, D6, ruling A).
 
 use super::{
-    AppAction, AppConnector, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE, APP_GET_BODY, APP_METHOD,
-    APP_PATH, APP_PATH_ESCAPE, APP_QUERY_METHOD, APP_QUERY_TOO_LARGE, APP_QUERY_VALUES,
-    MAX_PATH_BYTES, MAX_QUERY_BYTES, MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
+    AppAction, AppConnector, APP_ACCOUNT_SHAPE, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE,
+    APP_GET_BODY, APP_GRAPHQL_SHAPE, APP_METHOD, APP_PATH, APP_PATH_ESCAPE, APP_QUERY_METHOD,
+    APP_QUERY_TOO_LARGE, APP_QUERY_VALUES, MAX_ACCOUNT_CHARS, MAX_PATH_BYTES, MAX_QUERY_BYTES,
+    MAX_QUERY_ITEM_BYTES, MAX_QUERY_PARAMS,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// The methods a call may use, upper case only.
+/// The methods a call may use. A bruh writes them upper case; [`classify`]
+/// compares them in any case, so a lower-case one can't slip past a rule.
 pub const APP_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 /// One `app_request` call as the bruh wrote it. There is no host and no
@@ -22,7 +25,7 @@ pub const APP_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 pub struct AppCall {
     pub app: String,
     /// Picks the account by its label or entry name when the bruh may use
-    /// more than one for this app.
+    /// more than one for this app. At most [`MAX_ACCOUNT_CHARS`].
     #[serde(default)]
     pub account: Option<String>,
     pub method: String,
@@ -33,8 +36,9 @@ pub struct AppCall {
     pub body: Option<Value>,
 }
 
-/// Checks a call's method, path, query and body against D12's limits. It
-/// doesn't look the app up; the gate does that next.
+/// Checks a call's method, path, query, body and account against D12's
+/// limits. It doesn't look the app up; the gate does that next, then
+/// [`classify`].
 pub fn validate_call(call: &AppCall) -> Result<(), &'static str> {
     if !APP_METHODS.contains(&call.method.as_str()) {
         return Err(APP_METHOD);
@@ -47,6 +51,12 @@ pub fn validate_call(call: &AppCall) -> Result<(), &'static str> {
         }
         if compact_len(body) > APP_BODY_MAX_BYTES {
             return Err(APP_BODY_TOO_LARGE);
+        }
+    }
+    if let Some(account) = &call.account {
+        let chars = account.chars().count();
+        if chars == 0 || chars > MAX_ACCOUNT_CHARS {
+            return Err(APP_ACCOUNT_SHAPE);
         }
     }
     Ok(())
@@ -87,11 +97,12 @@ pub fn validate_path(path: &str) -> Result<(), &'static str> {
 }
 
 /// The one path a call is classified, shown and sent on (F4). It starts with
-/// `/`, is at most [`MAX_PATH_BYTES`] of printable ASCII with no space, `?`,
-/// `#`, `\` or `@`, and has no empty, `.` or `..` segment. Escapes of
-/// unreserved characters (letters, digits, `-`, `.`, `_`, `~`) are decoded,
-/// so `%6Derge` is `merge` and `%2e%2e` is `..`; every other escape keeps its
-/// place with upper-case hex, and one hiding a separator or a control
+/// `/`, is at most [`MAX_PATH_BYTES`] of printable ASCII with no space or
+/// any of `?#\@;"{}<>|^` and backtick, and has no empty, `.` or `..`
+/// segment. Escapes of unreserved characters (letters, digits, `-`, `.`,
+/// `_`, `~`) are decoded, so `%6Derge` is `merge` and `%2e%2e` is `..`;
+/// every other escape keeps its place with upper-case hex. An escape hiding
+/// a separator, `;` (matrix parameters), `%` (a second decoding) or a control
 /// character is refused.
 pub fn normalize_path(path: &str) -> Result<String, &'static str> {
     if path.len() > MAX_PATH_BYTES || !path.starts_with('/') {
@@ -113,7 +124,7 @@ pub fn normalize_path(path: &str) -> Result<String, &'static str> {
             let decoded = high * 16 + low;
             if is_unreserved(decoded) {
                 out.push(char::from(decoded));
-            } else if matches!(decoded, b'/' | b'\\' | b'?' | b'#' | b'@')
+            } else if matches!(decoded, b'/' | b'\\' | b'?' | b'#' | b'@' | b';' | b'%')
                 || decoded.is_ascii_control()
             {
                 return Err(APP_PATH_ESCAPE);
@@ -122,7 +133,7 @@ pub fn normalize_path(path: &str) -> Result<String, &'static str> {
                 out.push(char::from(HEX_UPPER[usize::from(high)]));
                 out.push(char::from(HEX_UPPER[usize::from(low)]));
             }
-        } else if byte.is_ascii_graphic() && !matches!(byte, b'?' | b'#' | b'\\' | b'@') {
+        } else if byte.is_ascii_graphic() && !RAW_REFUSED.contains(&byte) {
             out.push(char::from(byte));
         } else {
             return Err(APP_PATH);
@@ -139,6 +150,11 @@ pub fn normalize_path(path: &str) -> Result<String, &'static str> {
     }
 }
 
+/// Printable bytes a path may not hold raw: the URL's own delimiters, `;`
+/// (servers strip matrix parameters before routing), and the characters a
+/// URL builder would escape, so the path shown is the path sent.
+const RAW_REFUSED: &[u8] = b"?#\\@;\"{}<>|^`";
+
 const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 fn hex_value(byte: u8) -> Option<u8> {
@@ -154,7 +170,7 @@ fn is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }
 
-/// Matches a rule's path pattern against a normalized path, segment by
+/// Matches an endpoint's path pattern against a normalized path, segment by
 /// segment: `*` matches any run of characters within one segment, a `**`
 /// segment matches any number of segments, and literal characters compare
 /// ASCII case-insensitively (F4).
@@ -208,58 +224,40 @@ fn segment_match(pattern: &[u8], text: &[u8]) -> bool {
         .is_some_and(|rest| rest.iter().all(|c| *c == b'*'))
 }
 
-/// Whether the call reaches an endpoint that makes, reads or changes a
-/// credential, key or webhook (F6). Such a call is refused at every level
-/// with [`super::APP_CREDENTIAL_REFUSED`], before any other rule. A path
-/// that doesn't normalize counts as refused.
-pub fn refused_endpoint(connector: &AppConnector, method: &str, path: &str) -> bool {
-    let Ok(path) = normalize_path(path) else {
-        return true;
-    };
-    connector
-        .refused
-        .iter()
-        .any(|rule| rule.methods.contains(&method) && path_glob(rule.path, &path))
-}
-
-/// What a call does (D5), on its normalized path: the connector's rules
-/// (first match wins), then its GraphQL rule (a POST is a read for a query
-/// and the rule's action otherwise; any other method is the rule's action,
-/// F5), then a GET is a read when the connector says so, and anything else
-/// is the connector's default write. The method must already be upper case
-/// ([`validate_call`]). A path that doesn't normalize counts as delivery,
-/// the strictest action, though [`validate_call`] refuses it first.
-pub fn classify(
-    connector: &AppConnector,
-    method: &str,
-    path: &str,
-    body: Option<&Value>,
-) -> AppAction {
-    let Ok(path) = normalize_path(path) else {
-        return AppAction::Delivery;
-    };
-    if let Some(rule) = connector
-        .rules
-        .iter()
-        .find(|rule| rule.methods.contains(&method) && path_glob(rule.path, &path))
-    {
-        return rule.action;
-    }
+/// The one entry point for what a call may do (ruling A). On the call's
+/// normalized path and its method in any case:
+///
+/// - The connector's GraphQL path takes only a POST with no URL query
+///   (`APP_GRAPHQL_SHAPE` otherwise). A query operation is a read; a
+///   mutation, subscription or anything unreadable is the rule's action.
+/// - Otherwise the first allowlisted endpoint that matches gives the class.
+/// - Anything else is refused with the connector's `unlisted` copy, so an
+///   alias, a credential endpoint or a new money action is never sent until
+///   the catalog names it.
+pub fn classify(connector: &AppConnector, call: &AppCall) -> Result<AppAction, &'static str> {
+    let method = call.method.to_ascii_uppercase();
+    let path = normalize_path(&call.path)?;
     if let Some(graphql) = connector
         .graphql
         .as_ref()
         .filter(|graphql| path_glob(graphql.path, &path))
     {
-        return match (method, graphql_operation(body)) {
-            ("POST", GraphqlOperation::Query) => AppAction::Read,
-            _ => graphql.mutation,
-        };
+        if method != "POST" || !call.query.is_empty() {
+            return Err(APP_GRAPHQL_SHAPE);
+        }
+        return Ok(match graphql_operation(call.body.as_ref()) {
+            GraphqlOperation::Query => AppAction::Read,
+            GraphqlOperation::Mutation => graphql.mutation,
+        });
     }
-    if method == "GET" && connector.get_is_read {
-        AppAction::Read
-    } else {
-        connector.default_write
-    }
+    connector
+        .endpoints
+        .iter()
+        .find(|endpoint| {
+            endpoint.methods.contains(&method.as_str()) && path_glob(endpoint.path, &path)
+        })
+        .map(|endpoint| endpoint.action)
+        .ok_or(connector.unlisted)
 }
 
 /// What a GraphQL document does (D6).
@@ -412,9 +410,35 @@ fn skip_selection(tokens: &[Token<'_>], mut at: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{connector, APP_CREDENTIAL_REFUSED, CONNECTORS};
+    use super::super::{connector, CONNECTORS};
     use super::*;
     use serde_json::json;
+
+    fn call(app: &str, method: &str, path: &str, body: Option<Value>) -> AppCall {
+        AppCall {
+            app: app.into(),
+            account: None,
+            method: method.into(),
+            path: path.into(),
+            query: BTreeMap::new(),
+            body,
+        }
+    }
+
+    fn outcome(
+        app: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<AppAction, &'static str> {
+        classify(connector(app).unwrap(), &call(app, method, path, body))
+    }
+
+    /// The class of an allowlisted call; panics with the refusal otherwise.
+    fn action(app: &str, method: &str, path: &str, body: Option<Value>) -> AppAction {
+        outcome(app, method, path, body)
+            .unwrap_or_else(|refusal| panic!("{app} {method} {path}: {refusal}"))
+    }
 
     #[test]
     fn paths_never_leave_the_app() {
@@ -471,6 +495,21 @@ mod tests {
         assert_eq!(normalize_path("/a/"), Err(APP_PATH));
         assert_eq!(normalize_path("/"), Err(APP_PATH));
         assert_eq!(normalize_path("/caf\u{e9}"), Err(APP_PATH));
+        // Ruling A, I1, M2, M6: matrix parameters, a second decoding and
+        // characters a URL builder would escape are refused, raw or escaped.
+        for raw in [
+            "/a;x/b", "/a/b;", "/a{b}", "/a<b>", "/a|b", "/a^b", "/a\"b", "/a`b",
+        ] {
+            assert_eq!(normalize_path(raw), Err(APP_PATH), "{raw}");
+        }
+        for escaped in [
+            "/a%3Bx/b",
+            "/a%3bx",
+            "/repos/o/r/pulls/1/%256Derge",
+            "/a%25",
+        ] {
+            assert_eq!(normalize_path(escaped), Err(APP_PATH_ESCAPE), "{escaped}");
+        }
     }
 
     #[test]
@@ -545,10 +584,17 @@ mod tests {
             input[field] = json!("x");
             assert!(serde_json::from_value::<AppCall>(input).is_err(), "{field}");
         }
-    }
-
-    fn action(app: &str, method: &str, path: &str, body: Option<Value>) -> AppAction {
-        classify(connector(app).unwrap(), method, path, body.as_ref())
+        // M7: the account a call names is 1 to 64 characters.
+        for (account, verdict) in [
+            ("ws", Ok(())),
+            (&*"é".repeat(MAX_ACCOUNT_CHARS), Ok(())),
+            (&*"a".repeat(MAX_ACCOUNT_CHARS + 1), Err(APP_ACCOUNT_SHAPE)),
+            ("", Err(APP_ACCOUNT_SHAPE)),
+        ] {
+            let mut named = call("GET", None);
+            named.account = Some(account.to_string());
+            assert_eq!(validate_call(&named), verdict, "{account}");
+        }
     }
 
     #[test]
@@ -682,7 +728,7 @@ mod tests {
 
     #[test]
     fn escapes_and_case_never_dodge_a_rule() {
-        // F4: the rules see the path the app routes.
+        // F4: the allowlist sees the path the app routes.
         assert_eq!(
             action("github", "PUT", "/repos/o/r/pulls/1/%6Derge", None),
             AppAction::Delivery
@@ -700,32 +746,30 @@ mod tests {
             action("github", "POST", "/graph%71l", Some(mutation)),
             AppAction::Delivery
         );
-        // F5: GraphQL over another method is the rule's action, even a GET.
+        // I2: methods match in any case, so a lower-case one can't slip by.
         assert_eq!(
-            action("github", "GET", "/graphql", None),
+            action("github", "put", "/repos/o/r/pulls/1/merge", None),
             AppAction::Delivery
         );
         assert_eq!(
-            action("linear", "GET", "/graphql", None),
+            action("slack", "get", "/api/chat.postMessage", None),
             AppAction::SendAsOwner
         );
+        assert!(outcome("github", "post", "/user/keys", Some(json!({}))).is_err());
         assert_eq!(
-            action("shopify", "GET", "/admin/api/2026-10/graphql.json", None),
-            AppAction::SendAsOwner
+            outcome("github", "HEAD", "/user", None),
+            Err(connector("github").unwrap().unlisted)
         );
+        // A path that doesn't normalize is refused with its reason.
+        assert_eq!(outcome("notion", "GET", "/%2e%2E/x", None), Err(APP_PATH));
         assert_eq!(
-            action(
-                "shopify",
+            outcome(
+                "jira",
                 "POST",
-                "/admin/api/2026-10/graphql.json",
-                Some(json!({"query": "{ shop { name } }"}))
+                "/rest/api/3/issue;x/X-1/comment",
+                Some(json!({}))
             ),
-            AppAction::Read
-        );
-        // A path that doesn't normalize is the strictest action.
-        assert_eq!(
-            action("notion", "GET", "/%2e%2E/x", None),
-            AppAction::Delivery
+            Err(APP_PATH)
         );
         // Globs: `**` takes any number of segments, literals ignore case.
         assert!(
@@ -741,36 +785,108 @@ mod tests {
     }
 
     #[test]
-    fn money_and_delivery_endpoints_are_classified_so() {
-        // F6 (b): access to code and repositories is delivery on GitHub.
-        for (method, path) in [
-            ("PUT", "/repos/o/r/collaborators/eve"),
-            ("PATCH", "/repos/o/r"),
-            ("DELETE", "/repos/o/r"),
-            ("POST", "/repos/o/r/transfer"),
-            ("POST", "/repos/o/r/dispatches"),
-            ("POST", "/repos/o/r/actions/workflows/ci.yml/dispatches"),
-            ("PUT", "/repos/o/r/pulls/1/update-branch"),
-            ("POST", "/repos/o/r/merges"),
-            ("DELETE", "/repos/o/r/contents/a.rs"),
-            ("POST", "/repos/o/r/git/refs"),
-            ("PATCH", "/repos/o/r/git/refs/heads/main"),
+    fn graphql_takes_its_document_only_from_a_post_body() {
+        let with_query = |app: &str, path: &str, key: &str, value: Value| {
+            let mut call = call(
+                app,
+                "POST",
+                path,
+                Some(json!({"query": "{ viewer { login } }"})),
+            );
+            call.query.insert(key.into(), value);
+            classify(connector(app).unwrap(), &call)
+        };
+        // C2: a mutation, operation name or variables in the URL query never ride along.
+        for (app, path) in [
+            ("github", "/graphql"),
+            ("linear", "/graphql"),
+            ("shopify", "/admin/api/2026-10/graphql.json"),
         ] {
             assert_eq!(
-                action("github", method, path, None),
-                AppAction::Delivery,
-                "{method} {path}"
+                with_query(app, path, "query", json!("mutation { a }")),
+                Err(APP_GRAPHQL_SHAPE),
+                "{app}"
+            );
+            assert_eq!(
+                with_query(app, path, "operationName", json!("B")),
+                Err(APP_GRAPHQL_SHAPE),
+                "{app}"
+            );
+            assert_eq!(
+                with_query(app, path, "variables", json!("{}")),
+                Err(APP_GRAPHQL_SHAPE),
+                "{app}"
+            );
+            // F5, now refused outright: no other method reaches GraphQL.
+            for method in ["GET", "PUT", "PATCH", "DELETE"] {
+                assert_eq!(
+                    outcome(app, method, path, None),
+                    Err(APP_GRAPHQL_SHAPE),
+                    "{app} {method}"
+                );
+            }
+            // No body, or one that isn't readable, is a mutation.
+            assert_ne!(action(app, "POST", path, None), AppAction::Read, "{app}");
+            assert_ne!(
+                action(app, "POST", path, Some(json!({"query": "{ a "}))),
+                AppAction::Read,
+                "{app}"
             );
         }
-        assert_eq!(action("github", "GET", "/repos/o/r", None), AppAction::Read);
-        // F6 (c): money and customer notices are sent as the owner.
+        // I5: Shopify's unversioned GraphQL path is GraphQL too.
+        let refund = json!({"query": "mutation { refundCreate(input: {}) { refund { id } } }"});
+        for path in [
+            "/admin/api/graphql.json",
+            "/admin/graphql.json",
+            "/admin/api/2025-01/graphql.json",
+        ] {
+            assert_eq!(
+                action("shopify", "POST", path, Some(refund.clone())),
+                AppAction::SendAsOwner,
+                "{path}"
+            );
+            assert_eq!(
+                outcome("shopify", "GET", path, None),
+                Err(APP_GRAPHQL_SHAPE),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            action(
+                "shopify",
+                "POST",
+                "/admin/api/graphql.json",
+                Some(json!({"query": "{ shop { name } }"}))
+            ),
+            AppAction::Read
+        );
+        assert_eq!(
+            action(
+                "github",
+                "POST",
+                "/graphql",
+                Some(json!({"query": "subscription { a }"}))
+            ),
+            AppAction::Delivery
+        );
+    }
+
+    #[test]
+    fn allowed_money_and_send_actions_are_sent_as_the_owner() {
         for (app, method, path) in [
+            ("stripe", "POST", "/v1/charges"),
+            ("stripe", "POST", "/v1/payment_intents"),
+            ("stripe", "POST", "/v1/payment_intents/pi_1/confirm"),
             ("stripe", "POST", "/v1/payment_intents/pi_1/capture"),
             ("stripe", "POST", "/v1/charges/ch_1/capture"),
             ("stripe", "POST", "/v1/subscriptions"),
             ("stripe", "POST", "/v1/subscriptions/sub_1"),
             ("stripe", "DELETE", "/v1/subscriptions/sub_1"),
+            ("stripe", "POST", "/v1/invoices/in_1/send"),
+            ("stripe", "POST", "/v1/invoices/in_1/pay"),
+            ("stripe", "POST", "/v1/invoices/in_1/finalize"),
             ("stripe", "POST", "/v1/invoices/in_1/void"),
+            ("stripe", "POST", "/v1/transfers"),
             ("stripe", "POST", "/v1/transfers/tr_1/reversals"),
             ("stripe", "POST", "/v1/credit_notes"),
             ("stripe", "POST", "/v1/payouts"),
@@ -784,24 +900,48 @@ mod tests {
             (
                 "shopify",
                 "POST",
-                "/admin/api/2026-10/customers/1/send_invite.json",
+                "/admin/api/2026-10/orders/1/refunds.json",
+            ),
+            ("shopify", "POST", "/admin/api/2026-10/fulfillments.json"),
+            (
+                "shopify",
+                "POST",
+                "/admin/api/2026-10/draft_orders/1/send_invoice.json",
             ),
             (
                 "shopify",
                 "POST",
-                "/admin/api/2026-10/orders/1/refunds.json",
+                "/admin/api/2026-10/customers/1/send_invite.json",
             ),
             ("jira", "POST", "/rest/api/3/issue"),
             ("jira", "POST", "/rest/api/3/issue/X-1/comment"),
+            ("jira", "POST", "/rest/api/3/issue/X-1/notify"),
             (
                 "hubspot",
                 "POST",
                 "/marketing/v3/transactional/single-email/send",
             ),
+            (
+                "hubspot",
+                "POST",
+                "/conversations/v3/conversations/threads/1/messages",
+            ),
             ("figma", "POST", "/v1/files/f/comments"),
+            ("figma", "POST", "/v1/files/f/comments/1/reactions"),
             ("clickup", "POST", "/api/v2/task/t/comment"),
+            ("clickup", "POST", "/api/v2/list/l/comment"),
+            (
+                "clickup",
+                "POST",
+                "/api/v3/workspaces/1/chat/channels/c/messages",
+            ),
             ("trello", "POST", "/1/cards/c/actions/comments"),
             ("todoist", "POST", "/api/v1/comments"),
+            ("github", "POST", "/repos/o/r/issues"),
+            ("github", "PATCH", "/repos/o/r/issues/1"),
+            ("github", "POST", "/repos/o/r/pulls/1/reviews"),
+            ("slack", "POST", "/api/chat.update"),
+            ("slack", "POST", "/api/reactions.add"),
         ] {
             assert_eq!(
                 action(app, method, path, Some(json!({}))),
@@ -809,56 +949,83 @@ mod tests {
                 "{app} {method} {path}"
             );
         }
-        assert_eq!(
-            action(
+        for (method, path) in [
+            ("PUT", "/repos/o/r/pulls/1/update-branch"),
+            ("POST", "/repos/o/r/git/refs"),
+            ("PATCH", "/repos/o/r/git/refs/heads/main"),
+        ] {
+            assert_eq!(
+                action("github", method, path, Some(json!({}))),
+                AppAction::Delivery,
+                "{method} {path}"
+            );
+        }
+        for (app, method, path, class) in [
+            (
                 "jira",
                 "POST",
                 "/rest/api/3/issue/bulkfetch",
-                Some(json!({}))
+                AppAction::Read,
             ),
-            AppAction::Read
-        );
-        assert_eq!(
-            action("jira", "PUT", "/rest/api/3/issue/X-1", Some(json!({}))),
-            AppAction::Write
-        );
-        assert_eq!(
-            action(
+            ("jira", "PUT", "/rest/api/3/issue/X-1", AppAction::Write),
+            (
+                "jira",
+                "POST",
+                "/rest/api/3/issue/X-1/transitions",
+                AppAction::Write,
+            ),
+            (
                 "hubspot",
                 "POST",
                 "/crm/v3/objects/contacts/search",
-                Some(json!({}))
+                AppAction::Read,
             ),
-            AppAction::Read
-        );
-        assert_eq!(
-            action(
+            (
+                "hubspot",
+                "PATCH",
+                "/crm/v3/objects/contacts/1",
+                AppAction::Write,
+            ),
+            (
                 "airtable",
                 "POST",
                 "/v0/app1/tbl1/listRecords",
-                Some(json!({}))
+                AppAction::Read,
             ),
-            AppAction::Read
-        );
-        assert_eq!(
-            action("airtable", "PATCH", "/v0/app1/tbl1", Some(json!({}))),
-            AppAction::Write
-        );
-        assert_eq!(
-            action(
-                "clickup",
+            ("airtable", "PATCH", "/v0/app1/tbl1", AppAction::Write),
+            ("todoist", "POST", "/api/v1/tasks/1/close", AppAction::Write),
+            ("trello", "PUT", "/1/cards/c", AppAction::Write),
+            ("clickup", "PUT", "/api/v2/task/t", AppAction::Write),
+            (
+                "shopify",
+                "PUT",
+                "/admin/api/2026-10/products/1.json",
+                AppAction::Write,
+            ),
+            (
+                "cloudflare",
                 "POST",
-                "/api/v3/workspaces/1/chat/channels/c/messages",
-                Some(json!({}))
+                "/client/v4/zones/z/dns_records",
+                AppAction::Write,
             ),
-            AppAction::SendAsOwner
-        );
-        // Unknown endpoints fall back to the connector's default, never to a read.
+            ("figma", "GET", "/v1/files/f/nodes", AppAction::Read),
+        ] {
+            assert_eq!(
+                action(app, method, path, Some(json!({}))),
+                class,
+                "{app} {method} {path}"
+            );
+        }
+        // Nothing unlisted is ever a read, or anything else.
         for connector in &CONNECTORS {
-            for method in ["POST", "PUT", "PATCH", "DELETE"] {
-                assert_ne!(
-                    classify(connector, method, "/no/such/endpoint", None),
-                    AppAction::Read,
+            for method in APP_METHODS {
+                let refused = classify(
+                    connector,
+                    &call(connector.id, method, "/no/such/endpoint", None),
+                );
+                assert_eq!(
+                    refused,
+                    Err(connector.unlisted),
                     "{} {method}",
                     connector.id
                 );
@@ -866,109 +1033,319 @@ mod tests {
         }
     }
 
+    /// Endpoints that alias an allowlisted one, make, read or change a
+    /// credential, key or webhook, or move money, code or access in ways
+    /// the catalog doesn't name yet (F6, review C1, C3, I3, I4). Each must be
+    /// refused; the allowlist refuses them by construction.
+    const REFUSED: &[(&str, &str, &str)] = &[
+        // C1: GitHub's id aliases.
+        ("github", "PUT", "/repositories/1/pulls/1/merge"),
+        ("github", "PUT", "/repositories/1/contents/a.rs"),
+        ("github", "GET", "/repositories/1/issues"),
+        ("github", "POST", "/repositories/1/keys"),
+        ("github", "POST", "/repositories/1/hooks"),
+        ("github", "PUT", "/repositories/1/actions/secrets/X"),
+        ("github", "PUT", "/repositories/1/environments/p/secrets/X"),
+        ("github", "POST", "/organizations/1/hooks"),
+        (
+            "github",
+            "POST",
+            "/organizations/1/actions/runners/registration-token",
+        ),
+        // F6 (a): GitHub keys, hooks, secrets and runner tokens.
+        ("github", "POST", "/user/keys"),
+        ("github", "POST", "/user/gpg_keys"),
+        ("github", "POST", "/user/ssh_signing_keys"),
+        ("github", "POST", "/repos/o/r/keys"),
+        ("github", "POST", "/repos/o/r/hooks"),
+        ("github", "GET", "/repos/o/r/hooks"),
+        ("github", "PATCH", "/repos/o/r/hooks/1/config"),
+        ("github", "POST", "/orgs/o/hooks"),
+        ("github", "PATCH", "/orgs/o/hooks/1"),
+        ("github", "PUT", "/repos/o/r/actions/secrets/X"),
+        ("github", "PUT", "/orgs/o/actions/secrets/X"),
+        ("github", "PUT", "/repos/o/r/environments/prod/secrets/X"),
+        ("github", "PUT", "/repos/o/r/dependabot/secrets/X"),
+        ("github", "PUT", "/orgs/o/dependabot/secrets/X"),
+        ("github", "PUT", "/user/codespaces/secrets/X"),
+        (
+            "github",
+            "POST",
+            "/repos/o/r/actions/runners/registration-token",
+        ),
+        (
+            "github",
+            "POST",
+            "/orgs/o/actions/runners/registration-token",
+        ),
+        ("github", "POST", "/repos/o/r/actions/runners/remove-token"),
+        (
+            "github",
+            "POST",
+            "/repos/o/r/actions/runners/generate-jitconfig",
+        ),
+        // I3: GitHub.
+        ("github", "PUT", "/repos/o/r/codespaces/secrets/X"),
+        ("github", "PUT", "/orgs/o/codespaces/secrets/X"),
+        ("github", "POST", "/app-manifests/c/conversions"),
+        ("github", "POST", "/orgs/o/personal-access-token-requests"),
+        ("github", "POST", "/orgs/o/personal-access-tokens/1"),
+        ("github", "POST", "/orgs/o/private-registries"),
+        ("github", "PUT", "/orgs/o/private-registries/r"),
+        (
+            "github",
+            "POST",
+            "/enterprises/e/actions/runners/registration-token",
+        ),
+        (
+            "github",
+            "POST",
+            "/enterprises/e/actions/runners/remove-token",
+        ),
+        (
+            "github",
+            "POST",
+            "/enterprises/e/actions/runners/generate-jitconfig",
+        ),
+        ("github", "PUT", "/repos/o/r/actions/oidc/customization/sub"),
+        // F6 (b) and I4: GitHub access, code and run changes not named yet.
+        ("github", "PUT", "/repos/o/r/collaborators/eve"),
+        ("github", "PATCH", "/repos/o/r"),
+        ("github", "DELETE", "/repos/o/r"),
+        ("github", "POST", "/repos/o/r/transfer"),
+        ("github", "POST", "/repos/o/r/dispatches"),
+        (
+            "github",
+            "POST",
+            "/repos/o/r/actions/workflows/ci.yml/dispatches",
+        ),
+        ("github", "POST", "/repos/o/r/merges"),
+        ("github", "DELETE", "/repos/o/r/contents/a.rs"),
+        ("github", "DELETE", "/repos/o/r/git/refs/heads/main"),
+        ("github", "POST", "/repos/o/r/merge-upstream"),
+        ("github", "POST", "/repos/o/r/branches/main/rename"),
+        ("github", "POST", "/repos/o/r/releases"),
+        ("github", "PUT", "/repos/o/r/branches/main/protection"),
+        (
+            "github",
+            "POST",
+            "/repos/o/r/branches/main/protection/enforce_admins",
+        ),
+        (
+            "github",
+            "DELETE",
+            "/repos/o/r/branches/main/protection/required_signatures",
+        ),
+        ("github", "POST", "/repos/o/r/deployments"),
+        ("github", "POST", "/repos/o/r/actions/runs/1/rerun"),
+        (
+            "github",
+            "POST",
+            "/repos/o/r/actions/runs/1/rerun-failed-jobs",
+        ),
+        ("github", "POST", "/repos/o/r/actions/runs/1/approve"),
+        ("github", "PUT", "/orgs/o/memberships/eve"),
+        ("github", "PUT", "/orgs/o/teams/t/repos/o/r"),
+        ("github", "PUT", "/orgs/o/outside_collaborators/eve"),
+        ("github", "PATCH", "/repos/o/r/invitations/1"),
+        ("github", "GET", "/repos/o/r/tarball/main"),
+        ("github", "GET", "/repos/o/r/actions/runs/1/logs"),
+        // F6 (a) and I3: Cloudflare.
+        ("cloudflare", "POST", "/client/v4/user/tokens"),
+        ("cloudflare", "PUT", "/client/v4/user/tokens/t"),
+        ("cloudflare", "PUT", "/client/v4/user/tokens/t/value"),
+        ("cloudflare", "POST", "/client/v4/accounts/a/tokens"),
+        ("cloudflare", "PUT", "/client/v4/accounts/a/tokens/t"),
+        ("cloudflare", "PUT", "/client/v4/accounts/a/tokens/t/value"),
+        (
+            "cloudflare",
+            "POST",
+            "/client/v4/accounts/a/alerting/v3/destinations/webhooks",
+        ),
+        (
+            "cloudflare",
+            "POST",
+            "/client/v4/accounts/a/access/service_tokens",
+        ),
+        (
+            "cloudflare",
+            "POST",
+            "/client/v4/accounts/a/access/service_tokens/t/rotate",
+        ),
+        (
+            "cloudflare",
+            "POST",
+            "/client/v4/accounts/a/access/service_tokens/t/refresh",
+        ),
+        (
+            "cloudflare",
+            "POST",
+            "/client/v4/zones/z/access/service_tokens",
+        ),
+        (
+            "cloudflare",
+            "GET",
+            "/client/v4/accounts/a/cfd_tunnel/t/token",
+        ),
+        (
+            "cloudflare",
+            "PUT",
+            "/client/v4/accounts/a/workers/scripts/s/secrets",
+        ),
+        ("cloudflare", "PUT", "/client/v4/accounts/a/stream/webhook"),
+        ("cloudflare", "POST", "/client/v4/accounts/a/logpush/jobs"),
+        ("cloudflare", "POST", "/client/v4/zones/z/logpush/jobs"),
+        // F6 (a), I3 and I4: Stripe.
+        ("stripe", "POST", "/v1/webhook_endpoints"),
+        ("stripe", "POST", "/v1/webhook_endpoints/we_1"),
+        ("stripe", "POST", "/v1/ephemeral_keys"),
+        ("stripe", "POST", "/v1/apps/secrets"),
+        ("stripe", "GET", "/v1/apps/secrets/find"),
+        ("stripe", "POST", "/v1/terminal/connection_tokens"),
+        ("stripe", "POST", "/v1/accounts/acct_1/login_links"),
+        ("stripe", "POST", "/v1/account_links"),
+        ("stripe", "POST", "/v1/account_sessions"),
+        ("stripe", "POST", "/v1/billing_portal/sessions"),
+        ("stripe", "POST", "/v2/core/event_destinations"),
+        ("stripe", "GET", "/v1/issuing/cards/ic_1"),
+        ("stripe", "POST", "/v1/charges/ch_1/refund"),
+        ("stripe", "POST", "/v1/charges/ch_1/refunds"),
+        ("stripe", "POST", "/v1/topups"),
+        ("stripe", "POST", "/v1/treasury/outbound_payments"),
+        ("stripe", "POST", "/v1/treasury/outbound_transfers"),
+        ("stripe", "POST", "/v1/payouts/po_1/reverse"),
+        ("stripe", "POST", "/v1/application_fees/fee_1/refund"),
+        ("stripe", "POST", "/v1/application_fees/fee_1/refunds"),
+        ("stripe", "POST", "/v1/subscription_items"),
+        ("stripe", "DELETE", "/v1/subscription_items/si_1"),
+        ("stripe", "POST", "/v1/subscription_schedules"),
+        (
+            "stripe",
+            "POST",
+            "/v1/subscription_schedules/sub_sched_1/release",
+        ),
+        ("stripe", "POST", "/v1/quotes/qt_1/accept"),
+        (
+            "stripe",
+            "POST",
+            "/v1/payment_intents/pi_1/increment_authorization",
+        ),
+        // F6 (a), I3 and I4: Shopify, versioned and not.
+        (
+            "shopify",
+            "POST",
+            "/admin/api/2026-10/storefront_access_tokens.json",
+        ),
+        ("shopify", "POST", "/admin/api/2026-10/webhooks.json"),
+        ("shopify", "PUT", "/admin/api/2026-10/webhooks/1.json"),
+        ("shopify", "POST", "/admin/webhooks.json"),
+        ("shopify", "POST", "/admin/api/2026-10/webhooks"),
+        ("shopify", "POST", "/admin/storefront_access_tokens.json"),
+        ("shopify", "POST", "/admin/orders.json"),
+        (
+            "shopify",
+            "POST",
+            "/admin/api/2026-10/customers/1/account_activation_url.json",
+        ),
+        (
+            "shopify",
+            "POST",
+            "/admin/api/2026-10/carrier_services.json",
+        ),
+        (
+            "shopify",
+            "POST",
+            "/admin/api/2026-10/fulfillment_services.json",
+        ),
+        (
+            "shopify",
+            "POST",
+            "/admin/api/2026-10/draft_orders/1/complete.json",
+        ),
+        ("shopify", "POST", "/admin/api/2026-10/gift_cards.json"),
+        // F6 (a) and I3: Slack.
+        ("slack", "POST", "/api/apps.connections.open"),
+        ("slack", "GET", "/api/apps.manifest.export"),
+        ("slack", "GET", "/api/apps.permissions.list"),
+        ("slack", "POST", "/api/oauth.v2.access"),
+        ("slack", "POST", "/api/openid.connect.token"),
+        ("slack", "POST", "/api/auth.revoke"),
+        ("slack", "POST", "/api/tooling.tokens.rotate"),
+        ("slack", "POST", "/api/admin.apps.approve"),
+        ("slack", "GET", "/api/admin.apps.requests.list"),
+        ("slack", "GET", "/api/rtm.connect"),
+        ("slack", "GET", "/api/rtm.start"),
+        // F6 (a), I3 and I4: Airtable.
+        ("airtable", "POST", "/v0/bases/app1/webhooks"),
+        ("airtable", "GET", "/v0/bases/app1/webhooks"),
+        ("airtable", "POST", "/v0/bases/app1/webhooks/w/refresh"),
+        (
+            "airtable",
+            "POST",
+            "/v0/bases/app1/webhooks/w/enableNotifications",
+        ),
+        ("airtable", "POST", "/v0/app1/tbl1/rec1/comments"),
+        // F6 (a): Figma, Trello, ClickUp.
+        ("figma", "POST", "/v2/webhooks"),
+        ("figma", "PUT", "/v2/webhooks/1"),
+        ("trello", "POST", "/1/webhooks"),
+        ("trello", "PUT", "/1/webhooks/1"),
+        ("trello", "POST", "/1/tokens/t/webhooks"),
+        ("trello", "GET", "/1/tokens/t"),
+        ("trello", "GET", "/1/members/me/tokens"),
+        ("clickup", "POST", "/api/v2/team/1/webhook"),
+        ("clickup", "PUT", "/api/v2/webhook/1"),
+        ("clickup", "POST", "/api/v2/comment/1/reply"),
+        // C3 and I4: Jira's other roots, webhooks, Service Management and Confluence.
+        ("jira", "POST", "/rest/api/2/issue/X-1/comment"),
+        ("jira", "POST", "/rest/api/2/issue/X-1/notify"),
+        ("jira", "POST", "/rest/api/2/issue"),
+        ("jira", "POST", "/rest/api/latest/issue/X-1/comment"),
+        ("jira", "GET", "/rest/api/2/myself"),
+        ("jira", "POST", "/rest/api/3/webhook"),
+        ("jira", "PUT", "/rest/api/3/webhook/refresh"),
+        ("jira", "POST", "/rest/webhooks/1.0/webhook"),
+        ("jira", "PUT", "/rest/webhooks/1.0/webhook/1"),
+        ("jira", "POST", "/rest/servicedeskapi/request/1/comment"),
+        ("jira", "POST", "/wiki/rest/api/content/1/child/comment"),
+        ("jira", "POST", "/wiki/api/v2/footer-comments"),
+        // I4: Todoist sync, HubSpot email paths not named yet.
+        ("todoist", "POST", "/api/v1/sync"),
+        ("todoist", "POST", "/rest/v2/comments"),
+        ("hubspot", "POST", "/marketing/v4/email/single-send"),
+        ("hubspot", "POST", "/automation/v4/sequences/enrollments"),
+        // I1: matrix parameters never reach a router that strips them.
+        ("jira", "POST", "/rest/api/3/webhook;x"),
+        (
+            "hubspot",
+            "POST",
+            "/marketing/v3/transactional/single-email/send;x",
+        ),
+        // F4: escapes and case don't get round it.
+        ("github", "POST", "/user/%6Beys"),
+        ("stripe", "POST", "/V1/WEBHOOK_ENDPOINTS"),
+        ("notion", "GET", "/a/../b"),
+    ];
+
     #[test]
-    fn credential_key_and_webhook_endpoints_are_refused() {
-        let refused = |app: &str, method: &str, path: &str| {
-            refused_endpoint(connector(app).unwrap(), method, path)
-        };
-        for (app, method, path) in [
-            ("github", "POST", "/user/keys"),
-            ("github", "POST", "/user/gpg_keys"),
-            ("github", "POST", "/user/ssh_signing_keys"),
-            ("github", "POST", "/repos/o/r/keys"),
-            ("github", "POST", "/repos/o/r/hooks"),
-            ("github", "PATCH", "/repos/o/r/hooks/1/config"),
-            ("github", "POST", "/orgs/o/hooks"),
-            ("github", "PATCH", "/orgs/o/hooks/1"),
-            ("github", "PUT", "/repos/o/r/actions/secrets/TOKEN"),
-            ("github", "PUT", "/orgs/o/actions/secrets/TOKEN"),
-            (
-                "github",
-                "PUT",
-                "/repos/o/r/environments/prod/secrets/TOKEN",
-            ),
-            ("github", "PUT", "/repos/o/r/dependabot/secrets/TOKEN"),
-            ("github", "PUT", "/orgs/o/dependabot/secrets/TOKEN"),
-            ("github", "PUT", "/user/codespaces/secrets/TOKEN"),
-            (
-                "github",
-                "POST",
-                "/repos/o/r/actions/runners/registration-token",
-            ),
-            (
-                "github",
-                "POST",
-                "/orgs/o/actions/runners/registration-token",
-            ),
-            ("github", "POST", "/repos/o/r/actions/runners/remove-token"),
-            (
-                "github",
-                "POST",
-                "/repos/o/r/actions/runners/generate-jitconfig",
-            ),
-            (
-                "github",
-                "POST",
-                "/orgs/o/actions/runners/generate-jitconfig",
-            ),
-            ("cloudflare", "POST", "/client/v4/user/tokens"),
-            ("cloudflare", "PUT", "/client/v4/user/tokens/t/value"),
-            ("cloudflare", "POST", "/client/v4/accounts/a/tokens"),
-            ("cloudflare", "PUT", "/client/v4/accounts/a/tokens/t/value"),
-            (
-                "cloudflare",
-                "POST",
-                "/client/v4/accounts/a/alerting/v3/destinations/webhooks",
-            ),
-            (
-                "shopify",
-                "POST",
-                "/admin/api/2026-10/storefront_access_tokens.json",
-            ),
-            ("shopify", "POST", "/admin/api/2026-10/webhooks.json"),
-            ("shopify", "PUT", "/admin/api/2026-10/webhooks/1.json"),
-            ("stripe", "POST", "/v1/webhook_endpoints"),
-            ("stripe", "POST", "/v1/webhook_endpoints/we_1"),
-            ("stripe", "POST", "/v1/ephemeral_keys"),
-            ("stripe", "POST", "/v1/apps/secrets"),
-            ("stripe", "GET", "/v1/apps/secrets/find"),
-            ("slack", "POST", "/api/apps.connections.open"),
-            ("slack", "GET", "/api/apps.manifest.export"),
-            ("slack", "POST", "/api/oauth.v2.access"),
-            ("slack", "POST", "/api/openid.connect.token"),
-            ("slack", "POST", "/api/auth.revoke"),
-            ("airtable", "POST", "/v0/bases/app1/webhooks"),
-            ("figma", "POST", "/v2/webhooks"),
-            ("figma", "PUT", "/v2/webhooks/1"),
-            ("trello", "POST", "/1/webhooks"),
-            ("trello", "PUT", "/1/webhooks/1"),
-            ("trello", "POST", "/1/tokens/t/webhooks"),
-            ("clickup", "POST", "/api/v2/team/1/webhook"),
-            ("clickup", "PUT", "/api/v2/webhook/1"),
-            ("jira", "POST", "/rest/api/3/webhook"),
-            ("jira", "PUT", "/rest/api/3/webhook/refresh"),
-            // Escapes and case don't get round it (F4).
-            ("github", "POST", "/user/%6Beys"),
-            ("stripe", "POST", "/V1/WEBHOOK_ENDPOINTS"),
-            // Nor does a path that doesn't normalize.
-            ("notion", "GET", "/a/../b"),
-        ] {
-            assert!(refused(app, method, path), "{app} {method} {path}");
+    fn credential_alias_and_unnamed_endpoints_are_refused() {
+        for (app, method, path) in REFUSED {
+            let body = (!matches!(*method, "GET" | "DELETE")).then(|| json!({}));
+            let result = outcome(app, method, path, body);
+            assert!(
+                result.is_err(),
+                "{app} {method} {path} classified as {result:?}"
+            );
         }
-        for (app, method, path) in [
-            ("github", "GET", "/user"),
-            ("github", "GET", "/repos/o/r/hooks"),
-            ("github", "DELETE", "/repos/o/r/hooks/1"),
-            ("github", "GET", "/repos/o/r/actions/secrets"),
-            ("cloudflare", "GET", "/client/v4/user/tokens/verify"),
-            ("slack", "POST", "/api/chat.postMessage"),
-            ("slack", "GET", "/api/auth.test"),
-            ("stripe", "GET", "/v1/webhook_endpoints"),
-            ("notion", "POST", "/v1/search"),
-        ] {
-            assert!(!refused(app, method, path), "{app} {method} {path}");
-        }
-        assert!(APP_CREDENTIAL_REFUSED.ends_with("Ask the owner."));
+        // A refused endpoint names its app; a bad path names the path.
+        assert_eq!(
+            outcome("github", "POST", "/user/keys", Some(json!({}))),
+            Err("Bruhs can't call that endpoint of GitHub yet.")
+        );
+        assert_eq!(
+            outcome("jira", "POST", "/rest/api/3/webhook;x", Some(json!({}))),
+            Err(APP_PATH)
+        );
     }
 
     #[test]
