@@ -1,0 +1,23 @@
+[package]
+name = "bruhs-backup"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# The BRUHSBAK container: header, Argon2id key, AES-256-GCM STREAM writer and
+# reader, and sealed sets. Wasm-safe, so the browser and the server share one
+# format: no I/O beyond `Read`/`Write`, and no `getrandom` (callers pass the
+# random bytes).
+
+[dependencies]
+aead = { version = "0.5", default-features = false, features = ["alloc", "stream"] }
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "zeroize"] }
+thiserror = { workspace = true }
+zeroize = { workspace = true }

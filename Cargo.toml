@@ -26,6 +26,7 @@ members = [
     "bruhs-ui",
     "bruhs-mcp",
     "bruhs-capture",
+    "bruhs-backup",
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
@@ -44,6 +45,7 @@ rust-version = "1.98"
 # on top (features are additive across the workspace).
 [workspace.dependencies]
 # Internal crates
+bruhs-backup = { path = "bruhs-backup" }
 bruhs-core = { path = "bruhs-core" }
 bruhs-models = { path = "bruhs-models" }
 bruhs-ui = { path = "bruhs-ui" }
@@ -80,6 +82,7 @@ rusqlite = { version = "=0.41.0", features = ["bundled", "hooks", "limits"] }
 directories = "6"
 rand = "0.9"
 sha2 = "0.10"
+zeroize = "1"
 cpal = "0.15"
 # OS credential stores. Without a backend feature keyring silently falls back
 # to an in-memory mock, so every platform the app runs on is listed. The Linux
@@ -154,3 +157,23 @@ cast-lossless = "warn"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Backup keys come from Argon2id at 64 to 256 MiB, which unoptimized code
+# runs 10 to 50 times slower. Debug builds (tests, `trunk build` without
+# --release) therefore optimize the KDF and AES-GCM crates.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.universal-hash]
+opt-level = 3
+[profile.dev.package.ctr]
+opt-level = 3
