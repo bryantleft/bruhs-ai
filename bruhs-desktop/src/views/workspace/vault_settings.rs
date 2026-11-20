@@ -14,7 +14,7 @@ use crate::app_state::spawn_tokio;
 use crate::server_client::ServerError;
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
-    bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
+    bruh_choice_label, delete_question, fixed_hint_after, form_create, form_fields, form_for,
     form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
     row_label, vault_row, wait_reason, FormField, FormKind, FormScope, FormSource, LoginFields,
     LoginMeta, VaultBusy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultNotice,
@@ -219,6 +219,8 @@ pub(super) struct VaultSettings {
     pub(super) rows_focus: HashMap<String, RowFocus>,
     next_serial: u64,
     task: Option<Task<()>>,
+    /// A quiet listing read for the other section's change (BC M4).
+    reread_task: Option<Task<()>>,
     /// Every request, as `METHOD path`; tests never reach a server.
     #[cfg(test)]
     vault_requests: Vec<String>,
@@ -262,6 +264,7 @@ impl VaultSettings {
             rows_focus: HashMap::new(),
             next_serial: 0,
             task: None,
+            reread_task: None,
             #[cfg(test)]
             vault_requests: Vec::new(),
             #[cfg(test)]
@@ -426,7 +429,7 @@ impl VaultSettings {
             .entries
             .iter()
             .find(|entry| &entry.id == id)
-            .map(|entry| delete_entry_confirm(&entry.name))
+            .map(delete_question)
     }
 
     fn row_focus(&mut self, id: &str, cx: &mut Context<'_, Self>) -> &RowFocus {
@@ -807,6 +810,40 @@ impl VaultSettings {
         cx.notify();
     }
 
+    /// The Apps section changed an app token (final review BC M4): read
+    /// the listing again. A loaded page keeps its open form and rows; one
+    /// that isn't loaded reloads in full, and one not shown yet waits to be.
+    /// Waits out a running change.
+    pub(super) fn reread(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        match self.load {
+            // Not shown yet: it reads the listing when it shows.
+            Load::Idle => return,
+            Load::Ready => {}
+            _ => {
+                self.refresh(window, cx);
+                return;
+            }
+        }
+        if self.busy != VaultBusy::Idle {
+            return;
+        }
+        self.record("GET /api/vault".into());
+        if cfg!(test) {
+            return;
+        }
+        let client = self.client.clone();
+        let operation = spawn_tokio(cx, async move { client.vault_listing().await });
+        self.reread_task = Some(cx.spawn(async move |this, cx| {
+            let result = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                if let (Ok(listing), VaultBusy::Idle) = (result, this.busy) {
+                    this.listing = listing;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     /// A change that got no answer may have landed (rereview M5): the list
     /// reloads, which closes any form, and the page says so, as the web
     /// does.
@@ -874,6 +911,18 @@ impl VaultSettings {
         cx: &mut Context<'_, Self>,
     ) {
         self.busy = VaultBusy::Idle;
+        // An app token that went, or may have, leaves the Apps section too
+        // (final review BC M4).
+        let app_token = self.listing.entries.iter().any(|entry| {
+            entry.id == id && matches!(entry.kind, bruhs_models::vault::VaultKind::AppToken(_))
+        });
+        let gone = match &result {
+            Ok(()) => true,
+            Err(error) => error.is_not_found() || error.vault_may_have_landed(),
+        };
+        if app_token && gone {
+            cx.emit(CredentialsChanged);
+        }
         match result {
             Ok(()) => self.forget(&id, window, cx),
             Err(error) if error.is_not_found() => self.forget(&id, window, cx),
@@ -1659,6 +1708,12 @@ impl VaultSettings {
     }
 }
 
+/// A change on one of the Vault and Apps sections that the other shows:
+/// Workspace has the other read its listing again (final review BC M4).
+pub(super) struct CredentialsChanged;
+
+impl gpui::EventEmitter<CredentialsChanged> for VaultSettings {}
+
 impl Render for VaultSettings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         if self.load == Load::Idle {
@@ -2084,6 +2139,53 @@ mod tests {
         assert!(!requests(&view, cx)
             .iter()
             .any(|line| line.starts_with("PUT")));
+    }
+
+    /// Final review BC M4: deleting an app token asks the Apps page's
+    /// Disconnect question and tells the Apps section; deleting a key tells
+    /// it nothing. A change from Apps has a loaded page read again quietly.
+    #[gpui::test]
+    fn an_app_token_delete_warns_and_tells_the_apps_section(cx: &mut TestAppContext) {
+        let mut fixture = listing();
+        fixture.entries.push(VaultEntry {
+            id: "v1-app".into(),
+            name: "GitHub octo".into(),
+            scope: CredentialScope::Global,
+            kind: VaultKind::AppToken(bruhs_models::vault::AppTokenMeta {
+                app: "github".into(),
+                account: "octo".into(),
+                params: std::collections::BTreeMap::new(),
+            }),
+            state: SavedCredentialState::Saved,
+            attention: None,
+        });
+        let (view, cx) = page(cx, Some(fixture));
+        let told = Rc::new(std::cell::Cell::new(0));
+        let count = told.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&view, move |_, _: &super::CredentialsChanged, _| {
+                count.set(count.get() + 1);
+            })
+            .detach();
+        });
+        click(cx, "desktop-vault-delete-v1-app");
+        assert_eq!(
+            view.read_with(cx, |view, _| view.confirm_line()),
+            Some(bruhs_models::apps::disconnect_confirm("GitHub octo"))
+        );
+        deleted_answer(&view, cx, "v1-deploy", Ok(()));
+        assert_eq!(told.get(), 0, "a key is not the Apps section's");
+        deleted_answer(&view, cx, "v1-app", Ok(()));
+        assert_eq!(told.get(), 1);
+
+        let before = requests(&view, cx).len();
+        cx.update(|window, cx| view.update(cx, |view, cx| view.reread(window, cx)));
+        cx.run_until_parked();
+        assert_eq!(requests(&view, cx)[before..], ["GET /api/vault"]);
+        assert!(
+            view.read_with(cx, |view, _| view.load == super::Load::Ready),
+            "a quiet read keeps the page loaded"
+        );
     }
 
     /// An app token is the Apps page's and a newer Bruhs' entry isn't read

@@ -30,7 +30,9 @@ use bruhs_models::vault::{
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
 
-use super::vault_settings::{focus_after_render, focus_on_page, unique_id, BUTTON, DANGER_BUTTON};
+use super::vault_settings::{
+    focus_after_render, focus_on_page, unique_id, CredentialSync, BUTTON, DANGER_BUTTON,
+};
 use crate::ui::Switch;
 use form::{ConnectFormView, ReplaceFormView};
 
@@ -124,9 +126,19 @@ struct Page {
     /// The whole page, for the late-answer focus guard.
     page_ref: NodeRef<html::Div>,
     refresh: Callback<()>,
+    /// The Vault section on the same Settings page, when there is one.
+    sync: Option<CredentialSync>,
 }
 
 impl Page {
+    /// An account was added, replaced or removed, or may have been: the
+    /// Vault section reads its listing again (final review BC M4).
+    fn vault_changed(self) {
+        if let Some(sync) = self.sync {
+            CredentialSync::bump(sync.vault);
+        }
+    }
+
     fn ready(self) -> bool {
         self.load.with(|load| *load == Load::Ready)
     }
@@ -153,6 +165,7 @@ impl Page {
     fn unanswered(self) {
         self.refresh.try_run(());
         self.notice.try_set(Some(Notice::MayHaveChanged));
+        self.vault_changed();
     }
 }
 
@@ -221,8 +234,29 @@ pub fn AppsSettings() -> impl IntoView {
         wait,
         page_ref,
         refresh,
+        sync: use_context::<CredentialSync>(),
     };
     Effect::new(move |_| refresh.run(()));
+    // The Vault deleted an app token: read the listing again. A loaded page
+    // keeps its open form and rows; one that isn't loaded reloads in full.
+    if let Some(sync) = page.sync {
+        CredentialSync::on_bump(sync.apps, move || {
+            if load.with_untracked(|load| *load != Load::Ready) {
+                refresh.run(());
+                return;
+            }
+            if busy.get_untracked() != Busy::Idle {
+                return;
+            }
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(next) = crate::api::apps_listing().await {
+                    if busy.try_get_untracked() == Some(Busy::Idle) {
+                        listing.try_set(next);
+                    }
+                }
+            });
+        });
+    }
     let connectors: &'static [AppConnector] = &CONNECTORS;
     let mailboxes = move || {
         let generation = generation.get();
@@ -331,6 +365,7 @@ fn AppSection(app: &'static AppConnector, page: Page) -> impl IntoView {
             listing.accounts.push(account);
         });
         page.notice.try_set(Some(Notice::Done(line)));
+        page.vault_changed();
     });
     view! {
         <section data-apps-app=app.id aria-labelledby=heading class="min-w-0 py-4">
@@ -413,6 +448,7 @@ fn AccountRow(
                 bruh.apps.retain(|grant| *grant != id);
             }
         });
+        page.vault_changed();
         if held {
             focus_after_render(connect_ref);
         }
@@ -494,6 +530,7 @@ fn AccountRow(
         });
         tested.try_set(None);
         page.notice.try_set(Some(Notice::Done(line)));
+        page.vault_changed();
     });
     view! {
         <article data-apps-account=id.get_value() aria-labelledby=heading class="min-w-0 py-3">

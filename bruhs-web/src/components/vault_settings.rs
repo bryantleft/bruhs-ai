@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
-    bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
+    bruh_choice_label, delete_question, fixed_hint_after, form_create, form_fields, form_for,
     form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
     row_label, vault_row, wait_reason, FormField, FormScope, LoginFields, LoginMeta, VaultBruh,
     VaultBusy as Busy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultNotice,
@@ -98,6 +98,50 @@ enum Open {
     Entry(String),
 }
 
+/// What the Vault and Apps sections of one Settings page tell each other
+/// (final review BC M4): a change in one that adds or removes the other's
+/// rows bumps the other's count, and the other reads its listing again.
+#[derive(Clone, Copy)]
+pub struct CredentialSync {
+    /// Bumped after Apps connects, replaces or disconnects an account.
+    pub vault: RwSignal<u64>,
+    /// Bumped after the Vault deletes an app token.
+    pub apps: RwSignal<u64>,
+}
+
+impl CredentialSync {
+    /// Shares one pair with every section under the caller.
+    pub fn provide() {
+        provide_context(Self {
+            vault: RwSignal::new(0),
+            apps: RwSignal::new(0),
+        });
+    }
+
+    /// Tells the section that reads `count` to read again. Runs after an
+    /// await, so a page already gone is fine.
+    pub fn bump(count: RwSignal<u64>) {
+        count.try_update(|count| *count = count.wrapping_add(1));
+    }
+
+    /// Runs `reread` each time `count` is bumped, never for the first read.
+    pub fn on_bump(count: RwSignal<u64>, reread: impl Fn() + 'static) {
+        Effect::new(move |seen: Option<u64>| {
+            let now = count.get();
+            if bumped(seen, now) {
+                untrack(&reread);
+            }
+            now
+        });
+    }
+}
+
+/// Whether a count read as `now` was bumped since it was `seen`; the first
+/// read (`None`) never is, since each section loads on its own.
+fn bumped(seen: Option<u64>, now: u64) -> bool {
+    seen.is_some_and(|seen| seen != now)
+}
+
 #[component]
 pub fn VaultSettings() -> impl IntoView {
     let listing = RwSignal::new(VaultListing::default());
@@ -140,6 +184,26 @@ pub fn VaultSettings() -> impl IntoView {
         });
     });
     Effect::new(move |_| refresh.run(()));
+    // Apps changed an app token: read the listing again. A loaded page keeps
+    // its open form and rows; one that isn't loaded reloads in full.
+    if let Some(sync) = use_context::<CredentialSync>() {
+        CredentialSync::on_bump(sync.vault, move || {
+            if load.with_untracked(|load| *load != Load::Ready) {
+                refresh.run(());
+                return;
+            }
+            if busy.get_untracked() != Busy::Idle {
+                return;
+            }
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(next) = crate::api::vault_listing().await {
+                    if busy.try_get_untracked() == Some(Busy::Idle) {
+                        listing.try_set(next);
+                    }
+                }
+            });
+        });
+    }
     let saved = Callback::new(move |entry: VaultEntry| {
         listing.try_update(|listing| {
             match listing.entries.iter_mut().find(|row| row.id == entry.id) {
@@ -266,7 +330,21 @@ fn VaultRowView(
     let keep_ref = NodeRef::<html::Button>::new();
     let question_id = unique_id("vault-delete-question");
     let label = row_label(&name);
-    let confirm = delete_entry_confirm(&name);
+    let confirm =
+        entry.with_untracked(|entry| entry.as_ref().map(delete_question).unwrap_or_default());
+    // Deleting an app token takes it off the Apps section too (BC M4).
+    let app_token = entry.with_untracked(|entry| {
+        entry
+            .as_ref()
+            .is_some_and(|entry| matches!(entry.kind, VaultKind::AppToken(_)))
+    });
+    // Read now: after an await there is no owner to read context from.
+    let sync = use_context::<CredentialSync>().filter(|_| app_token);
+    let apps_changed = move || {
+        if let Some(sync) = sync {
+            CredentialSync::bump(sync.apps);
+        }
+    };
     let forget = move || {
         // Runs after an await: the row may be gone by now.
         let Some(id) = id.try_get_value() else {
@@ -326,10 +404,17 @@ fn VaultRowView(
             let result = crate::api::delete_vault_entry(&id).await;
             busy.try_set(Busy::Idle);
             match result {
-                Ok(()) => forget(),
-                Err(err) if err.is_status(404) => forget(),
+                Ok(()) => {
+                    forget();
+                    apps_changed();
+                }
+                Err(err) if err.is_status(404) => {
+                    forget();
+                    apps_changed();
+                }
                 Err(err) if crate::api::vault_failure(&err).may_have_landed() => {
                     on_unanswered.try_run(());
+                    apps_changed();
                 }
                 Err(err) => {
                     error.try_set(Some(crate::api::vault_message(&err)));
@@ -777,6 +862,16 @@ fn VaultFormView(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Final review BC M4: a section reads again only when the other one
+    /// bumped its count, never on its own first load.
+    #[test]
+    fn a_section_rereads_only_after_the_other_changes() {
+        assert!(!bumped(None, 0));
+        assert!(!bumped(Some(2), 2));
+        assert!(bumped(Some(2), 3));
+        assert!(bumped(Some(u64::MAX), 0), "a wrapped count still counts");
+    }
     use bruhs_models::secrets::SavedCredentialState;
     use bruhs_models::vault::{CredentialScope, FormKind, FormSource};
 

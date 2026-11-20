@@ -14,7 +14,7 @@
 
 mod form;
 
-use super::vault_settings::{button, is_forbidden, panel, small};
+use super::vault_settings::{button, is_forbidden, panel, small, CredentialsChanged};
 use super::*;
 use crate::app_state::spawn_tokio;
 use crate::server_client::ServerError;
@@ -156,6 +156,8 @@ pub(super) struct AppsSettings {
     page_focus: FocusHandle,
     next_serial: u64,
     task: Option<Task<()>>,
+    /// A quiet listing read for the other section's change (BC M4).
+    reread_task: Option<Task<()>>,
     /// Every request, as `METHOD path`; tests never reach a server.
     #[cfg(test)]
     apps_requests: Vec<String>,
@@ -191,6 +193,7 @@ impl AppsSettings {
             page_focus: cx.focus_handle(),
             next_serial: 0,
             task: None,
+            reread_task: None,
             #[cfg(test)]
             apps_requests: Vec::new(),
             #[cfg(test)]
@@ -305,6 +308,41 @@ impl AppsSettings {
     fn unanswered(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.refresh(window, cx);
         self.notice = Some(Notice::MayHaveChanged);
+        cx.emit(CredentialsChanged);
+    }
+
+    /// The Vault section deleted an app token (final review BC M4): read
+    /// the listing again. A loaded page keeps its open form and rows; one
+    /// that isn't loaded reloads in full, and one not shown yet waits to be.
+    /// Waits out a running change.
+    pub(super) fn reread(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        match self.load {
+            // Not shown yet: it reads the listing when it shows.
+            Load::Idle => return,
+            Load::Ready => {}
+            _ => {
+                self.refresh(window, cx);
+                return;
+            }
+        }
+        if self.busy != VaultBusy::Idle {
+            return;
+        }
+        self.record("GET /api/apps".into());
+        if cfg!(test) {
+            return;
+        }
+        let client = self.client.clone();
+        let operation = spawn_tokio(cx, async move { client.apps_listing().await });
+        self.reread_task = Some(cx.spawn(async move |this, cx| {
+            let result = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                if let (Ok(listing), VaultBusy::Idle) = (result, this.busy) {
+                    this.listing = listing;
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     fn row_focus(&mut self, id: &str, cx: &mut Context<'_, Self>) -> &RowFocus {
@@ -429,6 +467,7 @@ impl AppsSettings {
         self.row_errors.remove(id);
         self.grant_errors.remove(id);
         self.rows_focus.remove(id);
+        cx.emit(CredentialsChanged);
         let connect = app.and_then(|app| self.connect_focus.get(app.as_str()).cloned());
         if let (true, Some(connect)) = (held, connect) {
             connect.focus(window, cx);
@@ -1050,6 +1089,8 @@ impl AppsSettings {
             .into_any_element()
     }
 }
+
+impl gpui::EventEmitter<CredentialsChanged> for AppsSettings {}
 
 impl Render for AppsSettings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {

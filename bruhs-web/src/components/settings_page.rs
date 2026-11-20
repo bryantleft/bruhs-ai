@@ -17,7 +17,7 @@ use crate::components::diarize_settings::DiarizeSettingsPanel;
 use crate::components::google_calendar_settings::GoogleCalendarSettings;
 use crate::components::personality_settings::PersonalitySettings as PersonalitySettingsPanel;
 use crate::components::provider::provider_label;
-use crate::components::vault_settings::VaultSettings;
+use crate::components::vault_settings::{CredentialSync, VaultSettings};
 use crate::components::whisper_model_settings::WhisperModelSettings;
 use crate::state::{
     AppView, ClaudeAutoCompactSignal, CompactIdleSignal, EditorSignal, FollowUpSteerSignal,
@@ -617,6 +617,8 @@ pub fn SettingsPage() -> impl IntoView {
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let (current, set_current) = signal(SECTIONS[0].0.to_string());
     let content_ref = NodeRef::<Div>::new();
+    // The Vault and Apps sections refresh each other (final review BC M4).
+    CredentialSync::provide();
 
     let jump = move |id: &'static str| {
         set_current.set(id.to_string());

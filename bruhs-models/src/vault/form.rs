@@ -507,6 +507,17 @@ pub fn delete_entry_confirm(name: &str) -> String {
     )
 }
 
+/// The Delete question for `entry`: an app token's is the Apps page's
+/// Disconnect question, since routines that watch it stop too (final
+/// review BC M4).
+#[must_use]
+pub fn delete_question(entry: &VaultEntry) -> String {
+    match entry.kind {
+        VaultKind::AppToken(_) => crate::apps::disconnect_confirm(&review_text(&entry.name)),
+        _ => delete_entry_confirm(&entry.name),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{assert_no_debug_or_clone, canary};
@@ -667,6 +678,15 @@ mod tests {
                 account: "me\u{202e}".into(),
                 params: std::collections::BTreeMap::new(),
             }),
+        );
+        // Its Delete says routines that watch it stop, as Disconnect does.
+        assert_eq!(
+            delete_question(&app),
+            "Disconnect Deploy? Bruhs lose it, and routines that watch it stop."
+        );
+        assert_eq!(
+            delete_question(&entry(CredentialScope::Global, VaultKind::Value)),
+            delete_entry_confirm("Deploy")
         );
         let row = vault_row(&app, &[]);
         assert_eq!(

@@ -1,4 +1,4 @@
-use super::{AppsSettings, Notice, Open};
+use super::{AppsSettings, CredentialsChanged, Load, Notice, Open};
 use crate::server_client::{ServerClient, ServerError};
 use crate::{app_state::DesktopState, theme};
 use bruhs_models::apps::{
@@ -408,6 +408,48 @@ fn disconnect_asks_first(cx: &mut TestAppContext) {
         assert!(view.listing.accounts.is_empty());
         assert!(view.listing.bruhs[0].apps.is_empty());
     });
+}
+
+/// Final review BC M4: a connect, a replace and a disconnect each tell
+/// the Vault section, and a Vault change has a loaded page read again
+/// quietly, keeping what it has open.
+#[gpui::test]
+fn account_changes_tell_the_vault_section(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx, Some(listing()));
+    let told = Rc::new(std::cell::Cell::new(0));
+    let count = told.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&view, move |_, _: &CredentialsChanged, _| {
+            count.set(count.get() + 1);
+        })
+        .detach();
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.answered(0, Ok(github()), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(told.get(), 1, "a connect or a replace");
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.disconnected("v1-gh".into(), Ok(()), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(told.get(), 2, "a disconnect");
+
+    click(cx, "desktop-apps-connect-github");
+    assert!(rendered(cx, "desktop-apps-form"));
+    let before = requests(&view, cx).len();
+    cx.update(|window, cx| view.update(cx, |view, cx| view.reread(window, cx)));
+    cx.run_until_parked();
+    assert_eq!(requests(&view, cx)[before..], ["GET /api/apps"]);
+    assert!(rendered(cx, "desktop-apps-form"), "the open form stays");
+    assert!(
+        view.read_with(cx, |view, _| view.load == Load::Ready),
+        "a quiet read keeps the page loaded"
+    );
 }
 
 #[gpui::test]

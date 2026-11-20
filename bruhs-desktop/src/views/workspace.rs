@@ -1556,6 +1556,28 @@ type ThreadRestorer = fn(
 ) -> (Vec<DesktopThread>, Option<String>);
 
 impl Workspace {
+    /// The Vault and Apps sections share one Settings page: a change on
+    /// one that the other shows has the other read its listing again
+    /// (final review BC M4).
+    fn sync_credential_sections(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let vault = self.vault_settings.clone();
+        self._subscriptions.push(cx.subscribe_in(
+            &self.apps_settings,
+            window,
+            move |_, _, _: &vault_settings::CredentialsChanged, window, cx| {
+                vault.update(cx, |vault, cx| vault.reread(window, cx));
+            },
+        ));
+        let apps = self.apps_settings.clone();
+        self._subscriptions.push(cx.subscribe_in(
+            &self.vault_settings,
+            window,
+            move |_, _, _: &vault_settings::CredentialsChanged, window, cx| {
+                apps.update(cx, |apps, cx| apps.reread(window, cx));
+            },
+        ));
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         Self::from_loaded_state(
             load_desktop_state(),
@@ -2278,6 +2300,7 @@ impl Workspace {
             zoom: crate::zoom::restore(persisted.as_ref().and_then(|state| state.zoom)),
             _subscriptions: subscriptions,
         };
+        workspace.sync_credential_sections(window, cx);
         workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
         // Return to the view the app closed on, as the web does from its URL.

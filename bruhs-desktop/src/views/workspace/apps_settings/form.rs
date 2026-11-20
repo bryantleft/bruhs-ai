@@ -374,6 +374,7 @@ impl AppsSettings {
                     None => self.listing.accounts.push(account),
                 }
                 self.notice = Some(Notice::Done(line));
+                cx.emit(super::CredentialsChanged);
                 if let Some(open) = this_form {
                     self.close_form(window, cx);
                     if held {
