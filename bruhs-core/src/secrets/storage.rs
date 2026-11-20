@@ -24,6 +24,9 @@ mod vault;
 /// The keychain account service every Bruhs secret is stored under.
 const KEYCHAIN_SERVICE: &str = SECRETS_SERVICE;
 
+/// The legacy catalog, in the format older binaries read.
+const CATALOG_FILE: &str = "catalog.json";
+
 type MemoryKeys = Arc<KeyMap>;
 
 /// In-memory keychain items for the memory store and tests.
@@ -569,7 +572,7 @@ impl Vault {
 
     fn persist(&self) -> Result<(), SecretError> {
         match &self.directory {
-            Some(directory) => write_atomically(directory, "catalog.json", &self.catalog),
+            Some(directory) => write_atomically(directory, CATALOG_FILE, &self.catalog),
             None => Ok(()),
         }
     }
@@ -668,7 +671,7 @@ pub(super) fn rekey(
     let legacy_moved = !moved.is_empty();
     let vault = vault::rekeyed(directory, rules, &mut moved)?;
     if legacy_moved {
-        write_atomically(directory, "catalog.json", &catalog)?;
+        write_atomically(directory, CATALOG_FILE, &catalog)?;
     }
     if let Some(vault) = vault {
         vault::write_vault(directory, &vault)?;
@@ -684,7 +687,7 @@ pub(super) fn catalog_directory() -> Result<PathBuf, SecretError> {
 }
 
 fn read_catalog(directory: &Path) -> Result<Catalog, SecretError> {
-    let catalog: Catalog = match File::open(directory.join("catalog.json")) {
+    let catalog: Catalog = match File::open(directory.join(CATALOG_FILE)) {
         Ok(file) => {
             serde_json::from_reader(BufReader::new(file)).map_err(|_| SecretError::Catalog)?
         }

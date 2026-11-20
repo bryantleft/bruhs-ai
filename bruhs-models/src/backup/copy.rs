@@ -110,6 +110,9 @@ pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and 
 pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try again.";
 pub const KEYCHAIN_NEEDS_YOU: &str =
     "Your keychain needs you. Allow access on this computer, or leave out saved logins and keys.";
+pub const KEYCHAIN_ITEM_REFUSED: &str = "That keychain item isn't one of Bruhs' own.";
+pub const KEYCHAIN_READ_FAILED: &str = "Bruhs couldn't read its keychain items. Try again.";
+pub const KEYCHAIN_SET_UNREADABLE: &str = "The saved keychain items could not be opened.";
 pub const BACKUP_BUSY: &str = "A backup or restore is already running.";
 pub const RESTORE_PENDING: &str = "A restore is waiting to finish. Start Bruhs again to finish it.";
 pub const CONFIRM_REPLACE: &str = "Confirm that your data will be replaced.";
@@ -214,6 +217,9 @@ pub const ALL_COPY: &[&str] = &[
     NO_SPACE,
     FILE_CHANGED,
     KEYCHAIN_NEEDS_YOU,
+    KEYCHAIN_ITEM_REFUSED,
+    KEYCHAIN_READ_FAILED,
+    KEYCHAIN_SET_UNREADABLE,
     BACKUP_BUSY,
     RESTORE_PENDING,
     CONFIRM_REPLACE,
