@@ -16,3 +16,8 @@ pub use document::Link;
 pub use state::{init, CopySelection, TextFormat, TextPosition, TextSelection, TextViewState};
 pub use style::TextViewStyle;
 pub use view::TextView;
+
+/// A user activated an allowed HTTP(S) link in a rendered document.
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = text, no_json)]
+pub struct OpenWebLink(pub String);

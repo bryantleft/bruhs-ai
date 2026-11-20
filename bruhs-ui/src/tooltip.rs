@@ -53,7 +53,7 @@ impl Render for Tooltip {
                 .border_color(theme::ring_floating())
                 .px(px(X_PADDING_PX))
                 .py(px(Y_PADDING_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_family(theme::FontFace::Small)
                 .text_size(px(TEXT_SIZE_PX))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme::rambutan_100())

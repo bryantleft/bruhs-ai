@@ -87,7 +87,7 @@ pub fn web_button(
         .items_center()
         .justify_center()
         .gap(px(WEB_BUTTON_GAP_PX))
-        .font_family(WEB_BUTTON_FONT_FAMILY)
+        .font_family(crate::theme::FontFace::Interface.with_default(WEB_BUTTON_FONT_FAMILY))
         .font_weight(FontWeight::MEDIUM)
         .rounded(px(WEB_BUTTON_RADIUS_PX))
         .line_height(relative(WEB_BUTTON_LINE_HEIGHT))
@@ -102,7 +102,7 @@ pub fn web_button(
                 .px(px(WEB_BUTTON_SMALL_X_PADDING_PX))
                 .py(px(WEB_BUTTON_SMALL_Y_PADDING_PX))
                 .text_size(px(WEB_BUTTON_SMALL_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_family(theme::FontFace::Small)
         })
         .when(matches!(size, WebButtonSize::IconDefault), |el| {
             el.min_w(px(WEB_BUTTON_ICON_DEFAULT_MIN_SIZE_PX))
@@ -115,7 +115,7 @@ pub fn web_button(
                 .min_h(px(WEB_BUTTON_ICON_SMALL_MIN_SIZE_PX))
                 .p(px(WEB_BUTTON_ICON_SMALL_PADDING_PX))
                 .text_size(px(WEB_BUTTON_ICON_SMALL_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_family(theme::FontFace::Small)
         })
         .map(|el| match variant {
             WebButtonVariant::Primary => el

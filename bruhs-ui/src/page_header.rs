@@ -38,7 +38,7 @@ pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString
                         .role(Role::Heading)
                         .aria_level(1)
                         .aria_label(title.clone())
-                        .font_family(theme::HEADING_FONT_FAMILY)
+                        .font_family(theme::FontFace::Heading)
                         .text_size(px(18.0))
                         .font_weight(FontWeight::MEDIUM)
                         .line_height(relative(1.5))
@@ -50,7 +50,7 @@ pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString
                     header.child(
                         div()
                             .mt(px(2.0))
-                            .font_family(theme::CODE_FONT_FAMILY)
+                            .font_family(theme::FontFace::Code)
                             .text_size(px(13.0))
                             .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())

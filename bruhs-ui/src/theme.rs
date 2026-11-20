@@ -2,7 +2,12 @@
 // Approximates the OKLCH values from https://design.bruhs.dev/llms.txt
 
 use gpui::{hsla, px, rgb, App, FontFeatures, Global, Hsla, Pixels, SharedString, Window};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+mod fonts;
+mod palettes;
+pub use palettes::{Palette, ThemeFamily};
+pub use fonts::{FontFace,set_font_families,set_text_layout,wrap_code,show_composer_context};
 
 /// bruhs label/UI face (web: `Monaspace Argon`).
 pub const UI_FONT_FAMILY: &str = "Monaspace Argon";
@@ -53,29 +58,92 @@ pub fn tabular_nums() -> FontFeatures {
 // longan — warm brown-black (canvas, panels, cards)
 // =====================================================================
 
+thread_local! {
+    // Native windows draw on the UI thread, as with the shared page zoom.
+    static PALETTE_MODE: std::cell::Cell<ThemeMode> = const { std::cell::Cell::new(ThemeMode::Dark) };
+    static ACTIVE_PALETTE: std::cell::Cell<Palette> = const { std::cell::Cell::new(*ThemeFamily::Bruhs.palette(ThemeMode::Dark)) };
+    static GLASS_OPACITY: std::cell::Cell<u8> = const { std::cell::Cell::new(100) };
+    static CONTRAST: std::cell::Cell<u8> = const { std::cell::Cell::new(100) };
+}
+
+fn palette_color(dark: u32, light: u32) -> Hsla {
+    let color = match PALETTE_MODE.get() {
+        ThemeMode::Dark => dark,
+        ThemeMode::Light => light,
+    };
+    toned_color(color)
+}
+
+fn toned_color(color: u32) -> Hsla {
+    let mut color: Hsla = rgb(color).into();
+    let contrast = CONTRAST.get();
+    if contrast != 100 {
+        let exponent = f32::from(contrast) / 100.;
+        color.l = if color.l < 0.5 {
+            0.5 * (2. * color.l).powf(exponent)
+        } else {
+            1. - 0.5 * (2. * (1. - color.l)).powf(exponent)
+        };
+    }
+    color
+}
+
+fn surface_ring(alpha: f32) -> Hsla {
+    hsla(
+        0.,
+        0.,
+        if PALETTE_MODE.get() == ThemeMode::Dark {
+            1.
+        } else {
+            0.
+        },
+        alpha,
+    )
+}
+
+/// Apply a device contrast setting without changing its color scheme or zoom.
+pub fn set_contrast(percent: u8, cx: &mut App) {
+    if CONTRAST.replace(percent.clamp(50, 200)) != percent.clamp(50, 200) {
+        apply_bruhs_theme(cx);
+        cx.refresh_windows();
+    }
+}
+
+/// Tint floating surfaces while keeping labels, controls and focus rings opaque.
+pub fn glass_surface(surface: Hsla) -> Hsla {
+    surface.opacity(f32::from(GLASS_OPACITY.get()) / 100.)
+}
+
+pub fn set_glass_opacity(percent: u8, cx: &mut App) {
+    let percent = percent.clamp(40, 100);
+    if GLASS_OPACITY.replace(percent) != percent {
+        cx.refresh_windows();
+    }
+}
+
 /// longan-950 — Canvas background
 pub fn longan_950() -> Hsla {
-    rgb(0x141210).into()
+    toned_color(ACTIVE_PALETTE.get().surface[0])
 }
 
 /// longan-900 — Panel background
 pub fn longan_900() -> Hsla {
-    rgb(0x1d1916).into()
+    toned_color(ACTIVE_PALETTE.get().surface[1])
 }
 
 /// longan-800 — Card background, borders
 pub fn longan_800() -> Hsla {
-    rgb(0x2f2922).into()
+    toned_color(ACTIVE_PALETTE.get().surface[2])
 }
 
 /// longan-700 — Floating elevation, hover surfaces
 pub fn longan_700() -> Hsla {
-    rgb(0x443a2c).into()
+    toned_color(ACTIVE_PALETTE.get().surface[3])
 }
 
 /// longan-600 — Strong hover surface
 pub fn longan_600() -> Hsla {
-    rgb(0x594a36).into()
+    toned_color(ACTIVE_PALETTE.get().surface[4])
 }
 
 // =====================================================================
@@ -84,34 +152,34 @@ pub fn longan_600() -> Hsla {
 
 /// rambutan-100 — Primary text on dark
 pub fn rambutan_100() -> Hsla {
-    rgb(0xf5ede7).into()
+    toned_color(ACTIVE_PALETTE.get().text[0])
 }
 
 /// rambutan-200 — Strong secondary text
 pub fn rambutan_200() -> Hsla {
-    rgb(0xede1d8).into()
+    toned_color(ACTIVE_PALETTE.get().text[1])
 }
 
 /// rambutan-300 — Body text
 pub fn rambutan_300() -> Hsla {
-    rgb(0xdfcfc3).into()
+    toned_color(ACTIVE_PALETTE.get().text[2])
 }
 
 /// rambutan-400 — Muted text. Darkest informative text that stays above
 /// 4.5:1 on longan-950, longan-900, and longan-800.
 pub fn rambutan_400() -> Hsla {
-    rgb(0xc3afa1).into()
+    toned_color(ACTIVE_PALETTE.get().text[3])
 }
 
 /// rambutan-500 — Placeholder and subtle text. Also above 4.5:1 on those surfaces.
 pub fn rambutan_500() -> Hsla {
-    rgb(0xab998f).into()
+    toned_color(ACTIVE_PALETTE.get().text[4])
 }
 
 /// rambutan-600 — Separators and non-text tracks. Clears 4.5:1 on the
 /// canvas only, so it is not for body text.
 pub fn rambutan_600() -> Hsla {
-    rgb(0x8b7c74).into()
+    toned_color(ACTIVE_PALETTE.get().text[5])
 }
 
 // =====================================================================
@@ -121,32 +189,32 @@ pub fn rambutan_600() -> Hsla {
 
 /// persimmon-100 — Timegrid event text
 pub fn persimmon_100() -> Hsla {
-    rgb(0xfbe1cc).into()
+    toned_color(ACTIVE_PALETTE.get().accent[0])
 }
 
 /// persimmon-200 — Soft active control text
 pub fn persimmon_200() -> Hsla {
-    rgb(0xf7c194).into()
+    toned_color(ACTIVE_PALETTE.get().accent[1])
 }
 
 /// persimmon-300 — Today's timegrid header
 pub fn persimmon_300() -> Hsla {
-    rgb(0xf29e58).into()
+    toned_color(ACTIVE_PALETTE.get().accent[2])
 }
 
 /// persimmon-400 — Focus ring, soft accents
 pub fn persimmon_400() -> Hsla {
-    rgb(0xec7f2c).into()
+    toned_color(ACTIVE_PALETTE.get().accent[3])
 }
 
 /// persimmon-500 — Primary button background
 pub fn persimmon_500() -> Hsla {
-    rgb(0xdf6815).into()
+    toned_color(ACTIVE_PALETTE.get().accent[4])
 }
 
 /// persimmon-600 — Active primary button background
 pub fn persimmon_600() -> Hsla {
-    rgb(0xbd5310).into()
+    toned_color(ACTIVE_PALETTE.get().accent[5])
 }
 
 // =====================================================================
@@ -155,27 +223,27 @@ pub fn persimmon_600() -> Hsla {
 
 /// pandan-100 — Timegrid event text
 pub fn pandan_100() -> Hsla {
-    rgb(0xd4f0cd).into()
+    palette_color(0xd4f0cd, 0x143713)
 }
 
 /// pandan-200 — Today's "Day plan applied." (bruhs `oklch(91.9% .072 138.94)`)
 pub fn pandan_200() -> Hsla {
-    rgb(0xccf1c3).into()
+    palette_color(0xccf1c3, 0x214c20)
 }
 
 /// pandan-300 — Auth command / subtle success foreground
 pub fn pandan_300() -> Hsla {
-    rgb(0x7fcc6e).into()
+    palette_color(0x7fcc6e, 0x245521)
 }
 
 /// pandan-400 — Success indicator
 pub fn pandan_400() -> Hsla {
-    rgb(0x5ab44a).into()
+    palette_color(0x5ab44a, 0x286924)
 }
 
 /// pandan-500 — Strong success
 pub fn pandan_500() -> Hsla {
-    rgb(0x3f9931).into()
+    palette_color(0x3f9931, 0x287124)
 }
 
 // =====================================================================
@@ -184,37 +252,37 @@ pub fn pandan_500() -> Hsla {
 
 /// lychee-50 — Destructive button text
 pub fn lychee_50() -> Hsla {
-    rgb(0xfef2f2).into()
+    palette_color(0xfef2f2, 0x481316)
 }
 
 /// lychee-100 — Timegrid event text
 pub fn lychee_100() -> Hsla {
-    rgb(0xfde2e1).into()
+    palette_color(0xfde2e1, 0x5c1b1d)
 }
 
 /// lychee-200 — Soft error badge text
 pub fn lychee_200() -> Hsla {
-    rgb(0xfcc6c4).into()
+    palette_color(0xfcc6c4, 0x742426)
 }
 
 /// lychee-300 — Diff removal / destructive hover foreground
 pub fn lychee_300() -> Hsla {
-    rgb(0xf8a09c).into()
+    palette_color(0xf8a09c, 0x8f2930)
 }
 
 /// lychee-400 — Error indicator
 pub fn lychee_400() -> Hsla {
-    rgb(0xf06b65).into()
+    palette_color(0xf06b65, 0xa03138)
 }
 
 /// lychee-500 — Strong error
 pub fn lychee_500() -> Hsla {
-    rgb(0xdf3f37).into()
+    palette_color(0xdf3f37, 0xa92e37)
 }
 
 /// lychee-600 — Destructive button surface
 pub fn lychee_600() -> Hsla {
-    rgb(0xbf2a23).into()
+    palette_color(0xbf2a23, 0x86272c)
 }
 
 // =====================================================================
@@ -223,27 +291,27 @@ pub fn lychee_600() -> Hsla {
 
 /// durian-100 — Strong warning text on dark
 pub fn durian_100() -> Hsla {
-    rgb(0xfbf0c8).into()
+    palette_color(0xfbf0c8, 0x4a2f04)
 }
 
 /// durian-200 — Muted warning text
 pub fn durian_200() -> Hsla {
-    rgb(0xf6dd8c).into()
+    palette_color(0xf6dd8c, 0x5c3c04)
 }
 
 /// durian-300 — Warning icon/text
 pub fn durian_300() -> Hsla {
-    rgb(0xf0c450).into()
+    palette_color(0xf0c450, 0x705009)
 }
 
 /// durian-400 — Warning indicator
 pub fn durian_400() -> Hsla {
-    rgb(0xe9aa1e).into()
+    palette_color(0xe9aa1e, 0x7f5707)
 }
 
 /// durian-500 — Warning surface
 pub fn durian_500() -> Hsla {
-    rgb(0xcd8e0d).into()
+    palette_color(0xcd8e0d, 0x89600a)
 }
 
 // =====================================================================
@@ -252,27 +320,27 @@ pub fn durian_500() -> Hsla {
 
 /// blueberry-200 — Selected text on a blueberry tint
 pub fn blueberry_200() -> Hsla {
-    rgb(0xbfddff).into()
+    palette_color(0xbfddff, 0x20385d)
 }
 
 /// blueberry-300 — Links and booking times (bruhs `oklch(83.6% .098 257.89)`)
 pub fn blueberry_300() -> Hsla {
-    rgb(0xa1cbff).into()
+    palette_color(0xa1cbff, 0x214d7c)
 }
 
 /// blueberry-400 — Informational
 pub fn blueberry_400() -> Hsla {
-    rgb(0x5b9adf).into()
+    palette_color(0x5b9adf, 0x225b96)
 }
 
 /// blueberry-500 — Timegrid event surface
 pub fn blueberry_500() -> Hsla {
-    rgb(0x3a7fcb).into()
+    palette_color(0x3a7fcb, 0x255b9d)
 }
 
 /// blueberry-600 — Selection tint (used at low opacity)
 pub fn blueberry_600() -> Hsla {
-    rgb(0x327de2).into()
+    palette_color(0x327de2, 0x254e7e)
 }
 
 // =====================================================================
@@ -281,22 +349,22 @@ pub fn blueberry_600() -> Hsla {
 
 /// mangosteen-400 — Purple accent
 pub fn mangosteen_400() -> Hsla {
-    rgb(0xa87fcc).into()
+    palette_color(0xa87fcc, 0x724c92)
 }
 
 /// mangosteen-500 — Timegrid event surface
 pub fn mangosteen_500() -> Hsla {
-    rgb(0x8a5fb5).into()
+    palette_color(0x8a5fb5, 0x753d9d)
 }
 
 /// dragonfruit-400 — Pink accent
 pub fn dragonfruit_400() -> Hsla {
-    rgb(0xe864a3).into()
+    palette_color(0xe864a3, 0x993567)
 }
 
 /// dragonfruit-500 — Timegrid event surface
 pub fn dragonfruit_500() -> Hsla {
-    rgb(0xd04388).into()
+    palette_color(0xd04388, 0xab2869)
 }
 
 // =====================================================================
@@ -305,46 +373,50 @@ pub fn dragonfruit_500() -> Hsla {
 
 /// white at 5% — Input/select surface
 pub fn control_surface() -> Hsla {
-    hsla(0.0, 0.0, 1.0, 0.05)
+    surface_ring(0.05)
 }
 
 /// white at 5% — Panel ring
 pub fn ring_panel() -> Hsla {
-    hsla(0.0, 0.0, 1.0, 0.05)
+    surface_ring(0.05)
 }
 
 /// white at 10% — Card ring
 pub fn ring_card() -> Hsla {
-    hsla(0.0, 0.0, 1.0, 0.10)
+    surface_ring(0.10)
 }
 
 /// white at 15% — Floating ring
 pub fn ring_floating() -> Hsla {
-    hsla(0.0, 0.0, 1.0, 0.15)
+    surface_ring(0.15)
 }
 
 /// white at 20% — Modal/dialog ring
 pub fn ring_modal() -> Hsla {
-    hsla(0.0, 0.0, 1.0, 0.20)
+    surface_ring(0.20)
 }
 
 // =====================================================================
 // The app theme
 // =====================================================================
 
-/// Light or dark. Bruhs is dark-first; the mode is kept for callers that
-/// pass it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Palette used by the native desktop surfaces and controls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all="lowercase")]
 pub enum ThemeMode {
     Light,
     #[default]
     Dark,
 }
 
+/// Literal RGBA values for the selected appearance of an imported theme.
+pub type ColorRoles = Arc<BTreeMap<String, [u8; 4]>>;
+
 /// The few theme values the window and app read globally: the surface,
 /// its text and the font. Everything else is a token above.
 #[derive(Clone, Debug)]
 pub struct Theme {
+    color_roles: Option<ColorRoles>,
     pub mode: ThemeMode,
     pub font_family: SharedString,
     /// The rem size, which page zoom scales.
@@ -357,8 +429,9 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
+            color_roles: None,
             mode: ThemeMode::Dark,
-            font_family: UI_FONT_FAMILY.into(),
+            font_family: FontFace::Interface.into(),
             font_size: px(16.0),
             background: longan_950(),
             foreground: rambutan_200(),
@@ -372,10 +445,51 @@ impl Global for Theme {}
 impl Theme {
     /// Use `mode`, creating the theme if there is none yet.
     pub fn change(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App) {
-        cx.default_global::<Theme>().mode = mode;
+        Self::use_family(ThemeFamily::Bruhs, mode, window, cx);
+    }
+
+    /// Apply the palette for the current light or dark appearance to every window.
+    pub fn use_family(
+        family: ThemeFamily,
+        mode: ThemeMode,
+        window: Option<&mut Window>,
+        cx: &mut App,
+    ) {
+        Self::use_palette(*family.palette(mode), mode, window, cx);
+    }
+
+    pub fn use_palette(
+        palette: Palette,
+        mode: ThemeMode,
+        window: Option<&mut Window>,
+        cx: &mut App,
+    ) {
+        Self::use_color_roles(palette, None, mode, window, cx);
+    }
+
+    pub fn use_color_roles(
+        palette: Palette,
+        roles: Option<ColorRoles>,
+        mode: ThemeMode,
+        window: Option<&mut Window>,
+        cx: &mut App,
+    ) {
+        PALETTE_MODE.set(mode);
+        ACTIVE_PALETTE.set(palette);
+        let theme = cx.default_global::<Theme>();
+        theme.mode = mode;
+        theme.color_roles = roles;
+        apply_bruhs_theme(cx);
+        cx.refresh_windows();
         if let Some(window) = window {
             window.refresh();
         }
+    }
+
+    pub fn color_role(&self, role: &str) -> Option<Hsla> {
+        let &[r, g, b, a] = self.color_roles.as_ref()?.get(role)?;
+        let rgb = u32::from_be_bytes([0, r, g, b]);
+        Some(toned_color(rgb).opacity(f32::from(a) / 255.))
     }
 
     pub fn is_dark(&self) -> bool {
@@ -411,7 +525,9 @@ pub fn apply_bruhs_theme(cx: &mut App) {
     let mode = cx
         .try_global::<Theme>()
         .map_or(ThemeMode::Dark, |theme| theme.mode);
+    let color_roles = cx.try_global::<Theme>().and_then(|theme| theme.color_roles.clone());
     cx.set_global(Theme {
+        color_roles,
         mode,
         font_size: px(16.0) * zoom,
         ..Theme::default()
@@ -531,6 +647,22 @@ mod tests {
             assert_eq!(theme.background, longan_950());
             assert_eq!(theme.foreground, rambutan_200());
             assert_eq!(theme.font_family.as_ref(), UI_FONT_FAMILY);
+        });
+    }
+
+    #[gpui::test]
+    fn light_palette_and_contrast_update_surface_and_text(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            Theme::change(ThemeMode::Light, None, cx);
+            let surface = longan_950();
+            let text = rambutan_200();
+            assert!(surface.l > text.l);
+            set_contrast(150, cx);
+            assert!(Theme::global(cx).background.l > surface.l);
+            assert!(Theme::global(cx).foreground.l < text.l);
+            set_contrast(100, cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert!(longan_950().l < rambutan_200().l);
         });
     }
 
