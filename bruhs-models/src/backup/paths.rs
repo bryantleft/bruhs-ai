@@ -50,8 +50,8 @@ pub const CONTENT_FOLDERS: [&str; 4] = [
     "knowledge-attachments",
 ];
 
-/// File name endings a backup leaves out anywhere: lock files and SQLite's
-/// side files.
+/// File name endings a backup leaves out of Bruhs' own folders: lock files
+/// and SQLite's side files. Owner content keeps them (D4 ruling).
 const EXCLUDED_SUFFIXES: [&str; 4] = [".lock", "-wal", "-shm", "-journal"];
 /// Media file extensions under `audio/` that the audio option covers
 /// (ruling F9: transcripts, centroids and OCR always go in).
@@ -136,7 +136,10 @@ pub enum Excluded {
 }
 
 /// What D4 says about `rel` (relative to its root, `/`-separated). Lock
-/// files and SQLite side files are left out anywhere; a bruh's
+/// files and SQLite side files are left out of Bruhs' own folders, but
+/// owner content (the content folders and each bruh's `work` folder) keeps
+/// them, so a project's `Cargo.lock` or an owner database's journal comes
+/// back whole. A bruh's
 /// `browser-cache` and the profile's cache folders always; its `browser`
 /// profile and the media files under `audio/` by option. Everything else
 /// goes in, including folders a later Bruhs adds.
@@ -147,6 +150,7 @@ pub fn excluded(rel: &str, is_dir: bool) -> Excluded {
     }
     let name = parts.last().copied().unwrap_or_default();
     if !is_dir
+        && !owner_content(&parts)
         && EXCLUDED_SUFFIXES
             .iter()
             .any(|suffix| name.ends_with(suffix))
@@ -185,13 +189,15 @@ pub fn included(rel: &str, is_dir: bool, options: &BackupOptions) -> bool {
 /// of which hold the owner's own files.
 pub fn rewritable(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
-    if parts[0] == "credentials" || CONTENT_FOLDERS.contains(&parts[0]) {
-        return false;
-    }
-    !matches!(
-        bruh_folder(&parts),
-        Some("work" | "browser" | "browser-cache")
-    )
+    parts[0] != "credentials"
+        && !owner_content(&parts)
+        && !matches!(bruh_folder(&parts), Some("browser" | "browser-cache"))
+}
+
+/// Whether a path sits in the owner's own files: a content folder or a
+/// bruh's `work` folder.
+fn owner_content(parts: &[&str]) -> bool {
+    CONTENT_FOLDERS.contains(&parts[0]) || bruh_folder(parts) == Some("work")
 }
 
 /// Whether a top-level entry belongs to the desktop app.
@@ -330,14 +336,66 @@ pub fn rewrite_json(value: &mut serde_json::Value, rules: &[PathRewrite]) -> usi
     }
 }
 
-/// Adds to `into` the absolute paths in `value` (string values and object
-/// keys) that sit under no rule's `from` or `to`, by their first two
+/// The JSON fields and SQLite columns that hold absolute paths, the only
+/// places [`collect_outside`] looks (D10 ruling): project paths (threads,
+/// work items, bruhs and the credential catalog), agent working folders,
+/// and meeting and capture audio. A bare `path` isn't one: it also names
+/// API routes such as `/api/events`.
+pub const PATH_FIELDS: [&str; 16] = [
+    "project_path",
+    "projectPath",
+    "cwd",
+    "working_path",
+    "workingPath",
+    "workspace_path",
+    "workspacePath",
+    "workspace_root",
+    "workspaceRoot",
+    "repo_root",
+    "repoRoot",
+    "worktree_path",
+    "audio_path",
+    "audioPath",
+    "wav_path",
+    "wavPath",
+];
+
+/// Whether a JSON field or SQLite column holds paths.
+pub fn path_field(name: &str) -> bool {
+    PATH_FIELDS.contains(&name)
+}
+
+/// Adds to `into` the absolute paths held in [`PATH_FIELDS`] anywhere in
+/// `value` (a field's string, or every string inside its array or object
+/// value) that sit under no rule's `from` or `to`, by their first two
 /// components (`/Volumes/Work`), up to 20 in all (D10). A path is a string
 /// that starts with `/`, has at least two components, no newline and at
-/// most 4096 bytes. Temporary and system folders are never named, and
-/// nothing is when there are no rules, since then nothing moves.
+/// most 4096 bytes. Other strings and object keys are never read.
+/// Temporary and system folders are never named, and nothing is when there
+/// are no rules, since then nothing moves.
 pub fn collect_outside(
     value: &serde_json::Value,
+    rules: &[PathRewrite],
+    into: &mut BTreeSet<String>,
+) {
+    walk_outside(value, false, rules, into);
+}
+
+/// [`collect_outside`] for a value held in the field or SQLite column
+/// `field`: a cell of a [`path_field`] column is read whole, any other
+/// cell only through the path fields inside it.
+pub fn collect_outside_in(
+    field: &str,
+    value: &serde_json::Value,
+    rules: &[PathRewrite],
+    into: &mut BTreeSet<String>,
+) {
+    walk_outside(value, path_field(field), rules, into);
+}
+
+fn walk_outside(
+    value: &serde_json::Value,
+    in_field: bool,
     rules: &[PathRewrite],
     into: &mut BTreeSet<String>,
 ) {
@@ -345,16 +403,15 @@ pub fn collect_outside(
         return;
     }
     match value {
-        serde_json::Value::String(text) => note_outside(text, rules, into),
+        serde_json::Value::String(text) if in_field => note_outside(text, rules, into),
         serde_json::Value::Array(items) => {
             for item in items {
-                collect_outside(item, rules, into);
+                walk_outside(item, in_field, rules, into);
             }
         }
         serde_json::Value::Object(map) => {
             for (key, item) in map {
-                note_outside(key, rules, into);
-                collect_outside(item, rules, into);
+                walk_outside(item, in_field || path_field(key), rules, into);
             }
         }
         _ => {}
@@ -483,6 +540,39 @@ mod tests {
         );
     }
 
+    /// D4 ruling: lock and journal files are left out of Bruhs' own
+    /// folders only; owner content keeps them.
+    #[test]
+    fn owner_content_keeps_its_lock_and_journal_files() {
+        let options = BackupOptions {
+            audio: true,
+            browser_profiles: true,
+            ..BackupOptions::default()
+        };
+        for kept in [
+            "server/bruhs/a1/work/Cargo.lock",
+            "server/bruhs/a1/work/app/yarn.lock",
+            "server/bruhs/a1/work/notes.db-journal",
+            "server/bruhs/a1/work/notes.db-wal",
+            "attachments/t1/flake.lock",
+            "knowledge-attachments/k.sqlite-journal",
+        ] {
+            assert_eq!(excluded(kept, false), Excluded::No, "{kept}");
+            assert!(included(kept, false, &options), "{kept}");
+        }
+        for dropped in [
+            "server/reactive.sqlite3.lock",
+            "server/meetings.sqlite3-journal",
+            "server/mail.sqlite3-shm",
+            "calendar/google/state.lock",
+            "server/bruhs/a1/profile.json.lock",
+            "server/bruhs/a1/browser/Default/Cookies-journal",
+        ] {
+            assert_eq!(excluded(dropped, false), Excluded::Always, "{dropped}");
+            assert!(!included(dropped, false, &options), "{dropped}");
+        }
+    }
+
     /// Ruling F9: audio off leaves out media files only.
     #[test]
     fn audio_off_keeps_transcripts_centroids_and_ocr() {
@@ -605,7 +695,7 @@ mod tests {
         assert_eq!(rewrite_path("/home/adam/src", &rules), None);
         assert_eq!(rewrite_path("see /home/ada/src", &rules), None);
         assert!(rewrite_rules(&mac, &mac).is_empty());
-        let mut doc = json!({"project_path": "/home/ada/src/app", "/home/ada/k": 1, "n": ["/Volumes/Work/repo", "/tmp/x"]});
+        let mut doc = json!({"project_path": "/home/ada/src/app", "/home/ada/k": 1, "n": [{"cwd": "/Volumes/Work/repo"}, {"cwd": "/tmp/x"}]});
         assert_eq!(rewrite_json(&mut doc, &rules), 2);
         assert_eq!(doc["project_path"], "/Users/ada/src/app");
         assert!(doc.get("/Users/ada/k").is_some());
@@ -655,7 +745,7 @@ mod tests {
         let rules = rewrite_rules(&linux(), &mac());
         let mut outside = BTreeSet::new();
         collect_outside(
-            &json!([
+            &json!({"cwd": [
                 "/dev/null",
                 "/private/tmp/x/y",
                 "/var/folders/ab/T",
@@ -663,16 +753,54 @@ mod tests {
                 "/usr",
                 "//host/x",
                 "/a/b\nc"
-            ]),
+            ]}),
             &rules,
             &mut outside,
         );
         assert!(outside.is_empty(), "{outside:?}");
         let many: Vec<String> = (0..30).map(|n| format!("/Volumes/V{n}/x")).collect();
-        collect_outside(&json!(many), &rules, &mut outside);
+        collect_outside(&json!({ "project_path": many }), &rules, &mut outside);
         assert_eq!(outside.len(), 20);
         let mut none = BTreeSet::new();
-        collect_outside(&json!("/Volumes/Work/repo"), &[], &mut none);
+        collect_outside(&json!({"cwd": "/Volumes/Work/repo"}), &[], &mut none);
         assert!(none.is_empty());
+    }
+
+    /// D10 ruling: only the known path fields are read, so routes and other
+    /// strings that look like paths never reach the preview.
+    #[test]
+    fn outside_paths_come_only_from_path_fields() {
+        let rules = rewrite_rules(&linux(), &mac());
+        let mut outside = BTreeSet::new();
+        let record = json!({
+            "path": "/api/events",
+            "url": "/api/events/stream",
+            "/Volumes/Key/x": 1,
+            "text": "/Volumes/Notes/x",
+            "call": {"method": "GET", "path": "/api/events"},
+            "items": ["/Volumes/Loose/x"],
+            "work": {"cwd": "/Volumes/Work/repo"},
+            "meeting": {"audio_path": "/Volumes/Rec/m1.wav"},
+        });
+        collect_outside(&record, &rules, &mut outside);
+        assert_eq!(
+            outside.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["/Volumes/Rec", "/Volumes/Work"]
+        );
+        assert!(!outside.contains("/api/events"));
+        let mut cells = BTreeSet::new();
+        collect_outside_in("project_path", &json!("/srv/repos/app"), &rules, &mut cells);
+        collect_outside_in("summary", &json!("/api/events"), &rules, &mut cells);
+        collect_outside_in(
+            "metadata",
+            &json!({"cwd": "/opt/work/x"}),
+            &rules,
+            &mut cells,
+        );
+        assert_eq!(
+            cells.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["/opt/work", "/srv/repos"]
+        );
+        assert!(path_field("cwd") && !path_field("path"));
     }
 }
