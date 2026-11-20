@@ -10,19 +10,20 @@
 //! the ciphertext.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use bruhs_backup::{Encryptor, Kdf, Key, Kind};
 use bruhs_models::backup::{
-    backup_file_name, browser_busy_line, no_space, normalize_password, skipped_names_line,
-    validate_password, BackupApp, BackupCounts, BackupFile, BackupManifest, BackupOptions,
-    JobState, JobStep, LastBackup, ManifestFile, BACKUP_STOPPED, DESTINATION_EXISTS,
-    DESTINATION_INSIDE, DESTINATION_MISSING, FILE_CHANGED, KEYCHAIN_ITEM_REFUSED,
+    backup_file_name, browser_busy_line, changed_files_line, missing_items_line, no_space,
+    normalize_password, skipped_names_line, validate_password, BackupApp, BackupCounts, BackupFile,
+    BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_STOPPED,
+    BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING,
+    DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED,
     KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED,
     WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
@@ -32,7 +33,9 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
-use super::host::{new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config};
+use super::host::{
+    new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config, PARTIAL_MARKER,
+};
 use super::{
     free_bytes, inventory, open_source, snapshot_sqlite, BackupError, RootId, RootKey, Roots,
     SourceFile, FREE_MARGIN,
@@ -88,6 +91,11 @@ impl CancelFlag {
 
 /// The file extension every backup has.
 const EXTENSION: &str = "bruhsbak";
+/// The longest file name the volumes Bruhs runs on take, in bytes.
+const NAME_MAX: usize = 255;
+/// What a partial file adds to its final name: `.`, `.partial-` and 32
+/// hex characters.
+const PARTIAL_EXTRA: usize = 1 + 9 + 32;
 /// Bytes read between two progress updates.
 const PROGRESS_STEP: u64 = 1 << 20;
 
@@ -116,6 +124,10 @@ pub fn check_destination(
     } else {
         format!("{name}.{EXTENSION}")
     };
+    // `.<name>.partial-<32 hex>` must fit a 255-byte file name.
+    if name.len().saturating_add(PARTIAL_EXTRA) > NAME_MAX {
+        return Err(BackupError::Refused(DESTINATION_NAME_LONG));
+    }
     let folder = path.parent().ok_or_else(missing)?;
     let folder = std::fs::canonicalize(folder).map_err(|_| missing())?;
     if !folder.is_dir() {
@@ -139,10 +151,10 @@ pub fn check_destination(
 }
 
 /// Creates `folder` with mode 0700 when missing. An existing one must be a
-/// real folder, never a link.
+/// real folder, never a link, and is made 0700 through its own handle.
 pub(super) fn private_dir(folder: &Path) -> Result<(), BackupError> {
     match std::fs::symlink_metadata(folder) {
-        Ok(metadata) if metadata.is_dir() => return Ok(()),
+        Ok(metadata) if metadata.is_dir() => return tighten(folder),
         Ok(_) => return Err(not_a_folder()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
@@ -162,6 +174,25 @@ pub(super) fn private_dir(folder: &Path) -> Result<(), BackupError> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+/// Makes the real folder `folder` 0700, opened without following a link.
+fn tighten(folder: &Path) -> Result<(), BackupError> {
+    let opened = File::from(
+        rustix::fs::open(
+            folder,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|_| not_a_folder())?,
+    );
+    if opened.metadata()?.permissions().mode() & 0o777 != 0o700 {
+        opened.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 /// A `backups` folder that is a link or a file.
@@ -189,6 +220,9 @@ pub(crate) async fn create(
     } = request;
     let info = utf8_roots(&roots)?;
     validate_password(&password).map_err(BackupError::Refused)?;
+    if web_part.is_some() && web_db_version.is_none() {
+        return Err(BackupError::Refused(INVALID_REQUEST));
+    }
     let made_at = EpochMs::now();
 
     // Neither root's `backups` may be a link (B Task 5 I1 ruling).
@@ -226,6 +260,9 @@ pub(crate) async fn create(
         .iter()
         .map(|id| browser_busy_line(bruhs.names.get(id).map_or(id.as_str(), String::as_str)))
         .collect();
+    if bruhs.count.is_none() {
+        warnings.push(BRUHS_UNCOUNTED.to_owned());
+    }
     cancel.check()?;
 
     let walked = {
@@ -252,10 +289,21 @@ pub(crate) async fn create(
     let folder = target
         .parent()
         .ok_or(BackupError::Refused(DESTINATION_MISSING))?;
-    let free = free_bytes(folder)?;
-    let needed = total.saturating_add(FREE_MARGIN);
-    if free < needed {
-        return Err(BackupError::Space(no_space(needed - free)));
+    // Snapshots wait in `backups/tmp` one at a time, so the largest must
+    // fit there too, beside the output when both share a volume.
+    let snapshot = files
+        .iter()
+        .filter(|file| file.sqlite)
+        .map(|file| file.bytes)
+        .max()
+        .unwrap_or(0);
+    let shared = std::fs::metadata(folder)?.dev() == std::fs::metadata(&tmp)?.dev();
+    let needed = total
+        .saturating_add(if shared { snapshot } else { 0 })
+        .saturating_add(FREE_MARGIN);
+    enough_space(folder, needed)?;
+    if !shared {
+        enough_space(&tmp, snapshot.saturating_add(FREE_MARGIN))?;
     }
 
     let keychain = if options.keychain {
@@ -266,10 +314,13 @@ pub(crate) async fn create(
     };
     cancel.check()?;
 
-    let keychain_items = keychain.as_ref().map_or(0, |(_, count)| *count);
+    let keychain_items = keychain.as_ref().map_or(0, |(_, count, _)| *count);
+    if let Some((_, _, missing)) = &keychain {
+        warnings.extend(missing_items_line(*missing));
+    }
     let manifest = BackupManifest {
         format: MANIFEST_FORMAT,
-        app_version: env!("CARGO_PKG_VERSION").to_owned(),
+        app_version: config.app_version.clone(),
         made_at_ms: made_at,
         made_on: app,
         reactive_protocol: CREW_PROTOCOL,
@@ -285,7 +336,7 @@ pub(crate) async fn create(
         skipped_links: walked.skipped_links,
         skipped_names: walked.skipped_names,
         counts: BackupCounts {
-            bruhs: bruhs.count,
+            bruhs: bruhs.count.unwrap_or(0),
             vault_entries: vault_entries(&roots),
             keychain_items,
             files: u64::try_from(files.len()).unwrap_or(u64::MAX),
@@ -293,12 +344,13 @@ pub(crate) async fn create(
     };
     let writer = Writer {
         files,
-        keychain: keychain.map(|(json, _)| json),
+        keychain: keychain.map(|(json, ..)| json),
         web,
         password,
         kdf: config.kdf,
         tmp,
         cancel: cancel.clone(),
+        changed: 0,
         progress: Progress {
             sender: progress.clone(),
             total,
@@ -306,13 +358,15 @@ pub(crate) async fn create(
             sent: 0,
         },
         manifest,
+        app_version: config.app_version.clone(),
         #[cfg(test)]
         before_file: config.before_file.clone(),
     };
     let place = target.clone();
-    let bytes = tokio::task::spawn_blocking(move || writer.run(&place, overwrite))
+    let (bytes, changed) = tokio::task::spawn_blocking(move || writer.run(&place, overwrite))
         .await
         .map_err(|_| stopped())??;
+    warnings.extend(changed_files_line(changed));
 
     // The backup is made either way; Settings only misses its last line.
     if host
@@ -380,12 +434,16 @@ fn utf8_roots(roots: &Roots) -> Result<bruhs_models::backup::RootsInfo, BackupEr
 #[derive(Default)]
 struct Bruhs {
     names: BTreeMap<String, String>,
-    count: u32,
+    /// `None` when the store didn't answer, which the result says.
+    count: Option<u32>,
 }
 
 async fn bruhs_here(config: &Config) -> Bruhs {
     let Some(runtime) = &config.reactive else {
-        return Bruhs::default();
+        return Bruhs {
+            count: Some(0),
+            ..Bruhs::default()
+        };
     };
     let Ok(snapshot) = runtime.snapshot().await else {
         return Bruhs::default();
@@ -396,7 +454,17 @@ async fn bruhs_here(config: &Config) -> Bruhs {
             .into_iter()
             .map(|agent| (agent.id, agent.name))
             .collect(),
-        count: u32::try_from(snapshot.bruhs.len()).unwrap_or(u32::MAX),
+        count: Some(u32::try_from(snapshot.bruhs.len()).unwrap_or(u32::MAX)),
+    }
+}
+
+/// `NO_SPACE` unless `needed` bytes are free on the volume of `folder`.
+fn enough_space(folder: &Path, needed: u64) -> Result<(), BackupError> {
+    let free = free_bytes(folder)?;
+    if free < needed {
+        Err(BackupError::Space(no_space(needed - free)))
+    } else {
+        Ok(())
     }
 }
 
@@ -441,19 +509,20 @@ fn profile_owners(trees: &Path) -> Vec<String> {
 
 /// Reads every keychain item Bruhs' catalogs name (D5) and answers them
 /// as `keychain.json`, `{"items": [...]}` with base64 values (ruling B
-/// Task 4 I2), in a wiped buffer sized once, and how many there are. A
-/// read that waits or fails stops the backup.
+/// Task 4 I2), in a wiped buffer sized once, with how many there are and
+/// how many the keychain didn't hold (D5). A read that waits or fails
+/// stops the backup.
 async fn read_keychain(
     config: &Config,
     roots: &Roots,
-) -> Result<(Zeroizing<Vec<u8>>, u32), BackupError> {
+) -> Result<(Zeroizing<Vec<u8>>, u32, u32), BackupError> {
     let refs = keychain_inventory(
         &roots.core.join("credentials"),
         &roots.core.join("connections"),
         &roots.config.join("calendar").join("google"),
     )
     .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))?;
-    let (items, _missing) = read_items(&config.store, &refs, config.keychain_wait)
+    let (items, missing) = read_items(&config.store, &refs, config.keychain_wait)
         .await
         .map_err(|error| {
             BackupError::Keychain(match error {
@@ -463,7 +532,7 @@ async fn read_keychain(
             })
         })?;
     let count = u32::try_from(items.len()).unwrap_or(u32::MAX);
-    Ok((keychain_json(&items)?, count))
+    Ok((keychain_json(&items)?, count, missing))
 }
 
 #[derive(serde::Serialize)]
@@ -564,46 +633,88 @@ struct Writer {
     kdf: bruhs_backup::KdfParams,
     tmp: PathBuf,
     cancel: CancelFlag,
+    /// Files that changed while they were read (ruling B Task 6 I2).
+    changed: u32,
     progress: Progress,
     manifest: BackupManifest,
+    app_version: String,
     #[cfg(test)]
-    before_file: Option<Arc<dyn Fn() + Send + Sync>>,
+    before_file: Option<super::host::TestHook>,
 }
 
 type Sink = Encryptor<BufWriter<File>>;
 
-impl Writer {
-    /// Writes the backup beside `target` and moves it into place. Answers
-    /// its size.
-    fn run(self, target: &Path, overwrite: bool) -> Result<u64, BackupError> {
-        let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
-            return Err(BackupError::Refused(DESTINATION_MISSING));
-        };
-        let partial = folder.join(format!(
+/// The partial file a job writes beside its target, and the marker in
+/// `backups/tmp` that names it, so the next start removes a partial file
+/// a stopped process left (`BackupHost::sweep`). Dropped unplaced, both
+/// go.
+struct Partial {
+    path: PathBuf,
+    marker: PathBuf,
+    placed: bool,
+}
+
+impl Partial {
+    fn new(folder: &Path, name: &std::ffi::OsStr, tmp: &Path) -> Result<(Self, File), BackupError> {
+        use std::os::unix::ffi::OsStrExt as _;
+        let path = folder.join(format!(
             ".{}.partial-{}",
             name.to_string_lossy(),
             random_id()
         ));
-        let file = new_private_file(&partial)?;
-        let cancel = self.cancel.clone();
-        let written = self
-            .write(file)
-            .and_then(|bytes| place(&partial, target, overwrite).map(|()| bytes));
-        match written {
-            Ok(bytes) => Ok(bytes),
-            Err(error) => {
-                // Best effort: the file is incomplete and 0600.
-                let _ = std::fs::remove_file(&partial);
-                if cancel.cancelled() {
-                    Err(BackupError::Refused(BACKUP_STOPPED))
-                } else {
-                    Err(error)
-                }
-            }
+        let marker = tmp.join(format!("{}{PARTIAL_MARKER}", random_id()));
+        let mut note = new_private_file(&marker)?;
+        let partial = Self {
+            path,
+            marker,
+            placed: false,
+        };
+        note.write_all(partial.path.as_os_str().as_bytes())?;
+        note.sync_all()?;
+        let file = new_private_file(&partial.path)?;
+        Ok((partial, file))
+    }
+}
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        // Best effort: the sweep finds the marker otherwise.
+        if !self.placed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+        let _ = std::fs::remove_file(&self.marker);
+    }
+}
+
+impl Writer {
+    #[cfg(test)]
+    fn hook(&self, stage: super::host::Hook, path: &str) {
+        if let Some(hook) = &self.before_file {
+            hook(stage, path);
         }
     }
 
-    fn write(mut self, file: File) -> Result<u64, BackupError> {
+    /// Writes the backup beside `target` and moves it into place. Answers
+    /// its size and how many files changed while they were read.
+    fn run(self, target: &Path, overwrite: bool) -> Result<(u64, u32), BackupError> {
+        let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
+            return Err(BackupError::Refused(DESTINATION_MISSING));
+        };
+        let (mut partial, file) = Partial::new(folder, name, &self.tmp)?;
+        let cancel = self.cancel.clone();
+        let written = self.write(file).and_then(|written| {
+            place(&partial.path, target, overwrite)?;
+            partial.placed = true;
+            Ok(written)
+        });
+        drop(partial);
+        match written {
+            Err(_) if cancel.cancelled() => Err(BackupError::Refused(BACKUP_STOPPED)),
+            written => written,
+        }
+    }
+
+    fn write(mut self, file: File) -> Result<(u64, u32), BackupError> {
         let mut random = [0_u8; 23];
         random_bytes(&mut random);
         let header = bruhs_backup::Header::new(Kind::Full, Kdf::Argon2id(self.kdf), random);
@@ -623,15 +734,13 @@ impl Writer {
         let files = std::mem::take(&mut self.files);
         for file in &files {
             self.cancel.check()?;
-            #[cfg(test)]
-            if let Some(hook) = &self.before_file {
-                hook();
-            }
             let prefix = match file.root {
                 RootKey::Core => "core",
                 RootKey::Desktop => "desktop",
             };
             let path = format!("{prefix}/{}", file.rel);
+            #[cfg(test)]
+            self.hook(super::host::Hook::BeforeFile, &path);
             archive.folders_for(&path)?;
             if file.sqlite {
                 self.snapshot(&mut archive, file, &path)?;
@@ -639,13 +748,16 @@ impl Writer {
                 self.copy(&mut archive, file, &path)?;
             }
         }
+        // Only the data files written: one gone since the walk isn't in.
+        self.manifest.counts.files = u64::try_from(archive.listed.len()).unwrap_or(u64::MAX);
         if let Some(json) = self.keychain.take() {
             archive.secret("keychain.json", &json)?;
         }
         if let Some((part, bytes)) = self.web.take() {
-            self.stream(&mut archive, "web/part.bin", part, bytes)?;
+            self.stream(&mut archive, "web/part.bin", part, bytes, PRIVATE)?;
         }
         self.manifest.files = std::mem::take(&mut archive.listed);
+        self.manifest.app_version = std::mem::take(&mut self.app_version);
         let manifest = serde_json::to_vec(&self.manifest).map_err(io::Error::other)?;
         archive.plain("manifest.json", &manifest)?;
         self.progress.flush();
@@ -656,7 +768,7 @@ impl Writer {
             .into_inner()
             .map_err(io::IntoInnerError::into_error)?;
         file.sync_all()?;
-        Ok(file.metadata()?.len())
+        Ok((file.metadata()?.len(), self.changed))
     }
 
     /// A database of Bruhs' own: snapshotted through SQLite into `tmp`,
@@ -677,36 +789,51 @@ impl Writer {
             .custom_flags(libc::O_NOFOLLOW)
             .open(&copy.0)?;
         let bytes = opened.metadata()?.len();
-        self.stream(archive, path, opened, bytes)
+        self.stream(archive, path, opened, bytes, PRIVATE)
     }
 
-    /// Any other file, opened through its folder handles. One whose size
-    /// differs from the walk's is opened again once; a size that still
-    /// moves, or changes while it is read, is `FILE_CHANGED`.
+    /// Any other file, opened through its folder handles, with the owner's
+    /// execute bit kept (ruling B Task 6 I1). The header carries the size
+    /// taken before the read (D6, as amended by ruling B Task 6 I2): a file
+    /// that grows or whose time changes while it is read keeps that much
+    /// and is counted; only one that shrinks below it mid-read fails the
+    /// backup with `FILE_CHANGED`.
     fn copy(
         &mut self,
         archive: &mut Archive,
         file: &SourceFile,
         path: &str,
     ) -> Result<(), BackupError> {
-        let Some((opened, bytes)) = open_settled(file)? else {
+        let Some((opened, bytes, before)) = open_settled(file)? else {
             return Ok(());
         };
+        let mode = if before.permissions().mode() & 0o100 == 0 {
+            PRIVATE
+        } else {
+            RUNNABLE
+        };
+        #[cfg(test)]
+        self.hook(super::host::Hook::Opened, path);
         let check = opened.try_clone()?;
-        self.stream(archive, path, opened, bytes)?;
-        if check.metadata()?.len() != bytes {
-            return Err(BackupError::Refused(FILE_CHANGED));
+        self.stream(archive, path, opened, bytes, mode)?;
+        #[cfg(test)]
+        self.hook(super::host::Hook::Read, path);
+        let after = check.metadata()?;
+        if after.len() != bytes || after.modified().ok() != before.modified().ok() {
+            self.changed = self.changed.saturating_add(1);
         }
         Ok(())
     }
 
-    /// Appends `bytes` bytes of `source` at `path`, hashing them.
+    /// Appends `bytes` bytes of `source` at `path` with `mode`, hashing
+    /// them. Fewer bytes than that is `FILE_CHANGED`.
     fn stream(
         &mut self,
         archive: &mut Archive,
         path: &str,
         source: File,
         bytes: u64,
+        mode: u32,
     ) -> Result<(), BackupError> {
         let mut reader = Hashing {
             inner: source.take(bytes),
@@ -715,10 +842,12 @@ impl Writer {
             cancel: &self.cancel,
             progress: &mut self.progress,
         };
-        let mut header = file_header(bytes);
-        archive.tar.append_data(&mut header, path, &mut reader)?;
-        if reader.read != bytes {
-            return Err(BackupError::Refused(FILE_CHANGED));
+        let mut header = file_header(bytes, mode);
+        match archive.tar.append_data(&mut header, path, &mut reader) {
+            Ok(()) if reader.read == bytes => {}
+            // A short entry leaves the tar unusable: the job ends here.
+            Ok(()) => return Err(BackupError::Refused(FILE_CHANGED)),
+            Err(error) => return Err(error.into()),
         }
         let sha256 = hex(&reader.hasher.finalize());
         archive.listed.push(ManifestFile {
@@ -729,6 +858,11 @@ impl Writer {
         Ok(())
     }
 }
+
+/// The mode of every entry but an owner-runnable file.
+const PRIVATE: u32 = 0o600;
+/// A file the owner could run: a restore keeps it runnable (ruling F32).
+const RUNNABLE: u32 = 0o700;
 
 /// A snapshot in `backups/tmp`, deleted when dropped.
 struct Snapshot(PathBuf);
@@ -744,33 +878,52 @@ fn root_changed() -> BackupError {
     BackupError::Io(io::Error::other("a data root changed since the walk"))
 }
 
-/// Opens a listed file and answers it with the size to read, or `None`
-/// when it is gone or became a link since the walk.
-fn open_settled(file: &SourceFile) -> Result<Option<(File, u64)>, BackupError> {
-    let mut expected = file.bytes;
-    for attempt in 0..2 {
-        let opened = match open_source(file) {
-            Ok(opened) => opened,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
-                return Ok(None)
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let bytes = opened.metadata()?.len();
-        if bytes == expected {
-            return Ok(Some((opened, bytes)));
+/// Opens a listed file and answers it with the size to read and its
+/// metadata then, or `None` when it is gone or became a link since the
+/// walk. A size that differs from the walk's opens the file again once:
+/// a size that holds is read whole; one still moving is read up to the
+/// walk's size, unless it is now smaller (`FILE_CHANGED`).
+fn open_settled(file: &SourceFile) -> Result<Option<(File, u64, Metadata)>, BackupError> {
+    let open = || match open_source(file) {
+        Ok(opened) => {
+            let metadata = opened.metadata()?;
+            Ok(Some((opened, metadata)))
         }
-        if attempt == 1 {
-            break;
-        }
-        expected = bytes;
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => Ok(None),
+        Err(error) => Err(BackupError::from(error)),
+    };
+    let Some((opened, first)) = open()? else {
+        return Ok(None);
+    };
+    if first.len() == file.bytes {
+        return Ok(Some((opened, file.bytes, first)));
     }
-    Err(BackupError::Refused(FILE_CHANGED))
+    drop(opened);
+    let Some((opened, second)) = open()? else {
+        return Ok(None);
+    };
+    if second.len() == first.len() {
+        let bytes = second.len();
+        Ok(Some((opened, bytes, second)))
+    } else if second.len() >= file.bytes {
+        Ok(Some((opened, file.bytes, second)))
+    } else {
+        Err(BackupError::Refused(FILE_CHANGED))
+    }
+}
+
+/// Whether a failed `link` means the volume has no hard links (FAT and
+/// exFAT drives, some network shares), not some other refusal.
+fn no_hard_links(error: &io::Error) -> bool {
+    error.raw_os_error().is_some_and(|code| {
+        [libc::EXDEV, libc::EPERM, libc::ENOTSUP, libc::EOPNOTSUPP].contains(&code)
+    })
 }
 
 /// Moves the finished partial file into place. Without `overwrite` an
 /// existing file is never replaced, even one that appeared during the job.
+/// The partial file is already 0600.
 fn place(partial: &Path, target: &Path, overwrite: bool) -> Result<(), BackupError> {
     if overwrite {
         std::fs::rename(partial, target)?;
@@ -781,16 +934,15 @@ fn place(partial: &Path, target: &Path, overwrite: bool) -> Result<(), BackupErr
                 return Err(BackupError::Refused(DESTINATION_EXISTS));
             }
             // A volume without hard links: check, then rename.
-            Err(_) => {
+            Err(error) if no_hard_links(&error) => {
                 if std::fs::symlink_metadata(target).is_ok() {
                     return Err(BackupError::Refused(DESTINATION_EXISTS));
                 }
                 std::fs::rename(partial, target)?;
             }
+            Err(error) => return Err(error.into()),
         }
     }
-    let mode = std::fs::Permissions::from_mode(0o600);
-    std::fs::set_permissions(target, mode)?;
     if let Some(folder) = target.parent() {
         // Best effort: makes the rename durable where folders can sync.
         let _ = File::open(folder).and_then(|folder| folder.sync_all());
@@ -829,7 +981,10 @@ impl Archive {
 
     /// A small file that holds no secret, such as the manifest.
     fn plain(&mut self, path: &str, data: &[u8]) -> io::Result<()> {
-        let mut header = file_header(u64::try_from(data.len()).map_err(io::Error::other)?);
+        let mut header = file_header(
+            u64::try_from(data.len()).map_err(io::Error::other)?,
+            PRIVATE,
+        );
         self.tar.append_data(&mut header, path, data)
     }
 
@@ -838,7 +993,7 @@ impl Archive {
     /// hash (ruling F16).
     fn secret(&mut self, path: &str, data: &[u8]) -> io::Result<()> {
         let bytes = u64::try_from(data.len()).map_err(io::Error::other)?;
-        let mut header = file_header(bytes);
+        let mut header = file_header(bytes, PRIVATE);
         header.set_path(path)?;
         header.set_cksum();
         let out = self.tar.get_mut();
@@ -855,11 +1010,11 @@ impl Archive {
     }
 }
 
-/// A regular file's header: the size, mode 0600, and no owner or time.
-fn file_header(bytes: u64) -> tar::Header {
+/// A regular file's header: the size, `mode`, and no owner or time.
+fn file_header(bytes: u64, mode: u32) -> tar::Header {
     let mut header = tar::Header::new_gnu();
     header.set_entry_type(tar::EntryType::Regular);
-    header.set_mode(0o600);
+    header.set_mode(mode);
     header.set_size(bytes);
     header.set_mtime(0);
     header

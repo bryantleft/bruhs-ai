@@ -714,3 +714,58 @@ fn detection_keeps_this_process_s_sqlite_locks() {
     writer.execute_batch("COMMIT").unwrap();
     assert!(!locked_for_others(&live), "the probe sees the lock go");
 }
+
+/// A rollback-mode database another connection commits to during the
+/// stepped copy, then stops writing (B Task 6 C1): the copy starts again
+/// and ends with every committed row.
+#[test]
+fn a_rollback_database_copies_through_writes_between_steps() {
+    let (_dir, base) = temp();
+    let live = base.join("mail.sqlite3");
+    let setup = Connection::open(&live).unwrap();
+    setup
+        .execute_batch(
+            "CREATE TABLE mail(body TEXT);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 4000)
+             INSERT INTO mail SELECT printf('%0500d', i) FROM n;",
+        )
+        .unwrap();
+    let mode: String = setup
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode, "delete");
+    let pages: i64 = setup
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .unwrap();
+    let single_pass = u32::try_from(pages / 64 + 1).unwrap();
+    std::fs::create_dir_all(base.join("tmp")).unwrap();
+    let into = base.join("tmp").join("mail.sqlite3");
+
+    let mut steps = 0_u32;
+    let mut writes = 0_u32;
+    snapshot_sqlite_with(&live, &into, &mut || {
+        steps += 1;
+        // Commit on the first three steps, then stop writing.
+        if steps <= 3 {
+            setup
+                .execute("INSERT INTO mail VALUES ('late')", [])
+                .unwrap();
+            writes += 1;
+        }
+    })
+    .unwrap();
+    assert_eq!(writes, 3);
+    assert!(
+        steps > single_pass,
+        "each write restarts the copy: {steps} steps for {single_pass} a pass"
+    );
+    let copy = Connection::open_with_flags(&into, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let rows: i64 = copy
+        .query_row("SELECT count(*) FROM mail", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rows, 4003);
+    let check: String = copy
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(check, "ok");
+}

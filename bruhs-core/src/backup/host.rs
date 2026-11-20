@@ -15,8 +15,8 @@ use std::time::{Duration, SystemTime};
 use bruhs_backup::{Header, KdfParams, Kind, HEADER_LEN};
 use bruhs_models::backup::{
     no_space, valid_id, validate_password, BackupJob, BackupOptions, BackupOverview, BackupSizes,
-    JobState, JobStep, LastBackup, BACKUP_BUSY, NOT_A_BACKUP, RECORDING_FIRST, RESTORE_PENDING,
-    UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    JobState, JobStep, LastBackup, BACKUP_BUSY, INVALID_REQUEST, NOT_A_BACKUP, RECORDING_FIRST,
+    RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
@@ -70,11 +70,28 @@ pub(super) struct Config {
     pub(super) kdf: KdfParams,
     pub(super) keychain_wait: Duration,
     pub(super) browser_wait: Duration,
-    /// Called on the writer's thread before each data file, so a test can
-    /// hold a job mid-write.
+    /// The release written into each manifest.
+    pub(super) app_version: String,
+    /// Called on the writer's thread at each [`Hook`] of a data file, so a
+    /// test can hold a job or change a file mid-write.
     #[cfg(test)]
-    pub(super) before_file: Option<Arc<dyn Fn() + Send + Sync>>,
+    pub(super) before_file: Option<TestHook>,
 }
+
+/// Where the writer calls a test's hook, with the entry's path.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Hook {
+    /// Before the file is opened.
+    BeforeFile,
+    /// After it was opened and its size taken, before it is read.
+    Opened,
+    /// After it was read, before its size is checked again.
+    Read,
+}
+
+#[cfg(test)]
+pub(super) type TestHook = Arc<dyn Fn(Hook, &str) + Send + Sync>;
 
 #[derive(Default)]
 struct Shared {
@@ -107,6 +124,7 @@ impl BackupHost {
                 kdf: KdfParams::NATIVE,
                 keychain_wait: VAULT_READ_WAIT,
                 browser_wait: BROWSER_WAIT,
+                app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 #[cfg(test)]
                 before_file: None,
             }),
@@ -127,6 +145,14 @@ impl BackupHost {
         self
     }
 
+    /// The release each manifest names, as the app reports it (its
+    /// release version, else its crate version). Bruhs-core's own crate
+    /// version until set.
+    pub fn with_app_version(mut self, version: String) -> Self {
+        Arc::make_mut(&mut self.config).app_version = version;
+        self
+    }
+
     /// Fast key derivation, short waits and a daemon that answers as told.
     #[cfg(test)]
     pub(super) fn for_tests(mut self, recording: bool) -> Self {
@@ -139,7 +165,7 @@ impl BackupHost {
     }
 
     #[cfg(test)]
-    pub(super) fn with_before_file(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+    pub(super) fn with_before_file(mut self, hook: TestHook) -> Self {
         Arc::make_mut(&mut self.config).before_file = Some(hook);
         self
     }
@@ -166,6 +192,9 @@ impl BackupHost {
             return Err(BackupError::Refused(UNSUPPORTED_PLATFORM));
         }
         validate_password(&request.password).map_err(BackupError::Refused)?;
+        if request.web_part.is_some() && request.web_db_version.is_none() {
+            return Err(BackupError::Refused(INVALID_REQUEST));
+        }
         if let create::Output::File { path, overwrite } = &request.output {
             create::check_destination(self.roots(), path, *overwrite)?;
         }
@@ -180,11 +209,12 @@ impl BackupHost {
         }
 
         let id = random_id();
-        let (progress, state) = watch::channel(JobState::Running {
+        let first = JobState::Running {
             done_bytes: 0,
             total_bytes: 0,
             step: JobStep::Collecting,
-        });
+        };
+        let (progress, state) = watch::channel(first.clone());
         let cancel = CancelFlag::default();
         {
             let mut job = self.lock_job();
@@ -216,7 +246,7 @@ impl BackupHost {
             };
             progress.send_replace(state);
         });
-        Ok(self.job(&id).expect("the job was just stored"))
+        Ok(BackupJob { id, state: first })
     }
 
     /// A job's state, while it runs and after, until the next job starts.
@@ -254,6 +284,21 @@ impl BackupHost {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// `<core>/backups`, or one of its folders, when it is a real folder:
+    /// nothing is read or removed through a link (B Task 5 I1 ruling).
+    fn private_folder(&self, folder: Option<&str>) -> Option<PathBuf> {
+        let real =
+            |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir());
+        let backups = self.roots().backups(RootKey::Core);
+        if !real(&backups) {
+            return None;
+        }
+        match folder {
+            None => Some(backups),
+            Some(name) => Some(backups.join(name)).filter(|path| real(path)),
+        }
+    }
+
     fn restore_pending(&self) -> bool {
         std::fs::symlink_metadata(self.roots().backups(RootKey::Core).join(PENDING)).is_ok()
     }
@@ -263,7 +308,9 @@ impl BackupHost {
         if !valid_id(id) {
             return None;
         }
-        let path = self.outgoing_dir().join(format!("{id}.bruhsbak"));
+        let path = self
+            .private_folder(Some(OUTGOING))?
+            .join(format!("{id}.bruhsbak"));
         std::fs::symlink_metadata(&path)
             .is_ok_and(|metadata| metadata.is_file())
             .then_some(path)
@@ -315,35 +362,45 @@ impl BackupHost {
         if !valid_id(id) {
             return None;
         }
-        let path = upload_path(&self.incoming_dir(), kind, id);
+        let path = upload_path(&self.private_folder(Some(INCOMING))?, kind, id);
         std::fs::symlink_metadata(&path)
             .is_ok_and(|metadata| metadata.is_file())
             .then_some(path)
     }
 
     /// Removes downloads and uploads older than 30 minutes and, unless a
-    /// job runs, every snapshot left in `backups/tmp`.
+    /// job runs, every snapshot left in `backups/tmp` and the partial
+    /// files a stopped process left in chosen folders.
     pub fn sweep(&self) {
         let now = SystemTime::now();
-        for folder in [self.outgoing_dir(), self.incoming_dir()] {
-            sweep_folder(&folder, |modified| {
-                now.duration_since(modified)
-                    .is_ok_and(|age| age > TRANSFER_TTL)
-            });
+        for folder in [OUTGOING, INCOMING] {
+            if let Some(folder) = self.private_folder(Some(folder)) {
+                sweep_folder(&folder, |modified| {
+                    now.duration_since(modified)
+                        .is_ok_and(|age| age > TRANSFER_TTL)
+                });
+            }
         }
-        if !self.running() {
-            sweep_folder(&self.tmp_dir(), |_| true);
+        if self.running() {
+            return;
+        }
+        if let Some(tmp) = self.private_folder(Some(TMP)) {
+            remove_marked_partials(&tmp);
+            sweep_folder(&tmp, |_| true);
         }
     }
 
     /// The last backup made on this computer.
     pub fn last(&self) -> Option<LastBackup> {
-        let path = self.roots().backups(RootKey::Core).join(LAST);
+        let path = self.private_folder(None)?.join(LAST);
         let file = OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(path)
             .ok()?;
+        if !file.metadata().ok()?.is_file() {
+            return None;
+        }
         let mut text = Vec::new();
         file.take(LAST_MAX_BYTES).read_to_end(&mut text).ok()?;
         serde_json::from_slice(&text).ok()
@@ -532,6 +589,52 @@ pub(super) fn random_bytes(bytes: &mut [u8]) {
     rand::rngs::OsRng
         .try_fill_bytes(bytes)
         .expect("the operating system's random source answers");
+}
+
+/// Each marker in `tmp` names a partial backup file a job was writing
+/// (`<id>.partial-path`). A job that ended removes its marker; one left
+/// means the process stopped. The file it names is removed only when it
+/// still is a regular file with the partial name a job gives it.
+fn remove_marked_partials(tmp: &Path) {
+    use std::os::unix::ffi::OsStrExt as _;
+    let Ok(entries) = std::fs::read_dir(tmp) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let marker = name
+            .to_str()
+            .and_then(|name| name.strip_suffix(PARTIAL_MARKER))
+            .is_some_and(valid_id);
+        if !marker {
+            continue;
+        }
+        let Ok(text) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let partial = PathBuf::from(std::ffi::OsStr::from_bytes(&text));
+        if partial.is_absolute()
+            && partial.file_name().is_some_and(partial_name)
+            && std::fs::symlink_metadata(&partial).is_ok_and(|metadata| metadata.is_file())
+        {
+            let _ = std::fs::remove_file(&partial);
+        }
+        let _ = std::fs::remove_file(entry.path());
+    }
+}
+
+/// A marker's suffix in `backups/tmp`.
+pub(super) const PARTIAL_MARKER: &str = ".partial-path";
+
+/// Whether `name` is `.<name>.partial-<32 hex>`, as a job names the file
+/// it writes beside a chosen destination.
+fn partial_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        name.starts_with('.')
+            && name
+                .rsplit_once(".partial-")
+                .is_some_and(|(head, id)| head.len() > 1 && valid_id(id))
+    })
 }
 
 /// Removes the regular files in `folder` whose change time `expired`

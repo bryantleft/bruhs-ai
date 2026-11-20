@@ -747,12 +747,28 @@ pub fn no_space(needed: u64) -> String {
 /// The warning for owner files and folders a backup left out by name, if
 /// it left any out.
 pub fn skipped_names_line(skipped: u32) -> Option<String> {
-    let template = match skipped {
+    counted(skipped, SKIPPED_NAME, SKIPPED_NAMES)
+}
+
+/// `one` or `other` filled with `n`, or `None` for zero.
+fn counted(n: u32, one: &str, other: &str) -> Option<String> {
+    let template = match n {
         0 => return None,
-        1 => SKIPPED_NAME,
-        _ => SKIPPED_NAMES,
+        1 => one,
+        _ => other,
     };
-    Some(fill(template, &[("n", &skipped.to_string())]))
+    Some(fill(template, &[("n", &n.to_string())]))
+}
+
+/// The warning for files that changed while a backup read them, if any.
+pub fn changed_files_line(changed: u32) -> Option<String> {
+    counted(changed, CHANGED_FILE, CHANGED_FILES)
+}
+
+/// The warning for keychain items a catalog names but the keychain
+/// doesn't hold, if any.
+pub fn missing_items_line(missing: u32) -> Option<String> {
+    counted(missing, MISSING_ITEM, MISSING_ITEMS)
 }
 
 /// The warning for a bruh whose browser was still busy, so its profile
@@ -1146,6 +1162,24 @@ mod tests {
         assert_eq!(
             skipped_names_line(3).as_deref(),
             Some("3 files or folders with names a backup can't hold were left out.")
+        );
+        assert_eq!(changed_files_line(0), None);
+        assert_eq!(
+            changed_files_line(1).as_deref(),
+            Some("1 file changed while Bruhs read it, so its copy may be incomplete.")
+        );
+        assert_eq!(
+            changed_files_line(2).as_deref(),
+            Some("2 files changed while Bruhs read them, so their copies may be incomplete.")
+        );
+        assert_eq!(missing_items_line(0), None);
+        assert_eq!(
+            missing_items_line(1).as_deref(),
+            Some("1 keychain item wasn't in your keychain, so it isn't in this backup.")
+        );
+        assert_eq!(
+            missing_items_line(4).as_deref(),
+            Some("4 keychain items weren't in your keychain, so they aren't in this backup.")
         );
         assert_eq!(
             browser_busy_line("Scout {n}"),

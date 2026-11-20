@@ -52,6 +52,20 @@ pub const SKIPPED_NAMES: &str =
     "{n} files or folders with names a backup can't hold were left out.";
 pub const BROWSER_BUSY: &str = "{name}'s browser was busy, so its sign-ins aren't in this backup.";
 pub const BACKUP_STOPPED: &str = "The backup was stopped. Nothing was saved.";
+/// `{n}` counts files that changed while they were read; each holds the
+/// part that was there when the backup listed it (ruling B Task 6 I2).
+pub const CHANGED_FILE: &str =
+    "{n} file changed while Bruhs read it, so its copy may be incomplete.";
+pub const CHANGED_FILES: &str =
+    "{n} files changed while Bruhs read them, so their copies may be incomplete.";
+/// `{n}` counts keychain items a catalog names that the keychain doesn't
+/// hold (D5).
+pub const MISSING_ITEM: &str =
+    "{n} keychain item wasn't in your keychain, so it isn't in this backup.";
+pub const MISSING_ITEMS: &str =
+    "{n} keychain items weren't in your keychain, so they aren't in this backup.";
+pub const BRUHS_UNCOUNTED: &str =
+    "Bruhs couldn't count your bruhs, so this backup's summary shows none. They are in it.";
 
 // What a backup holds, shown before a restore.
 pub const PREVIEW_MADE: &str = "Made {date} on the {app} app, Bruhs {version}.";
@@ -138,6 +152,7 @@ pub const SERVICE_TOO_OLD: &str =
 pub const DESTINATION_EXISTS: &str = "A file with that name is already there.";
 pub const DESTINATION_INSIDE: &str = "Save the backup outside Bruhs' own folders.";
 pub const DESTINATION_MISSING: &str = "That folder doesn't exist.";
+pub const DESTINATION_NAME_LONG: &str = "Use a shorter file name.";
 pub const SOURCE_MISSING: &str = "That backup file isn't there anymore.";
 /// Ruling F28 caps a browser's plaintext at 256 MiB.
 pub const WEB_TOO_LARGE: &str =
@@ -189,6 +204,11 @@ pub const ALL_COPY: &[&str] = &[
     SKIPPED_NAMES,
     BROWSER_BUSY,
     BACKUP_STOPPED,
+    CHANGED_FILE,
+    CHANGED_FILES,
+    MISSING_ITEM,
+    MISSING_ITEMS,
+    BRUHS_UNCOUNTED,
     PREVIEW_MADE,
     PREVIEW_COUNTS,
     COUNT_BRUH,
@@ -249,6 +269,7 @@ pub const ALL_COPY: &[&str] = &[
     DESTINATION_EXISTS,
     DESTINATION_INSIDE,
     DESTINATION_MISSING,
+    DESTINATION_NAME_LONG,
     SOURCE_MISSING,
     WEB_TOO_LARGE,
     WEB_UNSUPPORTED,

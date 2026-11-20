@@ -24,6 +24,8 @@ mod host;
 
 #[cfg(unix)]
 pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
+#[cfg(all(test, unix))]
+use collect::snapshot_sqlite_with;
 #[cfg(unix)]
 pub use create::{check_destination, CancelFlag, CreateRequest, Output};
 #[cfg(unix)]

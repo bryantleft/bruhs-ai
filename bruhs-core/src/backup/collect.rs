@@ -496,6 +496,16 @@ pub fn open_source(file: &SourceFile) -> io::Result<File> {
 /// following a link, and its folder is resolved; on failure it is
 /// removed. Errors carry no path (ruling F15).
 pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
+    snapshot_sqlite_with(source, into, &mut || {})
+}
+
+/// [`snapshot_sqlite`], calling `between_steps` after each step of a
+/// stepped copy, so a test can write to the source mid-copy.
+pub(super) fn snapshot_sqlite_with(
+    source: &Path,
+    into: &Path,
+    between_steps: &mut dyn FnMut(),
+) -> Result<u64, BackupError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     {
@@ -503,7 +513,7 @@ pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     drop(options.open(into)?);
-    match copy_database(source, into) {
+    match copy_database(source, into, between_steps) {
         Ok(()) => Ok(std::fs::symlink_metadata(into)?.len()),
         Err(error) => {
             // Best effort: the copy is incomplete and in a 0600 file.
@@ -513,7 +523,11 @@ pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
     }
 }
 
-fn copy_database(source: &Path, into: &Path) -> Result<(), BackupError> {
+fn copy_database(
+    source: &Path,
+    into: &Path,
+    between_steps: &mut dyn FnMut(),
+) -> Result<(), BackupError> {
     // SQLite's `NOFOLLOW` refuses a link anywhere in a path (`/var` is one
     // on macOS), so the target's folder, which Bruhs made, is resolved.
     let into = resolved_folder(into)?;
@@ -537,7 +551,7 @@ fn copy_database(source: &Path, into: &Path) -> Result<(), BackupError> {
         live.execute("VACUUM INTO ?1", [target])
             .map_err(sqlite_failed)?;
     } else {
-        backup_in_steps(&live, &into)?;
+        backup_in_steps(&live, &into, between_steps)?;
     }
     live.close().map_err(|(_, error)| sqlite_failed(error))
 }
@@ -551,8 +565,14 @@ const BACKUP_DEADLINE: Duration = Duration::from_secs(120);
 
 /// Copies `live` into the empty file `into` with SQLite's online backup
 /// API, a few pages at a time. The source's lock is held only during a
-/// step.
-fn backup_in_steps(live: &Connection, into: &Path) -> Result<(), BackupError> {
+/// step. A write by another connection between steps starts the copy
+/// again, so a database written more often than one full pass takes is
+/// refused at the deadline with fixed copy.
+fn backup_in_steps(
+    live: &Connection,
+    into: &Path,
+    between_steps: &mut dyn FnMut(),
+) -> Result<(), BackupError> {
     use rusqlite::backup::{Backup, StepResult};
     let mut copy = Connection::open_with_flags(
         into,
@@ -573,6 +593,7 @@ fn backup_in_steps(live: &Connection, into: &Path) -> Result<(), BackupError> {
             if started.elapsed() > BACKUP_DEADLINE {
                 return Err(snapshot_failed("a SQLite backup never caught up"));
             }
+            between_steps();
             std::thread::sleep(BACKUP_STEP_PAUSE);
         }
     }
