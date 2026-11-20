@@ -787,7 +787,10 @@ mod tests {
                     "Proj",
                     CredentialScope::Project { path: "/p".into() },
                 ),
-                account("v1-n", "linear", "Ops\u{202e}", CredentialScope::Global),
+                AppAccount {
+                    state: SavedCredentialState::NeedsAttention,
+                    ..account("v1-n", "linear", "Ops\u{202e}", CredentialScope::Global)
+                },
                 account("v1-u", "newer", "Later", CredentialScope::Global),
             ],
             mailboxes: vec![AppMailbox {
@@ -815,7 +818,7 @@ mod tests {
                 },
                 AppGrantRow::Account {
                     id: "v1-n".into(),
-                    label: "Ops\\u{202e}, Linear".into(),
+                    label: "Ops\\u{202e}, Linear (needs attention)".into(),
                     on: false,
                 },
                 AppGrantRow::Account {

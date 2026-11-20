@@ -265,13 +265,31 @@ pub fn app_account_name(account: &AppAccount) -> String {
     review_text(&account.name)
 }
 
+/// Beside an account a write left unfinished: the listing keeps it, but
+/// its token may not read until it is replaced.
+pub const ACCOUNT_NEEDS_ATTENTION: &str = "needs attention";
+
+/// `label` with the account's state when it isn't usable as saved:
+/// "{label} (needs attention)".
+#[must_use]
+pub fn with_account_state(label: String, state: SavedCredentialState) -> String {
+    match state {
+        SavedCredentialState::Saved => label,
+        SavedCredentialState::NeedsAttention => format!("{label} ({ACCOUNT_NEEDS_ATTENTION})"),
+    }
+}
+
 /// How a shared app account reads beside its switch in a bruh's Settings:
-/// "{name}, {App}", or the app id for an app this build doesn't know.
+/// "{name}, {App}", or the app id for an app this build doesn't know, with
+/// its state when it needs attention.
 #[must_use]
 pub fn app_account_choice_label(account: &AppAccount) -> String {
     let app = super::connector(&account.app)
         .map_or_else(|| review_text(&account.app), |app| app.name.to_owned());
-    format!("{}, {app}", app_account_name(account))
+    with_account_state(
+        format!("{}, {app}", app_account_name(account)),
+        account.state,
+    )
 }
 
 /// How a mailbox reads beside its switch or in a poll's account choice:

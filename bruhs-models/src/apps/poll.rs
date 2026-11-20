@@ -5,7 +5,8 @@
 //! polls it from Task 10 and refuses any save of one that isn't the owner's.
 
 use super::page::{
-    account_order, app_account_name, mailbox_account, mailbox_choice_label, AppsListing,
+    account_order, app_account_name, mailbox_account, mailbox_choice_label, with_account_state,
+    AppsListing,
 };
 use crate::reactive::SourceKind;
 use crate::secrets::review_text;
@@ -255,8 +256,37 @@ pub fn poll_account_choices(watch: PollWatch, listing: &AppsListing) -> Vec<(Str
     accounts.sort_by(|a, b| account_order(a, b));
     accounts
         .into_iter()
-        .map(|account| (account.id.clone(), app_account_name(account)))
+        .map(|account| {
+            let label = with_account_state(app_account_name(account), account.state);
+            (account.id.clone(), label)
+        })
         .collect()
+}
+
+/// Refuses a poll whose account the loaded listing no longer offers for
+/// its watch, before it is saved (a gone or another kind of account).
+/// Without a listing nothing can be told, so it passes; an empty account
+/// is [`poll_form_kind`]'s to refuse.
+///
+/// # Errors
+///
+/// [`APP_POLL_ACCOUNT_GONE`] when the listing lacks the account.
+pub fn check_poll_account(
+    form: &AppPollForm,
+    listing: Option<&AppsListing>,
+) -> Result<(), &'static str> {
+    let account = form.account.trim();
+    let Some(listing) = listing.filter(|_| !account.is_empty()) else {
+        return Ok(());
+    };
+    if poll_account_choices(form.watch, listing)
+        .iter()
+        .any(|(id, _)| id == account)
+    {
+        Ok(())
+    } else {
+        Err(APP_POLL_ACCOUNT_GONE)
+    }
 }
 
 /// The account a new mail poll names in its line ([`describe_app_poll`]):
@@ -373,6 +403,13 @@ mod tests {
             (form.watch, form.minutes.as_str()),
             (PollWatch::GithubIssues, "5")
         );
+        // An account a write left unfinished says so.
+        let mut attention = listing;
+        attention.accounts[0].state = SavedCredentialState::NeedsAttention;
+        assert_eq!(
+            poll_account_choices(PollWatch::GithubIssues, &attention)[1].1,
+            "Work (needs attention)"
+        );
         for copy in [
             STARTS_WHEN_APP,
             NO_GITHUB_ACCOUNTS,
@@ -384,6 +421,48 @@ mod tests {
                 "{copy}"
             );
         }
+    }
+
+    /// Review refuses a poll whose account the listing no longer offers
+    /// for its watch, so it can't be saved only to fail later.
+    #[test]
+    fn a_gone_account_is_refused_before_saving() {
+        let listing = listing();
+        let form = |watch, account: &str| AppPollForm {
+            watch,
+            account: account.into(),
+            repo: "o/r".into(),
+            minutes: "5".into(),
+        };
+        let ok = form(PollWatch::GithubIssues, "v1-w");
+        assert_eq!(check_poll_account(&ok, Some(&listing)), Ok(()));
+        for gone in [
+            form(PollWatch::GithubIssues, "v1-gone"),
+            // A bruh's own account and another app's are never a poll's.
+            form(PollWatch::GithubPulls, "v1-o"),
+            form(PollWatch::GithubIssues, "v1-n"),
+            // A GitHub account can't watch mail.
+            form(PollWatch::NewMail, "v1-w"),
+        ] {
+            assert_eq!(
+                check_poll_account(&gone, Some(&listing)),
+                Err(APP_POLL_ACCOUNT_GONE),
+                "{gone:?}"
+            );
+        }
+        assert_eq!(
+            check_poll_account(&form(PollWatch::NewMail, "m1"), Some(&listing)),
+            Ok(())
+        );
+        // No listing yet, or no account chosen: left to the other checks.
+        assert_eq!(
+            check_poll_account(&form(PollWatch::GithubIssues, "v1-gone"), None),
+            Ok(())
+        );
+        assert_eq!(
+            check_poll_account(&form(PollWatch::GithubIssues, ""), Some(&listing)),
+            Ok(())
+        );
     }
 
     #[test]

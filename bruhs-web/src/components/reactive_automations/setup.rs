@@ -7,9 +7,9 @@ use super::{
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 use bruhs_models::apps::{
-    describe_app_poll, new_poll_form, open_apps_from_own_address, poll_account_label,
-    poll_form_for, poll_form_kind, AppsListing, FROM_NEWER_SOURCE, SOURCE_KIND_OTHER,
-    STARTS_WHEN_APP,
+    check_poll_account, describe_app_poll, new_poll_form, open_apps_from_own_address,
+    poll_account_label, poll_form_for, poll_form_kind, AppPollForm, AppsListing, FROM_NEWER_SOURCE,
+    SOURCE_KIND_OTHER, STARTS_WHEN_APP,
 };
 use bruhs_models::crew::{
     access_summary, agent_run_level, apps_ready, apps_reason, event_policy, event_policy_line,
@@ -120,6 +120,31 @@ fn starts_when_options(apps: bool, current: &str) -> Vec<(&'static str, &'static
     options
 }
 
+/// The source an App or newer-Bruhs type reviews as; `None` for every
+/// other type, which the editor builds itself. An App source is refused on
+/// an older service (`blocked`), with a malformed form, or with an account
+/// the loaded listing no longer offers. A newer Bruhs' source is never
+/// saved (ruling F3).
+fn fixed_kind_source(
+    kind: &str,
+    form: &AppPollForm,
+    apps: Option<&AppsListing>,
+    blocked: Option<&'static str>,
+) -> Option<Result<SourceKind, String>> {
+    match kind {
+        "app_poll" => Some((|| {
+            if let Some(reason) = blocked {
+                return Err(reason.to_owned());
+            }
+            let source = poll_form_kind(form)?;
+            check_poll_account(form, apps)?;
+            Ok(source)
+        })()),
+        "other" => Some(Err(FROM_NEWER_SOURCE.into())),
+        _ => None,
+    }
+}
+
 /// The account line an App routine names: the mailbox a new mail poll
 /// reads, when the listing has it.
 fn poll_label(kind: &SourceKind, apps: Option<&AppsListing>) -> Option<String> {
@@ -167,7 +192,11 @@ pub(crate) fn AutomationSetupPanel(
     let apps_notice = RwSignal::new(None::<String>);
     // The type picked for a newer Bruhs' source, waiting on Change type.
     let change_kind = RwSignal::new(None::<String>);
+    // Bumped by each load, so an older answer never replaces a newer one.
+    let apps_generation = StoredValue::new(0u64);
     let load_apps = move || {
+        apps_generation.update_value(|generation| *generation = generation.wrapping_add(1));
+        let requested = apps_generation.get_value();
         wasm_bindgen_futures::spawn_local(async move {
             let (listing, notice) = match crate::api::apps_listing().await {
                 Ok(listing) => (Some(listing), None),
@@ -179,6 +208,9 @@ pub(crate) fn AutomationSetupPanel(
                 }
                 Err(error) => (None, Some(crate::api::vault_message(&error))),
             };
+            if apps_generation.try_get_value() != Some(requested) {
+                return;
+            }
             apps.try_set(listing);
             apps_notice.try_set(notice);
         });
@@ -329,15 +361,15 @@ pub(crate) fn AutomationSetupPanel(
                     &cal_days.get_untracked(),
                     &cal_zone.get_untracked(),
                 )?
-            } else if kind.get_untracked() == "app_poll" {
-                // Offered only where the service keeps App sources.
-                if let Some(reason) = app_block.get_untracked() {
-                    return Err(reason.into());
-                }
-                poll_form_kind(&poll_form.get_untracked())?
-            } else if kind.get_untracked() == "other" {
-                // A newer Bruhs' source is never saved (ruling F3).
-                return Err(FROM_NEWER_SOURCE.into());
+            } else if let Some(source) = apps.with_untracked(|apps| {
+                fixed_kind_source(
+                    &kind.get_untracked(),
+                    &poll_form.get_untracked(),
+                    apps.as_ref(),
+                    app_block.get_untracked(),
+                )
+            }) {
+                source?
             } else {
                 source_kind(
                     &kind.get_untracked(),
@@ -705,6 +737,66 @@ mod tests {
         assert_eq!(bundled["source"]["enabled"], true);
         assert_eq!(bundled["subscription"]["enabled"], true);
     }
+    /// Review refuses a newer Bruhs' source, an App source on an older
+    /// service, a malformed one and one whose account is gone; it builds a
+    /// good one and leaves every other type to the editor.
+    #[test]
+    fn review_refuses_newer_sources_and_unusable_app_sources() {
+        use bruhs_models::apps::{
+            AppAccount, AppQuery, PollWatch, APP_POLL_ACCOUNT_GONE, REPO_SHAPE,
+        };
+        use bruhs_models::secrets::SavedCredentialState;
+        use bruhs_models::vault::CredentialScope;
+        let form = AppPollForm {
+            watch: PollWatch::GithubIssues,
+            account: "v1-g".into(),
+            repo: "o/r".into(),
+            minutes: "5".into(),
+        };
+        let listing = AppsListing {
+            accounts: vec![AppAccount {
+                id: "v1-g".into(),
+                app: "github".into(),
+                name: "GitHub octo".into(),
+                account: "octo".into(),
+                scope: CredentialScope::Global,
+                state: SavedCredentialState::Saved,
+                attention: None,
+            }],
+            ..AppsListing::default()
+        };
+        assert_eq!(
+            fixed_kind_source("other", &form, Some(&listing), None),
+            Some(Err(FROM_NEWER_SOURCE.to_owned()))
+        );
+        assert_eq!(
+            fixed_kind_source("app_poll", &form, Some(&listing), Some("older")),
+            Some(Err("older".to_owned()))
+        );
+        let bad = AppPollForm {
+            repo: "o".into(),
+            ..form.clone()
+        };
+        assert_eq!(
+            fixed_kind_source("app_poll", &bad, Some(&listing), None),
+            Some(Err(REPO_SHAPE.to_owned()))
+        );
+        assert_eq!(
+            fixed_kind_source("app_poll", &form, Some(&AppsListing::default()), None),
+            Some(Err(APP_POLL_ACCOUNT_GONE.to_owned()))
+        );
+        assert_eq!(
+            fixed_kind_source("app_poll", &form, Some(&listing), None),
+            Some(Ok(SourceKind::AppPoll {
+                app: "github".into(),
+                account: "v1-g".into(),
+                query: AppQuery::GithubIssues { repo: "o/r".into() },
+                poll_ms: 300_000,
+            }))
+        );
+        assert_eq!(fixed_kind_source("folder", &form, None, None), None);
+    }
+
     /// D10: the App source is offered only where the service keeps one; a
     /// routine that has one still shows it, as does a newer Bruhs' source.
     #[test]
