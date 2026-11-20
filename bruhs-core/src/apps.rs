@@ -5,6 +5,7 @@
 mod host;
 mod http;
 mod mail;
+mod poll;
 pub use host::*;
 pub use http::AppHttp;
 

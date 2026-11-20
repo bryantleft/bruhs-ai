@@ -8,7 +8,8 @@
 //!   query appended pair by pair (keys and values percent-encoded, so a key
 //!   is sent as the literal text the gate saw), then checked again.
 //! - Replies: any status, at most `APP_READ_MAX_BYTES` read and
-//!   `APP_RESPONSE_MAX_BYTES` returned, only `RESPONSE_HEADERS` kept, and
+//!   `APP_RESPONSE_MAX_BYTES` returned (a poll's own read keeps it whole),
+//!   only `RESPONSE_HEADERS` kept, and
 //!   every form of the token scrubbed from the raw text, the parsed JSON and
 //!   each kept header (F8). Failures are fixed copy.
 //!
@@ -88,12 +89,16 @@ enum Route {
     Upstream(SocketAddr),
 }
 
-/// One request as [`AppHttp::call`] or [`AppHttp::raw`] hands it on.
+/// One request as [`AppHttp::call`], [`AppHttp::raw`] or
+/// [`AppHttp::read_whole`] hands it on.
 struct Outgoing<'a> {
     method: &'a str,
     path: &'a str,
     query: &'a BTreeMap<String, Value>,
     body: Option<&'a Value>,
+    /// The whole reply, up to `APP_READ_MAX_BYTES`, instead of the
+    /// `APP_RESPONSE_MAX_BYTES` a bruh gets. Only Bruhs' own reads take it.
+    whole: bool,
 }
 
 impl AppHttp {
@@ -191,6 +196,7 @@ impl AppHttp {
             path: &call.path,
             query: &call.query,
             body: call.body.as_ref(),
+            whole: false,
         };
         self.send(connector, params, secret, outgoing).await
     }
@@ -212,6 +218,27 @@ impl AppHttp {
             path,
             query: &query,
             body,
+            whole: false,
+        };
+        self.send(connector, params, secret, outgoing).await
+    }
+
+    /// A GET Bruhs itself makes and reads whole, scrubbed like any reply but
+    /// never cut to a bruh's share: the polls, which parse the list.
+    pub(crate) async fn read_whole(
+        &self,
+        connector: &'static AppConnector,
+        params: &BTreeMap<String, String>,
+        secret: &AppSecret,
+        path: &str,
+        query: &BTreeMap<String, Value>,
+    ) -> Result<AppResponse, AppsError> {
+        let outgoing = Outgoing {
+            method: "GET",
+            path,
+            query,
+            body: None,
+            whole: true,
         };
         self.send(connector, params, secret, outgoing).await
     }
@@ -266,9 +293,14 @@ impl AppHttp {
             .ok()
             .and_then(Result::ok)
             .ok_or(AppsError::Unavailable(APP_BUSY))?;
+        let shown = if outgoing.whole {
+            APP_READ_MAX_BYTES
+        } else {
+            APP_RESPONSE_MAX_BYTES
+        };
         let work = async {
             let response = request.send().await.map_err(transport_error)?;
-            read_reply(response, &secrets).await
+            read_reply(response, &secrets, shown).await
         };
         tokio::time::timeout_at(deadline, work)
             .await
@@ -635,11 +667,12 @@ fn scrub_value(value: Value, secrets: &[&str]) -> Value {
 
 /// Reads at most [`APP_READ_MAX_BYTES`], then scrubs the raw text, parses
 /// it, [`clean`]s the parsed JSON's strings (or, for text, the whole text)
-/// and cuts what's over
-/// [`APP_RESPONSE_MAX_BYTES`].
+/// and cuts what's over `shown` bytes: [`APP_RESPONSE_MAX_BYTES`] for a
+/// bruh's call, [`APP_READ_MAX_BYTES`] for Bruhs' own poll reads.
 async fn read_reply(
     mut response: reqwest::Response,
     secrets: &[&str],
+    shown: usize,
 ) -> Result<AppResponse, AppsError> {
     let status = response.status().as_u16();
     let headers = kept_headers(response.headers(), secrets);
@@ -660,7 +693,7 @@ async fn read_reply(
         raw.extend_from_slice(&chunk);
     }
     let text = std::str::from_utf8(&raw).map_err(|_| AppsError::Invalid(APP_NOT_TEXT))?;
-    Ok(reply(status, headers, text, secrets))
+    Ok(reply(status, headers, text, secrets, shown))
 }
 
 fn reply(
@@ -668,6 +701,7 @@ fn reply(
     headers: BTreeMap<String, String>,
     text: &str,
     secrets: &[&str],
+    max: usize,
 ) -> AppResponse {
     let scrubbed = scrub(text, secrets);
     let (shown, parsed) = match serde_json::from_str::<Value>(&scrubbed) {
@@ -678,7 +712,7 @@ fn reply(
         // Not JSON: withheld whole if a decoder would turn up a secret.
         Err(_) => (clean(&scrubbed, secrets), None),
     };
-    if shown.len() <= APP_RESPONSE_MAX_BYTES {
+    if shown.len() <= max {
         return AppResponse {
             status,
             headers,
@@ -687,7 +721,7 @@ fn reply(
             note: None,
         };
     }
-    let mut end = APP_RESPONSE_MAX_BYTES;
+    let mut end = max;
     while !shown.is_char_boundary(end) {
         end -= 1;
     }

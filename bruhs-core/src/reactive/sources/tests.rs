@@ -388,36 +388,76 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
     assert_eq!(event.payload["scheduled_at_ms"], due);
 }
 
-#[tokio::test]
-async fn app_poll_and_other_sources_stay_inert_until_apps_poll() {
-    use bruhs_models::{
-        apps::AppQuery,
-        reactive::{ReactiveChange, ReactiveCommand},
-    };
+/// A runtime with one enabled routine on `source`, so its polls are saved.
+async fn routine_on(source: &EventSource) -> (tempfile::TempDir, ReactiveRuntime) {
+    use bruhs_models::reactive::{ReactiveChange, ReactiveCommand};
     let dir = tempfile::tempdir().unwrap();
     let runtime = ReactiveRuntime::open(dir.path().join("app-poll.sqlite3"))
         .await
         .unwrap();
-    let app_poll = EventSource {
+    let changes = [
+        ReactiveChange::SaveSource {
+            source: source.clone(),
+        },
+        ReactiveChange::SaveAgent {
+            agent: bruhs_models::reactive::ReactiveAgent {
+                id: "reader".into(),
+                name: "Reader".into(),
+                instructions: String::new(),
+                memory: String::new(),
+                model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+                project_path: dir.path().display().to_string(),
+                enabled: true,
+            },
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: bruhs_models::reactive::Subscription {
+                id: "reads".into(),
+                source_id: source.id.clone(),
+                agent_id: "reader".into(),
+                instructions: String::new(),
+                enabled: true,
+                auto_run: false,
+                debounce_ms: 0,
+                throttle_ms: 0,
+                on_busy: Default::default(),
+            },
+        },
+    ];
+    for change in changes {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    (dir, runtime)
+}
+
+fn github_poll(account: &str, poll_ms: u64) -> EventSource {
+    EventSource {
         id: "github-issues".into(),
         name: "New issues".into(),
         enabled: true,
         kind: SourceKind::AppPoll {
             app: "github".into(),
-            account: "v1-g".into(),
-            query: AppQuery::GithubIssues { repo: "o/r".into() },
-            poll_ms: 120_000,
+            account: account.into(),
+            query: bruhs_models::apps::AppQuery::GithubIssues { repo: "o/r".into() },
+            poll_ms,
         },
-    };
-    runtime
-        .command(ReactiveCommand::Apply {
-            change: ReactiveChange::SaveSource {
-                source: app_poll.clone(),
-            },
-        })
-        .await
-        .unwrap();
-    // A newer Bruhs' source, as that build saved it.
+    }
+}
+
+#[tokio::test]
+async fn app_polls_run_on_their_interval() {
+    let source = github_poll("v1-g", 120_000);
+    assert_eq!(
+        polling_interval(&source.kind),
+        Some(Duration::from_secs(120))
+    );
+    assert_eq!(polling_interval(&SourceKind::Other), None);
+
+    // A newer Bruhs' source, as that build saved it, never polls.
+    let (_dir, runtime) = routine_on(&source).await;
     runtime
         .call(|connection| {
             connection.execute(
@@ -438,18 +478,108 @@ async fn app_poll_and_other_sources_stay_inert_until_apps_poll() {
         .unwrap()
         .clone();
     assert_eq!(other.kind, SourceKind::Other);
-    let client = reqwest::Client::new();
-    for source in [&app_poll, &other] {
-        assert_eq!(polling_interval(&source.kind), None, "{}", source.id);
-        poll_once(&runtime, source, &client).await.unwrap();
-    }
-    let snapshot = runtime.snapshot().await.unwrap();
-    assert!(
-        snapshot
-            .source_statuses
-            .iter()
-            .all(|status| status.error.is_none()),
-        "{:?}",
-        snapshot.source_statuses
+    poll_once(&runtime, &other, &reqwest::Client::new())
+        .await
+        .unwrap();
+    assert_eq!(runtime.cursor("rss", "app_poll").await.unwrap(), None);
+}
+
+/// One poll as `drive` runs it: its error, if any, becomes the status.
+async fn polled_status(runtime: &ReactiveRuntime, source: &EventSource) -> Option<String> {
+    let error = poll_once(runtime, source, &reqwest::Client::new())
+        .await
+        .err()
+        .map(|error| error.to_string());
+    runtime.source_status(&source.id, error).await.unwrap();
+    runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .source_statuses
+        .into_iter()
+        .find(|status| status.source_id == source.id)
+        .and_then(|status| status.error)
+}
+
+#[tokio::test]
+async fn poll_failures_set_status_without_a_checkpoint() {
+    use crate::apps::{AppHttp, AppsHost};
+    use crate::mail::{gmail::GmailClient, outlook::OutlookClient};
+    use crate::secrets::{SecretManager, SecretStore};
+    use bruhs_models::apps::{APPS_NOT_ON_SERVER, APP_POLL_ACCOUNT_GONE};
+    use bruhs_models::vault::{CredentialScope, VaultCreate, VaultSecretInput};
+    use wiremock::matchers::path;
+
+    let server = MockServer::start().await;
+    let origin = format!("http://{}", server.address());
+    let host = AppsHost::new(
+        SecretManager::new(SecretStore::in_memory()),
+        AppHttp::with_upstream(*server.address()).unwrap(),
+        None,
+        std::sync::Arc::new(GmailClient::for_test_origin(&origin).unwrap()),
+        std::sync::Arc::new(OutlookClient::for_test_origin(&origin).unwrap()),
     );
+    let token = format!("tok_{}", uuid::Uuid::new_v4().simple());
+    let account = host
+        .vault()
+        .vault_create(VaultCreate {
+            name: "GitHub octo".into(),
+            scope: CredentialScope::Global,
+            secret: VaultSecretInput::AppToken {
+                app: "github".into(),
+                account: "octo".into(),
+                params: BTreeMap::new(),
+                token: Some(token.clone()),
+                key: None,
+            },
+        })
+        .await
+        .unwrap()
+        .id;
+    let source = github_poll(&account, 120_000);
+    let (_dir, runtime) = routine_on(&source).await;
+
+    // A server without apps.
+    assert_eq!(
+        polled_status(&runtime, &source).await.as_deref(),
+        Some(APPS_NOT_ON_SERVER)
+    );
+    assert_eq!(runtime.cursor(&source.id, "app_poll").await.unwrap(), None);
+
+    // With apps, a first poll records its baseline.
+    runtime.attach_apps(host.clone()).unwrap();
+    Mock::given(method("GET"))
+        .and(path("/repos/o/r/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"number": 7}])))
+        .mount(&server)
+        .await;
+    assert_eq!(polled_status(&runtime, &source).await, None);
+    let saved = runtime.cursor(&source.id, "app_poll").await.unwrap();
+    assert_eq!(saved.as_ref().unwrap()["newest"], 7);
+
+    // A refused token: the test call's copy, and the checkpoint stays.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(json!({"message": "Bad credentials", "token": token})),
+        )
+        .mount(&server)
+        .await;
+    assert_eq!(
+        polled_status(&runtime, &source).await.as_deref(),
+        Some("GitHub refused the token. Check it and what it may do.")
+    );
+    assert_eq!(runtime.cursor(&source.id, "app_poll").await.unwrap(), saved);
+
+    // The account is gone.
+    host.vault().vault_delete(&account).await.unwrap();
+    assert_eq!(
+        polled_status(&runtime, &source).await.as_deref(),
+        Some(APP_POLL_ACCOUNT_GONE)
+    );
+    assert_eq!(runtime.cursor(&source.id, "app_poll").await.unwrap(), saved);
+
+    let snapshot = serde_json::to_string(&runtime.snapshot().await.unwrap()).unwrap();
+    assert!(!snapshot.contains(&token));
 }

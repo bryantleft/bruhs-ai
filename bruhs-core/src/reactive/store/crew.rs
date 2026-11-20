@@ -237,6 +237,22 @@ pub(in crate::reactive) fn proposal_saves_app_poll(
     )
 }
 
+/// Whether automation `id` runs on an app poll source, which only the
+/// owner may switch on or off (ruling A Task 5). False for an id no
+/// automation has.
+pub(in crate::reactive) fn automation_polls_app(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, ReactiveError> {
+    let Some(subscription) = get::<Subscription>(connection, "reactive_subscriptions", id)? else {
+        return Ok(false);
+    };
+    Ok(
+        get::<EventSource>(connection, "reactive_sources", &subscription.source_id)?
+            .is_some_and(|source| matches!(source.kind, SourceKind::AppPoll { .. })),
+    )
+}
+
 /// The bruhs whose Computer is on (switched on, and available at their
 /// access and model), with their profile under `home`. Disabled agents and
 /// report agents have none.

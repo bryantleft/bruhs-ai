@@ -334,6 +334,7 @@ struct WeakRuntime {
     allowances: Weak<super::approval::Allowances>,
     private_roots: Weak<super::PrivateRoots>,
     vault: Weak<OnceLock<crate::secrets::SecretManager>>,
+    apps: Weak<OnceLock<crate::apps::AppsHost>>,
     vault_wait: std::time::Duration,
 }
 
@@ -351,6 +352,7 @@ impl WeakRuntime {
             allowances: Arc::downgrade(&runtime.allowances),
             private_roots: Arc::downgrade(&runtime.private_roots),
             vault: Arc::downgrade(&runtime.vault),
+            apps: Arc::downgrade(&runtime.apps),
             vault_wait: runtime.vault_wait,
         }
     }
@@ -368,6 +370,7 @@ impl WeakRuntime {
             allowances: self.allowances.upgrade()?,
             private_roots: self.private_roots.upgrade()?,
             vault: self.vault.upgrade()?,
+            apps: self.apps.upgrade()?,
             vault_wait: self.vault_wait,
         })
     }

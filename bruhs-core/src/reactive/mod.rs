@@ -94,6 +94,9 @@ pub struct ReactiveRuntime {
     private_roots: Arc<PrivateRoots>,
     /// The owner's vault, once attached: bruh logins and keys (`vault`).
     vault: Arc<OnceLock<crate::secrets::SecretManager>>,
+    /// The owner's connected apps and mail, once attached: app polls read
+    /// through it.
+    apps: Arc<OnceLock<crate::apps::AppsHost>>,
     /// The longest any vault lookup of this runtime waits before it fails
     /// closed.
     vault_wait: Duration,
@@ -261,6 +264,7 @@ impl ReactiveRuntime {
             allowances: Arc::default(),
             private_roots: Arc::new(private_roots),
             vault: Arc::new(OnceLock::new()),
+            apps: Arc::new(OnceLock::new()),
             vault_wait: crate::secrets::VAULT_READ_WAIT,
         })
     }
@@ -315,6 +319,21 @@ impl ReactiveRuntime {
     /// The owner's vault, once attached.
     pub fn vault(&self) -> Option<&crate::secrets::SecretManager> {
         self.vault.get()
+    }
+
+    /// Poll app sources through `apps` (D20). Until this is attached, an
+    /// app poll's status says apps aren't on this server. Once per runtime.
+    pub fn attach_apps(&self, apps: crate::apps::AppsHost) -> Result<(), ReactiveError> {
+        self.apps.set(apps).map_err(|_| {
+            ReactiveError::Conflict("This reactive runtime already has its apps.".into())
+        })?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The owner's apps and mail, once attached.
+    pub fn apps(&self) -> Option<&crate::apps::AppsHost> {
+        self.apps.get()
     }
 
     /// This runtime with its vault lookups bounded by `wait` instead of

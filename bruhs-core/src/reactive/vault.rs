@@ -257,9 +257,10 @@ impl ReactiveRuntime {
 
     /// Why `command` takes the owner's own app, as its refusal's copy, or
     /// `None` when any allowed page may send it (rulings F26 and BC I2): a
-    /// bruh's vault and app grants, an answer to its ask to use a vault key, and
+    /// bruh's vault and app grants, an answer to its ask to use a vault key,
     /// deleting an agent, which deletes a bruh's own vault entries, applied
-    /// or approved as a proposal.
+    /// or approved as a proposal, and turning an app poll routine on or off,
+    /// since an enabled one polls with the owner's own account.
     ///
     /// # Errors
     ///
@@ -276,6 +277,12 @@ impl ReactiveRuntime {
             } => Some(OWNER_ONLY_DELETE_BRUH),
             ReactiveCommand::Apply { change } if store::crew::saves_app_poll(change) => {
                 Some(OWNER_ONLY_APPS)
+            }
+            ReactiveCommand::SetAutomationEnabled { id, .. } => {
+                let id = id.clone();
+                self.call(move |connection| store::crew::automation_polls_app(connection, &id))
+                    .await?
+                    .then_some(OWNER_ONLY_APPS)
             }
             ReactiveCommand::DecideProposal { id, approve: true } => {
                 let id = id.clone();

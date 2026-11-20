@@ -17,6 +17,8 @@ use tokio::{
     task::{AbortHandle, JoinHandle, JoinSet},
 };
 
+mod app_poll;
+
 // A source can hold two 32 KiB process pipes or one HTTP body within the
 // 64 KiB event budget. Oversized encoded events fail before their cursor commits.
 const MAX_SOURCE_BODY_BYTES: usize = MAX_PAYLOAD_BYTES / 2;
@@ -130,11 +132,11 @@ fn polling_interval(kind: &SourceKind) -> Option<Duration> {
         SourceKind::Schedule { every_ms } => *every_ms,
         // Calendar wake-ups follow their saved deadline; this is only the retry pace.
         SourceKind::Calendar { .. } => 60_000,
-        // App polls start polling with Task 10; a newer Bruhs' kind never does.
+        SourceKind::AppPoll { poll_ms, .. } => *poll_ms,
+        // A newer Bruhs' kind never polls.
         SourceKind::Webhook
         | SourceKind::AppEvent { .. }
         | SourceKind::Custom
-        | SourceKind::AppPoll { .. }
         | SourceKind::Other => return None,
     };
     Some(Duration::from_millis(millis.max(1)))
@@ -162,13 +164,15 @@ async fn poll_once_next_deadline(
         SourceKind::Command { .. } => "command",
         SourceKind::Schedule { .. } => "schedule",
         SourceKind::Calendar { .. } => "calendar",
+        SourceKind::AppPoll { .. } => "app_poll",
         SourceKind::Webhook
         | SourceKind::AppEvent { .. }
         | SourceKind::Custom
-        | SourceKind::AppPoll { .. }
         | SourceKind::Other => return Ok(None),
     };
     let cursor = runtime.cursor(&source.id, cursor_key).await?;
+    // Shown once the batch is saved: a poll that read what it could.
+    let mut saved_status = None;
     let batch = match &source.kind {
         SourceKind::Folder {
             path,
@@ -215,10 +219,19 @@ async fn poll_once_next_deadline(
             weekdays,
             time_zone,
         } => calendar_batch(cursor, now_ms()?, times, weekdays, time_zone)?,
+        SourceKind::AppPoll {
+            app,
+            account,
+            query,
+            ..
+        } => {
+            let (batch, status) = app_poll::batch(runtime, app, account, query, cursor).await?;
+            saved_status = status;
+            batch
+        }
         SourceKind::Webhook
         | SourceKind::AppEvent { .. }
         | SourceKind::Custom
-        | SourceKind::AppPoll { .. }
         | SourceKind::Other => return Ok(None),
     };
     for event in &batch.events {
@@ -247,6 +260,9 @@ async fn poll_once_next_deadline(
         .await?;
     if waiting_for_capacity {
         return Err(ReactiveError::Conflict("Settled files are waiting for event queue space. Review or cancel pending runs before the next folder scan.".into()));
+    }
+    if let Some(status) = saved_status {
+        return Err(ReactiveError::Invalid(status));
     }
     Ok(next_deadline)
 }

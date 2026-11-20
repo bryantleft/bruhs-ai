@@ -146,7 +146,30 @@ pub(super) fn records<T: DeserializeOwned>(
 ) -> Result<Vec<T>, ReactiveError> {
     let mut statement = connection.prepare(&format!("SELECT payload FROM {table} ORDER BY id"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    if table == "reactive_sources" {
+        return readable_rows(rows);
+    }
     rows.map(|row| decode(row?)).collect()
+}
+
+/// Every source row this build can read. One a newer Bruhs wrote in a shape
+/// this build can't read (a newer query, say) is left out and counted in
+/// the log, so it can't break every listing (ruling A Task 5). The row
+/// itself stays as written.
+fn readable_rows<T: DeserializeOwned>(
+    rows: impl Iterator<Item = rusqlite::Result<String>>,
+) -> Result<Vec<T>, ReactiveError> {
+    let (mut readable, mut skipped) = (Vec::new(), 0_usize);
+    for row in rows {
+        match decode(row?) {
+            Ok(record) => readable.push(record),
+            Err(_) => skipped += 1,
+        }
+    }
+    if skipped > 0 {
+        tracing::warn!(skipped, "Left out source rows this build can't read");
+    }
+    Ok(readable)
 }
 
 fn get<T: DeserializeOwned>(

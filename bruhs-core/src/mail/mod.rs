@@ -21,6 +21,7 @@ pub use cache::identity::{
     MailAuthorizationRef, MailCacheHostId, MailDraftRef, MailIdentityError, MailboxId,
     RemoteMessageRef, RemoteThreadRef,
 };
+pub use cache::new_mail::NewMailThread;
 pub use cache::send_journal::{
     DispatchClaim, OperationError, ProviderAcceptance, SendOperation, SendReview, SendState,
 };
@@ -183,6 +184,29 @@ impl MailRuntime {
             authorization,
             _access: access,
         })
+    }
+
+    /// Up to `limit` of `mailbox`'s unread, unarchived threads whose newest
+    /// message came in after `after_ms`, oldest first (D20, ruling F28).
+    pub async fn unread_since(
+        &self,
+        mailbox: &str,
+        after_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<NewMailThread>, MailError> {
+        let mailbox = mailbox.to_owned();
+        self.call(false, move |cache| {
+            Ok(cache.unread_since(&mailbox, after_ms, limit)?)
+        })
+        .await
+    }
+
+    /// The newest `message_at_ms` among `mailbox`'s unread, unarchived
+    /// threads, or `None` when it has none.
+    pub async fn newest_unread_ms(&self, mailbox: &str) -> Result<Option<i64>, MailError> {
+        let mailbox = mailbox.to_owned();
+        self.call(false, move |cache| Ok(cache.newest_unread_ms(&mailbox)?))
+            .await
     }
 
     pub async fn cached_thread(

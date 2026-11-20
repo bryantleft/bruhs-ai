@@ -2523,6 +2523,84 @@ async fn app_poll_sources_validate_and_take_the_owner() {
     }
 }
 
+/// Ruling A Task 5: turning an app poll routine on or off is the owner's,
+/// since an enabled one polls with the owner's own account.
+#[tokio::test]
+async fn switching_an_app_poll_routine_takes_the_owner() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    for source in [
+        app_poll_source("p", "o/r"),
+        EventSource {
+            kind: SourceKind::Schedule { every_ms: 60_000 },
+            ..app_poll_source("t", "o/r")
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply {
+                change: ReactiveChange::SaveSource { source },
+            })
+            .await
+            .unwrap();
+    }
+    for (id, source) in [("polls", "p"), ("ticks", "t")] {
+        runtime
+            .command(ReactiveCommand::Apply {
+                change: ReactiveChange::SaveSubscription {
+                    subscription: subscription_to(id, source, "a", false),
+                },
+            })
+            .await
+            .unwrap();
+    }
+    for (id, enabled, expected) in [
+        ("polls", true, Some(OWNER_ONLY_APPS)),
+        ("polls", false, Some(OWNER_ONLY_APPS)),
+        ("ticks", true, None),
+        ("gone", true, None),
+    ] {
+        let command = ReactiveCommand::SetAutomationEnabled {
+            id: id.into(),
+            enabled,
+        };
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+}
+
+/// Ruling A Task 5: a source row this build can't read at all is left out
+/// of every listing instead of failing them.
+#[tokio::test]
+async fn unreadable_source_rows_leave_the_rest_readable() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSource {
+                source: app_poll_source("p", "o/r"),
+            },
+        })
+        .await
+        .unwrap();
+    let row = json!({"id": "q", "name": "Newer", "enabled": true,
+        "kind": {"type": "app_poll", "app": "github", "account": "v1-g",
+            "query": {"type": "github_discussions", "repo": "o/r"}, "poll_ms": 300_000}})
+    .to_string();
+    runtime
+        .call(move |connection| {
+            connection.execute(
+                "INSERT INTO reactive_sources(id,payload,hook_token) VALUES('q',?1,'t')",
+                [row],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.sources, [app_poll_source("p", "o/r")]);
+}
+
 /// Ruling F3 (b): enabling an automation re-saves its source, so one whose
 /// source a newer Bruhs wrote is refused and its row stays as it was.
 #[tokio::test]

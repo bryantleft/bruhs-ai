@@ -7,6 +7,7 @@ mod browse;
 mod compose;
 pub mod draft_attachments;
 pub mod identity;
+pub mod new_mail;
 pub mod send_journal;
 
 use bruhs_models::{connections::ServiceProvider, InboxConversation, InboxSource};

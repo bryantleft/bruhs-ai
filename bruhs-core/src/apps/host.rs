@@ -51,9 +51,9 @@ pub struct MailSendOutcome {
 pub struct AppsHost {
     vault: SecretManager,
     http: AppHttp,
-    mail: Option<MailRuntime>,
-    gmail: Arc<GmailClient>,
-    outlook: Arc<OutlookClient>,
+    pub(super) mail: Option<MailRuntime>,
+    pub(super) gmail: Arc<GmailClient>,
+    pub(super) outlook: Arc<OutlookClient>,
     /// Sends every mailbox's email instead of Gmail and Outlook (tests).
     mail_transport: Option<Arc<dyn MailSendTransport>>,
     /// How long a `send_mail` may take ([`MAIL_SEND_BUDGET_MS`]).
@@ -62,6 +62,9 @@ pub struct AppsHost {
     /// across its test call, so two connects of one account can't both
     /// save. Shared by every clone.
     connecting: Arc<tokio::sync::Mutex<()>>,
+    /// Held through each mail poll's sync and read, so two polls never
+    /// sync a mailbox at once (ruling F28). Shared by every clone.
+    pub(super) mail_polls: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppsHost {
@@ -83,6 +86,7 @@ impl AppsHost {
             mail_transport: None,
             send_budget: Duration::from_millis(MAIL_SEND_BUDGET_MS),
             connecting: Arc::default(),
+            mail_polls: Arc::default(),
         }
     }
 
@@ -373,7 +377,7 @@ impl AppsHost {
 
     /// Each connected Gmail and Outlook mailbox with the connection id it
     /// was bound with, which is the one present now (F14).
-    async fn connected_mailboxes(&self) -> Result<Vec<(AppMailbox, String)>, AppsError> {
+    pub(super) async fn connected_mailboxes(&self) -> Result<Vec<(AppMailbox, String)>, AppsError> {
         let Some(mail) = &self.mail else {
             return Ok(Vec::new());
         };
@@ -558,7 +562,7 @@ fn checked(
 
 /// A vault failure as the host reports it: a refused input keeps its copy,
 /// and a keychain that didn't answer within the read wait needs the owner.
-fn vault_error(error: SecretError) -> AppsError {
+pub(super) fn vault_error(error: SecretError) -> AppsError {
     match error {
         SecretError::Invalid(message) => AppsError::Invalid(message),
         SecretError::Storage => AppsError::Unavailable(KEYCHAIN_NEEDS_OWNER),
