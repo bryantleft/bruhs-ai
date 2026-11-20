@@ -14,7 +14,8 @@ use super::{
 };
 use crate::agent::AgentProvider;
 use crate::apps::{
-    classify, connector, normalize_path, validate_call, AppAction, AppCall, UNKNOWN_APP,
+    classify, connector, normalize_path, validate_call, AppAction, AppCall, APP_ACCOUNT_SHAPE,
+    MAX_ACCOUNT_CHARS, UNKNOWN_APP,
 };
 use crate::mail::{MailComposeContent, MailComposeError, MailReplyTarget};
 use crate::secrets::review_text;
@@ -80,12 +81,11 @@ pub const APPS_PREAMBLE: &str = "list_apps names their accounts, and with app it
 /// The send line when no app or mail tool is offered.
 pub const NEVER_SEND_PREAMBLE: &str = "Never send messages in the owner's name.";
 /// The send line at Ask with apps or mail.
-pub const SEND_ASK_PREAMBLE: &str = "Each write, email or post in the owner's name waits for the owner's approval; if one is denied, continue without it and say so.";
+pub const SEND_ASK_PREAMBLE: &str = "Each write, email, post, payment or refund in the owner's name waits for the owner's approval; if one is denied, continue without it and say so.";
 /// The send line at Full without Send as me.
-pub const SEND_APPROVAL_PREAMBLE: &str =
-    "Writes run without asking; email and posts in the owner's name wait for the owner's approval.";
+pub const SEND_APPROVAL_PREAMBLE: &str = "Writes run without asking; email, posts, payments and refunds in the owner's name wait for the owner's approval.";
 /// The send line at Full with Send as me.
-pub const SEND_AS_ME_PREAMBLE: &str = "You may send email and post in the owner's name without asking. Do it only when your job or the owner asks for it.";
+pub const SEND_AS_ME_PREAMBLE: &str = "You may send email, post, pay and refund in the owner's name without asking. Do it only when your job or the owner asks for it.";
 /// The preamble names at most this many apps and mailboxes, each.
 pub const PREAMBLE_MAX_NAMES: usize = 20;
 
@@ -316,8 +316,8 @@ pub fn list_apps_gate(access: &BruhAccess, provider: AgentProvider) -> Gate {
 }
 
 /// The gate for one `send_mail` (D7): refused when the bruh can't use mail,
-/// the input isn't a valid [`MailSendInput`] or the lookup found no
-/// mailbox; otherwise a send as the owner.
+/// the input isn't a valid [`MailSendInput`], the lookup found no mailbox,
+/// or `from` names another one; otherwise a send as the owner.
 #[must_use]
 pub fn mail_gate(
     access: &BruhAccess,
@@ -330,12 +330,23 @@ pub fn mail_gate(
     }
     let checked = serde_json::from_value::<MailSendInput>(input.clone())
         .map_err(|_| MAIL_CALL_SHAPE)
-        .and_then(|mail| mail.validate());
-    if let Err(reason) = checked {
-        return Gate::Deny(reason);
-    }
-    if let MailLookup::Missing(reason) = lookup {
-        return Gate::Deny(reason);
+        .and_then(|mail| mail.validate().map(|()| mail));
+    let mail = match checked {
+        Ok(mail) => mail,
+        Err(reason) => return Gate::Deny(reason),
+    };
+    match lookup {
+        MailLookup::Missing(reason) => return Gate::Deny(reason),
+        // Labels are email addresses, which compare in any case.
+        MailLookup::Found(target)
+            if mail
+                .from
+                .as_ref()
+                .is_some_and(|from| !from.eq_ignore_ascii_case(&target.account)) =>
+        {
+            return Gate::Deny(MAIL_NOT_GRANTED)
+        }
+        MailLookup::Found(_) => {}
     }
     gate(
         access,
@@ -345,23 +356,26 @@ pub fn mail_gate(
 }
 
 /// An app call's approval card input: the call as written plus `"as"`, the
-/// account it goes out as (D16). The allowance keeps the input as sent.
+/// account it goes out as (D16), and `"as_id"`, its vault entry, so the
+/// card's fingerprint names the exact account even when two share a label.
+/// The allowance keeps the input as sent.
 #[must_use]
 pub fn app_card_input(input: &Value, target: &AppTarget) -> Value {
-    with_as(input, &target.account)
+    with_as(input, &target.account, &target.entry_id)
 }
 
 /// A `send_mail`'s approval card input: the input plus `"as"`, the mailbox
-/// it goes out from.
+/// it goes out from, and `"as_id"`, that mailbox's id.
 #[must_use]
 pub fn mail_card_input(input: &Value, target: &MailTarget) -> Value {
-    with_as(input, &target.account)
+    with_as(input, &target.account, &target.mailbox_id)
 }
 
-fn with_as(input: &Value, account: &str) -> Value {
+fn with_as(input: &Value, account: &str, id: &str) -> Value {
     let mut card = input.clone();
     if let Value::Object(fields) = &mut card {
         fields.insert("as".to_owned(), Value::String(account.to_owned()));
+        fields.insert("as_id".to_owned(), Value::String(id.to_owned()));
     }
     card
 }
@@ -388,7 +402,8 @@ pub struct MailSendInput {
 }
 
 impl MailSendInput {
-    /// Checks the subject, the body and the recipients, parsed by the
+    /// Checks `from` as an app call's account, then the subject, the body
+    /// and the recipients, parsed by the
     /// compose rules: at least one in To, at most [`MAIL_MAX_RECIPIENTS`]
     /// in all once repeats are dropped.
     ///
@@ -396,6 +411,14 @@ impl MailSendInput {
     ///
     /// The model-facing reason the first broken rule gives.
     pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(from) = &self.from {
+            // As an app call's account: `review_text` would change a name
+            // with control or format characters.
+            let chars = from.chars().count();
+            if chars == 0 || chars > MAX_ACCOUNT_CHARS || review_text(from) != *from {
+                return Err(APP_ACCOUNT_SHAPE);
+            }
+        }
         let subject = match (&self.reply, &self.subject) {
             (Some(_), Some(_)) => return Err(MAIL_REPLY_SUBJECT),
             (Some(_), None) => "",
@@ -440,8 +463,9 @@ impl MailSendInput {
     }
 }
 
-// Card text (D16, ruling F12). The card input is the call plus `"as"`, so
-// these read its fields directly; it never parses as an `AppCall`.
+// Card text (D16, ruling F12). The card input is the call plus `"as"` and
+// `"as_id"`, so these read its fields directly; it never parses as an
+// `AppCall`.
 
 /// An app call card's summary: "{App}: {METHOD} {path}", or "As you on
 /// {App}: …" when the call sends as the owner. The path is the normalized
@@ -454,6 +478,7 @@ pub(super) fn app_summary(input: &Value) -> Option<String> {
     let mut call = input.clone();
     if let Value::Object(fields) = &mut call {
         fields.remove("as");
+        fields.remove("as_id");
     }
     let sends = found.is_some_and(|found| {
         serde_json::from_value::<AppCall>(call)
@@ -497,9 +522,17 @@ fn app_method_and_path(input: &Value) -> Option<(String, String)> {
 }
 
 /// A mail card's summary: "Email {to}: {subject}", or "Reply by email to
-/// {to}" for a reply. Uncut; the caller cuts it.
+/// {to}" for a reply, with how many more get it in Cc and Bcc ("Email
+/// {to} and 2 in Cc: …"). Uncut; the caller cuts it.
 pub(super) fn mail_summary(input: &Value) -> Option<String> {
-    let to = review_text(input["to"].as_str()?);
+    let mut to = review_text(input["to"].as_str()?);
+    let (cc, bcc) = copy_counts(input);
+    match (cc, bcc) {
+        (0, 0) => {}
+        (cc, 0) => to.push_str(&format!(" and {cc} in Cc")),
+        (0, bcc) => to.push_str(&format!(" and {bcc} in Bcc")),
+        (cc, bcc) => to.push_str(&format!(", {cc} in Cc and {bcc} in Bcc")),
+    }
     Some(if input["reply"].is_null() {
         let subject = review_text(input["subject"].as_str().unwrap_or_default());
         format!("Email {to}: {subject}")
@@ -508,9 +541,34 @@ pub(super) fn mail_summary(input: &Value) -> Option<String> {
     })
 }
 
-/// A mail card's detail, never cut: From, To, Cc and Bcc when set, the
-/// subject (the thread's for a reply), a blank line, then the body, each
-/// line through `review_text` on its own.
+/// How many people a mail card's Cc and Bcc reach once repeats are
+/// dropped, by the compose parser; a field it can't parse counts its
+/// non-empty parts.
+fn copy_counts(input: &Value) -> (usize, usize) {
+    let field = |name: &str| input[name].as_str().unwrap_or_default().to_owned();
+    let content = MailComposeContent {
+        to: field("to"),
+        cc: field("cc"),
+        bcc: field("bcc"),
+        ..MailComposeContent::default()
+    };
+    match content.validate_send() {
+        Ok(recipients) => (recipients.cc.len(), recipients.bcc.len()),
+        Err(_) => {
+            let parts = |text: String| {
+                text.split([',', ';'])
+                    .filter(|part| !part.trim().is_empty())
+                    .count()
+            };
+            (parts(content.cc), parts(content.bcc))
+        }
+    }
+}
+
+/// A mail card's detail, never cut: From, To, Cc and Bcc when set, for a
+/// reply the thread and message it replies to, the subject (the thread's
+/// for a reply), a blank line, then the body, each line through
+/// `review_text` on its own, a CRLF shown as one line break.
 pub(super) fn mail_detail(input: &Value) -> Option<String> {
     let to = input["to"].as_str()?;
     let mut lines = Vec::new();
@@ -524,6 +582,15 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
         }
     }
     if !input["reply"].is_null() {
+        lines.push(format!(
+            "Reply to: thread {}, message {}",
+            review_text(
+                input["reply"]["external_thread_id"]
+                    .as_str()
+                    .unwrap_or_default()
+            ),
+            review_text(input["reply"]["message_id"].as_str().unwrap_or_default()),
+        ));
         lines.push("Subject: the thread's".to_owned());
     } else if let Some(subject) = input["subject"].as_str() {
         lines.push(format!("Subject: {}", review_text(subject)));
@@ -534,7 +601,7 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
             .as_str()
             .unwrap_or_default()
             .split('\n')
-            .map(review_text),
+            .map(|line| review_text(line.strip_suffix('\r').unwrap_or(line))),
     );
     Some(lines.join("\n"))
 }
@@ -543,7 +610,7 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::apps::{APP_GRAPHQL_SHAPE, APP_PATH};
-    use crate::crew::{BRUH_BROWSER_TOOL, DELIVERY_DENIAL};
+    use crate::crew::{approval_fingerprint, approval_summary, BRUH_BROWSER_TOOL, DELIVERY_DENIAL};
     use crate::secrets::SavedCredentialState;
     use crate::vault::AppTokenMeta;
     use serde_json::json;
@@ -908,6 +975,51 @@ mod tests {
             Some(APPS_NEED_ASK)
         );
         assert_eq!(apps_unavailable(AccessLevel::Ask, claude), None);
+        // Delivery never asks: at Ask it is refused (D7).
+        let ask = BruhAccess {
+            level: AccessLevel::Ask,
+            send_as_me: true,
+            can_deliver: true,
+        };
+        assert_eq!(
+            app_gate(
+                &ask,
+                claude,
+                &json!({"app": "github", "method": "PUT", "path": "/repos/o/r/pulls/1/merge"}),
+                &github
+            ),
+            Gate::Deny(DELIVERY_DENIAL)
+        );
+        assert_eq!(
+            list_apps_gate(&BruhAccess::default(), claude),
+            Gate::Deny(APPS_NEED_ASK)
+        );
+        // Only Claude asks before each call, so every other runtime is out,
+        // for all three tools.
+        let read = json!({"app": "github", "method": "GET", "path": "/user"});
+        let mail = json!({"to": "ann@x.test", "subject": "s", "body": "b"});
+        let mailbox = MailLookup::Found(MailTarget {
+            mailbox_id: "m".into(),
+            account: "me@x.test".into(),
+        });
+        for provider in AgentProvider::ALL
+            .into_iter()
+            .filter(|provider| *provider != claude)
+        {
+            assert_eq!(
+                apps_unavailable(AccessLevel::Full, provider),
+                Some(APPS_NEED_ASK)
+            );
+            assert_eq!(
+                app_gate(&full, provider, &read, &github),
+                Gate::Deny(APPS_NEED_ASK)
+            );
+            assert_eq!(list_apps_gate(&full, provider), Gate::Deny(APPS_NEED_ASK));
+            assert_eq!(
+                mail_gate(&full, provider, &mail, &mailbox),
+                Gate::Deny(APPS_NEED_ASK)
+            );
+        }
         assert_eq!(apps_unavailable(AccessLevel::Full, claude), None);
     }
 
@@ -921,7 +1033,22 @@ mod tests {
         let input = json!({"app": "github", "method": "GET", "path": "/user"});
         assert_eq!(
             app_card_input(&input, &target),
-            json!({"app": "github", "method": "GET", "path": "/user", "as": "octo"})
+            json!({"app": "github", "method": "GET", "path": "/user", "as": "octo",
+                "as_id": "v1-gh"})
+        );
+        // Two accounts with one label give two cards, so an approval of one
+        // never serves the other (review I1).
+        let twin = AppTarget {
+            entry_id: "v1-gh-2".into(),
+            ..target.clone()
+        };
+        assert_ne!(
+            approval_fingerprint(APP_REQUEST_TOOL, &app_card_input(&input, &target)),
+            approval_fingerprint(APP_REQUEST_TOOL, &app_card_input(&input, &twin))
+        );
+        assert_eq!(
+            approval_summary(APP_REQUEST_TOOL, &app_card_input(&input, &twin)),
+            "GitHub: GET /user"
         );
         let mailbox = MailTarget {
             mailbox_id: "m".into(),
@@ -930,7 +1057,16 @@ mod tests {
         let mail = json!({"to": "ann@x.test", "subject": "Lunch", "body": "Hi"});
         assert_eq!(
             mail_card_input(&mail, &mailbox),
-            json!({"to": "ann@x.test", "subject": "Lunch", "body": "Hi", "as": "me@x.test"})
+            json!({"to": "ann@x.test", "subject": "Lunch", "body": "Hi", "as": "me@x.test",
+                "as_id": "m"})
+        );
+        let other_box = MailTarget {
+            mailbox_id: "m2".into(),
+            ..mailbox.clone()
+        };
+        assert_ne!(
+            mail_card_input(&mail, &mailbox),
+            mail_card_input(&mail, &other_box)
         );
         assert!(is_app_tool(APP_REQUEST_TOOL) && is_app_tool(LIST_APPS_TOOL));
         assert!(is_app_tool(SEND_MAIL_TOOL) && !is_app_tool(BRUH_BROWSER_TOOL));
@@ -1025,6 +1161,22 @@ mod tests {
             ),
             Gate::Deny(MAIL_CALL_SHAPE)
         );
+        // from must name the mailbox the lookup found, in any case.
+        let from = |from: &str| json!({"from": from, "to": "ann@x.test", "subject": "Lunch", "body": "Hi"});
+        let me = at(AccessLevel::Full, true);
+        let claude = AgentProvider::Claude;
+        assert_eq!(
+            mail_gate(&me, claude, &from("Me@X.test"), &found),
+            Gate::Allow
+        );
+        assert_eq!(
+            mail_gate(&me, claude, &from("you@x.test"), &found),
+            Gate::Deny(MAIL_NOT_GRANTED)
+        );
+        assert_eq!(
+            mail_gate(&me, claude, &from(""), &found),
+            Gate::Deny(APP_ACCOUNT_SHAPE)
+        );
     }
 
     #[test]
@@ -1066,6 +1218,14 @@ mod tests {
             (
                 json!({"to": "ann@x.test", "subject": "s", "body": "a\u{7}b"}),
                 MAIL_BODY_TEXT,
+            ),
+            (
+                json!({"from": "x".repeat(65), "to": "ann@x.test", "subject": "s", "body": "b"}),
+                APP_ACCOUNT_SHAPE,
+            ),
+            (
+                json!({"from": "me\u{202e}@x.test", "to": "ann@x.test", "subject": "s", "body": "b"}),
+                APP_ACCOUNT_SHAPE,
             ),
             (
                 json!({"to": "", "cc": "bo@x.test", "subject": "s", "body": "b"}),

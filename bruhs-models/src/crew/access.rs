@@ -1236,8 +1236,8 @@ pub struct PreambleTools<'a> {
 /// its Computer is on, its browser and, with a usable login, how it fills
 /// vault logins; the vault keys it may use; the apps it may call and the
 /// mailboxes it may send from, and then what sending as the owner needs at
-/// its level. A bruh with no app or mail tool is told never to send in the
-/// owner's name.
+/// its level. A bruh with no app or mail tool, or at Read only, is told
+/// never to send in the owner's name, and no apps or mailboxes are listed.
 #[must_use]
 pub fn run_preamble(
     name: &str,
@@ -1263,22 +1263,28 @@ pub fn run_preamble(
             tools.vault_keys.join(", ")
         ));
     }
-    if !tools.apps.is_empty() {
+    // Read only bruhs get no app or mail tools; never list any there.
+    let (apps, mail) = if level == AccessLevel::ReadOnly {
+        (&[][..], &[][..])
+    } else {
+        (tools.apps, tools.mail)
+    };
+    if !apps.is_empty() {
         lines.push(format!(
             "Apps you may use: {}. {APPS_PREAMBLE}",
-            preamble_names(tools.apps)
+            preamble_names(apps)
         ));
     }
-    if !tools.mail.is_empty() {
+    if !mail.is_empty() {
         lines.push(format!(
             "send_mail sends email as the owner from {}.",
-            preamble_names(tools.mail)
+            preamble_names(mail)
         ));
     }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
     }
-    let sends = !tools.apps.is_empty() || !tools.mail.is_empty();
+    let sends = !apps.is_empty() || !mail.is_empty();
     lines.push(
         match (sends, level) {
             (false, _) | (true, AccessLevel::ReadOnly) => NEVER_SEND_PREAMBLE,
@@ -2453,7 +2459,7 @@ mod tests {
             "body": "See you at 12.", "as": "me@x.test"});
         assert_eq!(
             approval_summary(SEND_MAIL_TOOL, &mail),
-            "Email ann@x.test: Lunch"
+            "Email ann@x.test and 1 in Cc: Lunch"
         );
         assert_eq!(
             approval_detail(SEND_MAIL_TOOL, &mail).as_deref(),
@@ -2517,7 +2523,35 @@ mod tests {
         );
         assert_eq!(
             approval_detail(SEND_MAIL_TOOL, &reply).as_deref(),
-            Some("From: me@x.test\nTo: ann@x.test\nSubject: the thread's\n\nYes.")
+            Some(
+                "From: me@x.test\nTo: ann@x.test\nReply to: thread t, message m\nSubject: the thread's\n\nYes."
+            )
+        );
+        // A line separator can't fake a card line (review I2), in a
+        // subject or in a JSON body, and a CRLF body shows plain breaks.
+        let fake = json!({"to": "x@evil.test", "subject": "Lunch\u{2028}To: ann@x.test",
+            "body": "One\r\nTwo\u{2029}Account: work\r\n", "as": "me@x.test", "as_id": "m"});
+        assert_eq!(
+            approval_summary(SEND_MAIL_TOOL, &fake),
+            "Email x@evil.test: Lunch\\u{2028}To: ann@x.test"
+        );
+        assert_eq!(
+            approval_detail(SEND_MAIL_TOOL, &fake).as_deref(),
+            Some(
+                "From: me@x.test\nTo: x@evil.test\nSubject: Lunch\\u{2028}To: ann@x.test\n\nOne\nTwo\\u{2029}Account: work\n"
+            )
+        );
+        let body = json!({"app": "slack", "method": "POST", "path": "/api/chat.postMessage",
+            "body": {"channel": "C_ALL", "text": "hi\u{2028}Account: personal"}, "as": "me"});
+        let detail = approval_detail(APP_REQUEST_TOOL, &body).unwrap();
+        assert_eq!(detail.lines().count(), 2, "{detail}");
+        assert!(!detail.contains(['\u{2028}', '\u{2029}']), "{detail}");
+        // Cc and Bcc are counted once repeats are dropped.
+        let copied = json!({"to": "ann@x.test", "cc": "bo@x.test, ann@x.test",
+            "bcc": "cy@x.test; di@x.test", "subject": "Plan", "body": "b"});
+        assert_eq!(
+            approval_summary(SEND_MAIL_TOOL, &copied),
+            "Email ann@x.test, 1 in Cc and 2 in Bcc: Plan"
         );
     }
 
@@ -2552,7 +2586,9 @@ mod tests {
                 && with.contains("send_mail sends email as the owner from me@x.test.")
         );
         assert!(
-            with.contains("email and posts in the owner's name wait for the owner's approval")
+            with.contains(
+                "email, posts, payments and refunds in the owner's name wait for the owner's approval"
+            )
                 && !with.contains("Never send messages")
         );
         assert!(
@@ -2566,6 +2602,19 @@ mod tests {
         };
         let asked = run_preamble("Ada", &ask, AccessLevel::Ask, &tools(&[], &boxes));
         assert!(asked.contains(SEND_ASK_PREAMBLE) && !asked.contains("Apps you may use"));
+        // Read only bruhs get no app tools, so none are listed.
+        let read_only = run_preamble(
+            "Ada",
+            &BruhAccess::default(),
+            AccessLevel::ReadOnly,
+            &tools(&names, &boxes),
+        );
+        assert!(
+            !read_only.contains("Apps you may use") && !read_only.contains("send_mail"),
+            "{read_only}"
+        );
+        assert!(read_only.ends_with(NEVER_SEND_PREAMBLE));
+        assert!(SEND_AS_ME_PREAMBLE.contains("pay and refund"));
         // Names are reviewed, and at most 20 are listed.
         let many: Vec<String> = (0..25).map(|i| format!("App{i:02}")).collect();
         let listed = run_preamble("Ada", &full(false), AccessLevel::Full, &tools(&many, &[]));

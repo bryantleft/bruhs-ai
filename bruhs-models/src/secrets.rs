@@ -78,11 +78,20 @@ fn is_format_control(c: char) -> bool {
     matches!(c, '\u{00ad}' | '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}')
 }
 
-/// Preserve readable Unicode while making controls in host-supplied paths visible.
+/// LINE SEPARATOR and PARAGRAPH SEPARATOR, which text views break lines at
+/// but `is_control` doesn't cover. The other line breaks (`\n`, `\r`,
+/// U+000B, U+000C, U+0085) are controls.
+fn is_line_separator(c: char) -> bool {
+    matches!(c, '\u{2028}' | '\u{2029}')
+}
+
+/// Preserve readable Unicode while making controls in host-supplied paths
+/// visible. Line separators are escaped too, so reviewed text stays on the
+/// line it was given and can't fake a line of a card.
 pub fn review_text(text: &str) -> String {
     let mut out = String::new();
     for c in text.chars() {
-        if c.is_control() || is_format_control(c) {
+        if c.is_control() || is_format_control(c) || is_line_separator(c) {
             out.extend(c.escape_default());
         } else {
             out.push(c);
@@ -174,6 +183,15 @@ pub enum SavedCredentialState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_text_keeps_every_line_break_visible() {
+        assert_eq!(
+            review_text("a\u{2028}b\u{2029}c\u{85}d\ne"),
+            "a\\u{2028}b\\u{2029}c\\u{85}d\\ne"
+        );
+        assert_eq!(review_text("Lunch at 12 ☕"), "Lunch at 12 ☕");
+    }
 
     fn request(saved_available: bool, saved_source: Option<SavedSource>) -> SecretRequest {
         SecretRequest {
