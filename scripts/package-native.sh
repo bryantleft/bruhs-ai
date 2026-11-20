@@ -45,7 +45,7 @@ depends=$(cat "$work/native-Linux/depends")
 test -n "$depends"
 cat >"$deb/DEBIAN/control" <<CONTROL
 Package: bruhs
-Version: $version
+Version: ${version/-nightly./~nightly.}
 Architecture: amd64
 Maintainer: Bruhs <hello@bruhs.ai>
 Description: Bruhs desktop workspace

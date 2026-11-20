@@ -87,7 +87,7 @@ step "assemble $app"
 rm -rf "$dist"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 build=$(git rev-list --count HEAD 2>/dev/null || echo 1)
-sed -e "s/@VERSION@/$version/g" -e "s/@BUILD@/$build/g" packaging/macos/Info.plist.in >"$app/Contents/Info.plist"
+sed -e "s/@MARKETING_VERSION@/${version%%-*}/g" -e "s/@VERSION@/$version/g" -e "s/@BUILD@/$build/g" packaging/macos/Info.plist.in >"$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 cp packaging/macos/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 scripts/third-party-licenses.sh "$app/Contents/Resources/THIRD_PARTY_LICENSES"
