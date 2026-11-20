@@ -80,7 +80,7 @@ impl MailRuntime {
 
     /// Deletes a draft that no send reached; `Ok(false)` when the send
     /// journal holds an operation for it, which keeps it (ruling F16).
-    pub async fn compose_discard_unsent(
+    pub(crate) async fn compose_discard_unsent(
         &self,
         expected_host: String,
         mailbox_id: String,

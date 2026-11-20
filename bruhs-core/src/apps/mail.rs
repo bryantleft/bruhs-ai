@@ -17,7 +17,7 @@ use crate::mail::compose::{ComposeError, MailSendProblem, MailSendTransport};
 use crate::mail::{MailRuntime, MailSession};
 use bruhs_models::connections::ServiceProvider;
 use bruhs_models::crew::{
-    MailSendInput, MAIL_MAY_HAVE_SENT, MAIL_NOT_SENT, MAIL_QUEUED, MAIL_SENT,
+    MailSendInput, MAIL_MAY_HAVE_SENT, MAIL_NOT_SENT, MAIL_QUEUED, MAIL_REPLY_UNKNOWN, MAIL_SENT,
 };
 use bruhs_models::mail::{
     MailComposeContent, MailDispatchState, MailDraftCreate, MailDraftSave, MailReviewRequest,
@@ -102,7 +102,9 @@ impl MailSend<'_> {
             .wait()
             .await;
         match result {
-            Ok(status) => Ok(self.outcome(&status, None, false)),
+            // The dispatch returned on its own: a queued or dispatching
+            // send is still on its way.
+            Ok(status) => Ok(self.outcome(&status, None, true)),
             Err(ComposeError::Provider(problem)) => self.settle(Some(problem), false).await,
             Err(_) => self.settle(None, false).await,
         }
@@ -188,9 +190,9 @@ impl MailSend<'_> {
     }
 
     /// After a failed or timed out dispatch: when the journal holds the
-    /// operation, its state answers; otherwise the draft is deleted in the
-    /// same step, so a dispatch still on its way can't queue it, and
-    /// nothing was sent.
+    /// operation, its state answers, and a send left queued or dispatching
+    /// may have gone out; otherwise the draft is deleted in the same step,
+    /// so a dispatch still on its way can't queue it, and nothing was sent.
     async fn settle(
         &self,
         problem: Option<MailSendProblem>,
@@ -222,7 +224,7 @@ impl MailSend<'_> {
                 )
                 .await
             {
-                Ok(Some(status)) => Ok(self.outcome(&status, problem, timed_out)),
+                Ok(Some(status)) => Ok(self.outcome(&status, problem, false)),
                 // Another send of this draft: this one wasn't queued.
                 Ok(None) => unsent(MAIL_NOT_SENT),
                 Err(_) => unsent(MAIL_MAY_HAVE_SENT),
@@ -249,18 +251,19 @@ impl MailSend<'_> {
         }
     }
 
-    /// What the bruh is told for a journaled send: sent, queued, may have
-    /// sent (in flight past the budget, or unconfirmed), or the provider's
-    /// problem when it was refused.
+    /// What the bruh is told for a journaled send: sent, queued (only when
+    /// the dispatch returned normally and the send is on its way), may
+    /// have sent (left queued or dispatching by a failure or the budget,
+    /// or unconfirmed), or the provider's problem when it was refused.
     fn outcome(
         &self,
         status: &MailSendStatus,
         problem: Option<MailSendProblem>,
-        timed_out: bool,
+        in_flight: bool,
     ) -> MailSendOutcome {
         let message = match status.state {
             MailDispatchState::Accepted => MAIL_SENT.to_owned(),
-            MailDispatchState::Queued | MailDispatchState::Dispatching if !timed_out => {
+            MailDispatchState::Queued | MailDispatchState::Dispatching if in_flight => {
                 MAIL_QUEUED.to_owned()
             }
             MailDispatchState::Queued
@@ -282,13 +285,16 @@ impl MailSend<'_> {
     }
 }
 
-/// A failure before the dispatch started: nothing was sent (F16).
+/// A failure before the dispatch started: nothing was sent (F16). A reply
+/// to a message the store doesn't hold, or a provider problem such as an
+/// expired sign in, says so, since trying again can't help.
 fn not_sent(error: &ComposeError) -> AppsError {
     match error {
-        ComposeError::Mail(_)
-        | ComposeError::Provider(_)
-        | ComposeError::PreparationWorker
-        | ComposeError::PreparedCorrupt => AppsError::Unavailable(MAIL_NOT_SENT),
+        ComposeError::InvalidReply => AppsError::Invalid(MAIL_REPLY_UNKNOWN),
+        ComposeError::Provider(problem) => AppsError::Unavailable(problem.message()),
+        ComposeError::Mail(_) | ComposeError::PreparationWorker | ComposeError::PreparedCorrupt => {
+            AppsError::Unavailable(MAIL_NOT_SENT)
+        }
         _ => AppsError::Invalid(MAIL_NOT_SENT),
     }
 }

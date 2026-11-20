@@ -9,11 +9,12 @@ use crate::mail::{MailRuntime, SyncBatch, ThreadWrite};
 use crate::secrets::{SecretManager, SecretStore};
 use bruhs_models::connections::ServiceProvider;
 use bruhs_models::crew::{
-    MailSendInput, MAIL_MAY_HAVE_SENT, MAIL_NOT_GRANTED, MAIL_NOT_SENT, MAIL_SENT, MAIL_UNAVAILABLE,
+    MailSendInput, MAIL_MAY_HAVE_SENT, MAIL_NOT_GRANTED, MAIL_NOT_SENT, MAIL_QUEUED,
+    MAIL_REPLY_UNKNOWN, MAIL_SENT, MAIL_UNAVAILABLE,
 };
 use bruhs_models::mail::{
     ConnectedMailMetadata, ConnectedMailThread, MailAddress, MailDispatchState, MailEnvelope,
-    MailMessageDetail, MailReplyTarget, MailSendProblemKind,
+    MailMessageDetail, MailReplyTarget, MailSendProblemKind, MailSendStatus,
 };
 use bruhs_models::{InboxConversation, InboxMessage, InboxSource};
 use std::sync::Arc;
@@ -123,15 +124,6 @@ async fn seed_thread(mail: &ConnectedMail) -> MailReplyTarget {
     }
 }
 
-fn not_sent(error: AppsError) -> &'static str {
-    match error {
-        AppsError::Invalid(message)
-        | AppsError::Unavailable(message)
-        | AppsError::TimedOut(message) => message,
-        other => panic!("not a refusal with copy: {other:?}"),
-    }
-}
-
 #[tokio::test]
 async fn a_granted_mailbox_sends_through_the_journal() {
     let mail = ConnectedMail::gmail().await;
@@ -173,12 +165,8 @@ async fn a_reply_binds_to_its_thread() {
     let transport = FakeTransport::new(Mode::Accepted, false);
     let host = mail_host(&mail, transport.clone());
     let target = seed_thread(&mail).await;
-    assert_eq!(
-        host.reply_subject(mail.mailbox.as_str(), &target)
-            .await
-            .as_deref(),
-        Some("Plans for Friday")
-    );
+    let card_subject = host.reply_subject(mail.mailbox.as_str(), &target).await;
+    assert_eq!(card_subject.as_deref(), Some("Plans for Friday"));
 
     let reply = MailSendInput {
         subject: None,
@@ -190,14 +178,9 @@ async fn a_reply_binds_to_its_thread() {
     assert_eq!(outcome.message, MAIL_SENT);
     let sent = transport.sent();
     let message = parsed(&sent[0]);
-    assert!(
-        message
-            .subject()
-            .unwrap_or_default()
-            .contains("Plans for Friday"),
-        "{:?}",
-        message.subject()
-    );
+    // The card's subject is exactly the one the email carries: the
+    // compose path sends a reply with the source's subject, no "Re: " added.
+    assert_eq!(message.subject(), card_subject.as_deref());
     assert!(format!("{:?}", message.in_reply_to()).contains("source@x.test"));
     assert!(format!("{:?}", message.references()).contains("source@x.test"));
     // The bruh's To stands, not the thread's sender.
@@ -218,7 +201,11 @@ async fn a_reply_binds_to_its_thread() {
         .send_mail(mail.mailbox.as_str(), unknown.clone())
         .await
         .unwrap_err();
-    assert_eq!(not_sent(error), MAIL_NOT_SENT);
+    // Trying again can't help, so the bruh is told what to do instead.
+    assert!(
+        matches!(error, AppsError::Invalid(message) if message == MAIL_REPLY_UNKNOWN),
+        "{error:?}"
+    );
     assert_eq!(transport.sends(), 1);
     assert_eq!(mail.send_operations().len(), 1);
     assert_eq!(drafts(&mail).await, 0);
@@ -289,6 +276,27 @@ async fn a_timeout_before_the_journal_says_not_sent_and_leaves_no_draft() {
         .unwrap_err();
     assert!(
         matches!(error, AppsError::TimedOut(message) if message == MAIL_NOT_SENT),
+        "{error:?}"
+    );
+    assert_eq!(drafts(&mail).await, 0);
+    assert!(mail.send_operations().is_empty());
+    assert_eq!(transport.sends(), 0);
+}
+
+#[tokio::test]
+async fn a_refused_sender_check_deletes_the_draft_and_says_why() {
+    let mail = ConnectedMail::gmail().await;
+    let transport = FakeTransport::refusing_sender(MailSendProblemKind::SignIn);
+    let host = mail_host(&mail, transport.clone());
+
+    // The draft is created and saved before the sender check fails.
+    let error = host
+        .send_mail(mail.mailbox.as_str(), lunch())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, AppsError::Unavailable(message)
+            if message == "Reconnect this mail account and review the email again."),
         "{error:?}"
     );
     assert_eq!(drafts(&mail).await, 0);
@@ -373,6 +381,42 @@ async fn only_a_connected_mailbox_named_by_from_sends() {
     };
     let outcome = host.send_mail(mail.mailbox.as_str(), named).await.unwrap();
     assert_eq!(outcome.message, MAIL_SENT);
+}
+
+#[tokio::test]
+async fn queued_means_on_its_way_only_when_the_dispatch_returned() {
+    let mail = ConnectedMail::gmail().await;
+    let send = super::MailSend {
+        mail: &mail.runtime,
+        host: mail.runtime.host().as_str().to_owned(),
+        mailbox: super::Mailbox {
+            id: mail.mailbox.as_str(),
+            provider: ServiceProvider::Gmail,
+            connection_id: "synthetic-connection",
+        },
+        client_id: "bruh-a".into(),
+        operation_id: "operation-a".into(),
+        dispatched: std::sync::atomic::AtomicBool::new(true),
+    };
+    for state in [MailDispatchState::Queued, MailDispatchState::Dispatching] {
+        let status = MailSendStatus {
+            host_id: send.host.clone(),
+            mailbox_id: mail.mailbox.as_str().into(),
+            operation_id: "operation-a".into(),
+            draft_id: "d".into(),
+            draft_revision: 1,
+            state,
+            provider_message_id: None,
+            provider_thread_id: None,
+            problem: None,
+        };
+        assert_eq!(send.outcome(&status, None, true).message, MAIL_QUEUED);
+        // Left there by a failed or timed out dispatch, it may have gone out.
+        assert_eq!(
+            send.outcome(&status, None, false).message,
+            MAIL_MAY_HAVE_SENT
+        );
+    }
 }
 
 #[tokio::test]

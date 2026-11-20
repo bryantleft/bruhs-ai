@@ -376,9 +376,10 @@ impl MailSendProblem {
     }
 }
 
-impl fmt::Display for MailSendProblem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self.kind {
+impl MailSendProblem {
+    /// What this problem means and what to do about it.
+    pub fn message(&self) -> &'static str {
+        match self.kind {
             MailSendProblemKind::SignIn => "Reconnect this mail account and review the email again.",
             MailSendProblemKind::Permission => "The provider did not permit sending. Check mail access and review again.",
             MailSendProblemKind::RateLimited => "The provider is limiting email. Wait before reviewing again.",
@@ -387,7 +388,13 @@ impl fmt::Display for MailSendProblem {
             MailSendProblemKind::AccountChanged => "The connected sender changed. Review the email using its owning account.",
             MailSendProblemKind::Unavailable => "The email provider could not be reached. Open send status before retrying.",
             MailSendProblemKind::Unconfirmed => "Sending could not be confirmed. Check send status and Sent mail before starting another send.",
-        })
+        }
+    }
+}
+
+impl fmt::Display for MailSendProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message())
     }
 }
 impl std::error::Error for MailSendProblem {}

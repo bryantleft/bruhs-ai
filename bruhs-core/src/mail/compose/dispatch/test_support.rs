@@ -104,6 +104,8 @@ pub struct FakeTransport {
     pub profile_delay: Option<Duration>,
     /// How long a send takes after it is recorded.
     pub send_delay: Option<Duration>,
+    /// Refuses the sender check with this problem.
+    pub sender_problem: Option<MailSendProblemKind>,
 }
 
 impl FakeTransport {
@@ -128,6 +130,15 @@ impl FakeTransport {
         })
     }
 
+    /// A transport whose sender check fails with `kind`, so nothing is
+    /// ever reviewed or sent.
+    pub fn refusing_sender(kind: MailSendProblemKind) -> Arc<Self> {
+        Arc::new(Self {
+            sender_problem: Some(kind),
+            ..Self::with_mode(Mode::Accepted, false)
+        })
+    }
+
     fn with_mode(mode: Mode, waiting: bool) -> Self {
         Self {
             mode,
@@ -137,6 +148,7 @@ impl FakeTransport {
             release: waiting.then(Notify::new),
             profile_delay: None,
             send_delay: None,
+            sender_problem: None,
         }
     }
 
@@ -165,6 +177,9 @@ impl MailSendTransport for FakeTransport {
     ) -> Result<VerifiedMailSender, MailSendProblem> {
         if let Some(delay) = self.profile_delay {
             tokio::time::sleep(delay).await;
+        }
+        if let Some(kind) = self.sender_problem {
+            return Err(MailSendProblem::new(kind));
         }
         VerifiedMailSender::from_profile(session, sender_address())
             .map_err(|_| MailSendProblem::new(MailSendProblemKind::AccountChanged))

@@ -83,6 +83,9 @@ pub const MAIL_MAY_HAVE_SENT: &str =
     "The email may have been sent. Don't send it again; tell the owner to check Sent mail.";
 /// A `send_mail` that stopped before the journal held it (F16).
 pub const MAIL_NOT_SENT: &str = "The email wasn't sent. Try again.";
+/// A reply naming a message this mailbox's mail store doesn't hold:
+/// retrying can't help, so this says what to do instead.
+pub const MAIL_REPLY_UNKNOWN: &str = "That message isn't in this mailbox's mail. Reply only to a message Bruhs showed you, or send a new email.";
 /// A `send_mail` on a server without a mail store.
 pub const MAIL_UNAVAILABLE: &str = "Mail isn't available on this server.";
 /// How long a `send_mail` may take, inside the helper route's 55 s (D17).
