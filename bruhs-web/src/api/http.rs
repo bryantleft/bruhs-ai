@@ -41,6 +41,9 @@ pub enum ApiError {
 
 fn http_message(status: u16, detail: Option<&str>) -> String {
     match detail {
+        // A refusal only the owner's own app is spared names the address
+        // that may make the change (fix wave B item 1).
+        Some(detail) if status == 403 => bruhs_models::vault::at_own_address(detail, BASE_URL),
         Some(detail) => detail.to_owned(),
         None => format!("The server answered HTTP {status}."),
     }
@@ -78,6 +81,13 @@ impl ApiError {
     /// Whether the server answered with `status`.
     pub fn is_status(&self, status: u16) -> bool {
         self.status() == Some(status)
+    }
+
+    /// Whether the server refused a change as one only the owner's own app
+    /// may make (`bruhs_models::vault::is_owner_refusal`).
+    pub fn is_owner_refusal(&self) -> bool {
+        matches!(self, Self::Http { status: 403, detail: Some(detail) }
+            if bruhs_models::vault::is_owner_refusal(detail))
     }
 
     /// A failure from `fetch` itself: an abort, or no response at all.
@@ -217,6 +227,35 @@ mod tests {
             detail(&error),
             Some("Expected request with `Content-Type: application/json`")
         );
+    }
+
+    /// Fix wave B item 1: a refusal only the owner's own app is spared
+    /// names the exact address wherever the page shows it; other 403s and
+    /// other statuses stay as the server said them.
+    #[test]
+    fn owner_refusals_name_the_servers_own_address() {
+        use bruhs_models::crew::{OWNER_ONLY_ACCESS, OWNER_ONLY_APPS};
+        use bruhs_models::vault::{at_own_address, OWNER_ONLY_CARD};
+        for refusal in [OWNER_ONLY_ACCESS, OWNER_ONLY_APPS, OWNER_ONLY_CARD] {
+            let error = ApiError::http(403, &serde_json::json!({ "error": refusal }).to_string());
+            assert!(error.is_owner_refusal(), "{refusal}");
+            assert_eq!(error.to_string(), at_own_address(refusal, BASE_URL));
+            assert!(error.to_string().contains("http://127.0.0.1:"), "{error}");
+            assert_eq!(
+                detail(&error),
+                Some(refusal),
+                "the detail stays the server's"
+            );
+        }
+        let other = ApiError::http(403, r#"{"error":"Forbidden origin"}"#);
+        assert!(!other.is_owner_refusal());
+        assert_eq!(other.to_string(), "Forbidden origin");
+        let conflict = ApiError::http(
+            409,
+            &serde_json::json!({ "error": OWNER_ONLY_ACCESS }).to_string(),
+        );
+        assert!(!conflict.is_owner_refusal());
+        assert_eq!(conflict.to_string(), OWNER_ONLY_ACCESS);
     }
 
     #[test]

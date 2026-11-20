@@ -3,10 +3,11 @@
 
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
-    approval_outcome, chat_follow_key, chat_markdown, composer_block, line_key, may_have_more,
-    merge_runs, transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
+    approval_outcome, chat_follow_key, chat_markdown, composer_block, line_key, locks_card,
+    may_have_more, merge_runs, transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
 };
 use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun};
+use bruhs_models::vault::{at_own_address, OWNER_ONLY_CARD};
 use leptos::html;
 use leptos::prelude::*;
 
@@ -285,7 +286,11 @@ pub(super) fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
             approve,
         });
     };
-    let disabled = Signal::derive(move || data.busy.get() || !data.crew_ready());
+    // Only the owner's own app may decide an app, mail or vault key card:
+    // a page the service refused says so up front (fix wave B).
+    let approval = item.approval.clone();
+    let locked = Signal::derive(move || locks_card(data.owner_only.get(), approval.as_ref()));
+    let disabled = Signal::derive(move || data.busy.get() || !data.crew_ready() || locked.get());
     view! {
         <article class=CARD aria-label="Approval">
             <p class="text-label-sm text-rambutan-400">{APPROVAL_WANTS}</p>
@@ -300,6 +305,7 @@ pub(super) fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
                         <Button size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| decide(true))>"Approve"</Button>
                         <Button variant=ButtonVariant::Outline size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| decide(false))>"Deny"</Button>
                         {move || data.service_reason().map(|reason| view! { <p class="min-w-0 text-label-sm text-rambutan-400">{reason}</p> })}
+                        {move || locked.get().then(|| view! { <p role="status" data-approval-owner-notice="" class="min-w-0 text-label-sm text-durian-300">{at_own_address(OWNER_ONLY_CARD, crate::api::BASE_URL)}</p> })}
                     </div>
                 }
                 .into_any(),
@@ -345,4 +351,70 @@ pub(super) fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
         </article>
     }
     .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bruhs_models::crew::{ApprovalRequest, ApprovalState, APP_REQUEST_TOOL, CREW_PROTOCOL};
+    use bruhs_models::reactive::{OutboxKind, SystemDelivery};
+    use bruhs_models::EpochMs;
+
+    fn card(tool: &str) -> OutboxItem {
+        OutboxItem {
+            id: "o".into(),
+            agent_id: "a".into(),
+            run_id: "r".into(),
+            kind: OutboxKind::Ask,
+            title: "Title".into(),
+            message: String::new(),
+            created_at: EpochMs::UNIX_EPOCH,
+            read_at: None,
+            resolved_at: None,
+            answer: None,
+            system: SystemDelivery::NotRequested,
+            approval: Some(ApprovalRequest {
+                tool: tool.into(),
+                summary: "As you on GitHub: POST /repos/o/r/issues".into(),
+                fingerprint: "f".into(),
+                state: ApprovalState::default(),
+                detail: None,
+            }),
+        }
+    }
+
+    /// Buttons drawn disabled: the attribute, never a `disabled:` class.
+    fn disabled(html: &str) -> usize {
+        html.match_indices(" disabled")
+            .filter(|(at, word)| !html[at + word.len()..].starts_with(':'))
+            .count()
+    }
+
+    /// Fix wave B item 1: once the service refused this page as not the
+    /// owner's own, an app card's Approve and Deny lock and the card names
+    /// the address that may decide it. Other cards stay open.
+    #[test]
+    fn a_refused_page_locks_owner_cards_and_names_the_address() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = CrewData::for_tests(CREW_PROTOCOL);
+            let render = |tool: &str| {
+                untrack(|| tachys::view::RenderHtml::to_html(approval_card(card(tool), data)))
+            };
+            let notice = at_own_address(OWNER_ONLY_CARD, crate::api::BASE_URL);
+            assert!(notice.contains("http://127.0.0.1:"), "{notice}");
+            let open = render(APP_REQUEST_TOOL);
+            assert!(!open.contains("data-approval-owner-notice"), "{open}");
+            assert_eq!(disabled(&open), 0, "{open}");
+
+            data.owner_only.set(true);
+            let locked = render(APP_REQUEST_TOOL);
+            assert!(locked.contains("data-approval-owner-notice"), "{locked}");
+            assert!(locked.contains(&notice), "{locked}");
+            assert_eq!(disabled(&locked), 2, "{locked}");
+            let shell = render("Bash");
+            assert!(!shell.contains("data-approval-owner-notice"), "{shell}");
+            assert_eq!(disabled(&shell), 0, "{shell}");
+        });
+    }
 }

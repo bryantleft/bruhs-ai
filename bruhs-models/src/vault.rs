@@ -115,6 +115,41 @@ pub fn open_from_own_address(server: &str) -> String {
     )
 }
 
+/// How every refusal of a change only the owner may make begins.
+const FROM_OWN_ADDRESS: &str = "Open Bruhs from its own address ";
+
+/// Whether `message` is the service's refusal of a change only the owner's
+/// own app may make: a vault, app or access change, a card's answer, a
+/// bruh's deletion or its Computer (rulings F26, BC I2, A2 I1 and BC M1).
+#[must_use]
+pub fn is_owner_refusal(message: &str) -> bool {
+    [
+        OWNER_ONLY,
+        OWNER_ONLY_CARD,
+        OWNER_ONLY_DELETE_BRUH,
+        crate::crew::OWNER_ONLY_APPS,
+        crate::crew::OWNER_ONLY_ACCESS,
+        crate::crew::COMPUTER_OWNER_ONLY,
+    ]
+    .contains(&message)
+}
+
+/// `message`, naming the exact address when it is an owner refusal
+/// ([`is_owner_refusal`]) and `server`, the client's own server URL, has a
+/// port, as the vault's and the Apps page's notices do. Any other message
+/// comes back as it is.
+#[must_use]
+pub fn at_own_address(message: &str, server: &str) -> String {
+    match (
+        is_owner_refusal(message),
+        message.strip_prefix(FROM_OWN_ADDRESS),
+        server_port(server),
+    ) {
+        (true, Some(rest), Some(port)) => format!("Open Bruhs at http://127.0.0.1:{port} {rest}"),
+        _ => message.to_owned(),
+    }
+}
+
 /// The explicit port of an `http(s)://host:port` URL.
 pub(crate) fn server_port(url: &str) -> Option<u16> {
     let (_, rest) = url.split_once("://")?;
@@ -1108,6 +1143,54 @@ mod tests {
             assert_eq!(open_from_own_address(server), notice, "{server}");
         }
     }
+    /// Fix wave B item 1: each owner refusal names the exact address, and
+    /// nothing else is rewritten.
+    #[test]
+    fn owner_refusals_name_the_exact_address() {
+        for (refusal, shown) in [
+            (
+                OWNER_ONLY,
+                "Open Bruhs at http://127.0.0.1:3005 to change the vault.",
+            ),
+            (
+                OWNER_ONLY_CARD,
+                "Open Bruhs at http://127.0.0.1:3005 to answer this card.",
+            ),
+            (
+                OWNER_ONLY_DELETE_BRUH,
+                "Open Bruhs at http://127.0.0.1:3005 to delete a bruh.",
+            ),
+            (
+                crate::crew::OWNER_ONLY_APPS,
+                "Open Bruhs at http://127.0.0.1:3005 to change apps.",
+            ),
+            (
+                crate::crew::OWNER_ONLY_ACCESS,
+                "Open Bruhs at http://127.0.0.1:3005 to raise a bruh's access.",
+            ),
+            (
+                crate::crew::COMPUTER_OWNER_ONLY,
+                "Open Bruhs at http://127.0.0.1:3005 to use a bruh's Computer.",
+            ),
+        ] {
+            assert!(is_owner_refusal(refusal), "{refusal}");
+            assert_eq!(at_own_address(refusal, "http://localhost:3005/"), shown);
+            // With no port the copy names none.
+            assert_eq!(
+                at_own_address(refusal, "https://api.bruhs.localhost"),
+                refusal
+            );
+        }
+        for other in [
+            OPEN_FROM_OWN_ADDRESS,
+            "Open Bruhs from its own address to do anything at all.",
+            "That bruh doesn't exist.",
+        ] {
+            assert!(!is_owner_refusal(other), "{other}");
+            assert_eq!(at_own_address(other, "http://127.0.0.1:3005"), other);
+        }
+    }
+
     use serde_json::json;
 
     /// Both apps show a failed vault call this way (V Task 14 minor): only

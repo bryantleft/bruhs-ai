@@ -28,6 +28,10 @@ pub struct CrewData {
     pub reload: Callback<()>,
     /// The last Computer state read said this system runs no bruh browser.
     pub computer_unsupported: RwSignal<bool>,
+    /// The service refused this page as not the owner's own: a command got
+    /// an owner refusal, or the Apps listing was refused (fix wave B). The
+    /// controls only the owner may use then show why up front.
+    pub owner_only: RwSignal<bool>,
     /// The protocol the live stream reports, when the app has the stream.
     live_protocol: Option<RwSignal<Option<u32>>>,
 }
@@ -88,6 +92,27 @@ impl CrewData {
     }
 }
 
+#[cfg(test)]
+impl CrewData {
+    /// Data for a view under test: a snapshot at `protocol` and a `send`
+    /// that sends nothing.
+    pub(super) fn for_tests(protocol: u32) -> Self {
+        Self {
+            snapshot: RwSignal::new(Some(ReactiveSnapshot {
+                protocol,
+                ..ReactiveSnapshot::default()
+            })),
+            send: Callback::new(|_| {}),
+            error: RwSignal::new(None),
+            busy: RwSignal::new(false),
+            reload: Callback::new(|()| {}),
+            computer_unsupported: RwSignal::new(false),
+            owner_only: RwSignal::new(false),
+            live_protocol: None,
+        }
+    }
+}
+
 /// Context data a caller may share. When a view is rebuilt in place, such
 /// as one bruh's page replacing another's, its owner is cleaned up and run
 /// again: the old page's data stays in context, but its signals are gone.
@@ -113,6 +138,7 @@ fn new_crew_data() -> CrewData {
     let alive = RwSignal::new(true);
     let revision = RwSignal::new(0u64);
     let queue = StoredValue::new(VecDeque::<ReactiveCommand>::new());
+    let owner_only = RwSignal::new(false);
 
     let load_failed = StoredValue::new(false);
     let reload = Callback::new(move |()| {
@@ -172,6 +198,9 @@ fn new_crew_data() -> CrewData {
                 Err(err) => {
                     queue.update_value(VecDeque::clear);
                     busy.set(false);
+                    if err.is_owner_refusal() {
+                        owner_only.set(true);
+                    }
                     error.set(Some(err.to_string()));
                 }
             }
@@ -210,6 +239,7 @@ fn new_crew_data() -> CrewData {
         busy,
         reload,
         computer_unsupported: RwSignal::new(false),
+        owner_only,
         live_protocol: updates.map(|updates| updates.protocol),
     }
 }
@@ -226,6 +256,7 @@ mod tests {
             busy: RwSignal::new(false),
             reload: Callback::new(|()| {}),
             computer_unsupported: RwSignal::new(false),
+            owner_only: RwSignal::new(false),
             live_protocol: None,
         }
     }

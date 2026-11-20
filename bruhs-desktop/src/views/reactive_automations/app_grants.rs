@@ -102,6 +102,11 @@ impl AppGrantsState {
         self.load == Load::Idle
     }
 
+    /// Whether the service refused the listing as not the owner's app.
+    pub(super) fn owner_only(&self) -> bool {
+        self.load == Load::OwnerOnly
+    }
+
     fn record(&mut self, request: String) {
         #[cfg(test)]
         self.requests.push(request);

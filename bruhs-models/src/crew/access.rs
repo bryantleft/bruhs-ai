@@ -67,6 +67,14 @@ pub fn owner_only_card(tool: &str) -> bool {
     matches!(tool, BRUH_SECRET_TOOL | APP_REQUEST_TOOL | SEND_MAIL_TOOL)
 }
 
+/// Whether a page the service refused as not the owner's own
+/// (`owner_only`) locks the card asking for `approval` up front, with
+/// `OWNER_ONLY_CARD` naming the address (fix wave B).
+#[must_use]
+pub fn locks_card(owner_only: bool, approval: Option<&super::ApprovalRequest>) -> bool {
+    owner_only && approval.is_some_and(|approval| owner_only_card(&approval.tool))
+}
+
 /// The run preamble's line after the key names, when [`BRUH_SECRET_TOOL`]
 /// is offered (D26, ruling F28).
 pub const SECRET_PREAMBLE: &str =
@@ -1254,6 +1262,76 @@ pub fn raises_access(old: &BruhAccess, new: &BruhAccess) -> bool {
         || (new.can_deliver && !old.can_deliver)
 }
 
+/// The access controls a page on another address can't use (fix wave B):
+/// each one that would raise the stored bruh ([`raises_access`]), its
+/// Computer included. Lowering stays open: a switch the bruh has on, a
+/// level at or under the stored one and whatever the form shows now stay
+/// pressable, so an unsaved raise can always be taken back. Both apps lock
+/// the same controls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RaiseLocks {
+    /// The stored access and Computer, when this page can't raise them.
+    stored: Option<(BruhAccess, bool)>,
+}
+
+impl RaiseLocks {
+    /// `owner_only` is whether the service refused this page as not the
+    /// owner's own; `access` and `computer` are what the bruh has stored.
+    #[must_use]
+    pub fn new(owner_only: bool, access: &BruhAccess, computer: bool) -> Self {
+        Self {
+            stored: owner_only.then(|| (access.clone(), computer)),
+        }
+    }
+
+    /// Whether any control is locked.
+    #[must_use]
+    pub fn any(&self) -> bool {
+        self.stored.is_some()
+    }
+
+    /// Whether `level` is locked while the form shows `chosen`.
+    #[must_use]
+    pub fn level(&self, level: AccessLevel, chosen: AccessLevel) -> bool {
+        level != chosen
+            && self.stored.as_ref().is_some_and(|(access, _)| {
+                raises_access(
+                    access,
+                    &BruhAccess {
+                        level,
+                        ..access.clone()
+                    },
+                )
+            })
+    }
+
+    /// Whether Send as me is locked while its switch shows `shown`.
+    #[must_use]
+    pub fn send_as_me(&self, shown: bool) -> bool {
+        !shown
+            && self
+                .stored
+                .as_ref()
+                .is_some_and(|(access, _)| !access.send_as_me)
+    }
+
+    /// Whether Can deliver is locked while its switch shows `shown`.
+    #[must_use]
+    pub fn can_deliver(&self, shown: bool) -> bool {
+        !shown
+            && self
+                .stored
+                .as_ref()
+                .is_some_and(|(access, _)| !access.can_deliver)
+    }
+
+    /// Whether the Computer switch is locked while it shows `shown`.
+    #[must_use]
+    pub fn computer(&self, shown: bool) -> bool {
+        !shown && self.stored.as_ref().is_some_and(|(_, computer)| !computer)
+    }
+}
+
 /// The opening lines of every bruh run: its name, what it may do and, when
 /// its Computer is on, its browser and, with a usable login, how it fills
 /// vault logins; the vault keys it may use; the apps it may call and the
@@ -2176,6 +2254,58 @@ mod tests {
         let full = at(AccessLevel::Full, true, true);
         assert!(!raises_access(&full, &at(AccessLevel::Ask, false, true)));
         assert!(!raises_access(&full, &full));
+    }
+
+    #[test]
+    fn other_pages_lock_owner_cards_only() {
+        let card = |tool: &str| super::super::ApprovalRequest {
+            tool: tool.into(),
+            summary: String::new(),
+            fingerprint: String::new(),
+            state: super::super::ApprovalState::default(),
+            detail: None,
+        };
+        for tool in [BRUH_SECRET_TOOL, APP_REQUEST_TOOL, SEND_MAIL_TOOL] {
+            assert!(locks_card(true, Some(&card(tool))), "{tool}");
+            assert!(!locks_card(false, Some(&card(tool))), "{tool}");
+        }
+        assert!(!locks_card(true, Some(&card("Bash"))));
+        assert!(!locks_card(true, None));
+    }
+
+    /// Fix wave B item 1: a page on another address locks only what would
+    /// raise the stored bruh, never what the form shows now; the owner's
+    /// own app locks nothing.
+    #[test]
+    fn other_pages_lock_only_the_controls_that_raise() {
+        use AccessLevel::{Ask, Full, ReadOnly};
+        let ask = BruhAccess {
+            level: Ask,
+            send_as_me: true,
+            can_deliver: false,
+        };
+        let locks = RaiseLocks::new(true, &ask, false);
+        assert!(locks.any());
+        assert_eq!(
+            [ReadOnly, Ask, Full].map(|level| locks.level(level, Ask)),
+            [false, false, true]
+        );
+        // An unsaved raise the form shows can be taken back.
+        assert!(!locks.level(Full, Full) && !locks.level(Ask, Full));
+        // Send as me is stored on, so turning it off and back stays open.
+        assert!(!locks.send_as_me(false) && !locks.send_as_me(true));
+        assert!(locks.can_deliver(false) && !locks.can_deliver(true));
+        assert!(locks.computer(false) && !locks.computer(true));
+        assert!(!RaiseLocks::new(true, &ask, true).computer(false));
+
+        let owner = RaiseLocks::new(false, &BruhAccess::default(), false);
+        assert!(!owner.any());
+        assert!(
+            !owner.level(Full, ReadOnly)
+                && !owner.send_as_me(false)
+                && !owner.can_deliver(false)
+                && !owner.computer(false)
+        );
     }
 
     /// Final review A1 I3: the browser's input is a write, never a card, so

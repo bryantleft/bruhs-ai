@@ -76,6 +76,10 @@ pub fn AppGrants(agent_id: String) -> impl IntoView {
                 Err(error) if error.is_status(403) => Load::OwnerOnly,
                 Err(error) => Load::Failed(crate::api::vault_message(&error)),
             };
+            // The bruh's other owner-only controls lock too (fix wave B).
+            if next == Load::OwnerOnly {
+                data.owner_only.try_set(true);
+            }
             // Settings may have closed while the listing came.
             load.try_set(next);
         });

@@ -5,10 +5,11 @@ use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
     access_options, clamp_level, computer_switch_follows, computer_switch_off,
     computer_switch_reason, current_settings, settings_commands_for, vault_grants_follow,
-    vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT,
-    COMPUTER_SWITCH, SEND_AS_ME_HINT,
+    vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings, RaiseLocks, COMPUTER_HINT,
+    COMPUTER_SWITCH, OWNER_ONLY_ACCESS, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+use bruhs_models::vault::at_own_address;
 use leptos::prelude::*;
 
 use super::app_grants::AppGrants;
@@ -22,6 +23,13 @@ const SECTION: &str =
     "min-w-0 space-y-3 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
 const RADIO: &str = "bruhs-control inline-flex min-h-control flex-1 items-center justify-center rounded-seed px-3 text-label-sm transition-colors focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
 const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
+/// The owner-only notice's id, which every locked control points to.
+const OWNER_NOTICE_ID: &str = "bruh-owner-notice";
+
+/// Why a raise is locked on this page, naming the address that may make it.
+fn owner_notice() -> String {
+    at_own_address(OWNER_ONLY_ACCESS, crate::api::BASE_URL)
+}
 
 fn effort_options() -> Vec<DropdownOption> {
     std::iter::once(DropdownOption::new("", "Default"))
@@ -194,6 +202,16 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         }
     });
 
+    // A page on another address can lower the bruh but never raise it
+    // (fix wave B): the controls that would raise it lock, with the notice.
+    let locks = Memo::new(move |_| {
+        let owner_only = data.owner_only.get();
+        saved.with(|saved| match saved {
+            Some(saved) => RaiseLocks::new(owner_only, &saved.access, saved.computer),
+            None => RaiseLocks::new(false, &BruhAccess::default(), false),
+        })
+    });
+
     let dirty = Memo::new(move |_| saved.get().is_some_and(|saved| saved != edited()));
     let save_disabled =
         Signal::derive(move || !dirty.get() || data.busy.get() || !data.crew_ready());
@@ -260,14 +278,15 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             </section>
             <section class=SECTION aria-labelledby="bruh-settings-access">
                 <h2 id="bruh-settings-access" class="text-label text-rambutan-100">"What it may do"</h2>
+                {move || locks.with(RaiseLocks::any).then(|| view! { <p id=OWNER_NOTICE_ID role="status" data-bruh-owner-notice="" class="text-label-sm text-durian-300">{owner_notice()}</p> })}
                 <div role="radiogroup" aria-label="Access" class="flex min-w-0 flex-wrap gap-1 rounded-grape bg-longan-900 p-0.5 inset-ring inset-ring-longan-800">
                     {move || access_options(&model.get()).into_iter().map(|(option, reason)| view! {
                         <button
                             type="button"
                             role="radio"
                             aria-checked=move || (level.get() == option).to_string()
-                            disabled=reason.is_some()
-                            title=reason.unwrap_or_default()
+                            disabled=move || reason.is_some() || locks.with(|locks| locks.level(option, level.get()))
+                            title=move || reason.map(str::to_owned).or_else(|| locks.with(|locks| locks.level(option, level.get())).then(owner_notice)).unwrap_or_default()
                             class=move || format!("{RADIO} {}", if level.get() == option { "bg-longan-700 text-rambutan-100" } else { "text-rambutan-400 hover:text-rambutan-200" })
                             on:click=move |_| level.set(option)
                         >{option.label()}</button>
@@ -283,7 +302,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                         <span class="text-label-sm text-rambutan-300">"Send as me"</span>
                         <p data-send-as-me-hint="" class="text-label-sm text-rambutan-500">{SEND_AS_ME_HINT}</p>
                     </div>
-                    <Switch label="Send as me" checked=Signal::derive(move || send_as_me.get()) on_change=Callback::new(move |on| send_as_me.set(on)) />
+                    <Switch label="Send as me" checked=Signal::derive(move || send_as_me.get()) disabled=Signal::derive(move || locks.with(|locks| locks.send_as_me(send_as_me.get()))) on_change=Callback::new(move |on| send_as_me.set(on)) attr:data-bruh-send-as-me="" attr:title=move || locks.with(|locks| locks.send_as_me(send_as_me.get())).then(owner_notice) attr:aria-describedby=move || locks.with(|locks| locks.send_as_me(send_as_me.get())).then_some(OWNER_NOTICE_ID) />
                 </div>
                 <div class="flex min-h-control items-center justify-between gap-3">
                     <div class="min-w-0">
@@ -292,7 +311,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                             <p class="text-label-sm text-rambutan-500">{DELIVER_NEEDS_FULL}</p>
                         </Show>
                     </div>
-                    <Switch label="Can deliver" checked=Signal::derive(move || can_deliver.get()) disabled=Signal::derive(move || level.get() != AccessLevel::Full) on_change=Callback::new(move |on| can_deliver.set(on)) />
+                    <Switch label="Can deliver" checked=Signal::derive(move || can_deliver.get()) disabled=Signal::derive(move || level.get() != AccessLevel::Full || locks.with(|locks| locks.can_deliver(can_deliver.get()))) on_change=Callback::new(move |on| can_deliver.set(on)) attr:data-bruh-can-deliver="" attr:title=move || locks.with(|locks| locks.can_deliver(can_deliver.get())).then(owner_notice) attr:aria-describedby=move || locks.with(|locks| locks.can_deliver(can_deliver.get())).then_some(OWNER_NOTICE_ID) />
                 </div>
                 <div class="flex min-h-control items-center justify-between gap-3">
                     <div class="min-w-0">
@@ -305,11 +324,15 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                         <Switch
                             label=COMPUTER_SWITCH
                             checked=Signal::derive(move || computer.get())
-                            disabled=computer_off
+                            disabled=Signal::derive(move || computer_off.get() || locks.with(|locks| locks.computer(computer.get())))
                             on_change=Callback::new(move |on| computer.set(on))
                             attr:data-bruh-computer=""
-                            attr:title=move || computer_block.get()
-                            attr:aria-describedby=move || if computer_block.with(Option::is_some) { "bruh-computer-hint bruh-computer-reason" } else { "bruh-computer-hint" }
+                            attr:title=move || computer_block.get().map(str::to_owned).or_else(|| locks.with(|locks| locks.computer(computer.get())).then(owner_notice))
+                            attr:aria-describedby=move || match (computer_block.with(Option::is_some), locks.with(|locks| locks.computer(computer.get()))) {
+                                (true, _) => "bruh-computer-hint bruh-computer-reason",
+                                (false, true) => "bruh-computer-hint bruh-owner-notice",
+                                (false, false) => "bruh-computer-hint",
+                            }
                         />
                     </label>
                 </div>

@@ -25,13 +25,15 @@ use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     access_options, approval_outcome, apps_unavailable, chat_follow_key, chat_markdown,
     clamp_level, composer_block, computer_switch_follows, computer_switch_off,
-    computer_switch_reason, current_settings, job_line, line_key, may_have_more, merge_runs,
-    settings_commands_for, status_line, transcript, vault_grants_follow, vault_unavailable,
-    AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT,
-    COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    computer_switch_reason, current_settings, job_line, line_key, locks_card, may_have_more,
+    merge_runs, settings_commands_for, status_line, transcript, vault_grants_follow,
+    vault_unavailable, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, RaiseLocks,
+    TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, COMPUTER_TAB, OWNER_ONLY_ACCESS, PAGE_FACE_PX,
+    RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+use bruhs_models::vault::{at_own_address, OWNER_ONLY_CARD};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
@@ -755,7 +757,6 @@ impl ReactiveAutomations {
         self.bruh.as_mut().map(|page| &mut page.vault)
     }
 
-    #[cfg(test)]
     pub(super) fn bruh_apps(&self) -> Option<&AppGrantsState> {
         self.bruh.as_ref().map(|page| &page.apps)
     }
@@ -1810,7 +1811,10 @@ impl ReactiveAutomations {
         let card = match approval_outcome(item) {
             Some(outcome) => card.child(small_text(outcome, theme::rambutan_400())),
             None => {
-                let disabled = self.crew_disabled();
+                // Only the owner's own app may decide an app, mail or vault
+                // key card (fix wave B).
+                let locked = locks_card(self.owner_only(), item.approval.as_ref());
+                let disabled = self.crew_disabled() || locked;
                 let (approve, deny) = (item.id.clone(), item.id.clone());
                 card.child(
                     div()
@@ -1836,6 +1840,13 @@ impl ReactiveAutomations {
                         ))
                         .when_some(self.crew_reason(), |el, reason| {
                             el.child(small_text(reason, theme::rambutan_400()))
+                        })
+                        .when(locked, |el| {
+                            let id = format!("desktop-bruh-owner-card-{}", item.id);
+                            el.child(div().debug_selector(move || id).child(small_text(
+                                at_own_address(OWNER_ONLY_CARD, self.client.base_url()),
+                                theme::durian_300(),
+                            )))
                         }),
                 )
             }
@@ -1953,6 +1964,12 @@ impl ReactiveAutomations {
         let apps_need_ask = saved.as_ref().and_then(|saved| {
             apps_unavailable(saved.access.level, AgentProvider::for_model(&saved.model))
         });
+        // A client the service refused can lower the bruh but never raise
+        // it (fix wave B): the controls that would raise it lock.
+        let locks = match &saved {
+            Some(saved) => RaiseLocks::new(self.owner_only(), &saved.access, saved.computer),
+            None => RaiseLocks::new(false, &BruhAccess::default(), false),
+        };
         let edited = form.edited(cx);
         let dirty = saved.is_some_and(|saved| saved != edited);
         let section = |heading_text: &'static str| {
@@ -2027,6 +2044,16 @@ impl ReactiveAutomations {
             form.computer_block(self.crew.protocol, self.computer_unsupported(), cx);
         let vault_block = form.vault_block(self.vault_reason(), cx);
         let access = section("What it may do")
+            .when(locks.any(), |el| {
+                el.child(
+                    div()
+                        .debug_selector(|| "desktop-bruh-owner-notice".to_string())
+                        .child(small_text(
+                            at_own_address(OWNER_ONLY_ACCESS, self.client.base_url()),
+                            theme::durian_300(),
+                        )),
+                )
+            })
             .child(
                 div()
                     .id("desktop-bruh-access")
@@ -2072,7 +2099,7 @@ impl ReactiveAutomations {
                                 }
                             })
                             .child(option.label());
-                        if reason.is_some() {
+                        if reason.is_some() || locks.level(option, form.level) {
                             segment.opacity(DISABLED_OPACITY).cursor_not_allowed()
                         } else {
                             on_press_view(
@@ -2123,7 +2150,7 @@ impl ReactiveAutomations {
                         "desktop-bruh-send-as-me",
                         "Send as me",
                         form.send_as_me,
-                        false,
+                        locks.send_as_me(form.send_as_me),
                         cx,
                         |this, _, cx| {
                             this.edit_bruh_settings(|form| form.send_as_me = !form.send_as_me, cx)
@@ -2149,7 +2176,7 @@ impl ReactiveAutomations {
                         "desktop-bruh-can-deliver",
                         "Can deliver",
                         form.can_deliver,
-                        !full,
+                        !full || locks.can_deliver(form.can_deliver),
                         cx,
                         |this, _, cx| {
                             this.edit_bruh_settings(|form| form.can_deliver = !form.can_deliver, cx)
@@ -2188,7 +2215,7 @@ impl ReactiveAutomations {
                         "desktop-bruh-computer",
                         COMPUTER_SWITCH,
                         form.computer,
-                        computer_off,
+                        computer_off || locks.computer(form.computer),
                         cx,
                         |this, _, cx| {
                             this.edit_bruh_settings(|form| form.computer = !form.computer, cx)
@@ -3204,6 +3231,84 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(lines(&panel, cx).len(), 1, "a new snapshot rebuilds it");
+    }
+
+    /// Fix wave B item 1: once the service refuses this client as not the
+    /// owner's app, the controls that would raise the bruh lock under a
+    /// notice naming the address; lowering stays open.
+    #[gpui::test]
+    fn a_refused_client_locks_only_the_raises(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(vault_snapshot(AccessLevel::Ask, CREW_PROTOCOL, &[])),
+            BruhTab::Settings,
+        );
+        assert!(cx.debug_bounds("desktop-bruh-owner-notice").is_none());
+        answer_apps(&panel, cx, Err(refused(reqwest::StatusCode::FORBIDDEN)));
+        assert!(cx.debug_bounds("desktop-bruh-owner-notice").is_some());
+        let form = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.update(cx, |panel, _| {
+                let form = panel.bruh_settings_mut().unwrap();
+                (form.level, form.send_as_me, form.computer)
+            })
+        };
+        click(cx, "desktop-bruh-send-as-me");
+        click(cx, "desktop-bruh-computer");
+        click(cx, "desktop-bruh-access-full");
+        assert_eq!(form(&panel, cx), (AccessLevel::Ask, false, false));
+        click(cx, "desktop-bruh-access-read-only");
+        assert_eq!(form(&panel, cx), (AccessLevel::ReadOnly, false, false));
+        // Back up to the stored level is no raise.
+        click(cx, "desktop-bruh-access-ask-first");
+        assert_eq!(form(&panel, cx).0, AccessLevel::Ask);
+    }
+
+    /// Fix wave B item 1: an owner refusal names the address, and an app
+    /// card can't be decided after it; other cards still can.
+    #[gpui::test]
+    fn an_owner_refusal_names_the_address_and_locks_app_cards(cx: &mut gpui::TestAppContext) {
+        let mut app = ask("i2", true);
+        if let Some(approval) = app.approval.as_mut() {
+            approval.tool = bruhs_models::crew::APP_REQUEST_TOOL.into();
+        }
+        let (panel, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::NeedsYou, vec![ask("i1", true), app])),
+            BruhTab::Chat,
+        );
+        assert!(cx.debug_bounds("desktop-bruh-owner-card-i2").is_none());
+        panel.update(cx, |panel, cx| {
+            panel.command_failed(
+                crate::views::reactive_automations::Scope::General,
+                bruhs_models::vault::OWNER_ONLY_CARD.into(),
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let (error, server) = panel.read_with(cx, |panel, _| {
+            (panel.error.clone(), panel.client.base_url().to_owned())
+        });
+        let notice =
+            bruhs_models::vault::at_own_address(bruhs_models::vault::OWNER_ONLY_CARD, &server);
+        assert!(notice.contains("http://127.0.0.1:"), "{notice}");
+        assert_eq!(error.as_deref(), Some(notice.as_str()));
+        assert!(cx.debug_bounds("desktop-bruh-owner-card-i2").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-owner-card-i1").is_none());
+        let before = sent(&panel, cx).len();
+        click(cx, "desktop-bruh-approve-i2");
+        assert_eq!(
+            sent(&panel, cx).len(),
+            before,
+            "a locked card sends nothing"
+        );
+        click(cx, "desktop-bruh-approve-i1");
+        assert_eq!(
+            sent(&panel, cx).last(),
+            Some(&ReactiveCommand::DecideApproval {
+                id: "i1".into(),
+                approve: true,
+            })
+        );
     }
 
     /// Send as me says what it already lets a Full bruh do.

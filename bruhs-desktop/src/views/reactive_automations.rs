@@ -125,6 +125,9 @@ struct CrewState {
     serving_debug: bool,
     /// The last Computer state read said this system runs no bruh browser.
     computer_unsupported: bool,
+    /// The service refused a command as one only the owner's own app may
+    /// send (fix wave B): the bruh page locks those controls up front.
+    owner_refused: bool,
     stream: Option<Task<()>>,
     service_request: Option<Task<()>>,
     updating: bool,
@@ -838,6 +841,14 @@ impl ReactiveAutomations {
     /// The service refused a command: drop what was queued behind it, let
     /// the dialog that sent it try again, and show why where it was sent.
     fn command_failed(&mut self, scope: Scope, message: String) {
+        // An owner refusal names the address that may make the change, as
+        // the Vault and Apps pages do (fix wave B).
+        let message = if bruhs_models::vault::is_owner_refusal(&message) {
+            self.crew.owner_refused = true;
+            bruhs_models::vault::at_own_address(&message, self.client.base_url())
+        } else {
+            message
+        };
         self.queued.clear();
         // A post that failed, or was dropped from the queue, comes back.
         self.room_post_failed();
@@ -1650,6 +1661,15 @@ impl ReactiveAutomations {
     /// browser.
     pub(crate) fn computer_unsupported(&self) -> bool {
         self.crew.computer_unsupported
+    }
+    /// Whether the service refused this client as not the owner's own app:
+    /// a command got an owner refusal, or the bruh's Apps listing was
+    /// refused (fix wave B).
+    pub(crate) fn owner_only(&self) -> bool {
+        self.crew.owner_refused
+            || self
+                .bruh_apps()
+                .is_some_and(app_grants::AppGrantsState::owner_only)
     }
     /// A Computer state was read: Settings learns whether this system runs
     /// a bruh's browser.
