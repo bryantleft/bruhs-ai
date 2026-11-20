@@ -193,7 +193,12 @@ fn regated(gate: Gate, owner_approved: bool) -> Result<(), RouteError> {
 }
 
 /// One allowed call of `tool` with `input`, which the gate let through for
-/// `target`, within `budget` of `started`.
+/// `target` (approved by the owner when `owner_approved`), within `budget`
+/// of `started`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the route's fixed context, and the tests that call it directly"
+)]
 async fn answer(
     runtime: &ReactiveRuntime,
     id: &str,

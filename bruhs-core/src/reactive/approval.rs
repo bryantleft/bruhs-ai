@@ -14,10 +14,9 @@ use bruhs_models::{
         app_card_input, app_gate, approval_fingerprint, apps_unavailable, browser_gate,
         is_app_tool, list_apps_gate, mail_card_input, mail_gate, network_host, owner_only_card,
         permission_gate, same_page_host, AppLookup, ApprovalState, BruhAccess, Gate, MailLookup,
-        APP_REQUEST_TOOL, BRUH_BROWSER_TOOL, BRUH_SECRET_TOOL, CONTROL_WAIT_EXPIRED,
-        LINKED_FILE_DENIAL, LOCAL_HOST_DENIAL, MAIL_RATE_LIMITED, MAIL_SENDS_PER_HOUR,
-        PAGE_CHANGED, PAGE_UNKNOWN, PROFILE_DENIAL, SEND_MAIL_TOOL, VAULT_COMMAND_RUNNING,
-        VAULT_FILE_DENIAL,
+        APP_REQUEST_TOOL, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED, LINKED_FILE_DENIAL,
+        LOCAL_HOST_DENIAL, MAIL_RATE_LIMITED, MAIL_SENDS_PER_HOUR, PAGE_CHANGED, PAGE_UNKNOWN,
+        PROFILE_DENIAL, SEND_MAIL_TOOL, VAULT_COMMAND_RUNNING, VAULT_FILE_DENIAL,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -105,11 +104,12 @@ impl MailSends {
     fn take(&self, agent_id: &str, now: Instant) -> bool {
         let mut sends = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let recent = Self::recent(&mut sends, agent_id, now);
-        if recent.len() >= MAIL_SENDS_PER_HOUR {
-            return false;
+        let room = recent.len() < MAIL_SENDS_PER_HOUR;
+        if room {
+            recent.push(now);
         }
-        recent.push(now);
-        true
+        drop(sends);
+        room
     }
 }
 
@@ -275,9 +275,8 @@ impl ReactiveRuntime {
     }
 
     /// Whether outbox item `id` is a card only the owner's own app may
-    /// answer: a use of a vault key ([`BRUH_SECRET_TOOL`]), an app call
-    /// ([`APP_REQUEST_TOOL`]) or an email ([`SEND_MAIL_TOOL`]), each in the
-    /// owner's name. An unknown item is not one.
+    /// answer ([`owner_only_card`]): a use of a vault key, an app call or
+    /// an email, each in the owner's name. An unknown item is not one.
     pub(super) async fn is_owner_only_approval(&self, id: &str) -> Result<bool, ReactiveError> {
         let id = id.to_owned();
         self.call(
@@ -1191,6 +1190,7 @@ pub(super) fn resolve(path: &Path, links: u8) -> Option<PathBuf> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use bruhs_models::crew::BRUH_SECRET_TOOL;
 
     /// Final review A2 M7: 30 emails a bruh an hour, each bruh counted on
     /// its own; one that falls out of the hour makes room.

@@ -2183,8 +2183,8 @@ mod tests {
     /// says, Send as me and app grants included.
     #[test]
     fn a_computer_bruh_never_sends_from_its_browser() {
-        let apps = vec!["Notion".to_string()];
-        let boxes = vec!["me@x.test".to_string()];
+        let apps = ["Notion".to_string()];
+        let boxes = ["me@x.test".to_string()];
         for (level, send_as_me) in [
             (AccessLevel::Full, true),
             (AccessLevel::Full, false),

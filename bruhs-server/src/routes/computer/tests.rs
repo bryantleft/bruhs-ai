@@ -964,7 +964,10 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
         )
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{text}");
-    assert!(text.contains(bruhs_models::crew::OWNER_ONLY_ACCESS), "{text}");
+    assert!(
+        text.contains(bruhs_models::crew::OWNER_ONLY_ACCESS),
+        "{text}"
+    );
     for origin in [None, Some(own.as_str()), Some(CONFIGURED_ORIGIN)] {
         let (status, text) = fixture
             .send(
