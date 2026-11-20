@@ -12,6 +12,7 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 ### Added
 
 - Vault: Settings, Vault (formerly Credentials) now creates logins with one-time codes, keys and 1Password references. Grant a login to a bruh and it signs in on that site in its own browser without seeing the password. Keys still ask each time. See `docs/secure-credential-requests.md`.
+- Apps: connect GitHub, Notion, Linear, Airtable, Todoist, Trello, ClickUp, HubSpot, Jira, Shopify, Stripe, Cloudflare, Slack and Figma with a token in Settings, Apps, and grant them and your Gmail or Outlook accounts to bruhs. A Claude bruh at Ask first or Full calls an app or sends email as you within its access, and never sees the token. Email, posts and payments ask first unless the bruh is at Full with Send as me on. Routines can start on new GitHub issues, pull requests and email. Each existing bruh starts one fresh session after this update. See `docs/service-connections.md`.
 
 ## [0.2.0] - 2026-11-18
 
