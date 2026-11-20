@@ -16,9 +16,9 @@ use std::time::{Duration, SystemTime};
 use bruhs_backup::{Header, KdfParams, Kind, HEADER_LEN};
 use bruhs_models::backup::{
     no_space, valid_id, validate_password, BackupJob, BackupOptions, BackupOverview, BackupSizes,
-    JobState, JobStep, LastBackup, StagedRestore, BACKUP_BUSY, INVALID_REQUEST, KEYCHAIN_MAX_BYTES,
-    MANIFEST_MAX_BYTES, MAX_ENTRIES, NOT_A_BACKUP, RECORDING_FIRST, RESTORE_PENDING,
-    UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    JobState, JobStep, LastBackup, PendingRestore, PreRestoreInfo, StagedRestore, BACKUP_BUSY,
+    INVALID_REQUEST, KEYCHAIN_MAX_BYTES, MANIFEST_MAX_BYTES, MAX_ENTRIES, NOT_A_BACKUP,
+    RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
@@ -521,9 +521,9 @@ impl BackupHost {
         written.map_err(BackupError::from)
     }
 
-    /// What Settings shows (ruling F25: sizes, keychain items, outside
-    /// roots, the last backup, the job and a staged restore; the other
-    /// restore fields come later).
+    /// What Settings shows (D23, ruling F25): sizes, keychain items,
+    /// outside roots, the last backup, the job, a waiting or staged
+    /// restore, the kept sets and whether a browser part waits.
     pub async fn overview(&self) -> BackupOverview {
         let roots = self.roots().clone();
         let measured = tokio::task::spawn_blocking(move || {
@@ -540,7 +540,12 @@ impl BackupHost {
                 &roots.config.join("calendar").join("google"),
             )
             .map_or(0, |items| items.len());
-            (sizes, u32::try_from(items).unwrap_or(u32::MAX))
+            let restore = Restore {
+                pending: super::pending(&roots),
+                pre_restores: super::pre_restores(&roots),
+                web_part_waiting: super::waiting_web_part(&roots).is_some(),
+            };
+            (sizes, u32::try_from(items).unwrap_or(u32::MAX), restore)
         })
         .await
         .unwrap_or_default();
@@ -557,10 +562,20 @@ impl BackupHost {
                 .outside_overrides(|name| std::env::var_os(name)),
             last: self.last(),
             job,
+            pending: measured.2.pending,
             staged: self.staged().map(|preview| StagedRestore { preview }),
-            ..BackupOverview::default()
+            pre_restores: measured.2.pre_restores,
+            web_part_waiting: measured.2.web_part_waiting,
         }
     }
+}
+
+/// The overview's restore fields, read off the async runtime.
+#[derive(Default)]
+struct Restore {
+    pending: Option<PendingRestore>,
+    pre_restores: Vec<PreRestoreInfo>,
+    web_part_waiting: bool,
 }
 
 /// What an upload is for.

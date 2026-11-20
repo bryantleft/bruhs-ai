@@ -1,7 +1,8 @@
 //! Backup and restore of everything Bruhs keeps on this computer (crew
 //! project 6): the data roots, what a backup takes from them, consistent
-//! SQLite copies, the free space a job needs, and opening a backup into
-//! staging folders before a restore.
+//! SQLite copies, the free space a job needs, opening a backup into
+//! staging folders before a restore, and applying it offline with today's
+//! data kept aside.
 //!
 //! The container format lives in `bruhs-backup`, the wire types, rules and
 //! copy in `bruhs_models::backup`. Nothing here is reachable from a bruh:
@@ -15,6 +16,8 @@ use bruhs_models::backup::{excluded, Excluded, RootsInfo};
 
 // Backup runs on macOS and Linux only (D27).
 #[cfg(unix)]
+mod apply;
+#[cfg(unix)]
 mod collect;
 #[cfg(unix)]
 mod create;
@@ -23,12 +26,20 @@ mod disk;
 #[cfg(unix)]
 mod host;
 #[cfg(unix)]
+mod journal;
+#[cfg(unix)]
 mod open;
 
 #[cfg(unix)]
-pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
+pub use apply::{
+    apply_pending, delete_pre_restore, instance_lock_path, keep_previous_web_part, pending,
+    pre_restores, result, schedule, take_instance_lock, take_service_restart, waiting_web_part,
+    ApplyOutcome, Holder,
+};
 #[cfg(all(test, unix))]
 use collect::snapshot_sqlite_with;
+#[cfg(unix)]
+pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
 #[cfg(unix)]
 pub use create::{check_destination, CancelFlag, CreateRequest, Output};
 #[cfg(unix)]
@@ -36,6 +47,8 @@ pub use disk::{free_bytes, FREE_MARGIN};
 #[cfg(unix)]
 pub use host::{BackupHost, Upload, UploadKind};
 
+#[cfg(test)]
+mod apply_tests;
 #[cfg(test)]
 mod collect_tests;
 #[cfg(test)]
@@ -82,7 +95,8 @@ pub struct Roots {
 
 /// One of the two data roots, as a backup's `core/` and `desktop/` name
 /// them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RootKey {
     Core,
     Desktop,
