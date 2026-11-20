@@ -274,11 +274,20 @@ impl ReactiveRuntime {
             ReactiveCommand::Apply {
                 change: ReactiveChange::DeleteAgent { .. },
             } => Some(OWNER_ONLY_DELETE_BRUH),
+            ReactiveCommand::Apply { change } if store::crew::saves_app_poll(change) => {
+                Some(OWNER_ONLY_APPS)
+            }
             ReactiveCommand::DecideProposal { id, approve: true } => {
                 let id = id.clone();
-                self.call(move |connection| store::proposal_deletes_agent(connection, &id))
-                    .await?
-                    .then_some(OWNER_ONLY_DELETE_BRUH)
+                self.call(move |connection| {
+                    Ok(if store::proposal_deletes_agent(connection, &id)? {
+                        Some(OWNER_ONLY_DELETE_BRUH)
+                    } else {
+                        store::crew::proposal_saves_app_poll(connection, &id)?
+                            .then_some(OWNER_ONLY_APPS)
+                    })
+                })
+                .await?
             }
             ReactiveCommand::DecideApproval { id, .. } => self
                 .is_vault_key_approval(id)

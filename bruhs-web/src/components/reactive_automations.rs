@@ -1,4 +1,5 @@
 //! Event agents live on the server, independently of the open browser and local workflows.
+use bruhs_models::apps::{source_read_only, SOURCE_KIND_APP, SOURCE_KIND_OTHER};
 use bruhs_models::crew::{
     auto_run_note, event_policy, event_policy_line, run_reviewed_label, saved_agent_level,
     AccessLevel, AUTO_RUN_LABEL,
@@ -46,6 +47,8 @@ fn source_label(kind: &SourceKind) -> &'static str {
         SourceKind::Webhook => "Webhook",
         SourceKind::AppEvent { .. } => "App event",
         SourceKind::Custom => "Custom event",
+        SourceKind::AppPoll { .. } => SOURCE_KIND_APP,
+        SourceKind::Other => SOURCE_KIND_OTHER,
     }
 }
 
@@ -251,7 +254,10 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
     let cal_times = RwSignal::new("08:00".to_string());
     let cal_days = RwSignal::new(Vec::<u8>::new());
     let cal_zone = RwSignal::new(calendar::local_time_zone());
+    // An App or newer source shows this line read only, with Save off (F18).
+    let source_fixed = RwSignal::new(None::<String>);
     let edit_source = Callback::new(move |source: EventSource| {
+        source_fixed.set(source_read_only(&source.kind));
         source_id.set(Some(source.id));
         source_name.set(source.name);
         source_enabled.set(source.enabled);
@@ -307,6 +313,8 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 source_value.set(topic);
             }
             SourceKind::Custom => source_type.set("custom".into()),
+            SourceKind::AppPoll { .. } => source_type.set("app_poll".into()),
+            SourceKind::Other => source_type.set("other".into()),
         }
         source_open.set(true);
     });
@@ -448,10 +456,11 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                             "webhook" => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Save the source, then reveal its private token from the source row."</p> }.into_any(),
                             "calendar" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><calendar::WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div> }.into_any(),
                             "custom" => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Publish events through the local API or the event form below. MQTT and Zigbee bridges can publish here. An FTP upload folder can use a folder source."</p> }.into_any(),
+                            "app_poll" | "other" => view! { <p data-source-read-only="" class="text-body-sm text-rambutan-300 sm:col-span-2">{move || source_fixed.get()}</p> }.into_any(),
                             _ => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Run on a repeating interval while the local server is available."</p> }.into_any(),
                         }}
                         <Show when=move || matches!(source_type.get().as_str(), "folder" | "http" | "command" | "schedule")><Field label="Interval in seconds" value=interval /></Show>
-                    </div><Check label="Source enabled" value=source_enabled /><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| {
+                    </div><Check label="Source enabled" value=source_enabled /><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small disabled=Signal::derive(move || fixed_source_type(&source_type.get())) on_click=Callback::new(move |_| {
                         let kind = if source_type.get_untracked() == "calendar" { calendar::calendar_source(&cal_times.get_untracked(), &cal_days.get_untracked(), &cal_zone.get_untracked()) } else { source_kind(&source_type.get_untracked(), source_value.get_untracked(), source_cwd.get_untracked(), pattern.get_untracked(), recursive.get_untracked(), &interval.get_untracked(), &settle.get_untracked(), &timeout.get_untracked()) };
                         match kind { Ok(kind) => { let next_id=source_id.get_untracked().unwrap_or_else(id); source_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSource { source: EventSource { id: next_id, name: source_name.get_untracked(), enabled: source_enabled.get_untracked(), kind } })); }, Err(err) => error.set(Some(err)), }
                     })>"Save source"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| source_open.set(false))>"Close"</Button></div></div>
@@ -524,6 +533,12 @@ fn milliseconds(text: &str, zero: bool) -> Result<u64, String> {
     } else {
         Ok(millis)
     }
+}
+
+/// The editor types of a source it shows read only: Save is off and
+/// [`source_kind`] builds neither (ruling F18).
+fn fixed_source_type(source_type: &str) -> bool {
+    matches!(source_type, "app_poll" | "other")
 }
 
 #[expect(
@@ -680,6 +695,42 @@ mod tests {
                 timeout_ms: 30000
             }
         );
+    }
+    /// Ruling F18: an App or newer source opens read only, Save is off and
+    /// the builder makes neither, so Save sends nothing.
+    #[test]
+    fn app_and_newer_sources_open_read_only_and_never_save() {
+        let app = SourceKind::AppPoll {
+            app: "github".into(),
+            account: "v1-g".into(),
+            query: bruhs_models::apps::AppQuery::GithubIssues { repo: "o/r".into() },
+            poll_ms: 300_000,
+        };
+        assert_eq!(source_label(&app), "App");
+        assert_eq!(source_label(&SourceKind::Other), "Other");
+        assert_eq!(
+            source_read_only(&app).as_deref(),
+            Some("GitHub: new issues in o/r")
+        );
+        assert_eq!(
+            source_read_only(&SourceKind::Other).as_deref(),
+            Some(bruhs_models::apps::FROM_NEWER_SOURCE)
+        );
+        for fixed in ["app_poll", "other"] {
+            assert!(fixed_source_type(fixed));
+            assert!(source_kind(
+                fixed,
+                String::new(),
+                String::new(),
+                String::new(),
+                false,
+                "5",
+                "0",
+                "30"
+            )
+            .is_err());
+        }
+        assert!(!fixed_source_type("folder"));
     }
     #[test]
     fn existing_zero_settle_source_round_trips_through_the_editor() {

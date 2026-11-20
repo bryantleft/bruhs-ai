@@ -2407,3 +2407,172 @@ async fn deleting_an_app_token_prunes_its_grants() {
 }
 
 mod approval_lifecycle_tests;
+
+fn app_poll_source(id: &str, repo: &str) -> EventSource {
+    EventSource {
+        id: id.into(),
+        name: "New issues".into(),
+        enabled: true,
+        kind: SourceKind::AppPoll {
+            app: "github".into(),
+            account: "v1-g".into(),
+            query: bruhs_models::apps::AppQuery::GithubIssues { repo: repo.into() },
+            poll_ms: 300_000,
+        },
+    }
+}
+
+fn subscription_to(id: &str, source_id: &str, agent_id: &str, enabled: bool) -> Subscription {
+    Subscription {
+        id: id.into(),
+        source_id: source_id.into(),
+        agent_id: agent_id.into(),
+        instructions: String::new(),
+        enabled,
+        auto_run: false,
+        debounce_ms: 0,
+        throttle_ms: 0,
+        on_busy: BusyPolicy::default(),
+    }
+}
+
+/// D20 and D23: an app poll is checked by the shared rules and only the
+/// owner saves one; ruling F3: a newer Bruhs' source is never written back.
+#[tokio::test]
+async fn app_poll_sources_validate_and_take_the_owner() {
+    use bruhs_models::apps::FROM_NEWER_SOURCE;
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let save = |source: EventSource| ReactiveCommand::Apply {
+        change: ReactiveChange::SaveSource { source },
+    };
+    let bad = runtime.command(save(app_poll_source("p", "o"))).await;
+    assert!(
+        matches!(&bad, Err(ReactiveError::Invalid(message)) if message == "Use owner/name for the repository."),
+        "{bad:?}"
+    );
+    let other = runtime
+        .command(save(EventSource {
+            kind: SourceKind::Other,
+            ..app_poll_source("n", "o/r")
+        }))
+        .await;
+    assert!(
+        matches!(&other, Err(ReactiveError::Invalid(message)) if message == FROM_NEWER_SOURCE),
+        "{other:?}"
+    );
+    let snapshot = runtime
+        .command(save(app_poll_source("p", "o/r")))
+        .await
+        .unwrap();
+    assert_eq!(snapshot.sources, [app_poll_source("p", "o/r")]);
+
+    let automation = ReactiveChange::SaveAutomation {
+        automation: Box::new(AutomationSetup {
+            agent: agent("a"),
+            source: app_poll_source("p2", "o/r"),
+            subscription: subscription_to("s2", "p2", "a", true),
+        }),
+    };
+    let snapshot = runtime
+        .command(ReactiveCommand::Propose {
+            change: automation.clone(),
+        })
+        .await
+        .unwrap();
+    let proposal = snapshot.proposals[0].id.clone();
+    let folder = EventSource {
+        kind: SourceKind::Folder {
+            path: std::env::temp_dir().to_string_lossy().into_owned(),
+            pattern: "*.pdf".into(),
+            recursive: false,
+            settle_ms: 0,
+            poll_ms: 5_000,
+        },
+        ..app_poll_source("f", "o/r")
+    };
+    for (command, expected) in [
+        (save(app_poll_source("p", "o/r")), Some(OWNER_ONLY_APPS)),
+        (
+            ReactiveCommand::Apply {
+                change: automation.clone(),
+            },
+            Some(OWNER_ONLY_APPS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal.clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_APPS),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal,
+                approve: false,
+            },
+            None,
+        ),
+        (save(folder), None),
+        (ReactiveCommand::Propose { change: automation }, None),
+    ] {
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+}
+
+/// Ruling F3 (b): enabling an automation re-saves its source, so one whose
+/// source a newer Bruhs wrote is refused and its row stays as it was.
+#[tokio::test]
+async fn enabling_an_automation_never_rewrites_a_newer_source() {
+    use bruhs_models::apps::FROM_NEWER_SOURCE;
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let row = json!({"id": "rss", "name": "Feed", "enabled": false,
+        "kind": {"type": "rss_feed", "url": "https://x.test/feed", "poll_ms": 1}})
+    .to_string();
+    let stored = row.clone();
+    runtime
+        .call(move |connection| {
+            connection.execute(
+                "INSERT INTO reactive_sources(id,payload,hook_token) VALUES('rss',?1,'t')",
+                [stored],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription {
+                subscription: subscription_to("s", "rss", "a", false),
+            },
+        })
+        .await
+        .unwrap();
+    let enable = runtime
+        .command(ReactiveCommand::SetAutomationEnabled {
+            id: "s".into(),
+            enabled: true,
+        })
+        .await;
+    assert!(
+        matches!(&enable, Err(ReactiveError::Invalid(message)) if message == FROM_NEWER_SOURCE),
+        "{enable:?}"
+    );
+    let payload: String = runtime
+        .call(|connection| {
+            Ok(connection.query_row(
+                "SELECT payload FROM reactive_sources WHERE id='rss'",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(payload, row);
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(!snapshot.subscriptions[0].enabled);
+    assert_eq!(snapshot.sources[0].kind, SourceKind::Other);
+}

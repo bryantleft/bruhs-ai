@@ -130,7 +130,12 @@ fn polling_interval(kind: &SourceKind) -> Option<Duration> {
         SourceKind::Schedule { every_ms } => *every_ms,
         // Calendar wake-ups follow their saved deadline; this is only the retry pace.
         SourceKind::Calendar { .. } => 60_000,
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return None,
+        // App polls start polling with Task 10; a newer Bruhs' kind never does.
+        SourceKind::Webhook
+        | SourceKind::AppEvent { .. }
+        | SourceKind::Custom
+        | SourceKind::AppPoll { .. }
+        | SourceKind::Other => return None,
     };
     Some(Duration::from_millis(millis.max(1)))
 }
@@ -157,7 +162,11 @@ async fn poll_once_next_deadline(
         SourceKind::Command { .. } => "command",
         SourceKind::Schedule { .. } => "schedule",
         SourceKind::Calendar { .. } => "calendar",
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
+        SourceKind::Webhook
+        | SourceKind::AppEvent { .. }
+        | SourceKind::Custom
+        | SourceKind::AppPoll { .. }
+        | SourceKind::Other => return Ok(None),
     };
     let cursor = runtime.cursor(&source.id, cursor_key).await?;
     let batch = match &source.kind {
@@ -206,7 +215,11 @@ async fn poll_once_next_deadline(
             weekdays,
             time_zone,
         } => calendar_batch(cursor, now_ms()?, times, weekdays, time_zone)?,
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
+        SourceKind::Webhook
+        | SourceKind::AppEvent { .. }
+        | SourceKind::Custom
+        | SourceKind::AppPoll { .. }
+        | SourceKind::Other => return Ok(None),
     };
     for event in &batch.events {
         if serde_json::to_vec(&event.payload)

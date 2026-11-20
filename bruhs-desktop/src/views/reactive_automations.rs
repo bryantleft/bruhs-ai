@@ -526,6 +526,8 @@ fn source_label(kind: &SourceKind) -> &'static str {
         SourceKind::Webhook => "Webhook",
         SourceKind::AppEvent { .. } => "App event",
         SourceKind::Custom => "Custom event",
+        SourceKind::AppPoll { .. } => bruhs_models::apps::SOURCE_KIND_APP,
+        SourceKind::Other => bruhs_models::apps::SOURCE_KIND_OTHER,
     }
 }
 fn seconds(millis: u64) -> String {
@@ -1149,6 +1151,8 @@ impl ReactiveAutomations {
             SourceKind::Webhook => ("webhook", ""),
             SourceKind::AppEvent { topic } => ("app_event", topic.as_str()),
             SourceKind::Custom => ("custom", ""),
+            SourceKind::AppPoll { .. } => ("app_poll", ""),
+            SourceKind::Other => ("other", ""),
         };
         editor.kind = kind;
         editor.value.set_value(text, window, cx);
@@ -1372,6 +1376,7 @@ impl ReactiveAutomations {
                     "calendar"=>body.child(self.render_calendar_fields(editor, cx)),
                     "webhook"=>body.child(muted("Save the source, then reveal its private token from the source row.")),
                     "custom"=>body.child(muted("MQTT and Zigbee bridges can publish through the local API. Use a folder source for an FTP upload folder.")),
+                    "app_poll"|"other"=>body.child(muted(bruhs_models::apps::source_read_only(&editor.source.kind).unwrap_or_default())),
                     _=>body.child(muted("Run on a repeating interval while the local server is available.")),
                 };
                 if matches!(editor.kind, "folder" | "http" | "command" | "schedule") {
@@ -1542,6 +1547,9 @@ impl ReactiveAutomations {
                     ));
             }
         }
+        // An App or newer source is shown read only, with Save off (F18).
+        let fixed =
+            matches!(editor, Editor::Source(source) if matches!(source.kind, "app_poll" | "other"));
         let label = match editor {
             Editor::Automation(_) => "Review automation",
             Editor::Agent(_) => "Save agent",
@@ -1557,7 +1565,7 @@ impl ReactiveAutomations {
                     .flex_wrap()
                     .gap_2()
                     .child(
-                        control("reactive-save-editor", label, self.busy)
+                        control("reactive-save-editor", label, self.busy || fixed)
                             .on_activate(cx, |this, _, cx| this.save_editor(cx)),
                     )
                     .child(
@@ -2876,6 +2884,69 @@ mod tests {
             };
             assert_eq!(value(&editor.value, cx), "meeting.summary");
         });
+    }
+
+    /// Ruling F18: an App or newer source opens read only with Save off, so
+    /// Save sends nothing and never turns it into another kind.
+    #[gpui::test]
+    fn app_and_newer_sources_open_read_only_and_never_save(cx: &mut gpui::TestAppContext) {
+        use bruhs_models::reactive::{EventSource, SourceKind};
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let holder = Rc::new(std::cell::RefCell::new(None));
+        let capture = holder.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let panel = cx.new(ReactiveAutomations::new);
+            *capture.borrow_mut() = Some(panel.clone());
+            bruhs_ui::Root::new(panel, window, cx)
+        });
+        let panel = holder.borrow().clone().unwrap();
+        let app = SourceKind::AppPoll {
+            app: "github".into(),
+            account: "v1-g".into(),
+            query: bruhs_models::apps::AppQuery::GithubIssues { repo: "o/r".into() },
+            poll_ms: 300_000,
+        };
+        for (kind, editor_kind) in [(app, "app_poll"), (SourceKind::Other, "other")] {
+            let source = EventSource {
+                id: "s".into(),
+                name: "Watch".into(),
+                enabled: true,
+                kind,
+            };
+            panel.update_in(cx, |panel, window, cx| {
+                panel.snapshot = Some(ReactiveSnapshot::default());
+                panel.loaded = true;
+                panel.open_source(Some(source.clone()), window, cx);
+                let Some(Editor::Source(editor)) = &panel.editor else {
+                    panic!("source editor");
+                };
+                assert_eq!(editor.kind, editor_kind);
+            });
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            let save = cx.debug_bounds("reactive-Save source").expect("save");
+            cx.simulate_click(save.center(), gpui::Modifiers::default());
+            cx.run_until_parked();
+            panel.update_in(cx, |panel, _, cx| {
+                assert!(
+                    panel.sent_for_test().is_empty(),
+                    "{editor_kind} sent nothing"
+                );
+                // Even reached another way, Save builds no source.
+                panel.save_editor(cx);
+                assert!(
+                    panel.sent_for_test().is_empty(),
+                    "{editor_kind} built nothing"
+                );
+                let Some(Editor::Source(editor)) = &panel.editor else {
+                    panic!("source editor");
+                };
+                assert_eq!(editor.source, source);
+            });
+        }
     }
 }
 

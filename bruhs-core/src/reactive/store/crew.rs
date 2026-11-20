@@ -17,8 +17,8 @@ use bruhs_models::{
     },
     logic::run_place::claude_effort,
     reactive::{
-        EventSource, OutboxItem, OutboxKind, ReactiveAgent, ReactiveRun, RunStatus, RunTrigger,
-        SourceKind, Subscription, SystemDelivery,
+        EventSource, OutboxItem, OutboxKind, ReactiveAgent, ReactiveChange, ReactiveProposal,
+        ReactiveRun, RunStatus, RunTrigger, SourceKind, Subscription, SystemDelivery,
     },
     weekly_reports::managed_preset_id,
     EpochMs,
@@ -213,6 +213,28 @@ pub(in crate::reactive) fn forget_vault_entry(
     }
     transaction.commit()?;
     Ok(changed)
+}
+
+/// Whether `change` saves an app poll source, which only the owner may do
+/// (D23): a poll calls the owner's own account.
+pub(in crate::reactive) fn saves_app_poll(change: &ReactiveChange) -> bool {
+    let source = match change {
+        ReactiveChange::SaveSource { source } => source,
+        ReactiveChange::SaveAutomation { automation } => &automation.source,
+        _ => return false,
+    };
+    matches!(source.kind, SourceKind::AppPoll { .. })
+}
+
+/// Whether proposal `id` saves an app poll source when approved.
+pub(in crate::reactive) fn proposal_saves_app_poll(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, ReactiveError> {
+    Ok(
+        get::<ReactiveProposal>(connection, "reactive_proposals", id)?
+            .is_some_and(|proposal| saves_app_poll(&proposal.change)),
+    )
 }
 
 /// The bruhs whose Computer is on (switched on, and available at their

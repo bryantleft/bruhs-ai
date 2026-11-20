@@ -5,6 +5,7 @@ use super::{
 };
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
+use bruhs_models::apps::{describe_app_poll, FROM_NEWER_SOURCE};
 use bruhs_models::crew::{
     access_summary, agent_run_level, event_policy, event_policy_line, AccessLevel, BruhLook,
     BruhStatus, AUTO_RUN_LABEL, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
@@ -197,6 +198,8 @@ pub(crate) fn AutomationSetupPanel(
                 source_value.set(topic.clone());
             }
             SourceKind::Custom => kind.set("custom".into()),
+            SourceKind::AppPoll { .. } => kind.set("app_poll".into()),
+            SourceKind::Other => kind.set("other".into()),
         }
         review.set(None);
         base.set(Some(setup));
@@ -250,6 +253,13 @@ pub(crate) fn AutomationSetupPanel(
                     &cal_days.get_untracked(),
                     &cal_zone.get_untracked(),
                 )?
+            } else if matches!(kind.get_untracked().as_str(), "app_poll" | "other") {
+                // An App source keeps its definition until its editor lands;
+                // a newer Bruhs' source is never saved (ruling F3).
+                if setup.source.kind == SourceKind::Other {
+                    return Err(FROM_NEWER_SOURCE.into());
+                }
+                setup.source.kind.clone()
             } else {
                 source_kind(
                     &kind.get_untracked(),
@@ -299,6 +309,7 @@ pub(crate) fn AutomationSetupPanel(
                             "calendar"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div>}.into_any(),
                             "app_event"=>view!{<label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Meeting event"</span><select aria-label="Meeting event" class=SELECT prop:value=move ||source_value.get() on:change=move |event|source_value.set(event_target_value(&event))>{bruhs_models::reactive::APP_EVENT_TOPICS.into_iter().map(|(topic,label)|view!{<option value=topic>{label}</option>}).collect_view()}</select></label>}.into_any(),
                             "webhook"=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"A private endpoint is created when you enable this automation. Reveal its token in Advanced settings."</p>}.into_any(),
+                            "app_poll"|"other"=>view!{<p class="text-body-sm text-rambutan-300 sm:col-span-2">{move ||base.with(|base|base.as_ref().map(|setup|source_summary(&setup.source.kind)))}</p>}.into_any(),
                             _=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"Device bridges can publish events through the local API. Use a watched folder for FTP uploads."</p>}.into_any(),
                         }}
                     </div>
@@ -345,6 +356,8 @@ pub(super) fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
+        SourceKind::AppPoll { query, .. } => describe_app_poll(query, None),
+        SourceKind::Other => FROM_NEWER_SOURCE.into(),
     }
 }
 /// `level` is the level the automation's agent runs at.
@@ -371,6 +384,8 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),
+        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,None),seconds(*poll_ms)),
+        SourceKind::Other=>FROM_NEWER_SOURCE.into(),
     }
 }
 
@@ -596,5 +611,21 @@ mod tests {
         assert_eq!(bundled["agent"]["enabled"], true);
         assert_eq!(bundled["source"]["enabled"], true);
         assert_eq!(bundled["subscription"]["enabled"], true);
+    }
+    #[test]
+    fn app_and_newer_sources_describe_themselves() {
+        let app = SourceKind::AppPoll {
+            app: "mail".into(),
+            account: "m".into(),
+            query: bruhs_models::apps::AppQuery::NewMail,
+            poll_ms: 300_000,
+        };
+        assert_eq!(source_summary(&app), "Email: new mail in your mail");
+        assert_eq!(
+            source_details(&app),
+            "Email: new mail in your mail\nCheck interval: 300 seconds"
+        );
+        assert_eq!(source_summary(&SourceKind::Other), FROM_NEWER_SOURCE);
+        assert_eq!(source_details(&SourceKind::Other), FROM_NEWER_SOURCE);
     }
 }

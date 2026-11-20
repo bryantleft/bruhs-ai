@@ -400,6 +400,19 @@ fn validate_change(connection: &Connection, change: &ReactiveChange) -> Result<(
                 }
                 SourceKind::AppEvent { topic } => text(topic, "App event topic", true)?,
                 SourceKind::Webhook | SourceKind::Custom => {}
+                SourceKind::AppPoll {
+                    app,
+                    account,
+                    query,
+                    poll_ms,
+                } => bruhs_models::apps::validate_app_poll(app, account, query, *poll_ms)
+                    .map_err(|error| ReactiveError::Invalid(error.into()))?,
+                // Nothing writes a newer Bruhs' source back (ruling F3).
+                SourceKind::Other => {
+                    return Err(ReactiveError::Invalid(
+                        bruhs_models::apps::FROM_NEWER_SOURCE.into(),
+                    ))
+                }
             }
             check_capacity(connection, "reactive_sources", &source.id)
         }

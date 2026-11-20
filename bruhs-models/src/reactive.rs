@@ -87,6 +87,18 @@ pub enum SourceKind {
         topic: String,
     },
     Custom,
+    /// New GitHub issues or pull requests, or new mail, on the owner's own
+    /// account (D20). Checked by [`crate::apps::validate_app_poll`].
+    AppPoll {
+        app: String,
+        account: String,
+        query: crate::apps::AppQuery,
+        poll_ms: u64,
+    },
+    /// A kind a newer Bruhs wrote. Never polled and never written back
+    /// (ruling F3).
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

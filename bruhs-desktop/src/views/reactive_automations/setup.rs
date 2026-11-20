@@ -1,5 +1,6 @@
 //! One review and one atomic command activate a complete automation.
 use super::*;
+use bruhs_models::apps::{describe_app_poll, FROM_NEWER_SOURCE};
 use bruhs_models::crew::{
     access_summary, BruhLook, BruhStatus, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
 };
@@ -230,6 +231,7 @@ impl ReactiveAutomations {
             "app_event"=>body.child(div().flex().flex_wrap().gap_2().children([("meeting.completed","Meeting completed"),("meeting.transcribed","Final transcript updated"),("meeting.summary","Summary ready")].into_iter().map(|(topic,label)|{let selected=value(&editor.source.value,cx)==topic;control(SharedString::from(format!("automation-topic-{topic}")),label,self.busy).aria_selected(selected).when(selected,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.value.set_value(topic,window,cx);}cx.notify();})}))),
             "calendar"=>body.child(self.render_calendar_fields(&editor.source, cx)),
             "webhook"=>body.child(muted("A private endpoint is created when you enable this automation. Reveal its token in Advanced settings.")),
+            "app_poll"|"other"=>body.child(muted(source_summary(&editor.source.source.kind))),
             _=>body.child(muted("Device bridges can publish through the local API. Use a watched folder for FTP uploads.")),
         };
         body = body.child(
@@ -571,6 +573,10 @@ impl AutomationEditor {
             "webhook" => SourceKind::Webhook,
             "app_event" => SourceKind::AppEvent { topic: text },
             "custom" => SourceKind::Custom,
+            // An App source keeps its definition until its editor lands; a
+            // newer Bruhs' source is never saved (ruling F3).
+            "app_poll" => self.source.source.kind.clone(),
+            "other" => return Err(bruhs_models::apps::FROM_NEWER_SOURCE.into()),
             _ => return Err("Choose a supported source type.".into()),
         };
         let mut subscription = self.subscription.subscription.clone();
@@ -608,6 +614,8 @@ fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
+        SourceKind::AppPoll { query, .. } => describe_app_poll(query, None),
+        SourceKind::Other => FROM_NEWER_SOURCE.into(),
     }
 }
 /// `level` is the level the automation's agent runs at.
@@ -634,6 +642,8 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),
+        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,None),seconds(*poll_ms)),
+        SourceKind::Other=>FROM_NEWER_SOURCE.into(),
     }
 }
 
@@ -791,5 +801,22 @@ mod tests {
             assert!(panel.snapshot.as_ref().unwrap().subscriptions.is_empty());
             assert!(!panel.busy);
         });
+    }
+    #[test]
+    fn app_and_newer_sources_describe_themselves() {
+        use super::{source_details, source_summary, SourceKind, FROM_NEWER_SOURCE};
+        let app = SourceKind::AppPoll {
+            app: "github".into(),
+            account: "v1-g".into(),
+            query: bruhs_models::apps::AppQuery::GithubPulls { repo: "o/r".into() },
+            poll_ms: 60_000,
+        };
+        assert_eq!(source_summary(&app), "GitHub: new pull requests in o/r");
+        assert_eq!(
+            source_details(&app),
+            "GitHub: new pull requests in o/r\nCheck interval: 60 seconds"
+        );
+        assert_eq!(source_summary(&SourceKind::Other), FROM_NEWER_SOURCE);
+        assert_eq!(source_details(&SourceKind::Other), FROM_NEWER_SOURCE);
     }
 }

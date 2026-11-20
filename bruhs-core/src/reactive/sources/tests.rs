@@ -387,3 +387,69 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
     let event=event.expect("A resumed weekly source must wake for its saved due time rather than sleep another seven days");
     assert_eq!(event.payload["scheduled_at_ms"], due);
 }
+
+#[tokio::test]
+async fn app_poll_and_other_sources_stay_inert_until_apps_poll() {
+    use bruhs_models::{
+        apps::AppQuery,
+        reactive::{ReactiveChange, ReactiveCommand},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = ReactiveRuntime::open(dir.path().join("app-poll.sqlite3"))
+        .await
+        .unwrap();
+    let app_poll = EventSource {
+        id: "github-issues".into(),
+        name: "New issues".into(),
+        enabled: true,
+        kind: SourceKind::AppPoll {
+            app: "github".into(),
+            account: "v1-g".into(),
+            query: AppQuery::GithubIssues { repo: "o/r".into() },
+            poll_ms: 120_000,
+        },
+    };
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSource {
+                source: app_poll.clone(),
+            },
+        })
+        .await
+        .unwrap();
+    // A newer Bruhs' source, as that build saved it.
+    runtime
+        .call(|connection| {
+            connection.execute(
+                "INSERT INTO reactive_sources(id,payload,hook_token) VALUES('rss',?1,'t')",
+                [json!({"id": "rss", "name": "Feed", "enabled": true,
+                    "kind": {"type": "rss_feed", "url": "https://x.test/feed", "poll_ms": 1}})
+                .to_string()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime.snapshot().await.unwrap();
+    let other = snapshot
+        .sources
+        .iter()
+        .find(|source| source.id == "rss")
+        .unwrap()
+        .clone();
+    assert_eq!(other.kind, SourceKind::Other);
+    let client = reqwest::Client::new();
+    for source in [&app_poll, &other] {
+        assert_eq!(polling_interval(&source.kind), None, "{}", source.id);
+        poll_once(&runtime, source, &client).await.unwrap();
+    }
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(
+        snapshot
+            .source_statuses
+            .iter()
+            .all(|status| status.error.is_none()),
+        "{:?}",
+        snapshot.source_statuses
+    );
+}
