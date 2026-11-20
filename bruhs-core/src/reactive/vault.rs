@@ -15,8 +15,8 @@ use crate::{
 use bruhs_models::{
     crew::{
         usable_by, LoginTarget, KEYCHAIN_NEEDS_OWNER, LOGIN_NOT_GRANTED, LOGIN_NO_FIELD,
-        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, PAGE_UNKNOWN,
-        VAULT_READ_FAILED,
+        LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE, OWNER_ONLY_APPS,
+        PAGE_UNKNOWN, VAULT_READ_FAILED,
     },
     local_tools::SecretRef,
     reactive::{ReactiveChange, ReactiveCommand},
@@ -257,7 +257,7 @@ impl ReactiveRuntime {
 
     /// Why `command` takes the owner's own app, as its refusal's copy, or
     /// `None` when any allowed page may send it (rulings F26 and BC I2): a
-    /// bruh's vault grants, an answer to its ask to use a vault key, and
+    /// bruh's vault and app grants, an answer to its ask to use a vault key, and
     /// deleting an agent, which deletes a bruh's own vault entries, applied
     /// or approved as a proposal.
     ///
@@ -270,6 +270,7 @@ impl ReactiveRuntime {
     ) -> Result<Option<&'static str>, ReactiveError> {
         Ok(match command {
             ReactiveCommand::SetVault { .. } => Some(OWNER_ONLY),
+            ReactiveCommand::SetAppGrant { .. } => Some(OWNER_ONLY_APPS),
             ReactiveCommand::Apply {
                 change: ReactiveChange::DeleteAgent { .. },
             } => Some(OWNER_ONLY_DELETE_BRUH),

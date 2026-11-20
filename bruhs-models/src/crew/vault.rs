@@ -57,7 +57,7 @@ pub fn vault_unavailable(level: AccessLevel, provider: AgentProvider) -> Option<
     }
 }
 
-fn grant_id_ok(id: &str) -> bool {
+pub(super) fn grant_id_ok(id: &str) -> bool {
     !id.is_empty()
         && id.chars().count() <= MAX_GRANT_ID_CHARS
         && id
@@ -134,16 +134,19 @@ pub fn vault_choices(entries: &[VaultEntry], agent_id: &str) -> VaultChoices {
             CredentialScope::Bruh { .. } | CredentialScope::Project { .. } => {}
         }
     }
-    let by_name = |a: &VaultEntry, b: &VaultEntry| {
-        a.name
-            .to_lowercase()
-            .cmp(&b.name.to_lowercase())
-            .then_with(|| a.name.cmp(&b.name))
-            .then_with(|| a.id.cmp(&b.id))
-    };
-    choices.own.sort_by(by_name);
-    choices.shared.sort_by(by_name);
+    choices.own.sort_by(entry_order);
+    choices.shared.sort_by(entry_order);
     choices
+}
+
+/// The order a bruh's Settings list entries in: by name ignoring case,
+/// then by name, then by id.
+pub(super) fn entry_order(a: &VaultEntry, b: &VaultEntry) -> std::cmp::Ordering {
+    a.name
+        .to_lowercase()
+        .cmp(&b.name.to_lowercase())
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 /// How a shared entry reads in a bruh's Settings: its name, as the Vault

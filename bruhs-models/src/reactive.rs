@@ -1,7 +1,7 @@
 //! Durable event-driven agents shared by the local server and both clients.
 
 use crate::crew::room::{Room, RoomState};
-use crate::crew::{BruhAccess, BruhLook, BruhState};
+use crate::crew::{AppGrant, BruhAccess, BruhLook, BruhState};
 use crate::{ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -384,6 +384,14 @@ pub enum ReactiveCommand {
     SetVault {
         agent_id: String,
         entries: Vec<String>,
+    },
+    /// Grant a bruh one app account or mailbox, or take it back. Changes one
+    /// id inside the store's transaction, so two pages toggling at once
+    /// never undo each other. Cancels no runs and keeps the session.
+    SetAppGrant {
+        agent_id: String,
+        grant: AppGrant,
+        granted: bool,
     },
 }
 

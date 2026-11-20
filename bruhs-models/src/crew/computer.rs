@@ -1267,6 +1267,8 @@ mod tests {
                 unread: 0,
                 computer,
                 vault: Vec::new(),
+                apps: Vec::new(),
+                mail: Vec::new(),
             }],
             ..ReactiveSnapshot::default()
         }

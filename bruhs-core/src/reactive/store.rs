@@ -1032,6 +1032,11 @@ pub(super) fn command(
             ReactiveCommand::SetVault { agent_id, entries } => {
                 crew::set_vault(connection, &agent_id, entries)?;
             }
+            ReactiveCommand::SetAppGrant {
+                agent_id,
+                grant,
+                granted,
+            } => crew::set_app_grant(connection, &agent_id, grant, granted)?,
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {

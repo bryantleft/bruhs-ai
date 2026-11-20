@@ -11,8 +11,9 @@ use bruhs_models::{
     agent::AgentProvider,
     crew::{
         approval_detail, approval_fingerprint, approval_summary, computer_on, effective_level,
-        level_unavailable, normalize_grants, rail_order, status_for, ApprovalRequest,
-        ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
+        level_unavailable, normalize_grants, rail_order, status_for, toggle_grant, AppGrant,
+        ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
+        MAX_APP_GRANTS, MAX_MAIL_GRANTS,
     },
     logic::run_place::claude_effort,
     reactive::{
@@ -150,9 +151,44 @@ pub(in crate::reactive) fn set_vault(
     save(connection, agent_id, &BruhProfile { vault, ..old })
 }
 
-/// Take vault entry `id` out of every bruh's grants, in one transaction:
-/// the count of bruhs whose grants changed. Grants are rewritten from the
-/// stored profiles, so a change made just before can't be undone.
+/// Grant the bruh one app token or mailbox, or take it back (D9). Only that
+/// id changes, read and written inside the command's transaction, so two
+/// pages toggling at once never undo each other. Its runs, approvals and
+/// session stay: every use checks the grants live.
+pub(in crate::reactive) fn set_app_grant(
+    connection: &Connection,
+    agent_id: &str,
+    grant: AppGrant,
+    granted: bool,
+) -> Result<(), ReactiveError> {
+    required::<ReactiveAgent>(connection, "reactive_agents", agent_id, "agent")?;
+    let old = profile(connection, agent_id)?;
+    let invalid = |reason: &str| ReactiveError::Invalid(reason.into());
+    let profile = match grant {
+        AppGrant::Token { entry_id } => {
+            let apps =
+                toggle_grant(&old.apps, &entry_id, granted, MAX_APP_GRANTS).map_err(invalid)?;
+            if apps == old.apps {
+                return Ok(());
+            }
+            BruhProfile { apps, ..old }
+        }
+        AppGrant::Mailbox { mailbox_id } => {
+            let mail =
+                toggle_grant(&old.mail, &mailbox_id, granted, MAX_MAIL_GRANTS).map_err(invalid)?;
+            if mail == old.mail {
+                return Ok(());
+            }
+            BruhProfile { mail, ..old }
+        }
+    };
+    save(connection, agent_id, &profile)
+}
+
+/// Take vault entry `id` out of every bruh's grants, vault and app alike,
+/// in one transaction: the count of bruhs whose grants changed. Grants are
+/// rewritten from the stored profiles, so a change made just before can't
+/// be undone.
 pub(in crate::reactive) fn forget_vault_entry(
     connection: &mut Connection,
     id: &str,
@@ -166,10 +202,12 @@ pub(in crate::reactive) fn forget_vault_entry(
     let mut changed = 0;
     for (agent_id, payload) in profiles {
         let mut profile: BruhProfile = decode(payload)?;
-        if !profile.vault.iter().any(|granted| granted == id) {
+        let holds = |grants: &[String]| grants.iter().any(|granted| granted == id);
+        if !holds(&profile.vault) && !holds(&profile.apps) {
             continue;
         }
         profile.vault.retain(|granted| granted != id);
+        profile.apps.retain(|granted| granted != id);
         save(&transaction, &agent_id, &profile)?;
         changed += 1;
     }
@@ -641,6 +679,8 @@ pub(in crate::reactive) fn bruh_states(
             unread,
             computer: profile.computer,
             vault: profile.vault,
+            apps: profile.apps,
+            mail: profile.mail,
         });
     }
     rail_order(&mut states);

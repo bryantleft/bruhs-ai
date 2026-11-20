@@ -85,7 +85,7 @@ pub const FORGE_COMMAND_HOSTS: [&str; 2] = ["github.com", "gitlab.com"];
 
 /// The line under Send as me in a bruh's Settings, on both apps.
 pub const SEND_AS_ME_HINT: &str =
-    "At Full access, a Claude bruh also comments, files issues and calls GitHub or GitLab as you without asking.";
+    "At Full access, a Claude bruh also sends email, posts in your apps, comments, files issues and calls GitHub or GitLab as you without asking.";
 
 /// Claude `--disallowedTools` rules that keep a run from delivering code.
 pub const DELIVERY_DENY_RULES: [&str; 5] = [
@@ -1620,6 +1620,7 @@ mod tests {
     #[test]
     fn the_send_as_me_hint_names_the_forges_without_dashes() {
         assert!(SEND_AS_ME_HINT.contains("GitHub") && SEND_AS_ME_HINT.contains("Full access"));
+        assert!(SEND_AS_ME_HINT.contains("sends email, posts in your apps"));
         assert!(
             !SEND_AS_ME_HINT.contains(['–', '—', '•', '·']) && !SEND_AS_ME_HINT.contains(" - ")
         );

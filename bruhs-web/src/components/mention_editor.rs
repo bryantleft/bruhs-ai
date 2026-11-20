@@ -1559,6 +1559,8 @@ mod tests {
             unread: 0,
             computer: false,
             vault: Vec::new(),
+            apps: Vec::new(),
+            mail: Vec::new(),
         };
         let members = [bruh("c", "Cy"), bruh("b", "Bobby"), bruh("a", "Abo")];
         let rows = member_rows(&members, Some("a"), "bo");

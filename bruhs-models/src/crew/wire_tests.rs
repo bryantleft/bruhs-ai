@@ -303,8 +303,8 @@ fn set_vault_is_its_own_command_and_never_sent_to_an_older_service() {
         state.vault.is_empty(),
         "an older service's bruh has no grants"
     );
-    assert!(vault_ready(4) && !vault_ready(3) && CREW_PROTOCOL == 4);
-    assert_eq!(VAULT_PROTOCOL, CREW_PROTOCOL);
+    assert!(vault_ready(VAULT_PROTOCOL) && !vault_ready(COMPUTER_PROTOCOL));
+    assert!(vault_ready(CREW_PROTOCOL));
     assert_eq!(
         vault_reason(Some(3)),
         Some(ServiceNotice::ServingOld.message())
@@ -376,6 +376,8 @@ fn the_same_grants_in_another_order_send_nothing() {
         unread: 0,
         computer: false,
         vault: vec!["v1-a".into(), "v1-b".into()],
+        apps: Vec::new(),
+        mail: Vec::new(),
     };
     let mut edited = BruhSettings {
         name: "A".into(),
@@ -404,4 +406,49 @@ fn deleting_a_bruh_names_its_vault_entries() {
         delete_bruh_confirm("Ada"),
         "Delete Ada? Its chat, memory, browser, own vault entries and private work folder go with it. A folder you chose stays."
     );
+}
+
+#[test]
+fn apps_commands_never_reach_an_older_service() {
+    let command: ReactiveCommand = serde_json::from_str(
+        r#"{"action":"set_app_grant","agent_id":"a","grant":{"type":"mailbox","mailbox_id":"m"},"granted":true}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        command,
+        ReactiveCommand::SetAppGrant {
+            agent_id: "a".into(),
+            grant: AppGrant::Mailbox {
+                mailbox_id: "m".into()
+            },
+            granted: true
+        }
+    );
+    let token: AppGrant = serde_json::from_str(r#"{"type":"token","entry_id":"v1-g"}"#).unwrap();
+    assert_eq!(
+        token,
+        AppGrant::Token {
+            entry_id: "v1-g".into()
+        }
+    );
+    let profile: BruhProfile = serde_json::from_str("{}").unwrap();
+    assert!(profile.apps.is_empty() && profile.mail.is_empty());
+    let state: BruhState = serde_json::from_str(
+        r#"{"agent_id":"a","name":"A","look":{},"access":{},"status":"asleep"}"#,
+    )
+    .unwrap();
+    assert!(
+        state.apps.is_empty() && state.mail.is_empty(),
+        "an older service's bruh has no app grants"
+    );
+    assert!(apps_ready(APPS_PROTOCOL) && !apps_ready(VAULT_PROTOCOL));
+    assert_eq!(APPS_PROTOCOL, VAULT_PROTOCOL + 1);
+    assert_eq!(CREW_PROTOCOL, APPS_PROTOCOL);
+    assert!(vault_ready(APPS_PROTOCOL));
+    assert_eq!(
+        apps_reason(Some(VAULT_PROTOCOL)),
+        Some(ServiceNotice::ServingOld.message())
+    );
+    assert_eq!(apps_reason(Some(APPS_PROTOCOL)), None);
+    assert_eq!(apps_reason(None), None);
 }

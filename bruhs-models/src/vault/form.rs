@@ -8,7 +8,8 @@ use super::{
     FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FROM_NEWER,
     KIND_APP, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD, KIND_OTHER, LOADING, MANAGE_IN_APPS,
     SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT, SOURCE_ONE_PASSWORD, SOURCE_SAVED,
-    STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+    STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED, STATE_UNKNOWN, WAIT_FOR_CHANGE,
+    WAIT_FOR_CHECK,
 };
 use crate::secrets::{review_text, SavedCredentialState};
 
@@ -443,7 +444,9 @@ pub fn vault_row(entry: &VaultEntry, bruhs: &[VaultBruh]) -> VaultRow {
                 ..
             })
     );
-    let state = if from_one_password {
+    let state = if matches!(entry.kind, VaultKind::Other) {
+        STATE_UNKNOWN
+    } else if from_one_password {
         STATE_IN_ONE_PASSWORD
     } else {
         match entry.state {
@@ -690,6 +693,11 @@ mod tests {
         assert_eq!(
             (row.kind, row.editable, row.checkable),
             (KIND_OTHER, false, false)
+        );
+        // This build can't vouch for where a newer kind keeps its value.
+        assert_eq!(
+            (row.state, row.detail.as_deref()),
+            (STATE_UNKNOWN, Some(FROM_NEWER))
         );
         for stored in [&app, &other] {
             assert!(!stored.kind.editable());

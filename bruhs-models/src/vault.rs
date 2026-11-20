@@ -80,6 +80,8 @@ pub const FROM_NEWER: &str = "From a newer Bruhs.";
 pub const STATE_SAVED: &str = "Stored in your OS keychain. Value hidden.";
 pub const STATE_IN_ONE_PASSWORD: &str = "Read from 1Password when used.";
 pub const STATE_NEEDS_ATTENTION: &str = "Needs attention. Replace or delete it to finish a change.";
+/// A newer Bruhs' entry: this build can't say where its value is.
+pub const STATE_UNKNOWN: &str = "This Bruhs can only delete it.";
 pub const EMPTY: &str =
     "The vault is empty. Choose New entry to add a login, a key or a 1Password reference.";
 pub const NO_MATCH: &str = "Nothing in the vault matches your search.";
@@ -268,8 +270,9 @@ pub const MAX_NAME_CHARS: usize = 80;
 /// Most bytes in an `op://` reference.
 pub const MAX_REFERENCE_BYTES: usize = 512;
 /// Most characters in an app token's account, the label its test call
-/// named (ruling F24).
-pub const MAX_APP_ACCOUNT_CHARS: usize = 100;
+/// named (ruling F24). The same cap as a call's `account`, so a bruh can
+/// name any stored account when more than one fits.
+pub const MAX_APP_ACCOUNT_CHARS: usize = crate::apps::MAX_ACCOUNT_CHARS;
 
 /// Who an entry serves (D2). Project entries serve thread requests in that
 /// canonical folder, Global ones every thread and the bruhs they are
@@ -1391,6 +1394,17 @@ mod tests {
             *account = "me\u{202e}".into();
         }
         assert_eq!(odd.validate(), Err(INVALID_ENTRY));
+        for (chars, want) in [
+            (MAX_APP_ACCOUNT_CHARS, Ok(())),
+            (MAX_APP_ACCOUNT_CHARS + 1, Err(INVALID_ENTRY)),
+        ] {
+            let mut long = app_create(global(), "github", &[], Some(token), None);
+            if let VaultSecretInput::AppToken { account, .. } = &mut long.secret {
+                *account = "é".repeat(chars);
+            }
+            assert_eq!(long.validate(), want, "{chars}");
+        }
+        assert_eq!(MAX_APP_ACCOUNT_CHARS, crate::apps::MAX_ACCOUNT_CHARS);
         let meta = app_create(global(), "github", &[], Some(token), None)
             .secret
             .kind_meta();

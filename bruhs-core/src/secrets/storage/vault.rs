@@ -38,7 +38,8 @@ pub(super) struct VaultCatalog {
     version: u32,
     entries: BTreeMap<String, VaultEntry>,
     /// Rows of a kind a newer Bruhs wrote (ruling F3): listed as Other,
-    /// written back exactly as read, and only ever deleted.
+    /// written back equal as JSON to what was read (integers within 64
+    /// bits), and only ever deleted.
     kept: BTreeMap<String, KeptRow>,
     /// Per entry, how many times its keychain item was written or removed.
     /// An update that read the item before the lock writes only if this

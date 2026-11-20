@@ -2170,4 +2170,240 @@ async fn set_vault_is_refused_for_report_agents() {
     );
 }
 
+fn app_grant(agent_id: &str, grant: AppGrant, granted: bool) -> ReactiveCommand {
+    ReactiveCommand::SetAppGrant {
+        agent_id: agent_id.into(),
+        grant,
+        granted,
+    }
+}
+
+fn token(entry_id: &str) -> AppGrant {
+    AppGrant::Token {
+        entry_id: entry_id.into(),
+    }
+}
+
+#[tokio::test]
+async fn set_app_grant_toggles_one_grant_and_keeps_everything_else() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    runtime
+        .command(set_bruh("a", pandan(), AccessLevel::Full))
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::SetComputer {
+            agent_id: "a".into(),
+            on: true,
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: vec!["v1-k".into()],
+        })
+        .await
+        .unwrap();
+    finished_with_session(&runtime).await;
+    let queued = chat(&runtime, "a", "Queued").await;
+
+    runtime
+        .command(app_grant("a", token("v1-g"), true))
+        .await
+        .unwrap();
+    let mailbox = format!("mailbox-v1-{}", "a".repeat(64));
+    let snapshot = runtime
+        .command(app_grant(
+            "a",
+            AppGrant::Mailbox {
+                mailbox_id: mailbox.clone(),
+            },
+            true,
+        ))
+        .await
+        .unwrap();
+    let bruh = &snapshot.bruhs[0];
+    assert_eq!(
+        (&bruh.apps, &bruh.mail, &bruh.vault),
+        (
+            &vec!["v1-g".to_owned()],
+            &vec![mailbox.clone()],
+            &vec!["v1-k".to_owned()]
+        )
+    );
+    assert!(bruh.computer);
+    assert_eq!(
+        (bruh.access.level, bruh.look.face),
+        (AccessLevel::Full, BruhColor::Pandan)
+    );
+    assert_eq!(run(&runtime, &queued.id).await.status, RunStatus::Queued);
+    assert_eq!(session(&runtime, "a").await.as_deref(), Some("s1"));
+
+    // One id at a time: a second token joins, a repeat changes nothing,
+    // and a revoke takes out only its own id.
+    runtime
+        .command(app_grant("a", token("v1-a"), true))
+        .await
+        .unwrap();
+    runtime
+        .command(app_grant("a", token("v1-a"), true))
+        .await
+        .unwrap();
+    let snapshot = runtime
+        .command(app_grant("a", token("v1-g"), false))
+        .await
+        .unwrap();
+    assert_eq!(snapshot.bruhs[0].apps, ["v1-a"]);
+    assert_eq!(snapshot.bruhs[0].mail, std::slice::from_ref(&mailbox));
+
+    // SetVault and an older-style SetBruh know nothing of app grants.
+    runtime
+        .command(ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime
+        .command(set_bruh("a", BruhLook::default(), AccessLevel::Full))
+        .await
+        .unwrap();
+    let bruh = &snapshot.bruhs[0];
+    assert!(bruh.vault.is_empty());
+    assert_eq!(
+        (&bruh.apps, &bruh.mail),
+        (&vec!["v1-a".to_owned()], &vec![mailbox])
+    );
+
+    let bad = runtime.command(app_grant("a", token("../x"), true)).await;
+    assert!(
+        matches!(&bad, Err(ReactiveError::Invalid(message)) if message == "That isn't an app account."),
+        "{bad:?}"
+    );
+    let missing = runtime
+        .command(app_grant("nobody", token("v1-g"), true))
+        .await;
+    assert!(
+        matches!(missing, Err(ReactiveError::NotFound(_))),
+        "{missing:?}"
+    );
+    assert_eq!(
+        runtime
+            .owner_only_refusal(&app_grant("a", token("v1-g"), false))
+            .await
+            .unwrap(),
+        Some(OWNER_ONLY_APPS)
+    );
+
+    // Nothing above stopped the queued run or its session.
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, queued.id);
+    assert_eq!(claim.bruh.apps, ["v1-a"]);
+    assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+    assert!(!claim.run.fresh_session);
+}
+
+#[tokio::test]
+async fn set_app_grant_is_bounded_and_refused_for_report_agents() {
+    use bruhs_models::weekly_reports::{WeeklyReportCommand, WeeklyReportPreset};
+    let (dir, runtime) = runtime_with(&[agent("a")]).await;
+    for i in 0..MAX_MAIL_GRANTS {
+        let mailbox_id = format!("mailbox-{i:02}");
+        runtime
+            .command(app_grant("a", AppGrant::Mailbox { mailbox_id }, true))
+            .await
+            .unwrap();
+    }
+    let full = runtime
+        .command(app_grant(
+            "a",
+            AppGrant::Mailbox {
+                mailbox_id: "mailbox-99".into(),
+            },
+            true,
+        ))
+        .await;
+    assert!(
+        matches!(&full, Err(ReactiveError::Invalid(message)) if message == "Grant at most 16 mail accounts."),
+        "{full:?}"
+    );
+
+    let preset = WeeklyReportPreset {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_path: dir.path().display().to_string(),
+        model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+        local_git: true,
+        github_pull_requests: false,
+        github_deployments: false,
+        scheduled: false,
+        schedule: None,
+    };
+    runtime
+        .weekly_report_command(WeeklyReportCommand::SavePreset {
+            preset: preset.clone(),
+        })
+        .await
+        .unwrap();
+    let refused = runtime
+        .command(app_grant(
+            &format!("weekly-report-{}", preset.id),
+            token("v1-g"),
+            true,
+        ))
+        .await;
+    assert!(
+        matches!(&refused, Err(ReactiveError::Conflict(message)) if message.contains("weekly report preset")),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn deleting_an_app_token_prunes_its_grants() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    for agent_id in ["a", "b"] {
+        runtime
+            .command(app_grant(agent_id, token("v1-g"), true))
+            .await
+            .unwrap();
+    }
+    runtime
+        .command(app_grant("b", token("v1-h"), true))
+        .await
+        .unwrap();
+    assert_eq!(runtime.forget_vault_entry("v1-g").await.unwrap(), 2);
+    let snapshot = runtime.snapshot().await.unwrap();
+    let apps = |agent_id: &str| {
+        snapshot
+            .bruhs
+            .iter()
+            .find(|bruh| bruh.agent_id == agent_id)
+            .map(|bruh| bruh.apps.clone())
+            .unwrap()
+    };
+    assert!(apps("a").is_empty());
+    assert_eq!(apps("b"), ["v1-h"]);
+    assert_eq!(runtime.forget_vault_entry("v1-g").await.unwrap(), 0);
+
+    // Two pages toggling at once, or a toggle beside a delete, never undo
+    // each other.
+    for i in 0..20 {
+        let (one, two, forgot) = tokio::join!(
+            runtime.command(app_grant("a", token(&format!("v1-x{i:02}")), true)),
+            runtime.command(app_grant("a", token(&format!("v1-y{i:02}")), true)),
+            runtime.forget_vault_entry("v1-h"),
+        );
+        one.unwrap();
+        two.unwrap();
+        forgot.unwrap();
+    }
+    let snapshot = runtime.snapshot().await.unwrap();
+    let a = snapshot
+        .bruhs
+        .iter()
+        .find(|bruh| bruh.agent_id == "a")
+        .unwrap();
+    assert_eq!(a.apps.len(), 40, "{:?}", a.apps);
+}
+
 mod approval_lifecycle_tests;

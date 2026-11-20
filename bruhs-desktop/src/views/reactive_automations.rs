@@ -3121,6 +3121,8 @@ mod crew_tests {
             unread: 2,
             computer: false,
             vault: Vec::new(),
+            apps: Vec::new(),
+            mail: Vec::new(),
         };
         panel.update(cx, |panel, cx| {
             assert_eq!(panel.crew_protocol(), None);

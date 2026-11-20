@@ -10,6 +10,8 @@ use crate::EpochMs;
 
 mod access;
 pub use access::*;
+mod apps;
+pub use apps::*;
 mod automation;
 pub use automation::*;
 mod computer;
@@ -27,7 +29,7 @@ pub use vault::*;
 mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
-pub const CREW_PROTOCOL: u32 = 4;
+pub const CREW_PROTOCOL: u32 = APPS_PROTOCOL;
 
 /// First version that has Stop, access and the other crew commands.
 pub const CREW_COMMANDS_PROTOCOL: u32 = 1;
@@ -40,6 +42,9 @@ pub const COMPUTER_PROTOCOL: u32 = 3;
 
 /// First version that has vault grants on a bruh.
 pub const VAULT_PROTOCOL: u32 = 4;
+
+/// First version that has app and mailbox grants on a bruh and app sources.
+pub const APPS_PROTOCOL: u32 = VAULT_PROTOCOL + 1;
 
 /// Which way a bruh looks.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -262,6 +267,15 @@ pub struct BruhProfile {
     /// Set only by `ReactiveCommand::SetVault`; see [`usable_by`].
     #[serde(default)]
     pub vault: Vec<String>,
+    /// The Global app tokens granted to the bruh, by vault entry id, sorted
+    /// and deduped. Set only by `ReactiveCommand::SetAppGrant`; see
+    /// [`usable_app_token`].
+    #[serde(default)]
+    pub apps: Vec<String>,
+    /// The mailboxes the bruh may send from, by mailbox id, sorted and
+    /// deduped. Set only by `ReactiveCommand::SetAppGrant`.
+    #[serde(default)]
+    pub mail: Vec<String>,
 }
 
 /// A bruh as the rail and pages show it.
@@ -284,6 +298,12 @@ pub struct BruhState {
     /// The Global vault entries granted to the bruh.
     #[serde(default)]
     pub vault: Vec<String>,
+    /// The Global app tokens granted to the bruh.
+    #[serde(default)]
+    pub apps: Vec<String>,
+    /// The mailboxes granted to the bruh.
+    #[serde(default)]
+    pub mail: Vec<String>,
 }
 
 /// Status by priority: off, paused, needs you, working, asleep.
@@ -459,6 +479,8 @@ mod tests {
             unread: 0,
             computer: false,
             vault: Vec::new(),
+            apps: Vec::new(),
+            mail: Vec::new(),
         }
     }
 

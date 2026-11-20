@@ -26,6 +26,8 @@ fn named(id: &str, name: &str) -> BruhState {
         unread: 0,
         computer: false,
         vault: Vec::new(),
+        apps: Vec::new(),
+        mail: Vec::new(),
     }
 }
 

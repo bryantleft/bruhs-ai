@@ -1529,6 +1529,8 @@ mod tests {
             unread: 0,
             computer: false,
             vault: Vec::new(),
+            apps: Vec::new(),
+            mail: Vec::new(),
         }
     }
 
