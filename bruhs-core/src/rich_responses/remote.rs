@@ -1,6 +1,7 @@
 //! User-triggered downloads use a resolver that passes only public addresses
 //! to the connector, including every redirect. No check/connect DNS race.
 use super::{private_directory, RichError, RichStore};
+use crate::net::public_ip;
 use bruhs_models::logic::attachments::{file_extension, safe_upload_filename, MAX_FILE_BYTES};
 use futures_core::Stream;
 use std::{
@@ -24,35 +25,6 @@ impl reqwest::dns::Resolve for PublicResolver {
             }
             Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
         })
-    }
-}
-
-fn public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            let [a, b, _, _] = ip.octets();
-            !ip.is_private()
-                && !ip.is_loopback()
-                && !ip.is_link_local()
-                && !ip.is_unspecified()
-                && !ip.is_multicast()
-                && !ip.is_broadcast()
-                && !ip.is_documentation()
-                && a != 0
-                && a < 224
-                && !(a == 100 && (64..=127).contains(&b))
-                && !(a == 198 && (b == 18 || b == 19))
-                && !(a == 192 && (b == 0 || b == 88))
-        }
-        IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return public_ip(IpAddr::V4(mapped));
-            }
-            let parts = ip.segments();
-            parts[0] & 0xe000 == 0x2000
-                && parts[0] != 0x2002
-                && !(parts[0] == 0x2001 && (parts[1] < 0x200 || parts[1] == 0xdb8))
-        }
     }
 }
 
