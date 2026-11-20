@@ -6,8 +6,8 @@ use super::{service_notice, AccessLevel, VAULT_PROTOCOL};
 use crate::agent::AgentProvider;
 use crate::secrets::review_text;
 use crate::vault::{
-    vault_row, CredentialScope, VaultEntry, VaultKind, VaultListing, KIND_KEY, KIND_LOGIN,
-    KIND_ONE_PASSWORD,
+    vault_row, CredentialScope, VaultEntry, VaultKind, VaultListing, KIND_APP, KIND_KEY,
+    KIND_LOGIN, KIND_ONE_PASSWORD, KIND_OTHER,
 };
 
 /// A bruh holds at most this many grants.
@@ -92,9 +92,13 @@ pub fn normalize_grants(entries: Vec<String>) -> Result<Vec<String>, &'static st
 }
 
 /// Whether bruh `agent_id` may use `entry` (D2): its own entries always,
-/// Global ones it was granted, and nothing else.
+/// Global ones it was granted, and nothing else. Never an app token, which
+/// only `app_request` and app polls use (D8), nor a newer Bruhs' kind.
 #[must_use]
 pub fn usable_by(entry: &VaultEntry, agent_id: &str, grants: &[String]) -> bool {
+    if !vault_grantable(&entry.kind) {
+        return false;
+    }
     match &entry.scope {
         CredentialScope::Bruh { agent_id: owner } => owner == agent_id,
         CredentialScope::Global => grants.contains(&entry.id),
@@ -110,12 +114,18 @@ pub struct VaultChoices {
     pub shared: Vec<VaultEntry>,
 }
 
-/// The choices for bruh `agent_id`. Project entries and other bruhs'
-/// entries are never offered.
+/// Whether a bruh's Vault section deals with this kind: not an app token
+/// (the Apps section's) nor a newer Bruhs' kind.
+fn vault_grantable(kind: &VaultKind) -> bool {
+    !matches!(kind, VaultKind::AppToken(_) | VaultKind::Other)
+}
+
+/// The choices for bruh `agent_id`. Project entries, other bruhs' entries,
+/// app tokens and newer kinds are never offered.
 #[must_use]
 pub fn vault_choices(entries: &[VaultEntry], agent_id: &str) -> VaultChoices {
     let mut choices = VaultChoices::default();
-    for entry in entries {
+    for entry in entries.iter().filter(|entry| vault_grantable(&entry.kind)) {
         match &entry.scope {
             CredentialScope::Bruh { agent_id: owner } if owner == agent_id => {
                 choices.own.push(entry.clone());
@@ -144,6 +154,8 @@ pub fn vault_choice_label(entry: &VaultEntry) -> String {
         VaultKind::Value => KIND_KEY,
         VaultKind::Login(_) => KIND_LOGIN,
         VaultKind::OnePassword { .. } => KIND_ONE_PASSWORD,
+        VaultKind::AppToken(_) => KIND_APP,
+        VaultKind::Other => KIND_OTHER,
     };
     format!("{}, {kind}", review_text(&entry.name))
 }
@@ -305,6 +317,32 @@ mod tests {
                 on: false,
             }]
         );
+    }
+
+    /// An app token is granted on the Apps page and an entry from a newer
+    /// Bruhs isn't understood here: neither is a Vault grant row.
+    #[test]
+    fn app_tokens_and_other_kinds_are_never_vault_grants() {
+        let app = VaultKind::AppToken(crate::vault::AppTokenMeta {
+            app: "github".into(),
+            account: "me".into(),
+            params: std::collections::BTreeMap::new(),
+        });
+        let listing = VaultListing {
+            entries: vec![
+                listed("v1-g", "GitHub", CredentialScope::Global, app.clone()),
+                listed("v1-a", "Mine", owned_by("a"), app),
+                listed("v1-x", "Newer", CredentialScope::Global, VaultKind::Other),
+                listed("v1-y", "Newer own", owned_by("a"), VaultKind::Other),
+            ],
+            ..VaultListing::default()
+        };
+        let grants = ["v1-g".to_string(), "v1-x".to_string()];
+        assert!(vault_grant_rows(&listing, "a", &grants).is_empty());
+        assert!(listing
+            .entries
+            .iter()
+            .all(|entry| !usable_by(entry, "a", &grants)));
     }
 
     #[test]

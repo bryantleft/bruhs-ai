@@ -34,7 +34,8 @@ use bruhs_models::{
     secrets::{SecretDecision, SecretOperation, SecretRequest, FORGET_SHARED},
     vault::{
         CredentialScope, LoginFields, LoginMeta, SavedSource, SecretField, VaultAttention,
-        VaultCheck, VaultEntry, VaultKind, VaultListing, VaultUpdate, CHECK_OK,
+        VaultCheck, VaultEntry, VaultKind, VaultListing, VaultUpdate, CHECK_OK, FROM_NEWER,
+        MANAGE_IN_APPS,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -475,14 +476,16 @@ impl SecretManager {
         })
     }
 
-    /// A key's value, from the keychain or 1Password. A login, or an id no
-    /// entry has, is `NotSaved`.
+    /// A key's value, from the keychain or 1Password. A login, a newer
+    /// Bruhs' kind or an id no entry has is `NotSaved`; an app token, which
+    /// only app calls use (D8), is refused.
     pub async fn resolve_value(&self, id: &str) -> Result<Zeroizing<String>, SecretError> {
         let entry = self.known(id).await?;
         let source = match entry.kind {
             VaultKind::Value => Source::Keychain(Pick::Value),
             VaultKind::OnePassword { reference } => Source::OnePassword(reference),
-            VaultKind::Login(_) => return Err(SecretError::NotSaved),
+            VaultKind::AppToken(_) => return Err(SecretError::Invalid(MANAGE_IN_APPS)),
+            VaultKind::Login(_) | VaultKind::Other => return Err(SecretError::NotSaved),
         };
         let one_password = matches!(source, Source::OnePassword(_));
         self.attended(id, self.read(id, source), one_password).await
@@ -526,10 +529,18 @@ impl SecretManager {
     }
 
     /// Read every value of an entry once and drop it: whether that worked,
-    /// with `CHECK_OK` or the failure's owner copy, never a value.
+    /// with `CHECK_OK` or the failure's owner copy, never a value. An app
+    /// token is checked on the Apps page, and a newer Bruhs' kind can't be
+    /// read: both answer so without a read.
     pub async fn vault_check(&self, id: &str) -> Result<VaultCheck, SecretError> {
         let entry = self.known(id).await?;
+        let unread = |message: &str| VaultCheck {
+            ok: false,
+            message: message.into(),
+        };
         let references = match entry.kind {
+            VaultKind::AppToken(_) => return Ok(unread(MANAGE_IN_APPS)),
+            VaultKind::Other => return Ok(unread(FROM_NEWER)),
             VaultKind::Value
             | VaultKind::Login(LoginMeta {
                 fields: LoginFields::Saved { .. },

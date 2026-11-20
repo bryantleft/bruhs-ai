@@ -1076,3 +1076,144 @@ async fn request_match_registers_an_unindexed_legacy_value() {
     );
     assert_eq!(store.vault_list().await.unwrap()[0].id, id);
 }
+
+/// A `vault.json` row as a newer Bruhs might write it.
+fn newer_row(id: &str, name: &str, scope: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"id": id, "name": name, "scope": scope,
+        "kind": {"kind": "passkey", "rp": "example.com", "extra": [1, 2.5, {"z": null}]},
+        "state": "saved", "future": {"field": true}})
+}
+
+/// Ruling F3: rows of a kind this build can't read list as Other, stay in
+/// the file untouched by other changes, refuse every change but a delete,
+/// and an app token never answers a thread's request.
+#[tokio::test]
+async fn older_kinds_and_app_tokens_round_trip_in_the_catalog() {
+    let directory = tempfile::tempdir().unwrap();
+    let keys = MemoryKeys::default();
+    let store = SecretStore(Backend::FileTest(directory.path().into(), keys.clone()));
+    let passkey = format!("v1-{}", "a".repeat(32));
+    let own_passkey = format!("v1-{}", "b".repeat(32));
+    let app = format!("v1-{}", "c".repeat(32));
+    let file = serde_json::json!({"version": 1, "entries": {
+        passkey.clone(): newer_row(&passkey, "Passkey", serde_json::json!({"type": "global"})),
+        own_passkey.clone(): newer_row(&own_passkey, "Mine", serde_json::json!({"type": "bruh", "agent_id": "b"})),
+        app.clone(): {"id": app, "name": "TOKEN", "scope": {"type": "global"},
+            "kind": {"kind": "app_token", "app": "github", "account": "me"}, "state": "saved"},
+    }});
+    let path = directory.path().join("vault.json");
+    fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+    let row = |id: &str| -> serde_json::Value {
+        let text = fs::read_to_string(&path).unwrap();
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["entries"][id].clone()
+    };
+    let stored = row(&passkey);
+    for (account, value) in [
+        (format!("vault:global:{passkey}"), canary("newer")),
+        (format!("vault:global:{app}"), canary("token")),
+    ] {
+        keys.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(account, Zeroizing::new(value));
+    }
+
+    let listed = store.vault_list().await.unwrap();
+    let kinds: Vec<_> = listed
+        .iter()
+        .map(|entry| (entry.id.as_str(), &entry.kind))
+        .collect();
+    assert_eq!(kinds.len(), 3);
+    assert!(kinds.contains(&(passkey.as_str(), &VaultKind::Other)));
+    assert!(kinds.contains(&(own_passkey.as_str(), &VaultKind::Other)));
+    assert!(matches!(
+        store
+            .vault_entry(&app)
+            .await
+            .unwrap()
+            .map(|entry| entry.kind),
+        Some(VaultKind::AppToken(_))
+    ));
+
+    // Neither kind answers a thread's request or gives out a value.
+    assert_eq!(store.request_match("/q", "TOKEN").await.unwrap(), None);
+    assert_eq!(store.request_match("/q", "Passkey").await.unwrap(), None);
+    for id in [&passkey, &app] {
+        assert!(matches!(
+            store.vault_secret(id).await,
+            Err(SecretError::NotSaved)
+        ));
+    }
+    let manager = crate::secrets::SecretManager::new(store.clone());
+    assert!(matches!(
+        manager.resolve_value(&app).await,
+        Err(SecretError::Invalid(bruhs_models::vault::MANAGE_IN_APPS))
+    ));
+    assert!(matches!(
+        manager.resolve_value(&passkey).await,
+        Err(SecretError::NotSaved)
+    ));
+    // Check reads neither: the Apps page checks a token.
+    for (id, message) in [
+        (&app, bruhs_models::vault::MANAGE_IN_APPS),
+        (&passkey, bruhs_models::vault::FROM_NEWER),
+    ] {
+        let check = manager.vault_check(id).await.unwrap();
+        assert_eq!((check.ok, check.message.as_str()), (false, message));
+    }
+
+    // An unrelated create rewrites the file and keeps the newer row as it was.
+    let created = store
+        .vault_create(key("NEW", CredentialScope::Global, &canary("value")))
+        .await
+        .unwrap();
+    assert_eq!(row(&passkey), stored);
+    // Its name still counts as taken in its scope.
+    assert!(matches!(
+        store
+            .vault_create(key("Passkey", CredentialScope::Global, &canary("value")))
+            .await,
+        Err(SecretError::Invalid(DUPLICATE_NAME))
+    ));
+    // Nothing changes it but a delete.
+    assert!(matches!(
+        store
+            .vault_update(
+                &passkey,
+                VaultUpdate {
+                    secret: VaultSecretInput::Value {
+                        value: Some(canary("value")),
+                    },
+                },
+            )
+            .await,
+        Err(SecretError::Invalid(KIND_FIXED))
+    ));
+    assert_eq!(row(&passkey), stored);
+
+    // A delete removes the row and its keychain item; the file still parses.
+    store.vault_delete(&passkey).await.unwrap();
+    assert_eq!(row(&passkey), serde_json::Value::Null);
+    assert!(item(&store, &format!("vault:global:{passkey}")).is_none());
+    // Forgetting a deleted bruh forgets its newer rows too.
+    assert_eq!(
+        store
+            .forget_bruh_entries(&HashSet::from(["b".to_owned()]))
+            .await
+            .unwrap(),
+        1
+    );
+    let reopened = SecretStore(Backend::FileTest(directory.path().into(), keys));
+    let ids: Vec<_> = reopened
+        .vault_list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&app) && ids.contains(&created.id));
+    assert!(matches!(
+        reopened.vault_delete(&passkey).await,
+        Err(SecretError::NotSaved)
+    ));
+}

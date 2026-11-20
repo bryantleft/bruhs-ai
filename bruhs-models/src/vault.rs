@@ -17,6 +17,7 @@ pub use totp::*;
 use crate::secrets::{review_text, SavedCredentialState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use std::collections::BTreeMap;
 
 // Page copy.
 pub const VAULT_TITLE: &str = "Vault";
@@ -33,6 +34,10 @@ pub const KEEP: &str = "Keep";
 pub const KIND_LOGIN: &str = "Login";
 pub const KIND_KEY: &str = "Key";
 pub const KIND_ONE_PASSWORD: &str = "1Password";
+/// An app token, kept for Settings, Apps (D8).
+pub const KIND_APP: &str = "App";
+/// An entry of a kind a newer Bruhs wrote.
+pub const KIND_OTHER: &str = "Other";
 pub const SCOPE_GLOBAL: &str = "All projects";
 pub const SCOPE_PROJECT: &str = "One project";
 pub const SCOPE_BRUH: &str = "One bruh";
@@ -65,6 +70,11 @@ pub const REFERENCE_HINT: &str = "References look like op://Vault/Item/field.";
 pub const OP_MISSING_HINT: &str =
     "1Password CLI not found. Install it and turn on its app integration to use references.";
 pub const FIXED_HINT: &str = "Delete it and create it again to change its name or where it's used.";
+/// An app token's row: the Apps page tests, replaces and grants it (D8).
+/// Also the vault routes' refusal of the kind.
+pub const MANAGE_IN_APPS: &str = "Manage it in Settings, Apps.";
+/// An entry of a kind a newer Bruhs wrote: this one can only delete it.
+pub const FROM_NEWER: &str = "From a newer Bruhs.";
 
 // State and result lines.
 pub const STATE_SAVED: &str = "Stored in your OS keychain. Value hidden.";
@@ -233,6 +243,10 @@ pub const USERNAME_TOO_LONG: &str = "Keep the username under 256 characters.";
 pub const USERNAME_CHARACTERS: &str = "Usernames can't contain control characters.";
 pub const ENTER_PROJECT: &str = "Enter the project folder.";
 pub const CHOOSE_BRUH: &str = "Choose a bruh.";
+/// An app token is for bruhs, never a project's threads (D8).
+pub const APPS_NOT_PROJECTS: &str =
+    "Apps are for bruhs. Choose Bruhs you grant it to, or One bruh.";
+pub const CHOOSE_APP: &str = "Choose an app.";
 pub const REFERENCE_SHAPE: &str = "Use a reference like op://Vault/Item/field.";
 pub const KIND_FIXED: &str = "Keep the entry's kind. Delete it and create another to change it.";
 pub const ORIGIN_FIXED: &str = "Delete it and create it again to use it on another site.";
@@ -253,6 +267,9 @@ pub const MAX_USERNAME_CHARS: usize = 256;
 pub const MAX_NAME_CHARS: usize = 80;
 /// Most bytes in an `op://` reference.
 pub const MAX_REFERENCE_BYTES: usize = 512;
+/// Most characters in an app token's account, the label its test call
+/// named (ruling F24).
+pub const MAX_APP_ACCOUNT_CHARS: usize = 100;
 
 /// Who an entry serves (D2). Project entries serve thread requests in that
 /// canonical folder, Global ones every thread and the bruhs they are
@@ -355,12 +372,41 @@ impl LoginMeta {
     }
 }
 
+/// An app token's metadata (D8): the connector id, the account its test
+/// call named, and the app's non-secret per-account values (a Jira site
+/// and email, a Shopify shop). The token and any key live in the keychain.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AppTokenMeta {
+    pub app: String,
+    pub account: String,
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VaultKind {
     Value,
     Login(LoginMeta),
-    OnePassword { reference: String },
+    OnePassword {
+        reference: String,
+    },
+    /// Serves `app_request` and app polls only: no fill, thread request or
+    /// key use ever matches it (D8).
+    AppToken(AppTokenMeta),
+    /// A kind a newer Bruhs wrote. Listed and deletable, never used or
+    /// written back (ruling F3).
+    #[serde(other)]
+    Other,
+}
+
+impl VaultKind {
+    /// Whether the Vault page's form can change it: an app token is the
+    /// Apps page's, and a newer Bruhs' kind isn't understood here.
+    #[must_use]
+    pub fn editable(&self) -> bool {
+        !matches!(self, Self::AppToken(_) | Self::Other)
+    }
 }
 
 /// The last failure on an entry, kept in memory and shown on its row.
@@ -471,6 +517,18 @@ pub enum VaultSecretInput {
     OnePassword {
         reference: String,
     },
+    /// An app token (D8). Only the Apps routes send it; `params` are the
+    /// app's non-secret values, `key` Trello's API key.
+    AppToken {
+        app: String,
+        account: String,
+        #[serde(default)]
+        params: BTreeMap<String, String>,
+        #[serde(default)]
+        token: Option<String>,
+        #[serde(default)]
+        key: Option<String>,
+    },
 }
 
 /// A login's values. 1Password fields are `op://` references.
@@ -543,7 +601,9 @@ impl VaultCreate {
             self.name = trimmed.to_owned();
         }
         validate_entry_name(&self.name)?;
+        let app_token = matches!(self.secret, VaultSecretInput::AppToken { .. });
         match &self.scope {
+            CredentialScope::Project { .. } if app_token => return Err(APPS_NOT_PROJECTS),
             CredentialScope::Global => {}
             CredentialScope::Project { path } if path.trim().is_empty() => {
                 return Err(ENTER_PROJECT)
@@ -552,6 +612,9 @@ impl VaultCreate {
                 return Err(CHOOSE_BRUH)
             }
             CredentialScope::Project { .. } | CredentialScope::Bruh { .. } => {}
+        }
+        if let VaultSecretInput::AppToken { app, params, .. } = &mut self.secret {
+            *params = app_params(app, params)?;
         }
         self.secret.validate(None)
     }
@@ -570,6 +633,9 @@ impl VaultUpdate {
                     VaultSecretInput::OnePassword { .. },
                     VaultKind::OnePassword { .. }
                 )
+        ) || matches!(
+            (&self.secret, existing),
+            (VaultSecretInput::AppToken { app, .. }, VaultKind::AppToken(meta)) if *app == meta.app
         );
         if !same_kind {
             return Err(KIND_FIXED);
@@ -596,6 +662,16 @@ impl VaultSecretInput {
             Self::OnePassword { reference } => Some(VaultKind::OnePassword {
                 reference: reference.clone(),
             }),
+            Self::AppToken {
+                app,
+                account,
+                params,
+                ..
+            } => Some(VaultKind::AppToken(AppTokenMeta {
+                app: app.clone(),
+                account: account.clone(),
+                params: params.clone(),
+            })),
             Self::Login { url, fields } => {
                 let fields = match fields {
                     LoginInput::Saved { username, totp, .. } => LoginFields::Saved {
@@ -631,6 +707,20 @@ impl VaultSecretInput {
                 None => Err(ENTER_VALUE),
             },
             Self::OnePassword { reference } => validate_op_reference(reference),
+            Self::AppToken {
+                app,
+                account,
+                params,
+                token,
+                key,
+            } => validate_app_token(
+                app,
+                account,
+                params,
+                token.as_deref(),
+                key.as_deref(),
+                existing,
+            ),
             Self::Login { url, fields } => {
                 login_origin(url)?;
                 match fields {
@@ -673,6 +763,67 @@ impl VaultSecretInput {
             }
         }
     }
+}
+
+/// The connector an app token names.
+fn app_connector(app: &str) -> Result<&'static crate::apps::AppConnector, &'static str> {
+    crate::apps::connector(app).ok_or(CHOOSE_APP)
+}
+
+/// An app token's params, normalized: exactly the app's non-secret values,
+/// each as [`crate::apps::validate_param`] reads it (ruling F24). A secret
+/// or unknown param is refused, so no value is stored as metadata.
+fn app_params(
+    app: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, &'static str> {
+    let connector = app_connector(app)?;
+    let mut normalized = BTreeMap::new();
+    for param in connector.params.iter().filter(|param| !param.secret) {
+        let value = params.get(param.id).map_or("", String::as_str);
+        normalized.insert(
+            param.id.to_owned(),
+            crate::apps::validate_param(param, value)?,
+        );
+    }
+    if params.keys().any(|id| !normalized.contains_key(id)) {
+        return Err(INVALID_ENTRY);
+    }
+    Ok(normalized)
+}
+
+/// An app token's checks (D8, F24): a known app, its params, an account
+/// label that shows as stored, and its secrets. A create needs the token
+/// (and Trello's key); an update keeps a missing one. Only an app with a
+/// secret `key` param takes a key.
+fn validate_app_token(
+    app: &str,
+    account: &str,
+    params: &BTreeMap<String, String>,
+    token: Option<&str>,
+    key: Option<&str>,
+    existing: Option<&VaultKind>,
+) -> Result<(), &'static str> {
+    let connector = app_connector(app)?;
+    app_params(app, params)?;
+    if account.trim().is_empty()
+        || account.chars().nth(MAX_APP_ACCOUNT_CHARS).is_some()
+        || has_hidden_characters(account)
+    {
+        return Err(INVALID_ENTRY);
+    }
+    for (id, value) in [("token", token), ("key", key)] {
+        let param = connector.params.iter().find(|param| param.id == id);
+        match (param, value) {
+            (Some(param), Some(value)) => {
+                crate::apps::validate_param(param, value)?;
+            }
+            (Some(_), None) if existing.is_none() => return Err(crate::apps::ENTER_TOKEN),
+            (None, Some(_)) => return Err(INVALID_ENTRY),
+            (Some(_) | None, None) => {}
+        }
+    }
+    Ok(())
 }
 
 /// `Err(None)` for an empty value, so the caller names the field.
@@ -1064,6 +1215,238 @@ mod tests {
         )
         .unwrap();
         assert_eq!(entry.attention, None);
+    }
+
+    #[test]
+    fn app_tokens_are_vault_entries_no_fill_or_key_can_use() {
+        let entry: VaultEntry = serde_json::from_value(json!({"id": "v1-g", "name": "GitHub me",
+            "scope": {"type": "global"},
+            "kind": {"kind": "app_token", "app": "github", "account": "me"}, "state": "saved"}))
+        .unwrap();
+        let VaultKind::AppToken(meta) = &entry.kind else {
+            panic!()
+        };
+        assert_eq!(
+            (meta.app.as_str(), meta.account.as_str(), meta.params.len()),
+            ("github", "me", 0)
+        );
+        let row = vault_row(&entry, &[]);
+        assert_eq!(
+            (row.kind, row.detail.as_deref(), row.editable),
+            ("App", Some("GitHub as me"), false)
+        );
+        assert_eq!(row.hint, Some(MANAGE_IN_APPS));
+        // Check stays: it runs the app's test call.
+        assert!(row.checkable);
+        assert!(!crate::crew::usable_by(&entry, "a", &["v1-g".into()]));
+        assert!(
+            crate::crew::vault_choices(std::slice::from_ref(&entry), "a")
+                .shared
+                .is_empty()
+        );
+        let mut own = entry.clone();
+        own.scope = CredentialScope::Bruh {
+            agent_id: "a".into(),
+        };
+        assert!(!crate::crew::usable_by(&own, "a", &[]));
+        assert!(crate::crew::vault_choices(&[own], "a").own.is_empty());
+        // The wire shape round-trips, params included.
+        let mut params = BTreeMap::new();
+        params.insert("site".to_owned(), "acme".to_owned());
+        let jira = VaultKind::AppToken(AppTokenMeta {
+            app: "jira".into(),
+            account: "me@acme.test".into(),
+            params,
+        });
+        let wire = json!(jira);
+        assert_eq!(
+            wire,
+            json!({"kind": "app_token", "app": "jira", "account": "me@acme.test",
+                "params": {"site": "acme"}})
+        );
+        assert_eq!(serde_json::from_value::<VaultKind>(wire).unwrap(), jira);
+    }
+
+    #[test]
+    fn unknown_source_and_vault_kinds_read_as_other() {
+        let entry: VaultEntry = serde_json::from_value(json!({"id": "v1-x", "name": "N",
+            "scope": {"type": "global"}, "kind": {"kind": "passkey", "rp": "x"}, "state": "saved"}))
+        .unwrap();
+        assert_eq!(entry.kind, VaultKind::Other);
+        let row = vault_row(&entry, &[]);
+        assert_eq!(
+            (row.detail.as_deref(), row.checkable, row.editable),
+            (Some("From a newer Bruhs."), false, false)
+        );
+        assert_eq!((row.kind, row.hint), ("Other", None));
+        assert!(!crate::crew::usable_by(&entry, "a", &["v1-x".into()]));
+        assert!(crate::crew::vault_choices(&[entry], "a").shared.is_empty());
+    }
+
+    fn app_create(
+        scope: CredentialScope,
+        app: &str,
+        params: &[(&str, &str)],
+        token: Option<&str>,
+        key: Option<&str>,
+    ) -> VaultCreate {
+        VaultCreate {
+            name: "App".into(),
+            scope,
+            secret: VaultSecretInput::AppToken {
+                app: app.into(),
+                account: "me".into(),
+                params: params
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                    .collect(),
+                token: token.map(Into::into),
+                key: key.map(Into::into),
+            },
+        }
+    }
+
+    #[test]
+    fn app_token_creates_check_scope_app_token_and_params() {
+        let token = "ghp_0123456789";
+        let global = || CredentialScope::Global;
+        assert_eq!(
+            app_create(global(), "github", &[], Some(token), None).validate(),
+            Ok(())
+        );
+        let bruh = CredentialScope::Bruh {
+            agent_id: "a".into(),
+        };
+        assert_eq!(
+            app_create(bruh, "github", &[], Some(token), None).validate(),
+            Ok(())
+        );
+        for path in ["/w", " "] {
+            let project = CredentialScope::Project { path: path.into() };
+            assert_eq!(
+                app_create(project, "github", &[], Some(token), None).validate(),
+                Err(APPS_NOT_PROJECTS)
+            );
+        }
+        for app in ["", "gitlab", "GitHub"] {
+            assert_eq!(
+                app_create(global(), app, &[], Some(token), None).validate(),
+                Err(CHOOSE_APP),
+                "{app}"
+            );
+        }
+        assert_eq!(
+            app_create(global(), "github", &[], None, None).validate(),
+            Err(crate::apps::ENTER_TOKEN)
+        );
+        assert_eq!(
+            app_create(global(), "github", &[], Some("short"), None).validate(),
+            Err(crate::apps::TOKEN_SHAPE)
+        );
+        // Trello needs its key too; nothing else takes one (F24).
+        assert_eq!(
+            app_create(global(), "trello", &[], Some(token), Some("key0123456")).validate(),
+            Ok(())
+        );
+        assert_eq!(
+            app_create(global(), "trello", &[], Some(token), None).validate(),
+            Err(crate::apps::ENTER_TOKEN)
+        );
+        assert_eq!(
+            app_create(global(), "github", &[], Some(token), Some("key0123456")).validate(),
+            Err(INVALID_ENTRY)
+        );
+        // Params are exactly the app's metadata, each checked and stored
+        // normalized.
+        let jira =
+            |params: &[(&str, &str)]| app_create(global(), "jira", params, Some(token), None);
+        let mut ok = jira(&[("site", " Acme "), ("email", "me@acme.test")]);
+        assert_eq!(ok.validate(), Ok(()));
+        let VaultSecretInput::AppToken { params, .. } = &ok.secret else {
+            panic!()
+        };
+        assert_eq!(params.get("site").map(String::as_str), Some("acme"));
+        assert_eq!(
+            jira(&[("site", "acme.evil"), ("email", "me@acme.test")]).validate(),
+            Err(crate::apps::SITE_SHAPE)
+        );
+        assert_eq!(
+            jira(&[("email", "me@acme.test")]).validate(),
+            Err(crate::apps::SITE_SHAPE)
+        );
+        assert_eq!(
+            jira(&[("site", "acme"), ("email", "nope")]).validate(),
+            Err(crate::apps::EMAIL_SHAPE)
+        );
+        for stray in ["key", "token", "region"] {
+            assert_eq!(
+                jira(&[("site", "acme"), ("email", "me@acme.test"), (stray, "x")]).validate(),
+                Err(INVALID_ENTRY),
+                "{stray}"
+            );
+        }
+        // The account is metadata the test call named: shown, so plain.
+        let mut odd = app_create(global(), "github", &[], Some(token), None);
+        if let VaultSecretInput::AppToken { account, .. } = &mut odd.secret {
+            *account = "me\u{202e}".into();
+        }
+        assert_eq!(odd.validate(), Err(INVALID_ENTRY));
+        let meta = app_create(global(), "github", &[], Some(token), None)
+            .secret
+            .kind_meta();
+        assert_eq!(
+            meta,
+            Some(VaultKind::AppToken(AppTokenMeta {
+                app: "github".into(),
+                account: "me".into(),
+                params: BTreeMap::new(),
+            }))
+        );
+    }
+
+    #[test]
+    fn app_token_updates_keep_their_app_and_other_never_changes() {
+        let existing = VaultKind::AppToken(AppTokenMeta {
+            app: "github".into(),
+            account: "me".into(),
+            params: BTreeMap::new(),
+        });
+        let update = |app: &str, token: Option<&str>| VaultUpdate {
+            secret: VaultSecretInput::AppToken {
+                app: app.into(),
+                account: "me".into(),
+                params: BTreeMap::new(),
+                token: token.map(Into::into),
+                key: None,
+            },
+        };
+        assert_eq!(update("github", None).validate(&existing), Ok(()));
+        assert_eq!(
+            update("github", Some("ghp_0123456789")).validate(&existing),
+            Ok(())
+        );
+        assert_eq!(update("notion", None).validate(&existing), Err(KIND_FIXED));
+        assert_eq!(
+            VaultUpdate {
+                secret: VaultSecretInput::Value {
+                    value: Some("v".into())
+                }
+            }
+            .validate(&existing),
+            Err(KIND_FIXED)
+        );
+        // Nothing a client sends changes an entry from a newer Bruhs.
+        assert_eq!(
+            VaultUpdate {
+                secret: VaultSecretInput::Value { value: None }
+            }
+            .validate(&VaultKind::Other),
+            Err(KIND_FIXED)
+        );
+        assert_eq!(
+            update("github", None).validate(&VaultKind::Other),
+            Err(KIND_FIXED)
+        );
     }
 
     #[test]
@@ -1616,6 +1999,19 @@ mod tests {
             },
         };
         assert_eq!(nul.validate(), Err(VALUE_NUL));
+        // An app token's values stay out of its metadata and errors too.
+        let (token, key) = (canary(), canary());
+        let mut app = app_create(
+            CredentialScope::Project { path: "/w".into() },
+            "trello",
+            &[],
+            Some(&token),
+            Some(&key),
+        );
+        let meta = format!("{:?}", app.secret.kind_meta());
+        assert!(!meta.contains(&token) && !meta.contains(&key), "{meta}");
+        let error = app.validate().unwrap_err();
+        assert!(!error.contains(&token) && !error.contains(&key));
     }
 
     #[test]

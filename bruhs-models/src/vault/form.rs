@@ -5,10 +5,10 @@ use super::{
     CredentialScope, LoginFields, LoginInput, LoginMeta, TotpInput, VaultBruh, VaultCreate,
     VaultEntry, VaultKind, VaultSecretInput, VaultUpdate, FIELD_KIND, FIELD_NAME, FIELD_PASSWORD,
     FIELD_PASSWORD_REF, FIELD_REFERENCE, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP,
-    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, KIND_KEY,
-    KIND_LOGIN, KIND_ONE_PASSWORD, LOADING, SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT,
-    SOURCE_ONE_PASSWORD, SOURCE_SAVED, STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED,
-    WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
+    FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FROM_NEWER,
+    KIND_APP, KIND_KEY, KIND_LOGIN, KIND_ONE_PASSWORD, KIND_OTHER, LOADING, MANAGE_IN_APPS,
+    SCOPE_BRUH, SCOPE_GLOBAL, SCOPE_PROJECT, SOURCE_ONE_PASSWORD, SOURCE_SAVED,
+    STATE_IN_ONE_PASSWORD, STATE_NEEDS_ATTENTION, STATE_SAVED, WAIT_FOR_CHANGE, WAIT_FOR_CHECK,
 };
 use crate::secrets::{review_text, SavedCredentialState};
 
@@ -305,6 +305,9 @@ fn form_secret(form: &VaultForm, editing: bool) -> VaultSecretInput {
 }
 
 /// The form for editing `entry`: its metadata filled in, every value empty.
+/// An app token or a newer Bruhs' kind isn't editable
+/// ([`VaultKind::editable`]): its form keeps only the name and scope, and
+/// [`form_update`] refuses any change built from it.
 #[must_use]
 pub fn form_for(entry: &VaultEntry) -> VaultForm {
     let mut form = VaultForm {
@@ -348,6 +351,7 @@ pub fn form_for(entry: &VaultEntry) -> VaultForm {
                 }
             }
         }
+        VaultKind::AppToken(_) | VaultKind::Other => {}
     }
     form
 }
@@ -363,6 +367,12 @@ pub struct VaultRow {
     pub state: &'static str,
     pub attention: Option<&'static str>,
     pub checkable: bool,
+    /// Whether the page offers Edit ([`VaultKind::editable`]).
+    pub editable: bool,
+    /// Where the entry is managed instead, shown in place of Edit:
+    /// [`MANAGE_IN_APPS`] for an app token. A newer Bruhs' kind says
+    /// [`FROM_NEWER`] in its detail.
+    pub hint: Option<&'static str>,
 }
 
 fn bruh_name<'a>(bruhs: &'a [VaultBruh], agent_id: &str) -> Option<&'a str> {
@@ -386,6 +396,12 @@ fn scope_line(scope: &CredentialScope, bruhs: &[VaultBruh]) -> String {
 fn detail_line(kind: &VaultKind) -> Option<String> {
     match kind {
         VaultKind::Value => None,
+        VaultKind::AppToken(meta) => {
+            let app = crate::apps::connector(&meta.app)
+                .map_or_else(|| review_text(&meta.app), |connector| connector.name.into());
+            Some(format!("{app} as {}", review_text(&meta.account)))
+        }
+        VaultKind::Other => Some(FROM_NEWER.into()),
         VaultKind::OnePassword { reference } => Some(review_text(reference)),
         VaultKind::Login(meta) => {
             let origin = meta.origin().unwrap_or_else(|| review_text(&meta.url));
@@ -414,6 +430,8 @@ pub fn vault_row(entry: &VaultEntry, bruhs: &[VaultBruh]) -> VaultRow {
         VaultKind::Value => KIND_KEY,
         VaultKind::Login(_) => KIND_LOGIN,
         VaultKind::OnePassword { .. } => KIND_ONE_PASSWORD,
+        VaultKind::AppToken(_) => KIND_APP,
+        VaultKind::Other => KIND_OTHER,
     };
     // Ruling F2: only values read from 1Password say so; a Saved login is
     // in the keychain, like a key.
@@ -441,7 +459,10 @@ pub fn vault_row(entry: &VaultEntry, bruhs: &[VaultBruh]) -> VaultRow {
         detail: detail_line(&entry.kind),
         state,
         attention: entry.attention.map(super::VaultAttention::message),
-        checkable: true,
+        // An app token's Check runs its test call; a newer kind can't be read.
+        checkable: !matches!(entry.kind, VaultKind::Other),
+        editable: entry.kind.editable(),
+        hint: matches!(entry.kind, VaultKind::AppToken(_)).then_some(MANAGE_IN_APPS),
     }
 }
 
@@ -630,6 +651,68 @@ mod tests {
                 STATE_IN_ONE_PASSWORD
             )
         );
+    }
+
+    /// App tokens and entries from a newer Bruhs are read only here: the
+    /// form can't hold them, and any update it builds is refused.
+    #[test]
+    fn app_tokens_and_other_kinds_are_not_editable() {
+        let app = entry(
+            CredentialScope::Global,
+            VaultKind::AppToken(AppTokenMeta {
+                app: "jira".into(),
+                account: "me\u{202e}".into(),
+                params: std::collections::BTreeMap::new(),
+            }),
+        );
+        let row = vault_row(&app, &[]);
+        assert_eq!(
+            (row.kind, row.detail.as_deref(), row.hint, row.editable),
+            (
+                KIND_APP,
+                Some("Jira as me\\u{202e}"),
+                Some(MANAGE_IN_APPS),
+                false
+            )
+        );
+        // An app the catalog no longer has still reads plainly.
+        let gone = entry(
+            CredentialScope::Global,
+            VaultKind::AppToken(AppTokenMeta {
+                app: "gone".into(),
+                account: "me".into(),
+                params: std::collections::BTreeMap::new(),
+            }),
+        );
+        assert_eq!(vault_row(&gone, &[]).detail.as_deref(), Some("gone as me"));
+        let other = entry(CredentialScope::Global, VaultKind::Other);
+        let row = vault_row(&other, &[]);
+        assert_eq!(
+            (row.kind, row.editable, row.checkable),
+            (KIND_OTHER, false, false)
+        );
+        for stored in [&app, &other] {
+            assert!(!stored.kind.editable());
+            let mut form = form_for(stored);
+            assert_eq!(form.name, "Deploy");
+            form.value = "v".into();
+            for kind in [FormKind::Value, FormKind::Login, FormKind::OnePassword] {
+                form.kind = kind;
+                assert_eq!(form_update(&form, stored).err(), Some(KIND_FIXED));
+            }
+        }
+        for kind in [
+            VaultKind::Value,
+            VaultKind::OnePassword {
+                reference: "op://P/I/f".into(),
+            },
+        ] {
+            assert!(
+                kind.editable() && vault_row(&entry(CredentialScope::Global, kind), &[]).editable
+            );
+        }
+        let key = vault_row(&entry(CredentialScope::Global, VaultKind::Value), &[]);
+        assert_eq!(key.hint, None);
     }
 
     #[test]

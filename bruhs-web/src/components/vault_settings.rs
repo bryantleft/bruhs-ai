@@ -366,12 +366,18 @@ fn VaultRowView(
                             {row.detail.map(|detail| view! { <p class="mt-1 break-all text-label-sm text-rambutan-400">{detail}</p> })}
                             <p class=if stuck { "mt-1 text-label-sm text-durian-300" } else { "mt-1 text-label-sm text-rambutan-400" }>{row.state}</p>
                             {attention.map(|attention| view! { <p data-vault-attention="" class="mt-1 text-label-sm text-durian-300">{attention}</p> })}
+                            {row.hint.map(|hint| view! { <p data-vault-hint="" class="mt-1 text-label-sm text-rambutan-400">{hint}</p> })}
                         </div>
                     }
                 })}
                 <div class="flex flex-wrap gap-2">
-                    <button type="button" node_ref=edit_ref data-vault-edit="" class=BUTTON aria-expanded=move || if editing.get() { "true" } else { "false" } aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { notice.set(None); asking.set(false); checked.set(None); open.set(Open::Entry(id.get_value())); }>{EDIT}</button>
-                    <button type="button" data-vault-check="" class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=check>{CHECK}</button>
+                    // An app token or a newer Bruhs' entry isn't edited here; its row says where.
+                    <Show when=move || row.with(|row| row.as_ref().is_some_and(|row| row.editable))>
+                        <button type="button" node_ref=edit_ref data-vault-edit="" class=BUTTON aria-expanded=move || if editing.get() { "true" } else { "false" } aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { notice.set(None); asking.set(false); checked.set(None); open.set(Open::Entry(id.get_value())); }>{EDIT}</button>
+                    </Show>
+                    <Show when=move || row.with(|row| row.as_ref().is_some_and(|row| row.checkable))>
+                        <button type="button" data-vault-check="" class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=check>{CHECK}</button>
+                    </Show>
                     <Show when=move || !asking.get()>
                         <button type="button" node_ref=delete_ref data-vault-delete="" class=BUTTON aria-describedby=WAIT_ID disabled=disabled title=move || wait.get() on:click=move |_| { error.set(None); asking.set(true); focus_after_render(keep_ref); }>{DELETE}</button>
                     </Show>

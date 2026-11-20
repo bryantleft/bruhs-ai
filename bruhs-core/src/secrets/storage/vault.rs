@@ -15,10 +15,10 @@ use bruhs_models::{
     vault::{
         base32_decode, base32_encode, parse_totp_setup, CredentialScope, LoginFields, LoginInput,
         LoginMeta, SavedSource, TotpAlgorithm, TotpInput, VaultCreate, VaultEntry, VaultKind,
-        VaultSecretInput, VaultUpdate, DUPLICATE_NAME,
+        VaultSecretInput, VaultUpdate, DUPLICATE_NAME, MANAGE_IN_APPS,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{BTreeMap, HashSet},
     fs::File,
@@ -33,16 +33,24 @@ const VAULT_VERSION: u32 = 1;
 const ID_PREFIX: &str = "v1-";
 
 /// `vault.json`: every entry that isn't a Project key. Never holds a value.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone)]
 pub(super) struct VaultCatalog {
     version: u32,
     entries: BTreeMap<String, VaultEntry>,
+    /// Rows of a kind a newer Bruhs wrote (ruling F3): listed as Other,
+    /// written back exactly as read, and only ever deleted.
+    kept: BTreeMap<String, KeptRow>,
     /// Per entry, how many times its keychain item was written or removed.
     /// An update that read the item before the lock writes only if this
     /// is still what it read, so it never writes back an older value.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     revisions: BTreeMap<String, u64>,
+}
+
+/// A newer Bruhs' row: its listing (kind Other) and the row as read.
+#[derive(Clone)]
+struct KeptRow {
+    entry: VaultEntry,
+    row: serde_json::Value,
 }
 
 impl Default for VaultCatalog {
@@ -50,14 +58,103 @@ impl Default for VaultCatalog {
         Self {
             version: VAULT_VERSION,
             entries: BTreeMap::new(),
+            kept: BTreeMap::new(),
             revisions: BTreeMap::new(),
         }
+    }
+}
+
+/// `vault.json` as read: each row stays JSON until it is sorted into a
+/// known entry or a kept one.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VaultFileIn {
+    version: u32,
+    entries: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    revisions: BTreeMap<String, u64>,
+}
+
+/// `vault.json` as written, borrowing the catalog.
+#[derive(Serialize)]
+struct VaultFileOut<'a> {
+    version: u32,
+    entries: BTreeMap<&'a str, StoredEntry<'a>>,
+    #[serde(skip_serializing_if = "no_revisions")]
+    revisions: &'a BTreeMap<String, u64>,
+}
+
+fn no_revisions(revisions: &&BTreeMap<String, u64>) -> bool {
+    revisions.is_empty()
+}
+
+/// One row as written: a known entry, or a kept row as it was read, so
+/// nothing ever writes an Other back (ruling F3).
+#[derive(Serialize)]
+#[serde(untagged)]
+enum StoredEntry<'a> {
+    Known(&'a VaultEntry),
+    Raw(&'a serde_json::Value),
+}
+
+impl Serialize for VaultCatalog {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let known = self
+            .entries
+            .iter()
+            .map(|(id, entry)| (id.as_str(), StoredEntry::Known(entry)));
+        let kept = self
+            .kept
+            .iter()
+            .map(|(id, kept)| (id.as_str(), StoredEntry::Raw(&kept.row)));
+        VaultFileOut {
+            version: self.version,
+            entries: known.chain(kept).collect(),
+            revisions: &self.revisions,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for VaultCatalog {
+    /// A row that doesn't read as an entry at all fails the file, as
+    /// before; one whose kind reads as Other is kept.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let file = VaultFileIn::deserialize(deserializer)?;
+        let mut catalog = Self {
+            version: file.version,
+            revisions: file.revisions,
+            ..Self::default()
+        };
+        for (id, row) in file.entries {
+            let entry = VaultEntry::deserialize(&row)
+                .map_err(|_| serde::de::Error::custom("unreadable vault row"))?;
+            if entry.kind == VaultKind::Other {
+                catalog.kept.insert(id, KeptRow { entry, row });
+            } else {
+                catalog.entries.insert(id, entry);
+            }
+        }
+        Ok(catalog)
     }
 }
 
 impl VaultCatalog {
     fn revision(&self, id: &str) -> u64 {
         self.revisions.get(id).copied().unwrap_or_default()
+    }
+
+    /// Every row's listing, kept rows included.
+    fn all(&self) -> impl Iterator<Item = &VaultEntry> {
+        self.entries
+            .values()
+            .chain(self.kept.values().map(|kept| &kept.entry))
+    }
+
+    fn get(&self, id: &str) -> Option<&VaultEntry> {
+        self.entries
+            .get(id)
+            .or_else(|| self.kept.get(id).map(|kept| &kept.entry))
     }
 }
 
@@ -217,11 +314,13 @@ fn account(entry: &VaultEntry) -> String {
     }
 }
 
-/// Whether an entry keeps a keychain item: keys and Saved logins.
+/// Whether an entry keeps a keychain item: keys, Saved logins and app
+/// tokens. A newer Bruhs' kind may have one too; only a delete touches it.
 fn has_item(kind: &VaultKind) -> bool {
     matches!(
         kind,
         VaultKind::Value
+            | VaultKind::AppToken(_)
             | VaultKind::Login(LoginMeta {
                 fields: LoginFields::Saved { .. },
                 ..
@@ -256,7 +355,7 @@ fn merged(catalog: &Catalog, vault: &VaultCatalog) -> Vec<VaultEntry> {
         .entries
         .values()
         .map(legacy_entry)
-        .chain(vault.entries.values().cloned())
+        .chain(vault.all().cloned())
         .collect();
     entries.sort_by(|a, b| {
         (scope_order(&a.scope), &a.name, &a.id).cmp(&(scope_order(&b.scope), &b.name, &b.id))
@@ -297,6 +396,12 @@ pub(super) fn read_vault_catalog(directory: &Path) -> Result<VaultCatalog, Secre
         }
         // Attention lives in memory only.
         entry.attention = None;
+    }
+    for (id, kept) in &mut catalog.kept {
+        if *id != kept.entry.id || !valid_id(id) {
+            return Err(SecretError::Catalog);
+        }
+        kept.entry.attention = None;
     }
     Ok(catalog)
 }
@@ -348,8 +453,7 @@ impl Vault {
         };
         let vault = self
             .vault()?
-            .entries
-            .values()
+            .all()
             .any(|entry| entry.scope == *scope && entry.name.trim() == name);
         if legacy || vault {
             return Err(SecretError::Invalid(DUPLICATE_NAME));
@@ -406,8 +510,20 @@ impl Vault {
         Ok(entry)
     }
 
-    /// Remove a `vault.json` row and its item, intent first.
+    /// Remove a `vault.json` row and its item, intent first. A kept row
+    /// can't be marked, so it goes with a best-effort removal of the item
+    /// its scope and id would name.
     fn remove(&mut self, id: &str) -> Result<(), SecretError> {
+        if let Some(kept) = self.vault()?.kept.get(id) {
+            let account = account(&kept.entry);
+            if self.keys.remove(&account).is_err() {
+                tracing::warn!("vault: a newer entry's keychain item could not be removed");
+            }
+            let vault = self.vault()?;
+            vault.kept.remove(id);
+            vault.revisions.remove(id);
+            return self.persist_vault();
+        }
         let Some(entry) = self.vault()?.entries.get_mut(id) else {
             return Err(SecretError::NotSaved);
         };
@@ -444,7 +560,7 @@ impl Snapshot {
     fn entry(&self, id: &str) -> Result<Option<VaultEntry>, SecretError> {
         match self.catalog.entries.get(id) {
             Some(credential) => Ok(Some(legacy_entry(credential))),
-            None => Ok(self.vault()?.entries.get(id).cloned()),
+            None => Ok(self.vault()?.get(id).cloned()),
         }
     }
 }
@@ -503,6 +619,10 @@ impl SecretStore {
             scrub(create.secret);
             return Err(SecretError::Invalid(error));
         }
+        if matches!(create.secret, VaultSecretInput::AppToken { .. }) {
+            scrub(create.secret);
+            return Err(SecretError::Invalid(MANAGE_IN_APPS));
+        }
         let kind = create.secret.kind_meta().unwrap_or(VaultKind::Value);
         let VaultCreate {
             name,
@@ -514,6 +634,8 @@ impl SecretStore {
                 value.ok_or(SecretError::Invalid(bruhs_models::vault::ENTER_VALUE))?,
             )),
             VaultSecretInput::OnePassword { .. } => Item::Keep,
+            // Refused above.
+            VaultSecretInput::AppToken { .. } => return Err(SecretError::Invalid(MANAGE_IN_APPS)),
             VaultSecretInput::Login { fields, .. } => match fields {
                 LoginInput::OnePassword { .. } => Item::Keep,
                 LoginInput::Saved { password, totp, .. } => {
@@ -608,6 +730,11 @@ impl SecretStore {
             Err(error) => Err(error),
         };
         let (snapshot, existing) = match checked {
+            // App tokens change only through Settings, Apps.
+            Ok(_) if matches!(update.secret, VaultSecretInput::AppToken { .. }) => {
+                scrub(update.secret);
+                return Err(SecretError::Invalid(MANAGE_IN_APPS));
+            }
             Ok(checked) => checked,
             Err(error) => {
                 scrub(update.secret);
@@ -635,6 +762,8 @@ impl SecretStore {
                 fields: LoginInput::OnePassword { .. },
                 ..
             } => (kind, removal(&existing)),
+            // Refused above.
+            VaultSecretInput::AppToken { .. } => return Err(SecretError::Invalid(MANAGE_IN_APPS)),
             VaultSecretInput::Login {
                 fields: LoginInput::Saved { password, totp, .. },
                 ..
@@ -685,8 +814,7 @@ impl SecretStore {
         self.access(move |vault| {
             let ids: Vec<_> = vault
                 .vault()?
-                .entries
-                .values()
+                .all()
                 .filter(|entry| {
                     matches!(&entry.scope, CredentialScope::Bruh { agent_id } if gone.contains(agent_id))
                 })
@@ -737,13 +865,15 @@ impl SecretStore {
             .find_map(|entry| match entry.kind {
                 VaultKind::Value => Some((entry.id.clone(), SavedSource::Global)),
                 VaultKind::OnePassword { .. } => Some((entry.id.clone(), SavedSource::OnePassword)),
-                VaultKind::Login(_) => None,
+                // An app token serves only app calls (D8).
+                VaultKind::Login(_) | VaultKind::AppToken(_) | VaultKind::Other => None,
             }))
     }
 
     /// An entry's keychain values, read without the catalog lock (ruling
     /// F13). `Ok(None)` only for a 1Password kind, which keeps no item; an
-    /// unknown entry, or a key or Saved login whose item is missing, is
+    /// unknown entry, a key or Saved login whose item is missing, an app
+    /// token (never read as a key or login) or a newer Bruhs' kind is
     /// `NotSaved`.
     pub(in crate::secrets) async fn vault_secret(
         &self,
@@ -751,6 +881,9 @@ impl SecretStore {
     ) -> Result<Option<VaultSecret>, SecretError> {
         let snapshot = self.snapshot().await?;
         let entry = snapshot.entry(id)?.ok_or(SecretError::NotSaved)?;
+        if matches!(entry.kind, VaultKind::AppToken(_) | VaultKind::Other) {
+            return Err(SecretError::NotSaved);
+        }
         if !has_item(&entry.kind) {
             return Ok(None);
         }
@@ -774,6 +907,7 @@ impl SecretStore {
                 password: None,
                 totp: None,
             },
+            VaultKind::AppToken(_) | VaultKind::Other => return Err(SecretError::NotSaved),
         }))
     }
 }
@@ -850,6 +984,10 @@ pub(in crate::secrets) fn scrub(secret: VaultSecretInput) {
             if let TotpInput::Set { setup } = totp {
                 drop(Zeroizing::new(setup));
             }
+        }
+        VaultSecretInput::AppToken { token, key, .. } => {
+            drop(token.map(Zeroizing::new));
+            drop(key.map(Zeroizing::new));
         }
         VaultSecretInput::Login {
             fields: LoginInput::OnePassword { .. },

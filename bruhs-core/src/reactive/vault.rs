@@ -90,8 +90,14 @@ fn from_one_password(entry: &VaultEntry) -> bool {
     match &entry.kind {
         VaultKind::OnePassword { .. } => true,
         VaultKind::Login(meta) => matches!(meta.fields, LoginFields::OnePassword { .. }),
-        VaultKind::Value => false,
+        VaultKind::Value | VaultKind::AppToken(_) | VaultKind::Other => false,
     }
+}
+
+/// Whether a bruh may use `kind` as a key: a value or a 1Password
+/// reference, never a login, an app token (D8) or a newer Bruhs' kind.
+fn is_key(kind: &VaultKind) -> bool {
+    matches!(kind, VaultKind::Value | VaultKind::OnePassword { .. })
 }
 
 /// The owner copy a failed value read ends the fill with.
@@ -332,7 +338,7 @@ impl ReactiveRuntime {
             .await
             .unwrap_or_default()
             .iter()
-            .filter(|entry| !matches!(entry.kind, VaultKind::Login(_)))
+            .filter(|entry| is_key(&entry.kind))
             .map(|entry| review_text(&entry.name))
             .collect();
         names.sort();
@@ -346,9 +352,9 @@ impl ReactiveRuntime {
     pub(super) async fn usable_value(&self, agent_id: &str, name: &str) -> Option<String> {
         let usable = self.usable_entries(agent_id).await.ok()?;
         let keys = || {
-            usable.iter().filter(move |entry| {
-                entry.name == name && !matches!(entry.kind, VaultKind::Login(_))
-            })
+            usable
+                .iter()
+                .filter(move |entry| entry.name == name && is_key(&entry.kind))
         };
         let own = keys().find(|entry| {
             matches!(

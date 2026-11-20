@@ -475,7 +475,13 @@ impl VaultSettings {
         if self.wait().is_some() {
             return;
         }
-        let Some(entry) = self.listing.entries.iter().find(|e| e.id == id).cloned() else {
+        let Some(entry) = self
+            .listing
+            .entries
+            .iter()
+            .find(|e| e.id == id && e.kind.editable())
+            .cloned()
+        else {
             return;
         };
         self.notice = None;
@@ -1492,8 +1498,14 @@ impl VaultSettings {
             .when_some(attention, |el, attention| {
                 let selector = format!("desktop-vault-attention-{id}");
                 el.child(small(attention, theme::durian_300()).debug_selector(move || selector))
+            })
+            .when_some(row.hint, |el, hint| {
+                let selector = format!("desktop-vault-hint-{id}");
+                el.child(small(hint, theme::rambutan_400()).debug_selector(move || selector))
             });
-        let edit = {
+        // An app token or a newer Bruhs' entry isn't edited here; its row
+        // says where.
+        let edit = row.editable.then(|| {
             let id = id.clone();
             let mut edit = button(
                 SharedString::from(format!("desktop-vault-edit-{id}")),
@@ -1509,8 +1521,8 @@ impl VaultSettings {
             on_press_view(edit, cx, move |this, window, cx| {
                 this.open_edit(id.clone(), window, cx);
             })
-        };
-        let check = {
+        });
+        let check = row.checkable.then(|| {
             let id = id.clone();
             on_press_view(
                 button(
@@ -1523,7 +1535,7 @@ impl VaultSettings {
                 cx,
                 move |this, window, cx| this.check(id.clone(), window, cx),
             )
-        };
+        });
         let delete = (!asking).then(|| {
             let id = id.clone();
             let mut delete = button(
@@ -1607,8 +1619,8 @@ impl VaultSettings {
                         .flex_shrink_0()
                         .flex()
                         .gap_2()
-                        .child(edit)
-                        .child(check)
+                        .children(edit)
+                        .children(check)
                         .children(delete),
                 ),
             )
@@ -2072,6 +2084,64 @@ mod tests {
         assert!(!requests(&view, cx)
             .iter()
             .any(|line| line.starts_with("PUT")));
+    }
+
+    /// An app token is the Apps page's and a newer Bruhs' entry isn't read
+    /// here: neither offers Edit, and each row says why.
+    #[gpui::test]
+    fn app_tokens_and_newer_entries_are_read_only(cx: &mut TestAppContext) {
+        let mut fixture = listing();
+        let read_only = |id: &str, kind| VaultEntry {
+            id: id.into(),
+            name: id.into(),
+            scope: CredentialScope::Global,
+            kind,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        };
+        fixture.entries.push(read_only(
+            "v1-app",
+            VaultKind::AppToken(bruhs_models::vault::AppTokenMeta {
+                app: "github".into(),
+                account: "octo".into(),
+                params: std::collections::BTreeMap::new(),
+            }),
+        ));
+        fixture
+            .entries
+            .push(read_only("v1-newer", VaultKind::Other));
+        let (view, cx) = page(cx, Some(fixture));
+        for id in ["v1-app", "v1-newer"] {
+            assert!(!rendered(cx, &format!("desktop-vault-edit-{id}")), "{id}");
+            assert!(rendered(cx, &format!("desktop-vault-delete-{id}")), "{id}");
+        }
+        assert!(rendered(cx, "desktop-vault-edit-v1-shop"));
+        // Check stays for a token: it runs the app's test call.
+        assert!(rendered(cx, "desktop-vault-check-v1-app"));
+        assert!(!rendered(cx, "desktop-vault-check-v1-newer"));
+        assert!(rendered(cx, "desktop-vault-hint-v1-app"));
+        assert!(!rendered(cx, "desktop-vault-hint-v1-newer"));
+        let rows = view.read_with(cx, |view, _| view.rows());
+        let app = rows.iter().find(|row| row.id == "v1-app").unwrap();
+        assert_eq!(
+            (app.detail.as_deref(), app.hint),
+            (
+                Some("GitHub as octo"),
+                Some(bruhs_models::vault::MANAGE_IN_APPS)
+            )
+        );
+        let newer = rows.iter().find(|row| row.id == "v1-newer").unwrap();
+        assert_eq!(
+            newer.detail.as_deref(),
+            Some(bruhs_models::vault::FROM_NEWER)
+        );
+        // Nothing opens a form for either, whatever asks.
+        view.update_in(cx, |view, window, cx| {
+            view.open_edit("v1-app".into(), window, cx);
+            view.open_edit("v1-newer".into(), window, cx);
+        });
+        cx.run_until_parked();
+        assert!(!rendered(cx, "desktop-vault-form"));
     }
 
     #[gpui::test]
