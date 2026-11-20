@@ -108,6 +108,10 @@ pub const ROOTS_OVERLAP: &str =
     "This backup's two data folders overlap on this computer. Nothing was changed.";
 pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and try again.";
 pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try again.";
+/// A file in Bruhs' own folders whose name a restore would refuse (B Task 5
+/// I2 ruling). Owner files with such names are left out and counted.
+pub const DATA_NAME_REFUSED: &str =
+    "A file in Bruhs' own folders has a name a backup can't hold, so no backup was made.";
 pub const KEYCHAIN_NEEDS_YOU: &str =
     "Your keychain needs you. Allow access on this computer, or leave out saved logins and keys.";
 pub const KEYCHAIN_ITEM_REFUSED: &str = "That keychain item isn't one of Bruhs' own.";
@@ -216,6 +220,7 @@ pub const ALL_COPY: &[&str] = &[
     ROOTS_OVERLAP,
     NO_SPACE,
     FILE_CHANGED,
+    DATA_NAME_REFUSED,
     KEYCHAIN_NEEDS_YOU,
     KEYCHAIN_ITEM_REFUSED,
     KEYCHAIN_READ_FAILED,

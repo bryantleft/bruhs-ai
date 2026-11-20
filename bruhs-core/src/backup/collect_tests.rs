@@ -3,13 +3,22 @@
 #![cfg(unix)]
 
 use std::ffi::OsString;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use bruhs_models::backup::BackupOptions;
+use bruhs_models::backup::{BackupOptions, DATA_NAME_REFUSED};
 use rusqlite::{Connection, OpenFlags};
 
 use super::*;
+
+/// A fresh temp folder and its resolved path (`/var` is a link on macOS,
+/// and the inventory names files under resolved roots).
+fn temp() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(dir.path()).unwrap();
+    (dir, base)
+}
 
 /// A temp home with two data roots (`core`, `desktop`) and the config root
 /// equal to the core root, as on macOS.
@@ -84,8 +93,8 @@ fn listed(inventory: &Inventory) -> Vec<(RootKey, &str)> {
 
 #[test]
 fn the_inventory_takes_data_and_leaves_caches() {
-    let dir = tempfile::tempdir().unwrap();
-    let roots = two_roots(dir.path());
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
     lay_out(&roots.core, &roots.desktop);
 
     let taken = inventory(&roots, &BackupOptions::default()).unwrap();
@@ -138,8 +147,8 @@ fn the_inventory_takes_data_and_leaves_caches() {
     );
 
     // One root: each file once, under the core key.
-    let dir = tempfile::tempdir().unwrap();
-    let roots = one_root(dir.path());
+    let (_dir, base) = temp();
+    let roots = one_root(&base);
     assert!(roots.same());
     lay_out(&roots.core, &roots.desktop);
     let single = inventory(&roots, &BackupOptions::default()).unwrap();
@@ -174,9 +183,9 @@ fn inventory_of(roots: &Roots, options: &BackupOptions) -> Vec<(RootKey, String)
 /// does.
 #[test]
 fn calendar_state_comes_from_the_config_root() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut roots = one_root(dir.path());
-    roots.config = dir.path().join("home").join("config");
+    let (_dir, base) = temp();
+    let mut roots = one_root(&base);
+    roots.config = base.join("home").join("config");
     write(&roots.config.join("calendar/google/cursors.json"), b"{}");
     write(&roots.config.join("other.json"), b"{}");
     write(&roots.core.join("calendar/stale.json"), b"{}");
@@ -198,9 +207,9 @@ fn calendar_state_comes_from_the_config_root() {
 
 #[test]
 fn links_are_counted_never_followed() {
-    let dir = tempfile::tempdir().unwrap();
-    let roots = two_roots(dir.path());
-    let outside = dir.path().join("outside");
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    let outside = base.join("outside");
     write(&outside.join("vault.json"), b"theirs");
     write(&roots.core.join("server/bruhs/a1/work/n.md"), b"mine");
     std::os::unix::fs::symlink("/etc", roots.core.join("server/bruhs/a1/work/out")).unwrap();
@@ -229,16 +238,140 @@ fn links_are_counted_never_followed() {
     drop(socket);
 }
 
-/// A name the restore would refuse fails the inventory instead of making a
-/// backup that can't be restored.
+/// B Task 5 I2 ruling: a name the restore would refuse is left out and
+/// counted in the owner's own files (a folder once, with its tree), and
+/// refuses the backup in Bruhs' own folders. Names an option or the rules
+/// leave out, and entries that aren't files or folders, never count.
 #[test]
-fn names_a_restore_refuses_stop_the_inventory() {
-    let dir = tempfile::tempdir().unwrap();
-    let roots = two_roots(dir.path());
-    write(&roots.core.join("server/bruhs/a1/work/a\\b"), b"x");
-    let error = inventory(&roots, &BackupOptions::default()).unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-    assert!(!error.to_string().contains("a1"), "{error}");
+fn unrestorable_names_are_skipped_in_owner_files_and_refused_in_bruhs_own() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    let work = roots.core.join("server/bruhs/a1/work");
+    write(&work.join("a\\b"), b"x");
+    write(&work.join("bad\\dir/one.md"), b"x");
+    write(&work.join("bad\\dir/two.md"), b"x");
+    write(&work.join("fine.md"), b"x");
+    write(
+        &roots.core.join("attachments/t/zero\u{200b}width.pdf"),
+        b"x",
+    );
+    write(
+        &roots.desktop.join("knowledge-attachments/k\u{202e}fdp.exe"),
+        b"x",
+    );
+    write(
+        &roots.core.join("server/bruhs/a1/browser/Default/odd\\name"),
+        b"x",
+    );
+    // Left out anyway, so never judged.
+    write(&roots.core.join("logs/a\\b"), b"x");
+    write(&roots.core.join("server/odd\\name.lock"), b"x");
+    let fifo = std::process::Command::new("mkfifo")
+        .arg(roots.core.join("server/pipe\\name"))
+        .status()
+        .unwrap();
+    assert!(fifo.success());
+    // Not UTF-8 (APFS refuses such names; Linux keeps them).
+    let raw = std::ffi::OsStr::from_bytes(b"caf\xe9.txt");
+    let non_utf8 = std::fs::write(work.join(raw), b"x").is_ok();
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert_eq!(
+        listed(&taken),
+        [(RootKey::Core, "server/bruhs/a1/work/fine.md")]
+    );
+    assert_eq!(taken.skipped_names, 4 + u32::from(non_utf8));
+    let profiles = BackupOptions {
+        browser_profiles: true,
+        ..BackupOptions::default()
+    };
+    let with_profiles = inventory(&roots, &profiles).unwrap();
+    assert_eq!(with_profiles.skipped_names, 5 + u32::from(non_utf8));
+
+    // In Bruhs' own folders the backup is refused, with fixed copy.
+    write(&roots.core.join("server/x\\y.json"), b"{}");
+    let refused = inventory(&roots, &BackupOptions::default()).unwrap_err();
+    assert!(matches!(refused, BackupError::Refused(DATA_NAME_REFUSED)));
+    assert!(!refused.message().contains("x\\y"));
+}
+
+/// The length limits are measured with the root's own prefix: `desktop/`
+/// is three bytes longer than `core/`.
+#[test]
+fn name_lengths_count_the_real_root_prefix() {
+    let name = std::ffi::CString::new("f").unwrap();
+    let folder = "a".repeat(200);
+    let mut rel = String::from("knowledge-attachments");
+    while rel.len() + 1 + folder.len() <= 4086 {
+        rel = format!("{rel}/{folder}");
+    }
+    let pad = 4089 - rel.len() - 3;
+    rel = format!("{rel}/{}/f", "b".repeat(pad));
+    assert_eq!(rel.len(), 4089);
+    assert!(super::collect::restorable(RootKey::Core, &rel, &name));
+    assert!(!super::collect::restorable(RootKey::Desktop, &rel, &name));
+}
+
+/// B Task 5 I1 ruling: a folder swapped for a link between reading its
+/// type and opening it is counted as a link and never followed, so a
+/// private folder can't ride into a backup under a bruh's work folder.
+#[test]
+fn a_link_swapped_in_mid_walk_is_never_followed() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("credentials/vault.json"), b"{}");
+    let work = roots.core.join("server/bruhs/a1/work");
+    write(&work.join("x/n.md"), b"mine");
+    let mut swapped = false;
+    let taken = super::collect::inventory_with(&roots, &BackupOptions::default(), &mut |rel| {
+        if rel == "server/bruhs/a1/work/x" {
+            std::fs::rename(work.join("x"), work.join("x-old")).unwrap();
+            std::os::unix::fs::symlink(roots.core.join("credentials"), work.join("x")).unwrap();
+            swapped = true;
+        }
+    })
+    .unwrap();
+    assert!(swapped);
+    assert_eq!(listed(&taken), [(RootKey::Core, "credentials/vault.json")]);
+    assert_eq!(taken.skipped_links, 1);
+}
+
+/// A listed file is reopened through folder handles: one whose folder or
+/// itself became a link since the walk fails to open.
+#[test]
+fn listed_files_reopen_without_following_links() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("credentials/vault.json"), b"secret");
+    let work = roots.core.join("server/bruhs/a1/work");
+    write(&work.join("y/f.md"), b"mine");
+    write(&work.join("z.md"), b"mine too");
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    let file = |rel: &str| {
+        taken
+            .files
+            .iter()
+            .find(|file| file.rel == rel)
+            .unwrap()
+            .clone()
+    };
+    let (in_y, z) = (
+        file("server/bruhs/a1/work/y/f.md"),
+        file("server/bruhs/a1/work/z.md"),
+    );
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut open_source(&in_y).unwrap(), &mut text).unwrap();
+    assert_eq!(text, "mine");
+
+    std::fs::rename(work.join("y"), work.join("y-old")).unwrap();
+    std::fs::create_dir_all(roots.core.join("credentials/y")).unwrap();
+    std::fs::write(roots.core.join("credentials/y/f.md"), b"secret").unwrap();
+    std::os::unix::fs::symlink(roots.core.join("credentials/y"), work.join("y")).unwrap();
+    assert!(open_source(&in_y).is_err());
+    std::fs::remove_file(work.join("z.md")).unwrap();
+    std::os::unix::fs::symlink(roots.core.join("credentials/vault.json"), work.join("z.md"))
+        .unwrap();
+    assert!(open_source(&z).is_err());
 }
 
 /// A database in WAL mode with an open writer that committed a row.
@@ -263,8 +396,8 @@ fn digest(path: &Path) -> Vec<u8> {
 
 #[test]
 fn sqlite_files_are_marked_and_snapshotted() {
-    let dir = tempfile::tempdir().unwrap();
-    let roots = two_roots(dir.path());
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
     let live = roots.core.join("server/reactive.sqlite3");
     let writer = wal_database(&live);
     // Databases in the owner's own files are copied raw (ruling F15).
@@ -279,7 +412,13 @@ fn sqlite_files_are_marked_and_snapshotted() {
         browser_profiles: true,
         ..BackupOptions::default()
     };
+    // An empty file is not a database, whatever its name.
+    write(&roots.core.join("server/empty.sqlite3"), b"");
     let taken = inventory(&roots, &options).unwrap();
+    assert!(taken
+        .files
+        .iter()
+        .any(|file| file.rel == "server/empty.sqlite3" && !file.sqlite));
     let marked: Vec<_> = taken
         .files
         .iter()
@@ -293,7 +432,7 @@ fn sqlite_files_are_marked_and_snapshotted() {
         .any(|file| file.rel == "server/bruhs/a1/work/app.sqlite3" && !file.sqlite));
 
     let before = digest(&live);
-    let into = dir.path().join("tmp").join("reactive.sqlite3");
+    let into = base.join("tmp").join("reactive.sqlite3");
     std::fs::create_dir_all(into.parent().unwrap()).unwrap();
     let bytes = snapshot_sqlite(&live, &into).unwrap();
     assert_eq!(bytes, std::fs::metadata(&into).unwrap().len());
@@ -316,21 +455,21 @@ fn sqlite_files_are_marked_and_snapshotted() {
 
     // A snapshot never replaces a file, and never follows a link.
     assert!(snapshot_sqlite(&live, &into).is_err());
-    let link = dir.path().join("link.sqlite3");
+    let link = base.join("link.sqlite3");
     std::os::unix::fs::symlink(&live, &link).unwrap();
-    assert!(snapshot_sqlite(&link, &dir.path().join("tmp").join("b.sqlite3")).is_err());
-    assert!(!dir.path().join("tmp").join("b.sqlite3").exists());
+    assert!(snapshot_sqlite(&link, &base.join("tmp").join("b.sqlite3")).is_err());
+    assert!(!base.join("tmp").join("b.sqlite3").exists());
 }
 
 /// With no writer left open, a WAL database still snapshots, and the live
 /// file stays as it was.
 #[test]
 fn a_closed_wal_database_snapshots_unchanged() {
-    let dir = tempfile::tempdir().unwrap();
-    let live = dir.path().join("server").join("mail.sqlite3");
+    let (_dir, base) = temp();
+    let live = base.join("server").join("mail.sqlite3");
     drop(wal_database(&live));
     let before = digest(&live);
-    let into = dir.path().join("mail.sqlite3");
+    let into = base.join("mail.sqlite3");
     snapshot_sqlite(&live, &into).unwrap();
     assert_eq!(digest(&live), before);
     let snapshot = Connection::open_with_flags(&into, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -342,9 +481,9 @@ fn a_closed_wal_database_snapshots_unchanged() {
 
 #[test]
 fn free_space_is_readable() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(free_bytes(dir.path()).unwrap() > 0);
-    assert!(free_bytes(&dir.path().join("missing")).is_err());
+    let (_dir, base) = temp();
+    assert!(free_bytes(&base).unwrap() > 0);
+    assert!(free_bytes(&base.join("missing")).is_err());
 }
 
 #[test]
@@ -420,4 +559,70 @@ fn errors_answer_fixed_copy() {
         BackupError::Space("Free 2 GB.".into()).message(),
         "Free 2 GB."
     );
+}
+
+/// The child side of `detection_keeps_this_process_s_sqlite_locks`: run as
+/// its own process, it tries to take the write lock on the database the
+/// parent names and fails when the parent still holds it. Without the
+/// variable it does nothing.
+#[test]
+#[ignore = "run as a child process by detection_keeps_this_process_s_sqlite_locks"]
+fn sqlite_lock_probe_child() {
+    let Some(path) = std::env::var_os(LOCK_PROBE_DB) else {
+        return;
+    };
+    let other = Connection::open(PathBuf::from(path)).unwrap();
+    other.busy_timeout(std::time::Duration::ZERO).unwrap();
+    let taken = other.execute_batch("BEGIN IMMEDIATE; ROLLBACK;");
+    assert!(
+        matches!(
+            taken.as_ref().map_err(rusqlite::Error::sqlite_error_code),
+            Err(Some(rusqlite::ErrorCode::DatabaseBusy))
+        ),
+        "another process took the write lock: {taken:?}"
+    );
+}
+
+const LOCK_PROBE_DB: &str = "BRUHS_TEST_LOCK_PROBE_DB";
+
+/// Whether another process is kept from writing `db` right now.
+fn locked_for_others(db: &Path) -> bool {
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "backup::collect_tests::sqlite_lock_probe_child",
+            "--test-threads=1",
+            "-q",
+        ])
+        .env(LOCK_PROBE_DB, db)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    status.success()
+}
+
+/// Ruling B Task 5 C1: the inventory finds databases through SQLite, so
+/// it never closes a descriptor of a live database this process holds
+/// open (a POSIX close drops every lock the process holds on the file).
+/// A rollback-mode writer mid-transaction keeps its lock through the
+/// inventory and through a snapshot.
+#[test]
+fn detection_keeps_this_process_s_sqlite_locks() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    let live = roots.core.join("server").join("mail.sqlite3");
+    std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+    let writer = Connection::open(&live).unwrap();
+    writer
+        .execute_batch("CREATE TABLE t (x); BEGIN IMMEDIATE; INSERT INTO t VALUES (1);")
+        .unwrap();
+    assert!(locked_for_others(&live), "the probe sees the lock");
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert!(taken.files.iter().any(|file| file.sqlite));
+    assert!(locked_for_others(&live), "the inventory dropped the lock");
+
+    writer.execute_batch("COMMIT").unwrap();
 }

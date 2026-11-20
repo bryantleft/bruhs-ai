@@ -302,6 +302,9 @@ pub struct BackupManifest {
     pub keychain_items: u32,
     #[serde(default)]
     pub skipped_links: u32,
+    /// Owner files left out because a restore would refuse their names.
+    #[serde(default)]
+    pub skipped_names: u32,
     #[serde(default)]
     pub counts: BackupCounts,
 }
@@ -924,6 +927,7 @@ mod tests {
         .unwrap();
         assert!(manifest.readable().is_ok());
         assert_eq!(manifest.options, BackupOptions::default());
+        assert_eq!(manifest.skipped_names, 0);
         let newer = BackupManifest {
             reactive_protocol: CREW_PROTOCOL + 1,
             ..manifest.clone()

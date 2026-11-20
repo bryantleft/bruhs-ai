@@ -1253,6 +1253,7 @@ dependencies = [
  "reqwest",
  "ress",
  "rusqlite",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha1",

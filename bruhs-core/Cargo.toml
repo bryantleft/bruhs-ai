@@ -61,6 +61,8 @@ mail-builder = { version = "=0.4.4", default-features = false }
 cssparser = "0.36"
 ress = "0.11.7"
 libc = "0.2"
+# Backup walks the data roots through folder handles, never following a link.
+rustix = { version = "1", features = ["fs"] }
 rusqlite = { workspace = true }
 tokio-postgres = "=0.7.18"
 sqlparser = { version = "=0.64.0", features = ["visitor"] }

@@ -1,40 +1,57 @@
-//! What a backup takes from the roots (D4, rulings F9, F10, F15): a walk
-//! that never follows a link, and consistent copies of Bruhs' own SQLite
-//! databases.
+//! What a backup takes from the roots (D4, rulings F9, F10, F15 and the
+//! B Task 5 rulings): a walk through folder handles that never follows a
+//! link, and consistent copies of Bruhs' own SQLite databases.
+//!
+//! Nothing here opens a database file with a plain descriptor: closing one
+//! drops every POSIX lock this process holds on the file, including the
+//! locks of the server's own connections. Databases are found and copied
+//! through SQLite, whose unix VFS shares one descriptor per file within a
+//! process.
 
-use std::fs::{File, Metadata, OpenOptions};
-use std::io::{self, Read};
+use std::ffi::{CStr, CString};
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bruhs_models::backup::{
-    excluded, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS, EXCLUDED_TOP,
+    excluded, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS, DATA_NAME_REFUSED,
+    EXCLUDED_TOP,
 };
 use rusqlite::{Connection, OpenFlags};
+use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
+use rustix::io::Errno;
 
 use super::{BackupError, RootKey, Roots};
 
-/// The first 16 bytes of every SQLite database file.
-const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 /// The top-level folder that, on Linux, comes from the config root.
 const CALENDAR: &str = "calendar";
-/// How long a snapshot waits for a writer that holds its lock mid-commit.
-const SNAPSHOT_WAIT: Duration = Duration::from_secs(5);
+/// How long a snapshot or a check waits for a writer that holds its lock
+/// mid-commit.
+const SQLITE_WAIT: Duration = Duration::from_secs(5);
+/// SQLite's extended result code for a link in a path it was told not to
+/// follow (`SQLITE_CANTOPEN_SYMLINK`).
+const CANTOPEN_SYMLINK: i32 = 1550;
 
 /// One file a backup takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
     /// The root it goes under in the archive (`core/` or `desktop/`).
     pub root: RootKey,
-    /// Its path below that root, `/`-separated. Always one
-    /// `safe_entry_path` accepts once prefixed with the root's name.
+    /// Its path below that root, `/`-separated, one `safe_entry_path`
+    /// accepts under the root's own prefix.
     pub rel: String,
-    /// Where it is on disk.
+    /// `base` joined with `rel`. It names no link unless one was swapped
+    /// in after the walk; open it with [`open_source`], never by path.
     pub path: PathBuf,
+    /// The resolved folder `rel` is relative to: the root, or for the core
+    /// root's `calendar/` on Linux, the config root.
+    pub base: PathBuf,
     /// Its size when it was listed.
     pub bytes: u64,
     /// A database of Bruhs' own, copied with [`snapshot_sqlite`] rather
-    /// than byte for byte (ruling F15).
+    /// than byte for byte (ruling F15). Never read with a plain descriptor.
     pub sqlite: bool,
 }
 
@@ -43,9 +60,12 @@ pub struct SourceFile {
 pub struct Inventory {
     /// The files that go in, root by root, depth first, by name.
     pub files: Vec<SourceFile>,
-    /// Links found where a file would go in. They are never followed or
-    /// stored.
+    /// Links found where a file would go in, including an entry that
+    /// became a link during the walk. They are never followed or stored.
     pub skipped_links: u32,
+    /// Owner files and folders left out because a restore would refuse
+    /// their names; a folder counts once for its whole tree.
+    pub skipped_names: u32,
     /// The bytes that go in whatever the options say.
     pub data_bytes: u64,
     /// The meeting audio files, whether or not they go in.
@@ -61,221 +81,361 @@ pub struct Inventory {
 /// core root's `calendar/` comes from the config root, where Bruhs keeps
 /// it, and nothing else of the config root goes in (ruling F10 a).
 ///
-/// Nothing is followed: a link is counted in `skipped_links` where its
-/// path would go in, and a socket, FIFO or device is left out. A name the
-/// restore would refuse (not UTF-8, or one `safe_entry_path` refuses)
-/// fails the inventory with [`io::ErrorKind::InvalidData`], whose message
-/// names no path: a backup that can't be restored is worse than none.
-pub fn inventory(roots: &Roots, options: &BackupOptions) -> io::Result<Inventory> {
+/// The walk goes through folder handles (`openat` with `O_NOFOLLOW`,
+/// `fstatat` without following), so a link is never followed, even one
+/// swapped in mid-walk; it is counted in `skipped_links` where its path
+/// would go in. Sockets, FIFOs and devices are left out.
+///
+/// Names are judged where they would go in. One the restore would refuse
+/// (not UTF-8, or one `safe_entry_path` refuses under the root's prefix) is
+/// left out and counted in `skipped_names` in the owner's own files: the
+/// content folders and a bruh's `work` and `browser` folders. Anywhere else
+/// it refuses the backup with [`DATA_NAME_REFUSED`].
+pub fn inventory(roots: &Roots, options: &BackupOptions) -> Result<Inventory, BackupError> {
+    inventory_with(roots, options, &mut |_| {})
+}
+
+/// [`inventory`], calling `before_open` with each folder's `rel` between
+/// reading its type and opening it, so a test can swap it for a link.
+pub(super) fn inventory_with(
+    roots: &Roots,
+    options: &BackupOptions,
+    before_open: &mut dyn FnMut(&str),
+) -> Result<Inventory, BackupError> {
     let mut walk = Walk {
         options,
         inventory: Inventory::default(),
+        before_open,
     };
-    let mut core = top_entries(&roots.core)?;
-    if roots.config != roots.core {
-        core.retain(|(name, _)| name != CALENDAR);
-        let calendar = roots.config.join(CALENDAR);
-        if exists(&calendar)? {
-            core.push((CALENDAR.to_owned(), calendar));
-            core.sort_by(|a, b| a.0.cmp(&b.0));
+    let core = opened_root(&roots.core)?;
+    let desktop = opened_root(&roots.desktop)?;
+    let config = if roots.config == roots.core {
+        None
+    } else {
+        opened_root(&roots.config)?
+    };
+
+    if let Some(core) = &core {
+        let mut top: Vec<(CString, &OpenedRoot)> = names(&core.fd)?
+            .into_iter()
+            .filter(|name| config.is_none() || name.as_bytes() != CALENDAR.as_bytes())
+            .map(|name| (name, core))
+            .collect();
+        if let Some(config) = &config {
+            let calendar = CString::new(CALENDAR).map_err(io::Error::other)?;
+            match rustix::fs::statat(&config.fd, calendar.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(_) => top.push((calendar, config)),
+                Err(Errno::NOENT) => {}
+                Err(error) => return Err(io::Error::from(error).into()),
+            }
+            top.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        for (name, from) in &top {
+            walk.entry(RootKey::Core, from, &from.fd, "", name)?;
         }
     }
-    walk.entries(RootKey::Core, "", core)?;
-    if !roots.same() {
-        let desktop = top_entries(&roots.desktop)?;
-        walk.entries(RootKey::Desktop, "", desktop)?;
+    let separate = match (&core, &desktop) {
+        (Some(core), Some(desktop)) => !roots.same() && core.base != desktop.base,
+        _ => !roots.same(),
+    };
+    if let (true, Some(desktop)) = (separate, &desktop) {
+        for name in names(&desktop.fd)? {
+            walk.entry(RootKey::Desktop, desktop, &desktop.fd, "", &name)?;
+        }
     }
     Ok(walk.inventory)
+}
+
+/// A root folder, resolved and open.
+struct OpenedRoot {
+    base: PathBuf,
+    fd: OwnedFd,
+}
+
+/// Opens a root, or `None` when it doesn't exist yet. The root itself may
+/// be a link the owner made; nothing below it is followed.
+fn opened_root(root: &Path) -> io::Result<Option<OpenedRoot>> {
+    let base = match std::fs::canonicalize(root) {
+        Ok(base) => base,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let fd = rustix::fs::open(
+        &base,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    Ok(Some(OpenedRoot { base, fd }))
+}
+
+/// The names in the folder `fd`, without `.` and `..`, sorted by bytes.
+fn names(fd: &OwnedFd) -> io::Result<Vec<CString>> {
+    let mut names = Vec::new();
+    for entry in Dir::read_from(fd)? {
+        let name = entry?.file_name().to_owned();
+        if name.as_bytes() != b"." && name.as_bytes() != b".." {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
 }
 
 struct Walk<'a> {
     options: &'a BackupOptions,
     inventory: Inventory,
+    before_open: &'a mut dyn FnMut(&str),
 }
 
 impl Walk<'_> {
-    /// Visits `entries`, the sorted children of the folder at `parent`.
-    fn entries(
-        &mut self,
-        root: RootKey,
-        parent: &str,
-        entries: Vec<(String, PathBuf)>,
-    ) -> io::Result<()> {
-        for (name, path) in entries {
-            if parent.is_empty()
-                && EXCLUDED_TOP
-                    .iter()
-                    .any(|excluded| name.eq_ignore_ascii_case(excluded))
-            {
-                continue;
-            }
-            let metadata = match std::fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                // Gone since the folder was read.
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            let rel = if parent.is_empty() {
-                name
-            } else {
-                format!("{parent}/{name}")
-            };
-            self.entry(root, rel, path, &metadata)?;
-        }
-        Ok(())
-    }
-
+    /// Visits `name` in the folder `parent`, which sits at `parent_rel` (a
+    /// lossy text when the walk is only measuring) below `root.base`.
     fn entry(
         &mut self,
-        root: RootKey,
-        rel: String,
-        path: PathBuf,
-        metadata: &Metadata,
-    ) -> io::Result<()> {
-        let kind = metadata.file_type();
-        let why = excluded(&rel, kind.is_dir());
-        if why == Excluded::Always {
+        key: RootKey,
+        root: &OpenedRoot,
+        parent: &OwnedFd,
+        parent_rel: &str,
+        name: &CStr,
+    ) -> Result<(), BackupError> {
+        let shown = String::from_utf8_lossy(name.to_bytes());
+        if parent_rel.is_empty()
+            && EXCLUDED_TOP
+                .iter()
+                .any(|excluded| shown.eq_ignore_ascii_case(excluded))
+        {
             return Ok(());
         }
+        let rel = if parent_rel.is_empty() {
+            shown.into_owned()
+        } else {
+            format!("{parent_rel}/{shown}")
+        };
+        let stat = match rustix::fs::statat(parent, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(stat) => stat,
+            // Gone since the folder was read.
+            Err(Errno::NOENT) => return Ok(()),
+            Err(error) => return Err(io::Error::from(error).into()),
+        };
+        let kind = FileType::from_raw_mode(stat.st_mode);
+        let why = excluded(&rel, kind == FileType::Directory);
         let goes_in = match why {
             Excluded::No => true,
-            Excluded::Always => false,
+            Excluded::Always => return Ok(()),
             Excluded::Audio => self.options.audio,
             Excluded::Browser => self.options.browser_profiles,
         };
-        if kind.is_symlink() {
-            if goes_in {
-                self.inventory.skipped_links = self.inventory.skipped_links.saturating_add(1);
+        match kind {
+            FileType::Symlink => {
+                self.skipped_link(goes_in);
+                return Ok(());
             }
-        } else if kind.is_dir() {
-            // A folder an option leaves out is still walked for its size.
-            let children = children(&path)?;
-            self.entries(root, &rel, children)?;
-        } else if kind.is_file() {
-            let bytes = metadata.len();
-            let total = match why {
-                Excluded::Audio => &mut self.inventory.audio_bytes,
-                Excluded::Browser => &mut self.inventory.browser_bytes,
-                Excluded::No | Excluded::Always => &mut self.inventory.data_bytes,
-            };
-            *total = total.saturating_add(bytes);
-            if goes_in {
-                if safe_entry_path(&format!("core/{rel}")).is_err() {
-                    return Err(refused_name());
+            FileType::Directory | FileType::RegularFile => {}
+            // Sockets, FIFOs and devices never go in.
+            _ => return Ok(()),
+        }
+        if goes_in && !restorable(key, &rel, name) {
+            if owner_content(&rel) {
+                self.inventory.skipped_names = self.inventory.skipped_names.saturating_add(1);
+                return Ok(());
+            }
+            return Err(BackupError::Refused(DATA_NAME_REFUSED));
+        }
+        if kind == FileType::Directory {
+            (self.before_open)(&rel);
+            let folder = match rustix::fs::openat(
+                parent,
+                name,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            ) {
+                Ok(folder) => folder,
+                Err(Errno::NOENT) => return Ok(()),
+                // It became a link (or a file) since it was read.
+                Err(Errno::LOOP | Errno::NOTDIR) => {
+                    self.skipped_link(goes_in);
+                    return Ok(());
                 }
-                let sqlite = snapshot_candidate(&rel) && has_sqlite_magic(&path)?;
-                self.inventory.files.push(SourceFile {
-                    root,
-                    rel,
-                    path,
-                    bytes,
-                    sqlite,
-                });
+                Err(error) => return Err(io::Error::from(error).into()),
+            };
+            // A folder an option leaves out is still walked for its size.
+            for child in names(&folder)? {
+                self.entry(key, root, &folder, &rel, &child)?;
+            }
+            return Ok(());
+        }
+
+        let bytes = u64::try_from(stat.st_size).map_err(io::Error::other)?;
+        let path = root.base.join(&rel);
+        let mut sqlite = false;
+        if goes_in && bytes > 0 && snapshot_candidate(&rel) {
+            match found(&path) {
+                Found::Database => sqlite = true,
+                Found::Other => {}
+                Found::Link => {
+                    self.skipped_link(true);
+                    return Ok(());
+                }
             }
         }
-        // Sockets, FIFOs and devices never go in.
+        let total = match why {
+            Excluded::Audio => &mut self.inventory.audio_bytes,
+            Excluded::Browser => &mut self.inventory.browser_bytes,
+            Excluded::No | Excluded::Always => &mut self.inventory.data_bytes,
+        };
+        *total = total.saturating_add(bytes);
+        if goes_in {
+            self.inventory.files.push(SourceFile {
+                root: key,
+                rel,
+                path,
+                base: root.base.clone(),
+                bytes,
+                sqlite,
+            });
+        }
         Ok(())
     }
-}
 
-/// The sorted children of a root, or none when the root doesn't exist
-/// yet. The root itself may be a link the owner made; nothing below it is
-/// followed.
-fn top_entries(root: &Path) -> io::Result<Vec<(String, PathBuf)>> {
-    match children(root) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
-        other => other,
+    fn skipped_link(&mut self, goes_in: bool) {
+        if goes_in {
+            self.inventory.skipped_links = self.inventory.skipped_links.saturating_add(1);
+        }
     }
 }
 
-/// The children of `folder` with their names, sorted by name.
-fn children(folder: &Path) -> io::Result<Vec<(String, PathBuf)>> {
-    let mut children = Vec::new();
-    for entry in std::fs::read_dir(folder)? {
-        let entry = entry?;
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| refused_name())?;
-        children.push((name, entry.path()));
-    }
-    children.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(children)
+/// Whether a restore accepts `rel` under `key`'s prefix, `name` (its last
+/// component) included: UTF-8 and every `safe_entry_path` rule, its length
+/// limits measured with the real prefix.
+pub(super) fn restorable(key: RootKey, rel: &str, name: &CStr) -> bool {
+    let prefix = match key {
+        RootKey::Core => "core",
+        RootKey::Desktop => "desktop",
+    };
+    name.to_str().is_ok() && safe_entry_path(&format!("{prefix}/{rel}")).is_ok()
 }
 
-fn exists(path: &Path) -> io::Result<bool> {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
+/// Whether `rel` sits in the owner's own files: a content folder, or a
+/// bruh's `work` folder or `browser` profile (whose names Chromium picks).
+fn owner_content(rel: &str) -> bool {
+    match rel.split('/').collect::<Vec<_>>().as_slice() {
+        [top, ..] if CONTENT_FOLDERS.contains(top) => true,
+        ["server", "bruhs", _, folder, ..] => matches!(*folder, "work" | "browser"),
+        _ => false,
     }
-}
-
-fn refused_name() -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        "a file name can't go in a backup",
-    )
 }
 
 /// Whether a file at `rel` may be one of Bruhs' own databases (ruling
-/// F15): not in a content folder, nor in a bruh's `work`, `browser` or
-/// `browser-cache` folder, which hold the owner's own files and are
-/// copied byte for byte.
+/// F15): not in the owner's files nor a bruh's `browser-cache`, all of
+/// which are copied byte for byte.
 fn snapshot_candidate(rel: &str) -> bool {
-    let parts: Vec<&str> = rel.split('/').collect();
-    let owner = match parts.as_slice() {
-        [top, ..] if CONTENT_FOLDERS.contains(top) => true,
-        ["server", "bruhs", _, folder, ..] => {
-            matches!(*folder, "work" | "browser" | "browser-cache")
+    !owner_content(rel)
+        && !matches!(
+            rel.split('/').collect::<Vec<_>>().as_slice(),
+            ["server", "bruhs", _, "browser-cache", ..]
+        )
+}
+
+/// What SQLite makes of a file.
+enum Found {
+    /// A database, or a file SQLite can't yet tell apart from one (busy,
+    /// locked, a hot journal): never read raw.
+    Database,
+    /// Not a database.
+    Other,
+    /// A link took the file's place.
+    Link,
+}
+
+/// Asks SQLite whether the file at `path` is a database (B Task 5 C1):
+/// read-only, no link anywhere in the path, then `PRAGMA schema_version`.
+/// SQLite shares this process's descriptor for a file it already has open,
+/// so the check never drops a lock.
+fn found(path: &Path) -> Found {
+    let checked = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .and_then(|connection| {
+        connection.busy_timeout(SQLITE_WAIT)?;
+        connection.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0))
+    });
+    match checked {
+        Ok(_) => Found::Database,
+        Err(rusqlite::Error::SqliteFailure(failure, _))
+            if failure.code == rusqlite::ErrorCode::NotADatabase =>
+        {
+            Found::Other
         }
-        _ => false,
-    };
-    !owner
+        Err(rusqlite::Error::SqliteFailure(failure, _))
+            if failure.extended_code == CANTOPEN_SYMLINK =>
+        {
+            Found::Link
+        }
+        Err(_) => Found::Database,
+    }
 }
 
-/// Whether the regular file at `path` starts with the SQLite header. It is
-/// opened without following a link and without blocking on a FIFO that
-/// took its place.
-fn has_sqlite_magic(path: &Path) -> io::Result<bool> {
-    let file = match open_no_follow(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    if !file.metadata()?.is_file() {
-        return Ok(false);
+/// Opens a listed file for reading through folder handles from its `base`,
+/// following no link on the way (B Task 5 I1 ruling): a folder or the file
+/// swapped for a link since the walk fails with `ELOOP` or `ENOTDIR`, and
+/// anything but a regular file fails with `InvalidData`. Never use it on a
+/// [`SourceFile::sqlite`] file.
+pub fn open_source(file: &SourceFile) -> io::Result<File> {
+    let mut folder = rustix::fs::open(
+        &file.base,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let mut parts = file.rel.split('/').peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            let opened = rustix::fs::openat(
+                &folder,
+                part,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?;
+            if FileType::from_raw_mode(rustix::fs::fstat(&opened)?.st_mode) != FileType::RegularFile
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "a listed file isn't a regular file anymore",
+                ));
+            }
+            return Ok(File::from(opened));
+        }
+        folder = rustix::fs::openat(
+            &folder,
+            part,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
     }
-    let mut head = Vec::with_capacity(SQLITE_MAGIC.len());
-    file.take(16).read_to_end(&mut head)?;
-    Ok(head == SQLITE_MAGIC)
-}
-
-fn open_no_follow(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    options.open(path)
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "a listed file has no name",
+    ))
 }
 
 /// Copies the SQLite database at `source` into the new file `into` with
 /// `VACUUM INTO` and returns the copy's size. The copy is one consistent
 /// snapshot, committed WAL frames included.
 ///
-/// The live database is opened read-only (no link followed, schema code
-/// untrusted), so the snapshot takes only a read transaction: a writer in
-/// WAL mode keeps committing while it runs, and the live file is never
-/// written. `into` is created first with mode 0600, never replacing a
-/// file or following a link; on failure it is removed. Errors carry no
-/// path (ruling F15).
+/// The live database is opened read-only through SQLite, with no link
+/// anywhere in `source` (pass a [`SourceFile::path`], which is resolved)
+/// and schema code untrusted. The snapshot takes only a read transaction
+/// and never writes the live file. In WAL mode a writer keeps committing
+/// while it runs; in rollback mode a writer waits for it (B Task 5 I3:
+/// Task 6 copies those databases with the online backup API instead).
+/// `into` is created first with mode 0600, never replacing a file or
+/// following a link, and its folder is resolved; on failure it is
+/// removed. Errors carry no path (ruling F15).
 pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
@@ -292,22 +452,20 @@ pub fn snapshot_sqlite(source: &Path, into: &Path) -> Result<u64, BackupError> {
 }
 
 fn vacuum_into(source: &Path, into: &Path) -> Result<(), BackupError> {
-    // SQLite's `NOFOLLOW` refuses a link anywhere in the path (`/var` is
-    // one on macOS), so both folders are resolved first; a link in the
-    // final name is still refused.
-    let source = resolved_folder(source)?;
+    // SQLite's `NOFOLLOW` refuses a link anywhere in a path (`/var` is one
+    // on macOS), so the target's folder, which Bruhs made, is resolved.
     let into = resolved_folder(into)?;
     let target = into
         .to_str()
         .ok_or_else(|| snapshot_failed("the snapshot path isn't UTF-8"))?;
     let live = Connection::open_with_flags(
-        &source,
+        source,
         OpenFlags::SQLITE_OPEN_READ_ONLY
             | OpenFlags::SQLITE_OPEN_NO_MUTEX
             | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(sqlite_failed)?;
-    live.busy_timeout(SNAPSHOT_WAIT).map_err(sqlite_failed)?;
+    live.busy_timeout(SQLITE_WAIT).map_err(sqlite_failed)?;
     live.pragma_update(None, "trusted_schema", false)
         .map_err(sqlite_failed)?;
     live.execute("VACUUM INTO ?1", [target])

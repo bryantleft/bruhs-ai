@@ -12,10 +12,15 @@ use std::path::{Component, Path, PathBuf};
 
 use bruhs_models::backup::{excluded, Excluded, RootsInfo};
 
+// Backup runs on macOS and Linux only (D27).
+#[cfg(unix)]
 mod collect;
+#[cfg(unix)]
 mod disk;
 
-pub use collect::{inventory, snapshot_sqlite, Inventory, SourceFile};
+#[cfg(unix)]
+pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, SourceFile};
+#[cfg(unix)]
 pub use disk::{free_bytes, FREE_MARGIN};
 
 #[cfg(test)]
