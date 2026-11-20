@@ -220,6 +220,20 @@ pub fn tool_label(call: &impl ToolCallView, state: ToolState, root: Option<&str>
                     format!("{} agent: {}", tense("Running", "Ran"), d)
                 }
             }
+            "File changes" => {
+                let changes = call.input()["changes"].as_array();
+                match changes.map(Vec::as_slice) {
+                    Some([change]) => format!(
+                        "{} {}",
+                        tense("Changing", "Changed"),
+                        relative_path(change["path"].as_str().unwrap_or("file"), root)
+                    ),
+                    Some(items) if !items.is_empty() => {
+                        format!("{} {} files", tense("Changing", "Changed"), items.len())
+                    }
+                    _ => "File changes".to_owned(),
+                }
+            }
             "TodoWrite" => tense("Updating todos", "Updated todos").to_string(),
             "AskUserQuestion" => tense("Asking a question", "Asked a question").to_string(),
             "mcp__bruhs_secrets__request_secret" => format!(

@@ -217,6 +217,7 @@ async fn pump(
     if let Err(e) = written {
         return Ending::Failed(format!("sending the prompt to codex failed: {e}"));
     }
+    let mut pending_changes = std::collections::HashSet::new();
     loop {
         let line = match process.next_line(tx).await {
             Ok(line) => line,
@@ -235,10 +236,71 @@ async fn pump(
         if let QueryEvent::Init { thread_id } = &event {
             turn.thread_id = Some(thread_id.clone());
         }
+        if let QueryEvent::Raw(json) = &event {
+            if let Some(events) = file_change_events(json, &mut pending_changes) {
+                for event in events {
+                    if tx.send(event).await.is_err() {
+                        return Ending::ConsumerGone;
+                    }
+                }
+                continue;
+            }
+        }
         if tx.send(event).await.is_err() {
             return Ending::ConsumerGone;
         }
     }
+}
+
+/// Some CLI versions report a patch only once it finishes. In that case
+/// emit the call immediately before its result so the timeline can pair them.
+fn file_change_events(
+    json: &serde_json::Value,
+    pending: &mut std::collections::HashSet<String>,
+) -> Option<Vec<QueryEvent>> {
+    let item = &json["item"];
+    if item["type"] != "file_change" {
+        return None;
+    }
+    let id = item["id"].as_str()?;
+    let finished = match json["type"].as_str()? {
+        "item.started" => false,
+        "item.completed" => true,
+        _ => return None,
+    };
+    let needs_call = if finished {
+        !pending.remove(id)
+    } else {
+        pending.insert(id.to_owned())
+    };
+    let mut events = Vec::new();
+    if needs_call {
+        events.push(QueryEvent::ToolCall {
+            id: id.to_string(),
+            tool: "File changes".to_owned(),
+            input: serde_json::json!({ "changes": item["changes"] }),
+        });
+    }
+    if finished {
+        let lines = item["changes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|change| {
+                Some(format!(
+                    "{} {}",
+                    change["kind"].as_str().unwrap_or("change"),
+                    change["path"].as_str()?
+                ))
+            })
+            .collect::<Vec<_>>();
+        events.push(QueryEvent::ToolResult {
+            tool_use_id: id.to_owned(),
+            content: lines.join("\n"),
+            is_error: item["status"] == "failed",
+        });
+    }
+    Some(events)
 }
 
 /// Write the whole prompt and close stdin so codex sees EOF.
@@ -452,6 +514,23 @@ mod tests {
         assert!(
             matches!(event, QueryEvent::ToolResult { tool_use_id, content, is_error } if tool_use_id == "item_0" && content == "/repo\n" && !is_error)
         );
+    }
+
+    #[test]
+    fn file_changes_pair_even_without_a_start_event() {
+        for has_start in [true, false] {
+            let mut pending = std::collections::HashSet::new();
+            let mut json = serde_json::json!({"type":"item.started","item":{"id":"patch","type":"file_change","changes":[{"kind":"update","path":"a.rs"}]}});
+            let mut events = vec![];
+            if has_start {
+                events.extend(super::file_change_events(&json, &mut pending).unwrap());
+            }
+            json["type"] = "item.completed".into();
+            events.extend(super::file_change_events(&json, &mut pending).unwrap());
+            assert!(
+                matches!(events.as_slice(), [QueryEvent::ToolCall { id, .. }, QueryEvent::ToolResult { tool_use_id, content, .. }] if id == tool_use_id && content == "update a.rs")
+            );
+        }
     }
 
     #[test]
