@@ -24,7 +24,9 @@ use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
 use tokio::sync::watch;
 
+use super::apply::{RESTORE_LOCK, RESULT};
 use super::create::{self, CancelFlag, CreateRequest};
+use super::journal::JOURNAL;
 use super::{free_bytes, inventory, BackupError, RootKey, Roots, FREE_MARGIN};
 use crate::local_tools::LocalToolsHost;
 use crate::reactive::ReactiveRuntime;
@@ -36,6 +38,7 @@ const INCOMING: &str = "incoming";
 const TMP: &str = "tmp";
 /// The restore a start finishes (Task 8 writes it).
 pub(super) const PENDING: &str = "pending.json";
+
 /// The last backup made here.
 const LAST: &str = "last.json";
 /// A download or upload left this long is swept.
@@ -486,13 +489,29 @@ impl BackupHost {
             sweep_folder(&tmp, |_| true, |_| true);
         }
         self.sweep_staged();
-        // A `last.json` record that a stopped process never renamed.
+        // A `last.json`, `pending.json`, `apply.json` or `result.json`
+        // record that a stopped process never renamed (B Task 8 M11). The
+        // restore's ones only while no apply holds `restore.lock`.
         if let Some(backups) = self.private_folder(None) {
-            let leftover = format!(".{LAST}.partial-");
+            let applying = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(backups.join(RESTORE_LOCK))
+                .is_ok_and(|lock| lock.try_lock().is_err());
+            let records: &[&str] = if applying {
+                &[LAST]
+            } else {
+                &[LAST, PENDING, JOURNAL, RESULT]
+            };
             sweep_folder(
                 &backups,
                 |_| true,
-                |name| name.strip_prefix(leftover.as_str()).is_some_and(valid_id),
+                |name| {
+                    records.iter().any(|record| {
+                        name.strip_prefix(&format!(".{record}.partial-"))
+                            .is_some_and(valid_id)
+                    })
+                },
             );
         }
     }

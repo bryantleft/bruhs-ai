@@ -19,9 +19,9 @@ use bruhs_models::backup::{valid_id, valid_stamp, PathRewrite, RestoreSource, DA
 use bruhs_models::EpochMs;
 use serde::{Deserialize, Serialize};
 
-use super::apply::movable;
+use super::apply::{movable, pass_roots};
 use super::host::{new_private_file, random_id, read_small};
-use super::{BackupError, RootKey};
+use super::{BackupError, RootKey, Roots};
 use crate::secrets::ItemRef;
 
 /// The journal's name inside `<core>/backups`.
@@ -84,13 +84,19 @@ pub(super) enum Step {
     WebPart,
     /// The result and the pre-restore set's info are written.
     Done,
+    /// A rename failed for good before any keychain write: the renames are
+    /// being undone, and a resume finishes undoing them (B Task 8 I1).
+    RollingBack,
 }
 
 impl Journal {
-    /// The journal in `backups`, if one is there. One that isn't a small
-    /// regular file, doesn't parse or names anything outside its plan is
-    /// `DAMAGED`: an apply never acts on it.
-    pub(super) fn load(backups: &Path) -> Result<Option<Self>, BackupError> {
+    /// The journal in `<core>/backups` of `roots`, if one is there. One
+    /// that isn't a small regular file, doesn't parse, names anything
+    /// outside its plan or plans other roots than this computer's (one
+    /// pass on one root, ruling F33) is `DAMAGED`: an apply never acts on
+    /// it.
+    pub(super) fn load(roots: &Roots) -> Result<Option<Self>, BackupError> {
+        let backups = roots.backups(RootKey::Core);
         let path = backups.join(JOURNAL);
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {}
@@ -100,15 +106,16 @@ impl Journal {
         let damaged = || BackupError::Format(DAMAGED);
         let text = read_small(&path, JOURNAL_MAX).ok_or_else(damaged)?;
         let journal: Self = serde_json::from_slice(&text).map_err(|_| damaged())?;
-        if journal.valid() {
+        let planned: Vec<RootKey> = journal.passes.iter().map(|pass| pass.root).collect();
+        if journal.valid() && planned == pass_roots(roots) {
             Ok(Some(journal))
         } else {
             Err(damaged())
         }
     }
 
-    /// Whether every name and id is one this build writes, and every step
-    /// belongs to the plan.
+    /// Whether every name and id is one this build writes, every step
+    /// belongs to the plan, and no root comes twice.
     fn valid(&self) -> bool {
         let source = match &self.source {
             RestoreSource::Staged { id } => valid_id(id),
@@ -204,9 +211,33 @@ pub(super) fn write_atomically(folder: &Path, name: &str, bytes: &[u8]) -> Resul
 
 /// fsyncs a folder, opened without following a link, so the names made or
 /// removed in it last. A volume that can't sync folders (`EINVAL`) is left
-/// as it is.
+/// as it is. On macOS this reaches the drive's cache only at the next full
+/// sync ([`full_sync`]); each journal record is one, since `sync_all` is
+/// `F_FULLFSYNC` there.
 pub(super) fn sync_dir(folder: &Path) -> Result<(), BackupError> {
-    let opened = rustix::fs::open(
+    match rustix::fs::fsync(open_dir(folder)?) {
+        Ok(()) | Err(rustix::io::Errno::INVAL) => Ok(()),
+        Err(error) => Err(io::Error::from(error).into()),
+    }
+}
+
+/// A full sync through `folder` (M5): `F_FULLFSYNC` on macOS, which also
+/// flushes the drive's cache and so makes every earlier sync durable; a
+/// plain fsync elsewhere, where it already reaches the drive.
+pub(super) fn full_sync(folder: &Path) -> Result<(), BackupError> {
+    let opened = open_dir(folder)?;
+    #[cfg(target_os = "macos")]
+    let synced = rustix::fs::fcntl_fullfsync(&opened);
+    #[cfg(not(target_os = "macos"))]
+    let synced = rustix::fs::fsync(&opened);
+    match synced {
+        Ok(()) | Err(rustix::io::Errno::INVAL | rustix::io::Errno::NOTSUP) => sync_dir(folder),
+        Err(error) => Err(io::Error::from(error).into()),
+    }
+}
+
+fn open_dir(folder: &Path) -> Result<std::os::fd::OwnedFd, BackupError> {
+    Ok(rustix::fs::open(
         folder,
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::DIRECTORY
@@ -214,9 +245,5 @@ pub(super) fn sync_dir(folder: &Path) -> Result<(), BackupError> {
             | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
     )
-    .map_err(io::Error::from)?;
-    match rustix::fs::fsync(opened) {
-        Ok(()) | Err(rustix::io::Errno::INVAL) => Ok(()),
-        Err(error) => Err(io::Error::from(error).into()),
-    }
+    .map_err(io::Error::from)?)
 }

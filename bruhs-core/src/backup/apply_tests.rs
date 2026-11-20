@@ -19,7 +19,7 @@ use bruhs_models::vault::{CredentialScope, VaultEntry, VaultKind};
 use rusqlite::Connection;
 use zeroize::Zeroizing;
 
-use super::apply::{apply_pending_with, Crash};
+use super::apply::{apply_pending_with, Point};
 use super::journal::Step;
 use super::open::staging_dir;
 use super::*;
@@ -386,7 +386,7 @@ fn no_key(store: &SecretStore, account: &str) -> bool {
     matches!(read_seal_key(store, account), Err(SecretError::NotSaved))
 }
 
-fn never_stop(_: &Step, _: Crash) -> bool {
+fn never_stop(_: &Step, _: Point) -> bool {
     false
 }
 
@@ -398,7 +398,10 @@ fn no_env(_: &str) -> Option<std::ffi::OsString> {
 /// Answers whether the stop was reached.
 fn apply_stopping_at(fixture: &Fixture, at: usize) -> bool {
     let seen = Cell::new(0_usize);
-    let stop = |_: &Step, _: Crash| {
+    let stop = |_: &Step, point: Point| {
+        if point == Point::Before {
+            return false;
+        }
         let now = seen.get();
         seen.set(now + 1);
         now == at
@@ -501,7 +504,7 @@ async fn applying_onto_one_root_moves_each_entry_once() {
     let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
     schedule(&fixture.roots, &staged_source(&before), false).unwrap();
     // The journal plans a single pass (ruling F33).
-    let stop = |step: &Step, crash: Crash| *step == Step::Sealed && crash == Crash::Recorded;
+    let stop = |step: &Step, crash: Point| *step == Step::Sealed && crash == Point::Recorded;
     assert!(apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &stop).is_err());
     let journal: serde_json::Value = serde_json::from_slice(
         &std::fs::read(fixture.roots.backups(RootKey::Core).join("apply.json")).unwrap(),
@@ -632,8 +635,8 @@ async fn an_interrupted_apply_finishes_on_the_next_start() {
     schedule(&fixture.roots, &staged_source(&before), false).unwrap();
     // Killed after the second entry was placed and recorded.
     let placed = Cell::new(0);
-    let stop = |step: &Step, crash: Crash| {
-        if matches!(step, Step::Placed { .. }) && crash == Crash::Recorded {
+    let stop = |step: &Step, crash: Point| {
+        if matches!(step, Step::Placed { .. }) && crash == Point::Recorded {
             placed.set(placed.get() + 1);
         }
         placed.get() == 2
@@ -655,7 +658,7 @@ async fn an_interrupted_apply_finishes_on_the_next_start() {
     let fixture = second;
     let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
     schedule(&fixture.roots, &staged_source(&before), false).unwrap();
-    let stop = |step: &Step, crash: Crash| *step == Step::KeysWritten && crash == Crash::Acted;
+    let stop = |step: &Step, crash: Point| *step == Step::KeysWritten && crash == Point::Acted;
     assert!(apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &stop).is_err());
     assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
     fixture
@@ -960,4 +963,491 @@ async fn a_linked_backups_folder_is_never_acted_on() {
         .backups(RootKey::Core)
         .join("apply.json")
         .exists());
+}
+
+/// The stamp of the apply in progress, read from its journal.
+fn journal_stamp(roots: &Roots) -> Option<String> {
+    let text = std::fs::read(roots.backups(RootKey::Core).join("apply.json")).ok()?;
+    let journal: serde_json::Value = serde_json::from_slice(&text).ok()?;
+    journal["stamp"].as_str().map(str::to_owned)
+}
+
+fn kept_folders(roots: &Roots) -> Vec<String> {
+    let mut names = Vec::new();
+    for root in [RootKey::Core, RootKey::Desktop] {
+        if let Ok(entries) = std::fs::read_dir(roots.backups(root)) {
+            names.extend(
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.starts_with("pre-restore-")),
+            );
+        }
+    }
+    names
+}
+
+/// The end state of a rollback (B Task 8 I1): today's data byte for byte
+/// and today's items, no kept set or its key, nothing waiting, the staged
+/// restore left for the sweep, and the result saying so.
+fn assert_rolled_back(fixture: &Fixture, before: &Before, stamp: Option<&str>) {
+    let roots = &fixture.roots;
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+    if !roots.same() {
+        assert_eq!(files_under(&roots.desktop, &["backups"]), before.desktop);
+    }
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+    assert_eq!(item(&fixture.store, EXTRA).as_deref(), Some("extra"));
+    assert!(pending(roots).is_none());
+    assert!(!roots.backups(RootKey::Core).join("pending.json").exists());
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    assert!(pre_restores(roots).is_empty());
+    assert_eq!(kept_folders(roots), Vec::<String>::new());
+    if let Some(stamp) = stamp {
+        assert!(no_key(&fixture.store, &format!("pre-restore:{stamp}")));
+    }
+    assert!(staging_dir(roots, RootKey::Core, &before.staged).exists());
+    assert_eq!(
+        result(roots).unwrap().warnings,
+        vec![RESTORE_ROLLED_BACK.to_owned()]
+    );
+}
+
+fn rolled_back(outcome: Result<ApplyOutcome, BackupError>) -> bool {
+    matches!(outcome, Err(BackupError::Refused(message)) if message == RESTORE_ROLLED_BACK)
+}
+
+/// A rename that fails for good, at each rename in turn, puts today's
+/// data back as it was (B Task 8 I1).
+#[tokio::test]
+async fn a_rename_that_fails_for_good_rolls_back() {
+    for at in 0.. {
+        let fixture = fixture(false, false);
+        let before = stage_b(&fixture, BackupOptions::default(), true, true).await;
+        schedule(&fixture.roots, &staged_source(&before), true).unwrap();
+        let renames = Cell::new(0_usize);
+        let stamp = std::cell::RefCell::new(None);
+        let fail = |_: &Step, point: Point| {
+            if point != Point::Before {
+                return false;
+            }
+            *stamp.borrow_mut() = journal_stamp(&fixture.roots);
+            let now = renames.get();
+            renames.set(now + 1);
+            now == at
+        };
+        let outcome = apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &fail);
+        if matches!(outcome, Ok(ApplyOutcome::Applied(_))) {
+            assert!(at > 6, "too few renames: {at}");
+            assert_applied(&fixture, &before);
+            break;
+        }
+        assert!(rolled_back(outcome), "rename {at}");
+        assert_rolled_back(&fixture, &before, stamp.borrow().as_deref());
+        // The service still starts again, and a new restore can be made.
+        assert!(take_service_restart(&fixture.roots));
+        schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+        assert!(matches!(
+            apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+            ApplyOutcome::Applied(_)
+        ));
+    }
+}
+
+/// A stop anywhere in a rollback resumes into the rollback, even when the
+/// resume stops too.
+#[tokio::test]
+async fn a_stop_during_a_rollback_resumes_the_rollback() {
+    for at in 0.. {
+        let fixture = fixture(false, false);
+        let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+        schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+        // Fail the sixth rename (past several moves and a place), then
+        // stop at the `at`-th point of the rollback.
+        let renames = Cell::new(0_usize);
+        let points = Cell::new(0_usize);
+        let stop = |step: &Step, point: Point| match point {
+            Point::Before => {
+                renames.set(renames.get() + 1);
+                renames.get() == 6
+            }
+            _ if *step == Step::RollingBack || point == Point::Undone => {
+                points.set(points.get() + 1);
+                points.get() == at + 1
+            }
+            _ => false,
+        };
+        let stamp_before = std::cell::RefCell::new(None);
+        let outcome = apply_pending_with(
+            &fixture.roots,
+            &fixture.store,
+            None,
+            &no_env,
+            &|step, point| {
+                if stamp_before.borrow().is_none() {
+                    *stamp_before.borrow_mut() = journal_stamp(&fixture.roots);
+                }
+                stop(step, point)
+            },
+        );
+        let stamp = stamp_before.borrow().clone();
+        if rolled_back(outcome) {
+            assert!(at > 4, "too few rollback points: {at}");
+            assert_rolled_back(&fixture, &before, stamp.as_deref());
+            break;
+        }
+        assert!(fixture
+            .roots
+            .backups(RootKey::Core)
+            .join("apply.json")
+            .exists());
+        if at == 0 {
+            // Stopped before `RollingBack` was recorded: nothing decided
+            // the rollback yet, so the next start goes forward (where a
+            // rename that fails for good would fail again).
+            assert!(matches!(
+                apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+                ApplyOutcome::Applied(_)
+            ));
+            assert_applied(&fixture, &before);
+            continue;
+        }
+        // A second stop while resuming, then a clean resume.
+        let again = Cell::new(0_usize);
+        let second = |_: &Step, point: Point| {
+            if point == Point::Before {
+                return false;
+            }
+            again.set(again.get() + 1);
+            again.get() == 2
+        };
+        let outcome = apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &second);
+        if !rolled_back(outcome) {
+            let last = apply_pending(&fixture.roots, &fixture.store, None);
+            let shown = format!("{last:?}");
+            assert!(rolled_back(last), "rollback point {at}: {shown}");
+        }
+        assert_rolled_back(&fixture, &before, stamp.as_deref());
+    }
+}
+
+/// Something that takes a name mid-apply (the capture daemon's `audio/`,
+/// say) is in the way for good: the restore rolls back, and the newcomer
+/// is kept aside in a listed set rather than lost.
+#[tokio::test]
+async fn an_entry_in_the_way_rolls_back_and_is_kept() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    let intruder = fixture.roots.core.join("server/intruder.txt");
+    let planted = Cell::new(false);
+    let plant = |step: &Step, point: Point| {
+        if matches!(step, Step::Placed { .. }) && point == Point::Recorded && !planted.get() {
+            planted.set(true);
+            write(&intruder, b"made mid-apply");
+        }
+        false
+    };
+    let outcome = apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &plant);
+    assert!(rolled_back(outcome));
+    let roots = &fixture.roots;
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+    assert_eq!(files_under(&roots.desktop, &["backups"]), before.desktop);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+    assert!(pending(roots).is_none());
+    let kept = pre_restores(roots);
+    assert_eq!(kept.len(), 1);
+    let set = kept_dir(roots, RootKey::Core, &kept[0].stamp);
+    assert_eq!(
+        std::fs::read(set.join(".in-the-way/server/intruder.txt")).unwrap(),
+        b"made mid-apply"
+    );
+    assert!(!set.join("meta/keychain.sealed").exists());
+    assert!(no_key(
+        &fixture.store,
+        &format!("pre-restore:{}", kept[0].stamp)
+    ));
+}
+
+/// Forward too: a resume that stops is resumed again (B Task 8 M9).
+#[tokio::test]
+async fn a_second_stop_while_resuming_still_finishes() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), true, true).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    let first =
+        |step: &Step, point: Point| matches!(step, Step::Placed { .. }) && point == Point::Acted;
+    assert!(apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &first).is_err());
+    let second = |step: &Step, point: Point| *step == Step::KeysPruned && point == Point::Acted;
+    assert!(apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &second).is_err());
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_applied(&fixture, &before);
+}
+
+/// Refusals that can never pass remove `pending.json`, so backups and
+/// restores aren't blocked; nothing else changes (B Task 8 I2).
+#[tokio::test]
+async fn permanent_refusals_clear_the_pending_restore() {
+    let backups = |fixture: &Fixture| fixture.roots.backups(RootKey::Core);
+    // A damaged pending.json, and one a newer Bruhs wrote.
+    for (text, expected) in [
+        (&b"{not json"[..], DAMAGED),
+        (
+            &br#"{"source":{"type":"from_the_future"},"created_at_ms":0}"#[..],
+            INVALID_REQUEST,
+        ),
+    ] {
+        let fixture = fixture(false, false);
+        std::fs::create_dir_all(backups(&fixture)).unwrap();
+        std::fs::write(backups(&fixture).join("pending.json"), text).unwrap();
+        let outcome = apply_pending(&fixture.roots, &fixture.store, None);
+        assert!(
+            matches!(&outcome, Err(error) if error.message() == expected),
+            "{outcome:?}"
+        );
+        assert!(!backups(&fixture).join("pending.json").exists());
+    }
+
+    // The staged items' key is gone.
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    crate::secrets::forget_seal_key(&fixture.store, &format!("staged:{}", before.staged)).unwrap();
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None),
+        Err(BackupError::Keychain(message)) if message == KEYCHAIN_SET_UNREADABLE
+    ));
+    assert!(pending(&fixture.roots).is_none());
+    assert_eq!(files_under(&fixture.roots.core, &["backups"]), before.core);
+
+    // A folder this user can't move (I1 f): refused before anything moves.
+    let fixture = self::fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    let server = fixture.roots.core.join("server");
+    std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let outcome = apply_pending(&fixture.roots, &fixture.store, None);
+    std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(matches!(outcome, Err(BackupError::Io(_))), "{outcome:?}");
+    assert!(pending(&fixture.roots).is_none());
+    assert!(!backups(&fixture).join("apply.json").exists());
+    assert_eq!(files_under(&fixture.roots.core, &["backups"]), before.core);
+    assert_eq!(kept_folders(&fixture.roots), Vec::<String>::new());
+}
+
+/// A keychain that may answer later keeps the restore waiting.
+#[tokio::test]
+async fn a_transient_refusal_keeps_the_pending_restore() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    // A key the keychain answers with something unreadable is a storage
+    // error, which may pass on a retry.
+    fixture
+        .store
+        .write_item(
+            crate::secrets::BACKUP_SERVICE,
+            &format!("staged:{}", before.staged),
+            "not a key",
+        )
+        .unwrap();
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None),
+        Err(BackupError::Keychain(message)) if message == KEYCHAIN_NEEDS_YOU
+    ));
+    assert!(pending(&fixture.roots).is_some());
+    assert_eq!(files_under(&fixture.roots.core, &["backups"]), before.core);
+}
+
+/// Staged data the manifest doesn't name is never placed (B Task 8 M4):
+/// a file is damage, an empty folder stays behind.
+#[tokio::test]
+async fn staged_data_the_manifest_doesnt_name_is_refused() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    let staging = staging_dir(roots, RootKey::Core, &before.staged);
+    write(&staging.join("smuggled/extra.json"), b"{}");
+    assert!(matches!(
+        schedule(roots, &staged_source(&before), false),
+        Err(BackupError::Format(DAMAGED))
+    ));
+    std::fs::remove_dir_all(staging.join("smuggled")).unwrap();
+    schedule(roots, &staged_source(&before), false).unwrap();
+    // Added after the schedule: refused at apply, and the wait is over.
+    write(&staging.join("late.json"), b"{}");
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None),
+        Err(BackupError::Format(DAMAGED))
+    ));
+    assert!(pending(roots).is_none());
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+
+    std::fs::remove_file(staging.join("late.json")).unwrap();
+    std::fs::create_dir_all(staging.join("empty/inside")).unwrap();
+    schedule(roots, &staged_source(&before), false).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert!(!roots.core.join("empty").exists());
+    assert_applied(&fixture, &before);
+}
+
+/// A journal is never acted on for other roots than this computer's, or
+/// with a stamp that names a set already kept (B Task 8 M3).
+#[tokio::test]
+async fn a_journal_that_doesnt_fit_is_refused() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let sealed = |step: &Step, point: Point| *step == Step::Sealed && point == Point::Acted;
+    assert!(apply_pending_with(roots, &fixture.store, None, &no_env, &sealed).is_err());
+
+    // The same core root seen as one root: a two-pass journal won't do.
+    let one = Roots {
+        desktop: roots.core.clone(),
+        ..roots.clone()
+    };
+    assert!(matches!(
+        apply_pending(&one, &fixture.store, None),
+        Err(BackupError::Format(DAMAGED))
+    ));
+
+    // A stamp that names a kept set already there.
+    let taken = "2026-01-01-0000-abcd";
+    let set = kept_dir(roots, RootKey::Core, taken);
+    write(&set.join("meta/keychain.sealed"), b"theirs");
+    write(
+        &set.join("meta/info.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "stamp": taken, "made_at_ms": 1, "bytes": 0, "keychain": true,
+            "roots": [{ "root": "core", "names": [] }, { "root": "desktop", "names": [] }],
+        }))
+        .unwrap(),
+    );
+    std::fs::create_dir_all(kept_dir(roots, RootKey::Desktop, taken)).unwrap();
+    let journal = roots.backups(RootKey::Core).join("apply.json");
+    let mut text: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&journal).unwrap()).unwrap();
+    let own = text["stamp"].as_str().unwrap().to_owned();
+    text["stamp"] = taken.into();
+    std::fs::write(&journal, serde_json::to_vec(&text).unwrap()).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None),
+        Err(BackupError::Format(DAMAGED))
+    ));
+    assert_eq!(
+        std::fs::read(set.join("meta/keychain.sealed")).unwrap(),
+        b"theirs"
+    );
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+
+    // Its own stamp back, it finishes.
+    text["stamp"] = own.into();
+    std::fs::write(&journal, serde_json::to_vec(&text).unwrap()).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+}
+
+#[tokio::test]
+async fn a_linked_desktop_backups_folder_is_never_acted_on() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let real = fixture.base.join("desktop-backups");
+    std::fs::rename(roots.backups(RootKey::Desktop), &real).unwrap();
+    std::os::unix::fs::symlink(&real, roots.backups(RootKey::Desktop)).unwrap();
+    assert!(apply_pending(roots, &fixture.store, None).is_err());
+    assert!(pending(roots).is_none());
+    assert!(pre_restores(roots).is_empty());
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    // The real folder back, the restore still waits and applies.
+    std::fs::remove_file(roots.backups(RootKey::Desktop)).unwrap();
+    std::fs::rename(&real, roots.backups(RootKey::Desktop)).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_applied(&fixture, &before);
+}
+
+/// Linux's layout: one data root and a config root of its own.
+#[tokio::test]
+async fn calendar_goes_back_to_the_config_root_on_one_root() {
+    let fixture = fixture(true, true);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let roots = &fixture.roots;
+    assert_eq!(
+        std::fs::read(roots.config.join("calendar/google/state.json")).unwrap(),
+        b"B calendar"
+    );
+    let stamp = pre_restores(roots)[0].stamp.clone();
+    assert_eq!(
+        std::fs::read(kept_dir(roots, RootKey::Core, &stamp).join("calendar/google/state.json"))
+            .unwrap(),
+        b"A calendar"
+    );
+    assert_eq!(
+        std::fs::read(roots.core.join("calendar/own.txt")).unwrap(),
+        b"core own"
+    );
+}
+
+/// While an apply holds `restore.lock`, nothing schedules a restore or
+/// changes a kept set (B Task 8 M7), and the sweep leaves its partial
+/// records alone; with the lock free, the sweep removes them (M11).
+#[tokio::test]
+async fn the_restore_lock_holds_off_schedule_the_web_part_and_the_sweep() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    apply_pending(roots, &fixture.store, None).unwrap();
+    let host = host(&fixture);
+    let (id, _) = web_part_upload(&host, UploadKind::PreviousWebPart, b"{}");
+    let upload = host.uploaded(UploadKind::PreviousWebPart, &id).unwrap();
+
+    let backups = roots.backups(RootKey::Core);
+    let partials: Vec<PathBuf> = ["apply.json", "pending.json", "result.json", "last.json"]
+        .iter()
+        .map(|name| backups.join(format!(".{name}.partial-{}", "a".repeat(32))))
+        .collect();
+    for partial in &partials {
+        std::fs::write(partial, b"half").unwrap();
+    }
+    let lock = File::options()
+        .read(true)
+        .write(true)
+        .open(backups.join("restore.lock"))
+        .unwrap();
+    lock.try_lock().unwrap();
+    assert!(matches!(
+        schedule(roots, &staged_source(&before), false),
+        Err(BackupError::Busy(BACKUP_BUSY))
+    ));
+    assert!(matches!(
+        keep_previous_web_part(roots, &upload),
+        Err(BackupError::Busy(BACKUP_BUSY))
+    ));
+    host.sweep();
+    assert!(!partials[3].exists());
+    assert!(partials[..3].iter().all(|partial| partial.exists()));
+    drop(lock);
+    keep_previous_web_part(roots, &upload).unwrap();
+    host.sweep();
+    assert!(partials.iter().all(|partial| !partial.exists()));
 }

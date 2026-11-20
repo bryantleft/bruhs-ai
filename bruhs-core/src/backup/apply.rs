@@ -19,6 +19,11 @@
 //! 5. write the set's `meta/info.json` and `backups/result.json`;
 //! 6. remove the source, its seal key, `pending.json` and the journal.
 //!
+//! Before step 3, a rename that fails for good undoes the renames and
+//! answers `RESTORE_ROLLED_BACK` ([`rollback`]); from step 3 on, the apply
+//! only goes forward, since only keychain errors remain and they pass on a
+//! retry.
+//!
 //! Every rename stays on one volume and is followed by an fsync of both
 //! folders before the journal records it. Staged data was synced when it
 //! was staged. Nothing here logs a path, a name from inside a backup or a
@@ -44,7 +49,9 @@ use zeroize::Zeroizing;
 
 use super::create::{backups_are_folders, private_dir};
 use super::host::{new_private_file, random_bytes, random_id, read_small, PENDING};
-use super::journal::{single_component, sync_dir, write_atomically, Journal, Pass, Step, JOURNAL};
+use super::journal::{
+    full_sync, single_component, sync_dir, write_atomically, Journal, Pass, Step, JOURNAL,
+};
 use super::open::staging_dir;
 use super::{BackupError, RootKey, Roots};
 use crate::secrets::{
@@ -52,8 +59,10 @@ use crate::secrets::{
     ItemRef, KeychainItem, SecretError, SecretStore, BACKUP_SERVICE,
 };
 
+mod rollback;
+
 /// The apply's own lock, inside `<core>/backups`, which no apply moves.
-const RESTORE_LOCK: &str = "restore.lock";
+pub(super) const RESTORE_LOCK: &str = "restore.lock";
 /// The desktop app's instance lock, at the top of the desktop root (D17).
 const INSTANCE_LOCK: &str = "desktop.instance.lock";
 /// Any running server holds this lock beside its reactive database.
@@ -61,7 +70,7 @@ const REACTIVE_LOCK: &str = "reactive.sqlite3.lock";
 const REACTIVE_DB: &str = "reactive.sqlite3";
 const REACTIVE_DB_ENV: &str = "BRUHS_REACTIVE_DB";
 const SERVER: &str = "server";
-const RESULT: &str = "result.json";
+pub(super) const RESULT: &str = "result.json";
 /// `<core>/backups/web-part/<id>.bin`: a restored browser part waiting for
 /// the browser (D19).
 const WEB_PARTS: &str = "web-part";
@@ -115,12 +124,18 @@ pub enum ApplyOutcome {
     Busy(Holder),
 }
 
-/// Where a test stops an apply, as a kill would: after a step's work but
-/// before the journal records it, or right after it is recorded.
+/// Where an apply asks a test's hook whether to stop, as a kill would.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Crash {
+pub(super) enum Point {
+    /// Before a rename's work. A yes fails the rename for good (`EACCES`),
+    /// as a folder the owner can't move would.
+    Before,
+    /// After a step's work, before the journal records it.
     Acted,
+    /// Right after the journal records it.
     Recorded,
+    /// After a rollback undid a recorded rename.
+    Undone,
 }
 
 /// `pending.json`: the restore a start finishes.
@@ -197,8 +212,10 @@ pub fn take_instance_lock(path: &Path) -> io::Result<Option<File>> {
 
 /// Schedules `source` to be applied at the next start (D15): writes and
 /// syncs `backups/pending.json`. Refused while a restore waits or runs
-/// (`RESTORE_PENDING`) and for a source that isn't a finished staged
-/// restore or a whole kept set (`GONE`).
+/// (`RESTORE_PENDING`), while an apply holds `restore.lock`
+/// (`BACKUP_BUSY`), for a source that isn't a finished staged restore or
+/// a whole kept set (`GONE`), and for a staging that holds data its
+/// manifest doesn't name (`DAMAGED`).
 pub fn schedule(
     roots: &Roots,
     source: &RestoreSource,
@@ -206,7 +223,10 @@ pub fn schedule(
 ) -> Result<PendingRestore, BackupError> {
     backups_are_folders(roots)?;
     let backups = roots.backups(RootKey::Core);
-    private_dir(&backups)?;
+    new_dir(&backups)?;
+    let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
+        return Err(BackupError::Busy(BACKUP_BUSY));
+    };
     if exists(&backups.join(PENDING))? || exists(&backups.join(JOURNAL))? {
         return Err(BackupError::Refused(RESTORE_PENDING));
     }
@@ -232,6 +252,12 @@ pub fn schedule(
 /// out of the core root, whose lock this can't check (ruling F10 c). A
 /// `backups` folder that is a link is never acted on.
 ///
+/// A restore that can never be applied (its source isn't there whole, its
+/// sealed items don't open, a rename can't happen, or `pending.json` is
+/// damaged) is refused and `pending.json` removed, so it doesn't block
+/// backups (B Task 8 I2). A rename that fails for good mid-apply puts
+/// today's data back and answers `RESTORE_ROLLED_BACK` (I1).
+///
 /// It blocks on the file system and the keychain: call it before the
 /// stores open, or from a blocking task.
 pub fn apply_pending(
@@ -249,13 +275,13 @@ pub fn apply_pending(
 }
 
 /// [`apply_pending`], reading the environment through `env` and asking
-/// `stop` after each step whether a test stops the apply there.
+/// `stop` at each [`Point`] whether a test stops or fails the apply there.
 pub(super) fn apply_pending_with(
     roots: &Roots,
     store: &SecretStore,
     desktop_lock: Option<&File>,
     env: &dyn Fn(&str) -> Option<OsString>,
-    stop: &dyn Fn(&Step, Crash) -> bool,
+    stop: &dyn Fn(&Step, Point) -> bool,
 ) -> Result<ApplyOutcome, BackupError> {
     backups_are_folders(roots)?;
     let backups = roots.backups(RootKey::Core);
@@ -266,11 +292,16 @@ pub(super) fn apply_pending_with(
     let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
         return Ok(ApplyOutcome::Busy(Holder::Restore));
     };
-    let work = match Journal::load(&backups)? {
+    let work = match Journal::load(roots)? {
         Some(journal) => Work::Resume(journal),
-        None => match read_pending(&backups)? {
-            Some(pending) => Work::Start(pending),
-            None => return Ok(ApplyOutcome::NothingPending),
+        None => match read_pending(&backups) {
+            Ok(Some(pending)) => Work::Start(pending),
+            Ok(None) => return Ok(ApplyOutcome::NothingPending),
+            // Damaged, or a source this build can't read.
+            Err(error @ (BackupError::Format(_) | BackupError::Refused(_))) => {
+                return Err(refuse(&backups, error))
+            }
+            Err(error) => return Err(error),
         },
     };
     let moved_db = env(REACTIVE_DB_ENV)
@@ -364,7 +395,7 @@ pub fn pre_restores(roots: &Roots) -> Vec<PreRestoreInfo> {
     let Some(backups) = backups_dir(roots) else {
         return Vec::new();
     };
-    let consuming = match Journal::load(&backups) {
+    let consuming = match Journal::load(roots) {
         Ok(Some(Journal {
             source: RestoreSource::PreRestore { stamp },
             ..
@@ -403,9 +434,10 @@ pub fn pre_restores(roots: &Roots) -> Vec<PreRestoreInfo> {
     kept
 }
 
-/// Deletes a kept set: both roots' folders and its seal key. An invalid
+/// Deletes a kept set: its seal key, then both roots' folders. An invalid
 /// or unknown stamp is `GONE`; a set a waiting or running restore uses is
-/// `RESTORE_PENDING`. Blocks on the keychain.
+/// `RESTORE_PENDING`; one an apply holds `restore.lock` over,
+/// `BACKUP_BUSY`. Blocks on the keychain.
 pub fn delete_pre_restore(
     roots: &Roots,
     store: &SecretStore,
@@ -419,7 +451,7 @@ pub fn delete_pre_restore(
         return Err(BackupError::Busy(BACKUP_BUSY));
     };
     let named = |source: &RestoreSource| matches!(source, RestoreSource::PreRestore { stamp: used } if used == stamp);
-    let journal = Journal::load(&backups)?;
+    let journal = Journal::load(roots)?;
     let in_use = journal
         .as_ref()
         .is_some_and(|journal| journal.stamp == stamp || named(&journal.source))
@@ -427,25 +459,38 @@ pub fn delete_pre_restore(
     if in_use {
         return Err(BackupError::Refused(RESTORE_PENDING));
     }
-    let mut found = false;
-    for root in pass_roots(roots) {
-        found |= remove_tree(&kept_dir(roots, *root, stamp))?;
+    if !pass_roots(roots)
+        .iter()
+        .any(|root| real_dir(&kept_dir(roots, *root, stamp)))
+    {
+        return Err(BackupError::Refused(GONE));
     }
+    // The key goes first: a keychain that refuses leaves the set whole, and
+    // a stop after it leaves a set whose key is gone, never a key without
+    // its set (M8). Removing the info unlists the set before its folders.
     forget_seal_key(store, &kept_account(stamp))
         .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
-    if found {
-        Ok(())
-    } else {
-        Err(BackupError::Refused(GONE))
+    let meta = kept_dir(roots, RootKey::Core, stamp).join(META);
+    if real_dir(&meta) {
+        remove_if_there(&meta.join(INFO))?;
+        sync_dir(&meta)?;
     }
+    for root in pass_roots(roots) {
+        remove_tree(&kept_dir(roots, *root, stamp))?;
+    }
+    Ok(())
 }
 
 /// Moves a finished upload of the browser's data from before its own
 /// restore into the newest kept set's `meta/web-part.bin` (D18, D19),
-/// replacing one kept before.
+/// replacing one kept before. `BACKUP_BUSY` while an apply holds
+/// `restore.lock`.
 pub fn keep_previous_web_part(roots: &Roots, upload: &Path) -> Result<(), BackupError> {
     let gone = || BackupError::Refused(GONE);
-    backups_dir(roots).ok_or_else(gone)?;
+    let backups = backups_dir(roots).ok_or_else(gone)?;
+    let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
+        return Err(BackupError::Busy(BACKUP_BUSY));
+    };
     if !is_file(upload) {
         return Err(gone());
     }
@@ -471,30 +516,40 @@ enum Work {
     Start(PendingFile),
 }
 
-/// Plans a fresh apply of `pending` and saves the journal. A source that
-/// isn't there whole, or whose manifest doesn't match its folders, is
-/// never applied: `pending.json` is removed and the answer is `GONE`.
+/// Plans a fresh apply of `pending` and saves the journal. A restore that
+/// can never be applied is refused with `pending.json` removed (B Task 8
+/// I2): a source that isn't there whole (`GONE`) or holds data its
+/// manifest doesn't name (`DAMAGED`), sealed items that don't open
+/// (`KEYCHAIN_SET_UNREADABLE`), or a rename that can't happen. A keychain
+/// that needs the owner, or another read error, keeps it for a retry.
 fn plan(
     roots: &Roots,
     store: &SecretStore,
     backups: &Path,
     pending: PendingFile,
 ) -> Result<Journal, BackupError> {
-    let Some(set) = check_source(roots, &pending.source)? else {
-        remove_if_there(&backups.join(PENDING))?;
-        sync_dir(backups)?;
-        return Err(BackupError::Refused(GONE));
+    let set = match check_source(roots, &pending.source) {
+        Ok(Some(set)) => set,
+        Ok(None) => return Err(refuse(backups, BackupError::Refused(GONE))),
+        Err(error @ BackupError::Format(_)) => return Err(refuse(backups, error)),
+        Err(error) => return Err(error),
     };
     // The source's items open before anything moves; only their accounts
     // are kept.
     let written: Vec<ItemRef> = if set.keychain {
-        open_items(roots, store, &pending.source)?
-            .iter()
-            .map(|item| ItemRef {
-                service: item.service.clone(),
-                account: item.account.clone(),
-            })
-            .collect()
+        match open_items(roots, store, &pending.source) {
+            Ok(items) => items
+                .iter()
+                .map(|item| ItemRef {
+                    service: item.service.clone(),
+                    account: item.account.clone(),
+                })
+                .collect(),
+            Err(BackupError::Keychain(message)) if message == KEYCHAIN_SET_UNREADABLE => {
+                return Err(refuse(backups, BackupError::Keychain(message)))
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         Vec::new()
     };
@@ -508,7 +563,9 @@ fn plan(
             places,
         });
     }
-    one_volume(roots, &pending.source, &passes)?;
+    if !renames_can_happen(roots, &pending.source, &passes)? {
+        return Err(refuse(backups, cant_move()));
+    }
     let web_part = set.web_part.then(|| match &pending.source {
         RestoreSource::Staged { id } => id.clone(),
         _ => random_id(),
@@ -535,37 +592,36 @@ struct Apply<'a> {
     store: &'a SecretStore,
     backups: &'a Path,
     journal: Journal,
-    stop: &'a dyn Fn(&Step, Crash) -> bool,
+    stop: &'a dyn Fn(&Step, Point) -> bool,
 }
 
 impl Apply<'_> {
     fn run(mut self) -> Result<ApplyOutcome, BackupError> {
+        if self.journal.done(&Step::RollingBack) {
+            return self.roll_back();
+        }
         if !self.journal.done(&Step::Sealed) {
+            // A plan never names a kept set that is there (M3); a journal
+            // that does would lose that set's sealed items.
+            if kept_info(self.roots, &self.journal.stamp).is_some() {
+                return Err(BackupError::Format(DAMAGED));
+            }
             self.seal()?;
             self.step(Step::Sealed)?;
         }
-        for pass in self.journal.passes.clone() {
-            for name in &pass.moves {
-                let step = Step::Moved {
-                    root: pass.root,
-                    name: name.clone(),
-                };
-                if !self.journal.done(&step) {
-                    self.move_aside(pass.root, name)?;
-                    self.step(step)?;
-                }
+        // Before the keychain writes, a rename that fails for good undoes
+        // the renames; from them on, the apply only goes forward (I1).
+        if let Err((step, error)) = self.renames() {
+            if !permanent(&error) || self.journal.done(&Step::KeysWritten) {
+                return Err(error);
             }
-            let source = source_dir(self.roots, &self.journal.source, pass.root)?;
-            for name in &pass.places {
-                let step = Step::Placed {
-                    root: pass.root,
-                    name: name.clone(),
-                };
-                if !self.journal.done(&step) {
-                    self.place(&source, pass.root, name)?;
-                    self.step(step)?;
-                }
+            tracing::warn!("A restore couldn't move its data, so Bruhs is putting it back");
+            // The failed step may have half happened: the undo judges each
+            // rename by what is on disk.
+            if !self.journal.done(&step) {
+                self.journal.steps.push(step);
             }
+            return self.roll_back();
         }
         if !self.journal.done(&Step::KeysWritten) {
             self.write_keys()?;
@@ -595,13 +651,46 @@ impl Apply<'_> {
         Ok(ApplyOutcome::Applied(result))
     }
 
+    /// Each root's renames: today's entries aside, then the source's in.
+    /// On a failure, answers the step it failed at.
+    fn renames(&mut self) -> Result<(), (Step, BackupError)> {
+        for pass in self.journal.passes.clone() {
+            let moves = pass.moves.iter().map(|name| Step::Moved {
+                root: pass.root,
+                name: name.clone(),
+            });
+            let places = pass.places.iter().map(|name| Step::Placed {
+                root: pass.root,
+                name: name.clone(),
+            });
+            for step in moves.chain(places) {
+                if self.journal.done(&step) {
+                    continue;
+                }
+                let done = if (self.stop)(&step, Point::Before) {
+                    Err(io::Error::from_raw_os_error(libc::EACCES).into())
+                } else {
+                    match &step {
+                        Step::Moved { root, name } => self.move_aside(*root, name),
+                        Step::Placed { root, name } => self.place(*root, name),
+                        _ => Ok(()),
+                    }
+                };
+                if let Err(error) = done.and_then(|()| self.step(step.clone())) {
+                    return Err((step, error));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Records `step`, stopping where a test asks.
     fn step(&mut self, step: Step) -> Result<(), BackupError> {
-        if (self.stop)(&step, Crash::Acted) {
+        if (self.stop)(&step, Point::Acted) {
             return Err(stopped());
         }
         self.journal.record(self.backups, step.clone())?;
-        if (self.stop)(&step, Crash::Recorded) {
+        if (self.stop)(&step, Point::Recorded) {
             return Err(stopped());
         }
         Ok(())
@@ -616,12 +705,12 @@ impl Apply<'_> {
     /// (D13). A seal a stop left behind is made again.
     fn seal(&self) -> Result<(), BackupError> {
         for pass in &self.journal.passes {
-            private_dir(&self.roots.backups(pass.root))?;
-            private_dir(&self.kept(pass.root))?;
+            new_dir(&self.roots.backups(pass.root))?;
+            new_dir(&self.kept(pass.root))?;
         }
         let kept = self.kept(RootKey::Core);
         let meta = kept.join(META);
-        private_dir(&meta)?;
+        new_dir(&meta)?;
         let sealed = meta.join(SEALED);
         remove_if_there(&sealed)?;
         let items = current_items(self.roots, self.store)?;
@@ -648,23 +737,24 @@ impl Apply<'_> {
         let from = live(self.roots, root, name);
         let to = self.kept(root).join(name);
         match (exists(&from)?, exists(&to)?) {
-            (true, false) => rename_synced(&from, &to),
+            (true, false) => rename_retrying(&from, &to),
             (false, _) => Ok(()),
             (true, true) => Err(in_the_way()),
         }
     }
 
     /// Renames the source's `name` into the root. Done already when it is
-    /// gone from the source.
-    fn place(&self, source: &Path, root: RootKey, name: &str) -> Result<(), BackupError> {
-        let from = source.join(name);
+    /// gone from the source. Something that took the name since today's
+    /// entry moved aside is in the way, for good.
+    fn place(&self, root: RootKey, name: &str) -> Result<(), BackupError> {
+        let from = source_dir(self.roots, &self.journal.source, root)?.join(name);
         let to = live(self.roots, root, name);
         match (exists(&from)?, exists(&to)?) {
             (true, false) => {
                 if let Some(parent) = to.parent() {
                     make_root(parent)?;
                 }
-                rename_synced(&from, &to)
+                rename_retrying(&from, &to)
             }
             (false, _) => Ok(()),
             (true, true) => Err(in_the_way()),
@@ -727,7 +817,7 @@ impl Apply<'_> {
             .join(META)
             .join(WEB_PART);
         let folder = self.backups.join(WEB_PARTS);
-        private_dir(&folder)?;
+        new_dir(&folder)?;
         if exists(&from)? {
             rename_synced(&from, &folder.join(format!("{id}.bin")))?;
         }
@@ -735,29 +825,10 @@ impl Apply<'_> {
     }
 
     /// Writes the kept set's `meta/info.json` from what it holds, then
-    /// `result.json`. Both are replaced whole, so doing it again is safe.
+    /// `result.json`, then makes it all durable with one full sync (M5).
+    /// Both files are replaced whole, so doing it again is safe.
     fn finish(&self) -> Result<(), BackupError> {
-        let mut roots = Vec::new();
-        let mut bytes = 0_u64;
-        for pass in &self.journal.passes {
-            let folder = self.kept(pass.root);
-            let names = top_names(&folder)?;
-            for name in &names {
-                bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
-            }
-            roots.push(KeptRoot {
-                root: pass.root,
-                names,
-            });
-        }
-        let info = KeptInfo {
-            stamp: self.journal.stamp.clone(),
-            made_at_ms: self.journal.made_at_ms,
-            bytes,
-            keychain: true,
-            roots,
-        };
-        write_atomically(&self.kept(RootKey::Core).join(META), INFO, &to_json(&info)?)?;
+        self.write_info(true)?;
         let web_part = self.journal.web_part.as_ref().and_then(|id| {
             let path = self.backups.join(WEB_PARTS).join(format!("{id}.bin"));
             let metadata = std::fs::symlink_metadata(path).ok()?;
@@ -774,7 +845,41 @@ impl Apply<'_> {
             service_to_restart: self.journal.service_to_restart,
             web_part,
         };
-        write_atomically(self.backups, RESULT, &to_json(&result)?)
+        write_atomically(self.backups, RESULT, &to_json(&result)?)?;
+        full_sync(self.backups)
+    }
+
+    /// Writes the kept set's `meta/info.json` from what its folders hold:
+    /// its manifest, which a put back checks.
+    fn write_info(&self, keychain: bool) -> Result<(), BackupError> {
+        let mut roots = Vec::new();
+        let mut bytes = 0_u64;
+        for pass in &self.journal.passes {
+            let folder = self.kept(pass.root);
+            let names = if real_dir(&folder) {
+                top_names(&folder)?
+            } else {
+                Vec::new()
+            };
+            for name in &names {
+                bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
+            }
+            roots.push(KeptRoot {
+                root: pass.root,
+                names,
+            });
+        }
+        let info = KeptInfo {
+            stamp: self.journal.stamp.clone(),
+            made_at_ms: self.journal.made_at_ms,
+            bytes,
+            keychain,
+            roots,
+        };
+        let meta = self.kept(RootKey::Core).join(META);
+        new_dir(&self.kept(RootKey::Core))?;
+        new_dir(&meta)?;
+        write_atomically(&meta, INFO, &to_json(&info)?)
     }
 
     /// Removes the source and its seal key, then `pending.json`, then the
@@ -851,7 +956,8 @@ fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupErro
     }
     let mut places = Vec::new();
     for (root, names) in &expected {
-        let Some(staged) = staged_names(&staging_dir(roots, *root, id))? else {
+        let folder = staging_dir(roots, *root, id);
+        let Some(staged) = staged_names(&folder)? else {
             return Ok(None);
         };
         if !names
@@ -860,7 +966,18 @@ fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupErro
         {
             return Ok(None);
         }
-        places.push((*root, staged));
+        // Data the manifest doesn't name is never placed (M4): a file or a
+        // folder holding one is damage; a folder holding none comes from
+        // an empty folder in the backup and stays behind.
+        let mut named = Vec::new();
+        for name in staged {
+            if names.contains(name.as_str()) {
+                named.push(name);
+            } else if holds_files(&folder.join(&name))? {
+                return Err(BackupError::Format(DAMAGED));
+            }
+        }
+        places.push((*root, named));
     }
     let keychain = manifest.options.keychain;
     let web_part = manifest.web_db_version.is_some();
@@ -985,26 +1102,78 @@ fn live_names(roots: &Roots, root: RootKey, places: &[String]) -> Result<Vec<Str
     Ok(names.into_values().collect())
 }
 
-/// Refuses a plan whose renames would cross volumes: a rename can't, and
-/// an apply that stopped there could never finish.
-fn one_volume(roots: &Roots, source: &RestoreSource, passes: &[Pass]) -> Result<(), BackupError> {
+/// Whether every rename the plan makes can happen (B Task 8 I1 f, M2), so
+/// a rollback stays for the rare case: each entry is on the volume it goes
+/// to, by its own device (a mount point is another), this user may write
+/// the folders it leaves and enters, and a folder itself, since moving it
+/// to another parent rewrites its `..`.
+fn renames_can_happen(
+    roots: &Roots,
+    source: &RestoreSource,
+    passes: &[Pass],
+) -> Result<bool, BackupError> {
     for pass in passes {
         let backups = roots.backups(pass.root);
-        private_dir(&backups)?;
+        new_dir(&backups)?;
         let kept = device(&backups)?;
-        let staged = device(&source_dir(roots, source, pass.root)?)?;
+        let from = source_dir(roots, source, pass.root)?;
+        if !writable(&backups) || !writable(&from) {
+            return Ok(false);
+        }
         for name in &pass.moves {
-            if device(&live_parent(roots, pass.root, name))? != kept {
-                return Err(other_volume());
+            let parent = live_parent(roots, pass.root, name);
+            if !entry_can_move(&parent.join(name), &parent, kept)? {
+                return Ok(false);
             }
         }
         for name in &pass.places {
-            if nearest_device(&live_parent(roots, pass.root, name))? != staged {
-                return Err(other_volume());
+            let parent = live_parent(roots, pass.root, name);
+            if exists(&parent)? && !writable(&parent) {
+                return Ok(false);
+            }
+            if !entry_can_move(&from.join(name), &from, nearest_device(&parent)?)? {
+                return Ok(false);
             }
         }
     }
-    Ok(())
+    Ok(true)
+}
+
+/// Whether `entry` (in `parent`) can be renamed to a folder on `device`.
+/// One that isn't there has nothing to move.
+fn entry_can_move(entry: &Path, parent: &Path, device: u64) -> Result<bool, BackupError> {
+    let metadata = match std::fs::symlink_metadata(entry) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(metadata.dev() == device && writable(parent) && (!metadata.is_dir() || writable(entry)))
+}
+
+/// Whether this user may write `path`, judged by the system, not by the
+/// mode bits alone.
+fn writable(path: &Path) -> bool {
+    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
+}
+
+/// Whether a file is at or under `path`, never following a link.
+fn holds_files(path: &Path) -> Result<bool, BackupError> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_dir() {
+        return Ok(true);
+    }
+    let mut folders = vec![path.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                folders.push(entry.path());
+            } else {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn device(path: &Path) -> Result<u64, BackupError> {
@@ -1151,7 +1320,7 @@ fn new_stamp(roots: &Roots) -> Result<String, BackupError> {
 
 /// The roots one apply passes over: the core root, and the desktop root
 /// unless both are one folder (ruling F33).
-fn pass_roots(roots: &Roots) -> &'static [RootKey] {
+pub(super) fn pass_roots(roots: &Roots) -> &'static [RootKey] {
     if roots.same() {
         &[RootKey::Core]
     } else {
@@ -1244,15 +1413,85 @@ fn rename_synced(from: &Path, to: &Path) -> Result<(), BackupError> {
     Ok(())
 }
 
-/// Makes a missing root folder (and its parents) 0700.
+/// [`rename_synced`], tried once more when a folder target briefly isn't
+/// empty (`ENOTEMPTY`).
+fn rename_retrying(from: &Path, to: &Path) -> Result<(), BackupError> {
+    match rename_synced(from, to) {
+        Err(BackupError::Io(error)) if error.raw_os_error() == Some(libc::ENOTEMPTY) => {
+            rename_synced(from, to)
+        }
+        done => done,
+    }
+}
+
+/// Makes a missing root folder (and its parents) 0700, syncing the folder
+/// above each one made (M5).
 fn make_root(folder: &Path) -> Result<(), BackupError> {
-    if !exists(folder)? {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(folder)?;
+    let mut missing = Vec::new();
+    let mut at = Some(folder);
+    while let Some(path) = at {
+        if exists(path)? {
+            break;
+        }
+        missing.push(path);
+        at = path.parent();
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)?;
+    for made in missing.iter().rev() {
+        if let Some(parent) = made.parent() {
+            sync_dir(parent)?;
+        }
     }
     Ok(())
+}
+
+/// [`private_dir`] (0700, never a link), syncing the folder above when it
+/// made one (M5).
+fn new_dir(folder: &Path) -> Result<(), BackupError> {
+    let made = !exists(folder)?;
+    private_dir(folder)?;
+    if let (true, Some(parent)) = (made, folder.parent()) {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+/// Removes `pending.json` and answers `error` (B Task 8 I2): a restore
+/// that can never be applied doesn't block backups and restores.
+fn refuse(backups: &Path, error: BackupError) -> BackupError {
+    match remove_if_there(&backups.join(PENDING)).and_then(|()| sync_dir(backups)) {
+        Ok(()) => error,
+        Err(failed) => failed,
+    }
+}
+
+/// Whether a rename failed for good (B Task 8 I1): a name something else
+/// took, no permission, another volume, a busy mount point or a folder
+/// that isn't empty or isn't one. Anything else may pass on a retry.
+fn permanent(error: &BackupError) -> bool {
+    let BackupError::Io(error) = error else {
+        return false;
+    };
+    error.kind() == io::ErrorKind::AlreadyExists
+        || error.raw_os_error().is_some_and(|code| {
+            [
+                libc::EACCES,
+                libc::EPERM,
+                libc::EXDEV,
+                libc::EBUSY,
+                libc::ENOTEMPTY,
+                libc::EEXIST,
+                libc::EISDIR,
+                libc::ENOTDIR,
+            ]
+            .contains(&code)
+        })
 }
 
 /// Removes a real folder and everything in it, never through a link, then
@@ -1343,10 +1582,15 @@ fn stopped() -> BackupError {
     BackupError::Io(io::Error::other("the apply stopped at a crash point"))
 }
 
+/// Something took a name the apply needs: permanent.
 fn in_the_way() -> BackupError {
-    BackupError::Io(io::Error::other("an entry is in the way of the restore"))
+    BackupError::Io(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "an entry is in the way of the restore",
+    ))
 }
 
-fn other_volume() -> BackupError {
-    BackupError::Io(io::Error::other("a restore can't move data across volumes"))
+/// A rename the plan makes can't happen: another volume, or no permission.
+fn cant_move() -> BackupError {
+    BackupError::Io(io::Error::other("a restore can't move this data"))
 }
