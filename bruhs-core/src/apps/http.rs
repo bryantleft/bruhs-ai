@@ -20,13 +20,13 @@ use crate::secrets::AppSecret;
 use base64::Engine;
 use bruhs_models::apps::{
     app_host, host_declared, normalize_path, validate_call, AppAuth, AppCall, AppConnector,
-    AppResponse, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE, APP_CALL_TIMEOUT_MS, APP_CUT_NOTE,
-    APP_GET_BODY, APP_HOST_REFUSED, APP_METHOD, APP_METHODS, APP_NOT_TEXT, APP_PATH,
+    AppResponse, APP_BODY_MAX_BYTES, APP_BODY_TOO_LARGE, APP_BUSY, APP_CALL_TIMEOUT_MS,
+    APP_CUT_NOTE, APP_GET_BODY, APP_HOST_REFUSED, APP_METHOD, APP_METHODS, APP_NOT_TEXT, APP_PATH,
     APP_QUERY_VALUES, APP_READ_MAX_BYTES, APP_RESPONSE_MAX_BYTES, APP_TIMED_OUT, APP_TOO_LARGE,
     APP_UNREACHABLE, EMAIL_SHAPE, MAX_APP_CALLS, RESPONSE_HEADERS, TOKEN_SHAPE, UNKNOWN_APP,
     USER_AGENT,
 };
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::Value;
@@ -67,6 +67,7 @@ const COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type LookupFuture = Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send>>;
 type Lookup = Arc<dyn Fn(String) -> LookupFuture + Send + Sync>;
+type OwnAddresses = Arc<dyn Fn() -> io::Result<Vec<IpAddr>> + Send + Sync>;
 
 /// The app client: one per process, cloned cheaply, with at most
 /// [`MAX_APP_CALLS`] calls in flight across every clone.
@@ -259,17 +260,19 @@ impl AppHttp {
                 .body(body);
         }
         // One deadline covers the wait for a slot and the whole call, so a
-        // call never outlives APP_CALL_TIMEOUT_MS (F11).
+        // call never outlives APP_CALL_TIMEOUT_MS (F11). Running out while
+        // waiting for a slot means nothing was sent, and says so.
+        let deadline = tokio::time::Instant::now() + self.timeout;
+        let _slot = tokio::time::timeout_at(deadline, self.calls.acquire())
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .ok_or(AppsError::Unavailable(APP_BUSY))?;
         let work = async {
-            let _slot = self
-                .calls
-                .acquire()
-                .await
-                .map_err(|_| AppsError::Unavailable(APP_UNREACHABLE))?;
             let response = request.send().await.map_err(transport_error)?;
             read_reply(response, &secrets).await
         };
-        tokio::time::timeout(self.timeout, work)
+        tokio::time::timeout_at(deadline, work)
             .await
             .map_err(|_| AppsError::TimedOut(APP_TIMED_OUT))?
     }
@@ -440,9 +443,13 @@ fn basic_credentials(
 }
 
 /// Every string a reply could echo a secret in, at least
-/// [`MIN_SECRET_BYTES`] long: the token, the key, the whole auth value and
-/// Basic's `email:token` and base64, each also JSON-escaped (`/` as `\/`)
-/// and percent-encoded (upper- and lower-case hex, and form encoding) (F8).
+/// [`MIN_SECRET_BYTES`] long: the token, the key, the whole auth value,
+/// Basic's `email:token`, and the base64 of the token and of `email:token`
+/// (standard and URL-safe, padded and not), each also JSON-escaped (`/` as
+/// `\/`) and percent-encoded (upper- and lower-case hex, and form encoding)
+/// (F8). Base64 of a secret inside a larger encoded blob, at another
+/// alignment, isn't listed; [`clean`] still withholds percent and `\u`
+/// forms it can decode.
 pub(crate) fn secret_strings(
     connector: &AppConnector,
     params: &BTreeMap<String, String>,
@@ -453,11 +460,16 @@ pub(crate) fn secret_strings(
     if let Ok((_, value)) = auth_header(connector, params, secret) {
         plain.push(value);
     }
+    let mut encoded = vec![secret.token.clone()];
     if connector.auth == AppAuth::Basic {
         if let Some(email) = params.get("email") {
-            plain.push(Zeroizing::new(format!("{email}:{}", secret.token.as_str())));
+            let credentials = Zeroizing::new(format!("{email}:{}", secret.token.as_str()));
+            encoded.push(credentials.clone());
+            plain.push(credentials);
         }
-        plain.extend(basic_credentials(params, secret).ok());
+    }
+    for text in encoded {
+        plain.extend(base64_forms(text.as_bytes()));
     }
     let mut all = Vec::with_capacity(plain.len() * 5);
     for text in plain {
@@ -474,6 +486,13 @@ pub(crate) fn secret_strings(
     all.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     all.dedup_by(|a, b| a.as_str() == b.as_str());
     all
+}
+
+/// `bytes` in standard and URL-safe base64, padded and not.
+fn base64_forms(bytes: &[u8]) -> [Zeroizing<String>; 4] {
+    use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD};
+    [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD]
+        .map(|engine| Zeroizing::new(engine.encode(bytes)))
 }
 
 /// `%2F` as `%2f`.
@@ -512,10 +531,94 @@ pub(crate) fn scrub(text: &str, secrets: &[&str]) -> String {
     out
 }
 
-/// [`scrub`] on every string value and object key.
+/// [`scrub`], then a look for any secret that a decoder would still turn
+/// up: on copies with JSON escapes (`\uXXXX`, `\/` and the rest) undone,
+/// percent escapes undone, and both. A match withholds the whole text as
+/// `[redacted]`, since only an escape the scrub didn't list can hide one
+/// (mixed-case hex, partial encoding, `\u` escapes outside JSON).
+fn clean(text: &str, secrets: &[&str]) -> String {
+    let scrubbed = scrub(text, secrets);
+    if hides_secret(&scrubbed, secrets) {
+        REDACTED.to_owned()
+    } else {
+        scrubbed
+    }
+}
+
+fn hides_secret(text: &str, secrets: &[&str]) -> bool {
+    if !text.contains(['%', '\\']) {
+        return false;
+    }
+    // The decoded copies may hold a secret, so they're wiped when dropped.
+    let unescaped = Zeroizing::new(json_unescape(text));
+    let decoded = Zeroizing::new(percent_decode_str(text).decode_utf8_lossy().into_owned());
+    let both = Zeroizing::new(
+        percent_decode_str(&unescaped)
+            .decode_utf8_lossy()
+            .into_owned(),
+    );
+    [&unescaped, &decoded, &both].iter().any(|copy| {
+        secrets
+            .iter()
+            .any(|secret| !secret.is_empty() && copy.contains(secret))
+    })
+}
+
+/// Undoes JSON string escapes wherever they appear, surrogate pairs
+/// included; anything that isn't a whole escape stays as it is.
+fn json_unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('\\') {
+        out.push_str(&rest[..at]);
+        let escape = &rest[at..];
+        let (decoded, used) = match escape.as_bytes().get(1) {
+            Some(b'u') => unicode_escape(escape).unwrap_or(('\\', 1)),
+            Some(b'/') => ('/', 2),
+            Some(b'\\') => ('\\', 2),
+            Some(b'"') => ('"', 2),
+            Some(b'n') => ('\n', 2),
+            Some(b't') => ('\t', 2),
+            Some(b'r') => ('\r', 2),
+            Some(b'b') => ('\u{8}', 2),
+            Some(b'f') => ('\u{c}', 2),
+            _ => ('\\', 1),
+        };
+        out.push(decoded);
+        rest = &escape[used..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `\uXXXX`, or a `\uD8xx\uDCxx` surrogate pair, at the start of `escape`:
+/// the character and the bytes it took.
+fn unicode_escape(escape: &str) -> Option<(char, usize)> {
+    let unit = |at: usize| {
+        let hex = escape.get(at + 2..at + 6)?;
+        if hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            u16::from_str_radix(hex, 16).ok()
+        } else {
+            None
+        }
+    };
+    let first = unit(0)?;
+    if (0xD800..0xDC00).contains(&first) {
+        let second = escape
+            .get(6..8)
+            .filter(|next| *next == "\\u")
+            .and_then(|_| unit(6))
+            .filter(|low| (0xDC00..0xE000).contains(low))?;
+        let code = 0x10000 + ((u32::from(first) - 0xD800) << 10) + (u32::from(second) - 0xDC00);
+        return char::from_u32(code).map(|c| (c, 12));
+    }
+    char::from_u32(u32::from(first)).map(|c| (c, 6))
+}
+
+/// [`clean`] on every string value and object key.
 fn scrub_value(value: Value, secrets: &[&str]) -> Value {
     match value {
-        Value::String(text) => Value::String(scrub(&text, secrets)),
+        Value::String(text) => Value::String(clean(&text, secrets)),
         Value::Array(items) => Value::Array(
             items
                 .into_iter()
@@ -525,7 +628,7 @@ fn scrub_value(value: Value, secrets: &[&str]) -> Value {
         Value::Object(object) => Value::Object(
             object
                 .into_iter()
-                .map(|(key, item)| (scrub(&key, secrets), scrub_value(item, secrets)))
+                .map(|(key, item)| (clean(&key, secrets), scrub_value(item, secrets)))
                 .collect(),
         ),
         other => other,
@@ -533,7 +636,8 @@ fn scrub_value(value: Value, secrets: &[&str]) -> Value {
 }
 
 /// Reads at most [`APP_READ_MAX_BYTES`], then scrubs the raw text, parses
-/// it, scrubs the parsed JSON again and cuts what's over
+/// it, [`clean`]s the parsed JSON's strings (or, for text, the whole text)
+/// and cuts what's over
 /// [`APP_RESPONSE_MAX_BYTES`].
 async fn read_reply(
     mut response: reqwest::Response,
@@ -573,7 +677,8 @@ fn reply(
             let clean = scrub_value(value, secrets);
             (clean.to_string(), Some(clean))
         }
-        Err(_) => (scrubbed, None),
+        // Not JSON: withheld whole if a decoder would turn up a secret.
+        Err(_) => (clean(&scrubbed, secrets), None),
     };
     if shown.len() <= APP_RESPONSE_MAX_BYTES {
         return AppResponse {
@@ -597,7 +702,7 @@ fn reply(
     }
 }
 
-/// Only [`RESPONSE_HEADERS`], each scrubbed, repeated values joined.
+/// Only [`RESPONSE_HEADERS`], each [`clean`]ed, repeated values joined.
 fn kept_headers(headers: &HeaderMap, secrets: &[&str]) -> BTreeMap<String, String> {
     RESPONSE_HEADERS
         .iter()
@@ -609,7 +714,7 @@ fn kept_headers(headers: &HeaderMap, secrets: &[&str]) -> BTreeMap<String, Strin
                 .collect();
             let joined = values.join(", ");
             (!values.is_empty() && joined.len() <= MAX_HEADER_BYTES)
-                .then(|| ((*name).to_owned(), scrub(&joined, secrets)))
+                .then(|| ((*name).to_owned(), clean(&joined, secrets)))
         })
         .collect()
 }
@@ -632,9 +737,24 @@ fn transport_error(error: reqwest::Error) -> AppsError {
 }
 
 /// Whether an app host's answer may not be called: not public
-/// ([`crate::net::public_ip`]) or this computer (ruling F7).
+/// ([`crate::net::public_ip`]) or this computer (ruling F7). Where this
+/// computer's interface addresses can't be read, every address is refused.
+/// The resolver reads the interfaces once per answer and asks
+/// [`refused_among`], so only tests ask this directly.
+#[cfg(test)]
 pub(crate) fn refused_address(ip: IpAddr) -> bool {
-    !crate::net::public_ip(ip) || crate::local_tools::is_this_computer(ip)
+    refused_among(ip, &crate::local_tools::interface_addresses())
+}
+
+/// [`refused_address`] against interface addresses already read (or the
+/// error that kept them from being read, which refuses: fail closed).
+fn refused_among(ip: IpAddr, own: &io::Result<Vec<IpAddr>>) -> bool {
+    match own {
+        Ok(own) => {
+            !crate::net::public_ip(ip) || crate::local_tools::is_this_computer_among(ip, own)
+        }
+        Err(_) => true,
+    }
 }
 
 /// The resolver's refusal of an undeclared host or a non-public answer.
@@ -652,9 +772,12 @@ impl std::error::Error for HostRefused {}
 /// Answers only for a declared host ([`host_declared`], checked before any
 /// lookup), and refuses the whole answer when any address is
 /// [`refused_address`]: never a filtered list, since a public SaaS host
-/// never resolves here and such an answer is tampering.
+/// never resolves here and such an answer is tampering. When this computer's
+/// interface addresses can't be read, every answer is refused.
 pub(crate) struct GuardedResolver {
     lookup: Lookup,
+    /// This computer's interface addresses, read for each answer.
+    own: OwnAddresses,
 }
 
 impl GuardedResolver {
@@ -673,7 +796,18 @@ impl GuardedResolver {
     {
         GuardedResolver {
             lookup: Arc::new(move |name| Box::pin(lookup(name))),
+            own: Arc::new(crate::local_tools::interface_addresses),
         }
+    }
+
+    /// Reads this computer's addresses from `own` instead of its interfaces.
+    #[cfg(test)]
+    fn with_own(
+        mut self,
+        own: impl Fn() -> io::Result<Vec<IpAddr>> + Send + Sync + 'static,
+    ) -> Self {
+        self.own = Arc::new(own);
+        self
     }
 }
 
@@ -681,6 +815,7 @@ impl Resolve for GuardedResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let name = name.as_str().to_owned();
         let lookup = Arc::clone(&self.lookup);
+        let own = Arc::clone(&self.own);
         Box::pin(async move {
             if !host_declared(&name) {
                 return Err(Box::new(HostRefused) as BoxError);
@@ -689,9 +824,10 @@ impl Resolve for GuardedResolver {
             if addresses.is_empty() {
                 return Err(io::Error::from(io::ErrorKind::NotFound).into());
             }
+            let own = own();
             if addresses
                 .iter()
-                .any(|address| refused_address(address.ip()))
+                .any(|address| refused_among(address.ip(), &own))
             {
                 return Err(Box::new(HostRefused) as BoxError);
             }

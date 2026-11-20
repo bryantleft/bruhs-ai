@@ -4,8 +4,8 @@
 use super::*;
 use base64::Engine;
 use bruhs_models::apps::{
-    connector, AppHost, APP_CUT_NOTE, APP_HOST_REFUSED, APP_NOT_TEXT, APP_RESPONSE_MAX_BYTES,
-    APP_TIMED_OUT, APP_TOO_LARGE, APP_UNREACHABLE, CONNECTORS,
+    connector, AppHost, APP_BUSY, APP_CUT_NOTE, APP_HOST_REFUSED, APP_NOT_TEXT,
+    APP_RESPONSE_MAX_BYTES, APP_TIMED_OUT, APP_TOO_LARGE, APP_UNREACHABLE, CONNECTORS,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -182,6 +182,73 @@ async fn echoed_tokens_never_come_back() {
     let wire = serde_json::to_string(&reply).unwrap();
     for leaked in [&token, &core, &basic, &encoded, &json_escaped(&token)] {
         assert!(!wire.contains(leaked.as_str()), "leaked {leaked}");
+    }
+}
+
+#[tokio::test]
+async fn a_secret_a_decoder_would_find_is_withheld() {
+    let (server, http) = upstream().await;
+    let (token, core) = canary();
+    let mixed_case = token
+        .replace('/', "%2f")
+        .replace('+', "%2B")
+        .replace('=', "%3d");
+    let partial = token.replace('+', "%2B");
+    let unicode_escaped = token.replacen('A', "\\u0041", 1);
+    let routes = [
+        ("/escaped", format!("token: {unicode_escaped}\n")),
+        (
+            "/mixed",
+            format!("<a href=\"/next?t={mixed_case}\">next</a>"),
+        ),
+        ("/partial", format!("next=/x?t={partial}")),
+        ("/innocent", "100% done \\u0041 \\n %2Fpath".to_owned()),
+        (
+            "/json",
+            format!(r#"{{"next": "/x?t={mixed_case}", "ok": "a%20b"}}"#),
+        ),
+    ];
+    for (route, body) in routes {
+        Mock::given(path(route))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_raw(body.into_bytes(), "text/plain")
+                    .insert_header(
+                        "link",
+                        format!("</x?t={mixed_case}>; rel=\"next\"").as_str(),
+                    )
+                    .insert_header("retry-after", "7"),
+            )
+            .mount(&server)
+            .await;
+    }
+    let github = app("github");
+    let account = params(&[]);
+    let app_secret = secret(&token);
+    let get = |route: &'static str| http.raw(github, &account, &app_secret, "GET", route, None);
+    for route in ["/escaped", "/mixed", "/partial"] {
+        let reply = get(route).await.unwrap();
+        assert_eq!(reply.status, 400, "{route}");
+        assert_eq!(reply.body, json!("[redacted]"), "{route}");
+        assert_eq!(reply.headers["retry-after"], "7");
+        assert_eq!(reply.headers["content-type"], "text/plain");
+        assert_eq!(reply.headers["link"], "[redacted]");
+    }
+    let innocent = get("/innocent").await.unwrap();
+    assert_eq!(innocent.body, json!("100% done \\u0041 \\n %2Fpath"));
+    let parsed = get("/json").await.unwrap();
+    assert_eq!(parsed.body, json!({"next": "[redacted]", "ok": "a%20b"}));
+    let wire = serde_json::to_string(&parsed).unwrap();
+    assert!(!wire.contains(&core));
+}
+
+#[test]
+fn json_escapes_are_undone_wherever_they_appear() {
+    assert_eq!(json_unescape(r#"a\u0041\/b\\c\"d\n"#), "aA/b\\c\"d\n");
+    assert_eq!(json_unescape(r"\ud83d\ude00 x"), "\u{1f600} x");
+    // Anything that isn't a whole escape stays as written.
+    for kept in [r"\ud83d alone", r"\u12", r"\x41", r"end\", r"\uZZZZ"] {
+        assert_eq!(json_unescape(kept), kept);
     }
 }
 
@@ -399,15 +466,20 @@ async fn failures_say_nothing_of_the_transport() {
     }
 }
 
-/// A lookup that answers every name with `answer` and counts its calls.
-fn stub(answer: &'static str) -> (GuardedResolver, Arc<AtomicUsize>) {
+/// A lookup that answers every name with `answers` and counts its calls.
+/// This computer's addresses are none, so only the address rules apply.
+fn stub(answers: &'static [&'static str]) -> (GuardedResolver, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);
     let resolver = GuardedResolver::with_lookup(move |_name: String| {
         counted.fetch_add(1, Ordering::SeqCst);
-        let ip: IpAddr = answer.parse().unwrap();
-        async move { Ok(vec![SocketAddr::new(ip, 443)]) }
-    });
+        let addresses = answers
+            .iter()
+            .map(|answer| SocketAddr::new(answer.parse().unwrap(), 443))
+            .collect();
+        async move { Ok(addresses) }
+    })
+    .with_own(|| Ok(Vec::new()));
     (resolver, calls)
 }
 
@@ -437,13 +509,13 @@ async fn declared_hosts_that_resolve_here_are_refused() {
         "::ffff:10.0.0.5",
     ];
     for answer in refused {
-        let (resolver, calls) = stub(answer);
+        let (resolver, calls) = stub(Box::leak(Box::new([answer])));
         let error = resolves(&resolver, "api.github.com").await.unwrap_err();
         assert!(error.is::<HostRefused>(), "{answer}");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(refused_address(answer.parse().unwrap()), "{answer}");
     }
-    let (resolver, calls) = stub("140.82.112.6");
+    let (resolver, calls) = stub(&["140.82.112.6"]);
     let error = resolves(&resolver, "evil.com").await.unwrap_err();
     assert!(error.is::<HostRefused>());
     assert_eq!(
@@ -463,8 +535,98 @@ async fn declared_hosts_that_resolve_here_are_refused() {
 }
 
 #[tokio::test]
+async fn one_refused_address_refuses_the_whole_answer() {
+    for answers in [
+        &["140.82.112.6", "10.0.0.5"][..],
+        &["10.0.0.5", "140.82.112.6"],
+        &["140.82.112.6", "::1"],
+        &["140.82.112.6", "140.82.112.7", "fd00::1"],
+    ] {
+        let (resolver, _) = stub(answers);
+        let error = resolves(&resolver, "api.github.com").await.unwrap_err();
+        assert!(error.is::<HostRefused>(), "{answers:?}");
+    }
+    let (resolver, _) = stub(&["140.82.112.6", "140.82.112.7"]);
+    assert_eq!(
+        resolves(&resolver, "api.github.com").await.unwrap().len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn this_computers_own_addresses_are_refused_and_unread_ones_refuse_all() {
+    // A public address on one of this computer's interfaces passes the
+    // address rules, so only the this-computer check refuses it.
+    let (resolver, _) = stub(&["140.82.112.6", "140.82.112.7"]);
+    let resolver = resolver.with_own(|| Ok(vec!["140.82.112.7".parse().unwrap()]));
+    let error = resolves(&resolver, "api.github.com").await.unwrap_err();
+    assert!(error.is::<HostRefused>());
+    let (resolver, _) = stub(&["2606:4700:4700::1111"]);
+    let resolver = resolver.with_own(|| Ok(vec!["::ffff:140.82.112.6".parse().unwrap()]));
+    assert!(resolves(&resolver, "api.github.com").await.is_ok());
+    let resolver = stub(&["140.82.112.6"])
+        .0
+        .with_own(|| Ok(vec!["::ffff:140.82.112.6".parse().unwrap()]));
+    assert!(resolves(&resolver, "api.github.com").await.is_err());
+
+    // Interfaces that can't be read refuse every answer (fail closed).
+    let (resolver, _) = stub(&["140.82.112.6"]);
+    let resolver = resolver.with_own(|| Err(io::Error::other("no getifaddrs")));
+    let error = resolves(&resolver, "api.github.com").await.unwrap_err();
+    assert!(error.is::<HostRefused>());
+    let unread = Err(io::Error::other("no getifaddrs"));
+    assert!(refused_among("140.82.112.6".parse().unwrap(), &unread));
+    assert!(!refused_among(
+        "140.82.112.6".parse().unwrap(),
+        &Ok(Vec::new())
+    ));
+}
+
+#[tokio::test]
+async fn a_call_that_never_gets_a_slot_says_nothing_was_sent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+    let http = AppHttp::with_upstream(*server.address())
+        .unwrap()
+        .with_timeout(Duration::from_millis(200));
+    let busy = Arc::clone(&http.calls)
+        .acquire_many_owned(u32::try_from(MAX_APP_CALLS).unwrap())
+        .await
+        .unwrap();
+    let error = http
+        .raw(
+            app("github"),
+            &params(&[]),
+            &secret(&canary().0),
+            "GET",
+            "/user",
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppsError::Unavailable(m) if m == APP_BUSY));
+    assert!(server.received_requests().await.unwrap().is_empty());
+    drop(busy);
+    let reply = http
+        .raw(
+            app("github"),
+            &params(&[]),
+            &secret(&canary().0),
+            "GET",
+            "/user",
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
 async fn a_guarded_client_never_connects_to_a_refused_answer() {
-    let (resolver, calls) = stub("127.0.0.1");
+    let (resolver, calls) = stub(&["127.0.0.1"]);
     let http = AppHttp::guarded(resolver).unwrap();
     let error = http
         .raw(
@@ -564,6 +726,17 @@ fn secret_strings_cover_every_form_of_the_token() {
             .replace('=', "%3d"),
     ] {
         assert!(strings.contains(&form.as_str()), "missing {form}");
+    }
+    for engine in [
+        base64::engine::general_purpose::STANDARD,
+        base64::engine::general_purpose::STANDARD_NO_PAD,
+        base64::engine::general_purpose::URL_SAFE,
+        base64::engine::general_purpose::URL_SAFE_NO_PAD,
+    ] {
+        for plain in [token.clone(), format!("me@acme.test:{token}")] {
+            let form = engine.encode(&plain);
+            assert!(strings.contains(&form.as_str()), "missing base64 {form}");
+        }
     }
     assert!(strings.iter().all(|text| text.len() >= 8));
 

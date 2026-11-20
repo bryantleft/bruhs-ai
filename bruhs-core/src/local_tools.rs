@@ -25,6 +25,7 @@ pub use computer::{FakePages, PageLaunch};
 #[cfg(test)]
 pub(crate) use network::interface_addresses_for_tests;
 pub(crate) use network::is_this_computer;
+pub(crate) use network::{interface_addresses, is_this_computer_among};
 pub use process::ProcessPolicy;
 pub use screencast::{ComputerWatch, Viewer};
 pub use video::DeviceVideo;

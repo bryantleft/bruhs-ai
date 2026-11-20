@@ -113,6 +113,9 @@ pub const APP_UNREACHABLE: &str =
     "Bruhs couldn't reach the app. Try again later, and tell the owner if it keeps failing.";
 pub const APP_TIMED_OUT: &str =
     "The app didn't answer in 30 seconds. A write may still have landed: read before trying again.";
+/// Every call slot stayed busy until the deadline, so nothing was sent.
+pub const APP_BUSY: &str =
+    "Bruhs sent nothing: too many app calls are running. Try again in a moment.";
 pub const APP_HOST_REFUSED: &str =
     "That app's address leads somewhere Bruhs doesn't call. Tell the owner.";
 

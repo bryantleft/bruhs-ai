@@ -330,6 +330,22 @@ pub(crate) fn is_this_computer(ip: IpAddr) -> bool {
     }
 }
 
+/// This computer's interface addresses read now, or the error that kept
+/// them from being read. App egress refuses on an error (fails closed);
+/// [`is_this_computer`] keeps failing open for the browser guard.
+pub(crate) fn interface_addresses() -> io::Result<Vec<IpAddr>> {
+    addresses::interface_addresses()
+}
+
+/// [`is_this_computer`] against interface addresses already read: the
+/// guard's fixed rule, or one of `own`.
+pub(crate) fn is_this_computer_among(ip: IpAddr, own: &[IpAddr]) -> bool {
+    local_address(ip)
+        || own
+            .iter()
+            .any(|own| own.to_canonical() == ip.to_canonical())
+}
+
 /// This computer's interface addresses, for tests outside the guard.
 #[cfg(test)]
 pub(crate) fn interface_addresses_for_tests() -> Vec<IpAddr> {

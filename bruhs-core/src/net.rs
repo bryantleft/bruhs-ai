@@ -9,7 +9,7 @@ use std::net::IpAddr;
 /// 0/8, 240/4, shared (100.64/10), benchmark (198.18/15) and the IETF and
 /// 6to4 relay blocks (192.0.0/24, 192.88.99/24). IPv6 allows only global
 /// unicast (`2000::/3`) outside 6to4 (`2002::/16`), the IETF block
-/// (`2001::/23`) and documentation (`2001:db8::/32`), so NAT64 and 6to4
+/// (`2001::/23`) and documentation (`2001:db8::/32`, `3fff::/20`), so NAT64 and 6to4
 /// forms that wrap a private IPv4 address never pass; a mapped IPv4 address
 /// is judged as IPv4.
 pub(crate) fn public_ip(ip: IpAddr) -> bool {
@@ -37,6 +37,27 @@ pub(crate) fn public_ip(ip: IpAddr) -> bool {
             parts[0] & 0xe000 == 0x2000
                 && parts[0] != 0x2002
                 && !(parts[0] == 0x2001 && (parts[1] < 0x200 || parts[1] == 0xdb8))
+                && !(parts[0] == 0x3fff && parts[1] < 0x1000)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::public_ip;
+
+    #[test]
+    fn documentation_ranges_are_not_public() {
+        for ip in ["2001:db8::1", "3fff::1", "3fff:fff:ffff::1", "192.0.2.1"] {
+            assert!(!public_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "3fff:1000::1",
+            "3ffe::1",
+            "2606:4700:4700::1111",
+            "140.82.112.6",
+        ] {
+            assert!(public_ip(ip.parse().unwrap()), "{ip}");
         }
     }
 }
