@@ -581,6 +581,17 @@ impl ReactiveRuntime {
             .await
     }
 
+    /// [`Self::ingestion_capacity`], or `None` when no enabled subscriber
+    /// would make a run of an event.
+    pub async fn ingestion_room(
+        &self,
+        source: &bruhs_models::reactive::EventSource,
+    ) -> Result<Option<usize>, ReactiveError> {
+        let source = source.clone();
+        self.call(move |connection| store::ingestion_room(connection, &source))
+            .await
+    }
+
     pub async fn source_status(
         &self,
         source_id: &str,

@@ -660,3 +660,139 @@ async fn event_text_can_not_close_the_event_fence() {
     let payload: Value = serde_json::from_str(&run.prompt[start..end]).unwrap();
     assert_eq!(payload["title"], title);
 }
+
+/// Final review A2 I2: an app poll emits no more than the run queue has
+/// room for across its subscribers, so a burst never fails the whole batch
+/// (and stalls the source for good); the rest comes once there is room.
+#[tokio::test]
+async fn app_polls_fit_the_run_queue() {
+    use crate::apps::{AppHttp, AppsHost};
+    use crate::mail::{gmail::GmailClient, outlook::OutlookClient};
+    use crate::secrets::{SecretManager, SecretStore};
+    use bruhs_models::apps::APP_POLL_WAITING;
+    use bruhs_models::reactive::{ReactiveChange, ReactiveCommand, RunStatus, Subscription};
+    use bruhs_models::vault::{CredentialScope, VaultCreate, VaultSecretInput};
+    use wiremock::matchers::path;
+
+    let server = MockServer::start().await;
+    let origin = format!("http://{}", server.address());
+    let host = AppsHost::new(
+        SecretManager::new(SecretStore::in_memory()),
+        AppHttp::with_upstream(*server.address()).unwrap(),
+        None,
+        std::sync::Arc::new(GmailClient::for_test_origin(&origin).unwrap()),
+        std::sync::Arc::new(OutlookClient::for_test_origin(&origin).unwrap()),
+    );
+    let account = host
+        .vault()
+        .vault_create(VaultCreate {
+            name: "GitHub octo".into(),
+            scope: CredentialScope::Global,
+            secret: VaultSecretInput::AppToken {
+                app: "github".into(),
+                account: "octo".into(),
+                params: BTreeMap::new(),
+                token: Some(format!("tok_{}", uuid::Uuid::new_v4().simple())),
+                key: None,
+            },
+        })
+        .await
+        .unwrap()
+        .id;
+    let source = github_poll(&account, 120_000);
+    let (_dir, runtime) = routine_on(&source).await;
+    runtime.attach_apps(host).unwrap();
+    for id in ["reads-2", "reads-3"] {
+        runtime
+            .command(ReactiveCommand::Apply {
+                change: ReactiveChange::SaveSubscription {
+                    subscription: Subscription {
+                        id: id.into(),
+                        source_id: source.id.clone(),
+                        agent_id: "reader".into(),
+                        instructions: String::new(),
+                        enabled: true,
+                        auto_run: false,
+                        debounce_ms: 0,
+                        throttle_ms: 0,
+                        on_busy: Default::default(),
+                    },
+                },
+            })
+            .await
+            .unwrap();
+    }
+    let lists = |numbers: Vec<u64>| {
+        let server = &server;
+        async move {
+            server.reset().await;
+            let items: Vec<Value> = numbers
+                .into_iter()
+                .map(|number| json!({"number": number}))
+                .collect();
+            Mock::given(method("GET"))
+                .and(path("/repos/o/r/issues"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(items))
+                .mount(server)
+                .await;
+        }
+    };
+    let pending = |runtime: &ReactiveRuntime| {
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .snapshot()
+                .await
+                .unwrap()
+                .runs
+                .into_iter()
+                .filter(|run| run.status == RunStatus::AwaitingReview)
+                .collect::<Vec<_>>()
+        }
+    };
+    lists(vec![10]).await;
+    assert_eq!(polled_status(&runtime, &source).await, None);
+
+    // 25 new issues for three subscribers: 16 fit the 50 run queue.
+    lists((11..=35).rev().collect()).await;
+    assert_eq!(polled_status(&runtime, &source).await, None);
+    let waiting = pending(&runtime).await;
+    assert_eq!(waiting.len(), 48);
+    let cursor = runtime
+        .cursor(&source.id, "app_poll")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cursor["newest"], 26);
+
+    // No room: nothing is read or emitted, and the status says why.
+    assert_eq!(
+        polled_status(&runtime, &source).await.as_deref(),
+        Some(APP_POLL_WAITING)
+    );
+    assert_eq!(pending(&runtime).await.len(), 48);
+    assert_eq!(
+        runtime
+            .cursor(&source.id, "app_poll")
+            .await
+            .unwrap()
+            .unwrap(),
+        cursor
+    );
+
+    // Once the owner clears the queue, the rest come.
+    for run in waiting {
+        runtime
+            .command(ReactiveCommand::CancelRun { id: run.id })
+            .await
+            .unwrap();
+    }
+    assert_eq!(polled_status(&runtime, &source).await, None);
+    assert_eq!(pending(&runtime).await.len(), 27);
+    let cursor = runtime
+        .cursor(&source.id, "app_poll")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cursor["newest"], 35);
+}

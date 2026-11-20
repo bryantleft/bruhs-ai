@@ -5,7 +5,8 @@
 //! takes no bruh grant. Its cursor keeps a digest of the source's
 //! definition: a new or changed source, or a cursor this build can't read,
 //! records where things stand and emits nothing (no backfill). After that a
-//! poll emits at most [`APP_POLL_MAX_ITEMS`] new items, oldest first, and the
+//! poll emits at most the limit it is given (at most [`APP_POLL_MAX_ITEMS`],
+//! fewer when the run queue has less room) new items, oldest first, and the
 //! cursor moves to the last one it emitted. Every text field goes through
 //! `review_text` before it enters a payload, and no failure carries a token.
 
@@ -51,7 +52,8 @@ pub(crate) struct PollOutcome {
 }
 
 /// Where a GitHub poll stands: the newest issue or pull request number it
-/// has seen or emitted.
+/// has seen or emitted. Issues and pull requests share one sequence, so an
+/// issues poll counts pull request numbers too (final review A2 M1).
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GithubCursor {
@@ -110,7 +112,8 @@ impl GithubWatch {
 
 impl AppsHost {
     /// Polls one app source. `definition` names the source's app, account
-    /// and query; a cursor saved for another one starts a new baseline.
+    /// and query; a cursor saved for another one starts a new baseline. At
+    /// most `limit` items are emitted (final review A2 I2).
     ///
     /// # Errors
     ///
@@ -124,18 +127,24 @@ impl AppsHost {
         query: &AppQuery,
         cursor: Option<Value>,
         definition: &str,
+        limit: usize,
     ) -> Result<PollOutcome, AppsError> {
         let definition = digest(definition);
+        let limit = limit.min(APP_POLL_MAX_ITEMS);
         match (app, query) {
             (POLL_APP_GITHUB, AppQuery::GithubIssues { repo }) => {
-                self.poll_github(account, repo, GithubWatch::Issues, cursor, definition)
+                let watch = GithubWatch::Issues;
+                self.poll_github(account, repo, watch, cursor, definition, limit)
                     .await
             }
             (POLL_APP_GITHUB, AppQuery::GithubPulls { repo }) => {
-                self.poll_github(account, repo, GithubWatch::Pulls, cursor, definition)
+                let watch = GithubWatch::Pulls;
+                self.poll_github(account, repo, watch, cursor, definition, limit)
                     .await
             }
-            (POLL_APP_MAIL, AppQuery::NewMail) => self.poll_mail(account, cursor, definition).await,
+            (POLL_APP_MAIL, AppQuery::NewMail) => {
+                self.poll_mail(account, cursor, definition, limit).await
+            }
             _ => Err(AppsError::Invalid(POLL_WATCH_MISMATCH)),
         }
     }
@@ -147,6 +156,7 @@ impl AppsHost {
         watch: GithubWatch,
         cursor: Option<Value>,
         definition: String,
+        limit: usize,
     ) -> Result<PollOutcome, AppsError> {
         let (connector, params) = self.github_account(account).await?;
         let secret =
@@ -181,21 +191,39 @@ impl AppsHost {
         let Value::Array(items) = reply.body else {
             return Err(failed(TestFailure::Unexpected));
         };
+        // Every number on the page, whichever list it is, so the baseline
+        // and the cursor never fall behind items the watch leaves out.
+        let seen = items
+            .iter()
+            .filter_map(|item| item.get("number")?.as_u64())
+            .max()
+            .unwrap_or(0);
         let mut found: Vec<(u64, &Value)> = items
             .iter()
             .filter(|item| watch.wants(item))
             .filter_map(|item| Some((item.get("number")?.as_u64()?, item)))
             .collect();
         let Some(mut cursor) = read_cursor::<GithubCursor>(cursor, &definition) else {
-            let newest = found.iter().map(|(number, _)| *number).max().unwrap_or(0);
-            return outcome(Vec::new(), &GithubCursor { definition, newest }, None);
+            return outcome(
+                Vec::new(),
+                &GithubCursor {
+                    definition,
+                    newest: seen,
+                },
+                None,
+            );
         };
         found.retain(|(number, _)| *number > cursor.newest);
         found.sort_by_key(|(number, _)| *number);
         found.dedup_by_key(|(number, _)| *number);
-        found.truncate(APP_POLL_MAX_ITEMS);
-        if let Some((number, _)) = found.last() {
-            cursor.newest = *number;
+        if found.len() <= limit {
+            // Nothing new is left out: move past everything seen.
+            cursor.newest = cursor.newest.max(seen);
+        } else {
+            found.truncate(limit);
+            if let Some((number, _)) = found.last() {
+                cursor.newest = *number;
+            }
         }
         let events = found
             .into_iter()
@@ -238,6 +266,7 @@ impl AppsHost {
         mailbox_id: &str,
         cursor: Option<Value>,
         definition: String,
+        limit: usize,
     ) -> Result<PollOutcome, AppsError> {
         let Some(mail) = &self.mail else {
             return Err(AppsError::Unavailable(MAIL_UNAVAILABLE));
@@ -275,13 +304,16 @@ impl AppsHost {
                 status,
             );
         };
+        if limit == 0 {
+            return outcome(Vec::new(), &cursor, status);
+        }
         let mut threads = mail
-            .unread_since(mailbox_id, cursor.after_ms, APP_POLL_MAX_ITEMS)
+            .unread_since(mailbox_id, cursor.after_ms, limit)
             .await
             .map_err(unreadable)?;
         // A full page may stop partway through threads that share its last
         // time; leave those for the next poll, which reads past the cursor.
-        if threads.len() == APP_POLL_MAX_ITEMS {
+        if threads.len() == limit {
             let last = threads.last().map(|thread| thread.message_at_ms);
             if let Some(keep) = threads
                 .iter()

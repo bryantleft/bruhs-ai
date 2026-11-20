@@ -31,8 +31,13 @@ pub const POLL_APP_MAIL: &str = "mail";
 pub const APP_POLL_MIN_MS: u64 = 60_000;
 pub const APP_POLL_DEFAULT_MS: u64 = 300_000;
 pub const APP_POLL_MAX_MS: u64 = 86_400_000;
-/// The most new items one poll emits, oldest first.
+/// The most new items one poll emits, oldest first; fewer when the run
+/// queue has less room for its subscribers (final review A2 I2).
 pub const APP_POLL_MAX_ITEMS: usize = 20;
+/// An app source's status while the run queue has no room for its next
+/// items: the poll reads nothing until it has.
+pub const APP_POLL_WAITING: &str =
+    "New items are waiting for room in the run queue. Review or cancel waiting runs.";
 /// Each part of `owner/name`.
 const REPO_PART_MAX_CHARS: usize = 100;
 /// The editor's interval, in whole minutes.

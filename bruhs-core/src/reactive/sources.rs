@@ -1,6 +1,7 @@
 //! Polling sources reconcile durable observations instead of relying on live-only notifications.
 
 use super::{ReactiveError, ReactiveRuntime, SourceEmission};
+use bruhs_models::apps::{APP_POLL_MAX_ITEMS, APP_POLL_WAITING};
 use bruhs_models::reactive::{EventSource, SourceKind, MAX_PAYLOAD_BYTES};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -230,7 +231,14 @@ async fn poll_once_next_deadline(
             query,
             ..
         } => {
-            let (batch, status) = app_poll::batch(runtime, app, account, query, cursor).await?;
+            // Each emitted item makes a run per subscriber, and one batch
+            // that won't fit fails whole (final review A2 I2).
+            let limit = runtime
+                .ingestion_room(source)
+                .await?
+                .map_or(APP_POLL_MAX_ITEMS, |room| room.min(APP_POLL_MAX_ITEMS));
+            let (batch, status) =
+                app_poll::batch(runtime, app, account, query, cursor, limit).await?;
             saved_status = status;
             batch
         }
@@ -264,6 +272,9 @@ async fn poll_once_next_deadline(
         .ingest(source, batch.events, cursor_key, batch.cursor)
         .await?;
     if waiting_for_capacity {
+        if matches!(source.kind, SourceKind::AppPoll { .. }) {
+            return Err(ReactiveError::Conflict(APP_POLL_WAITING.into()));
+        }
         return Err(ReactiveError::Conflict("Settled files are waiting for event queue space. Review or cancel pending runs before the next folder scan.".into()));
     }
     if let Some(status) = saved_status {

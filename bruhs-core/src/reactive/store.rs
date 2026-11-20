@@ -1437,6 +1437,16 @@ pub(super) fn ingestion_capacity(
     connection: &Connection,
     expected: &EventSource,
 ) -> Result<usize, ReactiveError> {
+    Ok(ingestion_room(connection, expected)?.unwrap_or_default())
+}
+
+/// How many events of `expected` the run queue has room for, one run per
+/// enabled subscriber each; `None` when no enabled subscriber would make a
+/// run of one.
+pub(super) fn ingestion_room(
+    connection: &Connection,
+    expected: &EventSource,
+) -> Result<Option<usize>, ReactiveError> {
     if enabled_source(connection, &expected.id)? != *expected {
         return Err(ReactiveError::Conflict(
             "Source configuration changed while checking its backlog.".into(),
@@ -1452,8 +1462,7 @@ pub(super) fn ingestion_capacity(
         .map_err(|_| ReactiveError::Storage("Saved work count is invalid.".into()))?;
     Ok(MAX_PENDING_RUNS
         .saturating_sub(pending)
-        .checked_div(subscriptions)
-        .unwrap_or_default())
+        .checked_div(subscriptions))
 }
 
 pub(super) fn source_status(

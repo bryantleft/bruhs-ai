@@ -106,6 +106,15 @@ fn watch(repo: &str) -> AppQuery {
 }
 
 async fn poll(fixture: &Github, query: &AppQuery, cursor: Option<Value>) -> PollOutcome {
+    poll_up_to(fixture, query, cursor, APP_POLL_MAX_ITEMS).await
+}
+
+async fn poll_up_to(
+    fixture: &Github,
+    query: &AppQuery,
+    cursor: Option<Value>,
+    limit: usize,
+) -> PollOutcome {
     fixture
         .host
         .poll(
@@ -114,6 +123,7 @@ async fn poll(fixture: &Github, query: &AppQuery, cursor: Option<Value>) -> Poll
             query,
             cursor,
             &format!("{query:?}"),
+            limit,
         )
         .await
         .unwrap()
@@ -134,7 +144,8 @@ async fn the_first_github_poll_records_a_baseline_and_emits_nothing() {
     .await;
     let first = poll(&fixture, &watch("o/r"), None).await;
     assert!(first.events.is_empty());
-    assert_eq!(first.cursor["newest"], 7);
+    // Final review A2 M1: issues and pull requests share one sequence.
+    assert_eq!(first.cursor["newest"], 8);
     assert_eq!(first.status, None);
 }
 
@@ -224,6 +235,74 @@ async fn a_full_page_is_read_whole_and_scrubbed() {
     assert!(!json!(next.events).to_string().contains(&fixture.token));
 }
 
+/// Final review A2 I2: a poll emits no more than the run queue has room
+/// for, oldest first, and the cursor stops at the last one emitted.
+#[tokio::test]
+async fn polls_stop_at_the_limit_they_are_given() {
+    let fixture = github().await;
+    let query = watch("o/r");
+    lists(&fixture, "/repos/o/r/issues", issues(&[10])).await;
+    let baseline = poll(&fixture, &query, None).await;
+    let many: Vec<u64> = (11..=35).rev().collect();
+    lists(&fixture, "/repos/o/r/issues", issues(&many)).await;
+    let some = poll_up_to(&fixture, &query, Some(baseline.cursor), 5).await;
+    assert_eq!(
+        keys(&some),
+        (11..=15)
+            .map(|number| format!("github:o/r:issue:{number}"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(some.cursor["newest"], 15);
+    let none = poll_up_to(&fixture, &query, Some(some.cursor.clone()), 0).await;
+    assert!(none.events.is_empty());
+    assert_eq!(none.cursor, some.cursor);
+    let rest = poll(&fixture, &query, Some(none.cursor)).await;
+    assert_eq!(rest.events.len(), APP_POLL_MAX_ITEMS);
+    assert_eq!(rest.events[0].0, "github:o/r:issue:16");
+    assert_eq!(rest.cursor["newest"], 35);
+}
+
+/// Final review A2 M1: an issues poll counts pull request numbers too, so
+/// a page of pull requests sets a real baseline, and an old issue that
+/// slides into the newest-50 window never reads as new.
+#[tokio::test]
+async fn issue_polls_count_pull_request_numbers() {
+    let fixture = github().await;
+    let query = watch("o/r");
+    lists(
+        &fixture,
+        "/repos/o/r/issues",
+        json!([item(9, true), item(8, true)]),
+    )
+    .await;
+    let baseline = poll(&fixture, &query, None).await;
+    assert_eq!(baseline.cursor["newest"], 9);
+    lists(
+        &fixture,
+        "/repos/o/r/issues",
+        json!([
+            item(12, true),
+            item(11, false),
+            item(9, true),
+            item(3, false)
+        ]),
+    )
+    .await;
+    let next = poll(&fixture, &query, Some(baseline.cursor)).await;
+    assert_eq!(keys(&next), ["github:o/r:issue:11"]);
+    // Nothing was left out, so the cursor moves to the newest number seen.
+    assert_eq!(next.cursor["newest"], 12);
+    lists(
+        &fixture,
+        "/repos/o/r/issues",
+        json!([item(12, true), item(5, false), item(3, false)]),
+    )
+    .await;
+    let slid = poll(&fixture, &query, Some(next.cursor.clone())).await;
+    assert!(slid.events.is_empty());
+    assert_eq!(slid.cursor, next.cursor);
+}
+
 #[tokio::test]
 async fn a_changed_definition_starts_a_new_baseline() {
     let fixture = github().await;
@@ -274,10 +353,17 @@ async fn github_polls_take_only_a_global_github_account() {
     let poll = |account: String| {
         let host = fixture.host.clone();
         async move {
-            host.poll("github", &account, &watch("o/r"), None, "d")
-                .await
-                .err()
-                .unwrap()
+            host.poll(
+                "github",
+                &account,
+                &watch("o/r"),
+                None,
+                "d",
+                APP_POLL_MAX_ITEMS,
+            )
+            .await
+            .err()
+            .unwrap()
         }
     };
     assert!(gone(poll("v1-missing".into()).await));
@@ -314,7 +400,14 @@ async fn github_polls_take_only_a_global_github_account() {
     // Mail polls take mail, and GitHub polls GitHub.
     let mismatch = fixture
         .host
-        .poll("mail", &fixture.account, &watch("o/r"), None, "d")
+        .poll(
+            "mail",
+            &fixture.account,
+            &watch("o/r"),
+            None,
+            "d",
+            APP_POLL_MAX_ITEMS,
+        )
         .await
         .err()
         .unwrap();
@@ -370,7 +463,7 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     // A first poll whose sync fails sets no baseline from a stale cache:
     // it fails with the sync's copy and saves nothing.
     let unsynced = host
-        .poll("mail", &mailbox, &query, None, "mail")
+        .poll("mail", &mailbox, &query, None, "mail", APP_POLL_MAX_ITEMS)
         .await
         .err()
         .unwrap();
@@ -402,7 +495,7 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     )
     .await;
     let first = host
-        .poll("mail", &mailbox, &query, None, "mail")
+        .poll("mail", &mailbox, &query, None, "mail", APP_POLL_MAX_ITEMS)
         .await
         .unwrap();
     assert!(first.events.is_empty());
@@ -458,8 +551,30 @@ async fn new_mail_syncs_then_emits_unread_threads() {
         ],
     )
     .await;
+    // Final review A2 I2: with no room in the run queue, nothing is
+    // emitted and the cursor stays.
+    let full = host
+        .poll(
+            "mail",
+            &mailbox,
+            &query,
+            Some(first.cursor.clone()),
+            "mail",
+            0,
+        )
+        .await
+        .unwrap();
+    assert!(full.events.is_empty());
+    assert_eq!(full.cursor, first.cursor);
     let next = host
-        .poll("mail", &mailbox, &query, Some(first.cursor), "mail")
+        .poll(
+            "mail",
+            &mailbox,
+            &query,
+            Some(first.cursor),
+            "mail",
+            APP_POLL_MAX_ITEMS,
+        )
         .await
         .unwrap();
     assert_eq!(next.status, None);
@@ -485,7 +600,14 @@ async fn new_mail_syncs_then_emits_unread_threads() {
 
     // Nothing new: nothing emitted.
     let again = host
-        .poll("mail", &mailbox, &query, Some(next.cursor.clone()), "mail")
+        .poll(
+            "mail",
+            &mailbox,
+            &query,
+            Some(next.cursor.clone()),
+            "mail",
+            APP_POLL_MAX_ITEMS,
+        )
         .await
         .unwrap();
     assert!(again.events.is_empty());
@@ -494,7 +616,14 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     // A failed sync still reads the cache, and its copy is the status.
     server.reset().await;
     let failed = host
-        .poll("mail", &mailbox, &query, Some(next.cursor.clone()), "mail")
+        .poll(
+            "mail",
+            &mailbox,
+            &query,
+            Some(next.cursor.clone()),
+            "mail",
+            APP_POLL_MAX_ITEMS,
+        )
         .await
         .unwrap();
     assert!(failed.events.is_empty());
@@ -506,7 +635,14 @@ async fn new_mail_syncs_then_emits_unread_threads() {
         .await
         .unwrap();
     let gone = host
-        .poll("mail", &mailbox, &query, Some(next.cursor), "mail")
+        .poll(
+            "mail",
+            &mailbox,
+            &query,
+            Some(next.cursor),
+            "mail",
+            APP_POLL_MAX_ITEMS,
+        )
         .await
         .err()
         .unwrap();
