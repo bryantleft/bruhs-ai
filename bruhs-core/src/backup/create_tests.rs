@@ -443,6 +443,7 @@ async fn a_backup_holds_every_file_and_opens_with_its_password() {
         u64::try_from(expected.len()).unwrap()
     );
     assert_eq!(manifest.options, BackupOptions::default());
+    assert_eq!(manifest.changed_files, 0);
 }
 
 /// Every regular file under `folder` changed since `since`, read without
@@ -749,6 +750,24 @@ async fn one_job_at_a_time_and_none_while_a_restore_waits() {
         Err(BackupError::Refused(RESTORE_PENDING))
     ));
     std::fs::remove_file(&pending).unwrap();
+    // A `pending.json` read through a linked `backups` folder isn't trusted;
+    // the job then refuses the linked folder itself.
+    let backups = fixture.roots.backups(RootKey::Core);
+    let moved = fixture.roots.core.join("moved-backups");
+    std::fs::rename(&backups, &moved).unwrap();
+    std::fs::write(moved.join("pending.json"), b"{}").unwrap();
+    std::os::unix::fs::symlink(&moved, &backups).unwrap();
+    let linked = host
+        .start_create(request(Output::Outgoing, BackupOptions::default()))
+        .await
+        .unwrap();
+    assert!(matches!(
+        finished(&host, &linked.id).await,
+        JobState::Failed { message } if message == BackupError::Io(std::io::Error::other("x")).message()
+    ));
+    std::fs::remove_file(&backups).unwrap();
+    std::fs::remove_file(moved.join("pending.json")).unwrap();
+    std::fs::rename(&moved, &backups).unwrap();
 
     // While the capture daemon records, no backup starts (ruling F24).
     let recording = BackupHost::new(fixture.roots.clone(), fixture.store.clone()).for_tests(true);
@@ -1043,6 +1062,7 @@ async fn a_file_that_grows_while_read_keeps_its_listed_part() {
         })
         .count();
     assert_eq!(manifest.counts.files, u64::try_from(data).unwrap());
+    assert_eq!(manifest.changed_files, 1);
 }
 
 #[tokio::test]
@@ -1100,28 +1120,128 @@ async fn a_root_that_is_not_utf8_is_refused() {
 
 #[tokio::test]
 async fn partial_files_left_by_a_stopped_process_are_swept() {
+    use std::os::unix::fs::MetadataExt as _;
     let fixture = fixture().await;
     let host = host(&fixture);
     let tmp = host.tmp_dir();
     std::fs::create_dir_all(&tmp).unwrap();
-    let ours = fixture
-        .out
-        .join(format!(".mine.bruhsbak.partial-{}", "a".repeat(32)));
-    let theirs = fixture.out.join("notes.txt");
+    let marker = |id: char, file: &Path, of: &Path| {
+        let metadata = std::fs::symlink_metadata(of).unwrap();
+        std::fs::write(
+            tmp.join(format!(
+                "{}{}",
+                id.to_string().repeat(32),
+                super::host::PARTIAL_MARKER
+            )),
+            super::host::marker_text(metadata.dev(), metadata.ino(), file),
+        )
+        .unwrap();
+    };
+    let partial = |id: char| {
+        fixture.out.join(format!(
+            ".mine.bruhsbak.partial-{}",
+            id.to_string().repeat(32)
+        ))
+    };
+    let ours = partial('a');
     std::fs::write(&ours, b"half").unwrap();
+    marker('1', &ours, &ours);
+    // A marker naming another partial-shaped file, but not its identity.
+    let decoy = partial('b');
+    std::fs::write(&decoy, b"someone else's").unwrap();
+    marker('2', &decoy, &ours);
+    // A file without a partial's name, even with its own identity.
+    let theirs = fixture.out.join("notes.txt");
     std::fs::write(&theirs, b"mine").unwrap();
-    std::fs::write(
-        tmp.join(format!("{}.partial-path", "b".repeat(32))),
-        ours.to_str().unwrap(),
+    marker('3', &theirs, &theirs);
+    // A FIFO in a marker's place is never read.
+    let fifo = tmp.join(format!("{}{}", "4".repeat(32), super::host::PARTIAL_MARKER));
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    // A leftover `last.json` partial goes too.
+    let backups = fixture.roots.backups(RootKey::Core);
+    let last_partial = backups.join(format!(".last.json.partial-{}", "d".repeat(32)));
+    std::fs::write(&last_partial, b"{").unwrap();
+
+    let swept = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking({
+            let host = host.clone();
+            move || host.sweep()
+        }),
     )
-    .unwrap();
-    std::fs::write(
-        tmp.join(format!("{}.partial-path", "c".repeat(32))),
-        theirs.to_str().unwrap(),
-    )
-    .unwrap();
-    host.sweep();
+    .await;
+    assert!(swept.is_ok(), "the sweep never blocks on a FIFO");
     assert!(!ours.exists(), "our partial file is gone");
+    assert!(decoy.exists(), "a file that isn't the one marked stays");
     assert!(theirs.exists(), "a file without our partial name stays");
-    assert!(names_in(&tmp).is_empty());
+    assert!(!last_partial.exists());
+    assert_eq!(
+        names_in(&tmp),
+        [fifo.file_name().unwrap().to_string_lossy()]
+    );
+}
+
+#[tokio::test]
+async fn a_file_that_shrank_before_its_second_open_is_read_at_that_size() {
+    let fixture = fixture().await;
+    let log = fixture.roots.core.join("server/bruhs/b1/work/run.log");
+    write(&log, &[b'x'; 10_000]);
+    let (cut, regrow) = (log.clone(), log.clone());
+    let host = host(&fixture).with_before_file(Arc::new(move |at: Hook, entry: &str| {
+        if entry != "core/server/bruhs/b1/work/run.log" {
+            return;
+        }
+        match at {
+            // Truncated by `>` before the first open, then written again
+            // before the second.
+            Hook::BeforeFile => std::fs::write(&cut, b"").unwrap(),
+            Hook::Reopening => std::fs::write(&regrow, [b'y'; 2000]).unwrap(),
+            _ => {}
+        }
+    }));
+    let file = created(&host, request(Output::Outgoing, BackupOptions::default())).await;
+    assert_eq!(file.warnings, [changed_files_line(1).unwrap()]);
+    let entries = open_backup(&backup_path(&host, &file));
+    assert_eq!(
+        entry(&entries, "core/server/bruhs/b1/work/run.log")
+            .unwrap()
+            .bytes,
+        vec![b'y'; 2000]
+    );
+    assert_eq!(manifest_of(&entries).changed_files, 1);
+}
+
+#[tokio::test]
+async fn a_rewrite_that_only_moves_the_time_is_counted() {
+    let fixture = fixture().await;
+    let note = fixture.roots.core.join("server/bruhs/b1/work/note.md");
+    write(&note, b"same size");
+    let touched = note.clone();
+    let host = host_acting(
+        &fixture,
+        Hook::Read,
+        "core/server/bruhs/b1/work/note.md",
+        move || {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&touched)
+                .unwrap();
+            file.set_modified(SystemTime::now() + Duration::from_secs(60))
+                .unwrap();
+        },
+    );
+    let file = created(&host, request(Output::Outgoing, BackupOptions::default())).await;
+    assert_eq!(file.warnings, [changed_files_line(1).unwrap()]);
+    let entries = open_backup(&backup_path(&host, &file));
+    assert_eq!(
+        entry(&entries, "core/server/bruhs/b1/work/note.md")
+            .unwrap()
+            .bytes,
+        b"same size"
+    );
+    assert_eq!(manifest_of(&entries).changed_files, 1);
 }

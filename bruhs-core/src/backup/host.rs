@@ -84,6 +84,9 @@ pub(super) struct Config {
 pub(super) enum Hook {
     /// Before the file is opened.
     BeforeFile,
+    /// Between a first open whose size differs from the walk's and the
+    /// second open.
+    Reopening,
     /// After it was opened and its size taken, before it is read.
     Opened,
     /// After it was read, before its size is checked again.
@@ -299,8 +302,11 @@ impl BackupHost {
         }
     }
 
+    /// Whether a restore waits. A `pending.json` seen through a linked
+    /// `backups` folder doesn't count; the job then refuses that folder.
     fn restore_pending(&self) -> bool {
-        std::fs::symlink_metadata(self.roots().backups(RootKey::Core).join(PENDING)).is_ok()
+        self.private_folder(None)
+            .is_some_and(|backups| std::fs::symlink_metadata(backups.join(PENDING)).is_ok())
     }
 
     /// A finished web download's file.
@@ -375,10 +381,14 @@ impl BackupHost {
         let now = SystemTime::now();
         for folder in [OUTGOING, INCOMING] {
             if let Some(folder) = self.private_folder(Some(folder)) {
-                sweep_folder(&folder, |modified| {
-                    now.duration_since(modified)
-                        .is_ok_and(|age| age > TRANSFER_TTL)
-                });
+                sweep_folder(
+                    &folder,
+                    |modified| {
+                        now.duration_since(modified)
+                            .is_ok_and(|age| age > TRANSFER_TTL)
+                    },
+                    |_| true,
+                );
             }
         }
         if self.running() {
@@ -386,7 +396,16 @@ impl BackupHost {
         }
         if let Some(tmp) = self.private_folder(Some(TMP)) {
             remove_marked_partials(&tmp);
-            sweep_folder(&tmp, |_| true);
+            sweep_folder(&tmp, |_| true, |_| true);
+        }
+        // A `last.json` record that a stopped process never renamed.
+        if let Some(backups) = self.private_folder(None) {
+            let leftover = format!(".{LAST}.partial-");
+            sweep_folder(
+                &backups,
+                |_| true,
+                |name| name.strip_prefix(leftover.as_str()).is_some_and(valid_id),
+            );
         }
     }
 
@@ -408,8 +427,10 @@ impl BackupHost {
 
     /// Records the backup just made, replacing the record atomically.
     pub(super) fn record_last(&self, last: &LastBackup) -> Result<(), BackupError> {
-        let backups = self.roots().backups(RootKey::Core);
-        create::private_dir(&backups)?;
+        create::private_dir(&self.roots().backups(RootKey::Core))?;
+        let backups = self
+            .private_folder(None)
+            .ok_or_else(|| BackupError::Io(io::Error::other("backups isn't a real folder")))?;
         let partial = backups.join(format!(".{LAST}.partial-{}", random_id()));
         let mut file = new_private_file(&partial)?;
         let written = serde_json::to_writer(&mut file, last)
@@ -592,11 +613,14 @@ pub(super) fn random_bytes(bytes: &mut [u8]) {
 }
 
 /// Each marker in `tmp` names a partial backup file a job was writing
-/// (`<id>.partial-path`). A job that ended removes its marker; one left
-/// means the process stopped. The file it names is removed only when it
-/// still is a regular file with the partial name a job gives it.
+/// (`<id>.partial-path`), with that file's device and inode. A job that
+/// ended removes its marker; one left means the process stopped. The file
+/// it names is removed only when it still is a regular file with the
+/// partial name a job gives it and the very inode the job made (ruling B
+/// Task 6 N1). A marker is read without following a link or waiting on a
+/// FIFO, and only when it is a small regular file.
 fn remove_marked_partials(tmp: &Path) {
-    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::MetadataExt as _;
     let Ok(entries) = std::fs::read_dir(tmp) else {
         return;
     };
@@ -609,18 +633,59 @@ fn remove_marked_partials(tmp: &Path) {
         if !marker {
             continue;
         }
-        let Ok(text) = std::fs::read(entry.path()) else {
+        let Some((dev, ino, partial)) = read_marker(&entry.path()) else {
             continue;
         };
-        let partial = PathBuf::from(std::ffi::OsStr::from_bytes(&text));
-        if partial.is_absolute()
+        let ours = partial.is_absolute()
             && partial.file_name().is_some_and(partial_name)
-            && std::fs::symlink_metadata(&partial).is_ok_and(|metadata| metadata.is_file())
-        {
+            && std::fs::symlink_metadata(&partial).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.dev() == dev && metadata.ino() == ino
+            });
+        if ours {
             let _ = std::fs::remove_file(&partial);
         }
         let _ = std::fs::remove_file(entry.path());
     }
+}
+
+/// The longest marker read: a path of up to `PATH_MAX` and its identity.
+const MARKER_MAX_BYTES: u64 = 4096 + 64;
+
+/// A marker's text: `<dev> <ino>`, a newline, then the partial file's path
+/// as raw bytes.
+pub(super) fn marker_text(dev: u64, ino: u64, partial: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let mut text = format!("{dev} {ino}\n").into_bytes();
+    text.extend_from_slice(partial.as_os_str().as_bytes());
+    text
+}
+
+/// Reads a marker: a regular file, opened without following a link or
+/// blocking, at most [`MARKER_MAX_BYTES`].
+fn read_marker(path: &Path) -> Option<(u64, u64, PathBuf)> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MARKER_MAX_BYTES {
+        return None;
+    }
+    let mut text = Vec::new();
+    file.take(MARKER_MAX_BYTES).read_to_end(&mut text).ok()?;
+    let split = text.iter().position(|byte| *byte == b'\n')?;
+    let (identity, partial) = (
+        std::str::from_utf8(&text[..split]).ok()?,
+        &text[split + 1..],
+    );
+    let (dev, ino) = identity.split_once(' ')?;
+    Some((
+        dev.parse().ok()?,
+        ino.parse().ok()?,
+        PathBuf::from(std::ffi::OsStr::from_bytes(partial)),
+    ))
 }
 
 /// A marker's suffix in `backups/tmp`.
@@ -637,13 +702,16 @@ fn partial_name(name: &std::ffi::OsStr) -> bool {
     })
 }
 
-/// Removes the regular files in `folder` whose change time `expired`
-/// accepts. Links and folders stay.
-fn sweep_folder(folder: &Path, expired: impl Fn(SystemTime) -> bool) {
+/// Removes the regular files in `folder` whose UTF-8 name `named` and
+/// change time `expired` accept. Links, FIFOs and folders stay.
+fn sweep_folder(folder: &Path, expired: impl Fn(SystemTime) -> bool, named: impl Fn(&str) -> bool) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
     for entry in entries.flatten() {
+        if !entry.file_name().to_str().is_some_and(&named) {
+            continue;
+        }
         let Ok(metadata) = entry.metadata() else {
             continue;
         };

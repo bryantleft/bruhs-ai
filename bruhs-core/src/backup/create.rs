@@ -34,7 +34,8 @@ use tokio::sync::watch;
 use zeroize::Zeroizing;
 
 use super::host::{
-    new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config, PARTIAL_MARKER,
+    marker_text, new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config,
+    PARTIAL_MARKER,
 };
 use super::{
     free_bytes, inventory, open_source, snapshot_sqlite, BackupError, RootId, RootKey, Roots,
@@ -335,6 +336,7 @@ pub(crate) async fn create(
         keychain_items,
         skipped_links: walked.skipped_links,
         skipped_names: walked.skipped_names,
+        changed_files: 0,
         counts: BackupCounts {
             bruhs: bruhs.count.unwrap_or(0),
             vault_entries: vault_entries(&roots),
@@ -358,7 +360,6 @@ pub(crate) async fn create(
             sent: 0,
         },
         manifest,
-        app_version: config.app_version.clone(),
         #[cfg(test)]
         before_file: config.before_file.clone(),
     };
@@ -637,7 +638,6 @@ struct Writer {
     changed: u32,
     progress: Progress,
     manifest: BackupManifest,
-    app_version: String,
     #[cfg(test)]
     before_file: Option<super::host::TestHook>,
 }
@@ -651,36 +651,40 @@ type Sink = Encryptor<BufWriter<File>>;
 struct Partial {
     path: PathBuf,
     marker: PathBuf,
-    placed: bool,
 }
 
 impl Partial {
+    /// Creates the partial file, then its marker with the file's device
+    /// and inode, so the sweep removes only this very file (ruling B Task
+    /// 6 N1).
     fn new(folder: &Path, name: &std::ffi::OsStr, tmp: &Path) -> Result<(Self, File), BackupError> {
-        use std::os::unix::ffi::OsStrExt as _;
         let path = folder.join(format!(
             ".{}.partial-{}",
             name.to_string_lossy(),
             random_id()
         ));
-        let marker = tmp.join(format!("{}{PARTIAL_MARKER}", random_id()));
-        let mut note = new_private_file(&marker)?;
+        let file = new_private_file(&path)?;
         let partial = Self {
             path,
-            marker,
-            placed: false,
+            marker: tmp.join(format!("{}{PARTIAL_MARKER}", random_id())),
         };
-        note.write_all(partial.path.as_os_str().as_bytes())?;
+        let identity = file.metadata()?;
+        let mut note = new_private_file(&partial.marker)?;
+        note.write_all(&marker_text(identity.dev(), identity.ino(), &partial.path))?;
         note.sync_all()?;
-        let file = new_private_file(&partial.path)?;
         Ok((partial, file))
     }
 }
 
 impl Drop for Partial {
+    /// Removes the partial file, which a placed backup no longer has (or,
+    /// after a hard link, still has as a second name), then the marker.
+    /// A partial file that can't be removed keeps its marker for the sweep.
     fn drop(&mut self) {
-        // Best effort: the sweep finds the marker otherwise.
-        if !self.placed {
-            let _ = std::fs::remove_file(&self.path);
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return,
         }
         let _ = std::fs::remove_file(&self.marker);
     }
@@ -700,11 +704,10 @@ impl Writer {
         let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
             return Err(BackupError::Refused(DESTINATION_MISSING));
         };
-        let (mut partial, file) = Partial::new(folder, name, &self.tmp)?;
+        let (partial, file) = Partial::new(folder, name, &self.tmp)?;
         let cancel = self.cancel.clone();
         let written = self.write(file).and_then(|written| {
             place(&partial.path, target, overwrite)?;
-            partial.placed = true;
             Ok(written)
         });
         drop(partial);
@@ -757,7 +760,7 @@ impl Writer {
             self.stream(&mut archive, "web/part.bin", part, bytes, PRIVATE)?;
         }
         self.manifest.files = std::mem::take(&mut archive.listed);
-        self.manifest.app_version = std::mem::take(&mut self.app_version);
+        self.manifest.changed_files = self.changed;
         let manifest = serde_json::to_vec(&self.manifest).map_err(io::Error::other)?;
         archive.plain("manifest.json", &manifest)?;
         self.progress.flush();
@@ -804,7 +807,17 @@ impl Writer {
         file: &SourceFile,
         path: &str,
     ) -> Result<(), BackupError> {
-        let Some((opened, bytes, before)) = open_settled(file)? else {
+        #[cfg(test)]
+        let reopening = || self.hook(super::host::Hook::Reopening, path);
+        #[cfg(not(test))]
+        let reopening = || {};
+        let Some(Settled {
+            file: opened,
+            bytes,
+            metadata: before,
+            moving,
+        }) = open_settled(file, &reopening)?
+        else {
             return Ok(());
         };
         let mode = if before.permissions().mode() & 0o100 == 0 {
@@ -819,7 +832,7 @@ impl Writer {
         #[cfg(test)]
         self.hook(super::host::Hook::Read, path);
         let after = check.metadata()?;
-        if after.len() != bytes || after.modified().ok() != before.modified().ok() {
+        if moving || after.len() != bytes || after.modified().ok() != before.modified().ok() {
             self.changed = self.changed.saturating_add(1);
         }
         Ok(())
@@ -883,7 +896,7 @@ fn root_changed() -> BackupError {
 /// walk. A size that differs from the walk's opens the file again once:
 /// a size that holds is read whole; one still moving is read up to the
 /// walk's size, unless it is now smaller (`FILE_CHANGED`).
-fn open_settled(file: &SourceFile) -> Result<Option<(File, u64, Metadata)>, BackupError> {
+fn open_settled(file: &SourceFile, reopening: &dyn Fn()) -> Result<Option<Settled>, BackupError> {
     let open = || match open_source(file) {
         Ok(opened) => {
             let metadata = opened.metadata()?;
@@ -897,20 +910,41 @@ fn open_settled(file: &SourceFile) -> Result<Option<(File, u64, Metadata)>, Back
         return Ok(None);
     };
     if first.len() == file.bytes {
-        return Ok(Some((opened, file.bytes, first)));
+        return Ok(Some(Settled {
+            file: opened,
+            bytes: file.bytes,
+            metadata: first,
+            moving: false,
+        }));
     }
     drop(opened);
+    reopening();
     let Some((opened, second)) = open()? else {
         return Ok(None);
     };
-    if second.len() == first.len() {
-        let bytes = second.len();
-        Ok(Some((opened, bytes, second)))
-    } else if second.len() >= file.bytes {
-        Ok(Some((opened, file.bytes, second)))
-    } else {
-        Err(BackupError::Refused(FILE_CHANGED))
-    }
+    let moving = second.len() != first.len();
+    Ok(Some(Settled {
+        file: opened,
+        // Still moving: at most the walk's size, never more than is there.
+        bytes: if moving {
+            second.len().min(file.bytes)
+        } else {
+            second.len()
+        },
+        metadata: second,
+        moving,
+    }))
+}
+
+/// A listed file opened for reading.
+struct Settled {
+    file: File,
+    /// The size its entry gets.
+    bytes: u64,
+    /// Its metadata when it was opened.
+    metadata: Metadata,
+    /// Its size still moved between the two opens: counted as changed.
+    moving: bool,
 }
 
 /// Whether a failed `link` means the volume has no hard links (FAT and
@@ -929,7 +963,13 @@ fn place(partial: &Path, target: &Path, overwrite: bool) -> Result<(), BackupErr
         std::fs::rename(partial, target)?;
     } else {
         match std::fs::hard_link(partial, target) {
-            Ok(()) => std::fs::remove_file(partial)?,
+            // The backup is in place; a partial name that stays is the
+            // sweep's (ruling B Task 6, outside the findings).
+            Ok(()) => {
+                if std::fs::remove_file(partial).is_err() {
+                    tracing::warn!("Bruhs couldn't remove a finished backup's partial name");
+                }
+            }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(BackupError::Refused(DESTINATION_EXISTS));
             }

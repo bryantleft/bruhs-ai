@@ -305,6 +305,10 @@ pub struct BackupManifest {
     /// Owner files left out because a restore would refuse their names.
     #[serde(default)]
     pub skipped_names: u32,
+    /// Files that changed while they were read; each holds the part there
+    /// when the backup listed it (ruling B Task 6 I2).
+    #[serde(default)]
+    pub changed_files: u32,
     #[serde(default)]
     pub counts: BackupCounts,
 }
