@@ -26,7 +26,7 @@ assert(process.argv[2], 'Explicit fresh WASM dist required; do not use the old g
 const dist = path.resolve(process.argv[2]);
 const evidenceRoot = path.join(root, 'target/pillar-completion-qa');
 const startedAt = new Date().toISOString();
-const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-'));
+const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-') + '-quota');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceFiles = [
   'bruhs-web/src/components/today_page.rs', 'bruhs-web/src/storage.rs',

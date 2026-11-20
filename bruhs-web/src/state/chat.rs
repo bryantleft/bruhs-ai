@@ -92,7 +92,7 @@ pub struct Thread {
     /// Worktree this thread runs in, once one was created or reused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
-    /// Claude effort stamped on the last turn. `None` leaves the CLI default.
+    /// Native reasoning effort stamped on the last turn. `None` keeps the CLI default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// The thread has a place and keeps running there. A failed worktree

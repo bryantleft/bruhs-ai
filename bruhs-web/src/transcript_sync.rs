@@ -3,7 +3,9 @@ use crate::state::{Meeting, TranscriptSegment};
 use crate::storage::transcripts::{self, Snapshot};
 use leptos::prelude::*;
 use std::collections::BTreeMap;
+mod metadata;
 mod stream;
+pub use metadata::MeetingLookup;
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Status {
@@ -17,6 +19,7 @@ mod tests;
 
 #[derive(Clone, Copy)]
 pub struct TranscriptSync {
+    meeting_lookups: RwSignal<BTreeMap<String, MeetingLookup>>,
     statuses: RwSignal<BTreeMap<String, Status>>,
     meetings: ReadSignal<Vec<Meeting>>,
     set_meetings: WriteSignal<Vec<Meeting>>,
@@ -39,6 +42,7 @@ impl TranscriptSync {
         banners: crate::components::banner::BannerStackSignal,
     ) -> Self {
         Self {
+            meeting_lookups: RwSignal::new(BTreeMap::new()),
             statuses: RwSignal::new(BTreeMap::new()),
             meetings,
             set_meetings,

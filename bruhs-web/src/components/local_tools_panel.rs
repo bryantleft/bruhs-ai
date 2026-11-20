@@ -229,6 +229,8 @@ pub fn LocalToolsPanel() -> impl IntoView {
 pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
     let thread = expect_context::<crate::state::ActiveThreadId>().0;
     let owner = StoredValue::new(thread.get_untracked());
+    let active_project = expect_context::<crate::state::ActiveProjectSignal>().0;
+    let recorded_project = StoredValue::new(None::<String>);
     let alive = RwSignal::new(true);
     let recording = StoredValue::new_local(None::<super::voice_enroll::Recorder>);
     let active = RwSignal::new(false);
@@ -265,14 +267,17 @@ pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
             return;
         };
         let source_thread = owner.get_value();
+        let project = recorded_project.get_value();
         let source_generation = generation.get_untracked();
         busy.set(true);
         wasm_bindgen_futures::spawn_local(async move {
             let result = async {
-                let response = gloo_net::http::Request::post(&format!(
-                    "{}/api/local-tools/dictation?model=base_en&language=en",
-                    crate::api::BASE_URL
-                ))
+                let mut url = format!("{}/api/local-tools/dictation?model=base_en&language=en", crate::api::BASE_URL);
+                if let Some(project) = project {
+                    url.push_str("&project=");
+                    url.push_str(&js_sys::encode_uri_component(&project).as_string().unwrap_or_default());
+                }
+                let response = gloo_net::http::Request::post(&url)
                 .header("Content-Type", "audio/wav")
                 .header("x-bruhs-tool-grant", &id)
                 .body(audio)
@@ -323,6 +328,7 @@ pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
         error.set(None);
         let source_thread = thread.get_untracked();
         owner.set_value(source_thread.clone());
+        recorded_project.set_value(active_project.get_untracked().map(|project|project.path));
         wasm_bindgen_futures::spawn_local(async move {
             let result = async {
                 let permission: ToolGrant = request(

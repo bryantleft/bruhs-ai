@@ -23,6 +23,7 @@ pub fn thread_facts<'a>(
 ) -> SidebarFacts<'a> {
     SidebarFacts {
         id: &thread.id,
+        idle_settle_after_ms: Some(bruhs_models::logic::sidebar::SETTLED_AFTER_MS),
         updated_at_ms: thread.last_active().map_or(now_ms, |at| at.as_millis()),
         pinned: thread.pinned,
         settled: thread.settled,

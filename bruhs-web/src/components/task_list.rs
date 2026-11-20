@@ -4,6 +4,8 @@ use crate::components::task_pagination::{page_start, TaskPagination};
 use crate::components::task_row::TaskRow;
 use crate::state::{SelectedWorkItem, SetSelectedWorkItem, WorkItem};
 
+pub(super) const PAGE_SIZE: usize = 100;
+
 #[component]
 pub fn TaskList(
     /// Filtered list of items already scoped to the active project.
@@ -12,7 +14,6 @@ pub fn TaskList(
 ) -> impl IntoView {
     let SelectedWorkItem(selected) = expect_context::<SelectedWorkItem>();
     let SetSelectedWorkItem(set_selected) = expect_context::<SetSelectedWorkItem>();
-    const PAGE_SIZE: usize = 100;
     let page = RwSignal::new(0usize);
     let total = Signal::derive(move || items.with(Vec::len));
     let visible = Memo::new(move |_| {

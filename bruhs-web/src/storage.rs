@@ -27,6 +27,7 @@ mod messages;
 pub mod metadata;
 pub mod people;
 pub mod relationships;
+pub mod scheduling;
 pub mod tasks;
 pub mod transcripts;
 pub mod whiteboards;
@@ -41,7 +42,9 @@ use crate::state::{
 const DB_NAME: &str = "bruhs";
 // v12 also gates the conversation envelope format. Older tabs must close
 // before a writer can replace a structured record with a JSON envelope.
-const DB_VERSION: u32 = 13;
+// v14 moves scheduling policy into transactional metadata. An older tab
+// must close its old connection before this authority can be migrated.
+const DB_VERSION: u32 = 14;
 const STORE_BOARDS: &str = "whiteboards";
 const STORE_BOARD_INDEX: &str = "whiteboard_index";
 const STORE_BOARD_ASSETS: &str = "whiteboard_assets";

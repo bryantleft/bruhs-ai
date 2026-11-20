@@ -704,7 +704,15 @@ pub async fn fetch_meetings() -> Result<Vec<Meeting>, ApiError> {
 
 /// `GET /api/meetings/{id}`; `Ok(None)` when the server has no such meeting.
 pub async fn get_meeting(id: &str) -> Result<Option<Meeting>, ApiError> {
-    found(get_json(&format!("/api/meetings/{}", segment(id))).await)
+    let meeting: Option<Meeting> =
+        found(get_json(&format!("/api/meetings/{}", segment(id))).await)?;
+    match meeting {
+        Some(meeting) if meeting.id != id => Err(ApiError::Decode(format!(
+            "asked for meeting {id}, got {}",
+            meeting.id
+        ))),
+        meeting => Ok(meeting),
+    }
 }
 
 /// Fetch one authoritative profile without loading the entire contact directory.

@@ -146,7 +146,7 @@ pub(super) fn ComposerOptions(
                             }).collect_view()}
                         </div>
                     </section>
-                    {move || (provider_for_model_id(&model.get()) == AgentProvider::Claude).then(|| view! {
+                    {move || matches!(provider_for_model_id(&model.get()), AgentProvider::Claude | AgentProvider::Codex).then(|| view! {
                         <section aria-label="Effort">
                             <h3 class="mb-1 px-2 text-label-sm text-rambutan-500">"Effort"</h3>
                             <div role="radiogroup" aria-label="Effort" class="grid grid-cols-3 gap-1">

@@ -991,7 +991,7 @@ pub fn ChatPage() -> impl IntoView {
             thread.branch.clone()
         };
         let project_label = thread.project_name.clone();
-        let effort = (provider == AgentProvider::Claude)
+        let effort = matches!(provider, AgentProvider::Claude | AgentProvider::Codex)
             .then(|| role_effort.or_else(|| claude_effort_pref.get_untracked()))
             .flatten()
             .as_deref()

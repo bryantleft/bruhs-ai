@@ -36,11 +36,21 @@ fn apply(change: ReactiveChange) -> ReactiveCommand {
     ReactiveCommand::Apply { change }
 }
 
+fn once_time(at: bruhs_models::EpochMs) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at.as_f64()));
+    if date.get_time().is_finite() {
+        date.to_iso_string().into()
+    } else {
+        "Invalid date".into()
+    }
+}
+
 fn source_label(kind: &SourceKind) -> &'static str {
     match kind {
         SourceKind::Folder { .. } => "Folder",
         SourceKind::Http { .. } => "Website",
         SourceKind::Command { .. } => "Command",
+        SourceKind::Once { .. } => "Once",
         SourceKind::Schedule { .. } => "Schedule",
         SourceKind::Calendar { .. } => "Calendar",
         SourceKind::Webhook => "Webhook",
@@ -301,6 +311,10 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 cal_days.set(weekdays);
                 cal_zone.set(time_zone);
             }
+            SourceKind::Once { due_at } => {
+                source_type.set("once".into());
+                source_value.set(once_time(due_at));
+            }
             SourceKind::Webhook => source_type.set("webhook".into()),
             SourceKind::AppEvent { topic } => {
                 source_type.set("app_event".into());
@@ -439,11 +453,12 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 {move || hook.get().map(|credentials| view! { <div class=CARD><p class="text-label-sm text-rambutan-300">"Private webhook credentials"</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{credentials.path}</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{format!("Authorization: Bearer {}", credentials.token)}</p><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| hook.set(None))>"Hide token"</Button></div> })}
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| { source_id.set(None); source_name.set(String::new()); source_type.set("folder".into()); source_value.set(String::new()); source_cwd.set(String::new()); cal_times.set("08:00".into()); cal_days.set(Vec::new()); cal_zone.set(calendar::local_time_zone()); source_enabled.set(false); source_open.set(true); })>"New event source"</Button>
                 <Show when=move || source_open.get()>
-                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| source_type.set(event_target_value(&event))>{[("folder","Folder"),("http","Website"),("command","Command"),("schedule","Schedule"),("calendar","Calendar"),("webhook","Webhook"),("app_event","App event"),("custom","Custom event")].into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label>
+                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| source_type.set(event_target_value(&event))>{[("folder","Folder"),("http","Website"),("command","Command"),("schedule","Schedule"),("once","Once"),("calendar","Calendar"),("webhook","Webhook"),("app_event","App event"),("custom","Custom event")].into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label>
                         {move || match source_type.get().as_str() {
                             "folder" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /><Check label="Include subfolders" value=recursive /><Field label="File settle time in seconds" value=settle /></div> }.into_any(),
                             "http" => view! { <div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div> }.into_any(),
                             "command" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Command to run" value=source_value multiline=true /><Field label="Command working folder" value=source_cwd /><Field label="Command timeout in seconds" value=timeout /><p class="text-label-sm text-rambutan-400">"This command runs on your machine when the source is enabled. Use a command you trust."</p></div> }.into_any(),
+                            "once" => view! { <Field label="Run at (date and time)" value=source_value /> }.into_any(),
                             "app_event" => view! { <div class="sm:col-span-2"><Field label="App event topic" value=source_value /><p class="mt-1 text-label-sm text-rambutan-500">"Choose meeting.completed, meeting.transcribed, or meeting.summary."</p></div> }.into_any(),
                             "webhook" => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Save the source, then reveal its private token from the source row."</p> }.into_any(),
                             "calendar" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><calendar::WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div> }.into_any(),
@@ -464,7 +479,7 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 }).collect_view()}
                 <Show when=move || subscription_open.get()>
                     <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Agent"</span><select aria-label="Subscription agent" class=SELECT prop:value=move || sub_agent.get() on:change=move |event| sub_agent.set(event_target_value(&event))><option value="">"Choose agent"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.agents.clone()).unwrap_or_default()).into_iter().map(|agent| view! { <option value=agent.id>{agent.name}</option> }).collect_view()}</select></label><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source"</span><select aria-label="Subscription source" class=SELECT prop:value=move || sub_source.get() on:change=move |event| sub_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().map(|source| view! { <option value=source.id>{source.name}</option> }).collect_view()}</select></label><div class="sm:col-span-2"><Field label="What to do when this source reports an event" value=sub_note multiline=true /></div><Field label="Debounce in seconds" value=debounce /><Field label="Minimum gap between runs in seconds" value=throttle /><label class="block space-y-1 text-label-sm text-rambutan-300 sm:col-span-2"><span>"While the agent is busy"</span><select aria-label="While the agent is busy" class=SELECT prop:value=move || sub_busy.get() on:change=move |event| sub_busy.set(event_target_value(&event))>{BUSY_CHOICES.into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label></div><Check label="Subscription enabled" value=sub_enabled /><Check label=AUTO_RUN_LABEL value=sub_auto /><p class="text-label-sm text-rambutan-500">{move || snapshot.with(|s| auto_run_note(saved_agent_level(s.as_ref(), &sub_agent.get())))}</p><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| {
-                        match (milliseconds(&debounce.get_untracked(), true), milliseconds(&throttle.get_untracked(), true)) { (Ok(debounce_ms),Ok(throttle_ms)) => { let next_id=subscription_id.get_untracked().unwrap_or_else(id); subscription_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSubscription { subscription: Subscription { id: next_id, source_id: sub_source.get_untracked(), agent_id: sub_agent.get_untracked(), instructions: sub_note.get_untracked(), enabled: sub_enabled.get_untracked(), auto_run: sub_auto.get_untracked(), debounce_ms, throttle_ms, on_busy: busy_policy(&sub_busy.get_untracked()) } })); }, _ => error.set(Some("Enter a nonnegative number of seconds for debounce and minimum gap.".into())) }
+                        match (milliseconds(&debounce.get_untracked(), true), milliseconds(&throttle.get_untracked(), true)) { (Ok(debounce_ms),Ok(throttle_ms)) => { let next_id=subscription_id.get_untracked().unwrap_or_else(id); let (webhook_filters, webhook_prompt, webhook_security, webhook_dedupe, task_conversation, task_checkout)=snapshot.with_untracked(|s| s.as_ref().and_then(|s| s.subscriptions.iter().find(|sub| sub.id==next_id && sub.source_id==sub_source.get_untracked())).map(|s| (s.webhook_filters.clone(),s.webhook_prompt.clone(),s.webhook_security.clone(),s.webhook_dedupe.clone(),s.task_conversation,s.task_checkout.clone())).unwrap_or_default()); subscription_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSubscription { subscription: Subscription { task_title: None, id: next_id, source_id: sub_source.get_untracked(), agent_id: sub_agent.get_untracked(), instructions: sub_note.get_untracked(), enabled: sub_enabled.get_untracked(), auto_run: sub_auto.get_untracked(), debounce_ms, throttle_ms, webhook_filters, webhook_prompt, webhook_security, webhook_dedupe, task_conversation, task_checkout, on_busy: busy_policy(&sub_busy.get_untracked()) } })); }, _ => error.set(Some("Enter a nonnegative number of seconds for debounce and minimum gap.".into())) }
                     })>"Save subscription"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| subscription_open.set(false))>"Close"</Button></div></div>
                 </Show>
                 <details class=CARD><summary class="cursor-pointer text-label text-rambutan-300">"Publish a custom event"</summary><div class="mt-3 space-y-3"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Custom event source"</span><select aria-label="Custom event source" class=SELECT prop:value=move || publish_source.get() on:change=move |event| publish_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().filter(|s| matches!(s.kind, SourceKind::Custom)).map(|s| view! { <option value=s.id>{s.name}</option> }).collect_view()}</select></label><Field label="Unique event key" value=publish_key /><Field label="Event payload as JSON" value=publish_payload multiline=true /><p class="text-label-sm text-rambutan-500">"Reusing a key keeps the same event from running twice."</p><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| match serde_json::from_str(&publish_payload.get_untracked()) { Ok(payload) => send.run(ReactiveCommand::Publish { source_id: publish_source.get_untracked(), key: publish_key.get_untracked(), payload }), Err(err) => error.set(Some(format!("Check the event JSON: {err}"))) })>"Publish event"</Button></div></details>
@@ -561,6 +576,10 @@ fn source_kind(
         "schedule" => SourceKind::Schedule {
             every_ms: milliseconds(interval, false)?,
         },
+        "once" => SourceKind::Once {
+            due_at: bruhs_models::EpochMs::from_f64_floor(js_sys::Date::parse(value.trim()))
+                .map_err(|_| "Enter a valid date and time.".to_string())?,
+        },
         "webhook" => SourceKind::Webhook,
         "app_event" => SourceKind::AppEvent { topic: value },
         "custom" => SourceKind::Custom,
@@ -576,7 +595,7 @@ fn proposal_label(
     snapshot: Option<&ReactiveSnapshot>,
 ) -> String {
     match change {
-        ReactiveChange::SaveAutomation { automation } => format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"}, automation.agent.name,event_policy_line(automation.subscription.auto_run, level)),
+        ReactiveChange::SaveAutomation { automation } => format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"}, automation.title(),event_policy_line(automation.subscription.auto_run, level)),
         ReactiveChange::SaveAgent { agent } => format!("Save agent {} with model {}, working folder {}, enabled {}. Review its instructions and memory below.", agent.name,agent.model,agent.project_path,agent.enabled),
         ReactiveChange::SaveSource { source } => format!("Save {} source {}, enabled {}. Review the complete connection settings below.", source_label(&source.kind),source.name,source.enabled),
         ReactiveChange::SaveSubscription { subscription } => format!("Connect source {} to agent {}. Enabled: {}. Runs automatically: {}.", subscription.source_id,subscription.agent_id,subscription.enabled,subscription.auto_run),

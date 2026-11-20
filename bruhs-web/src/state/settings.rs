@@ -69,7 +69,7 @@ pub struct EditorSignal(pub RwSignal<String>);
 #[derive(Copy, Clone)]
 pub struct RunChoiceSignal(pub RwSignal<bruhs_models::logic::run_place::WorkspaceChoice>);
 
-/// Claude effort for the next turn (`bruhs.effort`). `None` leaves the CLI default.
+/// Native reasoning effort for the next turn (`bruhs.effort`). `None` keeps the CLI default.
 #[derive(Copy, Clone)]
 pub struct ClaudeEffortSignal(pub RwSignal<Option<String>>);
 

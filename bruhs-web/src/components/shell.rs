@@ -835,6 +835,7 @@ pub fn Shell() -> impl IntoView {
                 <super::banner::BannerStack />
                 </div>
                 <crate::task_saves::TaskSaveNotice />
+                <super::scheduling_status::SchedulingStatus />
             </main>
 
             // Right: Diff / Tasks panel — below `md` it overlays as a drawer.

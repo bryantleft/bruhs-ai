@@ -150,6 +150,7 @@ mod tests {
 
     fn task(id: &str, title: &str) -> WorkItem {
         WorkItem {
+            source: None,
             id: id.into(),
             title: title.into(),
             project_id: None,

@@ -1336,7 +1336,7 @@ pub fn Sidebar() -> impl IntoView {
                                 pinned: thread.pinned,
                                 settled: thread.settled,
                                 snoozed: thread.snoozed_until_ms.is_some_and(|until| until > now),
-                                streaming: turns.is_running(&id),
+                                title_action_disabled: turns.is_running(&id),
                                 has_draft: active_thread_id.get().as_deref() == Some(id.as_str())
                                     && !composer_draft.with(String::is_empty),
                             })

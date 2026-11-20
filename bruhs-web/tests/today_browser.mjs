@@ -28,7 +28,7 @@ assert(process.argv[2], 'Explicit fresh WASM dist required; do not use the old g
 const dist = path.resolve(process.argv[2]);
 const evidenceRoot = path.join(root, 'target/pillar-completion-qa');
 const startedAt = new Date().toISOString();
-const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-'));
+const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-') + '-today');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceFiles = [
   'bruhs-web/src/components/today_page.rs', 'bruhs-web/src/storage.rs',
@@ -272,6 +272,9 @@ try {
       check(initial.tasks.length === 0 && initial.events.length === 0, 'isolated browser context starts with no task/event data', { tasks: [], events: [] }, { tasks: initial.tasks, events: initial.events });
       const now = Date.parse(spec.now), mainId = `${spec.id}-task-0`, doneId = `${spec.id}-completed-dependency`;
       const tasks = spec.kind === 'workday-boundaries' ? Array.from({ length: 6 }, (_, index) => task(`${spec.id}-task-${index}`, now, spec.date, 90)) : [task(mainId, now, spec.date), { ...task(doneId, now, spec.date), status: 'Done' }];
+      // DST fixtures declare their nine-hour opening, including Sundays. The
+      // availability suite separately checks default weekday-only hours.
+      if (spec.kind === 'workday-boundaries') await writer.evaluate(now => localStorage.setItem('bruhs.scheduling', JSON.stringify({ id: 'default', availability: [{ id: 'clock-boundary', label: 'Boundary fixture', weekdays: [0, 1, 2, 3, 4, 5, 6], start_minute: 540, end_minute: 1080, enabled: true }], focus: { enabled: true, daily_target_minutes: 120, minimum_block_minutes: 45, preferred_start_minute: 540 }, links: [], conflicts: [], updated_at_ms: now })), now);
       await writeDB(writer, { puts: { work_items: tasks } });
       await page.reload();
       await today.getByRole('heading', { name: 'Today', exact: true }).waitFor();

@@ -190,6 +190,8 @@ pub fn MeetingLive() -> impl IntoView {
                         }
                     });
                     storage::persist_meeting(updated);
+                    // Cache the stopped snapshot even when the next view is a task.
+                    transcript_sync.refresh(id.clone());
                     if live_id.get_untracked().as_deref() == Some(&id) {
                         set_live_id.set(None);
                     }

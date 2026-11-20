@@ -2,6 +2,20 @@
 
 use super::*;
 
+mod preferences;
+pub use preferences::SchedulingPreferencesStore;
+
+/// Fast review preflight. The authoritative policy is re-read inside every
+/// automatic placement/day-plan transaction before any related records change.
+pub(crate) fn read_saved_scheduling_preferences(
+) -> Result<SchedulingPreferences, bruhs_models::DayPlanChangeError> {
+    let SchedulingPreferencesSignal(preferences) = expect_context();
+    if !preferences.ready() || preferences.busy() {
+        return Err(bruhs_models::DayPlanChangeError::AvailabilityUnavailable);
+    }
+    Ok(preferences.get_untracked())
+}
+
 #[derive(Copy, Clone)]
 pub struct CalendarModeSignal(pub ReadSignal<CalendarMode>);
 #[derive(Copy, Clone)]
@@ -16,7 +30,7 @@ pub struct RelationshipsSignal(pub ReadSignal<Vec<RelationshipProfile>>);
 #[derive(Copy, Clone)]
 pub struct SetRelationshipsSignal(pub WriteSignal<Vec<RelationshipProfile>>);
 #[derive(Copy, Clone)]
-pub struct SchedulingPreferencesSignal(pub RwSignal<SchedulingPreferences>);
+pub struct SchedulingPreferencesSignal(pub SchedulingPreferencesStore);
 #[derive(Copy, Clone)]
 pub struct LifeContextSignal(pub DurableMetadata<LifeContext>);
 
@@ -85,12 +99,7 @@ pub(super) fn provide() {
     // Which calendar grain to render — month grid by default, week / day
     // for narrower-time-horizon views.
     let (calendar_mode, set_calendar_mode) = signal(CalendarMode::Month);
-    let scheduling_preferences = RwSignal::new(
-        load_json_pref::<SchedulingPreferences>("bruhs.scheduling").unwrap_or_default(),
-    );
-    Effect::new(move |_| {
-        save_json_pref("bruhs.scheduling", &scheduling_preferences.get());
-    });
+    let scheduling_preferences = SchedulingPreferencesStore::new();
 
     provide_context(CalendarEventsSignal(calendar_events));
     provide_context(SetCalendarEventsSignal(set_calendar_events));

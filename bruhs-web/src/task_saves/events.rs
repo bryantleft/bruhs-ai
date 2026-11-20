@@ -67,30 +67,4 @@ impl TaskSaves {
         self.save();
     }
 
-    pub fn schedule_task(self, original: WorkItem, task: WorkItem, event: CalendarEvent) {
-        self.initial_edits
-            .update_value(|edits| edits.edit(&task.id, Some(&task)));
-        self.initial_events
-            .update_value(|edits| edits.edit(&event.id, Some(&event)));
-        self.queue.update(|queue| {
-            let ids = [
-                (Kind::Task, task.id.clone()),
-                (Kind::Event, event.id.clone()),
-            ];
-            queue.edit(
-                task.id.clone(),
-                Some(Record::Task(original)),
-                Some(Record::Task(task)),
-            );
-            queue.edit_record(
-                Kind::Event,
-                event.id.clone(),
-                None,
-                Some(Record::Event(event)),
-            );
-            queue.group_records(&ids);
-        });
-        self.refresh_status();
-        self.save();
-    }
 }

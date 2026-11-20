@@ -25,6 +25,7 @@ impl CreatedRecord {
                 ))))
             }
             WorkflowOperation::CreateTask { title } => Ok(Self::Task(Box::new(WorkItem {
+                source: None,
                 id: uuid::Uuid::new_v4().to_string(),
                 project_id: None,
                 title: title.clone(),
