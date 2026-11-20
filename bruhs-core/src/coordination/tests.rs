@@ -1,11 +1,13 @@
 use super::*;
 
 mod board;
+mod handoffs;
 mod wakes;
 
 fn fixture(parent_id: Option<ThreadId>, state: TaskState) -> CoordinatedTask {
     CoordinatedTask {
         id: ThreadId::new_v4(),
+        work_item_origin: None,
         parent_id,
         source_context: vec![],
         source_revision: None,
@@ -14,6 +16,8 @@ fn fixture(parent_id: Option<ThreadId>, state: TaskState) -> CoordinatedTask {
         project_path: "/project".into(),
         working_path: "/project/worktree".into(),
         model: "claude-sonnet-4-5".into(),
+        effort: None,
+        execution_timeout_seconds: None,
         permission_mode: PermissionMode::Plan,
         spec_id: None,
         spec_revision: None,
@@ -47,6 +51,78 @@ async fn runtime(root: &Path, tasks: Vec<CoordinatedTask>) -> CoordinationRuntim
     CoordinationRuntime::open(path, Arc::new(crate::AppState::new()))
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn settled_task_effort_is_durable_but_active_or_invalid_changes_are_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let original = fixture(None, TaskState::Completed);
+    let id = original.id.clone();
+    let runtime = runtime(root.path(), vec![original]).await;
+    runtime
+        .command(CoordinationCommand::SetEffort {
+            id: id.clone(),
+            effort: Some("high".into()),
+        })
+        .await
+        .unwrap();
+    let saved = runtime.task(&id).await.unwrap();
+    assert_eq!(saved.effort.as_deref(), Some("high"));
+    assert_eq!(saved.state, TaskState::Completed);
+    assert_eq!(saved.permission_mode, PermissionMode::Plan);
+    assert_eq!(saved.messages.len(), 1);
+    assert!(saved.session_id.is_none());
+    let bytes = std::fs::read(root.path().join("tasks.json")).unwrap();
+    assert!(runtime
+        .command(CoordinationCommand::SetEffort {
+            id: id.clone(),
+            effort: Some("turbo".into())
+        })
+        .await
+        .is_err());
+    assert_eq!(
+        std::fs::read(root.path().join("tasks.json")).unwrap(),
+        bytes
+    );
+    drop(runtime);
+    let reopened = CoordinationRuntime::open(
+        root.path().join("tasks.json"),
+        Arc::new(crate::AppState::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened.task(&id).await.unwrap().effort.as_deref(),
+        Some("high")
+    );
+    {
+        let mut data = reopened.0.data.lock().await;
+        data.tasks.get_mut(&id).unwrap().state = TaskState::Running;
+    }
+    assert!(reopened
+        .command(CoordinationCommand::SetEffort {
+            id: id.clone(),
+            effort: None
+        })
+        .await
+        .is_err());
+    assert_eq!(
+        reopened.task(&id).await.unwrap().effort.as_deref(),
+        Some("high")
+    );
+    {
+        let mut data = reopened.0.data.lock().await;
+        data.tasks.get_mut(&id).unwrap().state = TaskState::Completed;
+    }
+    reopened
+        .command(CoordinationCommand::SetEffort {
+            id: id.clone(),
+            effort: None,
+        })
+        .await
+        .unwrap();
+    assert!(reopened.task(&id).await.unwrap().effort.is_none());
+    drop(reopened);
 }
 
 #[tokio::test]
@@ -275,6 +351,8 @@ async fn a_side_chat_reads_the_parent_worktree_and_uses_a_frozen_source_point() 
                 project_path: parent.project_path,
                 prompt: "Explain the current changes".into(),
                 model: parent.model,
+                effort: None,
+                execution_timeout_seconds: None,
                 permission_mode: PermissionMode::Plan,
                 isolation: Isolation::Shared,
                 spec_id: None,
@@ -532,5 +610,137 @@ async fn archive_files_finished_work_away_durably_and_refuses_running_work() {
         .unwrap()
         .archived_at
         .is_none());
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn execution_budget_is_saved_without_starting_and_active_changes_are_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let task = fixture(None, TaskState::Completed);
+    let id = task.id.clone();
+    let runtime = runtime(root.path(), vec![task]).await;
+    runtime
+        .command(CoordinationCommand::SetExecutionBudget {
+            id: id.clone(),
+            seconds: Some(60),
+        })
+        .await
+        .unwrap();
+    let saved = runtime.task(&id).await.unwrap();
+    assert_eq!(saved.execution_timeout_seconds, Some(60));
+    assert_eq!(saved.state, TaskState::Completed);
+    assert_eq!(saved.messages.len(), 1);
+    let before = std::fs::read(root.path().join("tasks.json")).unwrap();
+    for seconds in [Some(0), Some(u64::MAX)] {
+        assert!(runtime
+            .command(CoordinationCommand::SetExecutionBudget {
+                id: id.clone(),
+                seconds
+            })
+            .await
+            .is_err());
+        assert_eq!(
+            std::fs::read(root.path().join("tasks.json")).unwrap(),
+            before
+        );
+    }
+    {
+        runtime
+            .0
+            .data
+            .lock()
+            .await
+            .tasks
+            .get_mut(&id)
+            .unwrap()
+            .state = TaskState::Running;
+    }
+    assert!(runtime
+        .command(CoordinationCommand::SetExecutionBudget {
+            id: id.clone(),
+            seconds: Some(120)
+        })
+        .await
+        .is_err());
+    {
+        runtime
+            .0
+            .data
+            .lock()
+            .await
+            .tasks
+            .get_mut(&id)
+            .unwrap()
+            .state = TaskState::Completed;
+    }
+    drop(runtime);
+    let reopened = CoordinationRuntime::open(
+        root.path().join("tasks.json"),
+        Arc::new(crate::AppState::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened.task(&id).await.unwrap().execution_timeout_seconds,
+        Some(60)
+    );
+    reopened
+        .command(CoordinationCommand::SetExecutionBudget {
+            id: id.clone(),
+            seconds: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.task(&id).await.unwrap().execution_timeout_seconds,
+        None
+    );
+    drop(reopened);
+}
+
+#[tokio::test]
+async fn a_budget_stops_the_task_tree_preserves_partial_output_and_does_not_become_a_quota_retry() {
+    let root = tempfile::tempdir().unwrap();
+    let parent = fixture(None, TaskState::Completed);
+    let parent_id = parent.id.clone();
+    let child = fixture(Some(parent_id.clone()), TaskState::Completed);
+    let child_id = child.id.clone();
+    let other = fixture(None, TaskState::Completed);
+    let other_id = other.id.clone();
+    let runtime = runtime(root.path(), vec![parent, child, other]).await;
+    {
+        let mut data = runtime.0.data.lock().await;
+        for id in [&parent_id, &child_id] {
+            let task = data.tasks.get_mut(id).unwrap();
+            task.state = TaskState::Running;
+            task.live_output = "Retained partial work".into();
+            task.auto_resume_on_limit = true;
+            task.resume_at = Some(EpochMs::now());
+        }
+        drop(data);
+    }
+    runtime
+        .stop_tree(
+            &parent_id,
+            TaskState::Interrupted,
+            Some(crate::agent::execution_budget_message(1)),
+        )
+        .await
+        .unwrap();
+    let parent = runtime.task(&parent_id).await.unwrap();
+    assert_eq!(parent.state, TaskState::Interrupted);
+    assert!(parent.error.unwrap().contains("execution budget"));
+    assert_eq!(
+        parent.messages.last().unwrap().text,
+        "Retained partial work"
+    );
+    assert!(parent.resume_at.is_none());
+    let child = runtime.task(&child_id).await.unwrap();
+    assert_eq!(child.state, TaskState::Cancelled);
+    assert!(child.resume_at.is_none());
+    assert_eq!(
+        runtime.task(&other_id).await.unwrap().state,
+        TaskState::Completed
+    );
     drop(runtime);
 }

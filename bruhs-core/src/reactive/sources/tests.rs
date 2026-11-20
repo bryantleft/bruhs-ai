@@ -350,6 +350,13 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
                     auto_run: false,
                     debounce_ms: 0,
                     throttle_ms: 0,
+                    webhook_filters: Vec::new(),
+                    webhook_prompt: None,
+                    webhook_security: Default::default(),
+                    webhook_dedupe: Default::default(),
+                    task_title: None,
+                    task_conversation: Default::default(),
+                    task_checkout: Default::default(),
                     on_busy: Default::default(),
                 },
             },
@@ -366,6 +373,10 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
         )
         .await
         .unwrap();
+    let stored_due = |snapshot: bruhs_models::reactive::ReactiveSnapshot| {
+        snapshot.next_run_by_source.unwrap()["weekly-clock"].as_millis()
+    };
+    assert_eq!(stored_due(runtime.snapshot().await.unwrap()), i64::try_from(due).unwrap());
     let mut changes = runtime.watch_changes();
     let worker = tokio::spawn(drive(runtime.clone(), source, reqwest::Client::new()));
     let event = tokio::time::timeout(Duration::from_secs(5), async {
@@ -386,4 +397,27 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
     let _ = worker.await;
     let event=event.expect("A resumed weekly source must wake for its saved due time rather than sleep another seven days");
     assert_eq!(event.payload["scheduled_at_ms"], due);
+    assert_eq!(stored_due(runtime.snapshot().await.unwrap()), i64::try_from(due + every_ms).unwrap());
+}
+
+#[test]
+fn one_time_schedule_is_due_once_and_can_be_rescheduled_after_restart() {
+    let due = bruhs_models::EpochMs::new(1_000).unwrap();
+    let waiting = once_batch(None, 900, due).unwrap();
+    assert!(waiting.events.is_empty());
+    let fired = once_batch(Some(waiting.cursor), 2_000, due).unwrap();
+    assert_eq!(fired.events.len(), 1);
+    assert_eq!(fired.events[0].key, "once:1000");
+    let restart = once_batch(Some(fired.cursor), 3_000, due).unwrap();
+    assert!(restart.events.is_empty());
+    let next = bruhs_models::EpochMs::new(5_000).unwrap();
+    let changed = once_batch(Some(restart.cursor), 3_000, next).unwrap();
+    assert!(changed.events.is_empty());
+    assert_eq!(
+        once_batch(Some(changed.cursor), 5_000, next)
+            .unwrap()
+            .events
+            .len(),
+        1
+    );
 }

@@ -1,5 +1,5 @@
 use super::{DeliveryError, DeliveryResult, DeliveryService};
-use bruhs_models::delivery::Command;
+use bruhs_models::delivery::{Command, Forge, ForgeRepository};
 use std::{path::Path, process::Stdio};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
@@ -46,6 +46,35 @@ impl DeliveryService {
         program: &str,
         args: &[&str],
     ) -> DeliveryResult<String> {
+        self.read_scoped(cwd, program, args, None).await
+    }
+
+    pub(super) async fn github_repository(&self, cwd: &Path) -> DeliveryResult<ForgeRepository> {
+        self
+            .forge_repository(cwd, Forge::GitHub)
+            .await?
+            .ok_or_else(|| {
+                DeliveryError::Invalid(
+                    "GitHub delivery requires remote.origin.url. Add the intended GitHub origin and retry."
+                        .into(),
+                )
+            })
+    }
+
+    /// GitHub's saved default remote can differ from origin. Select the
+    /// repository explicitly for PR commands and API placeholder expansion.
+    pub(super) async fn github_read(&self, cwd: &Path, args: &[&str]) -> DeliveryResult<String> {
+        let repository = self.github_repository(cwd).await?;
+        self.read_scoped(cwd, "gh", args, Some(&repository)).await
+    }
+
+    pub(super) async fn read_scoped(
+        &self,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        repository: Option<&ForgeRepository>,
+    ) -> DeliveryResult<String> {
         let specification = Command {
             program: program.into(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -55,7 +84,7 @@ impl DeliveryService {
         // Same external CLI deadline as the existing pull lookup integration.
         tokio::time::timeout(
             std::time::Duration::from_secs(8),
-            self.run_command(cwd, &specification, &mut cancelled),
+            self.run_command(cwd, &specification, &mut cancelled, repository),
         )
         .await
         .map_err(|_| {
@@ -70,6 +99,58 @@ impl DeliveryService {
         cwd: &Path,
         specification: &Command,
         cancelled: &mut watch::Receiver<bool>,
+        repository: Option<&ForgeRepository>,
+    ) -> DeliveryResult<String> {
+        self.run_with_output(cwd, specification, cancelled, repository, None)
+            .await
+    }
+
+    /// Guide evidence stays in a private temporary file. Command diagnostics
+    /// and ordinary JSON responses keep their normal in-memory output budget.
+    pub(super) async fn spool(
+        &self,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        repository: Option<&ForgeRepository>,
+    ) -> DeliveryResult<std::fs::File> {
+        use std::io::Seek;
+        let mut file = tempfile::tempfile().map_err(|e| DeliveryError::Storage(e.to_string()))?;
+        let output = file
+            .try_clone()
+            .map_err(|e| DeliveryError::Storage(e.to_string()))?;
+        let specification = Command {
+            program: program.into(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            stdin: None,
+        };
+        let (_owner, mut cancelled) = watch::channel(false);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            self.run_with_output(
+                cwd,
+                &specification,
+                &mut cancelled,
+                repository,
+                Some(output),
+            ),
+        )
+        .await
+        .map_err(|_| {
+            DeliveryError::Command(format!("{program} timed out reading review data."))
+        })??;
+        file.rewind()
+            .map_err(|e| DeliveryError::Storage(e.to_string()))?;
+        Ok(file)
+    }
+
+    async fn run_with_output(
+        &self,
+        cwd: &Path,
+        specification: &Command,
+        cancelled: &mut watch::Receiver<bool>,
+        repository: Option<&ForgeRepository>,
+        output: Option<std::fs::File>,
     ) -> DeliveryResult<String> {
         let executable = match specification.program.as_str() {
             "gh" => self.gh.as_path(),
@@ -79,7 +160,14 @@ impl DeliveryService {
         };
         let mut command = tokio::process::Command::new(executable);
         if specification.program == "git" {
-            command.args(["-c", "core.fsmonitor=false"]);
+            command
+                .args([
+                    "-c",
+                    "core.fsmonitor=false",
+                    "-c",
+                    "diff.autoRefreshIndex=false",
+                ])
+                .env("GIT_OPTIONAL_LOCKS", "0");
         }
         command
             .args(&specification.args)
@@ -89,7 +177,7 @@ impl DeliveryService {
             } else {
                 Stdio::null()
             })
-            .stdout(Stdio::piped())
+            .stdout(output.map_or_else(Stdio::piped, Stdio::from))
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .env("NO_COLOR", "1")
@@ -98,9 +186,9 @@ impl DeliveryService {
             .env_remove("CLICOLOR_FORCE")
             .env_remove("FORCE_COLOR")
             .env_remove("GH_FORCE_TTY");
-        if specification.program == "git" {
+        if matches!(specification.program.as_str(), "git" | "gh" | "glab") {
             // CWD is the reviewed repository; inherited selectors must not redirect
-            // its index, worktree or ref transaction into another checkout.
+            // its index, worktree or the forge CLI's internal Git commands.
             for variable in [
                 "GIT_DIR",
                 "GIT_WORK_TREE",
@@ -112,8 +200,17 @@ impl DeliveryService {
             }
         }
         if specification.program == "gh" {
-            command.env_remove("GH_REPO");
-            command.env_remove("GH_HOST");
+            let repository = repository
+                .filter(|repository| repository.forge == Forge::GitHub)
+                .ok_or_else(|| DeliveryError::Conflict(
+                    "This GitHub command has no reviewed repository. Add the intended origin and prepare the action again."
+                        .into(),
+                ))?;
+            command.env(
+                "GH_REPO",
+                format!("{}/{}", repository.host, repository.project),
+            );
+            command.env("GH_HOST", &repository.host);
             command.env_remove("GH_DEBUG");
         }
         if specification.program == "glab" {
@@ -138,10 +235,13 @@ impl DeliveryService {
         })?;
         let mut group = ProcessGroup(child.id());
         let stdin = child.stdin.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| DeliveryError::Command("Command stdout was unavailable.".into()))?;
+        let stdout_pipe = child.stdout.take();
+        let stdout = async move {
+            match stdout_pipe {
+                Some(pipe) => bounded(pipe).await,
+                None => Ok(Vec::new()),
+            }
+        };
         let stderr = child
             .stderr
             .take()
@@ -162,7 +262,7 @@ impl DeliveryService {
             Ok::<(), DeliveryError>(())
         };
         let work = async {
-            let (_, out, err) = tokio::try_join!(input, bounded(stdout), bounded(stderr))?;
+            let (_, out, err) = tokio::try_join!(input, stdout, bounded(stderr))?;
             let status = child
                 .wait()
                 .await

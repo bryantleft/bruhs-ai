@@ -1,5 +1,6 @@
 //! Bounded next-message predictions, separate from the user's provider session.
 
+use bruhs_models::delivery::generation::{GenerationOptions, OptionKind};
 use std::{path::Path, time::Duration};
 
 use bruhs_models::{
@@ -77,6 +78,7 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
             &Instructions {
                 text: INSTRUCTIONS,
                 think: true,
+                generation: None,
             },
             workspace.path(),
         )
@@ -111,9 +113,50 @@ pub(crate) async fn isolated_reply(
     instructions: &Instructions<'_>,
     cwd: &Path,
 ) -> Result<String, SuggestionError> {
+    isolated_agent_reply(
+        provider,
+        prompt,
+        model,
+        instructions,
+        cwd,
+        ReplyUse::Background,
+    )
+    .await
+}
+#[derive(Clone, Copy)]
+pub(crate) enum ReplyUse<'a> {
+    Naming(&'a [crate::thread_title::NamingImage]),
+    Background,
+    RequestedGuide,
+}
+pub(crate) async fn isolated_agent_reply(
+    provider: AgentProvider,
+    prompt: &str,
+    model: &str,
+    instructions: &Instructions<'_>,
+    cwd: &Path,
+    purpose: ReplyUse<'_>,
+) -> Result<String, SuggestionError> {
+    if instructions
+        .generation
+        .is_some_and(|options| !options.valid_for(model))
+    {
+        return Err(SuggestionError::InvalidRequest);
+    }
+    let reply_limit = match (purpose, provider) {
+        (ReplyUse::RequestedGuide, _) => 65_536,
+        (_, AgentProvider::Codex) => 4096,
+        _ => usize::MAX,
+    };
     match provider {
-        AgentProvider::Claude => claude(prompt, model, instructions, cwd).await,
-        AgentProvider::Codex => codex(prompt, model, instructions.text, cwd).await,
+        AgentProvider::Claude => {
+            let reply = claude(prompt, model, instructions, cwd, purpose).await?;
+            if reply.len() > reply_limit {
+                return Err(SuggestionError::InvalidReply);
+            }
+            Ok(reply)
+        }
+        AgentProvider::Codex => codex(prompt, model, instructions, cwd, reply_limit, purpose).await,
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
@@ -128,6 +171,7 @@ pub(crate) async fn isolated_reply(
 pub(crate) struct Instructions<'a> {
     pub text: &'a str,
     pub think: bool,
+    pub generation: Option<&'a GenerationOptions>,
 }
 
 pub(crate) async fn usage_permits(provider: AgentProvider) -> bool {
@@ -169,18 +213,40 @@ fn claude_options(
     instructions: &Instructions<'_>,
     cwd: &Path,
 ) -> claude_sdk_rs::QueryOptions {
-    let options = crate::agent::claude_query_options_from_env(prompt);
-    let options = if instructions.think {
-        options
+    let mut options = crate::agent::claude_query_options_from_env(prompt);
+    let mut api_model = model.to_owned();
+    if let Some(selected) = instructions.generation {
+        let value = |kind| selected.value(model, kind);
+        let mut settings = serde_json::Map::new();
+        for (kind, key) in [
+            (OptionKind::Thinking, "alwaysThinkingEnabled"),
+            (OptionKind::FastMode, "fastMode"),
+            (OptionKind::Ultracode, "ultracode"),
+        ] {
+            if let Some(v) = value(kind) {
+                settings.insert(key.to_owned(), (v == "on").into());
+            }
+        }
+        if !settings.is_empty() {
+            options.settings = Some(serde_json::Value::Object(settings).to_string());
+        }
+        if let Some(effort) = value(OptionKind::Effort) {
+            options = options.effort(effort);
+        }
+        if value(OptionKind::ContextWindow) == Some("1m") {
+            api_model.push_str("[1m]");
+        }
     } else {
-        options.env("MAX_THINKING_TOKENS", "0")
-    };
+        options = options.effort("low");
+        if !instructions.think {
+            options = options.env("MAX_THINKING_TOKENS", "0");
+        }
+    }
     options
         .cwd(cwd)
-        .model(model)
+        .model(api_model)
         .tools(claude_sdk_rs::Tools::None)
         .system_prompt(instructions.text)
-        .effort("low")
         .setting_sources(Vec::<String>::new())
         .persist_session(false)
         .env("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "false")
@@ -192,14 +258,28 @@ async fn claude(
     model: &str,
     instructions: &Instructions<'_>,
     cwd: &Path,
+    purpose: ReplyUse<'_>,
 ) -> Result<String, SuggestionError> {
-    let mut stream = claude_sdk_rs::query(claude_options(prompt, model, instructions, cwd))
+    let mut options = claude_options(prompt, model, instructions, cwd);
+    if let ReplyUse::Naming(images) = purpose {
+        use base64::Engine;
+        options.images = images
+            .iter()
+            .map(|image| claude_sdk_rs::ImageInput {
+                media_type: image.mime.into(),
+                data: base64::engine::general_purpose::STANDARD.encode(&image.bytes),
+            })
+            .collect();
+    }
+    let mut stream = claude_sdk_rs::query(options)
         .map_err(|error| SuggestionError::Provider(error.to_string()))?;
     while let Some(event) = stream.next().await {
         match event {
             claude_sdk_rs::QueryEvent::Raw(event) => {
                 quota::observe_claude(&event);
-                if !quota::permits(AgentProvider::Claude).await {
+                if !matches!(purpose, ReplyUse::RequestedGuide)
+                    && !quota::permits(AgentProvider::Claude).await
+                {
                     return Err(SuggestionError::UsageReserved);
                 }
             }
@@ -216,10 +296,10 @@ async fn claude(
                 };
             }
             claude_sdk_rs::QueryEvent::Error(error) => {
-                return Err(SuggestionError::Provider(error))
+                return Err(SuggestionError::Provider(error));
             }
             claude_sdk_rs::QueryEvent::ProcessFailed(error) => {
-                return Err(SuggestionError::Provider(error.to_string()))
+                return Err(SuggestionError::Provider(error.to_string()));
             }
             _ => {}
         }
@@ -230,7 +310,7 @@ async fn claude(
 fn codex_options(
     prompt: &str,
     model: &str,
-    instructions: &str,
+    instructions: &Instructions<'_>,
     cwd: &Path,
 ) -> Result<codex_sdk_rs::QueryOptions, SuggestionError> {
     use codex_sdk_rs::{ApprovalPolicy, CodexAccess, ConfigOverride, SandboxMode, Session};
@@ -245,7 +325,7 @@ fn codex_options(
             sandbox: SandboxMode::ReadOnly,
             approval: ApprovalPolicy::Never,
         })
-        .developer_instructions(instructions);
+        .developer_instructions(instructions.text);
     // No user MCP servers/plugins/hooks or project instructions in this empty
     // workspace. Retain CLI authentication, but remove app-owned credentials.
     for key in crate::connections::PRIVATE_ENV {
@@ -260,12 +340,29 @@ fn codex_options(
         ("features.browser_use", "false"),
         ("features.computer_use", "false"),
         ("web_search", "\"disabled\""),
-        ("model_reasoning_effort", "\"low\""),
     ] {
         options = options.config(
             ConfigOverride::new(key, value)
                 .map_err(|error| SuggestionError::Provider(error.to_string()))?,
         );
+    }
+    let selected = |kind| instructions.generation.and_then(|o| o.value(model, kind));
+    for (key, value) in [
+        (
+            "model_reasoning_effort",
+            Some(selected(OptionKind::Effort).unwrap_or("low")),
+        ),
+        (
+            "service_tier",
+            selected(OptionKind::ServiceTier).filter(|v| *v != "default"),
+        ),
+    ] {
+        if let Some(value) = value {
+            options = options.config(
+                ConfigOverride::new(key, serde_json::Value::from(value).to_string())
+                    .map_err(|e| SuggestionError::Provider(e.to_string()))?,
+            );
+        }
     }
     Ok(options)
 }
@@ -273,23 +370,44 @@ fn codex_options(
 async fn codex(
     prompt: &str,
     model: &str,
-    instructions: &str,
+    instructions: &Instructions<'_>,
     cwd: &Path,
+    reply_limit: usize,
+    purpose: ReplyUse<'_>,
 ) -> Result<String, SuggestionError> {
-    let mut stream = codex_sdk_rs::query(codex_options(prompt, model, instructions, cwd)?)
+    let mut options = codex_options(prompt, model, instructions, cwd)?;
+    // codex exec takes image files. Keep an immutable snapshot outside the
+    // empty working directory until the provider has finished reading them.
+    let _snapshots = match purpose {
+        ReplyUse::Naming(images) if !images.is_empty() => {
+            let dir = tempfile::tempdir()?;
+            for (index, image) in images.iter().enumerate() {
+                let extension = image
+                    .mime
+                    .strip_prefix("image/")
+                    .expect("validated image MIME");
+                let path = dir.path().join(format!("{index}.{extension}"));
+                tokio::fs::write(&path, &image.bytes).await?;
+                options.images.push(path);
+            }
+            Some(dir)
+        }
+        _ => None,
+    };
+    let mut stream = codex_sdk_rs::query(options)
         .map_err(|error| SuggestionError::Provider(error.to_string()))?;
     let mut text = String::new();
     while let Some(event) = stream.next().await {
         match event {
             codex_sdk_rs::QueryEvent::Text(reply) => {
-                if reply.len() > 4096 {
+                if reply.len() > reply_limit {
                     return Err(SuggestionError::InvalidReply);
                 }
                 text = reply;
             }
             codex_sdk_rs::QueryEvent::Error(error) => return Err(SuggestionError::Provider(error)),
             codex_sdk_rs::QueryEvent::ProcessFailed(error) => {
-                return Err(SuggestionError::Provider(error.to_string()))
+                return Err(SuggestionError::Provider(error.to_string()));
             }
             _ => {}
         }
@@ -300,6 +418,49 @@ async fn codex(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writer_options_reach_each_isolated_provider() {
+        let options: GenerationOptions =
+            serde_json::from_value(serde_json::json!({"effort":"ultra","service_tier":"priority"}))
+                .unwrap();
+        let mut request = Instructions {
+            text: "Write a title",
+            think: false,
+            generation: Some(&options),
+        };
+        let cwd = Path::new("/tmp/empty");
+        let codex = codex_options("context", "gpt-6.1-sol", &request, cwd).unwrap();
+        let config = |key| {
+            codex
+                .config
+                .iter()
+                .filter(|c| c.key() == key)
+                .map(|c| c.value())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(config("model_reasoning_effort"), [r#""ultra""#]);
+        assert_eq!(config("service_tier"), [r#""priority""#]);
+        let opus = serde_json::from_value(
+            serde_json::json!({"effort":"xhigh","fast_mode":"on","ultracode":"on"}),
+        )
+        .unwrap();
+        request.generation = Some(&opus);
+        let result = claude_options("context", "claude-opus-4-8", &request, cwd);
+        assert_eq!(result.effort.as_deref(), Some("xhigh"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result.settings.as_deref().unwrap()).unwrap(),
+            serde_json::json!({"fastMode":true,"ultracode":true})
+        );
+        let haiku = serde_json::from_value(serde_json::json!({"thinking":"off"})).unwrap();
+        request.generation = Some(&haiku);
+        let result = claude_options("context", "claude-haiku-4-5", &request, cwd);
+        assert!(result.effort.is_none());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result.settings.as_deref().unwrap()).unwrap(),
+            serde_json::json!({"alwaysThinkingEnabled":false})
+        );
+    }
 
     #[test]
     fn only_short_structured_predictions_are_accepted() {
@@ -338,6 +499,7 @@ mod tests {
             &Instructions {
                 text: "x",
                 think: false,
+                generation: None,
             },
             Path::new("/tmp/empty"),
         );
@@ -351,6 +513,7 @@ mod tests {
             &Instructions {
                 text: "x",
                 think: true,
+                generation: None,
             },
             Path::new("/tmp/empty"),
         );
@@ -368,6 +531,7 @@ mod tests {
             &Instructions {
                 text: INSTRUCTIONS,
                 think: true,
+                generation: None,
             },
             Path::new("/tmp/empty"),
         );
@@ -381,7 +545,11 @@ mod tests {
         let codex = codex_options(
             "context",
             "gpt-6.1-sol",
-            INSTRUCTIONS,
+            &Instructions {
+                text: INSTRUCTIONS,
+                think: true,
+                generation: None,
+            },
             Path::new("/tmp/empty"),
         )
         .unwrap();

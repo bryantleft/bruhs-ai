@@ -51,6 +51,7 @@ fn no_quick_actions(text: &str) -> DeliveryResult<()> {
 struct MergeRequest {
     iid: u64,
     title: String,
+    changes_count: Option<String>,
     #[serde(default)]
     description: Option<String>,
     web_url: String,
@@ -173,6 +174,13 @@ fn pull(mr: MergeRequest, notes: Vec<PullComment>, approvals: &Value) -> Pull {
         checks,
         comments: notes,
         reviews,
+        changed_files: mr.changes_count.as_deref().and_then(|count| {
+            if count.ends_with('+') {
+                Some(ChangedFileCount::Capped)
+            } else {
+                count.parse().ok().map(ChangedFileCount::Exact)
+            }
+        }),
         files: Vec::new(),
     }
 }

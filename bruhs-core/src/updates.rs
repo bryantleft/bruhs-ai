@@ -150,7 +150,7 @@ async fn query(
 }
 
 /// The first `name` on `path`, as found (not canonicalized).
-fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
+pub(crate) fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
     std::env::split_paths(path?)
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
@@ -500,8 +500,12 @@ async fn git(root: &Path, args: &[&str]) -> Result<Ran, RunError> {
 /// Compare the build's commit with `origin`'s default branch. Offline, only
 /// the build is described.
 pub async fn check_app(build: &BuildInfo, online: bool) -> AppUpdate {
+    check_app_on(build, online, release::UpdateTrack::Stable).await
+}
+
+async fn check_app_on(build: &BuildInfo, online: bool, track: release::UpdateTrack) -> AppUpdate {
     if let Some(version) = &build.release_version {
-        return release::check(build, version, online).await;
+        return release::check(build, version, online, track).await;
     }
     let mut app = AppUpdate {
         state: AppUpdateState::Unavailable,
@@ -597,14 +601,20 @@ async fn is_ancestor(root: &Path, ancestor: &str, tip: &str) -> bool {
 
 /// Every provider and the app, checked concurrently.
 pub async fn check_all(build: &BuildInfo, online: bool) -> UpdatesReport {
-    check_all_on(build, std::env::var_os("PATH").as_ref(), online).await
+    check_all_on(build, std::env::var_os("PATH").as_ref(), online, online, release::UpdateTrack::Stable).await
 }
 
-async fn check_all_on(build: &BuildInfo, path: Option<&OsString>, online: bool) -> UpdatesReport {
+async fn check_all_on(
+    build: &BuildInfo,
+    path: Option<&OsString>,
+    online: bool,
+    provider_checks: bool,
+    track: release::UpdateTrack,
+) -> UpdatesReport {
     let (claude, codex, app) = tokio::join!(
-        check_provider_on(AgentProvider::Claude, path, online),
-        check_provider_on(AgentProvider::Codex, path, online),
-        check_app(build, online),
+        check_provider_on(AgentProvider::Claude, path, online && provider_checks),
+        check_provider_on(AgentProvider::Codex, path, online && provider_checks),
+        check_app_on(build, online, track),
     );
     UpdatesReport {
         checked_at: EpochMs::now(),
@@ -622,7 +632,7 @@ struct Inner {
     /// Where cross-process installer locks live.
     lock_dir: Option<PathBuf>,
     /// The last online report.
-    last: Mutex<Option<UpdatesReport>>,
+    last: Mutex<Option<(bool, release::UpdateTrack, UpdatesReport)>>,
     runs: std::sync::Mutex<Vec<ProviderRun>>,
     next_run: AtomicU64,
     /// One queue per installer.
@@ -683,19 +693,43 @@ impl UpdateChecker {
     /// TTL (`force` checks now); an offline report reads installed versions
     /// each time, which costs two `--version` runs.
     pub async fn report(&self, force: bool, online: bool) -> UpdatesReport {
+        self.report_with_provider_checks(force, online, true).await
+    }
+
+    /// Provider registry checks can be disabled independently of desktop releases.
+    pub async fn report_with_provider_checks(
+        &self,
+        force: bool,
+        online: bool,
+        provider_checks: bool,
+    ) -> UpdatesReport {
+        self.report_on_track(force, online, provider_checks, release::UpdateTrack::Stable).await
+    }
+
+    pub async fn report_on_track(&self, force: bool, online: bool, provider_checks: bool, track: release::UpdateTrack) -> UpdatesReport {
         let mut report = if online {
             let mut last = self.inner.last.lock().await;
             match last.as_ref() {
-                Some(report) if !force && report.is_fresh(EpochMs::now()) => report.clone(),
+                Some((cached, cached_track, report))
+                    if *cached_track == track && *cached == provider_checks && !force && report.is_fresh(EpochMs::now()) =>
+                {
+                    report.clone()
+                }
                 _ => {
-                    let report =
-                        check_all_on(&self.inner.build, self.inner.path.as_ref(), true).await;
-                    *last = Some(report.clone());
+                    let report = check_all_on(
+                        &self.inner.build,
+                        self.inner.path.as_ref(),
+                        true,
+                        provider_checks,
+                        track,
+                    )
+                    .await;
+                    *last = Some((provider_checks, track, report.clone()));
                     report
                 }
             }
         } else {
-            check_all_on(&self.inner.build, self.inner.path.as_ref(), false).await
+            check_all_on(&self.inner.build, self.inner.path.as_ref(), false, false, track).await
         };
         report.runs = self.runs();
         report
@@ -804,8 +838,8 @@ impl UpdateChecker {
     /// outdated without waiting for the TTL.
     async fn remember(&self, update: &ProviderUpdate) {
         let mut last = self.inner.last.lock().await;
-        if let Some(report) = last.take() {
-            *last = Some(report.with_provider(update.clone()));
+        if let Some((_, track, report)) = last.take_if(|(enabled, _, _)| *enabled) {
+            *last = Some((true, track, report.with_provider(update.clone())));
         }
     }
 

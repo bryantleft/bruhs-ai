@@ -62,7 +62,7 @@ fn setup(preset: &WeeklyReportPreset) -> AutomationSetup {
                 },
             ),
         },
-        subscription: Subscription { id: preset.subscription_id(), source_id: preset.source_id(), agent_id: preset.agent_id(), instructions: "Prepare this window's weekly engineering report.".into(), enabled: true, auto_run: true, debounce_ms: 0, throttle_ms: 0, on_busy: BusyPolicy::Queue },
+        subscription: Subscription { id: preset.subscription_id(), source_id: preset.source_id(), agent_id: preset.agent_id(), instructions: "Prepare this window's weekly engineering report.".into(), enabled: true, auto_run: true, debounce_ms: 0, throttle_ms: 0, webhook_filters: Vec::new(), webhook_prompt: None, webhook_security: Default::default(), webhook_dedupe: Default::default(), task_title: None, task_conversation: Default::default(), task_checkout: Default::default(), on_busy: BusyPolicy::Queue },
     }
 }
 
@@ -247,13 +247,14 @@ pub(super) fn guard_generic_command(
     connection: &Connection,
     command: &ReactiveCommand,
 ) -> Result<(), ReactiveError> {
+    fn automation_ids(connection: &Connection, automation: &AutomationSetup) -> Result<(), ReactiveError> {
+        guard_managed_identity(connection, &automation.agent.id)?;
+        guard_managed_identity(connection, &automation.source.id)?;
+        guard_managed_identity(connection, &automation.subscription.id)
+    }
     fn change(connection: &Connection, value: &ReactiveChange) -> Result<(), ReactiveError> {
         match value {
-            ReactiveChange::SaveAutomation { automation } => {
-                guard_managed_identity(connection, &automation.agent.id)?;
-                guard_managed_identity(connection, &automation.source.id)?;
-                guard_managed_identity(connection, &automation.subscription.id)
-            }
+            ReactiveChange::SaveAutomation { automation } => automation_ids(connection, automation),
             ReactiveChange::SaveAgent { agent } => guard_managed_identity(connection, &agent.id),
             ReactiveChange::SaveSource { source } => guard_managed_identity(connection, &source.id),
             ReactiveChange::SaveSubscription { subscription } => {
@@ -270,10 +271,11 @@ pub(super) fn guard_generic_command(
         }
     }
     match command {
+        ReactiveCommand::SaveScheduledTask { automation, .. } => automation_ids(connection, automation),
         ReactiveCommand::Apply { change: value } | ReactiveCommand::Propose { change: value } => {
             change(connection, value)
         }
-        ReactiveCommand::SetAutomationEnabled { id, .. } => guard_managed_identity(connection, id),
+        ReactiveCommand::ChatInTaskThread { task_id: id, .. } | ReactiveCommand::RunScheduledTask { id, .. } | ReactiveCommand::SetAutomationEnabled { id, .. } => guard_managed_identity(connection, id),
         ReactiveCommand::Publish { source_id, .. } => guard_managed_identity(connection, source_id),
         ReactiveCommand::DecideProposal { id, approve: true } => {
             let proposal: ReactiveProposal =

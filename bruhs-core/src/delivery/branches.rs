@@ -37,9 +37,8 @@ impl DeliveryService {
                 // `--head=` keeps a branch that starts like a flag a value.
                 let head = format!("--head={}", branch.as_str());
                 let output = self
-                    .read(
+                    .github_read(
                         path,
-                        "gh",
                         &[
                             "pr",
                             "list",

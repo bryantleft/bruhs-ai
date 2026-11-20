@@ -92,6 +92,9 @@ async fn drive(runtime: ReactiveRuntime, source: EventSource, client: reqwest::C
         let outcome = poll_once_next_deadline(&runtime, &source, &client)
             .await
             .and_then(|deadline| {
+                if deadline.is_none() && matches!(source.kind, SourceKind::Once { .. }) {
+                    return Ok(Duration::ZERO);
+                }
                 deadline.map_or(Ok(interval), |due| {
                     now_ms().map(|now| Duration::from_millis(due.saturating_sub(now).max(1)))
                 })
@@ -101,7 +104,9 @@ async fn drive(runtime: ReactiveRuntime, source: EventSource, client: reqwest::C
             Err(error) => (
                 if matches!(
                     source.kind,
-                    SourceKind::Schedule { .. } | SourceKind::Calendar { .. }
+                    SourceKind::Schedule { .. }
+                        | SourceKind::Calendar { .. }
+                        | SourceKind::Once { .. }
                 ) {
                     // Match the queue worker's one-second retry resolution when
                     // capacity/storage failures leave an overdue schedule pending.
@@ -118,6 +123,9 @@ async fn drive(runtime: ReactiveRuntime, source: EventSource, client: reqwest::C
         }
         // Schedule wake-ups follow their durable deadline, including a restart
         // partway through an interval. Other sources sleep after completed work.
+        if delay.is_zero() {
+            return;
+        }
         tokio::time::sleep(delay).await;
     }
 }
@@ -129,7 +137,7 @@ fn polling_interval(kind: &SourceKind) -> Option<Duration> {
         | SourceKind::Command { poll_ms, .. } => *poll_ms,
         SourceKind::Schedule { every_ms } => *every_ms,
         // Calendar wake-ups follow their saved deadline; this is only the retry pace.
-        SourceKind::Calendar { .. } => 60_000,
+        SourceKind::Calendar { .. } | SourceKind::Once { .. } => 60_000,
         SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return None,
     };
     Some(Duration::from_millis(millis.max(1)))
@@ -146,6 +154,30 @@ pub async fn poll_once(
         .map(|_| ())
 }
 
+pub(super) fn schedule_cursor_key(kind: &SourceKind) -> Option<&'static str> {
+    match kind {
+        SourceKind::Once { .. } => Some("once"),
+        SourceKind::Schedule { .. } => Some("schedule"),
+        SourceKind::Calendar { .. } => Some("calendar"),
+        _ => None,
+    }
+}
+
+/// Both the source worker and Settings read the occurrence committed by ingestion.
+pub(super) fn next_deadline(kind: &SourceKind, checkpoint: &Value) -> Option<u64> {
+    match kind {
+        SourceKind::Once { due_at } => {
+            let due = u64::try_from(due_at.as_millis()).ok()?;
+            (checkpoint.is_null() || checkpoint.as_u64().is_some_and(|fired| fired != due))
+                .then_some(due)
+        }
+        SourceKind::Schedule { .. } | SourceKind::Calendar { .. } => {
+            checkpoint.get("next_due_ms")?.as_u64().filter(|due| *due > 0)
+        }
+        _ => None,
+    }
+}
+
 async fn poll_once_next_deadline(
     runtime: &ReactiveRuntime,
     source: &EventSource,
@@ -155,9 +187,10 @@ async fn poll_once_next_deadline(
         SourceKind::Folder { .. } => "folder",
         SourceKind::Http { .. } => "http",
         SourceKind::Command { .. } => "command",
-        SourceKind::Schedule { .. } => "schedule",
-        SourceKind::Calendar { .. } => "calendar",
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
+        kind => match schedule_cursor_key(kind) {
+            Some(key) => key,
+            None => return Ok(None),
+        },
     };
     let cursor = runtime.cursor(&source.id, cursor_key).await?;
     let batch = match &source.kind {
@@ -200,6 +233,7 @@ async fn poll_once_next_deadline(
                 json!({ "cwd": cwd }),
             )?
         }
+        SourceKind::Once { due_at } => once_batch(cursor, now_ms()?, *due_at)?,
         SourceKind::Schedule { every_ms } => schedule_batch(cursor, now_ms()?, *every_ms)?,
         SourceKind::Calendar {
             times,
@@ -218,17 +252,7 @@ async fn poll_once_next_deadline(
         }
     }
     let waiting_for_capacity = batch.backpressured && batch.events.is_empty();
-    let next_deadline = match source.kind {
-        SourceKind::Schedule { .. } => {
-            let cursor: ScheduleCursor = decode_cursor(Some(batch.cursor.clone()))?;
-            Some(cursor.next_due_ms)
-        }
-        SourceKind::Calendar { .. } => {
-            let cursor: CalendarCursor = decode_cursor(Some(batch.cursor.clone()))?;
-            u64::try_from(cursor.next_due_ms).ok()
-        }
-        _ => None,
-    };
+    let next_deadline = next_deadline(&source.kind, &batch.cursor);
     runtime
         .ingest(source, batch.events, cursor_key, batch.cursor)
         .await?;
@@ -724,6 +748,44 @@ fn body_batch(
     Ok(PollBatch {
         events,
         cursor: serde_json::to_value(cursor).map_err(encoding_error)?,
+        backpressured: false,
+    })
+}
+
+// The due instant is both the cursor and the event's identity. Ingest saves
+// the event and cursor together, so a retry or restart cannot run it twice.
+fn once_batch(
+    cursor: Option<Value>,
+    now: u64,
+    due_at: bruhs_models::EpochMs,
+) -> Result<PollBatch, ReactiveError> {
+    let due = u64::try_from(due_at.as_millis())
+        .map_err(|_| ReactiveError::Invalid("The scheduled time is outside the clock.".into()))?;
+    let fired: Option<u64> = cursor
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(encoding_error)?
+        .flatten();
+    if fired == Some(due) {
+        return Ok(PollBatch {
+            events: vec![],
+            cursor: json!(due),
+            backpressured: false,
+        });
+    }
+    if now < due {
+        return Ok(PollBatch {
+            events: vec![],
+            cursor: Value::Null,
+            backpressured: false,
+        });
+    }
+    Ok(PollBatch {
+        events: vec![SourceEmission {
+            key: format!("once:{due}"),
+            payload: json!({ "event": "schedule_due", "scheduled_at_ms": due, "observed_at_ms": now }),
+        }],
+        cursor: json!(due),
         backpressured: false,
     })
 }

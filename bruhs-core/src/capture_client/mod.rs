@@ -391,15 +391,51 @@ pub async fn enroll_voice(
     Ok(r.embedding)
 }
 
-/// Transcribe one temporary microphone recording locally without starting a meeting.
+/// Read or change local Whisper hardware and model residency on the capture host.
+pub async fn dictation_runtime(change: Option<bruhs_models::dictation_runtime::Change>) -> Result<bruhs_models::dictation_runtime::Status,CaptureClientError>{
+    match change {Some(change)=>daemon_post(&["dictation","runtime"],|request|request.json(&change)).await,None=>daemon_get_json(&["dictation","runtime"]).await}
+}
+
+pub async fn dictation_models(
+    action: Option<bruhs_models::dictation_runtime::ModelAction>,
+) -> Result<Vec<bruhs_models::dictation_runtime::ModelEntry>, CaptureClientError> {
+    match action {
+        Some(action) => daemon_post(&["dictation", "models"], |request| request.json(&action)).await,
+        None => daemon_get_json(&["dictation", "models"]).await,
+    }
+}
+
+pub async fn speech_key(provider:bruhs_models::cloud_speech::Provider,change:Option<bruhs_models::cloud_speech::KeyChange>)->Result<bruhs_models::cloud_speech::KeyStatus,CaptureClientError>{
+    let route=["dictation","cloud",provider.id(),"key"];
+    match change{Some(value)=>daemon_post(&route,|r|r.json(&value)).await,None=>daemon_get_json(&route).await}
+}
+pub async fn cloud_speech_models()->Result<Vec<bruhs_models::cloud_speech::SpeechModel>,CaptureClientError>{
+    daemon_get_json(&["dictation","cloud","models"]).await
+}
+
 pub async fn transcribe_dictation(
     daemon: &DaemonEndpoint,
     options: &bruhs_models::local_tools::DictationOptions,
     wav: Vec<u8>,
 ) -> Result<bruhs_models::local_tools::DictationTranscript, CaptureClientError> {
-    let request = client()?
-        .post(daemon.url(&["dictation"])?)
-        .query(options)
+    transcribe_selected_dictation(daemon, options, wav, None, None).await
+}
+
+pub async fn transcribe_selected_dictation(
+    daemon: &DaemonEndpoint,
+    options: &bruhs_models::local_tools::DictationOptions,
+    wav: Vec<u8>,
+    remote_model: Option<&str>,
+    cloud: Option<bruhs_models::cloud_speech::Provider>,
+) -> Result<bruhs_models::local_tools::DictationTranscript, CaptureClientError> {
+    let path = match cloud {
+        Some(provider)=>vec!["dictation","cloud",provider.id(),"transcribe"],
+        None if remote_model.is_some()=>vec!["dictation","compatible"],
+        None=>vec!["dictation"],
+    };
+    let mut request=client()?.post(daemon.url(&path)?);
+    if let Some(model)=remote_model {request=request.query(&[("remote_model",model)]);}
+    let request = request.query(options)
         .header("Content-Type", "audio/wav")
         .body(wav);
     let mut response = daemon

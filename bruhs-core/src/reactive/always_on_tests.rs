@@ -27,6 +27,13 @@ fn subscription(id: &str, agent_id: &str, auto_run: bool, on_busy: BusyPolicy) -
         auto_run,
         debounce_ms: 0,
         throttle_ms: 0,
+        webhook_filters: Vec::new(),
+        webhook_prompt: None,
+        webhook_security: Default::default(),
+        webhook_dedupe: Default::default(),
+        task_title: None,
+        task_conversation: Default::default(),
+        task_checkout: Default::default(),
         on_busy,
     }
 }
@@ -630,4 +637,535 @@ async fn calendar_sources_and_quiet_hours_require_real_time_zones() {
             .await,
         Err(ReactiveError::Invalid(_))
     ));
+}
+
+#[tokio::test]
+async fn scheduled_thread_modes_keep_queued_runs_separate_and_resume_only_their_own_session() {
+    let (dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let mut scheduled = subscription("scheduled", "assistant", true, BusyPolicy::Queue);
+    scheduled.source_id = "hook".into();
+    scheduled.task_conversation = TaskConversation::Continue;
+    let save = |sub: Subscription| ReactiveCommand::Apply {
+        change: ReactiveChange::SaveSubscription { subscription: sub },
+    };
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSource {
+                source: EventSource {
+                    id: "hook".into(),
+                    name: "Scheduled webhook".into(),
+                    enabled: true,
+                    kind: SourceKind::Webhook,
+                },
+            },
+        })
+        .await
+        .unwrap();
+    runtime.command(save(scheduled.clone())).await.unwrap();
+    for key in ["first", "second"] {
+        runtime
+            .publish("hook", key, json!({"key":key}))
+            .await
+            .unwrap();
+    }
+    let first = claim_one(&runtime).await.unwrap();
+    assert!(first.run.fresh_session && first.run.merged_runs.is_empty());
+    let dedicated = first.run.thread_id.clone();
+    record_session(&runtime, &first.run.id).await;
+    finish(&runtime, &first.run.id, "first done", None).await;
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    let second = claim_one(&runtime).await.unwrap();
+    assert_eq!(second.run.thread_id, dedicated);
+    assert_eq!(second.run.session_id.as_deref(), Some("s1"));
+    finish(&runtime, &second.run.id, "second done", None).await;
+
+    for (mode, keys) in [
+        (TaskConversation::FreshSession, ["third", "fourth"]),
+        (TaskConversation::NewThread, ["fifth", "sixth"]),
+    ] {
+        scheduled.task_conversation = mode;
+        runtime.command(save(scheduled.clone())).await.unwrap();
+        let mut ids = Vec::new();
+        for key in keys {
+            runtime.publish("hook", key, json!({})).await.unwrap();
+        }
+        for _ in keys {
+            let claim = claim_one(&runtime).await.unwrap();
+            assert!(
+                claim.run.fresh_session
+                    && claim.run.session_id.is_none()
+                    && claim.run.merged_runs.is_empty()
+            );
+            ids.push(claim.run.thread_id.clone());
+            record_session(&runtime, &claim.run.id).await;
+            finish(&runtime, &claim.run.id, "done", None).await;
+        }
+        assert_eq!(ids[0] == ids[1], mode == TaskConversation::FreshSession);
+        let reply = ReactiveCommand::ChatInTaskThread {
+            task_id: scheduled.id.clone(), thread_id: dedicated.clone(), message: "Inspect the result".into(),
+        };
+        let saved = runtime.snapshot().await.unwrap();
+        if mode == TaskConversation::FreshSession {
+            assert_eq!(saved.task_threads[&scheduled.id], dedicated);
+            assert_eq!(ids[0], dedicated);
+            runtime.command(reply).await.unwrap();
+            let owner = claim_one(&runtime).await.unwrap();
+            assert_eq!(owner.run.thread_id, dedicated);
+            assert_eq!(owner.run.session_id.as_deref(), Some("s1"));
+            assert_eq!(owner.run.trigger, Some(RunTrigger::Chat));
+            finish(&runtime, &owner.run.id, "inspected", None).await;
+        } else {
+            assert!(!saved.task_threads.contains_key(&scheduled.id));
+            assert!(runtime.command(reply).await.is_err());
+            let page = runtime.agent_thread_runs("assistant".into(), None, Some(dedicated.clone())).await.unwrap();
+            assert_eq!(page.len(), 5);
+            let earlier = runtime.agent_thread_runs("assistant".into(), Some(page[1].id.clone()), Some(dedicated.clone())).await.unwrap();
+            assert_eq!(earlier, page[2..]);
+        }
+    }
+    runtime.publish("inbox", "owner", json!({})).await.unwrap();
+    let independent = claim_one(&runtime).await.unwrap();
+    assert!(independent.run.fresh_session);
+    assert_ne!(independent.run.thread_id, dedicated);
+}
+
+#[tokio::test]
+async fn changing_the_task_checkout_prevents_retrying_old_work_in_the_new_checkout() {
+    let (_dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let save = |change| ReactiveCommand::Apply { change };
+    runtime
+        .command(save(ReactiveChange::SaveSource {
+            source: EventSource {
+                id: "hook".into(),
+                name: "Hook".into(),
+                kind: SourceKind::Webhook,
+                enabled: true,
+            },
+        }))
+        .await
+        .unwrap();
+    let mut scheduled = subscription("task", "assistant", true, BusyPolicy::Queue);
+    scheduled.source_id = "hook".into();
+    scheduled.task_conversation = TaskConversation::Continue;
+    scheduled.task_checkout = TaskCheckout::Worktree {
+        base_branch: "main".into(),
+        start_from_remote: true,
+    };
+    runtime
+        .command(save(ReactiveChange::SaveSubscription {
+            subscription: scheduled.clone(),
+        }))
+        .await
+        .unwrap();
+    runtime.publish("hook", "old", json!({})).await.unwrap();
+    let first = claim_one(&runtime).await.unwrap().run;
+    assert_eq!(first.task_checkout, scheduled.task_checkout);
+    scheduled.task_checkout = TaskCheckout::Project;
+    runtime
+        .command(save(ReactiveChange::SaveSubscription {
+            subscription: scheduled,
+        }))
+        .await
+        .unwrap();
+    assert!(runtime
+        .command(ReactiveCommand::RetryRun { id: first.id })
+        .await
+        .is_err());
+    runtime.publish("hook", "new", json!({})).await.unwrap();
+    let next = claim_one(&runtime).await.unwrap().run;
+    assert!(next.task_checkout.is_project() && next.fresh_session);
+    assert_ne!(first.thread_id, next.thread_id);
+}
+
+#[tokio::test]
+async fn run_now_targets_one_paused_task_and_preserves_its_regular_schedule() {
+    let (_dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let save = |change| ReactiveCommand::Apply { change };
+    runtime
+        .command(save(ReactiveChange::SaveSource {
+            source: EventSource {
+                id: "clock".into(),
+                name: "Clock".into(),
+                enabled: true,
+                kind: SourceKind::Schedule {
+                    every_ms: 3_600_000,
+                },
+            },
+        }))
+        .await
+        .unwrap();
+    for (id, enabled) in [("manual", false), ("recurring", true)] {
+        let mut sub = subscription(id, "assistant", true, BusyPolicy::Queue);
+        sub.source_id = "clock".into();
+        sub.enabled = enabled;
+        sub.task_conversation = TaskConversation::NewThread;
+        runtime
+            .command(save(ReactiveChange::SaveSubscription { subscription: sub }))
+            .await
+            .unwrap();
+    }
+    let request = || ReactiveCommand::RunScheduledTask {
+        id: "manual".into(),
+        run_id: "owner-request".into(),
+    };
+    runtime.command(request()).await.unwrap();
+    let snapshot = runtime.command(request()).await.unwrap();
+    assert!(snapshot.events.is_empty());
+    assert_eq!(snapshot.runs.len(), 1);
+    let manual = claim_one(&runtime).await.unwrap().run;
+    assert_eq!(manual.id, "owner-request");
+    assert_eq!(manual.trigger, Some(RunTrigger::ManualTask));
+    assert_eq!(manual.subscription_id.as_deref(), Some("manual"));
+    assert!(
+        !snapshot
+            .subscriptions
+            .iter()
+            .find(|s| s.id == "manual")
+            .unwrap()
+            .enabled
+    );
+    finish(&runtime, &manual.id, "done", None).await;
+    runtime
+        .publish("clock", "scheduled-tick", json!({}))
+        .await
+        .unwrap();
+    let normal = claim_one(&runtime).await.unwrap().run;
+    assert_eq!(normal.subscription_id.as_deref(), Some("recurring"));
+    assert_eq!(normal.trigger, Some(RunTrigger::Event));
+    assert!(runtime
+        .command(ReactiveCommand::RunScheduledTask {
+            id: "recurring".into(),
+            run_id: manual.id
+        })
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn schedule_can_select_an_existing_project_conversation_after_its_task_is_removed() {
+    let (dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let owner = agent("assistant");
+    let project = owner.project_path.clone();
+    let mut task = AutomationSetup {
+        agent: owner,
+        source: EventSource {
+            id: "clock".into(),
+            name: "Clock".into(),
+            enabled: true,
+            kind: SourceKind::Schedule { every_ms: 86400000 },
+        },
+        subscription: subscription("morning", "assistant", true, BusyPolicy::Queue),
+    };
+    task.subscription.source_id = task.source.id.clone();
+    task.subscription.task_title = Some("München review".into());
+    task.subscription.task_conversation = TaskConversation::NewThread;
+    let save = |task: &AutomationSetup, thread: Option<bruhs_models::ids::ThreadId>| {
+        ReactiveCommand::SaveScheduledTask {
+            automation: Box::new(task.clone()),
+            enabled: true,
+            signing_secret: None,
+            destination: thread.map(|thread_id| TaskDestinationEdit::Existing { thread_id }),
+        }
+    };
+    let start = |id: &str, run: &str| ReactiveCommand::RunScheduledTask {
+        id: id.into(),
+        run_id: run.into(),
+    };
+    runtime.command(save(&task, None)).await.unwrap();
+    runtime.command(start("morning", "initial")).await.unwrap();
+    let initial = claim_one(&runtime).await.unwrap();
+    let target = initial.run.thread_id.clone();
+    record_session(&runtime, "initial").await;
+    finish(&runtime, "initial", "Saved review", None).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteSubscription {
+                id: "morning".into(),
+            },
+        })
+        .await
+        .unwrap();
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    assert!(runtime
+        .task_threads("/another".into(), String::new())
+        .await
+        .unwrap()
+        .is_empty());
+    let choices = runtime
+        .task_threads(project.clone(), "MÜNCHEN".into())
+        .await
+        .unwrap();
+    assert_eq!(choices.len(), 1);
+    assert_eq!(choices[0].thread_id, target);
+    assert_eq!(choices[0].title, "München review");
+    task.subscription.id = "evening".into();
+    task.subscription.task_title = Some("Evening follow-up".into());
+    task.subscription.task_conversation = TaskConversation::Continue;
+    // A rejected retarget must roll back the rest of a new task's settings.
+    let mut invalid = task.clone();
+    invalid.subscription.task_checkout = TaskCheckout::Worktree {
+        base_branch: "main".into(),
+        start_from_remote: false,
+    };
+    assert!(runtime
+        .command(save(&invalid, Some(target.clone())))
+        .await
+        .is_err());
+    assert!(runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .subscriptions
+        .iter()
+        .all(|s| s.id != "evening"));
+    for name in ["evening", "weekly"] {
+        task.subscription.id = name.into();
+        let snapshot = runtime
+            .command(save(&task, Some(target.clone())))
+            .await
+            .unwrap();
+        assert_eq!(snapshot.task_threads[name], target);
+        assert_eq!(snapshot.selected_task_threads.unwrap()[name], choices[0]);
+        runtime.command(start(name, name)).await.unwrap();
+        // Retrying the save keeps the queued turn.
+        runtime
+            .command(save(&task, Some(target.clone())))
+            .await
+            .unwrap();
+        let claim = claim_one(&runtime).await.unwrap();
+        assert_eq!(claim.run.id, name);
+        assert_eq!(claim.run.thread_id, target);
+        assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+        finish(&runtime, name, "Received", None).await;
+    }
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteSubscription {
+                id: "evening".into(),
+            },
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.task_threads["weekly"], target);
+    let mut reset = save(&task, None);
+    if let ReactiveCommand::SaveScheduledTask { destination, .. } = &mut reset {
+        *destination = Some(TaskDestinationEdit::FirstRun {
+            previous: target.clone(),
+        });
+    }
+    assert!(!runtime
+        .command(reset.clone())
+        .await
+        .unwrap()
+        .task_threads
+        .contains_key("weekly"));
+    runtime.command(start("weekly", "fresh")).await.unwrap();
+    let fresh = claim_one(&runtime).await.unwrap();
+    assert_ne!(fresh.run.thread_id, target);
+    assert!(fresh.run.session_id.is_none());
+    if let ReactiveCommand::SaveScheduledTask { automation, .. } = &mut reset {
+        automation.subscription.task_checkout = TaskCheckout::Existing { path: project.clone() };
+    }
+    assert!(runtime.command(reset).await.is_err());
+    assert_eq!(runtime.snapshot().await.unwrap().task_threads["weekly"],fresh.run.thread_id);
+    finish(&runtime, "fresh", "Done", None).await;
+    assert_eq!(
+        runtime
+            .agent_thread_runs("assistant".into(), None, Some(target))
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn older_task_destination_keeps_its_provider_session_when_upgraded() {
+    let (dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let mut sub = subscription("old", "assistant", true, BusyPolicy::Queue);
+    sub.source_id = "old-hook".into();
+    sub.task_conversation = TaskConversation::Continue;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSource {
+                source: EventSource {
+                    id: "old-hook".into(),
+                    name: "Hook".into(),
+                    kind: SourceKind::Webhook,
+                    enabled: true,
+                },
+            },
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription { subscription: sub },
+        })
+        .await
+        .unwrap();
+    runtime.publish("old-hook", "one", json!({})).await.unwrap();
+    let first = claim_one(&runtime).await.unwrap();
+    record_session(&runtime, &first.run.id).await;
+    finish(&runtime, &first.run.id, "done", None).await;
+    drop(runtime);
+    let path = dir.path().join("reactive.sqlite3");
+    {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch("CREATE TABLE reactive_task_threads(subscription_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,
+            mode TEXT NOT NULL,thread_id TEXT NOT NULL UNIQUE,session_id TEXT,stamp TEXT);
+            INSERT INTO reactive_task_threads SELECT d.subscription_id,c.agent_id,'continue',c.thread_id,c.session_id,c.stamp
+            FROM task_conversations c JOIN task_destinations d USING(thread_id);
+            DROP TRIGGER forget_task_destination;DROP TRIGGER forget_agent_conversations;
+            DROP TABLE task_destinations;DROP TABLE task_conversations;
+            CREATE TRIGGER discard_task_thread AFTER DELETE ON reactive_subscriptions
+            BEGIN DELETE FROM reactive_task_threads WHERE subscription_id=OLD.id;END;").unwrap();
+    }
+    for _ in 0..2 {
+        let runtime = ReactiveRuntime::open(&path).await.unwrap();
+        let saved = runtime.snapshot().await.unwrap();
+        assert_eq!(saved.task_threads["old"], first.run.thread_id);
+        assert!(saved.selected_task_threads.unwrap().is_empty());
+        runtime
+            .command(ReactiveCommand::ChatInTaskThread {
+                task_id: "old".into(),
+                thread_id: first.run.thread_id.clone(),
+                message: "Continue".into(),
+            })
+            .await
+            .unwrap();
+        let next = claim_one(&runtime).await.unwrap();
+        assert_eq!(next.run.session_id.as_deref(), Some("s1"));
+        finish(&runtime, &next.run.id, "continued", None).await;
+    }
+}
+
+#[tokio::test]
+async fn deleting_a_conversation_removes_only_its_live_schedules_and_transcript() {
+    use std::collections::BTreeSet;
+    let (dir, runtime) = runtime_with(&["assistant"], BusyPolicy::Queue).await;
+    let mut setup = AutomationSetup {
+        agent: agent("assistant"),
+        source: EventSource {
+            id: "clock".into(),
+            name: "Clock".into(),
+            enabled: true,
+            kind: SourceKind::Schedule {
+                every_ms: 86_400_000,
+            },
+        },
+        subscription: subscription("morning", "assistant", true, BusyPolicy::Queue),
+    };
+    setup.subscription.source_id = "clock".into();
+    setup.subscription.task_conversation = TaskConversation::Continue;
+    let save = |s: &AutomationSetup, destination| ReactiveCommand::SaveScheduledTask {
+        automation: Box::new(s.clone()),
+        enabled: true,
+        signing_secret: None,
+        destination,
+    };
+    let start = |id: &str, run: &str| ReactiveCommand::RunScheduledTask {
+        id: id.into(),
+        run_id: run.into(),
+    };
+    runtime.command(save(&setup, None)).await.unwrap();
+    runtime.command(start("morning", "first")).await.unwrap();
+    let first = claim_one(&runtime).await.unwrap();
+    record_session(&runtime, "first").await;
+    finish(&runtime, "first", &report(r#"{"outcome":"notify","title":"Release","message":"A private report","follow_ups":[{"key":"check-release","in_minutes":60,"note":"Check this report"}]}"#), None).await;
+    let thread = first.run.thread_id;
+    let delete = |names: &[&str]| ReactiveCommand::DeleteTaskThread {
+        thread_id: thread.clone(),
+        linked_tasks: names.iter().map(|n| n.to_string()).collect::<BTreeSet<_>>(),
+    };
+    setup.subscription.id = "evening".into();
+    runtime
+        .command(save(
+            &setup,
+            Some(TaskDestinationEdit::Existing {
+                thread_id: thread.clone(),
+            }),
+        ))
+        .await
+        .unwrap();
+    setup.subscription.id = "other".into();
+    runtime.command(save(&setup, None)).await.unwrap();
+    runtime.command(start("evening", "active")).await.unwrap();
+    let active = claim_one(&runtime).await.unwrap();
+    assert_eq!(active.run.thread_id, thread);
+    let approving = active.run.clone();
+    runtime
+        .call(move |db| {
+            store::crew::open_approval(db, &approving, "Read", &json!({"path":"build.log"}))
+        })
+        .await
+        .unwrap();
+    let before = runtime.snapshot().await.unwrap();
+    assert!(before.outbox.iter().any(|item| item.run_id == "first"));
+    assert!(before
+        .outbox
+        .iter()
+        .any(|item| item.run_id == "active" && item.approval.is_some()));
+    assert!(before
+        .follow_ups
+        .iter()
+        .any(|item| item.key == "check-release"));
+    runtime.command(start("morning", "queued")).await.unwrap();
+    runtime
+        .command(start("other", "independent"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        runtime.command(delete(&["morning"])).await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    assert_eq!(run(&runtime, "active").await.status, RunStatus::Running);
+    let saved = runtime
+        .command(delete(&["morning", "evening"]))
+        .await
+        .unwrap();
+    assert!(saved.subscriptions.iter().any(|s| s.id == "other"));
+    assert!(!saved
+        .subscriptions
+        .iter()
+        .any(|s| s.id == "morning" || s.id == "evening"));
+    assert!(saved.runs.iter().all(|r| r.thread_id != thread));
+    assert!(saved
+        .outbox
+        .iter()
+        .all(|item| item.run_id != "first" && item.run_id != "active"));
+    assert!(saved
+        .follow_ups
+        .iter()
+        .all(|item| item.key != "check-release"));
+    assert!(saved.task_threads.values().all(|id| id != &thread));
+    assert!(saved.sources.iter().any(|s| s.id == "clock" && s.enabled));
+    runtime
+        .command(delete(&["morning", "evening"]))
+        .await
+        .unwrap();
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    assert!(runtime
+        .agent_thread_runs("assistant".into(), None, Some(thread.clone()))
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(runtime
+        .task_threads(setup.agent.project_path.clone(), String::new())
+        .await
+        .unwrap()
+        .iter()
+        .all(|t| t.thread_id != thread));
+    assert!(runtime.command(start("other", "first")).await.is_err());
+    assert_eq!(claim_one(&runtime).await.unwrap().run.id, "independent");
 }

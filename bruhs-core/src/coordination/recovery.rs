@@ -64,20 +64,7 @@ impl CoordinationRuntime {
             ));
         }
         let provider = provider_for_model_id(&task.model).as_str();
-        let limits = if provider == "codex" {
-            crate::agent_extensions::refresh_codex()
-                .await
-                .map_err(storage)?
-        } else {
-            tokio::task::spawn_blocking(|| {
-                let root = crate::agent_extensions::directory()?;
-                crate::agent_extensions::snapshot_at(&root).map(|snapshot| snapshot.limits)
-            })
-            .await
-            .map_err(storage)?
-            .map_err(storage)?
-        };
-        let at = reset_time(&limits, provider, chrono::Utc::now().timestamp())
+        let at = provider_quota_reset(provider).await.map_err(storage)?
             .ok_or_else(|| invalid("This provider has no exhausted quota with a future reset time. Refresh Usage or resume manually."))?;
         let mut data = self.0.data.lock().await;
         let task = data.tasks.get_mut(id).ok_or_else(|| not_found(id))?;
@@ -99,6 +86,25 @@ impl CoordinationRuntime {
         }
         self.send(id, "Continue the task after the provider-reported usage reset. First inspect the current files and prior result before repeating a command.".into()).await
     }
+}
+
+/// The last exhausted window for the selected account must have a reported future reset.
+pub async fn provider_quota_reset(provider: &str) -> std::io::Result<Option<EpochMs>> {
+    let limits = match provider {
+        "codex" => crate::agent_extensions::refresh_codex().await?,
+        "claude" => tokio::task::spawn_blocking(|| {
+            let root = crate::agent_extensions::directory()?;
+            crate::agent_extensions::snapshot_at(&root).map(|snapshot| snapshot.limits)
+        })
+        .await
+        .map_err(std::io::Error::other)??,
+        _ => return Ok(None),
+    };
+    Ok(reset_time(
+        &limits,
+        provider,
+        chrono::Utc::now().timestamp(),
+    ))
 }
 
 fn reset_time(limits: &[QuotaWindow], provider: &str, now_seconds: i64) -> Option<EpochMs> {

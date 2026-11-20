@@ -844,7 +844,7 @@ pub(super) async fn act(
                 .map_err(|error| {
                     ToolError::Invalid(format!("Chrome returned an invalid screenshot: {error}"))
                 })?;
-            return super::screenshot(bytes).await;
+            return super::screenshot(bytes, crate::uploads::browser_captures::write).await;
         }
         BrowserAction::Console => {
             cdp.call("Runtime.evaluate", json!({"expression":"void 0"}))

@@ -365,6 +365,10 @@ impl AppState {
         &self,
         turn: AgentTurn,
     ) -> Result<OrchestratorEventStream, SendMessageError> {
+        let scratch_lease =
+            crate::worktrees::scratch::for_turn(std::path::Path::new(&turn.project_path))
+                .await
+                .map_err(SendMessageError::WorktreeUnavailable)?;
         // A worktree removed to free disk comes back for its next turn.
         crate::worktrees::restore_for_turn(std::path::Path::new(&turn.project_path))
             .await
@@ -375,8 +379,9 @@ impl AppState {
             .await
             .get(&turn.thread_id)
             .and_then(|t| t.system_prompt.clone());
-        self.orchestrator
-            .send_message(turn, system_prompt.as_deref())
+        let mut stream = self.orchestrator.send_message(turn, system_prompt.as_deref())?;
+        stream.scratch_lease = scratch_lease;
+        Ok(stream)
     }
 
     /// Write `prompt` into the Claude turn streaming on `thread_id`.

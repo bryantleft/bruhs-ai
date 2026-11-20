@@ -15,7 +15,12 @@ impl Fixture {
         let directory = tempfile::tempdir().unwrap();
         let repository = crate::delivery::tests::repository();
         assert!(Process::new("git")
-            .args(["remote", "add", "origin", "git@github.com:fixture/repo.git"])
+            .args([
+                "remote",
+                "set-url",
+                "origin",
+                "git@github.com:fixture/repo.git"
+            ])
             .current_dir(repository.path())
             .status()
             .unwrap()

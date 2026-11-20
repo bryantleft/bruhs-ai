@@ -10,6 +10,8 @@ use bruhs_models::{
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
+mod task_checkout;
+
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -34,6 +36,11 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
             Ok(_) => runtime.changed(),
             Err(error) => tracing::error!("Reactive follow-ups could not be queued: {error}"),
         }
+        match runtime.call(store::webhook_windows::flush_due).await {
+            Ok(0) => {}
+            Ok(_) => runtime.changed(),
+            Err(error) => tracing::error!("Webhook windows could not be dispatched: {error}"),
+        }
         // Fill free lanes; each claim takes one agent's queued work.
         loop {
             match runtime.claim_next().await {
@@ -42,8 +49,24 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
                     let (runtime, app, halted) = (runtime.clone(), app.clone(), halted.clone());
                     lanes.spawn(async move {
                         if let Err(error) = execute(&runtime, &app, &claim).await {
-                            tracing::error!("Reactive run could not be recorded: {error}");
-                            halted.store(true, std::sync::atomic::Ordering::Release);
+                            // Deletion can win any await in execute, including the final receipt.
+                            // Dropping the turn stream has already stopped its provider.
+                            let removed = matches!(
+                                error,
+                                ReactiveError::NotFound(_) | ReactiveError::Conflict(_)
+                            ) && {
+                                let id = claim.run.id.clone();
+                                matches!(
+                                    runtime
+                                        .call(move |db| store::task_conversations::run_was_deleted(db, &id))
+                                        .await,
+                                    Ok(true)
+                                )
+                            };
+                            if !removed {
+                                tracing::error!("Reactive run could not be recorded: {error}");
+                                halted.store(true, std::sync::atomic::Ordering::Release);
+                            }
                         }
                         // The run has left Running: its steps can't be sent.
                         runtime
@@ -207,6 +230,27 @@ async fn execute(
         context.clear();
         // Weekly reports only read their frozen evidence.
         bruh = BruhProfile::default();
+    }
+    if !run.task_checkout.is_project() {
+        match task_checkout::resolve(Path::new(&agent.project_path), run).await {
+            Ok(checkout) => effective_agent.project_path = checkout,
+            Err(error) => {
+                let id = run.id.clone();
+                runtime
+                    .call(move |connection| {
+                        store::finish_run(
+                            connection,
+                            &id,
+                            RunStatus::Failed,
+                            None,
+                            Some(error),
+                            None,
+                        )
+                    })
+                    .await?;
+                return Ok(());
+            }
+        }
     }
     let id = run.id.clone();
     if runtime

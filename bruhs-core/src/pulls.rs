@@ -95,7 +95,7 @@ async fn by_number(cwd: &Path, query: &str) -> PullList {
     listed
         .pulls
         .retain(|pull| pull.number.to_string().contains(query));
-    if let Ok(exact) = view_number(cwd, query).await {
+    if let Ok(exact) = view_pull(cwd, query).await {
         if let Some(pos) = listed
             .pulls
             .iter()
@@ -110,7 +110,8 @@ async fn by_number(cwd: &Path, query: &str) -> PullList {
     listed
 }
 
-async fn view_number(cwd: &Path, number: &str) -> Result<PullRef, String> {
+/// Read a PR by repository-local number or a fully qualified GitHub pull request URL.
+pub async fn view_pull(cwd: &Path, number: &str) -> Result<PullRef, String> {
     let stdout = gh(cwd, &["pr", "view", number, "--json", GH_FIELDS]).await?;
     let parsed: GhPull = serde_json::from_str(stdout.trim()).map_err(|error| error.to_string())?;
     Ok(to_ref(parsed))

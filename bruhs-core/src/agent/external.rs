@@ -18,6 +18,7 @@ mod process;
 #[derive(Clone)]
 pub(crate) struct Options {
     provider: AgentProvider,
+    pub(super) secret_env: Vec<(String, String)>,
     prompt: String,
     cwd: PathBuf,
     model: String,
@@ -50,6 +51,7 @@ impl Options {
     ) -> Self {
         Self {
             provider,
+            secret_env: Vec::new(),
             prompt: prompt.into(),
             cwd: cwd.into(),
             model: model.into(),
@@ -149,7 +151,7 @@ impl Options {
             &mut command,
             true,
             &crate::connections::PRIVATE_ENV.map(String::from),
-            &[],
+            &self.secret_env,
         );
         let prompt = self.prompt();
         let mut input = prompt.as_bytes().to_vec();

@@ -157,6 +157,11 @@ struct ActiveCall {
     _owner: Arc<store::RuntimeLock>,
 }
 
+pub enum WebhookTarget {
+    Source(String),
+    Task(String),
+}
+
 impl ReactiveRuntime {
     pub async fn weekly_reports(
         &self,
@@ -389,7 +394,62 @@ impl ReactiveRuntime {
         agent_id: String,
         before: Option<String>,
     ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
-        self.call(move |connection| store::agent_runs(connection, &agent_id, before.as_deref()))
+        self.agent_thread_runs(agent_id, before, None).await
+    }
+
+    /// Whether an enabled task targets this conversation or runs in its scratch folder.
+    pub(crate) async fn uses_scratch(
+        &self,
+        folder: std::path::PathBuf,
+        members: Vec<String>,
+    ) -> Result<bool, ReactiveError> {
+        self.call(move |db| {
+            let mut query = db.prepare(
+                "SELECT d.thread_id,a.thread_id,json_extract(a.payload,'$.project_path'),
+                        json_extract(s.payload,'$.task_checkout.path')
+                 FROM reactive_subscriptions s JOIN reactive_agents a
+                   ON a.id=json_extract(s.payload,'$.agent_id')
+                 LEFT JOIN task_destinations d ON d.subscription_id=s.id
+                 WHERE json_extract(s.payload,'$.enabled')=1",
+            )?;
+            let mut rows = query.query([])?;
+            while let Some(row) = rows.next()? {
+                for col in [0, 1] {
+                    if row
+                        .get::<_, Option<String>>(col)?
+                        .is_some_and(|id| members.contains(&id))
+                    {
+                        return Ok(true);
+                    }
+                }
+                for col in [2, 3] {
+                    if row.get::<_, Option<String>>(col)?.is_some_and(|p| {
+                        !p.is_empty()
+                            && crate::worktrees::resolve(std::path::Path::new(&p))
+                                .starts_with(&folder)
+                    }) {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        })
+        .await
+    }
+
+    pub async fn task_threads(
+        &self,
+        project: String,
+        query: String,
+    ) -> Result<Vec<bruhs_models::reactive::TaskThreadChoice>, ReactiveError> {
+        self.call(move |db| store::task_conversations::search(db, &project, &query))
+            .await
+    }
+
+    pub async fn agent_thread_runs(
+        &self, agent_id: String, before: Option<String>, thread: Option<bruhs_models::ids::ThreadId>
+    ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
+        self.call(move |connection| store::agent_runs(connection, &agent_id, before.as_deref(), thread.as_ref().map(|id| id.as_str())))
             .await
     }
 
@@ -474,11 +534,41 @@ impl ReactiveRuntime {
         Ok(())
     }
 
+    pub async fn webhook_deliveries(
+        &self,
+        task: String,
+    ) -> Result<Vec<bruhs_models::reactive::WebhookDeliverySummary>, ReactiveError> {
+        self.call(move |db| store::webhook_deliveries::list(db, &task))
+            .await
+    }
+
+    pub async fn webhook_delivery(
+        &self,
+        task: String,
+        delivery: String,
+    ) -> Result<bruhs_models::reactive::WebhookDelivery, ReactiveError> {
+        self.call(move |db| store::webhook_deliveries::detail(db, &task, &delivery))
+            .await
+    }
+
     /// Credential disclosure is a separate local-user operation, never part of a snapshot.
     pub async fn webhook_token(&self, source_id: &str) -> Result<String, ReactiveError> {
         let source_id = source_id.to_owned();
         self.call(move |connection| store::webhook_token(connection, &source_id))
             .await
+    }
+
+    pub async fn task_webhook_token(
+        &self,
+        task: String,
+        previous: Option<String>,
+    ) -> Result<String, ReactiveError> {
+        self.call(move |db| {
+            store::transaction(db, |db| {
+                store::task_webhooks::address(db, &task, previous.as_deref())
+            })
+        })
+        .await
     }
 
     pub async fn publish_hook(
@@ -488,12 +578,94 @@ impl ReactiveRuntime {
         key: &str,
         payload: Value,
     ) -> Result<ReactiveEvent, ReactiveError> {
-        let (source_id, token, key) = (source_id.to_owned(), token.to_owned(), key.to_owned());
-        let event = self
+        self.publish_hook_request(source_id, token, key, payload, Default::default()).await
+    }
+
+    pub async fn publish_hook_request(
+        &self,
+        source_id: &str,
+        token: &str,
+        key: &str,
+        payload: Value,
+        request: bruhs_models::reactive::WebhookMetadata,
+    ) -> Result<ReactiveEvent, ReactiveError> {
+        self.publish_hook_received(
+            source_id,
+            token,
+            key,
+            payload,
+            request,
+            bruhs_models::EpochMs::now(),
+        )
+        .await
+    }
+
+    /// The trusted ingress timestamps the arrival before reading the body or waiting on storage.
+    pub async fn publish_hook_received(
+        &self,
+        source_id: &str,
+        token: &str,
+        key: &str,
+        payload: Value,
+        request: bruhs_models::reactive::WebhookMetadata,
+        received: bruhs_models::EpochMs,
+    ) -> Result<ReactiveEvent, ReactiveError> {
+        self.receive_webhook(source_id, token, key, Some(payload), request, received)
+            .await
+    }
+
+    /// HTTP ingress supplies the raw body. Legacy callers can supply a parsed event.
+    pub async fn receive_webhook(
+        &self,
+        source_id: &str,
+        token: &str,
+        key: &str,
+        supplied: Option<Value>,
+        request: bruhs_models::reactive::WebhookMetadata,
+        received: bruhs_models::EpochMs,
+    ) -> Result<ReactiveEvent, ReactiveError> {
+        self.receive_addressed_webhook(
+            WebhookTarget::Source(source_id.to_owned()),
+            token,
+            key,
+            supplied,
+            request,
+            received,
+        )
+        .await
+    }
+
+    pub async fn receive_addressed_webhook(
+        &self,
+        target: WebhookTarget,
+        token: &str,
+        key: &str,
+        supplied: Option<Value>,
+        mut request: bruhs_models::reactive::WebhookMetadata,
+        received: bruhs_models::EpochMs,
+    ) -> Result<ReactiveEvent, ReactiveError> {
+        use bruhs_models::reactive::{WebhookOutcome, MAX_PAYLOAD_BYTES};
+        let (token, key) = (token.to_owned(), key.to_owned());
+        let (event, rejected_signature) = self
             .call(move |connection| {
-                store::transaction(connection, |connection| {
-                    let expected = store::webhook_token(connection, &source_id)
-                        .map_err(|_| ReactiveError::Unauthorized)?;
+                let mut receipt = None;
+                let mut rejected_source = None;
+                let mut denials = store::webhook_security::Denials::new();
+                let result = store::transaction(connection, |connection| {
+                    let (source_id, expected, task, scope) = match &target {
+                        WebhookTarget::Source(id) => (
+                            id.clone(),
+                            store::webhook_token(connection, id)
+                                .map_err(|_| ReactiveError::Unauthorized)?,
+                            None,
+                            None,
+                        ),
+                        WebhookTarget::Task(id) => {
+                            let (task, expected, scope) =
+                                store::task_webhooks::lookup(connection, id)?;
+                            (task.source_id.clone(), expected, Some(task), Some(scope))
+                        }
+                    };
                     let mismatch = expected
                         .bytes()
                         .zip(token.bytes())
@@ -501,11 +673,102 @@ impl ReactiveRuntime {
                     if expected.len() != token.len() || mismatch != 0 {
                         return Err(ReactiveError::Unauthorized);
                     }
-                    store::publish(connection, &source_id, &key, payload)
-                })
+                    if request
+                        .raw_body
+                        .as_ref()
+                        .is_some_and(|body| body.len() > MAX_PAYLOAD_BYTES)
+                    {
+                        return Err(ReactiveError::Invalid(
+                            "Webhook body exceeds the 64 KiB source budget.".into(),
+                        ));
+                    }
+                    let payload = match (request.payload(), supplied) {
+                        (Some(actual), Some(expected)) if actual != expected => {
+                            return Err(ReactiveError::Invalid(
+                                "Webhook body differs from its supplied payload.".into(),
+                            ))
+                        }
+                        (Some(actual), _) => actual,
+                        (None, Some(expected)) => expected,
+                        (None, None) => {
+                            return Err(ReactiveError::Invalid(
+                                "Webhook request body is missing.".into(),
+                            ))
+                        }
+                    };
+                    let tasks = match task {
+                        Some(task) => vec![task],
+                        None => store::source_subscriptions(connection, &source_id)?,
+                    };
+                    rejected_source = Some(source_id.clone());
+                    let now = bruhs_models::EpochMs::now();
+                    let received = received.min(now);
+                    denials = store::webhook_security::inspect(
+                        connection,
+                        &tasks,
+                        &mut request,
+                        received,
+                        now,
+                    )?;
+                    let rejected_signature = !tasks.is_empty()
+                        && tasks.iter().all(|task| {
+                            denials.get(&task.id) == Some(&WebhookOutcome::RejectedSignature)
+                        });
+                    let verified = tasks
+                        .iter()
+                        .filter(|task| {
+                            task.enabled
+                                && task.webhook_security.signature.is_some()
+                                && denials.get(&task.id) != Some(&WebhookOutcome::RejectedSignature)
+                        })
+                        .map(|task| task.id.clone())
+                        .collect();
+                    receipt = Some(store::webhook_deliveries::Receipt::new(
+                        &request, &payload, &token, received, verified,
+                    )?);
+                    let event = store::publish_with_metadata(
+                        connection,
+                        &source_id,
+                        &key,
+                        payload,
+                        &request,
+                        receipt.as_mut(),
+                        store::TaskAdmission {
+                            subscriptions: tasks,
+                            denied: &denials,
+                            scope: scope.as_deref(),
+                        },
+                    )?;
+                    Ok((event, rejected_signature))
+                });
+                if let (
+                    Err(error @ (ReactiveError::Conflict(_) | ReactiveError::Invalid(_))),
+                    Some(receipt),
+                    Some(source_id),
+                ) = (&result, receipt.as_mut(), rejected_source.as_deref())
+                {
+                    // The failed dispatch rolled back. Only authenticated requests reach these errors.
+                    store::transaction(connection, |db| {
+                        store::webhook_deliveries::record_rejected(
+                            db,
+                            source_id,
+                            match &target {
+                                WebhookTarget::Task(id) => Some(id.as_str()),
+                                WebhookTarget::Source(_) => None,
+                            },
+                            receipt,
+                            error,
+                            &denials,
+                        )
+                    })?;
+                }
+                result
             })
             .await?;
         self.changed();
+        if rejected_signature {
+            return Err(ReactiveError::Unauthorized);
+        }
         Ok(event)
     }
 

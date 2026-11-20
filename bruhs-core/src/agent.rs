@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
+mod budget;
 mod external;
 
 /// The models `provider`'s CLI lists for the signed-in account (Cursor's
@@ -70,7 +71,8 @@ pub struct AgentTurn {
     /// Drop the remembered session and start a new one. A rewind uses this
     /// so the removed turns are not resumed.
     pub fresh_session: bool,
-    /// Claude `--effort`. `None` omits the flag. Codex ignores it.
+    /// Claude `--effort` or Codex `model_reasoning_effort`. `None` keeps
+    /// the provider's configured default.
     pub effort: Option<String>,
     /// Claude `--autocompact`. `None` omits the flag. Codex ignores it.
     pub autocompact: Option<String>,
@@ -84,6 +86,8 @@ pub struct AgentTurn {
     pub instructions: Option<String>,
     /// Event handlers never inherit interactive integrations or elevated access.
     pub unattended: bool,
+    /// Optional owner-chosen wall-clock budget for this complete turn.
+    pub execution_timeout_seconds: Option<u64>,
     /// What an unattended turn may do, at the effective level for
     /// [`AgentTurn::provider`] (see [`AgentTurn::unattended_with`]).
     pub unattended_access: BruhAccess,
@@ -122,10 +126,18 @@ impl AgentTurn {
             thread_access: ThreadAccess::default(),
             instructions: None,
             unattended: false,
+            execution_timeout_seconds: None,
             unattended_access: BruhAccess::default(),
             computer: None,
             hidden_folders: Vec::new(),
         }
+    }
+
+    /// Bound this turn without changing model, effort or provider permissions.
+    /// Missing keeps the existing unlimited-duration behavior.
+    pub fn execution_timeout_seconds(mut self, seconds: Option<u64>) -> Self {
+        self.execution_timeout_seconds = seconds;
+        self
     }
 
     /// The thread's role instructions. Blank text is dropped.
@@ -208,7 +220,8 @@ impl AgentTurn {
         self
     }
 
-    /// Keep a Claude effort level. Anything outside the CLI list is dropped.
+    /// Keep an effort level shared by Claude and current Codex reasoning
+    /// models. Anything outside the app's effort list is dropped.
     pub fn effort(mut self, effort: Option<&str>) -> Self {
         self.effort = effort
             .and_then(bruhs_models::logic::run_place::claude_effort)
@@ -242,6 +255,8 @@ pub enum SendMessageError {
     /// The thread already has a turn in flight.
     #[error("thread {0} is already running a turn")]
     ThreadBusy(ThreadId),
+    #[error("Choose a positive execution time budget within this host's timer range.")]
+    InvalidExecutionBudget,
 }
 
 /// The user's answer to a tool-permission prompt.
@@ -389,6 +404,8 @@ pub enum OrchestratorEvent {
     Query(QueryEvent),
     /// A background task was registered in the registry.
     BackgroundTaskRegistered(BackgroundTask),
+    /// Host deadline; never a synthetic provider completion or a quota reset.
+    ExecutionBudgetExceeded { seconds: u64 },
 }
 
 // ---------------------------------------------------------------------------
@@ -402,13 +419,22 @@ pub struct OrchestratorEventStream {
     _secrets: crate::secrets::SecretGuard,
     _threads: crate::thread_link::ThreadScopeGuard,
     _turn: TurnGuard,
+    budget_event: Option<oneshot::Receiver<OrchestratorEvent>>,
+    finished: bool,
+    pub(crate) scratch_lease: Option<std::fs::File>,
 }
 
 impl Stream for OrchestratorEventStream {
     type Item = OrchestratorEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx)
+        let stream = self.as_mut().get_mut();
+        budget::poll_next(
+            &mut stream.rx,
+            &mut stream.budget_event,
+            &mut stream.finished,
+            cx,
+        )
     }
 }
 
@@ -689,10 +715,12 @@ impl AgentOrchestrator {
             thread_access,
             instructions,
             unattended,
+            execution_timeout_seconds,
             unattended_access,
             computer,
             hidden_folders,
         } = turn;
+        let deadline = budget::deadline(execution_timeout_seconds)?;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
         let context = match (system_prompt, instructions.as_deref()) {
@@ -754,7 +782,7 @@ impl AgentOrchestrator {
             system_prompt,
             resume.as_deref(),
         );
-        apply_claude_effort(&mut query_options, effort.as_deref());
+        apply_effort(&mut query_options, effort.as_deref());
         apply_claude_autocompact(&mut query_options, autocompact.as_deref());
         // A Codex session keeps the plugin setting it started with.
         let lean_file = crate::codex_lean::default_file();
@@ -821,145 +849,195 @@ impl AgentOrchestrator {
         let permissions = Arc::clone(&self.permissions);
         let steers = Arc::clone(&self.steers);
 
+        let (budget_sender, budget_event) = if deadline.is_some() {
+            let (sender, receiver) = oneshot::channel();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+        let secret_model = model.clone();
+        let budget_owner = turn.owner.clone();
+        let budget_permissions = Arc::clone(&permissions);
         tokio::spawn(async move {
-            let _secrets = producer_secrets;
-            let _threads = producer_threads;
-            if let Some(Err(error)) = bruh_browser {
-                turn.send_start_error(format!("Could not configure the bruh's browser: {error}"))
-                    .await;
-                return;
-            }
-            let app_tools = query_options.supports_mcp();
-            let broker = match if unattended || !app_tools {
-                Ok(None)
-            } else {
-                secrets.start().await.map(Some)
-            } {
-                Ok(broker) => broker,
-                Err(_) => {
+            let work = async move {
+                let _secrets = producer_secrets;
+                let _threads = producer_threads;
+                if let Some(Err(error)) = bruh_browser {
+                    turn.send_start_error(format!("Could not configure the bruh's browser: {error}"))
+                        .await;
+                    return;
+                }
+                if !unattended {
+                    match crate::secret_sources::for_turn(provider, &secret_model).await {
+                        Ok(vars) => match &mut query_options {
+                            ProviderQueryOptions::Claude(options) => options.env.extend(vars),
+                            ProviderQueryOptions::Codex(options) => options.env.extend(vars),
+                            ProviderQueryOptions::External(options) => options.secret_env = vars,
+                        },
+                        Err(error) => {
+                            turn.send_start_error(format!("Could not start the provider. {error}")).await;
+                            return;
+                        }
+                    }
+                }
+                let app_tools = query_options.supports_mcp();
+                let broker = match if unattended || !app_tools {
+                    Ok(None)
+                } else {
+                    secrets.start().await.map(Some)
+                } {
+                    Ok(broker) => broker,
+                    Err(_) => {
+                        turn.send_start_error(
+                            "Could not start the private credential broker. Retry the turn.".into(),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                if !unattended && permission_mode == PermissionMode::Plan {
+                    if let ProviderQueryOptions::Claude(options) = &mut query_options {
+                        crate::secrets::mcp::append_claude_instructions(options);
+                    }
+                } else if broker
+                    .as_ref()
+                    .is_some_and(|broker| broker.configure(&mut query_options).is_err())
+                {
                     turn.send_start_error(
-                        "Could not start the private credential broker. Retry the turn.".into(),
+                        "Could not configure private credential tools. Retry the turn.".into(),
                     )
                     .await;
                     return;
                 }
-            };
-            if !unattended && permission_mode == PermissionMode::Plan {
-                if let ProviderQueryOptions::Claude(options) = &mut query_options {
-                    crate::secrets::mcp::append_claude_instructions(options);
-                }
-            } else if broker
-                .as_ref()
-                .is_some_and(|broker| broker.configure(&mut query_options).is_err())
-            {
-                turn.send_start_error(
-                    "Could not configure private credential tools. Retry the turn.".into(),
-                )
-                .await;
-                return;
-            }
-            // Off in Settings: no thread tools. The turn also runs without
-            // them when the broker cannot start.
-            let _thread_broker = if unattended || !app_tools || thread_access == ThreadAccess::Off {
-                None
-            } else {
-                match threads.start(threads_read_only).await {
-                    Ok(broker) => match broker.configure(&mut query_options) {
-                        Ok(()) => Some(broker),
-                        Err(error) => {
-                            tracing::warn!("Thread tools could not be configured: {error}");
-                            None
-                        }
-                    },
-                    Err(error) => {
-                        tracing::warn!("Thread broker could not start: {error}");
+                // Off in Settings: no thread tools. The turn also runs without
+                // them when the broker cannot start.
+                let _thread_broker =
+                    if unattended || !app_tools || thread_access == ThreadAccess::Off {
                         None
+                    } else {
+                        match threads.start(threads_read_only).await {
+                            Ok(broker) => match broker.configure(&mut query_options) {
+                                Ok(()) => Some(broker),
+                                Err(error) => {
+                                    tracing::warn!("Thread tools could not be configured: {error}");
+                                    None
+                                }
+                            },
+                            Err(error) => {
+                                tracing::warn!("Thread broker could not start: {error}");
+                                None
+                            }
+                        }
+                    };
+                if let Err(error) = if unattended || !app_tools {
+                    Ok(())
+                } else {
+                    crate::pith::configure_turn(&mut query_options).await
+                } {
+                    turn.send_start_error(format!("Could not connect Pith: {error}"))
+                        .await;
+                    return;
+                }
+                if !unattended && app_tools {
+                    if let Err(error) = crate::website_reader::configure(&mut query_options) {
+                        turn.send_start_error(format!("Could not configure website reading: {error}")).await;
+                        return;
+                    }
+                    if let Err(error) =
+                        crate::artifact_tools::configure(&mut query_options, &artifact_project)
+                    {
+                        turn.send_start_error(format!(
+                            "Could not configure local artifact tools: {error}"
+                        ))
+                        .await;
+                        return;
+                    }
+                    if let Err(error) =
+                        crate::database_tools::configure(&mut query_options, &artifact_project)
+                    {
+                        turn.send_start_error(format!(
+                            "Could not configure database tools: {error}"
+                        ))
+                        .await;
+                        return;
+                    }
+                    if let Err(error) = crate::api_client_tools::configure(
+                        &mut query_options,
+                        &artifact_project,
+                        turn.owner.thread_id.as_str(),
+                        permission_mode != PermissionMode::Plan,
+                    ) {
+                        turn.send_start_error(format!(
+                            "Could not configure API request tools: {error}"
+                        ))
+                        .await;
+                        return;
+                    }
+                    if let Err(error) = crate::reactive_tools::configure(
+                        &mut query_options,
+                        permission_mode == PermissionMode::Plan,
+                    ) {
+                        turn.send_start_error(format!(
+                            "Could not configure reactive automation tools: {error}"
+                        ))
+                        .await;
+                        return;
+                    }
+                }
+                if !unattended && app_tools {
+                    if let Err(error) = crate::workbench_tools::configure(
+                        &mut query_options,
+                        &artifact_project,
+                        turn.owner.thread_id.as_str(),
+                        threads_read_only,
+                        permission_mode,
+                    ) {
+                        turn.send_start_error(format!(
+                            "Could not configure workbench tools: {error}"
+                        ))
+                        .await;
+                        return;
+                    }
+                }
+                match query_options {
+                    ProviderQueryOptions::Claude(options) => {
+                        stream_claude(options, turn, permissions, steers).await;
+                    }
+                    ProviderQueryOptions::Codex(options) => {
+                        stream_codex(options, turn, model, record_lean).await;
+                    }
+                    ProviderQueryOptions::External(options) => {
+                        external::stream(options, turn).await
                     }
                 }
             };
-            if let Err(error) = if unattended || !app_tools {
-                Ok(())
-            } else {
-                crate::pith::configure_turn(&mut query_options).await
-            } {
-                turn.send_start_error(format!("Could not connect Pith: {error}"))
-                    .await;
-                return;
-            }
-            if !unattended && app_tools {
-                if let Err(error) = crate::website_reader::configure(&mut query_options) {
-                    turn.send_start_error(format!("Could not configure website reading: {error}"))
-                        .await;
-                    return;
+            match deadline {
+                None => work.await,
+                Some((at, seconds)) => {
+                    if tokio::time::timeout_at(at, work).await.is_err() {
+                        // Dropping work stops the owned provider and brokers.
+                        // This path releases only the expired turn's prompts.
+                        release_turn_permissions(
+                            &mut *budget_permissions.write().await,
+                            &budget_owner,
+                        );
+                        if let Some(sender) = budget_sender {
+                            let _ =
+                                sender.send(OrchestratorEvent::ExecutionBudgetExceeded { seconds });
+                        }
+                    }
                 }
-                if let Err(error) =
-                    crate::artifact_tools::configure(&mut query_options, &artifact_project)
-                {
-                    turn.send_start_error(format!(
-                        "Could not configure local artifact tools: {error}"
-                    ))
-                    .await;
-                    return;
-                }
-                if let Err(error) =
-                    crate::database_tools::configure(&mut query_options, &artifact_project)
-                {
-                    turn.send_start_error(format!("Could not configure database tools: {error}"))
-                        .await;
-                    return;
-                }
-                if let Err(error) = crate::api_client_tools::configure(
-                    &mut query_options,
-                    &artifact_project,
-                    turn.owner.thread_id.as_str(),
-                    permission_mode != PermissionMode::Plan,
-                ) {
-                    turn.send_start_error(format!(
-                        "Could not configure API request tools: {error}"
-                    ))
-                    .await;
-                    return;
-                }
-                if let Err(error) = crate::reactive_tools::configure(
-                    &mut query_options,
-                    permission_mode == PermissionMode::Plan,
-                ) {
-                    turn.send_start_error(format!(
-                        "Could not configure reactive automation tools: {error}"
-                    ))
-                    .await;
-                    return;
-                }
-            }
-            if !unattended && app_tools {
-                if let Err(error) = crate::workbench_tools::configure(
-                    &mut query_options,
-                    &artifact_project,
-                    turn.owner.thread_id.as_str(),
-                    threads_read_only,
-                    permission_mode,
-                ) {
-                    turn.send_start_error(format!("Could not configure workbench tools: {error}"))
-                        .await;
-                    return;
-                }
-            }
-            match query_options {
-                ProviderQueryOptions::Claude(options) => {
-                    stream_claude(options, turn, permissions, steers).await;
-                }
-                ProviderQueryOptions::Codex(options) => {
-                    stream_codex(options, turn, model, record_lean).await;
-                }
-                ProviderQueryOptions::External(options) => external::stream(options, turn).await,
             }
         });
 
         Ok(OrchestratorEventStream {
+            scratch_lease: None,
             rx,
             _secrets: consumer_secrets,
             _threads: consumer_threads,
             _turn: consumer_guard,
+            budget_event,
+            finished: false,
         })
     }
 
@@ -1011,14 +1089,18 @@ fn session_to_resume(
     }
 }
 
-/// Put a Claude effort level on `options`. Codex and unknown levels are left alone,
-/// so an unset effort does not change the CLI arguments.
-fn apply_claude_effort(options: &mut ProviderQueryOptions, effort: Option<&str>) {
+/// Apply an explicit effort without replacing the user's configured default
+/// when the app did not select one. Other providers keep their own controls.
+fn apply_effort(options: &mut ProviderQueryOptions, effort: Option<&str>) {
     let Some(level) = effort.and_then(bruhs_models::logic::run_place::claude_effort) else {
         return;
     };
-    if let ProviderQueryOptions::Claude(options) = options {
-        options.effort = Some(level.to_string());
+    match options {
+        ProviderQueryOptions::Claude(options) => options.effort = Some(level.to_string()),
+        ProviderQueryOptions::Codex(options) => options
+            .config
+            .push(codex_sdk_rs::ConfigOverride::reasoning_effort(level)),
+        ProviderQueryOptions::External(_) => {}
     }
 }
 
@@ -1635,7 +1717,8 @@ async fn stream_claude(
         thread_id: turn.owner.thread_id.clone(),
     };
     let mut reported_error = false;
-    let consumer_alive = loop {
+    let mut completed = None;
+    let mut consumer_alive = loop {
         let event = tokio::select! {
             // The caller dropped the stream: stop now (dropping `stream`
             // kills the CLI) instead of at the next event.
@@ -1653,6 +1736,21 @@ async fn stream_claude(
         let event = map_claude_event(event);
         reported_error |= is_error_event(&event);
         turn.remember_session(&event);
+        if let QueryEvent::Result { usage, .. } = &event {
+            turn.record_usage(usage).await;
+        }
+        if matches!(
+            event,
+            QueryEvent::Result {
+                is_error: false,
+                ..
+            }
+        ) {
+            // A result can precede a failed exit. Consumers stop on success,
+            // so keep it private until the SDK settles the whole process.
+            completed = Some(event);
+            continue;
+        }
         match &event {
             QueryEvent::PermissionRequest { id, input, .. } => {
                 permissions.write().await.insert(
@@ -1676,6 +1774,15 @@ async fn stream_claude(
     // Whatever this turn still has pending can no longer be answered: the
     // CLI is gone (stream ended) or the client left (stream dropped).
     release_turn_permissions(&mut *permissions.write().await, &turn.owner);
+    if consumer_alive && !reported_error {
+        consumer_alive = turn
+            .forward(completed.unwrap_or_else(|| {
+                QueryEvent::Error(
+                    "Claude ended without a turn completion receipt. Review the output and workspace before explicitly retrying.".into(),
+                )
+            }))
+            .await;
+    }
     turn.finish(consumer_alive);
 }
 
@@ -1686,6 +1793,13 @@ async fn stream_codex(
     model: String,
     mut record_lean: Option<std::path::PathBuf>,
 ) {
+    let started = std::time::Instant::now();
+    let mut session_id = match &options.session {
+        codex_sdk_rs::Session::Resume(id) => Some(id.clone()),
+        _ => None,
+    };
+    let mut answer = String::new();
+    let mut completed_usage = None;
     let mut stream = match codex_sdk_rs::query(options) {
         Ok(stream) => stream,
         Err(e) => {
@@ -1695,7 +1809,7 @@ async fn stream_codex(
     };
     turn.register_process(stream.process_id);
     let mut reported_error = false;
-    let consumer_alive = loop {
+    let mut consumer_alive = loop {
         let event = tokio::select! {
             () = turn.tx.closed() => break false,
             event = tokio_stream::StreamExt::next(&mut stream) => match event {
@@ -1709,6 +1823,15 @@ async fn stream_codex(
             continue;
         }
         let event = map_codex_event(event, &model);
+        match &event {
+            QueryEvent::Init { session_id: id, .. } => session_id = Some(id.clone()),
+            QueryEvent::Text(text) => answer.clone_from(text),
+            QueryEvent::Usage(usage) => {
+                completed_usage = Some(usage.clone());
+                turn.record_usage(usage).await;
+            }
+            _ => {}
+        }
         if let QueryEvent::Init { session_id, .. } = &event {
             if let Some(file) = record_lean.take() {
                 let id = session_id.clone();
@@ -1729,7 +1852,41 @@ async fn stream_codex(
             break false;
         }
     };
+    if consumer_alive && !reported_error {
+        // The SDK emits usage after process settlement, possibly followed by a
+        // failed exit. Only EOF without that failure can complete the turn.
+        let completion = match (completed_usage, session_id.filter(|id| !id.is_empty())) {
+            (Some(usage), Some(session_id)) => QueryEvent::Result {
+                result: answer,
+                session_id,
+                duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                usage,
+                is_error: false,
+            },
+            _ => QueryEvent::Error(
+                "Codex ended without a complete turn completion receipt and session ID. Review the output and workspace before explicitly retrying.".into(),
+            ),
+        };
+        turn.remember_session(&completion);
+        consumer_alive = turn.forward(completion).await;
+    }
     turn.finish(consumer_alive);
+}
+
+impl Drop for TurnContext {
+    fn drop(&mut self) {
+        // Explicit finish drains this list. Cancellation or a host deadline
+        // reaches this guard with the remaining turn-owned tasks still present.
+        self.finish(false);
+    }
+}
+
+pub fn validate_execution_budget(seconds: Option<u64>) -> Result<(), SendMessageError> {
+    budget::deadline(seconds).map(|_| ())
+}
+
+pub fn execution_budget_message(seconds: u64) -> String {
+    format!("The owner-set {seconds} second execution budget was reached. This run stopped without a completion result. Files and partial output remain available; inspect them before continuing. Final usage may be unavailable.")
 }
 
 impl TurnContext {
@@ -1770,39 +1927,46 @@ impl TurnContext {
         }
     }
 
+    async fn record_usage(&self, usage: &UsageInfo) {
+        if cfg!(test)
+            || (usage.input_tokens == 0
+                && usage.output_tokens == 0
+                && usage.cache_read_input_tokens == 0
+                && usage.cache_creation_input_tokens == 0)
+        {
+            return;
+        }
+        let record = bruhs_models::agent_extensions::UsageRecord {
+            id: self.usage_receipt.clone(),
+            thread_id: self.owner.thread_id.as_str().into(),
+            model: self.model.clone(),
+            project: self.media_project.clone(),
+            at: chrono::Utc::now().timestamp(),
+            input: usage.input_tokens,
+            output: usage.output_tokens,
+            cache_read: usage.cache_read_input_tokens,
+            cache_write: usage.cache_creation_input_tokens,
+        };
+        let saved = tokio::task::spawn_blocking(move || {
+            crate::agent_extensions::record_at(&crate::agent_extensions::directory()?, record)
+        })
+        .await;
+        if !matches!(saved, Ok(Ok(()))) {
+            tracing::warn!(?saved, "Could not persist reported turn usage");
+        }
+    }
+
     /// Send `event` (and any background task it starts) to the caller.
     /// False when the caller has dropped the stream.
     async fn forward(&self, mut event: QueryEvent) -> bool {
-        if !cfg!(test) {
-            if let QueryEvent::Result { usage, .. } = &event {
-                if usage.input_tokens != 0
-                    || usage.output_tokens != 0
-                    || usage.cache_read_input_tokens != 0
-                    || usage.cache_creation_input_tokens != 0
-                {
-                    let record = bruhs_models::agent_extensions::UsageRecord {
-                        id: self.usage_receipt.clone(),
-                        thread_id: self.owner.thread_id.as_str().into(),
-                        model: self.model.clone(),
-                        project: self.media_project.clone(),
-                        at: chrono::Utc::now().timestamp(),
-                        input: usage.input_tokens,
-                        output: usage.output_tokens,
-                        cache_read: usage.cache_read_input_tokens,
-                        cache_write: usage.cache_creation_input_tokens,
-                    };
-                    let saved = tokio::task::spawn_blocking(move || {
-                        crate::agent_extensions::record_at(
-                            &crate::agent_extensions::directory()?,
-                            record,
-                        )
-                    })
-                    .await;
-                    if !matches!(saved, Ok(Ok(()))) {
-                        tracing::warn!(?saved, "Could not persist reported turn usage");
-                    }
-                }
+        if let QueryEvent::Result { usage, .. } = &event {
+            // Native runtimes retain reported usage independently of process
+            // success. Their later completion must not record it twice.
+            if !matches!(self.provider, AgentProvider::Claude | AgentProvider::Codex) {
+                self.record_usage(usage).await;
             }
+        }
+        if !cfg!(test) {
             if let QueryEvent::Raw(raw) = &event {
                 if raw["type"] == "rate_limit_event" {
                     let raw = raw.clone();
@@ -2060,6 +2224,9 @@ fn map_codex_event(event: codex_sdk_rs::QueryEvent, model: &str) -> QueryEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod claude_completion;
+    mod codex_completion;
 
     #[test]
     fn unattended_turns_remove_interactive_integrations_and_elevated_access() {
@@ -3028,22 +3195,38 @@ mod tests {
     }
 
     #[test]
-    fn claude_effort_reaches_only_the_claude_cli() {
+    fn selected_effort_reaches_the_native_provider() {
         let mut claude_opts = options(AgentProvider::Claude, PermissionMode::Default, None);
-        apply_claude_effort(&mut claude_opts, Some("high"));
+        apply_effort(&mut claude_opts, Some("high"));
         assert_eq!(claude(claude_opts).effort.as_deref(), Some("high"));
 
         let mut unset = options(AgentProvider::Claude, PermissionMode::Default, None);
-        apply_claude_effort(&mut unset, None);
+        apply_effort(&mut unset, None);
         assert_eq!(claude(unset).effort, None);
 
         let mut unknown = options(AgentProvider::Claude, PermissionMode::Default, None);
-        apply_claude_effort(&mut unknown, Some("minimal"));
+        apply_effort(&mut unknown, Some("minimal"));
         assert_eq!(claude(unknown).effort, None);
 
-        let mut codex_opts = options(AgentProvider::Codex, PermissionMode::Default, None);
-        apply_claude_effort(&mut codex_opts, Some("max"));
-        assert!(matches!(codex_opts, ProviderQueryOptions::Codex(_)));
+        for level in bruhs_models::logic::run_place::CLAUDE_EFFORTS {
+            let mut codex_opts = options(AgentProvider::Codex, PermissionMode::Default, None);
+            apply_effort(&mut codex_opts, Some(level));
+            let ProviderQueryOptions::Codex(codex_opts) = codex_opts else {
+                panic!("expected Codex options");
+            };
+            assert_eq!(codex_opts.config.len(), 1);
+            assert_eq!(codex_opts.config[0].key(), "model_reasoning_effort");
+            assert_eq!(codex_opts.config[0].value(), format!("\"{level}\""));
+        }
+
+        for level in [None, Some("nope"), Some("ultra")] {
+            let mut codex_opts = options(AgentProvider::Codex, PermissionMode::Default, None);
+            apply_effort(&mut codex_opts, level);
+            let ProviderQueryOptions::Codex(codex_opts) = codex_opts else {
+                panic!("expected Codex options");
+            };
+            assert!(codex_opts.config.is_empty());
+        }
 
         let turn = unstartable_turn(&ThreadId::new_v4()).effort(Some("xhigh"));
         assert_eq!(turn.effort.as_deref(), Some("xhigh"));

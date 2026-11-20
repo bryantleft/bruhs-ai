@@ -99,6 +99,13 @@ async fn receipt(mode: &str) {
                         auto_run: true,
                         debounce_ms: 0,
                         throttle_ms: 0,
+                        webhook_filters: Vec::new(),
+                        webhook_prompt: None,
+                        webhook_security: Default::default(),
+                        webhook_dedupe: Default::default(),
+                        task_title: None,
+                        task_conversation: Default::default(),
+                        task_checkout: Default::default(),
                         on_busy: Default::default(),
                     },
                 }

@@ -61,6 +61,7 @@ pub async fn suggest(
             &Instructions {
                 text: INSTRUCTIONS,
                 think: false,
+                generation: None,
             },
             workspace.path(),
         )

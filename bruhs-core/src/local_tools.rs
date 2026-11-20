@@ -342,7 +342,9 @@ impl Drop for BrowserLaunch<'_> {
     }
 }
 
-async fn screenshot(bytes: Vec<u8>) -> Result<ToolReply, ToolError> {
+type ScreenshotWriter = fn(&str, &[u8]) -> Result<bruhs_models::logic::attachments::UploadedFile, &'static str>;
+
+async fn screenshot(bytes: Vec<u8>, store: ScreenshotWriter) -> Result<ToolReply, ToolError> {
     use base64::Engine;
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err(ToolError::Invalid(
@@ -351,7 +353,7 @@ async fn screenshot(bytes: Vec<u8>) -> Result<ToolReply, ToolError> {
     }
     let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let uploaded = tokio::task::spawn_blocking(move || {
-        crate::uploads::write_upload("verification.png", &bytes)
+        store("verification.png", &bytes)
             .map_err(|error| ToolError::Unavailable(error.into()))
     })
     .await??;

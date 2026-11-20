@@ -196,7 +196,7 @@ fn catalogue(read_only: bool) -> Value {
     let definitions = [
         (
             "workspace_status",
-            "Read this project's host-owned task summaries, each with its board lane (building, validating, in_review, ready, done), status, branch and pull requests, and this thread's local-tool grants. To use a browser/device, ask the user to grant access in Workbench → Verification using this thread ID as principal.",
+            "Read this project's host-owned task summaries, each with its board lane (building, validating, in_review, ready, done), status, branch and pull requests, and this thread's local-tool grants. To use a browser/device, ask the user to enable access for this thread in desktop Settings → Browser or Devices, or in Workbench → Verification using the thread ID.",
         ),
         (
             "task_read",
@@ -208,7 +208,7 @@ fn catalogue(read_only: bool) -> Value {
         ),
         (
             "prepare_delivery",
-            "Prepare a delivery action for the owner to review in Workbench → Delivery. arguments.action is a typed DeliveryAction, timeout_seconds is the user's execution budget. This never executes it; only the UI can run the reviewed action.",
+            "Prepare a delivery action for the owner to review in Workbench → Delivery. Host-owned tasks use their actual worktree and retain their source identity in the local receipt. arguments.action is a typed DeliveryAction, timeout_seconds is the user's execution budget. This never executes it; only the UI can run the reviewed action.",
         ),
         (
             "task_work",
@@ -459,6 +459,27 @@ impl Scope {
         let snapshot = self.request("/api/local-tools", None).await?;
         snapshot["grants"].as_array().and_then(|grants|grants.iter().find(|g|g["principal"]==self.thread&&g["scope"]==scope)).cloned().ok_or_else(||io::Error::other(format!("No {scope} grant for thread {}. Ask the user to allow it in Workbench → Verification for this thread; do not call the grant endpoint yourself.",self.thread)))
     }
+    async fn prepare_delivery(&self, args: &Value) -> io::Result<Value> {
+        let snapshot = self.request("/api/coordination", None).await?;
+        let tasks = snapshot["tasks"].as_array().ok_or_else(|| {
+            io::Error::other("The task snapshot is unavailable. Retry after the host recovers.")
+        })?;
+        let request = json!({"forge":args.get("forge").cloned().unwrap_or_else(||json!("auto")),
+            "action":args["action"],"timeout_seconds":args["timeout_seconds"]});
+        if tasks.iter().any(|task| task["id"] == self.thread) {
+            self.scoped_task(&snapshot, &self.thread)?;
+            let mut url = url::Url::parse(&self.endpoint).map_err(io::Error::other)?;
+            url.path_segments_mut()
+                .map_err(|()| io::Error::other("Workbench URL cannot hold a task path."))?
+                .clear()
+                .extend(["api", "delivery", "tasks", self.thread.as_str(), "prepare"]);
+            self.request(url.path(), Some(request)).await
+        } else {
+            let mut request = request;
+            request["path"] = json!(self.project);
+            self.request("/api/delivery/prepare", Some(request)).await
+        }
+    }
     async fn call(&self, name: &str, args: &Value) -> io::Result<Value> {
         if !names(self.read_only).contains(&name) {
             return Err(io::Error::other(
@@ -477,7 +498,7 @@ impl Scope {
             },
             "delivery_read"=>self.request("/api/delivery/read",Some(json!({"path":self.project,"forge":args.get("forge").cloned().unwrap_or_else(||json!("auto")),"query":args["query"]}))).await,
             "task_read"=>self.read_task(args).await,
-            "prepare_delivery"=>self.request("/api/delivery/prepare",Some(json!({"path":self.project,"forge":args.get("forge").cloned().unwrap_or_else(||json!("auto")),"action":args["action"],"timeout_seconds":args["timeout_seconds"]}))).await,
+            "prepare_delivery"=>self.prepare_delivery(args).await,
             "task_work"=>{
                 let mut command=args.get("command").cloned().ok_or_else(||io::Error::other("A typed task command is required."))?;
                 let action=command["action"].as_str().unwrap_or("");
@@ -643,6 +664,82 @@ pub async fn run_mcp_helper() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn delivery_preparation_binds_host_tasks_but_preserves_ordinary_chat_scope() {
+        use axum::{
+            extract::{OriginalUri, State},
+            routing::{get, post},
+            Json, Router,
+        };
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        type Calls = Arc<Mutex<Vec<(String, Value)>>>;
+        async fn record(
+            State(calls): State<Calls>,
+            OriginalUri(uri): OriginalUri,
+            Json(body): Json<Value>,
+        ) -> Json<Value> {
+            calls.lock().await.push((uri.path().into(), body));
+            Json(json!({"id":"prepared-only"}))
+        }
+        let project = tempfile::tempdir().unwrap();
+        let working = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let snapshot = json!({"tasks":[{"id":"host-task","project_path":project.path(),"working_path":working.path()}]});
+        let calls = Calls::default();
+        let app = Router::new()
+            .route(
+                "/api/coordination",
+                get(move || {
+                    let snapshot = snapshot.clone();
+                    async move { Json(snapshot) }
+                }),
+            )
+            .route("/api/delivery/prepare", post(record))
+            .route("/api/delivery/tasks/{id}/prepare", post(record))
+            .with_state(calls.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut scope = Scope {
+            endpoint,
+            project: working.path().to_string_lossy().into_owned(),
+            thread: "host-task".into(),
+            read_only: false,
+            mode: bruhs_models::PermissionMode::AcceptEdits,
+            client: reqwest::Client::new(),
+            wait_client: reqwest::Client::new(),
+        };
+        let args = json!({"action":{"type":"comment","number":42,"body":"Owner must review"},"timeout_seconds":5});
+        scope.call("prepare_delivery", &args).await.unwrap();
+        scope.project = outside.path().to_string_lossy().into_owned();
+        assert!(scope.call("prepare_delivery", &args).await.is_err());
+        scope.thread = "ordinary-chat".into();
+        scope.project = project.path().to_string_lossy().into_owned();
+        scope.call("prepare_delivery", &args).await.unwrap();
+        assert!(scope
+            .call(
+                "task_work",
+                &json!({"command":{"action":"set_effort","id":"ordinary-chat","effort":"max"}})
+            )
+            .await
+            .is_err());
+        scope.read_only = true;
+        assert!(scope.call("prepare_delivery", &args).await.is_err());
+        let observed = calls.lock().await.clone();
+        assert_eq!(observed.len(), 2);
+        assert_eq!(observed[0].0, "/api/delivery/tasks/host-task/prepare");
+        assert!(observed[0].1.get("path").is_none());
+        assert!(observed[0].1.get("source_task").is_none());
+        assert_eq!(observed[1].0, "/api/delivery/prepare");
+        assert_eq!(observed[1].1["path"], json!(scope.project));
+        assert!(!catalogue(false).to_string().contains("task-source/forget"));
+        server.abort();
+    }
     #[test]
     fn read_only_catalogue_cannot_launch_tools_or_task_work() {
         let tools = catalogue(true).to_string();

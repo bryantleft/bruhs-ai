@@ -214,6 +214,20 @@ pub(super) fn answer(
         let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
         // A room run resumes in its room while the bruh is still in it.
         let original = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?;
+        if let Some(original) = &original {
+            if let Some(task) = &original.subscription_id {
+                let bound: bool = connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM task_destinations d JOIN task_conversations c USING(thread_id) WHERE d.subscription_id=?1 AND d.thread_id=?2 AND c.agent_id=?3)",
+                    params![task, original.thread_id.as_str(), &item.agent_id], |row| row.get(0),
+                )?;
+                if bound {
+                    run.thread_id = original.thread_id.clone();
+                    run.subscription_id = Some(task.clone());
+                    run.source_id = original.source_id.clone();
+                    run.task_checkout = original.task_checkout.clone();
+                }
+            }
+        }
         run.trigger = match original {
             Some(original) => super::rooms::resume_trigger_for(connection, &original)?,
             None => None,
