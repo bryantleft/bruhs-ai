@@ -944,7 +944,17 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
     let granted = |snapshot: &Value| snapshot["bruhs"][0]["vault"].clone();
     let (_, snapshot) = fixture.get("/api/reactive").await;
     assert_eq!(granted(&snapshot), json!([]));
-    // Other commands still come from any loopback page.
+    // Other commands still come from any loopback page; turning a Computer
+    // on raises the bruh, so that one takes the owner (final review A2 I1).
+    let (status, text) = fixture
+        .send(
+            Method::POST,
+            "/api/reactive/commands",
+            Some(json!({"action": "set_computer", "agent_id": "a", "on": false})),
+            Some(APP_ORIGIN),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
     let (status, text) = fixture
         .send(
             Method::POST,
@@ -953,7 +963,8 @@ async fn vault_changes_come_only_from_bruhs_own_pages() {
             Some(APP_ORIGIN),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "{text}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{text}");
+    assert!(text.contains(bruhs_models::crew::OWNER_ONLY_ACCESS), "{text}");
     for origin in [None, Some(own.as_str()), Some(CONFIGURED_ORIGIN)] {
         let (status, text) = fixture
             .send(

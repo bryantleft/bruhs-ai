@@ -621,7 +621,13 @@ async fn grants_key_cards_and_deleting_an_agent_are_the_owners() {
             None,
         ),
         (ReactiveCommand::Propose { change: delete() }, None),
-        (set_computer("a", true), None),
+        // Final review A2 I1: turning a Computer on raises the bruh, so it
+        // takes the owner; turning it off stays open.
+        (
+            set_computer("a", true),
+            Some(bruhs_models::crew::OWNER_ONLY_ACCESS),
+        ),
+        (set_computer("a", false), None),
     ] {
         assert_eq!(
             runtime.owner_only_refusal(&command).await.unwrap(),
