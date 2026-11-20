@@ -145,13 +145,17 @@ fn command(options: &QueryOptions) -> Command {
         cmd.arg("--ignore-rules");
     }
 
-    match &options.session {
-        Session::Resume(thread_id) => {
-            cmd.arg("resume").arg("--").arg(thread_id);
-        }
-        Session::New | Session::Ephemeral => {
-            cmd.arg("--");
-        }
+    if matches!(options.session, Session::Resume(_)) {
+        cmd.arg("resume");
+    }
+    for path in &options.images {
+        let mut image = OsString::from("--image=");
+        image.push(path);
+        cmd.arg(image);
+    }
+    cmd.arg("--");
+    if let Session::Resume(thread_id) = &options.session {
+        cmd.arg(thread_id);
     }
     cmd.arg("-");
 
@@ -478,6 +482,35 @@ impl Stream for QueryStream {
 mod tests {
     use super::parse_cli_line;
     use crate::types::QueryEvent;
+
+    #[test]
+    fn fresh_and_resumed_turns_attach_each_image_to_the_selected_command() {
+        use crate::{QueryOptions, Session};
+        for session in [Session::Ephemeral, Session::Resume("id".into())] {
+            let mut options = QueryOptions::new("name this");
+            options.session = session.clone();
+            options.images = vec!["/tmp/a b.png".into(), "/tmp/c.png".into()];
+            let cmd = super::command(&options);
+            let args: Vec<_> = cmd
+                .as_std()
+                .get_args()
+                .map(|a| a.to_str().unwrap())
+                .collect();
+            let end = if matches!(session, Session::Resume(_)) {
+                vec![
+                    "resume",
+                    "--image=/tmp/a b.png",
+                    "--image=/tmp/c.png",
+                    "--",
+                    "id",
+                    "-",
+                ]
+            } else {
+                vec!["--image=/tmp/a b.png", "--image=/tmp/c.png", "--", "-"]
+            };
+            assert!(args.ends_with(&end));
+        }
+    }
 
     #[test]
     fn parse_cli_line_should_emit_init_when_thread_starts() {

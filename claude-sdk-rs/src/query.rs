@@ -39,7 +39,8 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
     if let Some(session_id) = options.resume.as_ref().filter(|id| id.starts_with('-')) {
         return Err(Error::InvalidSessionId(session_id.clone()));
     }
-    let streaming = options.permission_prompts || options.accept_input;
+    let streaming =
+        options.permission_prompts || options.accept_input || !options.images.is_empty();
     let mut cmd = command(&options);
 
     // Never inherit our stdin: in text mode the CLI would read it as more input.
@@ -59,7 +60,7 @@ pub fn query(options: QueryOptions) -> Result<QueryStream> {
         stdin: Arc::clone(&stdin_slot),
         interactive: options.permission_prompts,
     };
-    let first_message = streaming.then(|| user_message_line(&options.prompt));
+    let first_message = streaming.then(|| initial_message_line(&options.prompt, &options.images));
 
     let (tx, rx) = mpsc::channel(256);
     let process_id = process.pid();
@@ -129,7 +130,8 @@ async fn pump(
 /// could be read as another flag. The prompt comes last, after `--`.
 fn command(options: &QueryOptions) -> Command {
     let mut cmd = Command::new("claude");
-    let streaming = options.permission_prompts || options.accept_input;
+    let streaming =
+        options.permission_prompts || options.accept_input || !options.images.is_empty();
 
     cmd.arg("-p") // print mode
         .arg("--output-format=stream-json")
@@ -276,11 +278,25 @@ async fn close_stdin(slot: &StdinSlot) {
 
 /// One stream-json user message carrying the prompt.
 fn user_message_line(prompt: &str) -> String {
-    let mut line = json!({
-        "type": "user",
-        "message": { "role": "user", "content": prompt },
-    })
-    .to_string();
+    initial_message_line(prompt, &[])
+}
+
+fn initial_message_line(prompt: &str, images: &[crate::ImageInput]) -> String {
+    let content = if images.is_empty() {
+        json!(prompt)
+    } else {
+        let mut blocks = vec![json!({"type":"text","text":prompt})];
+        blocks.extend(images.iter().map(|image| {
+            json!({
+                "type":"image",
+                "source":{"type":"base64","media_type":image.media_type,"data":image.data}
+            })
+        }));
+        serde_json::Value::Array(blocks)
+    };
+    let mut message = json!({"type":"user","message":{"role":"user"}});
+    message["message"]["content"] = content;
+    let mut line = message.to_string();
     line.push('\n');
     line
 }
@@ -848,6 +864,29 @@ mod tests {
     fn a_user_text_echo_is_not_an_event() {
         let line = user_message_line("steer this");
         assert!(parse_cli_line(line.trim_end()).is_empty());
+    }
+
+    #[test]
+    fn initial_images_use_ordered_stream_input() {
+        let mut options = QueryOptions::new("inspect these");
+        options.images = vec![crate::ImageInput {
+            media_type: "image/png".into(),
+            data: "YWJj".into(),
+        }];
+        let args = argv_of(&options);
+        assert!(args.contains(&"--input-format=stream-json".into()));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("inspect these") || arg.contains("YWJj")));
+        let line = initial_message_line(&options.prompt, &options.images);
+        let message: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            message["message"]["content"],
+            json!([
+                {"type":"text","text":"inspect these"},
+                {"type":"image","source":{"type":"base64","media_type":"image/png","data":"YWJj"}}
+            ])
+        );
     }
 
     #[test]

@@ -224,7 +224,7 @@ impl CliProcess {
     ///
     /// - [`Ending::ConsumerGone`]: kill and reap; nothing to report.
     /// - [`Ending::Eof`]: give the CLI [`EXIT_GRACE`] to exit, killing it after
-    ///   that; report a non-zero exit (or a death by signal not caused here).
+    ///   that; report a non-zero exit, signal or forced termination.
     /// - [`Ending::Failed`]: kill it unless it already exited, then report.
     pub(crate) async fn finish(mut self, ending: Ending) -> Option<ProcessFailure> {
         let status = match ending {
@@ -247,12 +247,14 @@ impl CliProcess {
                     let message = format!("waiting for {} failed: {e}", self.program);
                     return Some(self.failure(message, None).await);
                 }
-                // It closed stdout, so its output is complete; it just would
-                // not exit.
                 Err(_elapsed) => {
                     self.kill_and_reap().await;
-                    self.stderr.abort();
-                    return None;
+                    let message = format!(
+                        "{} did not exit within {} seconds after closing stdout and was stopped",
+                        self.program,
+                        EXIT_GRACE.as_secs()
+                    );
+                    return Some(self.failure(message, None).await);
                 }
             },
         };
