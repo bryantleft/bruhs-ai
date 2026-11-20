@@ -20,10 +20,13 @@ import Base from "../layouts/Base.astro";
       <h2>Downloads and updates</h2>
       <p>Downloads and source code come from GitHub, under <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">its own privacy statement</a>. The app checks GitHub for a newer release, and npm or Homebrew for newer Claude Code and Codex CLIs, unless you turn off <strong>Check for updates</strong> in Settings → Updates. Those checks send no account or usage data.</p>
 
+      <h2>Optional diagnostics</h2>
+      <p>The host can export diagnostic data to an OpenTelemetry receiver you configure in Settings → Diagnostics or through the host environment. The receiver gets request methods, route patterns, response codes and timings. Export is off by default.</p>
+
       <h2>Questions</h2>
       <p>For general questions, open an issue on <a href="https://github.com/bryantleft/bruhs-ai/issues">GitHub</a>. Keep personal data out of public issues.</p>
 
-      <p class="subtle">Last updated November 12, 2026.</p>
+      <p class="subtle">Last updated November 19, 2026.</p>
     </div>
   </main>
 </Base>
