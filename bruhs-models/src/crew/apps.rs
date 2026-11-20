@@ -93,6 +93,16 @@ pub const MAIL_UNAVAILABLE: &str = "Mail isn't available on this server.";
 /// How long a `send_mail` may take, inside the helper route's 55 s (D17).
 pub const MAIL_SEND_BUDGET_MS: u64 = 45_000;
 
+/// A bruh helper whose agent id can't name its routes (model-facing).
+pub const BRUH_NO_TOOLS: &str = "This bruh has no tools.";
+
+/// Why a bruh run didn't start: its workbench helper couldn't be set up,
+/// for `reason`.
+#[must_use]
+pub fn bruh_tools_failed(reason: &str) -> String {
+    format!("Could not configure the bruh's tools: {reason}")
+}
+
 /// The line every bruh's system instructions carry about event payloads
 /// and acting in the owner's name; the run's opening lines then say what
 /// its tools and level allow.

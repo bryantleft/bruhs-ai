@@ -398,7 +398,7 @@ impl BruhScope {
     /// segment.
     fn route(&self, tail: &[&str]) -> io::Result<String> {
         if matches!(self.agent_id.as_str(), "" | "." | "..") {
-            return Err(io::Error::other("This bruh has no tools."));
+            return Err(io::Error::other(bruhs_models::crew::BRUH_NO_TOOLS));
         }
         let mut url = url::Url::parse(&self.endpoint).map_err(io::Error::other)?;
         url.path_segments_mut()

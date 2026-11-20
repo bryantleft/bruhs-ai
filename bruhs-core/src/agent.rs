@@ -881,7 +881,7 @@ impl AgentOrchestrator {
             let _secrets = producer_secrets;
             let _threads = producer_threads;
             if let Some(Err(error)) = bruh_helper {
-                turn.send_start_error(format!("Could not configure the bruh's tools: {error}"))
+                turn.send_start_error(bruhs_models::crew::bruh_tools_failed(&error.to_string()))
                     .await;
                 return;
             }

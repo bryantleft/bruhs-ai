@@ -14,7 +14,7 @@ use crate::mail::outlook::OutlookClient;
 use crate::mail::{SyncBatch, ThreadWrite};
 use crate::secrets::{SecretManager, SecretStore};
 use crate::workbench_tools::BruhTools;
-use bruhs_models::apps::AppMailbox;
+use bruhs_models::apps::{AppMailbox, MAX_ACCOUNT_CHARS};
 use bruhs_models::connections::ServiceProvider;
 use bruhs_models::crew::*;
 use bruhs_models::mail::{
@@ -494,27 +494,64 @@ async fn lookups_pick_one_account_and_refuse_the_rest() {
         })
     );
 
-    // Two accounts with one label: the label picks neither, and each
-    // target's account names its entry too, so it is unique.
+    // Case doesn't matter, as for mailboxes.
+    assert_eq!(
+        lookup(json!({"app": "github", "account": "WORK"})).await,
+        found(&work, "work")
+    );
+
+    // The same account connected twice, shared (granted) and as the
+    // bruh's own, with the default name each time: name and label pick
+    // neither, and each is still pickable by the name it is shown under.
     let twin = fixture
-        .token("GitHub octo two", bruh("a"), "github", "octo", &[])
+        .token("GitHub octo", bruh("a"), "github", "octo", &[])
         .await;
     let runtime = &fixture.runtime;
     let lookup = |input: Value| async move { runtime.app_lookup("a", &input).await };
+    for account in ["octo", "GitHub octo", "github OCTO"] {
+        assert_eq!(
+            lookup(json!({"app": "github", "account": account})).await,
+            AppLookup::Missing(APP_ACCOUNT_NEEDED),
+            "{account}"
+        );
+    }
     assert_eq!(
-        lookup(json!({"app": "github", "account": "octo"})).await,
-        AppLookup::Missing(APP_ACCOUNT_NEEDED)
+        lookup(json!({"app": "github", "account": "octo (own)"})).await,
+        found(&twin, "octo (own)")
     );
     assert_eq!(
-        lookup(json!({"app": "github", "account": "GitHub octo two"})).await,
-        found(&twin, "octo (GitHub octo two)")
-    );
-    assert_eq!(
-        lookup(json!({"app": "github", "account": "octo (GitHub octo)"})).await,
-        found(&octo, "octo (GitHub octo)")
+        lookup(json!({"app": "github", "account": "Octo (Shared)"})).await,
+        found(&octo, "octo (shared)")
     );
 
-    // Revoked, the Global account is gone at once.
+    // One entry's name is another's label: that value picks neither, and
+    // the name is never preferred (ruling A Task 11 I2).
+    let team = fixture.token("me", bruh("a"), "notion", "team", &[]).await;
+    let runtime = &fixture.runtime;
+    let notion_lookup = |account: &str| {
+        let input = json!({"app": "notion", "account": account});
+        async move { runtime.app_lookup("a", &input).await }
+    };
+    assert_eq!(
+        notion_lookup("me").await,
+        AppLookup::Missing(APP_ACCOUNT_NEEDED)
+    );
+    let notion_found = |entry_id: &str, account: &str| {
+        AppLookup::Found(AppTarget {
+            entry_id: entry_id.into(),
+            app: "notion".into(),
+            account: account.into(),
+        })
+    };
+    // The shared account whose label is taken shows its scope.
+    assert_eq!(
+        notion_lookup("me (shared)").await,
+        notion_found(&notion, "me (shared)")
+    );
+    assert_eq!(notion_lookup("team").await, notion_found(&team, "team"));
+
+    // Revoked, the shared account is gone at once, and the bruh's own
+    // takes the plain label back.
     fixture
         .runtime
         .command(ReactiveCommand::SetAppGrant {
@@ -529,9 +566,16 @@ async fn lookups_pick_one_account_and_refuse_the_rest() {
     assert_eq!(
         fixture
             .runtime
-            .app_lookup("a", &json!({"app": "github", "account": "GitHub octo"}))
+            .app_lookup("a", &json!({"app": "github", "account": "octo (shared)"}))
             .await,
         AppLookup::Missing(APP_ACCOUNT_UNKNOWN)
+    );
+    assert_eq!(
+        fixture
+            .runtime
+            .app_lookup("a", &json!({"app": "github", "account": "GitHub octo"}))
+            .await,
+        found(&twin, "octo")
     );
 
     // Mail: only a granted, connected mailbox, picked by `from`.
@@ -616,6 +660,62 @@ async fn lookups_pick_one_account_and_refuse_the_rest() {
         Ok(&"m1".to_owned())
     );
     assert_eq!(pick_mailbox(&[], None).err(), Some(MAIL_NOT_GRANTED));
+}
+
+/// Names shown to the bruh stay unique and fit an account, even for a
+/// long label held twice at one scope, where only a number tells them
+/// apart.
+#[tokio::test]
+async fn shown_account_names_are_unique_and_fit() {
+    let mut fixture = Fixture::new().await;
+    let long = "l".repeat(MAX_ACCOUNT_CHARS);
+    let shared = fixture
+        .token("Long shared", CredentialScope::Global, "github", &long, &[])
+        .await;
+    fixture.grant_token("a", &shared).await;
+    let first = fixture
+        .token("Long one", bruh("a"), "github", &long, &[])
+        .await;
+    let second = fixture
+        .token("Long two", bruh("a"), "github", &long, &[])
+        .await;
+    let listed = fixture
+        .runtime
+        .list_apps("a", Some("github"))
+        .await
+        .unwrap();
+    let shown: Vec<String> = listed["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|account| account["account"].as_str().unwrap().to_owned())
+        .collect();
+    let cut = |suffix: &str| {
+        format!(
+            "{}{suffix}",
+            "l".repeat(MAX_ACCOUNT_CHARS - suffix.chars().count())
+        )
+    };
+    // Catalog order is by name: Long one, Long shared, Long two.
+    assert_eq!(shown, [cut(" (1)"), cut(" (shared)"), cut(" (2)")]);
+    for (account, entry_id) in [
+        (&shown[0], &first),
+        (&shown[1], &shared),
+        (&shown[2], &second),
+    ] {
+        assert!(account.chars().count() <= MAX_ACCOUNT_CHARS);
+        assert_eq!(
+            fixture
+                .runtime
+                .app_lookup("a", &json!({"app": "github", "account": account}))
+                .await,
+            AppLookup::Found(AppTarget {
+                entry_id: entry_id.clone(),
+                app: "github".into(),
+                account: account.clone(),
+            })
+        );
+    }
 }
 
 #[tokio::test]

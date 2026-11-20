@@ -11,6 +11,7 @@
 use super::{store, ReactiveError, ReactiveRuntime};
 use bruhs_models::apps::{
     base_url, connector, AppConnector, AppMailbox, APPS_NOT_ON_SERVER, CONNECTORS,
+    MAX_ACCOUNT_CHARS,
 };
 use bruhs_models::crew::{
     usable_app_token, AppLookup, AppTarget, MailLookup, MailTarget, APPS_UNREADABLE,
@@ -18,7 +19,7 @@ use bruhs_models::crew::{
     PREAMBLE_MAX_NAMES,
 };
 use bruhs_models::mail::MailReplyTarget;
-use bruhs_models::vault::{VaultEntry, VaultKind};
+use bruhs_models::vault::{CredentialScope, VaultEntry, VaultKind};
 use serde_json::{json, Value};
 
 /// One app account a bruh may use, with where its calls go.
@@ -29,8 +30,12 @@ struct Usable {
     /// The label its token's test call named (with its Jira site or
     /// Shopify shop).
     label: String,
+    /// The bruh's own token, not a granted Global one.
+    own: bool,
     connector: &'static AppConnector,
     base_url: String,
+    /// How the bruh and its cards name it ([`assign_handles`]).
+    handle: String,
 }
 
 /// `entry` as an account bruh `agent_id` may use with `granted`: its own
@@ -40,6 +45,7 @@ fn usable(entry: VaultEntry, agent_id: &str, granted: &[String]) -> Option<Usabl
     if !usable_app_token(&entry, agent_id, granted) {
         return None;
     }
+    let own = matches!(entry.scope, CredentialScope::Bruh { .. });
     let VaultKind::AppToken(meta) = entry.kind else {
         return None;
     };
@@ -49,8 +55,10 @@ fn usable(entry: VaultEntry, agent_id: &str, granted: &[String]) -> Option<Usabl
         entry_id: entry.id,
         name: entry.name,
         label: meta.account,
+        own,
         connector,
         base_url,
+        handle: String::new(),
     })
 }
 
@@ -67,60 +75,85 @@ fn catalog_order(a: &Usable, b: &Usable) -> std::cmp::Ordering {
         .then_with(|| a.entry_id.cmp(&b.entry_id))
 }
 
-/// How `one` is named to the bruh and on its cards: its label, unique
-/// among the bruh's accounts for that app; when another shares it, the
-/// label and the entry's name.
-fn handle(all: &[Usable], one: &Usable) -> String {
-    let shared = all
-        .iter()
-        .filter(|other| other.connector.id == one.connector.id && other.label == one.label)
-        .count()
-        > 1;
-    if shared {
-        format!("{} ({})", one.label, one.name)
-    } else {
-        one.label.clone()
+/// `label`, cut so that `label` and `suffix` together are at most
+/// [`MAX_ACCOUNT_CHARS`] characters; the suffix is never cut.
+fn fitted(label: &str, suffix: &str) -> String {
+    let room = MAX_ACCOUNT_CHARS.saturating_sub(suffix.chars().count());
+    let cut: String = label.chars().take(room).collect();
+    format!("{cut}{suffix}")
+}
+
+/// Gives each account the name the bruh and its cards know it by: unique
+/// among the bruh's accounts for its app, in any case, and at most
+/// [`MAX_ACCOUNT_CHARS`] characters (ruling A Task 11 I1). Its plain label
+/// when no other account of that app has it; else the label and its
+/// scope, "(own)" or "(shared)", when no other has the label at that
+/// scope; else, as a last resort, the label and a number. A name is also never another account's entry name or label, so
+/// it always picks exactly one account. `all` is in catalog order, which
+/// fixes who gets which number.
+fn assign_handles(all: &mut [Usable]) {
+    let same = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    for i in 0..all.len() {
+        let (app, label, own) = (all[i].connector.id, all[i].label.clone(), all[i].own);
+        let peers: Vec<usize> = (0..all.len())
+            .filter(|&j| j != i && all[j].connector.id == app)
+            .collect();
+        // Free when no peer holds it as a name, a label or a name already
+        // given (later peers check against this one in turn).
+        let free = |candidate: &str| {
+            peers.iter().all(|&j| {
+                !same(&all[j].name, candidate)
+                    && !same(&all[j].label, candidate)
+                    && (j > i || !same(&all[j].handle, candidate))
+            })
+        };
+        // The scope tells it apart only when no peer has its label at the
+        // same scope.
+        let scope_unique = peers
+            .iter()
+            .all(|&j| all[j].own != own || !same(&all[j].label, &label));
+        let scope = if own { "own" } else { "shared" };
+        let preferred = [
+            Some(fitted(&label, "")),
+            scope_unique.then(|| fitted(&label, &format!(" ({scope})"))),
+        ];
+        let handle = preferred
+            .into_iter()
+            .flatten()
+            .find(|candidate| free(candidate))
+            .unwrap_or_else(|| {
+                (1_usize..)
+                    .map(|n| fitted(&label, &format!(" ({n})")))
+                    .find(|candidate| free(candidate))
+                    .unwrap_or_default()
+            });
+        all[i].handle = handle;
     }
 }
 
 /// The account an `app_request` input goes out as, from the bruh's usable
-/// accounts. Without `account`, the app's one account; with it, the
-/// account whose entry name is exactly that, else whose name on cards is,
-/// else whose label is. More than one match asks the bruh to name one.
+/// accounts. Without `account`, the app's one account. With it, every
+/// account whose entry name, label or handle is that, in any case: exactly
+/// one is the account, more than one asks the bruh to name one, and no
+/// account is preferred over another (ruling A Task 11 I2).
 fn pick_account(all: &[Usable], input: &Value) -> AppLookup {
     let Some(app) = input.get("app").and_then(Value::as_str) else {
         return AppLookup::Missing(APP_NOT_GRANTED);
     };
-    let candidates: Vec<&Usable> = all
-        .iter()
-        .filter(|usable| usable.connector.id == app)
-        .collect();
-    if candidates.is_empty() {
+    let candidates = all.iter().filter(|usable| usable.connector.id == app);
+    if candidates.clone().next().is_none() {
         return AppLookup::Missing(APP_NOT_GRANTED);
     }
     let picked: Vec<&Usable> = match input.get("account") {
-        None | Some(Value::Null) => candidates,
+        None | Some(Value::Null) => candidates.collect(),
         Some(Value::String(account)) => {
-            let matching = |test: &dyn Fn(&Usable) -> bool| -> Vec<&Usable> {
-                candidates
-                    .iter()
-                    .copied()
-                    .filter(|usable| test(usable))
-                    .collect()
-            };
-            let by_name = matching(&|usable| usable.name == *account);
-            let by_handle = || matching(&|usable| handle(all, usable) == *account);
-            let by_label = || matching(&|usable| usable.label == *account);
-            let found = if by_name.is_empty() {
-                let handled = by_handle();
-                if handled.is_empty() {
-                    by_label()
-                } else {
-                    handled
-                }
-            } else {
-                by_name
-            };
+            let found: Vec<&Usable> = candidates
+                .filter(|usable| {
+                    [&usable.name, &usable.label, &usable.handle]
+                        .iter()
+                        .any(|value| value.eq_ignore_ascii_case(account))
+                })
+                .collect();
             if found.is_empty() {
                 return AppLookup::Missing(APP_ACCOUNT_UNKNOWN);
             }
@@ -132,7 +165,7 @@ fn pick_account(all: &[Usable], input: &Value) -> AppLookup {
         [one] => AppLookup::Found(AppTarget {
             entry_id: one.entry_id.clone(),
             app: one.connector.id.to_owned(),
-            account: handle(all, one),
+            account: one.handle.clone(),
         }),
         _ => AppLookup::Missing(APP_ACCOUNT_NEEDED),
     }
@@ -165,8 +198,8 @@ pub(super) fn pick_mailbox<'a>(
 }
 
 /// One account as `list_apps` names it: no token, header or vault id.
-fn account_json(all: &[Usable], one: &Usable) -> Value {
-    json!({"name": one.name, "account": handle(all, one), "base_url": one.base_url})
+fn account_json(one: &Usable) -> Value {
+    json!({"name": one.name, "account": one.handle, "base_url": one.base_url})
 }
 
 impl ReactiveRuntime {
@@ -210,6 +243,7 @@ impl ReactiveRuntime {
             .filter_map(|entry| usable(entry, agent_id, &granted))
             .collect();
         accounts.sort_by(catalog_order);
+        assign_handles(&mut accounts);
         let mailboxes = if mail.is_empty() {
             Vec::new()
         } else {
@@ -304,7 +338,7 @@ impl ReactiveRuntime {
             let mine: Vec<Value> = accounts
                 .iter()
                 .filter(|usable| usable.connector.id == app)
-                .map(|usable| account_json(&accounts, usable))
+                .map(account_json)
                 .collect();
             let Some(connector) = connector(app).filter(|_| !mine.is_empty()) else {
                 return Err(ReactiveError::Invalid(APP_NOT_GRANTED.into()));
@@ -321,7 +355,7 @@ impl ReactiveRuntime {
             let mine: Vec<Value> = accounts
                 .iter()
                 .filter(|usable| usable.connector.id == connector.id)
-                .map(|usable| account_json(&accounts, usable))
+                .map(account_json)
                 .collect();
             if !mine.is_empty() {
                 apps.push(json!({"app": connector.id, "name": connector.name, "accounts": mine}));
