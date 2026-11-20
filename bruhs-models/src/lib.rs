@@ -19,6 +19,7 @@ pub mod agent_extensions;
 pub mod api;
 pub mod api_client;
 pub mod apps;
+pub mod backup;
 pub mod calendar;
 pub mod capture_auth;
 pub mod capture_recovery;

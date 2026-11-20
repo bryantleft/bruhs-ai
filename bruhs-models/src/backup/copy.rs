@@ -1,0 +1,229 @@
+//! Every string the Backup section and its routes show. Templates name their
+//! values in braces (`{size}`); [`super::fill`] puts the values in.
+
+pub const BACKUP_TITLE: &str = "Backup";
+pub const BACKUP_DESCRIPTION: &str = "One encrypted file with your threads, bruhs, vault, mail and meetings. Restore it here or on another computer.";
+pub const MAKE_GROUP: &str = "Make a backup";
+pub const RESTORE_GROUP: &str = "Restore";
+pub const KEPT_GROUP: &str = "Kept from earlier restores";
+
+// Fields and buttons.
+pub const PASSWORD: &str = "Password";
+pub const PASSWORD_AGAIN: &str = "Password again";
+pub const PASSWORD_HINT: &str = "At least 12 characters. Bruhs never keeps it, and nobody can open the backup without it, Bruhs included.";
+pub const MAKE_BACKUP: &str = "Make backup";
+pub const DOWNLOAD: &str = "Download";
+pub const CHOOSE_FILE: &str = "Choose backup file";
+pub const OPEN_BACKUP: &str = "Open backup";
+pub const REPLACE: &str = "Replace my data";
+pub const CANCEL: &str = "Cancel";
+pub const PUT_BACK: &str = "Put back";
+pub const DELETE: &str = "Delete";
+pub const KEEP: &str = "Keep";
+pub const OPEN_WEB_APP: &str = "Open the web app";
+pub const RESTORE_BROWSER: &str = "Restore browser data";
+
+// Options. `{n}` is a count of keychain items, `{size}` a byte size.
+pub const KEYCHAIN_OPTION: &str = "Saved logins, keys and app tokens ({n})";
+pub const AUDIO_OPTION: &str = "Meeting audio ({size})";
+pub const BROWSERS_OPTION: &str = "Bruh browser sign-ins ({size})";
+pub const KEYCHAIN_OPTION_HINT: &str = "Read from your keychain into the encrypted file only.";
+pub const WEB_INCLUDED: &str = "This browser's data goes in too.";
+pub const DESKTOP_NO_WEB: &str =
+    "Browser data isn't in a backup made here. Make one from the web app to include it.";
+pub const OUTSIDE_ROOTS: &str =
+    "Some data lives outside Bruhs' folders and isn't in a backup: {list}.";
+
+// Progress.
+pub const JOB_COLLECTING: &str = "Reading your data: {done} of {total}";
+pub const JOB_KEYCHAIN: &str = "Reading your keychain";
+pub const JOB_WRITING: &str = "Writing the backup: {done} of {total}";
+pub const JOB_CHECKING: &str = "Checking the backup: {done} of {total}";
+pub const JOB_PREPARING: &str = "Preparing your data for this computer";
+pub const LOCKING_WEB: &str = "Locking this browser's data";
+pub const CREATED_WEB: &str = "Backup ready: {name}, {size}.";
+pub const CREATED_DESKTOP: &str = "Saved {name}, {size}.";
+
+// What a backup holds, shown before a restore.
+pub const PREVIEW_MADE: &str = "Made {date} on the {app} app, Bruhs {version}.";
+pub const PREVIEW_COUNTS: &str =
+    "{bruhs} bruhs, {entries} vault entries, {items} keychain items, {files} files, {size}.";
+pub const PREVIEW_REWRITE: &str = "Paths under {from} become {to}.";
+pub const PREVIEW_OUTSIDE: &str =
+    "These folders are outside the old home and stay as they are: {list}.";
+pub const PREVIEW_WEB: &str = "Browser data: included.";
+pub const PREVIEW_NO_WEB: &str = "No browser data in this backup.";
+pub const PREVIEW_NO_KEYCHAIN: &str =
+    "No keychain items in this backup. Restored vault entries need their values again.";
+pub const PREVIEW_NO_AUDIO: &str = "Meeting audio isn't in this backup.";
+pub const PREVIEW_NO_BROWSERS: &str = "Bruh browser sign-ins aren't in this backup.";
+pub const PREVIEW_SKIPPED_LINKS: &str = "{n} links were left out.";
+
+// Restoring.
+pub const REPLACE_WARNING: &str = "Restoring replaces the data on this computer. Bruhs stops, swaps the data in and keeps today's data aside until you delete it.";
+pub const STOPPING: &str =
+    "Bruhs is stopping to finish the restore. This page reconnects when it's back.";
+pub const START_AGAIN: &str = "Start Bruhs again to finish the restore.";
+pub const RESTORED: &str = "Restored. Your bruhs are paused: resume them on their pages.";
+pub const BRUHS_PAUSED: &str = RESTORED;
+pub const WEB_PART_WAITING: &str =
+    "This backup has data for this browser. Restoring it replaces what this browser holds now.";
+pub const WEB_PART_DONE: &str = "This browser's data is restored. Reload other Bruhs tabs.";
+pub const NO_WEB_PART: &str = "This backup has no browser data, so this browser keeps its own.";
+
+// Kept sets and the last backup.
+pub const PRE_RESTORE_LINE: &str = "From before the restore on {date}: {size}.";
+pub const DELETE_PRE_RESTORE_CONFIRM: &str =
+    "Delete the data from before the restore on {date}? It can't be brought back.";
+pub const PUT_BACK_CONFIRM: &str =
+    "Put back the data from before the restore on {date}? Today's data is kept aside the same way.";
+pub const LAST_BACKUP_LINE: &str = "Last backup: {date} from the {app} app, {size}.";
+
+// Errors.
+pub const PASSWORD_SHORT: &str = "Use at least 12 characters.";
+pub const PASSWORD_LONG: &str = "Keep the password under 1 KB.";
+pub const PASSWORD_CONTROL: &str = "Passwords can't contain control characters.";
+pub const PASSWORDS_DIFFER: &str = "The passwords don't match.";
+pub const WRONG_PASSWORD: &str = "That password doesn't open this backup, or the file was changed.";
+pub const NOT_A_BACKUP: &str = "This isn't a Bruhs backup.";
+pub const NEWER_BACKUP: &str =
+    "This backup comes from a newer Bruhs. Update Bruhs, then try again.";
+pub const NEWER_WEB_DATA: &str =
+    "This browser data comes from a newer Bruhs. Update Bruhs, then try again.";
+pub const UNSAFE_ENTRY: &str = "This backup holds a file Bruhs won't write. Nothing was changed.";
+pub const DAMAGED: &str = "This backup is damaged. Nothing was changed.";
+pub const ROOTS_OVERLAP: &str =
+    "This backup's two data folders overlap on this computer. Nothing was changed.";
+pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and try again.";
+pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try again.";
+pub const KEYCHAIN_NEEDS_YOU: &str =
+    "Your keychain needs you. Allow access on this computer, or leave out saved logins and keys.";
+pub const BACKUP_BUSY: &str = "A backup or restore is already running.";
+pub const RESTORE_PENDING: &str = "A restore is waiting to finish. Start Bruhs again to finish it.";
+pub const CONFIRM_REPLACE: &str = "Confirm that your data will be replaced.";
+pub const RECORDING_FIRST: &str = "Stop the meeting recording first.";
+pub const QUIT_DESKTOP_FIRST: &str =
+    "Quit the Bruhs desktop app first, or restore from the desktop app.";
+pub const SERVICE_TOO_OLD: &str =
+    "The background service runs an older Bruhs. Update it in Settings, then restore.";
+pub const DESTINATION_EXISTS: &str = "A file with that name is already there.";
+pub const DESTINATION_INSIDE: &str = "Save the backup outside Bruhs' own folders.";
+pub const DESTINATION_MISSING: &str = "That folder doesn't exist.";
+pub const SOURCE_MISSING: &str = "That backup file isn't there anymore.";
+/// Ruling F28 caps a browser's plaintext at 256 MiB.
+pub const WEB_TOO_LARGE: &str =
+    "This browser's data is over 256 MB. Make the backup from the desktop app.";
+pub const WEB_UNSUPPORTED: &str = "This browser holds data Bruhs can't put in a backup: {store}.";
+pub const OWNER_ONLY_BACKUP: &str = "Open Bruhs from its own address to make or restore a backup.";
+pub const UNSUPPORTED_PLATFORM: &str = "Backup runs on macOS and Linux.";
+pub const INVALID_REQUEST: &str = "That request isn't one Bruhs understands.";
+pub const GONE: &str = "That backup isn't here anymore.";
+
+/// Every constant above, for the copy rule test.
+pub const ALL_COPY: &[&str] = &[
+    BACKUP_TITLE,
+    BACKUP_DESCRIPTION,
+    MAKE_GROUP,
+    RESTORE_GROUP,
+    KEPT_GROUP,
+    PASSWORD,
+    PASSWORD_AGAIN,
+    PASSWORD_HINT,
+    MAKE_BACKUP,
+    DOWNLOAD,
+    CHOOSE_FILE,
+    OPEN_BACKUP,
+    REPLACE,
+    CANCEL,
+    PUT_BACK,
+    DELETE,
+    KEEP,
+    OPEN_WEB_APP,
+    RESTORE_BROWSER,
+    KEYCHAIN_OPTION,
+    AUDIO_OPTION,
+    BROWSERS_OPTION,
+    KEYCHAIN_OPTION_HINT,
+    WEB_INCLUDED,
+    DESKTOP_NO_WEB,
+    OUTSIDE_ROOTS,
+    JOB_COLLECTING,
+    JOB_KEYCHAIN,
+    JOB_WRITING,
+    JOB_CHECKING,
+    JOB_PREPARING,
+    LOCKING_WEB,
+    CREATED_WEB,
+    CREATED_DESKTOP,
+    PREVIEW_MADE,
+    PREVIEW_COUNTS,
+    PREVIEW_REWRITE,
+    PREVIEW_OUTSIDE,
+    PREVIEW_WEB,
+    PREVIEW_NO_WEB,
+    PREVIEW_NO_KEYCHAIN,
+    PREVIEW_NO_AUDIO,
+    PREVIEW_NO_BROWSERS,
+    PREVIEW_SKIPPED_LINKS,
+    REPLACE_WARNING,
+    STOPPING,
+    START_AGAIN,
+    RESTORED,
+    BRUHS_PAUSED,
+    WEB_PART_WAITING,
+    WEB_PART_DONE,
+    NO_WEB_PART,
+    PRE_RESTORE_LINE,
+    DELETE_PRE_RESTORE_CONFIRM,
+    PUT_BACK_CONFIRM,
+    LAST_BACKUP_LINE,
+    PASSWORD_SHORT,
+    PASSWORD_LONG,
+    PASSWORD_CONTROL,
+    PASSWORDS_DIFFER,
+    WRONG_PASSWORD,
+    NOT_A_BACKUP,
+    NEWER_BACKUP,
+    NEWER_WEB_DATA,
+    UNSAFE_ENTRY,
+    DAMAGED,
+    ROOTS_OVERLAP,
+    NO_SPACE,
+    FILE_CHANGED,
+    KEYCHAIN_NEEDS_YOU,
+    BACKUP_BUSY,
+    RESTORE_PENDING,
+    CONFIRM_REPLACE,
+    RECORDING_FIRST,
+    QUIT_DESKTOP_FIRST,
+    SERVICE_TOO_OLD,
+    DESTINATION_EXISTS,
+    DESTINATION_INSIDE,
+    DESTINATION_MISSING,
+    SOURCE_MISSING,
+    WEB_TOO_LARGE,
+    WEB_UNSUPPORTED,
+    OWNER_ONLY_BACKUP,
+    UNSUPPORTED_PLATFORM,
+    INVALID_REQUEST,
+    GONE,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_follows_the_rules() {
+        for text in ALL_COPY {
+            assert!(
+                !text.contains(" - ")
+                    && !text.contains('—')
+                    && !text.contains('–')
+                    && !text.contains('·'),
+                "{text}"
+            );
+            assert!(!text.starts_with("- ") && !text.contains('•'), "{text}");
+        }
+    }
+}
