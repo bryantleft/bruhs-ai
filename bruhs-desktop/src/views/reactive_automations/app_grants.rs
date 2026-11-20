@@ -15,24 +15,10 @@ use bruhs_models::crew::{
     BRUH_APPS_HINT, BRUH_APPS_LABEL, BRUH_APPS_NONE,
 };
 use bruhs_models::vault::{VaultNotice, LOAD_RETRY, REFRESH, WAIT_FOR_CHANGE};
-use std::sync::Mutex;
 
-/// A switch's id is `'static`; each one is kept once for the life of the
-/// app, so the set grows only with accounts and mailboxes.
+/// A switch's id (`crate::views::kept_selector`).
 fn grant_selector(id: &str) -> &'static str {
-    static SELECTORS: std::sync::OnceLock<Mutex<HashSet<&'static str>>> =
-        std::sync::OnceLock::new();
-    let selector = format!("desktop-bruh-app-grant-{id}");
-    let mut selectors = SELECTORS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(selector) = selectors.get(selector.as_str()) {
-        return selector;
-    }
-    let selector: &'static str = Box::leak(selector.into_boxed_str());
-    selectors.insert(selector);
-    selector
+    crate::views::kept_selector(format!("desktop-bruh-app-grant-{id}"))
 }
 
 /// A row's key, so a flip's switch shows its new state until the listing

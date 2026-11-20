@@ -452,6 +452,37 @@ fn account_changes_tell_the_vault_section(cx: &mut TestAppContext) {
     );
 }
 
+/// A Disconnect the service refused keeps its question open over the
+/// row's error, so trying again is one press, as on the web, whose
+/// `asking` stays set on a failure (Task 16 minor).
+#[gpui::test]
+fn a_refused_disconnect_keeps_the_question(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx, Some(listing()));
+    click(cx, "desktop-apps-disconnect-v1-gh");
+    click(cx, "desktop-apps-confirm");
+    let refused = ServerError::Status {
+        request: "DELETE /api/vault/v1-gh".into(),
+        code: reqwest::StatusCode::CONFLICT,
+        body: r#"{"error":"Refused."}"#.into(),
+    };
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.disconnected("v1-gh".into(), Err(refused), window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert!(rendered(cx, "desktop-apps-error-v1-gh"));
+    assert!(rendered(cx, "desktop-apps-confirm"), "the question stays");
+    assert!(rendered(cx, "desktop-apps-account-v1-gh"));
+    let before = requests(&view, cx).len();
+    click(cx, "desktop-apps-confirm");
+    assert_eq!(
+        requests(&view, cx).len(),
+        before + 1,
+        "one press tries again"
+    );
+}
+
 #[gpui::test]
 fn a_refused_token_shows_why_on_its_row(cx: &mut TestAppContext) {
     let (view, cx) = page(cx, Some(listing()));

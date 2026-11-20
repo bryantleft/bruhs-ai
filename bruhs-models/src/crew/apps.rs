@@ -840,9 +840,6 @@ mod tests {
         }
     }
 
-    /// D22: its own accounts as lines, then the shared ones, then the
-    /// mailboxes, each switch on as the listing's grants say. Other bruhs'
-    /// and Project accounts never show; names show escaped.
     /// A grant the service took while its listing can't be read shows as
     /// the service keeps it: sorted, deduped, and only for a known bruh.
     #[test]
@@ -874,6 +871,9 @@ mod tests {
         assert_eq!(listing.bruhs[0].mail, ["m1"]);
     }
 
+    /// D22: its own accounts as lines, then the shared ones, then the
+    /// mailboxes, each switch on as the listing's grants say. Other bruhs'
+    /// and Project accounts never show; names show escaped.
     #[test]
     fn app_grant_rows_read_the_listing_for_one_bruh() {
         let listing = AppsListing {

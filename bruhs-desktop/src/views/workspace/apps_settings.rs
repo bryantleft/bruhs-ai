@@ -24,8 +24,8 @@ use bruhs_models::apps::{
     GRANTS_LABEL, MAIL_GROUP, MAIL_HINT, NO_BRUHS_FOR_APPS, NO_MAILBOXES, REPLACE_TOKEN, TEST,
 };
 use bruhs_models::crew::{
-    apps_ready, apps_reason, grant_switch_on, toggle_grant, AppGrant, ServiceNotice, APPS_NEED_ASK,
-    MAX_APP_GRANTS, MAX_MAIL_GRANTS,
+    apps_ready, apps_reason, grant_switch_on, set_listing_grant, AppGrant, ServiceNotice,
+    APPS_NEED_ASK,
 };
 use bruhs_models::secrets::{review_text, SavedCredentialState};
 use bruhs_models::vault::{
@@ -42,22 +42,9 @@ const GROUP_RADIUS_PX: f32 = 10.0;
 const GROUP_FILL_OPACITY: f32 = 0.4;
 const GROUP_RING_OPACITY: f32 = 0.5;
 
-/// A switch's id is `'static`; each one is kept once for the life of the
-/// app, so the set grows only with accounts and bruhs.
+/// A switch's id (`crate::views::kept_selector`).
 fn grant_selector(target: &str, agent_id: &str) -> &'static str {
-    static SELECTORS: std::sync::OnceLock<Mutex<HashSet<&'static str>>> =
-        std::sync::OnceLock::new();
-    let selector = format!("desktop-apps-grant-{target}-{agent_id}");
-    let mut selectors = SELECTORS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(kept) = selectors.get(selector.as_str()) {
-        return kept;
-    }
-    let kept: &'static str = Box::leak(selector.into_boxed_str());
-    selectors.insert(kept);
-    kept
+    crate::views::kept_selector(format!("desktop-apps-grant-{target}-{agent_id}"))
 }
 
 /// The id a grant names: an app account's entry id or a mailbox's id.
@@ -65,26 +52,6 @@ fn grant_target(grant: &AppGrant) -> &str {
     match grant {
         AppGrant::Token { entry_id } => entry_id,
         AppGrant::Mailbox { mailbox_id } => mailbox_id,
-    }
-}
-
-/// `grant` set on or off for one bruh in the listing, as the server keeps
-/// it (`toggle_grant`: sorted, deduped and bounded), as the web's page does
-/// when the listing can't be read after a grant.
-fn set_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bool) {
-    let Some(bruh) = listing
-        .bruhs
-        .iter_mut()
-        .find(|bruh| bruh.agent_id == agent_id)
-    else {
-        return;
-    };
-    let (list, max) = match grant {
-        AppGrant::Token { .. } => (&mut bruh.apps, MAX_APP_GRANTS),
-        AppGrant::Mailbox { .. } => (&mut bruh.mail, MAX_MAIL_GRANTS),
-    };
-    if let Ok(next) = toggle_grant(list, grant_target(grant), on, max) {
-        *list = next;
     }
 }
 
@@ -634,7 +601,7 @@ impl AppsSettings {
             // read, the grant shows as sent.
             Ok(()) => match next {
                 Some(next) => self.listing = next,
-                None => set_grant(&mut self.listing, agent_id, grant, on),
+                None => set_listing_grant(&mut self.listing, agent_id, grant, on),
             },
             Err(error) if error.vault_may_have_landed() => self.unanswered(window, cx),
             Err(error) => {

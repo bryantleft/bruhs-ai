@@ -12,24 +12,10 @@ use bruhs_models::crew::{
     VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
 use bruhs_models::vault::{open_from_own_address, VaultListing, LOADING, LOAD_RETRY, REFRESH};
-use std::sync::Mutex;
 
-/// A switch's id is `'static`; each one is kept once for the life of the
-/// app, so the set grows only with the vault.
+/// A switch's id (`crate::views::kept_selector`).
 fn grant_selector(id: &str) -> &'static str {
-    static SELECTORS: std::sync::OnceLock<Mutex<HashSet<&'static str>>> =
-        std::sync::OnceLock::new();
-    let selector = format!("desktop-bruh-vault-grant-{id}");
-    let mut selectors = SELECTORS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(selector) = selectors.get(selector.as_str()) {
-        return selector;
-    }
-    let selector: &'static str = Box::leak(selector.into_boxed_str());
-    selectors.insert(selector);
-    selector
+    crate::views::kept_selector(format!("desktop-bruh-vault-grant-{id}"))
 }
 
 #[derive(Clone, Default, PartialEq)]

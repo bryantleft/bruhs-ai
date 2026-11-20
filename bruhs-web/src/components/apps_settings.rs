@@ -19,8 +19,8 @@ use bruhs_models::apps::{
     GRANTS_LABEL, MAIL_GROUP, MAIL_HINT, NO_BRUHS_FOR_APPS, NO_MAILBOXES, REPLACE_TOKEN, TEST,
 };
 use bruhs_models::crew::{
-    apps_ready, apps_reason, grant_switch_on, toggle_grant, AppGrant, ServiceNotice, APPS_NEED_ASK,
-    MAX_APP_GRANTS, MAX_MAIL_GRANTS,
+    apps_ready, apps_reason, grant_switch_on, set_listing_grant, AppGrant, ServiceNotice,
+    APPS_NEED_ASK,
 };
 use bruhs_models::secrets::{review_text, SavedCredentialState};
 use bruhs_models::vault::{
@@ -166,25 +166,6 @@ impl Page {
         self.refresh.try_run(());
         self.notice.try_set(Some(Notice::MayHaveChanged));
         self.vault_changed();
-    }
-}
-
-/// `grant` set on or off for one bruh in the listing, as the server keeps
-/// it (`toggle_grant`: sorted, deduped and bounded).
-pub(crate) fn set_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bool) {
-    let Some(bruh) = listing
-        .bruhs
-        .iter_mut()
-        .find(|bruh| bruh.agent_id == agent_id)
-    else {
-        return;
-    };
-    let (list, id, max) = match grant {
-        AppGrant::Token { entry_id } => (&mut bruh.apps, entry_id, MAX_APP_GRANTS),
-        AppGrant::Mailbox { mailbox_id } => (&mut bruh.mail, mailbox_id, MAX_MAIL_GRANTS),
-    };
-    if let Ok(next) = toggle_grant(list, id, on, max) {
-        *list = next;
     }
 }
 
@@ -704,7 +685,7 @@ fn GrantSwitch(
                             if let (Some(agent_id), Some(grant)) =
                                 (agent_id.try_get_value(), grant.try_get_value())
                             {
-                                set_grant(listing, &agent_id, &grant, on);
+                                set_listing_grant(listing, &agent_id, &grant, on);
                             }
                         }
                     });
@@ -739,43 +720,4 @@ fn GrantSwitch(
         </li>
     }
     .into_any()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::apps::AppsBruh;
-    use bruhs_models::crew::AppGrant;
-
-    /// When the listing can't be read after a grant, the page shows what
-    /// was sent, kept as the server keeps it.
-    #[test]
-    fn a_sent_grant_is_kept_sorted_and_once() {
-        let mut listing = AppsListing {
-            bruhs: vec![AppsBruh {
-                agent_id: "a".into(),
-                name: "Ada".into(),
-                apps: vec!["v1-c".into()],
-                mail: Vec::new(),
-                unavailable: None,
-            }],
-            ..AppsListing::default()
-        };
-        let token = |id: &str| AppGrant::Token {
-            entry_id: id.into(),
-        };
-        set_grant(&mut listing, "a", &token("v1-a"), true);
-        set_grant(&mut listing, "a", &token("v1-a"), true);
-        assert_eq!(listing.bruhs[0].apps, ["v1-a", "v1-c"]);
-        set_grant(&mut listing, "a", &token("v1-c"), false);
-        assert_eq!(listing.bruhs[0].apps, ["v1-a"]);
-        let mailbox = AppGrant::Mailbox {
-            mailbox_id: "m1".into(),
-        };
-        set_grant(&mut listing, "a", &mailbox, true);
-        assert_eq!(listing.bruhs[0].mail, ["m1"]);
-        // An unknown bruh changes nothing.
-        set_grant(&mut listing, "gone", &mailbox, false);
-        assert_eq!(listing.bruhs[0].mail, ["m1"]);
-    }
 }

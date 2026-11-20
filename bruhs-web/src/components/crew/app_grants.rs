@@ -8,14 +8,14 @@
 use bruhs_models::agent::AgentProvider;
 use bruhs_models::apps::{open_apps_from_own_address, AppsListing, APPS_LOADING};
 use bruhs_models::crew::{
-    app_grant_rows, apps_ready, apps_reason, apps_unavailable, current_settings, AppGrant,
-    AppGrantRow, ServiceNotice, BRUH_APPS_HINT, BRUH_APPS_LABEL, BRUH_APPS_NONE,
+    app_grant_rows, apps_ready, apps_reason, apps_unavailable, current_settings, set_listing_grant,
+    AppGrant, AppGrantRow, ServiceNotice, BRUH_APPS_HINT, BRUH_APPS_LABEL, BRUH_APPS_NONE,
 };
 use bruhs_models::vault::{VaultNotice, LOAD_RETRY, REFRESH, WAIT_FOR_CHANGE};
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
-use crate::components::apps_settings::{focus_dropped, focus_selector_after_render, set_grant};
+use crate::components::apps_settings::{focus_dropped, focus_selector_after_render};
 use crate::ui::{Button, ButtonSize, Switch};
 
 const HINT: &str = "text-label-sm text-rambutan-500";
@@ -153,7 +153,7 @@ pub fn AppGrants(agent_id: String) -> impl IntoView {
                 Some(Err(_)) if sent.is_ok() => {
                     load.try_update(|load| {
                         if let Load::Ready(listing) = load {
-                            set_grant(listing, &agent, &grant, on);
+                            set_listing_grant(listing, &agent, &grant, on);
                         }
                     });
                 }
