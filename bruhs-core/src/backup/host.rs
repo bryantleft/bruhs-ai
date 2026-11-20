@@ -201,6 +201,7 @@ impl BackupHost {
         if let create::Output::File { path, overwrite } = &request.output {
             create::check_destination(self.roots(), path, *overwrite)?;
         }
+        create::backups_are_folders(self.roots())?;
         if self.running() {
             return Err(BackupError::Busy(BACKUP_BUSY));
         }

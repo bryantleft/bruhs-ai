@@ -750,24 +750,35 @@ async fn one_job_at_a_time_and_none_while_a_restore_waits() {
         Err(BackupError::Refused(RESTORE_PENDING))
     ));
     std::fs::remove_file(&pending).unwrap();
-    // A `pending.json` read through a linked `backups` folder isn't trusted;
-    // the job then refuses the linked folder itself.
+    // A `backups` folder that isn't a real folder, in either root, refuses
+    // the backup before any job starts; a `pending.json` behind a link
+    // isn't trusted either way.
+    let refused_up_front =
+        |result: Result<BackupJob, BackupError>| matches!(result, Err(BackupError::Io(_)));
     let backups = fixture.roots.backups(RootKey::Core);
     let moved = fixture.roots.core.join("moved-backups");
     std::fs::rename(&backups, &moved).unwrap();
     std::fs::write(moved.join("pending.json"), b"{}").unwrap();
     std::os::unix::fs::symlink(&moved, &backups).unwrap();
-    let linked = host
-        .start_create(request(Output::Outgoing, BackupOptions::default()))
-        .await
-        .unwrap();
-    assert!(matches!(
-        finished(&host, &linked.id).await,
-        JobState::Failed { message } if message == BackupError::Io(std::io::Error::other("x")).message()
+    assert!(refused_up_front(
+        host.start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await
     ));
     std::fs::remove_file(&backups).unwrap();
     std::fs::remove_file(moved.join("pending.json")).unwrap();
     std::fs::rename(&moved, &backups).unwrap();
+    let desktop_backups = fixture.roots.backups(RootKey::Desktop);
+    std::fs::write(&desktop_backups, b"not a folder").unwrap();
+    assert!(refused_up_front(
+        host.start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await
+    ));
+    std::fs::remove_file(&desktop_backups).unwrap();
+    assert_eq!(
+        host.job(&job.id).map(|job| job.id),
+        Some(job.id.clone()),
+        "no new job replaced the last one"
+    );
 
     // While the capture daemon records, no backup starts (ruling F24).
     let recording = BackupHost::new(fixture.roots.clone(), fixture.store.clone()).for_tests(true);

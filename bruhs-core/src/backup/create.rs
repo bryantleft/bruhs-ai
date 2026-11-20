@@ -196,6 +196,25 @@ fn tighten(folder: &Path) -> Result<(), BackupError> {
     Ok(())
 }
 
+/// Refuses when either root's `backups` exists but isn't a real folder (a
+/// link, a file). A missing one is fine: a job makes it.
+pub(super) fn backups_are_folders(roots: &Roots) -> Result<(), BackupError> {
+    let keys: &[RootKey] = if roots.same() {
+        &[RootKey::Core]
+    } else {
+        &[RootKey::Core, RootKey::Desktop]
+    };
+    for key in keys {
+        match std::fs::symlink_metadata(roots.backups(*key)) {
+            Ok(metadata) if !metadata.is_dir() => return Err(not_a_folder()),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
 /// A `backups` folder that is a link or a file.
 fn not_a_folder() -> BackupError {
     BackupError::Io(io::Error::other("a backups folder isn't a real folder"))
@@ -227,13 +246,8 @@ pub(crate) async fn create(
     let made_at = EpochMs::now();
 
     // Neither root's `backups` may be a link (B Task 5 I1 ruling).
+    backups_are_folders(&roots)?;
     private_dir(&roots.backups(RootKey::Core))?;
-    if !roots.same() {
-        match std::fs::symlink_metadata(roots.backups(RootKey::Desktop)) {
-            Ok(metadata) if !metadata.is_dir() => return Err(not_a_folder()),
-            _ => {}
-        }
-    }
     let tmp = host.tmp_dir();
     private_dir(&tmp)?;
     let (target, overwrite, download) = match &output {
@@ -894,8 +908,11 @@ fn root_changed() -> BackupError {
 /// Opens a listed file and answers it with the size to read and its
 /// metadata then, or `None` when it is gone or became a link since the
 /// walk. A size that differs from the walk's opens the file again once:
-/// a size that holds is read whole; one still moving is read up to the
-/// walk's size, unless it is now smaller (`FILE_CHANGED`).
+/// a size that holds is read whole and isn't counted. A size still moving
+/// is read at the smaller of the second open's size and the walk's, so a
+/// file that has become smaller is read at that smaller size, and the file
+/// counts as changed (ruling B Task 6 N2). Only a shrink during the read
+/// fails, with `FILE_CHANGED`.
 fn open_settled(file: &SourceFile, reopening: &dyn Fn()) -> Result<Option<Settled>, BackupError> {
     let open = || match open_source(file) {
         Ok(opened) => {
