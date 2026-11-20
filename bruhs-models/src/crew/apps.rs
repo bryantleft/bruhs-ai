@@ -16,7 +16,7 @@ use crate::agent::AgentProvider;
 use crate::apps::{
     account_order, app_account_choice_label, classify, connector, mailbox_choice_label,
     normalize_path, own_app_line, validate_call, AppAccount, AppAction, AppCall, AppsBruh,
-    AppsListing, APP_ACCOUNT_SHAPE, MAX_ACCOUNT_CHARS, UNKNOWN_APP,
+    AppsListing, UNKNOWN_APP,
 };
 use crate::mail::{MailComposeContent, MailComposeError, MailReplyTarget};
 use crate::secrets::review_text;
@@ -74,6 +74,14 @@ pub const MAIL_BODY_TEXT: &str =
 pub const MAIL_RECIPIENTS: &str =
     "Put at least one email address in to, and separate addresses with commas.";
 pub const MAIL_TOO_MANY: &str = "Send to at most 20 people in all.";
+/// A `send_mail` `from` is a mailbox's account label, an address of up to
+/// 254 characters (final review A1 M7).
+pub const MAIL_FROM_MAX_CHARS: usize = 254;
+pub const MAIL_FROM_SHAPE: &str =
+    "Name the account to send from in 1 to 254 characters, with no control characters.";
+/// A reply's thread and message ids are each at most this many bytes of
+/// printable ASCII with no space or comma (final review A1 M8).
+pub const MAIL_REPLY_ID_MAX_BYTES: usize = 256;
 /// A helper call with no allowance for its tool and input (D15).
 pub const CALL_NOT_APPROVED: &str = "This call wasn't approved.";
 /// A helper call that came from a page, not the bruh's own tools (F26).
@@ -564,21 +572,35 @@ pub struct MailSendInput {
 }
 
 impl MailSendInput {
-    /// Checks `from` as an app call's account, then the subject, the body
-    /// and the recipients, parsed by the
-    /// compose rules: at least one in To, at most [`MAIL_MAX_RECIPIENTS`]
-    /// in all once repeats are dropped.
+    /// Checks `from` (1 to [`MAIL_FROM_MAX_CHARS`], unchanged by
+    /// `review_text`), the reply's ids, then the subject, the body and the
+    /// recipients, parsed by the compose rules: at least one in To, at most
+    /// [`MAIL_MAX_RECIPIENTS`] in all once repeats are dropped.
     ///
     /// # Errors
     ///
     /// The model-facing reason the first broken rule gives.
     pub fn validate(&self) -> Result<(), &'static str> {
         if let Some(from) = &self.from {
-            // As an app call's account: `review_text` would change a name
-            // with control or format characters.
+            // As an app call's account, but as long as an address:
+            // `review_text` would change a name with control or format
+            // characters.
             let chars = from.chars().count();
-            if chars == 0 || chars > MAX_ACCOUNT_CHARS || review_text(from) != *from {
-                return Err(APP_ACCOUNT_SHAPE);
+            if chars == 0 || chars > MAIL_FROM_MAX_CHARS || review_text(from) != *from {
+                return Err(MAIL_FROM_SHAPE);
+            }
+        }
+        if let Some(reply) = &self.reply {
+            // The card shows both ids uncut, so each reads as one id.
+            let id_ok = |id: &str| {
+                !id.is_empty()
+                    && id.len() <= MAIL_REPLY_ID_MAX_BYTES
+                    && id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_graphic() && byte != b',')
+            };
+            if !id_ok(&reply.external_thread_id) || !id_ok(&reply.message_id) {
+                return Err(MAIL_CALL_SHAPE);
             }
         }
         let subject = match (&self.reply, &self.subject) {
@@ -1536,7 +1558,7 @@ mod tests {
         );
         assert_eq!(
             mail_gate(&me, claude, &from(""), &found),
-            Gate::Deny(APP_ACCOUNT_SHAPE)
+            Gate::Deny(MAIL_FROM_SHAPE)
         );
     }
 
@@ -1580,13 +1602,44 @@ mod tests {
                 json!({"to": "ann@x.test", "subject": "s", "body": "a\u{7}b"}),
                 MAIL_BODY_TEXT,
             ),
+            // Final review A1 M7: a mailbox label is an address, up to 254.
             (
-                json!({"from": "x".repeat(65), "to": "ann@x.test", "subject": "s", "body": "b"}),
-                APP_ACCOUNT_SHAPE,
+                json!({"from": format!("{}@x.test", "x".repeat(MAIL_FROM_MAX_CHARS - 6)), "to": "ann@x.test", "subject": "s", "body": "b"}),
+                MAIL_FROM_SHAPE,
+            ),
+            (
+                json!({"from": "", "to": "ann@x.test", "subject": "s", "body": "b"}),
+                MAIL_FROM_SHAPE,
             ),
             (
                 json!({"from": "me\u{202e}@x.test", "to": "ann@x.test", "subject": "s", "body": "b"}),
-                APP_ACCOUNT_SHAPE,
+                MAIL_FROM_SHAPE,
+            ),
+            // Final review A1 M8: reply ids are bounded and read as one id.
+            (
+                json!({"to": "ann@x.test", "body": "y",
+                    "reply": {"external_thread_id": "t".repeat(MAIL_REPLY_ID_MAX_BYTES + 1), "message_id": "m"}}),
+                MAIL_CALL_SHAPE,
+            ),
+            (
+                json!({"to": "ann@x.test", "body": "y",
+                    "reply": {"external_thread_id": "t", "message_id": "m, message n"}}),
+                MAIL_CALL_SHAPE,
+            ),
+            (
+                json!({"to": "ann@x.test", "body": "y",
+                    "reply": {"external_thread_id": "t,u", "message_id": "m"}}),
+                MAIL_CALL_SHAPE,
+            ),
+            (
+                json!({"to": "ann@x.test", "body": "y",
+                    "reply": {"external_thread_id": "t", "message_id": ""}}),
+                MAIL_CALL_SHAPE,
+            ),
+            (
+                json!({"to": "ann@x.test", "body": "y",
+                    "reply": {"external_thread_id": "t\u{202e}", "message_id": "m"}}),
+                MAIL_CALL_SHAPE,
             ),
             (
                 json!({"to": "", "cc": "bo@x.test", "subject": "s", "body": "b"}),
@@ -1605,6 +1658,17 @@ mod tests {
         for (value, reason) in cases {
             assert_eq!(input(value.clone()).validate(), Err(reason), "{value}");
         }
+        // A 254-character address names its mailbox; ids of 256 bytes, of
+        // the characters Gmail and Outlook use, name a reply.
+        let long_from = format!("{}@x.test", "x".repeat(MAIL_FROM_MAX_CHARS - 7));
+        assert_eq!(long_from.chars().count(), MAIL_FROM_MAX_CHARS);
+        let named =
+            input(json!({"from": long_from, "to": "ann@x.test", "subject": "s", "body": "b"}));
+        assert_eq!(named.validate(), Ok(()));
+        let long_reply = input(json!({"to": "ann@x.test", "body": "y", "reply": {
+            "external_thread_id": "AAQkAD+/=_-".repeat(24).get(..MAIL_REPLY_ID_MAX_BYTES).unwrap(),
+            "message_id": "<CAB1=x@mail.gmail.com>"}}));
+        assert_eq!(long_reply.validate(), Ok(()));
         // The body may fill 8 KB; the same address twice counts once.
         let full = input(json!({"to": "ann@x.test, ann@X.TEST", "subject": "s",
             "body": "x".repeat(MAIL_BODY_MAX_BYTES)}));
