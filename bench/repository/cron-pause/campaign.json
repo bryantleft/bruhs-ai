@@ -1,0 +1,92 @@
+{
+  "scope": "Concurrent pause/resume in a second pinned upstream repository and language, three matched repeats per entrant. Diagnostic evidence, not overall leadership.",
+  "entrants": [
+    "codex",
+    "bruhs-codex"
+  ],
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "timeout_seconds_per_provider_and_grading_step": 600,
+  "budget_basis": "Reuse the existing task bench default of 600 seconds per step. Three repeats follow its documented diagnostic recommendation; they do not establish statistical superiority.",
+  "repeats": 3,
+  "order": [
+    {
+      "entrant": "codex",
+      "repeat": 1,
+      "attempt_label": "cron-pause-r1"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 1,
+      "attempt_label": "cron-pause-r1"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 2,
+      "attempt_label": "cron-pause-r2"
+    },
+    {
+      "entrant": "codex",
+      "repeat": 2,
+      "attempt_label": "cron-pause-r2"
+    },
+    {
+      "entrant": "codex",
+      "repeat": 3,
+      "attempt_label": "cron-pause-r3"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 3,
+      "attempt_label": "cron-pause-r3"
+    }
+  ],
+  "intervention_policy": "No code corrections, hidden-check feedback, retries, or model switches within an attempt. Preserve all planned cells including errors, timeouts and unstarted cells. A harness defect stops or invalidates affected evidence before a new campaign, rather than changing the task during execution.",
+  "success": "Provider completes; all frozen upstream/public/contract top-level Go tests finish once without failures/skips, package passes, race detector is clean; relevant tests and documentation are supplied and operator diff review accepts the complete contract.",
+  "configuration": "Identical upstream checkout and task prompt; Codex native workspace-write sandbox, no command network, ignored user config/rules, private HOME/CODEX_HOME. Bruhs retains its normal system contract and tools backed by isolated synthetic stores. Native CLI shared daemon, automatic skill instructions/bundled skills, remote plugins, native app connectors and memories are explicitly disabled in both paths; Bruhs own application MCP tools remain available. Both paths are provided an owned offline Go wrapper. Generated code is independently regraded with the pinned Go binary and a new private cache. The Go wrapper is provided through PATH, but coding shells can choose their own cache path or tool environment. Those settings are not uniformly enforced; only independent grading pins the Go binary and starts with a fresh private cache. No timing/cost advantage follows.",
+  "limits": [
+    "One feature in one additional public repository; familiarity or training overlap is unknown.",
+    "All upstream test files run with the race detector; JSON identity accounting covers top-level tests and rejects observed child failures/skips. It is not adversarial attestation.",
+    "Provider sandbox permits some host reads; hidden checks/reference are withheld from workspace and prompt, not an adversarial secrecy guarantee.",
+    "No Capy, Claude Code, T3 Code or product-default campaign; installed baseline and Bruhs Codex path only.",
+    "No actual PR delivery, physical capture or connected daily workflow.",
+    "Billed and complete human/machine cost remain unknown."
+  ],
+  "inputs": {
+    "upstream_pin": "source.json",
+    "task_contract": "prompt.md",
+    "public_smoke": "visible_test.go",
+    "frozen_inventory": "inventory.json in prepared fixture",
+    "reference_control": "reference.diff, withheld from task input"
+  },
+  "aggregation": "All six planned cells remain in the denominator. Failure, timeout, harness error and unstarted are distinct. Manual review can overturn automatic success; zero corrective feedback does not measure total human preparation/review effort.",
+  "controlled_factors": [
+    "upstream source commit and starting records",
+    "task prompt and public smoke checks",
+    "model and reasoning effort",
+    "workspace-write sandbox and command-network policy",
+    "declared provider/grading budgets",
+    "fresh provider sessions and private application stores"
+  ],
+  "intentional_product_differences": [
+    "Bruhs normal system instructions, response contract and available app tools",
+    "direct installed Codex CLI versus Bruhs API/SDK transport"
+  ],
+  "provider_config": {
+    "features.plugins": false,
+    "features.remote_plugin": false,
+    "features.plugin_discovery_prefetch": false,
+    "features.apps": false,
+    "features.memories": false,
+    "skills.bundled.enabled": false,
+    "skills.include_instructions": false
+  },
+  "native_cli_no_daemon": true,
+  "runtime_verification": "Each settled rollout must use the declared model and effort, never approval, workspace-write sandbox with command network disabled, and no automatic skills catalog. A mismatch stops the campaign and retains all planned cells.",
+  "revision_note": "Version 2 follows the retained six-cell version-1 campaign. All 65 frozen checks passed, but post-campaign review found a stale timer in the reference and one Bruhs submission. One additional slow-resume check and an explicit clock clarification are frozen before any version-2 attempt. No version-1 outcome is rewritten.",
+  "model_configuration_basis": "Use GPT-6.1 Sol at high effort for both entrants as a declared quality-focused configuration. This is not a matched comparison against earlier low-effort Python results.",
+  "task_id": "cron-pause",
+  "language": "go",
+  "go_liveness_basis": "Hidden control waits allow three seconds, covering three standard one-second schedule ticks. Short custom-schedule intervals trigger transitions without claiming a product latency SLA.",
+  "fixture_version": 2
+}

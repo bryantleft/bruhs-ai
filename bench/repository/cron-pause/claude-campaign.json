@@ -1,0 +1,55 @@
+{
+  "scope": "Fresh matched Claude Code / Bruhs Claude coding cohort on pinned robfig/cron v2. This constrained CLI profile tests coding and transport, not full product defaults or leadership. Prior Codex outcomes remain separate.",
+  "entrants": [
+    "claude",
+    "bruhs-claude"
+  ],
+  "model": "claude-sonnet-5-5",
+  "effort": "high",
+  "repeats": 3,
+  "timeout_seconds_per_provider_and_grading_step": 600,
+  "task_id": "cron-pause",
+  "order": [
+    {
+      "entrant": "claude",
+      "repeat": 1,
+      "attempt_label": "claude-cron-r1"
+    },
+    {
+      "entrant": "bruhs-claude",
+      "repeat": 1,
+      "attempt_label": "claude-cron-r1"
+    },
+    {
+      "entrant": "bruhs-claude",
+      "repeat": 2,
+      "attempt_label": "claude-cron-r2"
+    },
+    {
+      "entrant": "claude",
+      "repeat": 2,
+      "attempt_label": "claude-cron-r2"
+    },
+    {
+      "entrant": "claude",
+      "repeat": 3,
+      "attempt_label": "claude-cron-r3"
+    },
+    {
+      "entrant": "bruhs-claude",
+      "repeat": 3,
+      "attempt_label": "claude-cron-r3"
+    }
+  ],
+  "success": "Native completion inside the declared budget; all frozen 66 top-level Go checks and observed nested cases pass with race detector; supplied tests and docs; unblinded operator diff acceptance. Code checks alone do not count as completed work.",
+  "intervention_policy": "No corrective feedback, retries, repairs, prompt changes or model switches within the six planned cells. Preserve every timeout/failure/unstarted cell. Configuration preflights occur before campaign freeze and are retained separately.",
+  "configuration": "Both paths use installed Claude Code 2.1.322, exact Sonnet 5.5 model, high effort, acceptEdits, safe-mode, restricted file tools, explicit Read/Write/Edit/Glob/Grep/Bash tools, no skills/Chrome/session persistence, and enabled Bash sandbox with command network domains empty. OAuth remains in existing host configuration/keychain; no credentials are archived. Common wrapper provides these settings to native and Bruhs SDK CLI. Bruhs retains its host system contract, but safe-mode/tool restriction suppresses app MCP/customizations, so this is not normal product-default coverage. Offline Go wrapper is provided; coding children/tool environments are not fully attested. Independent grading uses pinned Go and new private cache. Non-interactive permission policy: native Claude print mode returns denials; the Bruhs HTTP fixture immediately declines every permission request via /api/agent/approve with approved=false and no reason or coding guidance. Every denial is audited. No request is approved, and no interactive owner waiting time is left unanswered.",
+  "limits": [
+    "One known public repository task; familiarity and training overlap unknown.",
+    "Actual CLI configuration is recorded, not a proof against adversarial sandbox escape or a uniform coding-child cache policy.",
+    "No Capy, T3, OpenCode, aider, connected-workspace, native UI or forge comparison in this cohort.",
+    "Reported subscription session cost is not billed cost; invoices, total machine cost and complete human time remain unknown.",
+    "Three paired repeats are diagnostic; this cohort cannot establish statistical superiority or erase the earlier Bruhs Codex timeout."
+  ],
+  "predecessor": "campaign-03 retained all six cells, including three Bruhs timeouts waiting on unserviced permission prompts. That driver mismatch invalidates a comparative interpretation. This new declaration fixes only the fixture permission-response policy before any fresh coding cell; it does not change those original outcomes."
+}

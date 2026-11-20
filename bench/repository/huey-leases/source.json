@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/coleifer/huey",
+  "commit": "7ea73730b9b6d413effdd67880970eb3e674974c",
+  "archive_url": "https://codeload.github.com/coleifer/huey/tar.gz/7ea73730b9b6d413effdd67880970eb3e674974c",
+  "archive_sha256": "931e4ffff15e485f7e38ca6ce5b087e20f802e324b035696bdb7a2c661356a06",
+  "files": 138,
+  "python_files": 79,
+  "python_lines": 14254,
+  "license": "Copyright (c) 2017 Charles Leifer\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE.\n"
+}

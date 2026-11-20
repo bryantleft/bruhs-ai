@@ -24,6 +24,14 @@ logs (`<tool>-<task>-<run>.*`), check output, captured replies
 workdirs are kept under `~/.cache/bruhs-bench/<timestamp>/<tool>/<task>-<run>/`
 so you can look at what each agent did (`git diff` in the workdir — each one
 starts as a one-commit repo; a chat task's directory only holds `reply.txt`).
+Run IDs include a random suffix so campaigns started in the same second stay
+separate. Before launching any harness, the runner freezes selected fixtures,
+hidden checks and helper scripts under the run's `snapshot/` directory. Runs
+use those copies. `manifest.json` records their SHA-256 hashes, selected tools,
+tasks/repeats, model selections, timeout and source revision. Extra CLI arguments
+are hashed rather than stored because they can contain credentials. Installed
+tool versions and provider/user configuration are not frozen; record those
+separately for a model-controlled comparison.
 
 ## Tasks
 
@@ -33,8 +41,8 @@ Each `bench/tasks/<name>/` holds:
 |---|---|
 | `prompt.md` | the exact instruction given to the agent |
 | `repo/` | the starting files, copied fresh for every run (Python 3 stdlib only) |
-| `hidden/` | tests the agent never sees; copied in only after it finishes |
-| `check.sh <workdir>` | exits 0 when the task is solved |
+| `hidden/` | checks withheld from the task workspace and prompt until grading |
+| `check.sh <workdir>` | exits 0 when its independent checks accept |
 | `solution/` | a reference solution, overlaid on `repo/` by `--self-check` |
 
 `check.sh` runs the hidden tests together with pristine copies of the repo's
@@ -43,7 +51,7 @@ visible tests (so weakening a visible test doesn't help) from
 
 | task | kind | what it measures |
 |---|---|---|
-| `bugfix-paginate` | bug fix | off-by-one in `page_count`; trivial for any agent, so mostly fixed per-run overhead |
+| `bugfix-paginate` | bug fix | a small off-by-one fix in `page_count` |
 | `feature-inventory-csv` | feature over 2–3 files | `Item.total_value` + `csv_report` + a `--csv` CLI flag |
 | `refactor-shipping` | refactor, tests stay green | collapse three copy-pasted `if/elif` country chains into `RATES`/`rate_for`; checked for identical behaviour against the original and for each country code appearing once |
 | `explore-timeout` | find-and-change in a 33-file repo | the HTTP default timeout lives in `relay/conf/defaults.py` among other 30-second settings; any other file changing fails (docstring/docs edits allowed) |
@@ -55,23 +63,18 @@ visible tests (so weakening a visible test doesn't help) from
 | `spec-invoice-tax` | implement from a long spec | `compute_invoice` against an 11-section `SPEC.md`: half away from zero for lines vs half to even for group tax, tax per rate group (numerically equal rates merge), largest-remainder invoice discount over positive lines only, tax-inclusive prices, per-line tax split rounded toward negative infinity, 0/2/3-decimal currencies, `-0.00`, every value of the wrong type a `TypeError` |
 | `concurrency-keyed-jobs` | asyncio bug fix under cancellation | `KeyedSerializer` (one job at a time per key) built as a chain of futures: a dropped waiting job lets the next one start early, a cancelled caller cancels a shared future, and `drain` can be cancelled into the jobs; the obvious rewrite (a per-key `Lock` dropped when `not lock.locked()`) races on hand-over, which the hidden tests catch |
 
-The first five are easy (every harness passed all of them in the first
-runs); the other six exist to separate tools on intelligence and were meant
-to make a small model (Haiku) fail some of the time. Measured with plain
-`claude --model haiku` (Haiku 5.5), they mostly do not: `multibug-ledger`,
-`spec-business-days` and `invariant-rename` pass every run, as do
-`spec-invoice-tax` (12/12 over runs `20261108-115557`, `-121125`,
-`-123733`, across its versions) and `concurrency-keyed-jobs` (8/8,
-`-121125`, `-123733`). Only `rootcause-paging` lands in range: 3/8 with
-the current hidden tests (runs `-115557` and `-121125`, re-graded; Haiku
-misses the cursor-shape rule, accepting `[]` or any list of ints), and 4/4
-in `-123733`, a run whose `encode_cursor` docstring spelled out that rule
-(since reverted). Haiku implements whatever a spec states, races and DST
-included; it slips where it has to derive the valid domain itself.
+Historical [results](RESULTS.md) found many of these fixtures saturated. Those
+runs used earlier task and grader revisions and have not been revalidated under
+the current receipt protocol. They motivate harder fixtures; they do not
+establish a current model or harness ranking.
 
 Adding a task: create the five pieces above, make `check.sh` source
 `bench/lib/check-lib.sh` and call `run_hidden_tests` (and `only_changed` if
-the task forbids collateral edits), then run `--self-check`.
+the task forbids collateral edits), then run `--self-check` and the benchmark
+integrity suite. Declare literal top-level unittest classes and `test_` methods.
+Dynamic or inherited layouts need an explicit inventory contract; mismatched or
+empty coverage fails. A coding checker must emit completion receipts through
+the shared helper before campaign results can count it as a pass.
 
 ### Chat tasks
 
@@ -113,8 +116,11 @@ wrong answer.
 
 ## Harnesses
 
-Every run starts in a fresh copy of `repo/`, headless, with no approval
-prompts. `BENCH_TIMEOUT` (default 600 s) kills the whole process tree.
+Coding runs start in fresh copies of `repo/`; chat runs have no project repo.
+Harnesses run headlessly with no approval prompts. `BENCH_TIMEOUT` (default
+600 s) bounds each provider or grading step and stops its owned process group.
+Stopping a CLI client does not by itself prove that a server-owned turn stopped;
+the T3 limitation is described below.
 
 | tool | how it runs | tokens / context source |
 |---|---|---|
@@ -124,7 +130,7 @@ prompts. `BENCH_TIMEOUT` (default 600 s) kills the whole process tree.
 | `bruhs-codex` | same route with a Codex model (`$BENCH_BRUHS_CODEX_MODEL`, else `$BENCH_CODEX_MODEL`, else `model` from `~/.codex/config.toml`) | last `usage` event; peak from the codex rollout |
 | `aider` | `aider --yes-always --no-auto-commits --no-check-update --no-pretty --message-file prompt.md [--model $BENCH_AIDER_MODEL]` — only when on PATH | `Tokens: N sent, M received` lines (aider rounds them) |
 | `opencode` | `opencode run --format json [--model $BENCH_OPENCODE_MODEL]` — only when on PATH | `step_finish` token parts |
-| `bruhs-review` | `bruhs`, then review mode (below) with Codex reviewing | turn 1 + turn 2 from the streams; the review's own tokens when its session log can be found (see below) |
+| `bruhs-review` | `bruhs`, then review mode (below) with Codex reviewing | complete usage from every executed turn plus the endpoint's reviewer usage; otherwise unknown |
 | `bruhs-codex-review` | `bruhs-codex`, then review mode with Claude reviewing | same |
 | `t3` | `t3 thread start --provider claudeAgent --model $BENCH_MODEL --wait --json <workdir> <prompt>` on an isolated T3 server (below) | every top-level Claude transcript in `~/.claude/projects/<workdir>/` (assistant messages deduped by id; matched `result.usage` exactly on two plain-`claude` runs) |
 | `t3-codex` | same with `--provider codex` and the bruhs-codex model | every Codex rollout whose `session_meta.cwd` is the workdir |
@@ -152,7 +158,7 @@ Each bench turn uses a new thread id `bench-<timestamp>-<tool>-<task>-<run>`.
 
 ### Review mode (`bruhs-review`, `bruhs-codex-review`)
 
-Coding tasks only. What a user gets from bruhs's `/second-opinion`, scripted:
+Coding and chat tasks. What a user gets from bruhs's `/second-opinion`, scripted:
 
 1. the bruhs turn exactly as `bruhs` / `bruhs-codex` runs it;
 2. `POST $BRUHS_URL/api/agent/second-opinion` with `{"project_path": <workdir>,
@@ -172,17 +178,15 @@ Coding tasks only. What a user gets from bruhs's `/second-opinion`, scripted:
    tests never reach turn 2); the note says `turn 1 alone: PASS|FAIL`, which
    is what tells you whether the review changed the outcome.
 
-`tokens` is turn 1 + turn 2 + the review when it can be counted. The
-endpoint returns no usage, so the bench looks for the reviewer's own session
-log in the workdir: a Claude reviewer's transcript under
-`~/.claude/projects/<workdir>/` (counted like a transcript: output
-undercounted), a Codex reviewer's rollout whose `session_meta.cwd` is the
-workdir. The Codex reviewer runs `--ephemeral` and writes no rollout, so for
-`bruhs-review` the note says "tokens = turns only". The review's wall time
-is always in the note and in `wall_s`. Peak and request count come from the
-resumed session's log once, since it covers both turns. If turn 1 fails or
-the review errors, turn 2 is skipped, the note says why
-(`<run>.review.skip`), and the run is graded as turn 1 left it.
+`tokens` is turn 1 + turn 2 + the review when all executed steps report
+usage. The endpoint returns reviewer usage; a missing report makes the total
+unknown. An attempted follow-up with an empty log is also unknown. Partial
+turn counts stay in the note as lower bounds. The review's wall time is in
+the note and in `wall_s`. Peak and request count come from the resumed
+session's log once, since it covers both turns. If turn 1 fails or the review
+errors, turn 2 is skipped and the note says why (`<run>.review.skip`). Hidden
+checks still grade the files/reply left behind, but a failed or unfinished
+review workflow cannot pass the complete run.
 `BENCH_TIMEOUT` applies to each of the three steps.
 
 ### T3 Code
@@ -208,9 +212,13 @@ request, equally for both.
 
 ## Reading the numbers
 
-- **pass** — the task's `check.sh` exit status after the agent stopped. The
-  only correctness signal; an agent saying "done" counts for nothing.
-- **tokens** — everything billed for the run: uncached input + cache reads +
+- **pass** — the task's `check.sh` passes, the harness exits zero, and its
+  terminal provider event reports completion. Failed, interrupted and unfinished
+  turns cannot pass just because they left correct files. `check_pass` retains
+  the independent hidden-check result; `completion` records the terminal state.
+  Aider/OpenCode currently use process completion only, explicitly labeled
+  `process-only`. An agent saying "done" is never the correctness check.
+- **tokens** — reported token volume for the run: uncached input + cache reads +
   cache writes + output, over every model request. For Codex,
   `input_tokens` already includes `cached_input_tokens`, so spent is
   `input + output` (cached is not added again). Cache reads are cheap in
@@ -219,9 +227,11 @@ request, equally for both.
   numbers come from `result.usage` for both `claude` and `bruhs` (the bruhs
   stream only forwards that); Claude Code's `result.modelUsage` also counts
   small side requests and reads slightly higher (under 1 % in the runs so
-  far). When a bruhs stream ends without its final usage event, Codex
-  tokens fall back to the session rollout's running total and the note says
-  so.
+  far). Missing terminal usage is unknown, rather than zero. Observed partial
+  counts remain in the note as lower bounds. Review totals require reported
+  usage for the reviewer and every turn; transcript estimates cannot substitute
+  for missing reviewer usage. Descendant/subagent usage is not independently
+  reconciled, so this is not a complete monetary cost ledger.
 - **peak_ctx** — the largest single prompt (input incl. cached) any request
   in the run sent. Tells you how close a harness gets to the context window
   and how much it drags along per step.
@@ -232,24 +242,83 @@ request, equally for both.
   command/file-change/MCP/web-search items).
 - **wall_s** — wall-clock seconds for the harness process, including CLI
   start-up.
+- **Coverage** — each tool is compared against every selected task and repeat,
+  including unavailable tools and unsupported kinds. Without a manifest,
+  historical reports use the union of recorded task/repeat cells. Missing cells
+  stay visible as incomplete coverage. Duplicated or unplanned attempts fail
+  reporting instead of inflating a denominator.
 - **Per tool** — one row per tool and task kind (code, chat): runs passed
-  out of runs made (tasks × `BENCH_RUNS`), mean / min / max tokens per run,
+  out of planned runs (tasks × `BENCH_RUNS`), mean / min / max tokens per run,
   and `tokens / passed run`, total tokens over all its runs divided by the
   runs it passed: the headline "tokens per finished task". Failed runs still
-  count toward the numerator. With `BENCH_RUNS` > 1 a "Per tool and task"
+  count toward the numerator. Missing coverage or usage suppresses the mean and
+  tokens-per-pass ratio; any known subtotal is labeled a lower bound. Missing
+  wall time is also unknown. Min/max describe only observed values.
+  With `BENCH_RUNS` > 1 a "Per tool and task"
   table adds pass count and mean / min / max per cell; every run keeps its
   own row in "Runs".
+
+Coding checks now require a complete receipt from the shared unittest runner.
+Both grading paths load the frozen test bytes before installation and require
+every declared test to start, finish and succeed. Empty suites, skips, expected
+failures and clean early exits fail. A coding checker that exits zero without
+retaining valid receipts also fails the campaign.
+
+Campaigns keep `<attempt>.check.tests.receipt.json` and
+`<attempt>.check.tests.result.json` beside the check log. The driver verifies
+the raw receipt and stored result against the frozen inventory before counting
+`check_pass`. These artifacts survive removal of the disposable grading copy.
+Existing output paths are rejected. The five chat tasks retain their separate
+fixed-answer checks; they execute no submitted Python.
+
+`BENCH_TIMEOUT` now applies to each provider and grading step. The driver passes
+it through `BRUHS_BENCH_CHECK_TIMEOUT`; `--check` does too. Calling `check.sh`
+directly without that variable preserves standalone behavior: no inner deadline
+and stdout results. This keeps direct checks usable under a caller's own outer
+deadline. Set the variable to give the checker its own deadline.
+`BRUHS_BENCH_CHECK_OUTPUT` optionally chooses a receipt prefix for a direct check.
+
+The task bench runs submitted code locally with a minimal environment; parent
+environment credentials are not forwarded. This path adds no filesystem or
+network sandbox. The live pilot retains its separate Seatbelt adapter. Both
+paths share a Python interpreter between tests and submitted code, so receipts
+are execution accounting rather than adversarial attestation. Current coding
+fixtures use literal top-level unittest methods; dynamic or inherited test
+layouts need an explicit inventory contract.
+
+The [task-bench completion checkpoint](../docs/evidence/task-bench-grader-completion-2026-11-16.json)
+records frozen reproductions, fixture controls and synthetic campaign checks.
+It adds no model attempts or competitive results.
+
+`--rescore` preserves hidden-check results, rechecks completion and reparses
+usage from saved logs. It keeps the original rows in `results.original.tsv`
+and records parser hashes in `rescore.json`. It does not rerun the agent or
+regrade its files. A legacy row without an exit status remains unverified.
+
+Run the benchmark integrity regressions without an agent or model charge:
+
+```sh
+python3 -m unittest discover -s bench/tests -v
+scripts/task-bench.sh --self-check
+```
+
+These checks run in `scripts/gate.sh`, including its quick mode. They validate
+the measurement machinery; they establish no competitive product ranking.
+The broader [competitive evaluation goal](../docs/competitive-evaluation-goal-2026-11-15.md)
+requires complete workflows beyond this small coding/chat suite.
 
 Caveats:
 
 - One run per cell is noisy. Agents are nondeterministic; use
   `BENCH_RUNS=3` (or more) before reading much into a 10–20 % difference.
-- Every Claude-based run (plain `claude` and `bruhs`) starts with your
+- Project coding runs with plain `claude` and `bruhs` start with your
   user-level Claude Code setup: `~/.claude/CLAUDE.md`, plugins, skills,
   hooks and MCP servers. On a heavily customised machine that is tens of
   thousands of tokens of fixed cost per run and dominates the small tasks.
   That is the real cost on this machine, and it is the same for `claude`
-  and `bruhs`. To measure the harnesses bare, pass extra flags with
+  and `bruhs` in that historical configuration. Bruhs lean chat disables those
+  settings; the plain CLI configuration is described in Chat tasks above.
+  To measure project harnesses bare, pass extra flags with
   `BENCH_CLAUDE_ARGS` (e.g. `--strict-mcp-config --setting-sources project`)
   and `BENCH_CODEX_ARGS`; bruhs-server has no such switch.
 - `BENCH_MODEL=haiku` (the default) keeps runs cheap. Codex uses whatever
@@ -272,7 +341,7 @@ Caveats:
 | `BENCH_AIDER_MODEL`, `BENCH_OPENCODE_MODEL` | tool default | |
 | `BENCH_T3_BIN`, `BENCH_T3_PORT` | `t3` on PATH, else `~/.t3/bin/t3`; `3998` | T3's CLI and its isolated server |
 | `BENCH_CLAUDE_ARGS`, `BENCH_CODEX_ARGS` | none | extra flags, word-split |
-| `BENCH_TIMEOUT` | `600` | seconds per run (per step in review mode) |
+| `BENCH_TIMEOUT` | `600` | seconds per provider or grading step |
 | `BENCH_WORK_ROOT` | `~/.cache/bruhs-bench` | must be under `$HOME` for bruhs |
 | `BRUHS_URL` | `http://127.0.0.1:3001` | bruhs-server |
 
@@ -280,4 +349,20 @@ Files: `scripts/task-bench.sh` (driver, bash 3.2-compatible),
 `bench/lib/run.py` (timeout + timing), `bench/lib/metrics.py` (log parsers
 and reply capture), `bench/lib/review.py` (bruhs request bodies, review-mode
 glue), `bench/lib/answer.py` (chat grading), `bench/lib/report.py`
-(markdown), `bench/lib/check-lib.sh` (shared check helpers).
+(markdown), `bench/lib/check-lib.sh` (shared check entry), `bench/lib/check.py` (local checker),
+`bench/lib/test_receipts.py` (frozen tests and receipt validation),
+`bench/lib/test_runner.py` (unittest execution),
+`bench/lib/completion.py` (terminal states), `bench/lib/provenance.py`
+(frozen inputs), `bench/lib/rescore.py` (preserved-row reparsing), and
+`bench/tests/` (synthetic integrity regressions).
+
+## Live model-controlled pilot
+
+The [macOS live coding pilot](live/README.md) runs installed Codex and the
+actual Bruhs Codex path against the same two contract-repair tasks, with private
+application stores, matched model settings and sandboxed independent grading.
+It is diagnostic evidence; one attempt per cell does not establish leadership.
+
+The [live delivery check](delivery/README.md) tests authenticated GitHub reads,
+repository-bound review previews and restart retention with a CLI guard that
+refuses forge writes. It does not establish complete PR delivery.

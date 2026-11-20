@@ -1,0 +1,231 @@
+--- a/huey/storage.py
++++ b/huey/storage.py
+@@ -3,6 +3,8 @@
+ import hashlib
+ import heapq
+ import itertools
++import math
++import uuid
+ import os
+ import re
+ import shutil
+@@ -870,8 +872,11 @@
+                      'queue text not null, key text not null, '
+                      'value integer not null default 0, '
+                      'primary key(queue, key))')
++    table_lease = ('create table if not exists task_lease ('
++                   'id integer primary key, queue text not null, '
++                   'token text not null unique, expires real not null)')
+     ddl = [table_kv, table_sched, index_sched, table_task, index_task,
+-           table_counter, drop_index_task]
++           table_counter, drop_index_task, table_lease]
+ 
+     def __init__(self, name='huey', filename='huey.db', cache_mb=8,
+                  fsync=None, journal_mode='wal', timeout=5, strict_fifo=False,
+@@ -933,21 +938,96 @@
+         self.sql('insert into task (queue, data, priority) values (?, ?, ?)',
+                  (self.name, self.to_blob(data), priority or 0), commit=True)
+ 
++    @staticmethod
++    def _lease_number(value, name, positive=False):
++        if type(value) not in (int, float):
++            raise ValueError('%s must be a finite number' % name)
++        try:
++            value = float(value)
++        except OverflowError:
++            raise ValueError('%s must be a finite number' % name)
++        if not math.isfinite(value) or (positive and value <= 0):
++            raise ValueError('%s must be %sa finite number' %
++                             (name, 'positive and ' if positive else ''))
++        return value
++
++    def _lease_clock(self, now):
++        return self._lease_number(time.time() if now is None else now, 'now')
++
++    def _lease_deadline(self, now, lease_for):
++        duration = self._lease_number(lease_for, 'lease_for', positive=True)
++        return self._lease_number(now + duration, 'deadline')
++
++    def _lease_head(self, curs, now):
++        curs.execute('select t.id, t.data from task t left join task_lease l '
++                     'on l.id = t.id where t.queue = ? '
++                     'and (l.id is null or l.expires <= ?) '
++                     'order by t.priority desc, t.id limit 1', (self.name, now))
++        return curs.fetchone()
++
++    def reserve(self, lease_for, now=None):
++        now = self._lease_clock(now)
++        deadline = self._lease_deadline(now, lease_for)
++        with self.db(commit=True) as curs:
++            result = self._lease_head(curs, now)
++            if result is None:
++                return None
++            tid, data = result
++            token = str(uuid.uuid4())
++            curs.execute('insert or replace into task_lease '
++                         '(id, queue, token, expires) values (?, ?, ?, ?)',
++                         (tid, self.name, token, deadline))
++            return token, data
++
++    def _live_lease(self, curs, token, now):
++        if not isinstance(token, str) or not token:
++            return None
++        curs.execute('select l.id from task_lease l join task t on t.id = l.id '
++                     'and t.queue = l.queue where l.queue = ? and l.token = ? '
++                     'and l.expires > ?', (self.name, token, now))
++        result = curs.fetchone()
++        return result[0] if result is not None else None
++
++    def ack(self, token, now=None):
++        now = self._lease_clock(now)
++        with self.db(commit=True) as curs:
++            tid = self._live_lease(curs, token, now)
++            if tid is None:
++                return False
++            curs.execute('delete from task where id = ? and queue = ?',
++                         (tid, self.name))
++            changed = curs.rowcount == 1
++            curs.execute('delete from task_lease where id = ?', (tid,))
++            return changed
++
++    def renew(self, token, lease_for, now=None):
++        now = self._lease_clock(now)
++        deadline = self._lease_deadline(now, lease_for)
++        with self.db(commit=True) as curs:
++            tid = self._live_lease(curs, token, now)
++            if tid is None:
++                return False
++            curs.execute('update task_lease set expires = ? where id = ?',
++                         (deadline, tid))
++            return True
++
++    def release(self, token, now=None):
++        now = self._lease_clock(now)
++        with self.db(commit=True) as curs:
++            tid = self._live_lease(curs, token, now)
++            if tid is None:
++                return False
++            curs.execute('delete from task_lease where id = ?', (tid,))
++            return True
++
+     def dequeue(self):
+-        # Quick check without the full exclusive lock.
+-        if not self.sql('select 1 from task where queue = ? limit 1',
+-                        (self.name,), results=True):
+-            return
+-
+         with self.db(commit=True) as curs:
+-            curs.execute('select id, data from task where queue = ? '
+-                         'order by priority desc, id limit 1', (self.name,))
+-            result = curs.fetchone()
++            result = self._lease_head(curs, time.time())
+             if result is not None:
+                 tid, data = result
+                 curs.execute('delete from task where id = ?', (tid,))
+-                if curs.rowcount == 1:
+-                    return data
++                curs.execute('delete from task_lease where id = ?', (tid,))
++                return data
+ 
+     def queue_size(self):
+         return self.sql('select count(id) from task where queue=?',
+@@ -963,7 +1043,9 @@
+         return [i for i, in self.sql(sql, params, results=True)]
+ 
+     def flush_queue(self):
+-        self.sql('delete from task where queue=?', (self.name,), commit=True)
++        with self.db(commit=True) as curs:
++            curs.execute('delete from task_lease where queue = ?', (self.name,))
++            curs.execute('delete from task where queue = ?', (self.name,))
+ 
+     def add_to_schedule(self, data, ts):
+         params = (self.name, self.to_blob(data), ts.timestamp())
+--- a/huey/api.py
++++ b/huey/api.py
+@@ -1464,6 +1464,35 @@
+ class SqliteHuey(Huey):
+     storage_class = SqliteStorage
+ 
++    def _require_leased_queue(self):
++        if self.immediate:
++            raise ValueError('Leased delivery is unavailable in immediate mode.')
++
++    def reserve_task(self, lease_for, now=None):
++        self._require_leased_queue()
++        result = self.storage.reserve(lease_for, now=now)
++        if result is None:
++            return None
++        token, data = result
++        try:
++            task = self.deserialize_task(data)
++        except Exception:
++            self.storage.release(token, now=now)
++            raise
++        return token, task
++
++    def ack_task(self, token, now=None):
++        self._require_leased_queue()
++        return self.storage.ack(token, now=now)
++
++    def renew_task(self, token, lease_for, now=None):
++        self._require_leased_queue()
++        return self.storage.renew(token, lease_for, now=now)
++
++    def release_task(self, token, now=None):
++        self._require_leased_queue()
++        return self.storage.release(token, now=now)
++
+ class CySqliteHuey(Huey):
+     storage_class = CySqliteStorage
+ 
+--- /dev/null
++++ b/tests/test_lease_recovery.py
+@@ -0,0 +1,22 @@
++import tempfile
++import unittest
++from pathlib import Path
++from huey.storage import SqliteStorage
++
++class LeaseRecoveryTest(unittest.TestCase):
++    def test_reopening_keeps_a_live_lease_then_fences_expired_ack(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = str(Path(tmp) / 'queue.db')
++            first = SqliteStorage('q', filename=path)
++            first.enqueue(b'work')
++            old, _ = first.reserve(5, now=10)
++            first.close()
++            second = SqliteStorage('q', filename=path)
++            try:
++                self.assertIsNone(second.reserve(5, now=14))
++                new, data = second.reserve(5, now=15)
++                self.assertEqual(data, b'work')
++                self.assertFalse(second.ack(old, now=16))
++                self.assertTrue(second.ack(new, now=16))
++            finally:
++                second.close()
+--- /dev/null
++++ b/docs/leased_delivery.rst
+@@ -0,0 +1,23 @@
++Leased SQLite delivery
++======================
++
++SqliteHuey can reserve queued work until a consumer confirms completion.
++Call reserve_task(lease_for) to receive a token and a deserialized task. Execute
++the task with the existing API, then call ack_task(token) to remove its queue
++record. Execution does not acknowledge automatically. A live reservation can be
++renewed with renew_task or made immediately available with release_task.
++
++Lease deadlines use wall-clock epoch seconds, with optional explicit now values
++for deterministic coordination. Exactly at expiry, a task becomes eligible for a
++fresh reservation. Every reservation has a new token; expired or superseded
++tokens cannot acknowledge, renew or release current work. Pending counts and
++listings include leased work. Legacy dequeue skips live reservations.
++
++Reservations survive reopening the SQLite file. Existing databases gain the
++additional lease table without changing their tasks, results or schedules.
++create_tables=False still requires explicit initialize_schema. Immediate mode
++rejects the new APIs. Queue flushing removes this queue's reservations too.
++
++This is at-least-once delivery. A consumer can continue external work after its
++lease expires. Token fencing prevents stale queue acknowledgment, but external
++side effects still need their own idempotency policy.

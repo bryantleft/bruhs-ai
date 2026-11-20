@@ -1,0 +1,10 @@
+{
+  "language": "go",
+  "repository": "https://github.com/robfig/cron",
+  "commit": "bc59245fe10efaed9d51b56900192527ed733435",
+  "pin_basis": "Upstream HEAD resolved on 2026-11-16 before any task model access. Public-repository familiarity is unknown.",
+  "archive_url": "https://codeload.github.com/robfig/cron/tar.gz/bc59245fe10efaed9d51b56900192527ed733435",
+  "archive_sha256": "b238010b8517a264da12d04224e77b1cf744460adc980e2a1140ada022ed2d2c",
+  "license": "MIT",
+  "license_sha256": "8f650581478707182f3306d9a86676d4e03e2d4edc868344378cf4d6fe6c927a"
+}

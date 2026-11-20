@@ -1,0 +1,87 @@
+{
+  "scope": "One pinned upstream repository feature, three matched repeats per entrant. Diagnostic evidence; no universal or statistically established product ranking.",
+  "entrants": [
+    "codex",
+    "bruhs-codex"
+  ],
+  "model": "gpt-6.1-sol",
+  "effort": "low",
+  "timeout_seconds_per_provider_and_grading_step": 600,
+  "budget_basis": "Reuse the existing task bench default of 600 seconds per step. Three repeats follow its documented diagnostic recommendation; they do not establish statistical superiority.",
+  "repeats": 3,
+  "order": [
+    {
+      "entrant": "codex",
+      "repeat": 1,
+      "attempt_label": "huey-leases-r1"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 1,
+      "attempt_label": "huey-leases-r1"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 2,
+      "attempt_label": "huey-leases-r2"
+    },
+    {
+      "entrant": "codex",
+      "repeat": 2,
+      "attempt_label": "huey-leases-r2"
+    },
+    {
+      "entrant": "codex",
+      "repeat": 3,
+      "attempt_label": "huey-leases-r3"
+    },
+    {
+      "entrant": "bruhs-codex",
+      "repeat": 3,
+      "attempt_label": "huey-leases-r3"
+    }
+  ],
+  "intervention_policy": "No code corrections, hidden-check feedback, retries, or model switches within an attempt. Preserve all planned cells including errors, timeouts and unstarted cells. A harness defect stops or invalidates affected evidence before a new campaign, rather than changing the task during execution.",
+  "success": "The provider completes successfully; every frozen test passes with complete identity receipts and no skips; relevant tests and documentation are added; review confirms the diff satisfies the provided contract without collateral regressions.",
+  "configuration": "Identical upstream checkout and task prompt; Codex native workspace-write sandbox, no command network, ignored user config/rules, private HOME/CODEX_HOME. Bruhs retains its normal system contract and tools backed by isolated synthetic stores. Native CLI shared daemon, automatic skill instructions/bundled skills, remote plugins, native app connectors and memories are explicitly disabled in both paths; Bruhs own application MCP tools remain available.",
+  "limits": [
+    "One feature and one public upstream repository; model familiarity or training overlap is unknown.",
+    "Only selected standard-library regressions run; unavailable optional-backend matrices and one absolute-host-path FileLock case are excluded before model access.",
+    "Provider sandbox permits some host reads. Hidden checks/reference are withheld from workspace and prompt but this is not an adversarial secrecy evaluation.",
+    "Token volume is not money; billed cost and complete human/machine cost remain unknown.",
+    "No Capy, Claude Code, T3 Code, product-default campaign or complete personal-workflow delivery is included."
+  ],
+  "inputs": {
+    "upstream_pin": "source.json",
+    "task_contract": "prompt.md",
+    "regression_selection": "regressions.json",
+    "generated_frozen_inventory": "inventory.json in the prepared fixture",
+    "reference_control": "reference.diff, withheld from task input"
+  },
+  "aggregation": "All six planned cells remain in the denominator. Failure, timeout, harness error and unstarted are distinct outcomes; none may be dropped or counted as success. Manual diff-review failures override automatic test success.",
+  "controlled_factors": [
+    "upstream source commit and starting records",
+    "task prompt and public smoke checks",
+    "model and reasoning effort",
+    "workspace-write sandbox and command-network policy",
+    "declared provider/grading budgets",
+    "fresh provider sessions and private application stores"
+  ],
+  "intentional_product_differences": [
+    "Bruhs normal system instructions, response contract and available app tools",
+    "direct installed Codex CLI versus Bruhs API/SDK transport"
+  ],
+  "provider_config": {
+    "features.plugins": false,
+    "features.remote_plugin": false,
+    "features.plugin_discovery_prefetch": false,
+    "features.apps": false,
+    "features.memories": false,
+    "skills.bundled.enabled": false,
+    "skills.include_instructions": false
+  },
+  "native_cli_no_daemon": true,
+  "runtime_verification": "Each settled provider rollout must contain no automatic skills catalog. Retain initial-message fingerprints; stop and retain all planned cells if actual runtime context fails this policy.",
+  "revision_note": "Version 2 follows retained campaign-01, stopped after discovering uncontrolled four-versus-58 skill catalogs. The original task prompt is unchanged. Three finite-integer review probes are now part of the predeclared frozen feature checks.",
+  "model_configuration_basis": "Reuse GPT-6.1 Sol at low effort from the earlier live pilot so repository coverage changes without also changing model/effort. This controlled configuration is separate from a product-default campaign."
+}
