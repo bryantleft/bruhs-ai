@@ -11,8 +11,14 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::{BackupOptions, PathRewrite, UNSAFE_ENTRY};
 
-/// A backup holds at most this many tar entries.
+/// A backup holds at most this many tar entries: files and folders, plus
+/// `keychain.json`, `web/part.bin` and `manifest.json`. A GNU long-name
+/// header belongs to the entry after it and doesn't count (B Task 7 I1).
 pub const MAX_ENTRIES: u64 = 1_000_000;
+/// `manifest.json` is at most this many bytes. A restore holds it in
+/// memory; a backup whose manifest would be larger isn't made (B Task 7
+/// I1).
+pub const MANIFEST_MAX_BYTES: u64 = 64 << 20;
 /// An entry path is at most this many bytes.
 const MAX_PATH_BYTES: usize = 4096;
 /// Each component of an entry path is at most this many bytes.

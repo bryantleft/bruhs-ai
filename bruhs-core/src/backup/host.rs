@@ -16,8 +16,9 @@ use std::time::{Duration, SystemTime};
 use bruhs_backup::{Header, KdfParams, Kind, HEADER_LEN};
 use bruhs_models::backup::{
     no_space, valid_id, validate_password, BackupJob, BackupOptions, BackupOverview, BackupSizes,
-    JobState, JobStep, LastBackup, StagedRestore, BACKUP_BUSY, INVALID_REQUEST, NOT_A_BACKUP,
-    RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    JobState, JobStep, LastBackup, StagedRestore, BACKUP_BUSY, INVALID_REQUEST, MANIFEST_MAX_BYTES,
+    MAX_ENTRIES, NOT_A_BACKUP, RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM,
+    WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
@@ -73,6 +74,9 @@ pub(super) struct Config {
     pub(super) browser_wait: Duration,
     /// The release written into each manifest.
     pub(super) app_version: String,
+    /// The most entries and manifest bytes a backup may hold, checked
+    /// alike by making and opening one.
+    pub(super) limits: Limits,
     /// Called on the writer's thread at each [`Hook`] of a data file, so a
     /// test can hold a job or change a file mid-write.
     #[cfg(test)]
@@ -85,6 +89,24 @@ pub(super) struct Config {
 
 #[cfg(test)]
 pub(super) type FreeSpace = Arc<dyn Fn(&Path) -> u64 + Send + Sync>;
+
+/// What one backup may hold (B Task 7 I1). Making a backup refuses one
+/// that wouldn't open, so the two sides never disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Limits {
+    /// Tar entries: files, folders and the three parts beside the data.
+    /// GNU long-name headers don't count.
+    pub(super) entries: u64,
+    /// `manifest.json`'s bytes.
+    pub(super) manifest_bytes: u64,
+}
+
+impl Limits {
+    pub(super) const BACKUP: Self = Self {
+        entries: MAX_ENTRIES,
+        manifest_bytes: MANIFEST_MAX_BYTES,
+    };
+}
 
 impl Config {
     /// The free bytes on the volume of `folder` (a test's answer when it
@@ -148,6 +170,7 @@ impl BackupHost {
                 keychain_wait: VAULT_READ_WAIT,
                 browser_wait: BROWSER_WAIT,
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                limits: Limits::BACKUP,
                 #[cfg(test)]
                 before_file: None,
                 #[cfg(test)]
@@ -192,6 +215,13 @@ impl BackupHost {
     #[cfg(test)]
     pub(super) fn with_before_file(mut self, hook: TestHook) -> Self {
         Arc::make_mut(&mut self.config).before_file = Some(hook);
+        self
+    }
+
+    /// Smaller limits, so a test can reach them.
+    #[cfg(test)]
+    pub(super) fn with_limits(mut self, limits: Limits) -> Self {
+        Arc::make_mut(&mut self.config).limits = limits;
         self
     }
 

@@ -10,6 +10,7 @@
 //! the descriptor open until that lock goes (`setPendingFd`), so no lock is
 //! dropped.
 
+use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -19,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bruhs_models::backup::{
-    excluded, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS, DATA_NAME_REFUSED,
-    EXCLUDED_TOP, MAX_ENTRY_DEPTH,
+    excluded, folded_entry_key, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS,
+    DATA_NAME_REFUSED, EXCLUDED_TOP, MAX_ENTRY_DEPTH,
 };
 use rusqlite::{Connection, OpenFlags};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
@@ -98,7 +99,10 @@ pub struct Inventory {
 /// more than that many folder handles) is
 /// left out and counted in `skipped_names` in the owner's own files: the
 /// content folders and a bruh's `work` and `browser` folders. Anywhere else
-/// it refuses the backup with [`DATA_NAME_REFUSED`].
+/// it refuses the backup with [`DATA_NAME_REFUSED`]. The same goes for the
+/// second of two names that differ only in case or Unicode normalization
+/// (`Makefile` and `makefile`), which a restore refuses because one would
+/// land on the other (B Task 7 I2); the walk takes names in byte order.
 pub fn inventory(roots: &Roots, options: &BackupOptions) -> Result<Inventory, BackupError> {
     inventory_with(roots, options, &mut |_| {})
 }
@@ -114,6 +118,7 @@ pub(super) fn inventory_with(
         options,
         inventory: Inventory::default(),
         before_open,
+        names: Names::default(),
     };
     let core = opened_root(&roots.core)?;
     let desktop = opened_root(&roots.desktop)?;
@@ -227,6 +232,39 @@ struct Walk<'a> {
     options: &'a BackupOptions,
     inventory: Inventory,
     before_open: &'a mut dyn FnMut(&str),
+    names: Names,
+}
+
+/// What the walk does with a name that would go in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Verdict {
+    Take,
+    /// Left out and counted in `skipped_names`: owner content.
+    Skip,
+    /// The backup is refused with `DATA_NAME_REFUSED`: Bruhs' own folders.
+    Refuse,
+}
+
+/// The folded key (`folded_entry_key`) of every path that goes in, root
+/// by root.
+#[derive(Default)]
+pub(super) struct Names(HashSet<(RootKey, String)>);
+
+impl Names {
+    /// Takes `rel` (its last component `name`) when a restore would: a
+    /// name `safe_entry_path` accepts that is the first in its root with
+    /// its folded key, so a volume that ignores case or normalization
+    /// keeps both (B Task 7 I2). Otherwise owner content skips it and
+    /// Bruhs' own folders refuse the backup.
+    pub(super) fn judge(&mut self, key: RootKey, rel: &str, name: &CStr) -> Verdict {
+        if restorable(key, rel, name) && self.0.insert((key, folded_entry_key(rel))) {
+            Verdict::Take
+        } else if owner_content(rel) {
+            Verdict::Skip
+        } else {
+            Verdict::Refuse
+        }
+    }
 }
 
 impl Walk<'_> {
@@ -281,12 +319,15 @@ impl Walk<'_> {
             // Sockets, FIFOs and devices never go in.
             _ => return Ok(()),
         }
-        if goes_in && !restorable(key, &rel, name) {
-            if owner_content(&rel) {
-                self.inventory.skipped_names = self.inventory.skipped_names.saturating_add(1);
-                return Ok(());
+        if goes_in {
+            match self.names.judge(key, &rel, name) {
+                Verdict::Take => {}
+                Verdict::Skip => {
+                    self.inventory.skipped_names = self.inventory.skipped_names.saturating_add(1);
+                    return Ok(());
+                }
+                Verdict::Refuse => return Err(BackupError::Refused(DATA_NAME_REFUSED)),
             }
-            return Err(BackupError::Refused(DATA_NAME_REFUSED));
         }
         if kind == FileType::Directory {
             (self.before_open)(&rel);

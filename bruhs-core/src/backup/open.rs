@@ -17,6 +17,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{DirBuilder, File, OpenOptions, Permissions};
 use std::io::{self, Read, Write};
+use std::os::fd::OwnedFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
@@ -27,9 +28,9 @@ use bruhs_models::backup::{
     excluded, folded_entry_key, no_space, normalize_password, safe_entry_path, valid_id,
     validate_password, BackupJob, BackupManifest, EntryPath, Excluded, JobState, JobStep,
     PendingRestore, RestorePreview, RestoreSource, BACKUP_BUSY, BACKUP_STOPPED, DAMAGED,
-    DESKTOP_ENTRIES, GONE, KEYCHAIN_NEEDS_YOU, MAX_ENTRIES, NAMES_CLASH, NEWER_BACKUP,
-    NOT_A_BACKUP, RESTORE_PENDING, ROOTS_OVERLAP, SOURCE_MISSING, UNSAFE_ENTRY,
-    UNSUPPORTED_PLATFORM, WRONG_PASSWORD,
+    DESKTOP_ENTRIES, GONE, KEYCHAIN_NEEDS_YOU, NAMES_CLASH, NEWER_BACKUP, NOT_A_BACKUP,
+    RESTORE_PENDING, ROOTS_OVERLAP, SOURCE_MISSING, UNSAFE_ENTRY, UNSUPPORTED_PLATFORM,
+    WRONG_PASSWORD,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
@@ -37,10 +38,10 @@ use zeroize::Zeroizing;
 
 use super::create::{backups_are_folders, private_dir, CancelFlag};
 use super::host::{
-    new_private_file, random_bytes, read_small, web_part_header, BackupHost, PENDING,
+    new_private_file, random_bytes, read_small, web_part_header, BackupHost, Limits, PENDING,
 };
 use super::{BackupError, RootKey, Roots, FREE_MARGIN};
-use crate::secrets::{forget_seal_key, seal_items, store_seal_key, KeychainItem};
+use crate::secrets::{check_items, forget_seal_key, seal_items, store_seal_key, KeychainItem};
 
 /// The folder inside each root's `backups` that holds staged restores.
 const STAGING: &str = "staging";
@@ -53,8 +54,6 @@ const SEALED_FILE: &str = "keychain.sealed";
 const WEB_PART_FILE: &str = "web-part.bin";
 /// `keychain.json` is held in memory, so it has a cap (D8).
 const KEYCHAIN_MAX: u64 = 4 << 20;
-/// `manifest.json` is held in memory, so it has a cap (D8).
-const MANIFEST_MAX: u64 = 64 << 20;
 /// A GNU long name holds one entry path and its NUL.
 const LONG_NAME_MAX: u64 = 4096 + 1;
 /// A tar block.
@@ -121,6 +120,9 @@ impl BackupHost {
     /// waits (`RESTORE_PENDING`). The job ends `Opened` with the preview,
     /// or `Failed` with nothing staged. With `remove_after`, the file (an
     /// upload) is removed when the job ends either way.
+    ///
+    /// Call it inside a Tokio runtime: the job is spawned on the current
+    /// one, and outside a runtime this panics.
     pub fn start_open(
         &self,
         source: PathBuf,
@@ -174,7 +176,8 @@ impl BackupHost {
 
     /// Removes a staged restore: both roots' folders and its seal key.
     /// Refused while its job runs or a restore waits on it; an id that
-    /// isn't staged is `GONE`.
+    /// isn't staged is `GONE`. Blocks on the keychain to remove the key:
+    /// call it from a blocking task, not an async worker.
     pub fn discard_staged(&self, id: &str) -> Result<(), BackupError> {
         if !valid_id(id) {
             return Err(BackupError::Refused(GONE));
@@ -211,8 +214,12 @@ impl BackupHost {
                 .as_ref()
                 .and_then(|staging| finished_staging(&staging.join(&id), &id))
                 .is_some_and(|(changed, _)| {
-                    now.duration_since(changed)
-                        .map_or(true, |age| age <= STAGED_TTL)
+                    // A preview from the future is fresh only within the
+                    // same 24 hours (a clock set back a little).
+                    match now.duration_since(changed) {
+                        Ok(age) => age <= STAGED_TTL,
+                        Err(ahead) => ahead.duration() <= STAGED_TTL,
+                    }
                 });
             if !fresh {
                 self.forget_staged(&id);
@@ -375,11 +382,12 @@ async fn open(
         armed: true,
     };
     let staged = {
-        let (roots, id, cancel, progress) = (
+        let (roots, id, cancel, progress, limits) = (
             roots.clone(),
             id.to_owned(),
             cancel.clone(),
             progress.clone(),
+            config.limits,
         );
         tokio::task::spawn_blocking(move || {
             let report = |done_bytes, total_bytes| {
@@ -389,7 +397,7 @@ async fn open(
                     step: JobStep::Checking,
                 });
             };
-            extract(&roots, &id, &source, &password, &cancel, &report)
+            extract_with(limits, &roots, &id, &source, &password, &cancel, &report)
         })
         .await
         .map_err(|_| worker_stopped())??
@@ -459,10 +467,13 @@ fn seal(config: &super::host::Config, staged: &Staged) -> Result<RestorePreview,
     let preview = preview_of(&staged.id, &staged.manifest);
     let text = serde_json::to_vec(&preview).map_err(io::Error::other)?;
     write_new(&meta.join(PREVIEW_FILE), &text)?;
+    // One full sync last (F_FULLFSYNC on macOS): it flushes the drive's
+    // cache, so every staged file and folder fsynced before it is durable
+    // too, and the preview only counts once all of it is.
     for synced in [&meta, &folder] {
-        // Best effort: makes the new names durable where folders can sync.
-        let _ = File::open(synced).and_then(|folder| folder.sync_all());
+        sync_folder(synced)?;
     }
+    File::open(meta.join(PREVIEW_FILE))?.sync_all()?;
     Ok(preview)
 }
 
@@ -503,7 +514,29 @@ fn preview_of(id: &str, manifest: &BackupManifest) -> RestorePreview {
 /// `id` (D8, D9, D11, ruling F16) and answers it with its keychain items.
 /// `progress` hears the bytes read of the file's size. On any failure the
 /// staging folders are gone and nothing else changed.
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 9"))]
 pub(crate) fn extract(
+    roots: &Roots,
+    id: &str,
+    source: &Path,
+    password: &str,
+    cancel: &CancelFlag,
+    progress: &dyn Fn(u64, u64),
+) -> Result<Staged, BackupError> {
+    extract_with(
+        Limits::BACKUP,
+        roots,
+        id,
+        source,
+        password,
+        cancel,
+        progress,
+    )
+}
+
+/// [`extract`] within `limits`.
+fn extract_with(
+    limits: Limits,
     roots: &Roots,
     id: &str,
     source: &Path,
@@ -515,9 +548,39 @@ pub(crate) fn extract(
         return Err(stopped());
     }
     let folders = Folders::create(roots, id)?;
-    let staged = Extraction::new(roots, &folders, id, cancel).run(source, password, progress)?;
+    let staged =
+        Extraction::new(roots, &folders, id, cancel, limits).run(source, password, progress)?;
     folders.keep();
     Ok(staged)
+}
+
+/// Opens a folder through its own handle, never through a link.
+fn open_folder(folder: &Path) -> io::Result<OwnedFd> {
+    Ok(rustix::fs::open(
+        folder,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?)
+}
+
+/// Makes a new folder, 0700 ([`FOLDER`], `RWXU`) whatever the umask,
+/// failing if the name exists.
+fn new_folder(folder: &Path) -> Result<(), BackupError> {
+    DirBuilder::new().mode(FOLDER).create(folder)?;
+    rustix::fs::fchmod(open_folder(folder)?, rustix::fs::Mode::RWXU).map_err(io::Error::from)?;
+    Ok(())
+}
+
+/// fsyncs a folder, so the names made in it last. A volume that can't
+/// sync folders (`EINVAL`) is left as it is.
+fn sync_folder(folder: &Path) -> Result<(), BackupError> {
+    match rustix::fs::fsync(open_folder(folder)?) {
+        Ok(()) | Err(rustix::io::Errno::INVAL) => Ok(()),
+        Err(error) => Err(io::Error::from(error).into()),
+    }
 }
 
 /// The staging folders of one open. Dropped before [`Folders::keep`], they
@@ -545,7 +608,7 @@ impl Folders {
             private_dir(&backups)?;
             private_dir(&backups.join(STAGING))?;
             let folder = staging_dir(roots, *root, id);
-            DirBuilder::new().mode(FOLDER).create(&folder)?;
+            new_folder(&folder)?;
             folders.made.push(folder);
         }
         Ok(folders)
@@ -666,6 +729,8 @@ struct Extraction<'a> {
     id: &'a str,
     cancel: &'a CancelFlag,
     fault: Rc<Cell<Option<Fault>>>,
+    limits: Limits,
+    /// Entries so far; a GNU long-name header doesn't count (B Task 7 I1).
     entries: u64,
     /// Every path in a staging folder, whether it is a folder.
     placed: HashMap<(RootKey, String), bool>,
@@ -686,7 +751,13 @@ struct Extraction<'a> {
 }
 
 impl<'a> Extraction<'a> {
-    fn new(roots: &Roots, folders: &'a Folders, id: &'a str, cancel: &'a CancelFlag) -> Self {
+    fn new(
+        roots: &Roots,
+        folders: &'a Folders,
+        id: &'a str,
+        cancel: &'a CancelFlag,
+        limits: Limits,
+    ) -> Self {
         let same = roots.same();
         Self {
             same,
@@ -699,6 +770,7 @@ impl<'a> Extraction<'a> {
             id,
             cancel,
             fault: Rc::default(),
+            limits,
             entries: 0,
             placed: HashMap::new(),
             given: HashSet::new(),
@@ -753,16 +825,16 @@ impl<'a> Extraction<'a> {
                 if self.cancel.cancelled() {
                     return Err(stopped());
                 }
-                self.entries = self.entries.saturating_add(1);
-                if self.entries > MAX_ENTRIES {
-                    return Err(unsafe_entry());
-                }
                 if entry.header().entry_type().is_gnu_longname() {
                     if long_name.is_some() {
                         return Err(damaged());
                     }
                     long_name = Some(self.long_name(&mut entry)?);
                     continue;
+                }
+                self.entries = self.entries.saturating_add(1);
+                if self.entries > self.limits.entries {
+                    return Err(unsafe_entry());
                 }
                 let name = long_name
                     .take()
@@ -774,6 +846,7 @@ impl<'a> Extraction<'a> {
             }
         }
         self.tail(&mut plain)?;
+        self.sync_folders()?;
         plain
             .inner
             .finish()
@@ -837,11 +910,19 @@ impl<'a> Extraction<'a> {
         }
         match target {
             EntryPath::Manifest => {
-                if size > MANIFEST_MAX {
+                if size > self.limits.manifest_bytes {
                     return Err(damaged());
                 }
-                let mut text = vec![0; usize::try_from(size).map_err(io::Error::other)?];
-                entry.read_exact(&mut text).map_err(|_| self.broken())?;
+                // Grows with the bytes that arrive, never sized from the
+                // header up front.
+                let mut text = Vec::new();
+                entry
+                    .take(size)
+                    .read_to_end(&mut text)
+                    .map_err(|_| self.broken())?;
+                if u64::try_from(text.len()).ok() != Some(size) {
+                    return Err(damaged());
+                }
                 self.manifest = Some(text);
             }
             EntryPath::Keychain => {
@@ -865,7 +946,8 @@ impl<'a> Extraction<'a> {
                 }
                 self.web_part = true;
                 let meta = self.core.join(META);
-                DirBuilder::new().mode(FOLDER).create(&meta)?;
+                new_folder(&meta)?;
+                self.made.insert(meta.clone());
                 let (bytes, sha256, head) =
                     self.write_file(entry, &meta.join(WEB_PART_FILE), PRIVATE, size)?;
                 if !web_part_header(&head) {
@@ -990,12 +1072,12 @@ impl<'a> Extraction<'a> {
             if self.made.contains(&folder) {
                 continue;
             }
-            match DirBuilder::new().mode(FOLDER).create(&folder) {
+            match new_folder(&folder) {
                 Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                Err(BackupError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists => {
                     return Err(BackupError::Format(NAMES_CLASH));
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
             self.made.insert(folder.clone());
         }
@@ -1048,7 +1130,23 @@ impl<'a> Extraction<'a> {
         if written != size {
             return Err(damaged());
         }
+        // A plain fsync per file; the seal's full sync makes them durable.
+        rustix::fs::fsync(&out).map_err(io::Error::from)?;
         Ok((written, hex(&hasher.finalize()), head))
+    }
+
+    /// fsyncs every folder made, deepest first, then the staging folders.
+    fn sync_folders(&self) -> Result<(), BackupError> {
+        let mut folders: Vec<&PathBuf> = self.made.iter().collect();
+        folders.sort_by_key(|folder| std::cmp::Reverse(folder.components().count()));
+        for folder in folders {
+            sync_folder(folder)?;
+        }
+        sync_folder(self.core)?;
+        if !self.same {
+            sync_folder(self.desktop)?;
+        }
+        Ok(())
     }
 
     /// The tar's end (ruling F16): after the first end block, which the
@@ -1124,7 +1222,11 @@ impl<'a> Extraction<'a> {
             }
             None => Vec::new(),
         };
-        if u32::try_from(items.len()).ok() != Some(manifest.keychain_items) {
+        // Every item one of Bruhs' own, none twice, before Task 9 or the
+        // seal sees them (B Task 7 ruling).
+        if u32::try_from(items.len()).ok() != Some(manifest.keychain_items)
+            || check_items(&items).is_err()
+        {
             return Err(damaged());
         }
         if manifest.same_root && !self.same {
@@ -1134,6 +1236,8 @@ impl<'a> Extraction<'a> {
                     std::fs::rename(&from, self.desktop.join(name))?;
                 }
             }
+            sync_folder(self.core)?;
+            sync_folder(self.desktop)?;
         }
         Ok(Staged {
             id: self.id.to_owned(),

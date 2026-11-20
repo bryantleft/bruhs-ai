@@ -20,7 +20,7 @@ use bruhs_models::vault::{CredentialScope, VaultEntry, VaultKind};
 use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
-use super::host::Hook;
+use super::host::{Hook, Limits};
 use super::*;
 use crate::local_tools::{BruhComputer, LocalToolsHost};
 use crate::reactive::ReactiveRuntime;
@@ -1255,4 +1255,65 @@ async fn a_rewrite_that_only_moves_the_time_is_counted() {
         b"same size"
     );
     assert_eq!(manifest_of(&entries).changed_files, 1);
+}
+
+/// B Task 7 I1: a backup a restore wouldn't take isn't made. At the
+/// limits a backup is made; one entry or one manifest byte over, the job
+/// fails with `BACKUP_TOO_MANY` and leaves no file. The entry count comes
+/// from the walk up front, so nothing is written; the manifest's exact
+/// size is known only once it is serialized, just before it goes in.
+#[tokio::test]
+async fn backups_past_the_restore_limits_are_refused() {
+    let fixture = fixture().await;
+    let first = created(
+        &host(&fixture),
+        request(Output::Outgoing, BackupOptions::default()),
+    )
+    .await;
+    let entries = open_backup(&backup_path(&host(&fixture), &first));
+    let count = u64::try_from(entries.len()).unwrap();
+    let manifest_bytes = u64::try_from(entries.last().unwrap().bytes.len()).unwrap();
+    let outgoing = fixture.roots.backups(RootKey::Core).join("outgoing");
+    let waiting = || std::fs::read_dir(&outgoing).unwrap().count();
+    assert_eq!(waiting(), 1);
+
+    for (entries, manifest, made, written) in [
+        (count, manifest_bytes, true, true),
+        (count - 1, manifest_bytes, false, false),
+        (count, manifest_bytes - 1, false, true),
+        (count, 100, false, false),
+    ] {
+        let started = Arc::new(AtomicBool::new(false));
+        let seen = started.clone();
+        let host = host(&fixture)
+            .with_limits(Limits {
+                entries,
+                manifest_bytes: manifest,
+            })
+            .with_before_file(Arc::new(move |_, _| seen.store(true, Ordering::SeqCst)));
+        let before = waiting();
+        let job = host
+            .start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await
+            .unwrap();
+        let state = finished(&host, &job.id).await;
+        if made {
+            assert!(matches!(state, JobState::Created { .. }), "{state:?}");
+            assert_eq!(waiting(), before + 1);
+        } else {
+            assert_eq!(
+                state,
+                JobState::Failed {
+                    message: BACKUP_TOO_MANY.into()
+                },
+                "{entries} {manifest}"
+            );
+            assert_eq!(waiting(), before, "no file is left");
+        }
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            written,
+            "{entries} {manifest}"
+        );
+    }
 }

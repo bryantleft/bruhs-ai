@@ -79,6 +79,20 @@ fn check_item_ref(service: &str, account: &str) -> Result<(), SecretError> {
     check_item(service, account)
 }
 
+/// Check items read from a backup before anything else sees them (B Task 7
+/// ruling): each one of Bruhs' own and never a seal key, and no service
+/// and account twice. Refused with fixed copy.
+pub(crate) fn check_items(items: &[KeychainItem]) -> Result<(), SecretError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for item in items {
+        check_item_ref(&item.service, &item.account)?;
+        if !seen.insert((item.service.as_str(), item.account.as_str())) {
+            return Err(SecretError::Invalid(KEYCHAIN_SET_UNREADABLE));
+        }
+    }
+    Ok(())
+}
+
 /// The two shapes of a `bruhs-ai-secrets` account: a legacy id (64
 /// lowercase hex, `storage_key`) or `vault:<scope key>:v1-<32 hex>`, the
 /// scope key `global`, `project:<16 hex>` or `bruh:<agent id>`.

@@ -22,7 +22,7 @@ use bruhs_models::backup::{
     backup_file_name, browser_busy_line, changed_files_line, missing_items_line, no_space,
     normalize_password, skipped_names_line, validate_password, BackupApp, BackupCounts, BackupFile,
     BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_STOPPED,
-    BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING,
+    BACKUP_TOO_MANY, BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING,
     DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED,
     KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED,
     WEB_TOO_LARGE, WEB_UPLOAD_MAX,
@@ -35,7 +35,7 @@ use zeroize::Zeroizing;
 
 use super::host::{
     marker_text, new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config,
-    PARTIAL_MARKER,
+    Limits, PARTIAL_MARKER,
 };
 use super::{
     free_bytes, inventory, open_source, snapshot_sqlite, BackupError, RootId, RootKey, Roots,
@@ -295,6 +295,15 @@ pub(crate) async fn create(
     });
     warnings.extend(skipped_names_line(walked.skipped_names));
     let web = web_part.as_deref().map(open_web_part).transpose()?;
+    let beside = [
+        options.keychain.then_some("keychain.json"),
+        web.as_ref().map(|_| "web/part.bin"),
+    ];
+    fits(
+        &files,
+        &beside.into_iter().flatten().collect::<Vec<_>>(),
+        config.limits,
+    )?;
 
     let total = files
         .iter()
@@ -364,6 +373,7 @@ pub(crate) async fn create(
         web,
         password,
         kdf: config.kdf,
+        limits: config.limits,
         tmp,
         cancel: cancel.clone(),
         changed: 0,
@@ -415,6 +425,53 @@ pub(crate) async fn create(
         download,
         warnings,
     })
+}
+
+/// The fewest bytes one listed file takes in the manifest beside its path:
+/// `{"path":"` `","bytes":` one digit `,"sha256":"` 64 hex `"}`.
+const LISTED_FILE_MIN_BYTES: u64 = 97;
+
+/// Refuses, before anything is written, a backup a restore wouldn't take
+/// (B Task 7 I1): more tar entries than `limits.entries` (the files, every
+/// folder above them, the parts `beside` the data and the manifest), or a
+/// manifest that would be over `limits.manifest_bytes` even at its
+/// smallest. The writer checks the exact count and size again before the
+/// manifest goes in.
+pub(super) fn fits(
+    files: &[SourceFile],
+    beside: &[&str],
+    limits: Limits,
+) -> Result<(), BackupError> {
+    let mut folders = HashSet::new();
+    let mut manifest = 0_u64;
+    let mut listed = |path_bytes: usize| {
+        let path_bytes = u64::try_from(path_bytes).unwrap_or(u64::MAX);
+        manifest = manifest
+            .saturating_add(path_bytes)
+            .saturating_add(LISTED_FILE_MIN_BYTES);
+    };
+    for file in files {
+        let prefix = match file.root {
+            RootKey::Core => "core/",
+            RootKey::Desktop => "desktop/",
+        };
+        for (end, _) in file.rel.match_indices('/') {
+            folders.insert((file.root, &file.rel[..end]));
+        }
+        listed(prefix.len() + file.rel.len());
+    }
+    for part in beside {
+        listed(part.len());
+    }
+    let entries = [files.len(), folders.len(), beside.len(), 1]
+        .into_iter()
+        .map(|count| u64::try_from(count).unwrap_or(u64::MAX))
+        .fold(0, u64::saturating_add);
+    if entries > limits.entries || manifest > limits.manifest_bytes {
+        Err(BackupError::Refused(BACKUP_TOO_MANY))
+    } else {
+        Ok(())
+    }
 }
 
 /// The job's worker stopped without an answer.
@@ -646,6 +703,7 @@ struct Writer {
     web: Option<(File, u64)>,
     password: Zeroizing<String>,
     kdf: bruhs_backup::KdfParams,
+    limits: Limits,
     tmp: PathBuf,
     cancel: CancelFlag,
     /// Files that changed while they were read (ruling B Task 6 I2).
@@ -773,9 +831,18 @@ impl Writer {
         if let Some((part, bytes)) = self.web.take() {
             self.stream(&mut archive, "web/part.bin", part, bytes, PRIVATE)?;
         }
+        // The exact count and size, so nothing made here fails to open (B
+        // Task 7 I1): the folders, the listed files and the manifest.
+        let entries = archive.folders.len() + archive.listed.len() + 1;
         self.manifest.files = std::mem::take(&mut archive.listed);
         self.manifest.changed_files = self.changed;
         let manifest = serde_json::to_vec(&self.manifest).map_err(io::Error::other)?;
+        if u64::try_from(entries).map_or(true, |entries| entries > self.limits.entries)
+            || u64::try_from(manifest.len())
+                .map_or(true, |bytes| bytes > self.limits.manifest_bytes)
+        {
+            return Err(BackupError::Refused(BACKUP_TOO_MANY));
+        }
         archive.plain("manifest.json", &manifest)?;
         self.progress.flush();
 

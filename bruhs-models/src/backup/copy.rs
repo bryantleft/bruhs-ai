@@ -132,6 +132,9 @@ pub const NAMES_CLASH: &str =
 pub const ROOTS_OVERLAP: &str =
     "This backup's two data folders overlap on this computer. Nothing was changed.";
 pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and try again.";
+/// More files and folders than a restore takes (B Task 7 I1).
+pub const BACKUP_TOO_MANY: &str =
+    "This backup would hold more files than a restore can take. Move some files out of Bruhs' folders, then try again.";
 pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try again.";
 /// A file in Bruhs' own folders whose name a restore would refuse (B Task 5
 /// I2 ruling). Owner files with such names are left out and counted.
@@ -258,6 +261,7 @@ pub const ALL_COPY: &[&str] = &[
     NAMES_CLASH,
     ROOTS_OVERLAP,
     NO_SPACE,
+    BACKUP_TOO_MANY,
     FILE_CHANGED,
     DATA_NAME_REFUSED,
     ROOT_NAME_REFUSED,

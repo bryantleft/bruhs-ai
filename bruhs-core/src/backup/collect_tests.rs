@@ -295,6 +295,94 @@ fn unrestorable_names_are_skipped_in_owner_files_and_refused_in_bruhs_own() {
     assert!(!refused.message().contains("x\\y"));
 }
 
+/// B Task 7 I2: the second of two names a case- or normalization-blind
+/// volume would merge is skipped in owner content and refused in Bruhs'
+/// own folders, root by root.
+#[test]
+fn names_one_volume_would_merge_are_skipped_or_refused() {
+    use collect::{Names, Verdict};
+    let mut names = Names::default();
+    let mut judge = |key, rel: &str| {
+        let name = rel.rsplit('/').next().unwrap();
+        names.judge(key, rel, &std::ffi::CString::new(name).unwrap())
+    };
+    let nfd = "attachments/cafe\u{301}.txt";
+    let nfc = "attachments/caf\u{e9}.txt";
+    for (key, rel, verdict) in [
+        (RootKey::Core, "attachments/Makefile", Verdict::Take),
+        (RootKey::Core, "attachments/makefile", Verdict::Skip),
+        (RootKey::Core, nfd, Verdict::Take),
+        (RootKey::Core, nfc, Verdict::Skip),
+        (RootKey::Core, "server/bruhs/a1/work/README", Verdict::Take),
+        (RootKey::Core, "server/bruhs/a1/work/readme", Verdict::Skip),
+        (RootKey::Core, "server/Makefile", Verdict::Take),
+        (RootKey::Core, "server/makefile", Verdict::Refuse),
+        (RootKey::Core, "server/notes", Verdict::Take),
+        // Each root is its own volume.
+        (RootKey::Desktop, "server/makefile", Verdict::Take),
+        // A name a restore refuses outright, as before.
+        (RootKey::Core, "attachments/a\\b", Verdict::Skip),
+        (RootKey::Core, "server/a\\b", Verdict::Refuse),
+    ] {
+        assert_eq!(judge(key, rel), verdict, "{key:?} {rel}");
+    }
+}
+
+/// The same through the walk, where the temp volume keeps both names of a
+/// pair (Linux, case-sensitive APFS). The default macOS volume merges them
+/// itself, so there the pair can't exist and the case above covers it.
+#[test]
+fn the_walk_keeps_one_of_each_merged_pair() {
+    let (_dir, base) = temp();
+    let probe = base.join("probe");
+    std::fs::create_dir_all(&probe).unwrap();
+    std::fs::write(probe.join("Makefile"), b"a").unwrap();
+    let case_sensitive = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(probe.join("makefile"))
+        .is_ok();
+    std::fs::write(probe.join("caf\u{e9}"), b"a").unwrap();
+    let keeps_forms = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(probe.join("cafe\u{301}"))
+        .is_ok();
+    if !case_sensitive && !keeps_forms {
+        return;
+    }
+    let roots = two_roots(&base);
+    let attachments = roots.core.join("attachments");
+    let mut pairs = Vec::new();
+    if case_sensitive {
+        pairs.push(("Makefile", "makefile"));
+    }
+    if keeps_forms {
+        pairs.push(("cafe\u{301}", "caf\u{e9}"));
+    }
+    for (first, second) in &pairs {
+        write(&attachments.join(first), b"one");
+        write(&attachments.join(second), b"two");
+    }
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    let expected: Vec<String> = pairs
+        .iter()
+        .map(|(first, _)| format!("attachments/{first}"))
+        .collect();
+    let mut got: Vec<&str> = listed(&taken).into_iter().map(|(_, rel)| rel).collect();
+    got.sort_unstable();
+    let mut expected: Vec<&str> = expected.iter().map(String::as_str).collect();
+    expected.sort_unstable();
+    assert_eq!(got, expected);
+    assert_eq!(taken.skipped_names, u32::try_from(pairs.len()).unwrap());
+
+    let (first, second) = pairs[0];
+    write(&roots.core.join("server").join(first), b"{}");
+    write(&roots.core.join("server").join(second), b"{}");
+    let refused = inventory(&roots, &BackupOptions::default()).unwrap_err();
+    assert!(matches!(refused, BackupError::Refused(DATA_NAME_REFUSED)));
+}
+
 /// The length limits are measured with the root's own prefix: `desktop/`
 /// is three bytes longer than `core/`.
 #[test]

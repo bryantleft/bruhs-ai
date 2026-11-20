@@ -22,7 +22,8 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use super::open::staging_dir;
+use super::host::Limits;
+use super::open::{extract, staging_dir};
 use super::*;
 use crate::secrets::{read_seal_key, unseal_items, SecretError, SecretStore, SECRETS_SERVICE};
 
@@ -31,6 +32,12 @@ const GLOBAL_VALUE: &str = "v1-11111111111111111111111111111111";
 /// A path over the 100 bytes a tar header holds, so it travels as a GNU
 /// long name.
 const LONG_FOLDER: &str = "workbench/a-folder-name-long-enough-that-the-whole-path-is-past-one-hundred-bytes-of-tar-header";
+
+/// A path whose archive name `core/<it>` is exactly 100 bytes: it fills
+/// the tar header's name field with no NUL and no long name.
+fn hundred_bytes() -> String {
+    format!("workbench/{}", "h".repeat(100 - "core/workbench/".len()))
+}
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -106,6 +113,8 @@ fn fixture(same: bool) -> Fixture {
     write(&script, b"#!/bin/sh\necho hi\n");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     write(&core.join(LONG_FOLDER).join("note.txt"), b"far down");
+    write(&core.join(hundred_bytes()), b"one hundred");
+    write(&core.join("server/empty.json"), b"");
     let big: Vec<u8> = (0..3 * 1024 * 1024_u32)
         .map(|i| u8::try_from(i.wrapping_mul(2_654_435_761) >> 24).unwrap())
         .collect();
@@ -347,8 +356,14 @@ async fn a_good_backup_stages_and_previews() {
             assert_eq!(staged, std::fs::read(live_root.join(rel)).unwrap(), "{rel}");
         }
     }
-    assert!(data >= 8, "{data}");
+    assert!(data >= 10, "{data}");
     assert!(core.join(LONG_FOLDER).join("note.txt").is_file());
+    assert_eq!(format!("core/{}", hundred_bytes()).len(), 100);
+    assert_eq!(
+        std::fs::read(core.join(hundred_bytes())).unwrap(),
+        b"one hundred"
+    );
+    assert_eq!(std::fs::read(core.join("server/empty.json")).unwrap(), b"");
     assert!(desktop.join("desktop-state.json").is_file());
     assert!(!core.join("desktop-state.json").exists());
 
@@ -455,6 +470,8 @@ enum EntryKind {
     Symlink(&'static str),
     HardLink(&'static str),
     Fifo,
+    /// Any other type byte, with no data.
+    Typed(tar::EntryType),
 }
 
 /// A crafted entry: its name's bytes, its type and its data.
@@ -478,6 +495,7 @@ fn tar_entry(out: &mut Vec<u8>, name: &[u8], kind: EntryKind, data: &[u8]) {
             (link, 0o777)
         }
         EntryKind::Fifo => (tar::EntryType::Fifo, 0o600),
+        EntryKind::Typed(kind) => (kind, 0o600),
     };
     header.set_entry_type(entry_type);
     header.set_mode(mode);
@@ -579,7 +597,8 @@ async fn refused(
 
 #[tokio::test]
 async fn hostile_archives_write_nothing_outside_staging() {
-    use EntryKind::{Fifo, File as F, Folder, HardLink, Symlink};
+    use tar::EntryType as T;
+    use EntryKind::{Fifo, File as F, Folder, HardLink, Symlink, Typed};
     let fixture = fixture(false);
     let host = host(&fixture);
     let core = &fixture.roots.core;
@@ -619,6 +638,12 @@ async fn hostile_archives_write_nothing_outside_staging() {
         manifest.files[0].bytes = 5
     });
     let big_keychain = vec![b' '; 5 << 20];
+    let says_keychain = manifest_of(&[("core/a", a)], |manifest| {
+        manifest.options.keychain = true
+    });
+    let says_web = manifest_of(&[("core/a", a)], |manifest| {
+        manifest.web_db_version = Some(13)
+    });
     let tmp_bytes = tmp_target.as_bytes();
     let cases: Vec<(Vec<Crafted<'_>>, &str)> = vec![
         (vec![(b"../x", F, a)], UNSAFE_ENTRY),
@@ -633,6 +658,19 @@ async fn hostile_archives_write_nothing_outside_staging() {
             UNSAFE_ENTRY,
         ),
         (vec![(b"core/f", Fifo, b"")], UNSAFE_ENTRY),
+        (vec![(b"core/c", Typed(T::Char), b"")], UNSAFE_ENTRY),
+        (vec![(b"core/d", Typed(T::Block), b"")], UNSAFE_ENTRY),
+        (
+            vec![(b"core/a", F, a), (b"core/b", Typed(T::Link), b"")],
+            UNSAFE_ENTRY,
+        ),
+        (vec![(b"core/x", Typed(T::XHeader), b"")], UNSAFE_ENTRY),
+        (
+            vec![(b"core/x", Typed(T::XGlobalHeader), b"")],
+            UNSAFE_ENTRY,
+        ),
+        (vec![(b"core/x", Typed(T::GNUSparse), b"")], UNSAFE_ENTRY),
+        (vec![(b"core/x", Typed(T::GNULongLink), b"")], UNSAFE_ENTRY),
         (vec![(b"core/a", F, a), (b"core/a", F, a)], UNSAFE_ENTRY),
         (
             vec![(b"core/n", Folder, b""), (b"core/n", Folder, b"")],
@@ -659,6 +697,15 @@ async fn hostile_archives_write_nothing_outside_staging() {
             DAMAGED,
         ),
         (vec![(b"keychain.json", F, &big_keychain)], DAMAGED),
+        // The keychain and web parts are there exactly when it says so.
+        (
+            vec![(b"core/a", F, a), (b"manifest.json", F, &says_keychain)],
+            DAMAGED,
+        ),
+        (
+            vec![(b"core/a", F, a), (b"manifest.json", F, &says_web)],
+            DAMAGED,
+        ),
         // Names one volume would merge, and names a restore refuses.
         (
             vec![(b"core/Notes.txt", F, a), (b"core/notes.txt", F, a)],
@@ -701,14 +748,33 @@ async fn hostile_archives_write_nothing_outside_staging() {
         refused(&fixture, &host, &path, expected, &outside).await;
     }
 
-    // A long name over 4 KiB.
-    let mut tar = Vec::new();
-    tar_long_name(&mut tar, &vec![b'a'; 5000]);
-    tar_entry(&mut tar, b"core/a", F, a);
-    tar_entry(&mut tar, b"manifest.json", F, &listing_a);
-    tar.extend_from_slice(&[0; 1024]);
-    seal_tar(&path, &tar);
-    refused(&fixture, &host, &path, UNSAFE_ENTRY, &outside).await;
+    // A long name over 4 KiB, two long names for one entry, and a long
+    // name after the manifest with no entry for it (which would otherwise
+    // open: the manifest is sound).
+    let mut over = Vec::new();
+    tar_entry(&mut over, b"core/a", F, a);
+    tar_long_name(&mut over, &vec![b'a'; 5000]);
+    tar_entry(&mut over, b"core/z", F, a);
+    tar_entry(&mut over, b"manifest.json", F, &listing_a);
+    let mut doubled = Vec::new();
+    tar_entry(&mut doubled, b"core/a", F, a);
+    tar_long_name(&mut doubled, b"core/b");
+    tar_long_name(&mut doubled, b"core/c");
+    tar_entry(&mut doubled, b"core/z", F, a);
+    tar_entry(&mut doubled, b"manifest.json", F, &listing_a);
+    let mut dangling = Vec::new();
+    tar_entry(&mut dangling, b"core/a", F, a);
+    tar_entry(&mut dangling, b"manifest.json", F, &listing_a);
+    tar_long_name(&mut dangling, b"core/b");
+    for (mut tar, expected) in [
+        (over, UNSAFE_ENTRY),
+        (doubled, DAMAGED),
+        (dangling, DAMAGED),
+    ] {
+        tar.extend_from_slice(&[0; 1024]);
+        seal_tar(&path, &tar);
+        refused(&fixture, &host, &path, expected, &outside).await;
+    }
 
     // The tar's end: missing, not zero, or longer than 10 KiB.
     let body = {
@@ -1022,6 +1088,27 @@ async fn the_sweep_removes_old_and_unfinished_staging() {
     assert_eq!(staged_ids(&fixture.roots), Vec::<String>::new());
     no_seal_key(&fixture.store, &id);
     assert_eq!(host.staged(), None);
+
+    // A preview dated ahead stays within 24 hours of now, and goes past
+    // that.
+    let (id, state) = open_with(&host, &backup, PASSWORD).await;
+    preview(state);
+    let preview_file = staging_dir(&fixture.roots, RootKey::Core, &id).join("meta/preview.json");
+    let date = |ahead: u64| {
+        File::options()
+            .write(true)
+            .open(&preview_file)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(ahead * 60 * 60))
+            .unwrap();
+    };
+    date(1);
+    host.sweep();
+    assert_eq!(staged_ids(&fixture.roots), vec![id.clone(), id.clone()]);
+    date(25);
+    host.sweep();
+    assert_eq!(staged_ids(&fixture.roots), Vec::<String>::new());
+    no_seal_key(&fixture.store, &id);
 }
 
 #[tokio::test]
@@ -1064,4 +1151,100 @@ async fn a_web_part_waits_in_meta() {
     let meta = staging_dir(&fixture.roots, RootKey::Core, &staged).join("meta");
     assert_eq!(std::fs::read(meta.join("web-part.bin")).unwrap(), part);
     assert_eq!(mode(&meta.join("web-part.bin")), 0o600);
+}
+
+/// B Task 7 I1: the entry and manifest limits are the writer's. A GNU long
+/// name doesn't count as an entry; a name of exactly 100 bytes needs none.
+#[tokio::test]
+async fn limits_count_entries_but_not_long_names() {
+    let fixture = fixture(false);
+    let a = b"alpha".as_slice();
+    let long = format!("core/{}", "l".repeat(120));
+    let hundred = format!("core/{}", "n".repeat(95));
+    assert_eq!(hundred.len(), 100);
+    let manifest = manifest_of(&[(long.as_str(), a), (hundred.as_str(), a)], |_| {});
+    let bytes = u64::try_from(manifest.len()).unwrap();
+    let mut tar = Vec::new();
+    tar_long_name(&mut tar, long.as_bytes());
+    tar_entry(&mut tar, &long.as_bytes()[..100], EntryKind::File, a);
+    tar_entry(&mut tar, hundred.as_bytes(), EntryKind::File, a);
+    tar_entry(&mut tar, b"manifest.json", EntryKind::File, &manifest);
+    tar.extend_from_slice(&[0; 1024]);
+    let path = fixture.out.join("limits.bruhsbak");
+    seal_tar(&path, &tar);
+
+    let limited = |entries, manifest_bytes| {
+        host(&fixture).with_limits(Limits {
+            entries,
+            manifest_bytes,
+        })
+    };
+    // Three entries: two files and the manifest.
+    let at_limits = limited(3, bytes);
+    let (id, state) = open_with(&at_limits, &path, PASSWORD).await;
+    preview(state);
+    let core = staging_dir(&fixture.roots, RootKey::Core, &id);
+    assert_eq!(std::fs::read(core.join(&long[5..])).unwrap(), a);
+    assert_eq!(std::fs::read(core.join(&hundred[5..])).unwrap(), a);
+    at_limits.discard_staged(&id).unwrap();
+
+    let outside: [PathBuf; 0] = [];
+    refused(&fixture, &limited(2, bytes), &path, UNSAFE_ENTRY, &outside).await;
+    refused(&fixture, &limited(3, bytes - 1), &path, DAMAGED, &outside).await;
+}
+
+/// B Task 7 ruling: `extract` checks every keychain item before anything
+/// sees `Staged`: one of Bruhs' own, never a seal key, none twice.
+#[tokio::test]
+async fn keychain_items_are_checked_before_extract_answers() {
+    let fixture = fixture(false);
+    let path = fixture.out.join("items.bruhsbak");
+    let item = |service: &str, account: &str| {
+        format!(r#"{{"service":"{service}","account":"{account}","value":"c2VjcmV0"}}"#)
+    };
+    let account = format!("vault:global:{GLOBAL_VALUE}");
+    let good = item(SECRETS_SERVICE, &account);
+    let seal_key = item("bruhs-ai-backup", "staged:0123456789abcdef0123456789abcdef");
+    for (number, (items, sound)) in [
+        (vec![good.clone()], true),
+        (vec![item("login", "someone")], false),
+        (vec![seal_key], false),
+        (vec![good.clone(), good], false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let json = format!(r#"{{"items":[{}]}}"#, items.join(","));
+        let manifest = manifest_of(&[("keychain.json", json.as_bytes())], |manifest| {
+            manifest.options.keychain = true;
+            manifest.keychain_items = u32::try_from(items.len()).unwrap();
+        });
+        craft(
+            &path,
+            &[
+                (b"keychain.json", EntryKind::File, json.as_bytes()),
+                (b"manifest.json", EntryKind::File, &manifest),
+            ],
+        );
+        let id = format!("{number:032x}");
+        let extracted = extract(
+            &fixture.roots,
+            &id,
+            &path,
+            PASSWORD,
+            &CancelFlag::default(),
+            &|_, _| {},
+        );
+        match (extracted, sound) {
+            (Ok(staged), true) => {
+                assert_eq!(staged.items.len(), 1);
+                assert_eq!(staged.items[0].value.as_str(), "secret");
+                host(&fixture).discard_staged(&id).unwrap();
+            }
+            (Err(error), false) => assert_eq!(error.message(), DAMAGED, "{json}"),
+            (Ok(_), false) => panic!("{json} was taken"),
+            (Err(error), true) => panic!("{error}"),
+        }
+        assert_eq!(staged_ids(&fixture.roots), Vec::<String>::new(), "{json}");
+    }
 }
