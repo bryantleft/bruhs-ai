@@ -45,7 +45,12 @@ describe("index.html", () => {
   });
 
   it("links the hero and closing download actions to the platform picker", () => {
-    assert.equal(html.match(/class="btn btn-primary for-desktop" href="\/download">Download for desktop<\/a>/g)?.length, 2);
+    const actions = [...html.matchAll(/<a class="btn btn-primary for-desktop" href="\/download">([^]*?)<\/a>/g)];
+    assert.equal(actions.length, 2);
+    for (const [, content] of actions) {
+      assert.match(content!, /Download for desktop/);
+      for (const icon of ["apple", "windows", "linux"]) assert.ok(content!.includes("icon-" + icon));
+    }
     assert.equal(html.match(/<button class="btn btn-primary for-phone"[^>]* data-share>/g)?.length, 2);
   });
 });
