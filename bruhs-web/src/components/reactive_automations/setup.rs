@@ -1,14 +1,20 @@
 //! A reviewed automation saves its agent, source, and subscription as one command.
+use super::app_poll::{AppPollFields, NewerSourceConfirm};
 use super::calendar::{calendar_source, local_time_zone, WeekdayToggles};
 use super::{
     apply, command_button, id, milliseconds, seconds, source_kind, Check, Field, CARD, SELECT,
 };
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
-use bruhs_models::apps::{describe_app_poll, FROM_NEWER_SOURCE};
+use bruhs_models::apps::{
+    describe_app_poll, new_poll_form, open_apps_from_own_address, poll_account_label,
+    poll_form_for, poll_form_kind, AppsListing, FROM_NEWER_SOURCE, SOURCE_KIND_OTHER,
+    STARTS_WHEN_APP,
+};
 use bruhs_models::crew::{
-    access_summary, agent_run_level, event_policy, event_policy_line, AccessLevel, BruhLook,
-    BruhStatus, AUTO_RUN_LABEL, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
+    access_summary, agent_run_level, apps_ready, apps_reason, event_policy, event_policy_line,
+    AccessLevel, BruhLook, BruhStatus, ServiceNotice, AUTO_RUN_LABEL, COMMAND_SOURCE_ACCESS,
+    RAIL_FACE_PX,
 };
 use bruhs_models::reactive::*;
 use leptos::prelude::*;
@@ -91,6 +97,35 @@ fn shown_setups(snapshot: &ReactiveSnapshot, agent_filter: Option<&str>) -> Vec<
         .collect()
 }
 
+/// The "Starts when" choices: the App source only on a service that keeps
+/// one, or for a routine that already has one (shown off with the reason),
+/// and a newer Bruhs' source only for a routine that has one.
+fn starts_when_options(apps: bool, current: &str) -> Vec<(&'static str, &'static str)> {
+    let mut options = vec![
+        ("folder", "A file arrives"),
+        ("http", "A website changes"),
+        ("command", "A command reports a change"),
+        ("schedule", "On a repeating schedule"),
+        ("calendar", "At set times of day"),
+        ("webhook", "A webhook arrives"),
+        ("app_event", "A meeting event occurs"),
+        ("custom", "A custom event arrives"),
+    ];
+    if apps || current == "app_poll" {
+        options.push(("app_poll", STARTS_WHEN_APP));
+    }
+    if current == "other" {
+        options.push(("other", SOURCE_KIND_OTHER));
+    }
+    options
+}
+
+/// The account line an App routine names: the mailbox a new mail poll
+/// reads, when the listing has it.
+fn poll_label(kind: &SourceKind, apps: Option<&AppsListing>) -> Option<String> {
+    apps.and_then(|apps| poll_account_label(kind, apps))
+}
+
 #[component]
 pub(crate) fn AutomationSetupPanel(
     snapshot: RwSignal<Option<ReactiveSnapshot>>,
@@ -126,7 +161,39 @@ pub(crate) fn AutomationSetupPanel(
     let cal_times = RwSignal::new("08:00".to_string());
     let cal_days = RwSignal::new(Vec::<u8>::new());
     let cal_zone = RwSignal::new(local_time_zone());
+    let poll_form = RwSignal::new(new_poll_form());
+    // The owner's app accounts and mailboxes, for App sources. Never stored.
+    let apps = RwSignal::new(None::<AppsListing>);
+    let apps_notice = RwSignal::new(None::<String>);
+    // The type picked for a newer Bruhs' source, waiting on Change type.
+    let change_kind = RwSignal::new(None::<String>);
+    let load_apps = move || {
+        wasm_bindgen_futures::spawn_local(async move {
+            let (listing, notice) = match crate::api::apps_listing().await {
+                Ok(listing) => (Some(listing), None),
+                Err(error) if error.is_status(404) => {
+                    (None, Some(ServiceNotice::ServingOld.message().to_owned()))
+                }
+                Err(error) if error.is_status(403) => {
+                    (None, Some(open_apps_from_own_address(crate::api::BASE_URL)))
+                }
+                Err(error) => (None, Some(crate::api::vault_message(&error))),
+            };
+            apps.try_set(listing);
+            apps_notice.try_set(notice);
+        });
+    };
+    load_apps();
+    let protocol = move || snapshot.with(|s| s.as_ref().map(|s| s.protocol));
+    let apps_on = move || protocol().is_some_and(apps_ready);
+    // Why an App source can't be saved here: an older service.
+    let app_block = Signal::derive(move || {
+        (!apps_on()).then(|| apps_reason(protocol()).unwrap_or(ServiceNotice::ServingOld.message()))
+    });
     let open = Callback::new(move |setup: AutomationSetup| {
+        poll_form.set(poll_form_for(&setup.source.kind).unwrap_or_else(new_poll_form));
+        change_kind.set(None);
+        load_apps();
         cal_times.set("08:00".into());
         cal_days.set(Vec::new());
         cal_zone.set(local_time_zone());
@@ -226,6 +293,15 @@ pub(crate) fn AutomationSetupPanel(
             saving.set(false);
         }
     });
+    let set_kind = move |value: String| {
+        if value == "app_event" {
+            source_value.set("meeting.completed".into());
+        }
+        if value == "schedule" {
+            interval.set("3600".into());
+        }
+        kind.set(value);
+    };
     let prepare = move |_| {
         let Some(mut setup) = base.get_untracked() else {
             return;
@@ -253,13 +329,15 @@ pub(crate) fn AutomationSetupPanel(
                     &cal_days.get_untracked(),
                     &cal_zone.get_untracked(),
                 )?
-            } else if matches!(kind.get_untracked().as_str(), "app_poll" | "other") {
-                // An App source keeps its definition until its editor lands;
-                // a newer Bruhs' source is never saved (ruling F3).
-                if setup.source.kind == SourceKind::Other {
-                    return Err(FROM_NEWER_SOURCE.into());
+            } else if kind.get_untracked() == "app_poll" {
+                // Offered only where the service keeps App sources.
+                if let Some(reason) = app_block.get_untracked() {
+                    return Err(reason.into());
                 }
-                setup.source.kind.clone()
+                poll_form_kind(&poll_form.get_untracked())?
+            } else if kind.get_untracked() == "other" {
+                // A newer Bruhs' source is never saved (ruling F3).
+                return Err(FROM_NEWER_SOURCE.into());
             } else {
                 source_kind(
                     &kind.get_untracked(),
@@ -297,10 +375,13 @@ pub(crate) fn AutomationSetupPanel(
                     <p class="text-body-sm text-rambutan-400">"Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."</p>
                     <Show when=move ||agent_filter.with_value(Option::is_some)><p class="mt-2 text-label-sm text-rambutan-400">"This routine runs as this bruh. Change its job and model in Settings."</p></Show>
                     <div class="mt-3 grid gap-3 sm:grid-cols-2"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div></Show>
-                        <label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);if value=="app_event"{source_value.set("meeting.completed".into());}
-                        if value=="schedule"{interval.set("3600".into());}kind.set(value);}>
-                            {[("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(value,label)|view!{<option value=value>{label}</option>}).collect_view()}
+                        <label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);
+                        // Changing a newer Bruhs' source replaces it: ask first.
+                        if kind.get_untracked()=="other" && value!="other"{change_kind.set(Some(value));kind.set("other".into());return;}
+                        set_kind(value);}>
+                            {move ||starts_when_options(apps_on(),&kind.get()).into_iter().map(|(value,label)|view!{<option value=value selected=move ||kind.get()==value>{label}</option>}).collect_view()}
                         </select></label>
+                        <NewerSourceConfirm pending=change_kind on_confirm=Callback::new(set_kind) />
                         {move ||match kind.get().as_str(){
                             "folder"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /></div>}.into_any(),
                             "http"=>view!{<div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div>}.into_any(),
@@ -309,7 +390,8 @@ pub(crate) fn AutomationSetupPanel(
                             "calendar"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div>}.into_any(),
                             "app_event"=>view!{<label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Meeting event"</span><select aria-label="Meeting event" class=SELECT prop:value=move ||source_value.get() on:change=move |event|source_value.set(event_target_value(&event))>{bruhs_models::reactive::APP_EVENT_TOPICS.into_iter().map(|(topic,label)|view!{<option value=topic>{label}</option>}).collect_view()}</select></label>}.into_any(),
                             "webhook"=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"A private endpoint is created when you enable this automation. Reveal its token in Advanced settings."</p>}.into_any(),
-                            "app_poll"|"other"=>view!{<p class="text-body-sm text-rambutan-300 sm:col-span-2">{move ||base.with(|base|base.as_ref().map(|setup|source_summary(&setup.source.kind)))}</p>}.into_any(),
+                            "app_poll"=>view!{<AppPollFields form=poll_form listing=Signal::derive(move ||apps.get()) notice=Signal::derive(move ||apps_notice.get()) disabled=app_block />}.into_any(),
+                            "other"=>view!{<p class="text-body-sm text-rambutan-300 sm:col-span-2">{FROM_NEWER_SOURCE}</p>}.into_any(),
                             _=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"Device bridges can publish events through the local API. Use a watched folder for FTP uploads."</p>}.into_any(),
                         }}
                     </div>
@@ -324,7 +406,8 @@ pub(crate) fn AutomationSetupPanel(
             </Show>
             {move ||review.get().map(|setup| {
                 let level=snapshot.with_untracked(|s|agent_run_level(s.as_ref(),&setup.agent.id,&setup.agent.model));
-                let review_rows=review_fields(&setup,level);
+                let account=apps.with_untracked(|apps|poll_label(&setup.source.kind,apps.as_ref()));
+                let review_rows=review_fields_with(&setup,level,account.as_deref());
                 view!{<article class=CARD><h3 class="text-label text-rambutan-100">"Review automation"</h3><dl class="mt-3 space-y-3">{review_rows.into_iter().map(|(label,value)|view!{<div><dt class="text-label-sm text-rambutan-400">{label}</dt><dd class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-200">{value}</dd></div>}).collect_view()}</dl><p class="mt-3 text-body-sm text-blueberry-200">{event_policy_line(setup.subscription.auto_run,level)}</p><p class="mt-1 text-label-sm text-rambutan-500">"The local server must be running. This enables the complete automation in one saved change."</p><div class="mt-3 flex flex-wrap gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_|{saving.set(true);send.run(apply(ReactiveChange::SaveAutomation{automation:Box::new(setup.clone())}));})>"Enable automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|review.set(None))>"Back to edit"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|{base.set(None);review.set(None);})>"Cancel setup"</Button></div></article>}
             })}
             <Show when=move ||snapshot.with(|s|s.as_ref().is_some_and(|s|agent_filter.with_value(|filter|shown_setups(s,filter.as_deref()).is_empty())))><p class="text-body-sm text-rambutan-400">"No automations yet. Start with a scan folder, a meeting event, or a repeating check."</p></Show>
@@ -336,13 +419,14 @@ pub(crate) fn AutomationSetupPanel(
                 let source_error=snapshot.with(|s|s.as_ref().and_then(|s|s.source_statuses.iter().find(|status|status.source_id==setup.source.id)).and_then(|status|status.error.clone()));
                 // The agent shows its face, as its bruh, in its live state.
                 let (look,face_status)=snapshot.with(|s|s.as_ref().and_then(|s|s.bruhs.iter().find(|bruh|bruh.agent_id==setup.agent.id)).map_or_else(||(BruhLook::default(),BruhStatus::Asleep),|bruh|(bruh.look.clone(),bruh.status)));
-                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><BruhFace size=f64::from(RAIL_FACE_PX) look=look status=face_status /><h3 class="min-w-0 break-words text-label text-rambutan-100">{setup.agent.name}</h3></div><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind)}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div>{with_memory.then(||view!{<super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send />})}</article>}
+                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><BruhFace size=f64::from(RAIL_FACE_PX) look=look status=face_status /><h3 class="min-w-0 break-words text-label text-rambutan-100">{setup.agent.name}</h3></div><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind,apps.with(|apps|poll_label(&setup.source.kind,apps.as_ref())).as_deref())}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div>{with_memory.then(||view!{<super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send />})}</article>}
             }).collect_view()}
         </div>
     }
 }
 
-pub(super) fn source_summary(kind: &SourceKind) -> String {
+/// `account` names a new mail poll's mailbox.
+pub(super) fn source_summary(kind: &SourceKind, account: Option<&str>) -> String {
     match kind {
         SourceKind::Folder { path, pattern, .. } => format!("Folder: {path} ({pattern})"),
         SourceKind::Http { url, .. } => format!("Website: {url}"),
@@ -356,7 +440,7 @@ pub(super) fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
-        SourceKind::AppPoll { query, .. } => describe_app_poll(query, None),
+        SourceKind::AppPoll { query, .. } => describe_app_poll(query, account),
         SourceKind::Other => FROM_NEWER_SOURCE.into(),
     }
 }
@@ -374,7 +458,7 @@ fn automation_status(setup: &AutomationSetup, level: AccessLevel) -> String {
         "Enabled: review each event".into()
     }
 }
-fn source_details(kind: &SourceKind) -> String {
+fn source_details(kind: &SourceKind, account: Option<&str>) -> String {
     match kind {
         SourceKind::Folder{path,pattern,recursive,settle_ms,poll_ms}=>format!("Folder: {path}\nFiles: {pattern}\nSubfolders: {}\nFile settle time: {} seconds\nCheck interval: {} seconds",if *recursive{"Included"}else{"Excluded"},seconds(*settle_ms),seconds(*poll_ms)),
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
@@ -384,7 +468,7 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),
-        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,None),seconds(*poll_ms)),
+        SourceKind::AppPoll{query,poll_ms,..}=>format!("{}\nCheck interval: {} seconds",describe_app_poll(query,account),seconds(*poll_ms)),
         SourceKind::Other=>FROM_NEWER_SOURCE.into(),
     }
 }
@@ -393,6 +477,15 @@ fn source_details(kind: &SourceKind) -> String {
 pub(super) fn review_fields(
     setup: &AutomationSetup,
     level: AccessLevel,
+) -> Vec<(&'static str, String)> {
+    review_fields_with(setup, level, None)
+}
+
+/// [`review_fields`], with `account` naming a new mail poll's mailbox.
+fn review_fields_with(
+    setup: &AutomationSetup,
+    level: AccessLevel,
+    account: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     vec![
         ("Name", setup.agent.name.clone()),
@@ -429,10 +522,10 @@ pub(super) fn review_fields(
             "Event policy",
             event_policy_line(setup.subscription.auto_run, level),
         ),
-        ("Starts when", source_summary(&setup.source.kind)),
+        ("Starts when", source_summary(&setup.source.kind, account)),
         (
             "Complete source settings",
-            source_details(&setup.source.kind),
+            source_details(&setup.source.kind, account),
         ),
         ("Working folder", setup.agent.project_path.clone()),
         ("Model", setup.agent.model.clone()),
@@ -612,6 +705,23 @@ mod tests {
         assert_eq!(bundled["source"]["enabled"], true);
         assert_eq!(bundled["subscription"]["enabled"], true);
     }
+    /// D10: the App source is offered only where the service keeps one; a
+    /// routine that has one still shows it, as does a newer Bruhs' source.
+    #[test]
+    fn starts_when_offers_the_app_source_only_when_the_service_keeps_one() {
+        let values = |apps, current| {
+            starts_when_options(apps, current)
+                .into_iter()
+                .map(|(value, _)| value)
+                .collect::<Vec<_>>()
+        };
+        assert!(!values(false, "folder").contains(&"app_poll"));
+        assert!(values(true, "folder").contains(&"app_poll"));
+        assert!(values(false, "app_poll").contains(&"app_poll"));
+        assert!(!values(true, "folder").contains(&"other"));
+        assert_eq!(values(true, "other").last(), Some(&"other"));
+        assert!(starts_when_options(true, "folder").contains(&("app_poll", STARTS_WHEN_APP)));
+    }
     #[test]
     fn app_and_newer_sources_describe_themselves() {
         let app = SourceKind::AppPoll {
@@ -620,12 +730,16 @@ mod tests {
             query: bruhs_models::apps::AppQuery::NewMail,
             poll_ms: 300_000,
         };
-        assert_eq!(source_summary(&app), "Email: new mail in your mail");
+        assert_eq!(source_summary(&app, None), "Email: new mail in your mail");
         assert_eq!(
-            source_details(&app),
+            source_summary(&app, Some("me@x.test")),
+            "Email: new mail in me@x.test"
+        );
+        assert_eq!(
+            source_details(&app, None),
             "Email: new mail in your mail\nCheck interval: 300 seconds"
         );
-        assert_eq!(source_summary(&SourceKind::Other), FROM_NEWER_SOURCE);
-        assert_eq!(source_details(&SourceKind::Other), FROM_NEWER_SOURCE);
+        assert_eq!(source_summary(&SourceKind::Other, None), FROM_NEWER_SOURCE);
+        assert_eq!(source_details(&SourceKind::Other, None), FROM_NEWER_SOURCE);
     }
 }

@@ -8,6 +8,7 @@ use bruhs_models::reactive::*;
 use leptos::prelude::*;
 
 use crate::ui::{button_class, Button, ButtonSize, ButtonVariant, Input, Textarea};
+mod app_poll;
 mod calendar;
 mod memory;
 mod notifications;
@@ -256,7 +257,10 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
     let cal_zone = RwSignal::new(calendar::local_time_zone());
     // An App or newer source shows this line read only, with Save off (F18).
     let source_fixed = RwSignal::new(None::<String>);
+    // The type picked for a newer Bruhs' source, waiting on Change type.
+    let change_type = RwSignal::new(None::<String>);
     let edit_source = Callback::new(move |source: EventSource| {
+        change_type.set(None);
         source_fixed.set(source_read_only(&source.kind));
         source_id.set(Some(source.id));
         source_name.set(source.name);
@@ -440,14 +444,14 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().map(|source| {
                     let edit = source.clone(); let mut toggle = source.clone(); toggle.enabled = !toggle.enabled; let hook_id = source.id.clone();
                     let status = snapshot.with(|s| s.as_ref().and_then(|s| s.source_statuses.iter().find(|status| status.source_id == source.id)).cloned());
-                    view! { <article class=CARD><div class="flex flex-wrap items-center justify-between gap-2"><div class="min-w-0"><h4 class="break-words text-label text-rambutan-100">{source.name.clone()}</h4><p class="text-label-sm text-rambutan-400">{format!("{}: {}", source_label(&source.kind), if source.enabled { "Enabled" } else { "Paused" })}</p></div><div class="flex flex-wrap gap-2"><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_source.run(edit.clone()))>"Edit source"</Button>{command_button(if source.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveSource { source: toggle }), send)}{command_button("Delete source", apply(ReactiveChange::DeleteSource { id: source.id.clone() }), send)}
+                    view! { <article class=CARD><div class="flex flex-wrap items-center justify-between gap-2"><div class="min-w-0"><h4 class="break-words text-label text-rambutan-100">{source.name.clone()}</h4><p class="text-label-sm text-rambutan-400">{format!("{}: {}", source_label(&source.kind), if source.enabled { "Enabled" } else { "Paused" })}</p></div><div class="flex flex-wrap gap-2"><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_source.run(edit.clone()))>"Edit source"</Button>{(source.kind != SourceKind::Other).then(|| command_button(if source.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveSource { source: toggle }), send))}{command_button("Delete source", apply(ReactiveChange::DeleteSource { id: source.id.clone() }), send)}
                         {matches!(source.kind, SourceKind::Webhook).then(|| view! { <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| { if busy.get_untracked() { return; } let source_id = hook_id.clone(); busy.set(true); loading.set(false); revision.update(|value| *value=value.wrapping_add(1)); let requested=revision.get_untracked(); wasm_bindgen_futures::spawn_local(async move { let result=crate::api::reactive_hook_token(&source_id).await; if alive.try_get_untracked()!=Some(true) || revision.try_get_untracked()!=Some(requested) { return; } busy.set(false); match result { Ok(token) => hook.set(Some(token)), Err(err) => error.set(Some(err.to_string())) } }); })>"Show webhook token"</Button> })}
                     </div></div>{status.and_then(|s| s.error).map(|error| view! { <p role="status" class="mt-2 break-words text-body-sm text-lychee-200">{error}</p> })}</article> }
                 }).collect_view()}
                 {move || hook.get().map(|credentials| view! { <div class=CARD><p class="text-label-sm text-rambutan-300">"Private webhook credentials"</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{credentials.path}</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{format!("Authorization: Bearer {}", credentials.token)}</p><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| hook.set(None))>"Hide token"</Button></div> })}
-                <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| { source_id.set(None); source_name.set(String::new()); source_type.set("folder".into()); source_value.set(String::new()); source_cwd.set(String::new()); cal_times.set("08:00".into()); cal_days.set(Vec::new()); cal_zone.set(calendar::local_time_zone()); source_enabled.set(false); source_open.set(true); })>"New event source"</Button>
+                <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| { change_type.set(None); source_id.set(None); source_name.set(String::new()); source_type.set("folder".into()); source_value.set(String::new()); source_cwd.set(String::new()); cal_times.set("08:00".into()); cal_days.set(Vec::new()); cal_zone.set(calendar::local_time_zone()); source_enabled.set(false); source_open.set(true); })>"New event source"</Button>
                 <Show when=move || source_open.get()>
-                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| source_type.set(event_target_value(&event))>{[("folder","Folder"),("http","Website"),("command","Command"),("schedule","Schedule"),("calendar","Calendar"),("webhook","Webhook"),("app_event","App event"),("custom","Custom event")].into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label>
+                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| { let value = event_target_value(&event); if source_type.get_untracked() == "other" && value != "other" { change_type.set(Some(value)); source_type.set("other".into()); } else { source_type.set(value); } }>{move || source_type_options(&source_type.get()).into_iter().map(|(value,label)| view! { <option value=value selected=move || source_type.get() == value>{label}</option> }).collect_view()}</select></label><app_poll::NewerSourceConfirm pending=change_type on_confirm=Callback::new(move |value| { source_fixed.set(None); source_type.set(value); }) />
                         {move || match source_type.get().as_str() {
                             "folder" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /><Check label="Include subfolders" value=recursive /><Field label="File settle time in seconds" value=settle /></div> }.into_any(),
                             "http" => view! { <div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div> }.into_any(),
@@ -533,6 +537,27 @@ fn milliseconds(text: &str, zero: bool) -> Result<u64, String> {
     } else {
         Ok(millis)
     }
+}
+
+/// The advanced editor's source types, plus the read-only type of the
+/// source it has open, so the select never shows a type it doesn't have.
+fn source_type_options(current: &str) -> Vec<(&'static str, &'static str)> {
+    let mut options = vec![
+        ("folder", "Folder"),
+        ("http", "Website"),
+        ("command", "Command"),
+        ("schedule", "Schedule"),
+        ("calendar", "Calendar"),
+        ("webhook", "Webhook"),
+        ("app_event", "App event"),
+        ("custom", "Custom event"),
+    ];
+    match current {
+        "app_poll" => options.push(("app_poll", SOURCE_KIND_APP)),
+        "other" => options.push(("other", SOURCE_KIND_OTHER)),
+        _ => {}
+    }
+    options
 }
 
 /// The editor types of a source it shows read only: Save is off and
@@ -731,6 +756,16 @@ mod tests {
             .is_err());
         }
         assert!(!fixed_source_type("folder"));
+        // The open source's own type is a choice, so the select shows it.
+        assert_eq!(
+            source_type_options("other").last(),
+            Some(&("other", "Other"))
+        );
+        assert_eq!(
+            source_type_options("app_poll").last(),
+            Some(&("app_poll", "App"))
+        );
+        assert_eq!(source_type_options("folder").len(), 8);
     }
     #[test]
     fn existing_zero_settle_source_round_trips_through_the_editor() {

@@ -4,8 +4,12 @@
 //! A poll uses the owner's own account, so it needs no bruh grant; core
 //! polls it from Task 10 and refuses any save of one that isn't the owner's.
 
+use super::page::{
+    account_order, app_account_name, mailbox_account, mailbox_choice_label, AppsListing,
+};
 use crate::reactive::SourceKind;
 use crate::secrets::review_text;
+use crate::vault::CredentialScope;
 use serde::{Deserialize, Serialize};
 
 /// What an app poll watches. GitHub queries go with the `github` app, new
@@ -52,6 +56,16 @@ pub const REPO_SHAPE: &str = "Use owner/name for the repository.";
 pub const POLL_INTERVAL_RANGE: &str = "Check at most once a minute and at least once a day.";
 pub const POLL_ACCOUNT_NEEDED: &str = "Choose an account.";
 pub const POLL_WATCH_MISMATCH: &str = "That watch doesn't go with that app.";
+/// The simple editor's "Starts when" choice for an app poll.
+pub const STARTS_WHEN_APP: &str = "GitHub or email has something new";
+/// A GitHub watch with no account to poll with: polls use a Global one.
+pub const NO_GITHUB_ACCOUNTS: &str =
+    "No GitHub account to watch with. Connect one in Settings, Apps, for Bruhs you grant it to.";
+/// Asked before an editor changes the type of a newer Bruhs' source, which
+/// replaces what that Bruhs saved (ruling A Task 5).
+pub const CHANGE_NEWER_SOURCE: &str =
+    "This source comes from a newer Bruhs. Changing its type replaces it for good.";
+pub const CHANGE_TYPE: &str = "Change type";
 const YOUR_MAIL: &str = "your mail";
 
 // Model-facing status copy (D20).
@@ -119,9 +133,10 @@ pub fn describe_app_poll(query: &AppQuery, account_label: Option<&str>) -> Strin
     }
 }
 
-/// The line a source editor shows, read only and with Save off, for a
-/// source it can't change: an app poll (until the App editor lands) and a
-/// newer Bruhs' kind (ruling F18). `None` for every other kind.
+/// The line the advanced source editor shows, read only and with Save off,
+/// for a source it can't change: an app poll (edited in a routine's
+/// editor) and a newer Bruhs' kind (ruling F18). `None` for every other
+/// kind.
 pub fn source_read_only(kind: &SourceKind) -> Option<String> {
     match kind {
         SourceKind::AppPoll { query, .. } => Some(describe_app_poll(query, None)),
@@ -208,11 +223,168 @@ pub fn poll_form_for(kind: &SourceKind) -> Option<AppPollForm> {
     })
 }
 
+/// A new App source's form: new GitHub issues, checked at the default
+/// interval.
+#[must_use]
+pub fn new_poll_form() -> AppPollForm {
+    AppPollForm {
+        minutes: (APP_POLL_DEFAULT_MS / MINUTE_MS).to_string(),
+        ..AppPollForm::default()
+    }
+}
+
+/// The accounts a watch can poll with, as `(id, label)`: Global GitHub
+/// accounts by name for the GitHub watches, mailboxes for new email. A
+/// poll runs as the owner, so a bruh's own account is never offered.
+#[must_use]
+pub fn poll_account_choices(watch: PollWatch, listing: &AppsListing) -> Vec<(String, String)> {
+    if watch == PollWatch::NewMail {
+        return listing
+            .mailboxes
+            .iter()
+            .map(|mailbox| (mailbox.mailbox_id.clone(), mailbox_choice_label(mailbox)))
+            .collect();
+    }
+    let mut accounts: Vec<_> = listing
+        .accounts
+        .iter()
+        .filter(|account| {
+            account.app == POLL_APP_GITHUB && account.scope == CredentialScope::Global
+        })
+        .collect();
+    accounts.sort_by(|a, b| account_order(a, b));
+    accounts
+        .into_iter()
+        .map(|account| (account.id.clone(), app_account_name(account)))
+        .collect()
+}
+
+/// The account a new mail poll names in its line ([`describe_app_poll`]):
+/// the mailbox's account. `None` for any other source, or a mailbox the
+/// listing no longer has.
+#[must_use]
+pub fn poll_account_label(kind: &SourceKind, listing: &AppsListing) -> Option<String> {
+    let SourceKind::AppPoll {
+        account,
+        query: AppQuery::NewMail,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    listing
+        .mailboxes
+        .iter()
+        .find(|mailbox| &mailbox.mailbox_id == account)
+        .map(|mailbox| mailbox_account(mailbox.provider, &mailbox.account))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::{AppAccount, AppMailbox};
+    use crate::connections::ServiceProvider;
     use crate::reactive::EventSource;
+    use crate::secrets::SavedCredentialState;
+    use crate::vault::CredentialScope;
     use serde_json::json;
+
+    fn listing() -> AppsListing {
+        let account = |id: &str, app: &str, name: &str, scope: CredentialScope| AppAccount {
+            id: id.into(),
+            app: app.into(),
+            name: name.into(),
+            account: "octo".into(),
+            scope,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        };
+        AppsListing {
+            accounts: vec![
+                account("v1-w", "github", "Work", CredentialScope::Global),
+                account("v1-a", "github", "alt", CredentialScope::Global),
+                account(
+                    "v1-o",
+                    "github",
+                    "Own",
+                    CredentialScope::Bruh {
+                        agent_id: "a".into(),
+                    },
+                ),
+                account("v1-n", "notion", "Notes", CredentialScope::Global),
+            ],
+            mailboxes: vec![AppMailbox {
+                mailbox_id: "m1".into(),
+                provider: ServiceProvider::Gmail,
+                account: "me@x.test".into(),
+            }],
+            ..AppsListing::default()
+        }
+    }
+
+    /// D20: a GitHub watch polls with a Global GitHub account, new mail
+    /// with a mailbox; each list reads as the bruh's Settings read it.
+    #[test]
+    fn poll_accounts_go_with_the_watch() {
+        let listing = listing();
+        let github = vec![
+            ("v1-a".to_owned(), "alt".to_owned()),
+            ("v1-w".to_owned(), "Work".to_owned()),
+        ];
+        assert_eq!(
+            poll_account_choices(PollWatch::GithubIssues, &listing),
+            github
+        );
+        assert_eq!(
+            poll_account_choices(PollWatch::GithubPulls, &listing),
+            github
+        );
+        assert_eq!(
+            poll_account_choices(PollWatch::NewMail, &listing),
+            vec![("m1".to_owned(), "me@x.test, Gmail".to_owned())]
+        );
+        let mail = SourceKind::AppPoll {
+            app: POLL_APP_MAIL.into(),
+            account: "m1".into(),
+            query: AppQuery::NewMail,
+            poll_ms: APP_POLL_DEFAULT_MS,
+        };
+        assert_eq!(
+            poll_account_label(&mail, &listing).as_deref(),
+            Some("me@x.test")
+        );
+        assert_eq!(
+            describe_app_poll(
+                &AppQuery::NewMail,
+                poll_account_label(&mail, &listing).as_deref()
+            ),
+            "Email: new mail in me@x.test"
+        );
+        let gone = SourceKind::AppPoll {
+            app: POLL_APP_MAIL.into(),
+            account: "m9".into(),
+            query: AppQuery::NewMail,
+            poll_ms: APP_POLL_DEFAULT_MS,
+        };
+        assert_eq!(poll_account_label(&gone, &listing), None);
+        assert_eq!(poll_account_label(&SourceKind::Custom, &listing), None);
+        let form = new_poll_form();
+        assert_eq!(
+            (form.watch, form.minutes.as_str()),
+            (PollWatch::GithubIssues, "5")
+        );
+        for copy in [
+            STARTS_WHEN_APP,
+            NO_GITHUB_ACCOUNTS,
+            CHANGE_NEWER_SOURCE,
+            CHANGE_TYPE,
+        ] {
+            assert!(
+                !copy.contains(['–', '—', '•', '·']) && !copy.contains(" - "),
+                "{copy}"
+            );
+        }
+    }
 
     #[test]
     fn app_polls_have_stable_wire_shapes_and_limits() {

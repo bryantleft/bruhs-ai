@@ -14,8 +14,9 @@ use super::{
 };
 use crate::agent::AgentProvider;
 use crate::apps::{
-    classify, connector, normalize_path, validate_call, AppAction, AppCall, APP_ACCOUNT_SHAPE,
-    MAX_ACCOUNT_CHARS, UNKNOWN_APP,
+    account_order, app_account_choice_label, classify, connector, mailbox_choice_label,
+    normalize_path, own_app_line, validate_call, AppAccount, AppAction, AppCall, AppsBruh,
+    AppsListing, APP_ACCOUNT_SHAPE, MAX_ACCOUNT_CHARS, UNKNOWN_APP,
 };
 use crate::mail::{MailComposeContent, MailComposeError, MailReplyTarget};
 use crate::secrets::review_text;
@@ -41,6 +42,12 @@ pub const MAIL_SUBJECT_MAX_BYTES: usize = 998;
 
 /// App copy too: shown beside a bruh's app switches when it can't use apps.
 pub const APPS_NEED_ASK: &str = "Apps need a Claude bruh at Ask first or Full.";
+/// A bruh's Settings, Apps section (D22).
+pub const BRUH_APPS_LABEL: &str = "Apps";
+pub const BRUH_APPS_HINT: &str =
+    "App accounts and mailboxes it may use, as you. Each switch saves at once.";
+pub const BRUH_APPS_NONE: &str =
+    "No shared app accounts or mailboxes yet. Connect one in Settings, Apps.";
 
 // Model-facing copy.
 pub const APP_NOT_GRANTED: &str =
@@ -236,6 +243,84 @@ pub fn app_choices(entries: &[VaultEntry], agent_id: &str) -> AppChoices {
     choices.own.sort_by(entry_order);
     choices.shared.sort_by(entry_order);
     choices
+}
+
+/// Whether `bruh` holds `grant` in an Apps listing.
+#[must_use]
+pub fn grant_switch_on(bruh: &AppsBruh, grant: &AppGrant) -> bool {
+    match grant {
+        AppGrant::Token { entry_id } => bruh.apps.contains(entry_id),
+        AppGrant::Mailbox { mailbox_id } => bruh.mail.contains(mailbox_id),
+    }
+}
+
+/// One row of a bruh's Apps section (D22): an app account it owns, as a
+/// line, or a shared account or mailbox it can be granted, as a switch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppGrantRow {
+    Own(String),
+    Account { id: String, label: String, on: bool },
+    Mailbox { id: String, label: String, on: bool },
+}
+
+impl AppGrantRow {
+    /// The grant the row's switch sends; `None` for an own line.
+    #[must_use]
+    pub fn grant(&self) -> Option<AppGrant> {
+        match self {
+            Self::Own(_) => None,
+            Self::Account { id, .. } => Some(AppGrant::Token {
+                entry_id: id.clone(),
+            }),
+            Self::Mailbox { id, .. } => Some(AppGrant::Mailbox {
+                mailbox_id: id.clone(),
+            }),
+        }
+    }
+}
+
+/// The rows for bruh `agent_id` from an Apps listing: its own accounts,
+/// then the shared ones, each by name as [`app_choices`] orders them, then
+/// the mailboxes in the listing's order. Each switch is on when the
+/// listing's grants hold it. Both apps draw these.
+#[must_use]
+pub fn app_grant_rows(listing: &AppsListing, agent_id: &str) -> Vec<AppGrantRow> {
+    let bruh = listing.bruhs.iter().find(|bruh| bruh.agent_id == agent_id);
+    let on = |grant: AppGrant| bruh.is_some_and(|bruh| grant_switch_on(bruh, &grant));
+    let in_scope = |scope: &CredentialScope| {
+        let mut accounts: Vec<&AppAccount> = listing
+            .accounts
+            .iter()
+            .filter(|account| &account.scope == scope)
+            .collect();
+        accounts.sort_by(|a, b| account_order(a, b));
+        accounts
+    };
+    let own = in_scope(&CredentialScope::Bruh {
+        agent_id: agent_id.to_owned(),
+    });
+    let shared = in_scope(&CredentialScope::Global);
+    let own = own
+        .into_iter()
+        .map(|account| AppGrantRow::Own(own_app_line(&review_text(&account.name))));
+    let shared = shared.into_iter().map(|account| AppGrantRow::Account {
+        id: account.id.clone(),
+        label: app_account_choice_label(account),
+        on: on(AppGrant::Token {
+            entry_id: account.id.clone(),
+        }),
+    });
+    let mailboxes = listing
+        .mailboxes
+        .iter()
+        .map(|mailbox| AppGrantRow::Mailbox {
+            id: mailbox.mailbox_id.clone(),
+            label: mailbox_choice_label(mailbox),
+            on: on(AppGrant::Mailbox {
+                mailbox_id: mailbox.mailbox_id.clone(),
+            }),
+        });
+    own.chain(shared).chain(mailboxes).collect()
 }
 
 /// Whether `tool` is one of the bruh's app or mail tools.
@@ -657,7 +742,9 @@ pub(super) fn mail_detail(input: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apps::{AppAccount, AppMailbox, AppsBruh};
     use crate::apps::{APP_GRAPHQL_SHAPE, APP_PATH};
+    use crate::connections::ServiceProvider;
     use crate::crew::{
         approval_detail, approval_fingerprint, approval_summary, BRUH_BROWSER_TOOL, DELIVERY_DENIAL,
     };
@@ -665,6 +752,129 @@ mod tests {
     use crate::vault::AppTokenMeta;
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    fn account(id: &str, app: &str, name: &str, scope: CredentialScope) -> AppAccount {
+        AppAccount {
+            id: id.into(),
+            app: app.into(),
+            name: name.into(),
+            account: "acct".into(),
+            scope,
+            state: SavedCredentialState::Saved,
+            attention: None,
+        }
+    }
+
+    fn own(agent_id: &str) -> CredentialScope {
+        CredentialScope::Bruh {
+            agent_id: agent_id.into(),
+        }
+    }
+
+    /// D22: its own accounts as lines, then the shared ones, then the
+    /// mailboxes, each switch on as the listing's grants say. Other bruhs'
+    /// and Project accounts never show; names show escaped.
+    #[test]
+    fn app_grant_rows_read_the_listing_for_one_bruh() {
+        let listing = AppsListing {
+            accounts: vec![
+                account("v1-z", "notion", "zed", CredentialScope::Global),
+                account("v1-o", "github", "GitHub octo", own("a")),
+                account("v1-b", "github", "Theirs", own("b")),
+                account(
+                    "v1-p",
+                    "github",
+                    "Proj",
+                    CredentialScope::Project { path: "/p".into() },
+                ),
+                account("v1-n", "linear", "Ops\u{202e}", CredentialScope::Global),
+                account("v1-u", "newer", "Later", CredentialScope::Global),
+            ],
+            mailboxes: vec![AppMailbox {
+                mailbox_id: "m1".into(),
+                provider: ServiceProvider::Outlook,
+                account: String::new(),
+            }],
+            bruhs: vec![AppsBruh {
+                agent_id: "a".into(),
+                name: "Ada".into(),
+                apps: vec!["v1-z".into()],
+                mail: vec!["m1".into()],
+                unavailable: None,
+            }],
+            protocol: APPS_PROTOCOL,
+        };
+        assert_eq!(
+            app_grant_rows(&listing, "a"),
+            vec![
+                AppGrantRow::Own("GitHub octo: its own".into()),
+                AppGrantRow::Account {
+                    id: "v1-u".into(),
+                    label: "Later, newer".into(),
+                    on: false,
+                },
+                AppGrantRow::Account {
+                    id: "v1-n".into(),
+                    label: "Ops\\u{202e}, Linear".into(),
+                    on: false,
+                },
+                AppGrantRow::Account {
+                    id: "v1-z".into(),
+                    label: "zed, Notion".into(),
+                    on: true,
+                },
+                AppGrantRow::Mailbox {
+                    id: "m1".into(),
+                    label: "Outlook Mail account".into(),
+                    on: true,
+                },
+            ]
+        );
+        // A bruh the listing doesn't name holds nothing.
+        assert!(app_grant_rows(&listing, "c").iter().all(|row| !matches!(
+            row,
+            AppGrantRow::Account { on: true, .. } | AppGrantRow::Mailbox { on: true, .. }
+        )));
+        let row = AppGrantRow::Mailbox {
+            id: "m1".into(),
+            label: String::new(),
+            on: false,
+        };
+        assert_eq!(
+            row.grant(),
+            Some(AppGrant::Mailbox {
+                mailbox_id: "m1".into()
+            })
+        );
+        assert_eq!(AppGrantRow::Own(String::new()).grant(), None);
+        for copy in [BRUH_APPS_LABEL, BRUH_APPS_HINT, BRUH_APPS_NONE] {
+            assert!(
+                !copy.contains(['–', '—', '•', '·']) && !copy.contains(" - "),
+                "{copy}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_switch_shows_the_bruhs_grant() {
+        let bruh = AppsBruh {
+            agent_id: "a".into(),
+            name: "Ada".into(),
+            apps: vec!["v1-x".into()],
+            mail: vec!["m1".into()],
+            unavailable: None,
+        };
+        let token = |id: &str| AppGrant::Token {
+            entry_id: id.into(),
+        };
+        let mailbox = |id: &str| AppGrant::Mailbox {
+            mailbox_id: id.into(),
+        };
+        assert!(grant_switch_on(&bruh, &token("v1-x")));
+        assert!(!grant_switch_on(&bruh, &token("m1")));
+        assert!(grant_switch_on(&bruh, &mailbox("m1")));
+        assert!(!grant_switch_on(&bruh, &mailbox("v1-x")));
+    }
 
     #[test]
     fn grants_toggle_one_id_and_stay_bounded() {

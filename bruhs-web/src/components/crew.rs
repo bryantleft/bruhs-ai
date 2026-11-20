@@ -1,5 +1,6 @@
 //! The crew: bruhs, their faces and their pages.
 
+pub mod app_grants;
 pub mod chat;
 pub mod computer;
 pub mod create;

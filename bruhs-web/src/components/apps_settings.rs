@@ -15,11 +15,13 @@ mod form;
 
 use bruhs_models::apps::{
     app_scope_line, apps_wait_reason, connected_as, disconnect_confirm, open_apps_from_own_address,
-    AppAccount, AppConnector, AppsBruh, AppsListing, APPS_LOADING, CONNECT, CONNECTORS, DISCONNECT,
+    AppAccount, AppConnector, AppsListing, APPS_LOADING, CONNECT, CONNECTORS, DISCONNECT,
     GRANTS_LABEL, MAIL_GROUP, MAIL_HINT, NO_BRUHS_FOR_APPS, NO_MAILBOXES, REPLACE_TOKEN, TEST,
 };
-use bruhs_models::crew::{apps_ready, apps_reason, AppGrant, ServiceNotice, APPS_NEED_ASK};
-use bruhs_models::reactive::ReactiveCommand;
+use bruhs_models::crew::{
+    apps_ready, apps_reason, grant_switch_on, toggle_grant, AppGrant, ServiceNotice, APPS_NEED_ASK,
+    MAX_APP_GRANTS, MAX_MAIL_GRANTS,
+};
 use bruhs_models::secrets::{review_text, SavedCredentialState};
 use bruhs_models::vault::{
     CredentialScope, VaultBusy as Busy, VaultNotice, KEEP, LOAD_RETRY, REFRESH,
@@ -66,7 +68,7 @@ impl Load {
 
 /// Whether focus fell to the page's body, as it does when the focused
 /// control is disabled while it waits.
-fn focus_dropped() -> bool {
+pub(crate) fn focus_dropped() -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return false;
     };
@@ -78,7 +80,7 @@ fn focus_dropped() -> bool {
 }
 
 /// Focus the element `selector` names once the view has drawn.
-fn focus_selector_after_render(selector: String) {
+pub(crate) fn focus_selector_after_render(selector: String) {
     request_animation_frame(move || {
         let target = web_sys::window()
             .and_then(|window| window.document())
@@ -154,17 +156,9 @@ impl Page {
     }
 }
 
-/// Whether `bruh` holds `grant` in the listing.
-fn grant_switch_on(bruh: &AppsBruh, grant: &AppGrant) -> bool {
-    match grant {
-        AppGrant::Token { entry_id } => bruh.apps.contains(entry_id),
-        AppGrant::Mailbox { mailbox_id } => bruh.mail.contains(mailbox_id),
-    }
-}
-
 /// `grant` set on or off for one bruh in the listing, as the server keeps
-/// it: sorted and deduped.
-fn set_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bool) {
+/// it (`toggle_grant`: sorted, deduped and bounded).
+pub(crate) fn set_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bool) {
     let Some(bruh) = listing
         .bruhs
         .iter_mut()
@@ -172,14 +166,12 @@ fn set_grant(listing: &mut AppsListing, agent_id: &str, grant: &AppGrant, on: bo
     else {
         return;
     };
-    let (list, id) = match grant {
-        AppGrant::Token { entry_id } => (&mut bruh.apps, entry_id),
-        AppGrant::Mailbox { mailbox_id } => (&mut bruh.mail, mailbox_id),
+    let (list, id, max) = match grant {
+        AppGrant::Token { entry_id } => (&mut bruh.apps, entry_id, MAX_APP_GRANTS),
+        AppGrant::Mailbox { mailbox_id } => (&mut bruh.mail, mailbox_id, MAX_MAIL_GRANTS),
     };
-    list.retain(|held| held != id);
-    if on {
-        list.push(id.clone());
-        list.sort();
+    if let Ok(next) = toggle_grant(list, id, on, max) {
+        *list = next;
     }
 }
 
@@ -647,18 +639,14 @@ fn GrantSwitch(
         if page.busy.get_untracked() != Busy::Idle || page.grants_off().is_some() {
             return;
         }
-        let command = ReactiveCommand::SetAppGrant {
-            agent_id: agent_id.get_value(),
-            grant: grant.get_value(),
-            granted: on,
-        };
+        let (target_bruh, target_grant) = (agent_id.get_value(), grant.get_value());
         page.busy.set(Busy::Changing);
         page.notice.set(None);
         error.set(None);
         pending.set(Some(on));
         let focus = format!("[data-apps-grant=\"{}\"]", selector.get_value());
         wasm_bindgen_futures::spawn_local(async move {
-            let sent = crate::api::reactive_command(&command).await;
+            let sent = crate::api::set_app_grant(&target_bruh, &target_grant, on).await;
             let next = match &sent {
                 Ok(_) => crate::api::apps_listing().await.ok(),
                 Err(_) => None,
@@ -721,27 +709,6 @@ mod tests {
     use super::*;
     use bruhs_models::apps::AppsBruh;
     use bruhs_models::crew::AppGrant;
-
-    #[test]
-    fn a_switch_shows_the_bruhs_grant() {
-        let bruh = AppsBruh {
-            agent_id: "a".into(),
-            name: "Ada".into(),
-            apps: vec!["v1-x".into()],
-            mail: vec!["m1".into()],
-            unavailable: None,
-        };
-        let token = |id: &str| AppGrant::Token {
-            entry_id: id.into(),
-        };
-        let mailbox = |id: &str| AppGrant::Mailbox {
-            mailbox_id: id.into(),
-        };
-        assert!(grant_switch_on(&bruh, &token("v1-x")));
-        assert!(!grant_switch_on(&bruh, &token("m1")));
-        assert!(grant_switch_on(&bruh, &mailbox("m1")));
-        assert!(!grant_switch_on(&bruh, &mailbox("v1-x")));
-    }
 
     /// When the listing can't be read after a grant, the page shows what
     /// was sent, kept as the server keeps it.

@@ -4,13 +4,16 @@
 //! account out of every bruh's grants. The browser keeps none of it beyond
 //! the page.
 
-use super::vault::vault_json;
+use super::vault::{vault_call, vault_json};
 use super::{segment, ApiError};
 use bruhs_models::apps::{AppAccount, AppConnect, AppReplace, AppTestResult, AppsListing};
+use bruhs_models::crew::AppGrant;
+use bruhs_models::reactive::ReactiveCommand;
 use gloo_net::http::Method;
 
 const APPS_PATH: &str = "/api/apps";
 const ACCOUNTS_PATH: &str = "/api/apps/accounts";
+const COMMANDS_PATH: &str = "/api/reactive/commands";
 
 fn app_account_path(id: &str) -> String {
     format!("{ACCOUNTS_PATH}/{}", segment(id))
@@ -44,6 +47,25 @@ pub async fn replace_app_token(id: &str, replace: &AppReplace) -> Result<AppAcco
 /// so read `ok`, not the status.
 pub async fn test_app_account(id: &str) -> Result<AppTestResult, ApiError> {
     vault_json::<(), _>(Method::POST, &app_test_path(id), None).await
+}
+
+/// Turns one bruh's app or mail grant on or off (`SetAppGrant`, D9). Only
+/// for a service where `apps_ready`. Bounded like the calls above; the
+/// answer's snapshot is left unread, since the page reloads the listing.
+pub async fn set_app_grant(
+    agent_id: &str,
+    grant: &AppGrant,
+    granted: bool,
+) -> Result<(), ApiError> {
+    let command = ReactiveCommand::SetAppGrant {
+        agent_id: agent_id.to_owned(),
+        grant: grant.clone(),
+        granted,
+    };
+    vault_call(Method::POST, COMMANDS_PATH, Some(&command), |_| async {
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(test)]

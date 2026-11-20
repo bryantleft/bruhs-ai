@@ -11,6 +11,7 @@ use bruhs_models::crew::{
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use leptos::prelude::*;
 
+use super::app_grants::AppGrants;
 use super::data::use_crew_snapshot;
 use super::face_editor::FaceEditor;
 use super::vault_grants::VaultGrants;
@@ -313,6 +314,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                     </label>
                 </div>
                 <VaultGrants agent_id=agent_id grants=vault disabled=vault_block />
+                <AppGrants agent_id=id.get_value() />
             </section>
             <section class=SECTION aria-labelledby="bruh-settings-face">
                 <h2 id="bruh-settings-face" class="text-label text-rambutan-100">"Face"</h2>

@@ -5,7 +5,9 @@
 use std::collections::VecDeque;
 
 use bruhs_models::crew::room::rooms_reason;
-use bruhs_models::crew::{crew_commands_ready, rooms_ready, service_notice, vault_reason};
+use bruhs_models::crew::{
+    apps_reason, crew_commands_ready, rooms_ready, service_notice, vault_reason,
+};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
 
@@ -77,6 +79,12 @@ impl CrewData {
             return None;
         }
         vault_reason(self.protocol())
+    }
+
+    /// Why app grants and App sources are off, once the version is known
+    /// to be older. Empty while they work.
+    pub fn apps_reason(&self) -> Option<&'static str> {
+        apps_reason(self.protocol())
     }
 }
 

@@ -248,6 +248,44 @@ pub fn mailbox_account(provider: ServiceProvider, label: &str) -> String {
     }
 }
 
+/// The order a bruh's Settings and a poll's choices list app accounts in:
+/// by name ignoring case, then by name, then by id.
+#[must_use]
+pub fn account_order(a: &AppAccount, b: &AppAccount) -> std::cmp::Ordering {
+    a.name
+        .to_lowercase()
+        .cmp(&b.name.to_lowercase())
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.id.cmp(&b.id))
+}
+
+/// An app account's name as both apps show it, escaped.
+#[must_use]
+pub fn app_account_name(account: &AppAccount) -> String {
+    review_text(&account.name)
+}
+
+/// How a shared app account reads beside its switch in a bruh's Settings:
+/// "{name}, {App}", or the app id for an app this build doesn't know.
+#[must_use]
+pub fn app_account_choice_label(account: &AppAccount) -> String {
+    let app = super::connector(&account.app)
+        .map_or_else(|| review_text(&account.app), |app| app.name.to_owned());
+    format!("{}, {app}", app_account_name(account))
+}
+
+/// How a mailbox reads beside its switch or in a poll's account choice:
+/// "{account}, {provider}", or [`mailbox_account`]'s "{provider} account"
+/// alone when the cache has no label.
+#[must_use]
+pub fn mailbox_choice_label(mailbox: &AppMailbox) -> String {
+    let account = mailbox_account(mailbox.provider, &mailbox.account);
+    if review_text(mailbox.account.trim()).is_empty() {
+        return account;
+    }
+    format!("{account}, {}", mailbox.provider.name())
+}
+
 /// An account label as stored: shown as [`review_text`] shows it, cut to
 /// [`MAX_APP_ACCOUNT_CHARS`] and trimmed (ruling F24). `None` when nothing
 /// is left.

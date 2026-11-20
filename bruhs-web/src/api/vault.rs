@@ -69,7 +69,7 @@ async fn bounded<T>(
 /// One vault call within [`VAULT_CALL_TIMEOUT_MS`], as the desktop waits:
 /// a keychain or 1Password prompt can hold the server, and the page must
 /// not wait on it for good. `read` takes the successful response.
-async fn vault_call<B, T, R>(
+pub(super) async fn vault_call<B, T, R>(
     method: Method,
     route: &str,
     body: Option<&B>,
