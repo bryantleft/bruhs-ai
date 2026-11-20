@@ -36,6 +36,9 @@ pub const ANOTHER_ACCOUNT: &str =
 pub const ACCOUNT_CONNECTED: &str = "That account is already connected. Replace its token instead.";
 /// The mail cache couldn't list its mailboxes.
 pub const MAILBOXES_UNAVAILABLE: &str = "Bruhs couldn't read your mail accounts. Try again.";
+/// A connect or replace body that isn't one: never serde's text, which can
+/// quote the token.
+pub const INVALID_APP_ACCOUNT: &str = "Invalid app account.";
 
 /// One connected app account, value free (`GET /api/apps`).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -83,6 +86,10 @@ pub struct AppsListing {
     pub mailboxes: Vec<AppMailbox>,
     #[serde(default)]
     pub bruhs: Vec<AppsBruh>,
+    /// The crew protocol the server speaks (ruling F19): grant switches
+    /// work only when `apps_ready(protocol)`. 0 from an older server.
+    #[serde(default)]
+    pub protocol: u32,
 }
 
 /// `POST /api/apps/accounts`. Write-only: deliberately no `Debug` or

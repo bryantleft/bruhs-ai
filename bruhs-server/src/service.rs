@@ -25,9 +25,14 @@ use std::{
 const LABEL: &str = "dev.bruhs.server";
 const UNIT: &str = "bruhs-server.service";
 /// Settings that describe this process's own lifetime, not the service's,
-/// and the acceptance script's in-memory secrets: a service installed from
-/// such a server would start with an empty vault and keep nothing.
-const SKIPPED_ENV: [&str; 2] = ["BRUHS_EXIT_WITH_PARENT", "BRUHS_SECRET_STORE"];
+/// the acceptance script's in-memory secrets (a service installed from such
+/// a server would start with an empty vault and keep nothing), and a debug
+/// build's test app upstream (D24).
+const SKIPPED_ENV: [&str; 3] = [
+    "BRUHS_EXIT_WITH_PARENT",
+    "BRUHS_SECRET_STORE",
+    bruhs_core::apps::APPS_UPSTREAM_ENV,
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
@@ -3036,5 +3041,14 @@ mod tests {
         assert!(carried("BRUHS_WEB_ORIGIN"));
         assert!(carried("PATH"));
         assert!(!carried("HOME"));
+    }
+
+    /// D24: a debug build's test upstream never follows the server into
+    /// the service, which then calls the real apps.
+    #[test]
+    fn the_service_never_copies_the_upstream_switch() {
+        assert_eq!(bruhs_core::apps::APPS_UPSTREAM_ENV, "BRUHS_APPS_UPSTREAM");
+        assert!(!carried(bruhs_core::apps::APPS_UPSTREAM_ENV));
+        assert!(carried("BRUHS_APPS_OTHER"));
     }
 }

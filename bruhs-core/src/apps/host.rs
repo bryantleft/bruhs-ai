@@ -44,6 +44,15 @@ pub struct MailSendOutcome {
     pub message: String,
 }
 
+/// A gated call with its token read, for [`AppsHost::send_ready`].
+/// Neither `Debug` nor `Clone`: it holds the token, wiped when it drops.
+pub struct ReadyCall<'a> {
+    connector: &'static AppConnector,
+    params: BTreeMap<String, String>,
+    secret: AppSecret,
+    call: &'a AppCall,
+}
+
 /// Everything the Apps routes, a bruh's app calls and the polls go
 /// through. Clone it freely: its [`AppHttp`] is the process's one client,
 /// so every clone shares its call slots.
@@ -430,6 +439,19 @@ impl AppsHost {
         entry: &VaultEntry,
         call: &AppCall,
     ) -> Result<AppResponse, AppsError> {
+        let ready = self.ready(entry, call).await?;
+        self.send_ready(ready).await
+    }
+
+    /// [`Self::request`]'s checks and its token read, without the call: a
+    /// route that must not cut a write in flight reads the token within its
+    /// own budget and sends only when the whole call still fits (ruling
+    /// F11).
+    pub async fn ready<'a>(
+        &self,
+        entry: &VaultEntry,
+        call: &'a AppCall,
+    ) -> Result<ReadyCall<'a>, AppsError> {
         let VaultKind::AppToken(meta) = &entry.kind else {
             return Err(AppsError::Invalid(UNKNOWN_APP));
         };
@@ -439,7 +461,20 @@ impl AppsHost {
         }
         classify(connector, call).map_err(AppsError::Invalid)?;
         let secret = self.resolve(&entry.id).await?;
-        self.http.call(connector, &meta.params, &secret, call).await
+        Ok(ReadyCall {
+            connector,
+            params: meta.params.clone(),
+            secret,
+            call,
+        })
+    }
+
+    /// Sends a call [`Self::ready`] made ready. It runs to its own
+    /// `APP_CALL_TIMEOUT_MS`.
+    pub async fn send_ready(&self, ready: ReadyCall<'_>) -> Result<AppResponse, AppsError> {
+        self.http
+            .call(ready.connector, &ready.params, &ready.secret, ready.call)
+            .await
     }
 
     /// An app token entry with its metadata and connector; any other kind

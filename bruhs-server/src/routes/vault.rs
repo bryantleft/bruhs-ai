@@ -10,7 +10,8 @@
 //!   ([`VaultCheck`]).
 //!
 //! An app token is the Apps routes' to create and replace (D8): these
-//! refuse the kind with [`MANAGE_IN_APPS`]. Delete and Check take any entry.
+//! refuse the kind with [`MANAGE_IN_APPS`]. Delete and Check take any entry;
+//! Check on an app token runs its test call.
 //!
 //! Every route sits behind the shared loopback guard, and each also needs
 //! a request from the owner's own app ([`Policy::owner_request`]): other
@@ -25,13 +26,14 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Extension, Json,
 };
-use bruhs_core::{reactive::ReactiveRuntime, secrets::SecretError, AppState};
+use bruhs_core::{apps::AppsHost, reactive::ReactiveRuntime, secrets::SecretError, AppState};
 use bruhs_models::vault::{
-    CredentialScope, VaultBruh, VaultCheck, VaultCreate, VaultEntry, VaultListing,
+    CredentialScope, VaultBruh, VaultCheck, VaultCreate, VaultEntry, VaultKind, VaultListing,
     VaultSecretInput, VaultUpdate, BRUH_MISSING, ENTRY_CHANGED, ENTRY_GONE, INVALID_ENTRY,
     MANAGE_IN_APPS, OWNER_ONLY, PROJECT_MISSING,
 };
 
+use super::apps::RouteError;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::local_access::Policy;
@@ -47,7 +49,7 @@ mod tests;
 
 /// The owner copy for a vault error. Every message is fixed text: core's
 /// vault errors never carry a value or 1Password's own output.
-fn vault_error(error: SecretError) -> AppError {
+pub(super) fn vault_error(error: SecretError) -> AppError {
     match error {
         SecretError::NotSaved => AppError::NotFound(ENTRY_GONE.into()),
         SecretError::Invalid(message) => AppError::BadRequest(message.into()),
@@ -255,18 +257,30 @@ async fn forget_grants(runtime: &ReactiveRuntime, id: &str) {
     }
 }
 
-/// `POST /api/vault/{id}/check`: reads each value once and drops it.
+/// `POST /api/vault/{id}/check`: reads each value once and drops it. An
+/// app token runs its test call instead (D8), through the apps host.
 pub async fn check(
     State(state): State<Arc<AppState>>,
     State(config): State<Arc<Config>>,
+    apps: Option<Extension<AppsHost>>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<VaultCheck>, AppError> {
+) -> Result<Json<VaultCheck>, RouteError> {
     owner_only(&config.access, &headers)?;
+    if let Some(Extension(apps)) = apps {
+        let entry = state
+            .secrets()
+            .vault_entry(&id)
+            .await
+            .map_err(vault_error)?;
+        if entry.is_some_and(|entry| matches!(entry.kind, VaultKind::AppToken(_))) {
+            return super::apps::check_saved(&apps, &id).await.map(Json);
+        }
+    }
     state
         .secrets()
         .vault_check(&id)
         .await
         .map(Json)
-        .map_err(vault_error)
+        .map_err(|error| vault_error(error).into())
 }

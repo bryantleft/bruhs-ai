@@ -136,6 +136,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Before the worker starts, so the first run's preamble and gate see
     // the vault.
     reactive.attach_vault(state.secrets().clone())?;
+    // The process's one app client (D13), shared by the Apps routes, the
+    // bruhs' calls and the polls; attached before the worker starts too.
+    let apps = bruhs_core::apps::AppsHost::new(
+        state.secrets().clone(),
+        bruhs_core::apps::AppHttp::from_env()?,
+        state.mail().cloned(),
+        Arc::clone(&gmail),
+        Arc::clone(&outlook),
+    );
+    reactive.attach_apps(apps.clone())?;
     let _reactive_worker = reactive.start(Arc::clone(&state))?;
     let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
@@ -178,6 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     })
     .layer(axum::Extension(reactive))
+    .layer(axum::Extension(apps))
     .layer(axum::Extension(gmail))
     .layer(axum::Extension(outlook));
     let coordination = bruhs_core::coordination::CoordinationRuntime::open(
@@ -506,6 +517,11 @@ fn router_with_capture_daemon(
             post(routes::computer::command),
         )
         .route(
+            "/api/reactive/agents/{id}/apps",
+            post(routes::bruh_apps::call)
+                .layer(DefaultBodyLimit::max(routes::apps::MAX_BODY_BYTES)),
+        )
+        .route(
             "/api/reactive/rooms/{id}/messages",
             get(routes::reactive::room_messages),
         )
@@ -628,6 +644,17 @@ fn router_with_capture_daemon(
                 .layer(DefaultBodyLimit::max(routes::vault::MAX_BODY_BYTES)),
         )
         .route("/api/vault/{id}/check", post(routes::vault::check))
+        .route("/api/apps", get(routes::apps::list))
+        .route(
+            "/api/apps/accounts",
+            post(routes::apps::connect).layer(DefaultBodyLimit::max(routes::apps::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/api/apps/accounts/{id}",
+            axum::routing::put(routes::apps::replace)
+                .layer(DefaultBodyLimit::max(routes::apps::MAX_BODY_BYTES)),
+        )
+        .route("/api/apps/accounts/{id}/test", post(routes::apps::test))
         .route("/api/connections", get(routes::connections::list))
         .route(
             "/api/connections/{provider}/start",
