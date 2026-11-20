@@ -48,6 +48,9 @@ describe("index.html", () => {
     const actions = [...html.matchAll(/<a class="btn btn-primary for-desktop" href="\/download">([^]*?)<\/a>/g)];
     assert.equal(actions.length, 2);
     for (const [, content] of actions) {
+      assert.match(content!, /Download for macOS/);
+      assert.match(content!, /Download for Windows/);
+      assert.match(content!, /Download for Linux/);
       assert.match(content!, /Download for desktop/);
       for (const icon of ["apple", "windows", "linux"]) assert.ok(content!.includes("icon-" + icon));
     }
