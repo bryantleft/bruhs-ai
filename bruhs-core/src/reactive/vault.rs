@@ -333,9 +333,21 @@ impl ReactiveRuntime {
 
     /// What a run's turn needs from the vault: the folders no run may
     /// reach, whether the preamble tells a bruh whose Computer is on about
-    /// its logins, and, for a run that may have the key tool (`keys`), the
-    /// keys it may use.
-    pub(super) async fn turn_vault(&self, agent_id: &str, computer: bool, keys: bool) -> TurnVault {
+    /// its logins, for a run that may have the key tool (`keys`) the keys
+    /// it may use, and for one that may have the app tools (`apps`) the
+    /// apps and mailboxes it may use.
+    pub(super) async fn turn_vault(
+        &self,
+        agent_id: &str,
+        computer: bool,
+        keys: bool,
+        apps: bool,
+    ) -> TurnVault {
+        let (app_names, mail) = if apps {
+            self.usable_apps(agent_id).await
+        } else {
+            (Vec::new(), Vec::new())
+        };
         TurnVault {
             private: self.private_rule_folders().to_vec(),
             logins: computer && self.has_usable_logins(agent_id).await,
@@ -344,6 +356,8 @@ impl ReactiveRuntime {
             } else {
                 Vec::new()
             },
+            apps: app_names,
+            mail,
         }
     }
 

@@ -6,9 +6,12 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const FLAG: &str = "--workbench-mcp";
 const SERVER: &str = "bruhs_workbench";
-/// Set on a bruh's helper: the agent id whose own browser it drives. The
-/// helper then offers only that browser (see [`BruhScope`]).
+/// Set on a bruh's helper: the agent id whose own tools it serves. The
+/// helper then offers only those (see [`BruhScope`]).
 pub(crate) const BRUH_ENV: &str = "BRUHS_WORKBENCH_BRUH";
+/// Set on a bruh's helper beside [`BRUH_ENV`]: the bruh's tools, as comma
+/// separated words (`browser`, `apps`, `mail`). Unknown words are ignored.
+pub(crate) const BRUH_TOOLS_ENV: &str = "BRUHS_WORKBENCH_BRUH_TOOLS";
 const ENDPOINT_ENV: &str = "BRUHS_WORKBENCH_URL";
 static ENDPOINT: OnceLock<String> = OnceLock::new();
 pub fn set_endpoint(url: String) -> io::Result<()> {
@@ -48,18 +51,94 @@ fn endpoint() -> io::Result<String> {
     Ok(endpoint)
 }
 
-/// Give a bruh's unattended Claude turn its own browser: the helper as the
-/// turn's only MCP server, bound to `agent_id`, with no thread, project or
-/// grant scope. `tools` stays as it is, so nothing pre-approves the browser
-/// and every call reaches the run's permission handler and gate.
-pub(crate) fn configure_bruh(options: &mut ProviderQueryOptions, agent_id: &str) -> io::Result<()> {
+/// What a bruh's turn is offered on its helper: its own browser, and the
+/// app and mail tools once it has a usable account (spec section 7, D1).
+/// The caller decides each with the bruh's live grants and level.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BruhTools {
+    /// The bruh whose tools these are, by agent id.
+    pub agent_id: String,
+    /// Its Computer is on: `local_browser`.
+    pub browser: bool,
+    /// It may use an app account: `app_request` and `list_apps`.
+    pub apps: bool,
+    /// It may send from a mailbox: `send_mail` and `list_apps`.
+    pub mail: bool,
+}
+
+impl BruhTools {
+    /// Whether any tool is offered.
+    pub fn any(&self) -> bool {
+        self.browser || self.apps || self.mail
+    }
+
+    /// The tools as [`BRUH_TOOLS_ENV`] carries them.
+    pub(crate) fn words(&self) -> String {
+        [
+            (self.browser, "browser"),
+            (self.apps, "apps"),
+            (self.mail, "mail"),
+        ]
+        .into_iter()
+        .filter_map(|(on, word)| on.then_some(word))
+        .collect::<Vec<_>>()
+        .join(",")
+    }
+}
+
+/// The tools a bruh's helper offers, read from [`BRUH_TOOLS_ENV`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BruhToolSet {
+    browser: bool,
+    apps: bool,
+    mail: bool,
+}
+
+impl BruhToolSet {
+    /// Known words only; anything else is ignored, so an unknown tool is
+    /// never offered.
+    fn parse(words: &str) -> Self {
+        let mut set = Self::default();
+        for word in words.split(',').map(str::trim) {
+            match word {
+                "browser" => set.browser = true,
+                "apps" => set.apps = true,
+                "mail" => set.mail = true,
+                _ => {}
+            }
+        }
+        set
+    }
+
+    /// Whether this set offers the bruh tool `name`.
+    fn offers(self, name: &str) -> bool {
+        match name {
+            "local_browser" => self.browser,
+            "app_request" => self.apps,
+            "list_apps" => self.apps || self.mail,
+            "send_mail" => self.mail,
+            _ => false,
+        }
+    }
+}
+
+/// Give a bruh's unattended Claude turn its own tools: the helper as the
+/// turn's only MCP server, bound to `tools.agent_id` and naming its tools,
+/// with no thread, project or grant scope. `tools` stays as it is, so
+/// nothing pre-approves them and every call reaches the run's permission
+/// handler and gate.
+pub(crate) fn configure_bruh(
+    options: &mut ProviderQueryOptions,
+    tools: &BruhTools,
+) -> io::Result<()> {
     let ProviderQueryOptions::Claude(o) = options else {
         return Err(io::Error::other(bruhs_models::crew::NEEDS_CLAUDE));
     };
     let executable = std::env::current_exe()?.to_string_lossy().into_owned();
     let env = HashMap::from([
         (ENDPOINT_ENV, endpoint()?),
-        (BRUH_ENV, agent_id.to_string()),
+        (BRUH_ENV, tools.agent_id.clone()),
+        (BRUH_TOOLS_ENV, tools.words()),
     ]);
     // Replace, never merge: this is the turn's one server.
     o.mcp_config = Some(
@@ -229,67 +308,127 @@ fn catalogue(read_only: bool) -> Value {
 /// The model-facing description of a bruh's browser.
 const BRUH_BROWSER_DESCRIPTION: &str = "Use your own browser. It keeps its logins between runs and starts on first use. command.action is one of navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill, logins. Take a snapshot to read the page; screenshots are 1280 by 800 CSS pixels, the coordinates click_at uses. If the owner has taken control, your step waits until they hand it back.";
 
-/// What a bruh's helper offers: its own browser, and nothing else. No
-/// evaluate, console or network action, no session or grant.
-fn bruh_catalogue() -> Value {
+/// What a bruh's helper offers: the tools in `set`, and nothing else. Its
+/// browser has no evaluate, console or network action, no session or
+/// grant. Every tool says it isn't read only, so a client never skips the
+/// permission prompt that leaves the call's allowance (F13).
+fn bruh_catalogue(set: &BruhToolSet) -> Value {
+    use bruhs_models::crew::{
+        APP_REQUEST_DESCRIPTION, LIST_APPS_DESCRIPTION, SEND_MAIL_DESCRIPTION,
+    };
     let string = json!({"type":"string"});
     let number = json!({"type":"number"});
-    let secret = json!({"type":"object","properties":{
-        "login_id":string,
-        "field":{"type":"string","enum":["username","password","totp"]}
-    },"required":["login_id","field"],"additionalProperties":false});
-    let command = json!({"type":"object","properties":{
-        "action":{"type":"string","enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
-        "url":string,"selector":string,"text":string,"x":number,"y":number,
-        "key":string,"dx":number,"dy":number,"secret":secret,"submit":{"type":"boolean"}
-    },"required":["action"],"additionalProperties":false});
-    json!({"tools":[{
-        "name":"local_browser",
-        "description":BRUH_BROWSER_DESCRIPTION,
-        "inputSchema":{"type":"object","properties":{"command":command},"required":["command"],"additionalProperties":false},
-        "annotations":{"readOnlyHint":false}
-    }]})
+    let tool = |name: &str, description: &str, properties: Value, required: Value| {
+        json!({
+            "name":name,
+            "description":description,
+            "inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},
+            "annotations":{"readOnlyHint":false}
+        })
+    };
+    let mut tools = Vec::new();
+    if set.browser {
+        let secret = json!({"type":"object","properties":{
+            "login_id":string,
+            "field":{"type":"string","enum":["username","password","totp"]}
+        },"required":["login_id","field"],"additionalProperties":false});
+        let command = json!({"type":"object","properties":{
+            "action":{"type":"string","enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
+            "url":string,"selector":string,"text":string,"x":number,"y":number,
+            "key":string,"dx":number,"dy":number,"secret":secret,"submit":{"type":"boolean"}
+        },"required":["action"],"additionalProperties":false});
+        tools.push(tool(
+            "local_browser",
+            BRUH_BROWSER_DESCRIPTION,
+            json!({"command":command}),
+            json!(["command"]),
+        ));
+    }
+    if set.apps {
+        tools.push(tool(
+            "app_request",
+            APP_REQUEST_DESCRIPTION,
+            json!({
+                "app":string,
+                "account":string,
+                "method":{"type":"string","enum":bruhs_models::apps::APP_METHODS},
+                "path":string,
+                "query":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},
+                "body":{"type":["object","array"]}
+            }),
+            json!(["app", "method", "path"]),
+        ));
+    }
+    if set.apps || set.mail {
+        tools.push(tool(
+            "list_apps",
+            LIST_APPS_DESCRIPTION,
+            json!({"app":string}),
+            json!([]),
+        ));
+    }
+    if set.mail {
+        let reply = json!({"type":"object","properties":{
+            "external_thread_id":string,"message_id":string
+        },"required":["external_thread_id","message_id"],"additionalProperties":false});
+        tools.push(tool(
+            "send_mail",
+            SEND_MAIL_DESCRIPTION,
+            json!({
+                "from":string,"to":string,"cc":string,"bcc":string,
+                "subject":string,"body":string,"reply":reply
+            }),
+            json!(["to", "body"]),
+        ));
+    }
+    json!({ "tools": tools })
 }
 
 /// A bruh's helper: bound to one agent id, it reaches only that bruh's
-/// browser route. The host checks the Computer and the action again.
+/// browser and app routes, and only for the tools in its set. The host
+/// checks the Computer, the grants and the gate's allowance again.
 struct BruhScope {
     endpoint: String,
     agent_id: String,
+    tools: BruhToolSet,
     client: reqwest::Client,
 }
 impl BruhScope {
-    /// `/api/reactive/agents/{id}/computer/command`, the id escaped as one
-    /// path segment.
-    fn route(&self) -> io::Result<String> {
+    /// `/api/reactive/agents/{id}/{tail}`, the id escaped as one path
+    /// segment.
+    fn route(&self, tail: &[&str]) -> io::Result<String> {
         if matches!(self.agent_id.as_str(), "" | "." | "..") {
-            return Err(io::Error::other("This bruh has no computer."));
+            return Err(io::Error::other("This bruh has no tools."));
         }
         let mut url = url::Url::parse(&self.endpoint).map_err(io::Error::other)?;
         url.path_segments_mut()
             .map_err(|()| io::Error::other("The workbench endpoint has no path."))?
             .pop_if_empty()
-            .extend([
-                "api",
-                "reactive",
-                "agents",
-                &self.agent_id,
-                "computer",
-                "command",
-            ]);
+            .extend(["api", "reactive", "agents", &self.agent_id])
+            .extend(tail);
         Ok(url.into())
     }
     async fn call(&self, name: &str, args: &Value) -> io::Result<Value> {
-        if name != "local_browser" {
+        if !self.tools.offers(name) {
             return Err(io::Error::other("Unknown workbench tool."));
         }
-        // Only the command: a model-supplied session, grant or page URL
-        // never reaches the host.
-        let command = args.get("command").cloned().unwrap_or(Value::Null);
+        if name == "local_browser" {
+            // Only the command: a model-supplied session, grant or page URL
+            // never reaches the host.
+            let command = args.get("command").cloned().unwrap_or(Value::Null);
+            return send(
+                &self.client,
+                &self.route(&["computer", "command"])?,
+                Some(json!({ "command": command })),
+            )
+            .await;
+        }
+        // The input exactly as the bruh wrote it: the host matches it
+        // against the allowance the gate left for this call.
         send(
             &self.client,
-            &self.route()?,
-            Some(json!({ "command": command })),
+            &self.route(&["apps"])?,
+            Some(json!({ "tool": name, "input": args })),
         )
         .await
     }
@@ -530,7 +669,7 @@ impl Scope {
     }
 }
 
-/// Who a helper process serves: a thread's turn, or one bruh's browser.
+/// Who a helper process serves: a thread's turn, or one bruh's tools.
 enum Helper {
     Thread(Scope),
     Bruh(BruhScope),
@@ -539,7 +678,7 @@ impl Helper {
     fn catalogue(&self) -> Value {
         match self {
             Helper::Thread(scope) => catalogue(scope.read_only),
-            Helper::Bruh(_) => bruh_catalogue(),
+            Helper::Bruh(scope) => bruh_catalogue(&scope.tools),
         }
     }
     async fn call(&self, name: &str, args: &Value) -> io::Result<Value> {
@@ -551,8 +690,9 @@ impl Helper {
 }
 
 /// Who a helper serves, read from its environment through `get`: one bruh's
-/// browser when [`BRUH_ENV`] is set, else a thread's turn. A bruh's helper
-/// has no thread scope, so its id is checked first.
+/// tools when [`BRUH_ENV`] is set, with the tools [`BRUH_TOOLS_ENV`] names
+/// (none when it is missing), else a thread's turn. A bruh's helper has no
+/// thread scope, so its id and tools are read first.
 fn helper(get: impl Fn(&str) -> Option<String>, client: reqwest::Client) -> io::Result<Helper> {
     let env = |key: &str| {
         get(key).ok_or_else(|| io::Error::other(format!("Missing workbench scope {key}.")))
@@ -560,9 +700,11 @@ fn helper(get: impl Fn(&str) -> Option<String>, client: reqwest::Client) -> io::
     let endpoint = env(ENDPOINT_ENV)?;
     validate_endpoint(&endpoint)?;
     if let Some(agent_id) = get(BRUH_ENV) {
+        let tools = BruhToolSet::parse(&get(BRUH_TOOLS_ENV).unwrap_or_default());
         return Ok(Helper::Bruh(BruhScope {
             endpoint,
             agent_id,
+            tools,
             client,
         }));
     }
@@ -725,15 +867,31 @@ mod tests {
         }
     }
     #[test]
-    fn the_bruh_catalogue_offers_only_the_browser() {
-        let tools = bruh_catalogue();
-        let names: Vec<_> = tools["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(names, ["local_browser"]);
+    fn the_bruh_catalogue_offers_only_its_tools() {
+        let names = |set: BruhToolSet| -> Vec<String> {
+            bruh_catalogue(&set)["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let browser = BruhToolSet {
+            browser: true,
+            ..BruhToolSet::default()
+        };
+        let apps_and_mail = BruhToolSet {
+            apps: true,
+            mail: true,
+            ..BruhToolSet::default()
+        };
+        assert_eq!(names(browser), ["local_browser"]);
+        assert_eq!(
+            names(apps_and_mail),
+            ["app_request", "list_apps", "send_mail"]
+        );
+        assert!(names(BruhToolSet::default()).is_empty());
+        let tools = bruh_catalogue(&browser);
         let schema = &tools["tools"][0]["inputSchema"];
         let command = &schema["properties"]["command"];
         let action = &command["properties"]["action"];
@@ -769,12 +927,128 @@ mod tests {
         for hidden in ["evaluate", "expression", "console", "network", "session_id"] {
             assert!(!text.contains(hidden), "{hidden}");
         }
+
+        // The app and mail tools: their descriptions are the shared copy,
+        // their inputs closed, and every tool goes through the permission
+        // prompt (F13).
+        let all = bruh_catalogue(&BruhToolSet {
+            browser: true,
+            apps: true,
+            mail: true,
+        });
+        let all = all["tools"].as_array().unwrap();
+        assert_eq!(all.len(), 4);
+        for tool in all {
+            assert_eq!(
+                tool["annotations"],
+                json!({"readOnlyHint": false}),
+                "{}",
+                tool["name"]
+            );
+            assert_eq!(
+                tool["inputSchema"]["additionalProperties"], false,
+                "{}",
+                tool["name"]
+            );
+        }
+        let tool = |name: &str| {
+            all.iter()
+                .find(|tool| tool["name"] == name)
+                .unwrap()
+                .clone()
+        };
+        use bruhs_models::crew::{
+            APP_REQUEST_DESCRIPTION, LIST_APPS_DESCRIPTION, SEND_MAIL_DESCRIPTION,
+        };
+        let app_request = tool("app_request");
+        assert_eq!(app_request["description"], APP_REQUEST_DESCRIPTION);
+        assert_eq!(tool("list_apps")["description"], LIST_APPS_DESCRIPTION);
+        let send_mail = tool("send_mail");
+        assert_eq!(send_mail["description"], SEND_MAIL_DESCRIPTION);
+        let request = &app_request["inputSchema"];
+        assert_eq!(request["required"], json!(["app", "method", "path"]));
+        assert_eq!(
+            request["properties"]["method"]["enum"],
+            json!(["GET", "POST", "PUT", "PATCH", "DELETE"])
+        );
+        let mut request_fields: Vec<_> =
+            request["properties"].as_object().unwrap().keys().collect();
+        request_fields.sort();
+        assert_eq!(
+            request_fields,
+            ["account", "app", "body", "method", "path", "query"]
+        );
+        let mail = &send_mail["inputSchema"];
+        assert_eq!(mail["required"], json!(["to", "body"]));
+        let reply = &mail["properties"]["reply"];
+        assert_eq!(
+            reply["required"],
+            json!(["external_thread_id", "message_id"])
+        );
+        assert_eq!(reply["additionalProperties"], false);
+        let mut mail_fields: Vec<_> = mail["properties"].as_object().unwrap().keys().collect();
+        mail_fields.sort();
+        assert_eq!(
+            mail_fields,
+            ["bcc", "body", "cc", "from", "reply", "subject", "to"]
+        );
+        let list = tool("list_apps");
+        assert!(list["inputSchema"]["required"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        // No input names a header, a host or a token.
+        for tool in all {
+            let schema = tool["inputSchema"].to_string().to_lowercase();
+            for hidden in ["header", "host", "token", "authorization"] {
+                assert!(!schema.contains(hidden), "{}: {hidden}", tool["name"]);
+            }
+        }
+    }
+
+    #[test]
+    fn the_bruh_tool_set_reads_known_words_only() {
+        assert_eq!(
+            BruhToolSet::parse("browser,apps,mail"),
+            BruhToolSet {
+                browser: true,
+                apps: true,
+                mail: true
+            }
+        );
+        assert_eq!(
+            BruhToolSet::parse("apps, shell ,,secrets"),
+            BruhToolSet {
+                apps: true,
+                ..BruhToolSet::default()
+            }
+        );
+        assert_eq!(BruhToolSet::parse(""), BruhToolSet::default());
+        let tools = BruhTools {
+            agent_id: "a".into(),
+            browser: true,
+            apps: false,
+            mail: true,
+        };
+        assert_eq!(tools.words(), "browser,mail");
+        assert_eq!(
+            BruhToolSet::parse(&tools.words()),
+            BruhToolSet {
+                browser: true,
+                mail: true,
+                ..BruhToolSet::default()
+            }
+        );
     }
 
     fn bruh_scope(endpoint: String) -> BruhScope {
         BruhScope {
             endpoint,
             agent_id: "a".into(),
+            tools: BruhToolSet {
+                browser: true,
+                ..BruhToolSet::default()
+            },
             client: reqwest::Client::new(),
         }
     }
@@ -801,7 +1075,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reply, json!({"text":"page"}));
-        for name in ["workspace_status", "task_work", "local_device", ""] {
+        // Without app or mail tools in its set, those are unknown too.
+        for name in [
+            "workspace_status",
+            "task_work",
+            "local_device",
+            "app_request",
+            "list_apps",
+            "send_mail",
+            "",
+        ] {
             let error = scope.call(name, &json!({})).await.unwrap_err();
             assert_eq!(error.to_string(), "Unknown workbench tool.", "{name}");
         }
@@ -826,6 +1109,62 @@ mod tests {
         assert_eq!(error.to_string(), off);
     }
 
+    #[tokio::test]
+    async fn the_bruh_helper_sends_app_calls_to_its_own_route() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        // The input goes through as the bruh wrote it: the gate's one-shot
+        // allowance is matched on it.
+        let call = json!({"app":"github","method":"GET","path":"/user","extra":{"x":1.5}});
+        Mock::given(method("POST"))
+            .and(path("/api/reactive/agents/a/apps"))
+            .and(body_json(json!({"tool":"app_request","input":call})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status":200})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/reactive/agents/a/apps"))
+            .and(body_json(json!({"tool":"list_apps","input":{}})))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_json(json!({"error": bruhs_models::crew::CALL_NOT_APPROVED})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let apps = BruhScope {
+            tools: BruhToolSet {
+                apps: true,
+                ..BruhToolSet::default()
+            },
+            ..bruh_scope(server.uri())
+        };
+        assert_eq!(
+            apps.call("app_request", &call).await.unwrap(),
+            json!({"status":200})
+        );
+        // The route's refusal is the tool's error.
+        let refused = apps.call("list_apps", &json!({})).await.unwrap_err();
+        assert_eq!(refused.to_string(), bruhs_models::crew::CALL_NOT_APPROVED);
+        // A tool outside the set never reaches the route.
+        for name in ["send_mail", "local_browser"] {
+            let error = apps.call(name, &json!({})).await.unwrap_err();
+            assert_eq!(error.to_string(), "Unknown workbench tool.", "{name}");
+        }
+        let mail = BruhScope {
+            tools: BruhToolSet {
+                mail: true,
+                ..BruhToolSet::default()
+            },
+            ..bruh_scope(server.uri())
+        };
+        let error = mail.call("app_request", &call).await.unwrap_err();
+        assert_eq!(error.to_string(), "Unknown workbench tool.");
+        server.verify().await;
+    }
+
     /// A helper environment holding exactly `pairs`.
     fn helper_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let env: HashMap<String, String> = pairs
@@ -847,7 +1186,20 @@ mod tests {
         ];
         // The endpoint and the bruh's id alone are enough.
         let bruh = helper(helper_env(&[url, (BRUH_ENV, "a")]), reqwest::Client::new());
-        assert!(matches!(bruh, Ok(Helper::Bruh(scope)) if scope.agent_id == "a"));
+        assert!(
+            matches!(bruh, Ok(Helper::Bruh(scope)) if scope.agent_id == "a" && scope.tools == BruhToolSet::default())
+        );
+        // Its tools come from its own variable; unknown words are ignored.
+        let tools = helper(
+            helper_env(&[url, (BRUH_ENV, "a"), (BRUH_TOOLS_ENV, "apps,shell")]),
+            reqwest::Client::new(),
+        );
+        assert!(
+            matches!(tools, Ok(Helper::Bruh(scope)) if scope.tools == BruhToolSet {
+                apps: true,
+                ..BruhToolSet::default()
+            })
+        );
         // The bruh's id wins over any thread scope beside it.
         let both = helper(
             helper_env(&[thread.as_slice(), &[(BRUH_ENV, "a")]].concat()),
@@ -882,8 +1234,12 @@ mod tests {
             ..bruh_scope("http://127.0.0.1:3001".into())
         };
         assert_eq!(
-            scope.route().unwrap(),
+            scope.route(&["computer", "command"]).unwrap(),
             "http://127.0.0.1:3001/api/reactive/agents/..%2Fx%3Fy/computer/command"
+        );
+        assert_eq!(
+            scope.route(&["apps"]).unwrap(),
+            "http://127.0.0.1:3001/api/reactive/agents/..%2Fx%3Fy/apps"
         );
     }
 

@@ -684,13 +684,13 @@ async fn the_preamble_mentions_logins_only_when_usable() {
         )
         .prompt
     };
-    let without = runtime.turn_vault("a", true, false).await;
+    let without = runtime.turn_vault("a", true, false, false).await;
     assert!(!prompt(&without).contains(VAULT_PREAMBLE));
     runtime.command(set_vault("a", &[&login.id])).await.unwrap();
-    let with = runtime.turn_vault("a", true, false).await;
+    let with = runtime.turn_vault("a", true, false, false).await;
     assert!(prompt(&with).contains(VAULT_PREAMBLE));
     // Computer off: no vault read, no paragraph.
-    assert!(!runtime.turn_vault("a", false, false).await.logins);
+    assert!(!runtime.turn_vault("a", false, false, false).await.logins);
 }
 
 fn key(name: &str, scope: CredentialScope) -> VaultCreate {
@@ -1379,7 +1379,7 @@ async fn read_only_and_codex_bruhs_get_no_broker() {
         model: "gpt-5.3-codex".into(),
         ..full_claude("a")
     };
-    let keyed = keys.runtime.turn_vault("a", false, true).await;
+    let keyed = keys.runtime.turn_vault("a", false, true, false).await;
     assert_eq!(keyed.keys, ["DEPLOY_KEY"]);
     for level in [AccessLevel::Ask, AccessLevel::Full] {
         let offered = turn(&claude, level, &keyed);
@@ -1404,13 +1404,13 @@ async fn read_only_and_codex_bruhs_get_no_broker() {
     }
     // A bruh with no usable key gets none either, and a run that can't
     // have the tool doesn't read the vault for it.
-    let none = keys.runtime.turn_vault("b", false, true).await;
+    let none = keys.runtime.turn_vault("b", false, true, false).await;
     assert!(none.keys.is_empty());
     let unkeyed = turn(&full_claude("b"), AccessLevel::Full, &none);
     assert!(!unkeyed.bruh_secrets && !crate::agent::bruh_secret_tools(&unkeyed));
     assert!(keys
         .runtime
-        .turn_vault("a", false, false)
+        .turn_vault("a", false, false, false)
         .await
         .keys
         .is_empty());

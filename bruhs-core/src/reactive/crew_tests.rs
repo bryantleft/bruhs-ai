@@ -893,6 +893,10 @@ fn instructions_stamp_ignores_name_and_access() {
     assert!(!instructions.contains(&a.name));
     assert!(!instructions.contains("read-only"));
     assert!(instructions.starts_with("You are a persistent Bruhs agent."));
+    // One shared line on payloads and acting as the owner, whatever tools
+    // a run has; its opening lines say what those allow.
+    assert!(instructions.contains(BRUH_SEND_RULE));
+    assert!(!instructions.contains("Never send messages"));
     assert!(instructions.contains("Prepare drafts for review."));
 }
 
@@ -953,7 +957,7 @@ async fn access_edits_cancel_pending_runs_but_keep_the_session() {
     assert!(!claim.run.fresh_session);
 }
 
-fn queued_run(prompt: &str) -> ReactiveRun {
+pub(super) fn queued_run(prompt: &str) -> ReactiveRun {
     let now = EpochMs::now();
     ReactiveRun {
         id: "r".into(),
@@ -1129,7 +1133,16 @@ fn the_worker_turns_computer_on_only_when_available() {
             std::path::Path::new("/home"),
             &worker::TurnVault::default(),
         );
-        assert_eq!(turn.computer.as_deref(), Some("a"), "{level:?}");
+        assert_eq!(
+            turn.bruh_tools,
+            Some(crate::workbench_tools::BruhTools {
+                agent_id: "a".into(),
+                browser: true,
+                apps: false,
+                mail: false,
+            }),
+            "{level:?}"
+        );
         assert!(turn.prompt.contains(BROWSER_LINE), "{level:?}");
     }
     let codex = ReactiveAgent {
@@ -1150,7 +1163,7 @@ fn the_worker_turns_computer_on_only_when_available() {
             &worker::TurnVault::default(),
         );
         assert_eq!(
-            turn.computer, None,
+            turn.bruh_tools, None,
             "{} {:?}",
             agent.model, profile.access.level
         );
