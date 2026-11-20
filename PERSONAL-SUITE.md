@@ -21,6 +21,14 @@ The goal is for bruhs to be your digital brain. Today already brings meeting dec
 | Decide what to change next week | Personal goals, milestones, private reflection, and Weekly Review belong in Today. Tasks and Calendar supply the initial evidence. Finance and Health participate by choice. |
 | Plan a trip, find a place, shop, or coordinate a household | Ditz owns discovery, saved places, maps, itineraries, reservations, shopping comparisons, purchase follow-up and warranties, meals, shared lists, chores, votes, and receipt splits. This includes solo shopping and travel. Bruhs surfaces selected commitments and links to the original plan. [Ditz product brief](https://github.com/bryantleft/dump/blob/main/ditz.md) |
 
+## Career workspace (deferred)
+
+Career belongs in bruhs-ai as an optional workspace for a job search. The long-term plan is to bring the existing TypeScript pipeline and CLI into this repository as a dedicated module. Implementation and repository migration are deferred, with no scheduled milestone. [Existing Careers repository](https://github.com/bryantleft/careers)
+
+The Career module would own job discovery and scoring, résumé versions, application review, submission status, and receipts. People would hold recruiter contacts, Calendar would hold interviews, and Notes and Today would hold interview notes and follow-ups. Completing a follow-up in Today would leave the application’s submission status under Career’s control.
+
+The proposed starting point is an opportunity page. Returning to a role before an interview, you could open the posting, check the exact résumé you sent, see who you’re meeting, and pick up the follow-up you promised last time.
+
 ## Build milestones
 
 Suggested slices can proceed independently except where a dependency is stated. The existing [web Life page](bruhs-web/src/components/life_page.rs) and [native Life view](bruhs-desktop/src/views/workspace/life_ui.rs) provide the manual ledger and health journal foundation.
