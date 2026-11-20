@@ -5,6 +5,7 @@ pub mod api_client_tools;
 pub mod apps;
 pub mod artifact_tools;
 pub mod artifacts;
+pub mod backup;
 pub mod capture_client;
 mod codex_lean;
 pub mod connections;

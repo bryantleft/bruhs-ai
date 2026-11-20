@@ -1387,4 +1387,63 @@ mod tests {
         );
         assert!(!resolved);
     }
+
+    /// Both data roots' `backups` folders are private (Backup D21): a bruh
+    /// can't read a backup through a link in its work folder, by an
+    /// absolute or a relative path, at any level of the tree.
+    #[test]
+    fn bruh_runs_are_kept_out_of_backups() {
+        let dir = tempfile::tempdir().unwrap();
+        // The tempdir path is not canonical on macOS (/var is a symlink),
+        // and the roots are resolved like the paths the tools name.
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let home = base.join("home");
+        let core = base.join("core");
+        let desktop = base.join("desktop");
+        let backups = [core.join("backups"), desktop.join("backups")];
+        let outgoing = backups[0].join("outgoing");
+        std::fs::create_dir_all(&outgoing).unwrap();
+        std::fs::create_dir_all(backups[1].join("pre-restore-x")).unwrap();
+        std::fs::write(outgoing.join("x.bruhsbak"), "sealed").unwrap();
+        let roots =
+            crate::secrets::private::private_folders(&home, &core.join("credentials"), &backups);
+        let work = home.join("bruhs").join("a1").join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("notes.md"), "mine").unwrap();
+        std::os::unix::fs::symlink(&backups[0], work.join("out")).unwrap();
+        std::os::unix::fs::symlink(&backups[1], work.join("kept")).unwrap();
+        let project = work.to_string_lossy().into_owned();
+        let at = |path: &Path| path.to_string_lossy().into_owned();
+        let refused = [
+            (
+                "Read",
+                serde_json::json!({"file_path": at(&work.join("out/outgoing/x.bruhsbak"))}),
+            ),
+            (
+                "Read",
+                serde_json::json!({"file_path": "out/outgoing/x.bruhsbak"}),
+            ),
+            (
+                "Read",
+                serde_json::json!({"file_path": at(&outgoing.join("x.bruhsbak"))}),
+            ),
+            ("LS", serde_json::json!({"path": "kept"})),
+            (
+                "Glob",
+                serde_json::json!({"pattern": "**", "path": at(&backups[1])}),
+            ),
+        ];
+        for (tool, input) in &refused {
+            assert_eq!(
+                private_file_refusal(&home, &roots, &project, tool, input),
+                Some(VAULT_FILE_DENIAL),
+                "{tool} {input}"
+            );
+        }
+        let open = serde_json::json!({"file_path": at(&work.join("notes.md"))});
+        assert_eq!(
+            private_file_refusal(&home, &roots, &project, "Read", &open),
+            None
+        );
+    }
 }

@@ -1101,6 +1101,9 @@ fn every_bruh_run_hides_the_vault_folders() {
     let private = crate::secrets::private::private_folders(
         home,
         std::path::Path::new("/Users/a/Library/Application Support/bruhs-ai/credentials"),
+        &[std::path::PathBuf::from(
+            "/Users/a/Library/Application Support/bruhs-ai/backups",
+        )],
     );
     let vault = worker::TurnVault {
         private: private.clone(),

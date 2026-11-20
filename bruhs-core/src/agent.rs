@@ -1218,7 +1218,9 @@ fn unattended_claude_settings(
 /// cover Grep and Glob, and Claude's sandbox adds `Read` and `Edit` deny
 /// paths to its own read and write blocks. A leading `//` makes a rule's
 /// path absolute.
-fn hidden_folder_rules(folders: &[std::path::PathBuf]) -> impl Iterator<Item = String> + '_ {
+pub(crate) fn hidden_folder_rules(
+    folders: &[std::path::PathBuf],
+) -> impl Iterator<Item = String> + '_ {
     folders.iter().flat_map(|folder| {
         let folder = folder.to_string_lossy();
         let folder = folder.trim_end_matches('/');
