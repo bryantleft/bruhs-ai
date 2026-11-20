@@ -19,6 +19,13 @@ pub const MAX_ENTRIES: u64 = 1_000_000;
 /// memory; a backup whose manifest would be larger isn't made (B Task 7
 /// I1).
 pub const MANIFEST_MAX_BYTES: u64 = 64 << 20;
+/// `keychain.json` is at most this many bytes. A restore holds it in
+/// memory; a backup whose items would be larger isn't made (B Task 7 N1).
+pub const KEYCHAIN_MAX_BYTES: u64 = 4 << 20;
+/// The folder a staged restore and a pre-restore set keep beside the data
+/// (`meta/`). No top-level entry of either root may take its name, in any
+/// case (B Task 7 N2).
+pub const RESERVED_TOP: &str = "meta";
 /// An entry path is at most this many bytes.
 const MAX_PATH_BYTES: usize = 4096;
 /// Each component of an entry path is at most this many bytes.
@@ -123,7 +130,9 @@ pub enum EntryPath {
 ///   name;
 /// - a first name a backup never holds ([`EXCLUDED_TOP`], in any case), or
 ///   one that matches a known top-level name only when case is ignored
-///   (`Credentials`, `SERVICE`), I1 ruling.
+///   (`Credentials`, `SERVICE`), I1 ruling;
+/// - [`RESERVED_TOP`] as the first name, folded as a volume would fold it
+///   (B Task 7 N2).
 pub fn safe_entry_path(path: &str) -> Result<EntryPath, &'static str> {
     if path.len() > MAX_PATH_BYTES
         || path
@@ -181,6 +190,7 @@ fn refused_top(first: &str) -> bool {
         || KNOWN_TOP.iter().any(variant)
         || CONTENT_FOLDERS.iter().any(variant)
         || DESKTOP_ENTRIES.iter().any(variant)
+        || folded_entry_key(first) == RESERVED_TOP
 }
 
 /// The format (Cf), line separator (Zl) and paragraph separator (Zp)
@@ -602,6 +612,17 @@ mod tests {
             assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad:?}");
         }
         assert!(safe_entry_path(&format!("core/{}", "a".repeat(255))).is_ok());
+    }
+
+    /// B Task 7 N2: `meta` is the staging's own, at the top of either root.
+    #[test]
+    fn the_staging_meta_name_is_reserved_at_the_top() {
+        for bad in ["core/meta", "core/meta/x", "desktop/Meta/x", "core/META"] {
+            assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad}");
+        }
+        for good in ["core/server/meta/x", "core/metadata", "desktop/meta.json"] {
+            assert!(safe_entry_path(good).is_ok(), "{good}");
+        }
     }
 
     #[test]

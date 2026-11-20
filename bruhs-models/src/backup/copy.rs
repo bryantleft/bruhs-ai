@@ -135,6 +135,9 @@ pub const NO_SPACE: &str = "There isn't enough free disk space. Free {size} and 
 /// More files and folders than a restore takes (B Task 7 I1).
 pub const BACKUP_TOO_MANY: &str =
     "This backup would hold more files than a restore can take. Move some files out of Bruhs' folders, then try again.";
+/// `keychain.json` over the restore's cap (B Task 7 N1).
+pub const KEYCHAIN_TOO_LARGE: &str =
+    "Your saved logins and keys are too large for one backup. Leave them out or remove some, then try again.";
 pub const FILE_CHANGED: &str = "A file changed while Bruhs was reading it. Try again.";
 /// A file in Bruhs' own folders whose name a restore would refuse (B Task 5
 /// I2 ruling). Owner files with such names are left out and counted.
@@ -262,6 +265,7 @@ pub const ALL_COPY: &[&str] = &[
     ROOTS_OVERLAP,
     NO_SPACE,
     BACKUP_TOO_MANY,
+    KEYCHAIN_TOO_LARGE,
     FILE_CHANGED,
     DATA_NAME_REFUSED,
     ROOT_NAME_REFUSED,

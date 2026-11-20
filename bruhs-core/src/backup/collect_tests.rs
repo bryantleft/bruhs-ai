@@ -328,6 +328,35 @@ fn names_one_volume_would_merge_are_skipped_or_refused() {
     }
 }
 
+/// B Task 7 N2: a top-level `meta` in either root is Bruhs' own name for
+/// the staging's folder, so a backup that holds one is refused; deeper
+/// down it is an ordinary name.
+#[test]
+fn a_top_level_meta_is_refused() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("attachments/meta/x.txt"), b"x");
+    write(&roots.core.join("server/meta.json"), b"{}");
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert_eq!(
+        listed(&taken),
+        [
+            (RootKey::Core, "attachments/meta/x.txt"),
+            (RootKey::Core, "server/meta.json")
+        ]
+    );
+    for (root, name) in [(&roots.core, "meta"), (&roots.desktop, "Meta")] {
+        let stray = root.join(name).join("notes.txt");
+        write(&stray, b"x");
+        let refused = inventory(&roots, &BackupOptions::default()).unwrap_err();
+        assert!(
+            matches!(refused, BackupError::Refused(DATA_NAME_REFUSED)),
+            "{name}"
+        );
+        std::fs::remove_dir_all(stray.parent().unwrap()).unwrap();
+    }
+}
+
 /// The same through the walk, where the temp volume keeps both names of a
 /// pair (Linux, case-sensitive APFS). The default macOS volume merges them
 /// itself, so there the pair can't exist and the case above covers it.

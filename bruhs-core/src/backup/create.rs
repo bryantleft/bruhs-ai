@@ -24,8 +24,8 @@ use bruhs_models::backup::{
     BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_STOPPED,
     BACKUP_TOO_MANY, BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING,
     DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED,
-    KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED,
-    WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_TOO_LARGE, MANIFEST_FORMAT, NOT_A_BACKUP,
+    ROOT_NAME_REFUSED, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use bruhs_models::crew::CREW_PROTOCOL;
 use bruhs_models::EpochMs;
@@ -332,7 +332,15 @@ pub(crate) async fn create(
 
     let keychain = if options.keychain {
         send(progress, 0, total, JobStep::Keychain);
-        Some(read_keychain(&config, &roots).await?)
+        let keychain = read_keychain(&config, &roots).await?;
+        // A restore holds `keychain.json` in memory up to its cap; past it,
+        // no backup is made (B Task 7 N1).
+        if u64::try_from(keychain.0.len())
+            .map_or(true, |bytes| bytes > config.limits.keychain_bytes)
+        {
+            return Err(BackupError::Refused(KEYCHAIN_TOO_LARGE));
+        }
+        Some(keychain)
     } else {
         None
     };

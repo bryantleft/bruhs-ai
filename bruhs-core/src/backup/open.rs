@@ -29,8 +29,8 @@ use bruhs_models::backup::{
     validate_password, BackupJob, BackupManifest, EntryPath, Excluded, JobState, JobStep,
     PendingRestore, RestorePreview, RestoreSource, BACKUP_BUSY, BACKUP_STOPPED, DAMAGED,
     DESKTOP_ENTRIES, GONE, KEYCHAIN_NEEDS_YOU, NAMES_CLASH, NEWER_BACKUP, NOT_A_BACKUP,
-    RESTORE_PENDING, ROOTS_OVERLAP, SOURCE_MISSING, UNSAFE_ENTRY, UNSUPPORTED_PLATFORM,
-    WRONG_PASSWORD,
+    RESERVED_TOP, RESTORE_PENDING, ROOTS_OVERLAP, SOURCE_MISSING, UNSAFE_ENTRY,
+    UNSUPPORTED_PLATFORM, WRONG_PASSWORD,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
@@ -45,15 +45,13 @@ use crate::secrets::{check_items, forget_seal_key, seal_items, store_seal_key, K
 
 /// The folder inside each root's `backups` that holds staged restores.
 const STAGING: &str = "staging";
-/// The folder inside the core staging that holds what isn't data. A backup
-/// entry can't take its name.
-const META: &str = "meta";
+/// The folder inside the core staging that holds what isn't data. No
+/// backup entry takes its name (`safe_entry_path`, B Task 7 N2).
+const META: &str = RESERVED_TOP;
 const PREVIEW_FILE: &str = "preview.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const SEALED_FILE: &str = "keychain.sealed";
 const WEB_PART_FILE: &str = "web-part.bin";
-/// `keychain.json` is held in memory, so it has a cap (D8).
-const KEYCHAIN_MAX: u64 = 4 << 20;
 /// A GNU long name holds one entry path and its NUL.
 const LONG_NAME_MAX: u64 = 4096 + 1;
 /// A tar block.
@@ -451,7 +449,12 @@ impl Drop for Discard {
 fn seal(config: &super::host::Config, staged: &Staged) -> Result<RestorePreview, BackupError> {
     let folder = staging_dir(&config.roots, RootKey::Core, &staged.id);
     let meta = folder.join(META);
-    private_dir(&meta)?;
+    // A web part already made it, 0700; otherwise it is made here, 0700
+    // whatever the umask (B Task 7 N3).
+    match std::fs::symlink_metadata(&meta) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => new_folder(&meta)?,
+        _ => private_dir(&meta)?,
+    }
     if staged.manifest.options.keychain {
         let mut key = Zeroizing::new([0_u8; 32]);
         random_bytes(&mut *key);
@@ -929,7 +932,7 @@ impl<'a> Extraction<'a> {
                 if self.keychain.is_some() {
                     return Err(unsafe_entry());
                 }
-                if size > KEYCHAIN_MAX {
+                if size > self.limits.keychain_bytes {
                     return Err(damaged());
                 }
                 // Sized once from the capped size, so it never moves.

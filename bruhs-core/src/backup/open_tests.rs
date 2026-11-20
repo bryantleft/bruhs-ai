@@ -1177,6 +1177,7 @@ async fn limits_count_entries_but_not_long_names() {
         host(&fixture).with_limits(Limits {
             entries,
             manifest_bytes,
+            ..Limits::BACKUP
         })
     };
     // Three entries: two files and the manifest.
@@ -1191,6 +1192,42 @@ async fn limits_count_entries_but_not_long_names() {
     let outside: [PathBuf; 0] = [];
     refused(&fixture, &limited(2, bytes), &path, UNSAFE_ENTRY, &outside).await;
     refused(&fixture, &limited(3, bytes - 1), &path, DAMAGED, &outside).await;
+
+    // `keychain.json` at its limit opens; one byte over is refused (B Task
+    // 7 N1).
+    let json = format!(
+        r#"{{"items":[{{"service":"{SECRETS_SERVICE}","account":"vault:global:{GLOBAL_VALUE}","value":"c2VjcmV0"}}]}}"#
+    );
+    let manifest = manifest_of(&[("keychain.json", json.as_bytes())], |manifest| {
+        manifest.options.keychain = true;
+        manifest.keychain_items = 1;
+    });
+    craft(
+        &path,
+        &[
+            (b"keychain.json", EntryKind::File, json.as_bytes()),
+            (b"manifest.json", EntryKind::File, &manifest),
+        ],
+    );
+    let keychain = |keychain_bytes| {
+        host(&fixture).with_limits(Limits {
+            keychain_bytes,
+            ..Limits::BACKUP
+        })
+    };
+    let json_bytes = u64::try_from(json.len()).unwrap();
+    let at_limit = keychain(json_bytes);
+    let (id, state) = open_with(&at_limit, &path, PASSWORD).await;
+    assert!(preview(state).has_keychain);
+    at_limit.discard_staged(&id).unwrap();
+    refused(
+        &fixture,
+        &keychain(json_bytes - 1),
+        &path,
+        DAMAGED,
+        &outside,
+    )
+    .await;
 }
 
 /// B Task 7 ruling: `extract` checks every keychain item before anything
