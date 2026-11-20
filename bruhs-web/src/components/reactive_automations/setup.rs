@@ -19,6 +19,11 @@ use bruhs_models::crew::{
 use bruhs_models::reactive::*;
 use leptos::prelude::*;
 
+/// The "Starts when" label: a full row of the editor from `sm`, so the
+/// select keeps its width in a bruh page's narrow column (final review
+/// BC M7), as the desktop's own row of buttons does.
+const STARTS_WHEN: &str = "block space-y-1 text-label-sm text-rambutan-300 sm:col-span-2";
+
 fn new_setup() -> AutomationSetup {
     let agent_id = id();
     let source_id = id();
@@ -407,7 +412,7 @@ pub(crate) fn AutomationSetupPanel(
                     <p class="text-body-sm text-rambutan-400">"Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."</p>
                     <Show when=move ||agent_filter.with_value(Option::is_some)><p class="mt-2 text-label-sm text-rambutan-400">"This routine runs as this bruh. Change its job and model in Settings."</p></Show>
                     <div class="mt-3 grid gap-3 sm:grid-cols-2"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div></Show>
-                        <label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);
+                        <label class=STARTS_WHEN><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);
                         // Changing a newer Bruhs' source replaces it: ask first.
                         if kind.get_untracked()=="other" && value!="other"{change_kind.set(Some(value));kind.set("other".into());return;}
                         set_kind(value);}>
@@ -595,6 +600,14 @@ fn review_fields_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Final review BC M7: at 640×480 the bruh page's column is about
+    /// 350px, and half of it cut "Starts when" to "GitHub or ema". It is a
+    /// full row of the editor from `sm`, as on the desktop.
+    #[test]
+    fn starts_when_is_a_full_row() {
+        assert!(STARTS_WHEN.contains("sm:col-span-2"), "{STARTS_WHEN}");
+    }
     #[test]
     fn unified_setup_has_one_stable_identity_and_an_explicit_automatic_draft_policy() {
         let setup = new_setup();
