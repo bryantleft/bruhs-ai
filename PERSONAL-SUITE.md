@@ -2,6 +2,14 @@
 
 Product decisions recorded November 19, 2026. The milestones below are open. Verify each milestone on web and desktop, including accessibility, persistence, and privacy.
 
+## Ideas for recalling work
+
+The goal is for bruhs to be your digital brain. Today already brings meeting decisions and follow-ups into view. These concepts explore how you might find the same context weeks later.
+
+- **3D memory viewer.** Start at a meeting and explore the people who attended, the decisions recorded there, and the tasks linked to it. Select a connection to see why it exists and open its source. A keyboard-accessible list could show the same relationships.
+- **Decision history.** From a project, follow a decision from the original meeting through later notes that revised it. Each entry would open the passage that explains what changed.
+- **Catch me up.** Before meeting someone again, pull up the last conversation, outstanding promises and related notes. Each reminder would link back to the record it came from.
+
 ## Where each workflow belongs
 
 | User intent | Owner and experience |

@@ -459,3 +459,49 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .window.revealing { mask-image: none; }
 }
+
+.memory-hero, .recall {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(2rem, 8vw, 7rem);
+}
+.memory-hero { padding-block: clamp(1rem, 4vw, 4rem); }
+.hero-copy { display: grid; justify-items: start; gap: 24px; }
+.hero-copy .get-row { justify-content: flex-start; }
+.field-note {
+  margin: 0;
+  padding: clamp(1.25rem, 3.5vw, 3rem);
+  color: var(--longan-950);
+  background: var(--rambutan-200);
+  border-top: 5px solid var(--persimmon-400);
+}
+.field-note figcaption { font: 500 .82rem/1.4 var(--argon); }
+.field-note blockquote {
+  margin: 1.4rem 0;
+  font: 500 clamp(1.15rem, 2vw, 1.65rem)/1.45 var(--xenon);
+}
+.field-note dl, .shortcuts { margin: 0; }
+.field-note dl div, .shortcuts div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: .55rem;
+  font-size: .85rem;
+}
+.field-note dl div { border-top: 1px dotted var(--longan-300); }
+.field-note dd, .shortcuts dd { margin: 0; text-align: end; }
+.tour-intro { max-width: 64ch; text-align: center; margin-bottom: 32px; }
+.tour-intro p, .recall p { color: var(--rambutan-400); }
+.shortcuts { max-width: 38ch; }
+.shortcuts div { border-bottom: 1px dotted var(--longan-700); }
+.shortcuts kbd { white-space: nowrap; font-family: var(--argon); }
+.concept { border-inline-start: 2px solid var(--durian-300); padding-inline-start: 1.5rem; }
+.concept h3 { color: var(--durian-300); }
+.concept p { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .memory-hero, .recall { grid-template-columns: minmax(0, 1fr); }
+  .memory-hero { padding-block: .75rem; }
+  .tour-intro { text-align: start; }
+}

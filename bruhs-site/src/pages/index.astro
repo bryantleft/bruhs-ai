@@ -30,27 +30,41 @@ const surfaces = [
 ---
 
 <Base
-  title="bruhs: one window for your whole day"
-  description="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS, Windows and Linux."
-  ogDescription="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine."
+  title="bruhs | Your digital brain"
+  description="Your local-first digital brain for meeting notes, people, tasks and agent conversations. Free, open source, for macOS, Windows and Linux."
+  ogDescription="Find the decision from your last meeting, remember who needs a follow-up, and see what’s due today."
   path="/"
   current="home"
   palette
 >
   <main id="main" tabindex="-1">
     <section class="hero">
-      <div class="wrap hero-stack">
-        <canvas class="bruh bruh-hero" data-bruh="hero" aria-hidden="true"></canvas>
-        <h1 class="display">One window for your whole day.</h1>
-        <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. Your work stays on your machine.</p>
-        <div class="get-row">
-          <GetButton />
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
+      <div class="wrap memory-hero">
+        <div class="hero-copy">
+          <h1 class="display">Your digital brain.</h1>
+          <p class="lede">Keep the thought, the conversation it came from, and the thing you promised to do next. All in one local-first workspace.</p>
+          <div class="get-row">
+            <GetButton />
+            <a class="btn btn-ghost" href="#surfaces">Explore the app ↓</a>
+          </div>
         </div>
+        <figure class="field-note">
+          <figcaption>Example meeting note</figcaption>
+          <blockquote>“Let’s try the pilot with one team first. I’ll send Maya the checklist on Friday.”</blockquote>
+          <dl>
+            <div><dt>Decision</dt><dd>Start with one pilot team</dd></div>
+            <div><dt>Follow-up</dt><dd>Send Maya the checklist</dd></div>
+            <div><dt>Due</dt><dd>Friday</dd></div>
+          </dl>
+        </figure>
       </div>
     </section>
 
-    <section class="section tour" id="surfaces" aria-label="What's inside">
+    <section class="section tour" id="surfaces" aria-labelledby="tour-title">
+      <div class="wrap tour-intro">
+        <h2 class="h2" id="tour-title">Where did we leave off?</h2>
+        <p>Start in Today to see what needs your attention. Revisit a meeting for the exact words, or open someone’s profile before you follow up.</p>
+      </div>
       <div class="surfaces" data-surfaces>
         <div class="wrap tabs-row">
           <div class="tabs" role="tablist" aria-label="Surfaces">
@@ -67,50 +81,20 @@ const surfaces = [
       </div>
     </section>
 
-    <section class="section" id="subs" aria-labelledby="providers-title">
-      <div class="wrap providers">
-        <div class="provider-copy">
-          <h2 class="h2" id="providers-title" tabindex="-1">Bring your own model.</h2>
-          <p>Choose the agent runtime and model for each thread. Keep using your own login, or connect API providers and local models through OpenCode. Available tools and access modes vary by runtime.</p>
+    <section class="section" aria-labelledby="recall-title">
+      <div class="wrap recall">
+        <div>
+          <h2 class="h2" id="recall-title">Find the detail you almost remember.</h2>
+          <p>Remember a phrase but forget where you heard it? Search transcripts, notes, tasks and agent threads from the same place.</p>
+          <dl class="shortcuts">
+            <div><dt>Capture a thought</dt><dd><kbd>⌘ ⇧ Space</kbd></dd></div>
+            <div><dt>Search your workspace</dt><dd><kbd>⌘ ⇧ F</kbd></dd></div>
+          </dl>
         </div>
-        <ul class="provider-list" role="list" aria-label="Supported agent runtimes">
-          <li>
-            <div>
-              <h3 class="h3">Claude Code</h3>
-              <p>Your Claude login or API key.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Codex</h3>
-              <p>Your existing Codex login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Cursor</h3>
-              <p>Your Cursor CLI login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Antigravity</h3>
-              <p>CLI setup, with Full access required.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Grok</h3>
-              <p>Your Grok CLI login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">OpenCode</h3>
-              <p>API providers and local models.</p>
-            </div>
-          </li>
-        </ul>
+        <aside class="concept">
+          <h3 class="h3">An idea we’re exploring</h3>
+          <p>A 3D memory viewer could let you start at a meeting, follow a decision to the task it created, and jump back to the original passage.</p>
+        </aside>
       </div>
     </section>
 
@@ -118,12 +102,16 @@ const surfaces = [
       <div class="wrap faq">
         <h2 class="h2" id="faq-title" tabindex="-1">Questions</h2>
         <details>
-          <summary>What can I do in bruhs?</summary>
-          <p>Keep agent threads alongside your tasks, calendar, meetings, people and notes. Import an existing conversation or start a thread in a project, then review changes and run commands in the same window.</p>
+          <summary>Where are my notes stored?</summary>
+          <p>Your workspace lives on your machine. You can search your notes locally and choose what to share with an agent. <a href="/privacy">Read about data and privacy.</a></p>
         </details>
         <details>
           <summary>Is it free?</summary>
           <p>Yes. bruhs is MIT licensed, with no paid tier and no account to make. Your selected runtime uses its own subscription, API billing or local model.</p>
+        </details>
+        <details id="subs">
+          <summary>Which agents can I use?</summary>
+          <p>Choose Claude Code, Codex, Cursor, Antigravity, Grok or OpenCode for each thread. Each runtime uses its own login or configuration. OpenCode also supports local models.</p>
         </details>
         <details>
           <summary>Can I use an API key instead?</summary>
@@ -174,7 +162,7 @@ const surfaces = [
 
     <section class="section closing" id="get" aria-labelledby="get-title">
       <div class="wrap">
-        <h2 class="display display-sm" id="get-title" tabindex="-1">Close the other twelve tabs.</h2>
+        <h2 class="display display-sm" id="get-title" tabindex="-1">Start with a thought worth keeping.</h2>
         <div class="get-row">
           <GetButton />
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases"><Icon name="github" />All releases</a>
