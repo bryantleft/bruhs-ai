@@ -18,7 +18,11 @@ pub struct NewMailThread {
     pub external_thread_id: String,
     /// The newest incoming message's id, as a reply names it.
     pub message_id: String,
+    /// The sender's display name, or their address when it has none.
     pub sender: String,
+    /// The sender's address, which a display name can't fake. Empty when
+    /// the message names none.
+    pub sender_address: String,
     pub subject: String,
     /// The start of that message's body, at most 300 characters.
     pub preview: String,
@@ -87,18 +91,20 @@ fn new_mail(
             .iter()
             .find(|detail| detail.id == message.id)
     });
-    let sender = detail
-        .and_then(|detail| detail.envelope.from.first())
-        .map_or_else(
-            || message.sender_name.clone(),
-            |address| {
-                if address.name.is_empty() {
-                    address.address.clone()
-                } else {
-                    address.name.clone()
-                }
-            },
-        );
+    let from = detail.and_then(|detail| detail.envelope.from.first());
+    let sender_address = from
+        .map(|address| address.address.clone())
+        .unwrap_or_default();
+    let sender = from.map_or_else(
+        || message.sender_name.clone(),
+        |address| {
+            if address.name.is_empty() {
+                address.address.clone()
+            } else {
+                address.name.clone()
+            }
+        },
+    );
     let subject = detail
         .map(|detail| detail.envelope.subject.clone())
         .filter(|subject| !subject.is_empty())
@@ -107,6 +113,7 @@ fn new_mail(
         external_thread_id,
         message_id: message.id.clone(),
         sender,
+        sender_address,
         subject,
         preview: message.body.chars().take(PREVIEW_CHARS).collect(),
         message_at_ms,

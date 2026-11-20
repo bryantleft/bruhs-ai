@@ -41,6 +41,10 @@ pub enum AppsError {
     /// Nothing was saved.
     #[error("{0}")]
     TestFailed(String),
+    /// A mail poll's provider sync failed before the poll had a baseline,
+    /// with the sync's own fixed copy. Nothing was emitted or saved.
+    #[error("{0}")]
+    MailSync(String),
     /// The vault couldn't save or find the account: a missing entry, a
     /// save that crossed another, or a catalog that can't be read. Its
     /// text is the vault's fixed copy.

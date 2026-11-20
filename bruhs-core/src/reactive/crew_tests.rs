@@ -2599,6 +2599,18 @@ async fn unreadable_source_rows_leave_the_rest_readable() {
         .unwrap();
     let snapshot = runtime.snapshot().await.unwrap();
     assert_eq!(snapshot.sources, [app_poll_source("p", "o/r")]);
+    // The log line carries how many rows were left out.
+    let good = serde_json::to_string(&app_poll_source("p", "o/r")).unwrap();
+    let (read, skipped) = store::readable_rows::<EventSource>(
+        [
+            Ok(good),
+            Ok("{\"id\":\"q\"}".to_owned()),
+            Ok("[".to_owned()),
+        ]
+        .into_iter(),
+    )
+    .unwrap();
+    assert_eq!((read, skipped), (vec![app_poll_source("p", "o/r")], 2));
 }
 
 /// Ruling F3 (b): enabling an automation re-saves its source, so one whose

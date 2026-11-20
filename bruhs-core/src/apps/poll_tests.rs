@@ -194,6 +194,36 @@ async fn new_issues_emit_once_oldest_first() {
     }
 }
 
+/// Ruling A Task 10 M2: a full page is read whole, over a bruh's 32 KiB
+/// share, and still scrubbed.
+#[tokio::test]
+async fn a_full_page_is_read_whole_and_scrubbed() {
+    let fixture = github().await;
+    let query = watch("o/r");
+    lists(&fixture, "/repos/o/r/issues", issues(&[10])).await;
+    let baseline = poll(&fixture, &query, None).await;
+    let page: Vec<Value> = (11..=60)
+        .rev()
+        .map(|number| {
+            let mut item = item(number, false);
+            item["body"] = json!("b".repeat(2_000));
+            if number == 11 {
+                item["title"] = json!(format!("Leak {}", fixture.token));
+            }
+            item
+        })
+        .collect();
+    let page = Value::Array(page);
+    assert!(page.to_string().len() > bruhs_models::apps::APP_RESPONSE_MAX_BYTES * 3);
+    lists(&fixture, "/repos/o/r/issues", page).await;
+    let next = poll(&fixture, &query, Some(baseline.cursor)).await;
+    assert_eq!(next.events.len(), APP_POLL_MAX_ITEMS);
+    let (key, payload) = &next.events[0];
+    assert_eq!(key, "github:o/r:issue:11");
+    assert_eq!(payload["title"], "Leak [redacted]");
+    assert!(!json!(next.events).to_string().contains(&fixture.token));
+}
+
 #[tokio::test]
 async fn a_changed_definition_starts_a_new_baseline() {
     let fixture = github().await;
@@ -335,6 +365,19 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     let mailbox = mail.mailbox.as_str().to_owned();
     let now = EpochMs::now().as_millis();
     let inbox = ["INBOX", "UNREAD"];
+    let query = AppQuery::NewMail;
+
+    // A first poll whose sync fails sets no baseline from a stale cache:
+    // it fails with the sync's copy and saves nothing.
+    let unsynced = host
+        .poll("mail", &mailbox, &query, None, "mail")
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        matches!(&unsynced, AppsError::MailSync(copy) if !copy.is_empty()),
+        "{unsynced:?}"
+    );
 
     // The first poll syncs the mailbox's first page and starts at its
     // newest unread thread.
@@ -358,7 +401,6 @@ async fn new_mail_syncs_then_emits_unread_threads() {
         vec![gmail_message("old-m", "old", &inbox, old_ms, "Old")],
     )
     .await;
-    let query = AppQuery::NewMail;
     let first = host
         .poll("mail", &mailbox, &query, None, "mail")
         .await
@@ -433,6 +475,7 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     assert_eq!(payload["external_thread_id"], "fresh");
     assert_eq!(payload["message_id"], fresh.as_str());
     assert_eq!(payload["sender"], "Bo Lee");
+    assert_eq!(payload["sender_address"], "bo@example.test");
     assert_eq!(payload["subject"], "About fresh");
     let shown = payload["preview"].as_str().unwrap();
     assert!(shown.starts_with("Hello\\np"), "{shown}");
@@ -451,15 +494,19 @@ async fn new_mail_syncs_then_emits_unread_threads() {
     // A failed sync still reads the cache, and its copy is the status.
     server.reset().await;
     let failed = host
-        .poll("mail", &mailbox, &query, Some(next.cursor), "mail")
+        .poll("mail", &mailbox, &query, Some(next.cursor.clone()), "mail")
         .await
         .unwrap();
     assert!(failed.events.is_empty());
     assert!(failed.status.is_some());
 
-    // A mailbox that isn't connected is gone.
+    // Once the owner disconnects it, the mailbox that worked is gone.
+    mail.connections
+        .disconnect(ServiceProvider::Gmail)
+        .await
+        .unwrap();
     let gone = host
-        .poll("mail", "gmail:nobody", &query, None, "mail")
+        .poll("mail", &mailbox, &query, Some(next.cursor), "mail")
         .await
         .err()
         .unwrap();

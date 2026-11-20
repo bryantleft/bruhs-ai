@@ -499,6 +499,7 @@ impl AppsHost {
                 AppsError::Invalid(_)
                 | AppsError::TooLarge(_)
                 | AppsError::TestFailed(_)
+                | AppsError::MailSync(_)
                 | AppsError::Vault(_) => TestFailure::Unexpected,
             })?;
         test_account(connector, params, reply.status, &reply.body)

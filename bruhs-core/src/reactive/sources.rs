@@ -132,7 +132,12 @@ fn polling_interval(kind: &SourceKind) -> Option<Duration> {
         SourceKind::Schedule { every_ms } => *every_ms,
         // Calendar wake-ups follow their saved deadline; this is only the retry pace.
         SourceKind::Calendar { .. } => 60_000,
-        SourceKind::AppPoll { poll_ms, .. } => *poll_ms,
+        // Clamped again here: a row that skipped the save checks can't poll
+        // the owner's account more often than once a minute.
+        SourceKind::AppPoll { poll_ms, .. } => (*poll_ms).clamp(
+            bruhs_models::apps::APP_POLL_MIN_MS,
+            bruhs_models::apps::APP_POLL_MAX_MS,
+        ),
         // A newer Bruhs' kind never polls.
         SourceKind::Webhook
         | SourceKind::AppEvent { .. }

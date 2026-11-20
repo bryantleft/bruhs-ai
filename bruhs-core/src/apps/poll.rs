@@ -256,6 +256,11 @@ impl AppsHost {
         let status = self.sync_mail(mail, &mailbox, &connection_id).await;
         let unreadable = |_| AppsError::Unavailable(MAILBOXES_UNAVAILABLE);
         let Some(mut cursor) = read_cursor::<MailCursor>(cursor, &definition) else {
+            // A baseline from a cache the sync couldn't bring up to date
+            // would backfill or skip mail: wait for a sync that works.
+            if let Some(status) = status {
+                return Err(AppsError::MailSync(status));
+            }
             let after_ms = mail
                 .newest_unread_ms(mailbox_id)
                 .await
@@ -302,6 +307,7 @@ impl AppsHost {
                     "external_thread_id": reviewed(&thread.external_thread_id, FIELD_CHARS),
                     "message_id": reviewed(&thread.message_id, FIELD_CHARS),
                     "sender": reviewed(&thread.sender, FIELD_CHARS),
+                    "sender_address": reviewed(&thread.sender_address, FIELD_CHARS),
                     "subject": reviewed(&thread.subject, FIELD_CHARS),
                     "preview": reviewed(&thread.preview, PREVIEW_CHARS),
                     "message_at_ms": thread.message_at_ms,

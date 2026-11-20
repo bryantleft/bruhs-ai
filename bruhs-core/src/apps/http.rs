@@ -225,7 +225,7 @@ impl AppHttp {
 
     /// A GET Bruhs itself makes and reads whole, scrubbed like any reply but
     /// never cut to a bruh's share: the polls, which parse the list.
-    pub(crate) async fn read_whole(
+    pub(super) async fn read_whole(
         &self,
         connector: &'static AppConnector,
         params: &BTreeMap<String, String>,
