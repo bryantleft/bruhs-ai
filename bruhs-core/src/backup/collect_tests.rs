@@ -561,6 +561,83 @@ fn errors_answer_fixed_copy() {
     );
 }
 
+/// B Task 5 N1 ruling: past `MAX_ENTRY_DEPTH` levels an owner tree is
+/// left out and counted once, Bruhs' own folders refuse the backup, and a
+/// measuring walk stops quietly.
+#[test]
+fn trees_deeper_than_the_cap_are_skipped_refused_or_left_unmeasured() {
+    use bruhs_models::backup::MAX_ENTRY_DEPTH;
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    // `server/bruhs/a1/work` is 4 levels; folders reach level 70.
+    let deep = |from: &Path, levels: usize| {
+        let mut path = from.to_path_buf();
+        for _ in 0..levels {
+            path.push("d");
+        }
+        path
+    };
+    let work = roots.core.join("server/bruhs/a1/work");
+    let bottom = deep(&work, 66);
+    write(&bottom.join("f"), b"x");
+    // A file at the cap still goes in.
+    let at_cap = deep(&work, MAX_ENTRY_DEPTH - 5).join("kept.md");
+    write(&at_cap, b"x");
+    let profile = roots.core.join("server/bruhs/a1/browser");
+    write(&deep(&profile, 70).join("f"), b"profile");
+    write(&profile.join("Default/Cookies"), b"cookies");
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    let kept = format!(
+        "server/bruhs/a1/work/{}/kept.md",
+        vec!["d"; MAX_ENTRY_DEPTH - 5].join("/")
+    );
+    assert_eq!(listed(&taken), [(RootKey::Core, kept.as_str())]);
+    assert_eq!(kept.split('/').count(), MAX_ENTRY_DEPTH);
+    assert_eq!(taken.skipped_names, 1);
+    // Measured up to the cap only, and never counted as a name.
+    assert_eq!(taken.browser_bytes, 7);
+
+    let refused_tree = deep(&roots.core.join("server/state"), 70);
+    write(&refused_tree.join("f.json"), b"{}");
+    let refused = inventory(&roots, &BackupOptions::default()).unwrap_err();
+    assert!(matches!(refused, BackupError::Refused(DATA_NAME_REFUSED)));
+}
+
+/// B Task 5 N3 and N4 rulings: a listed file's root is the same folder it
+/// was when the walk opened it, or the file isn't opened; a database is
+/// never opened with a plain descriptor.
+#[test]
+fn reopening_checks_the_root_and_refuses_databases() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("server/bruhs/a1/work/n.md"), b"mine");
+    drop(wal_database(&roots.core.join("server/reactive.sqlite3")));
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    let note = taken.files.iter().find(|file| !file.sqlite).unwrap();
+    let database = taken.files.iter().find(|file| file.sqlite).unwrap();
+    assert_eq!(RootId::of(&note.base).unwrap(), note.base_id);
+    assert!(open_source(note).is_ok());
+    assert_eq!(
+        open_source(database).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+
+    // The root is swapped for another folder at the same path.
+    std::fs::rename(&roots.core, base.join("home/core-old")).unwrap();
+    write(&roots.core.join("server/bruhs/a1/work/n.md"), b"other");
+    assert_ne!(RootId::of(&note.base).unwrap(), note.base_id);
+    assert_eq!(
+        open_source(note).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    // A link in its place isn't followed.
+    std::fs::remove_dir_all(&roots.core).unwrap();
+    std::os::unix::fs::symlink(base.join("home/core-old"), &roots.core).unwrap();
+    assert!(open_source(note).is_err());
+    assert!(RootId::of(&note.base).is_err());
+}
+
 /// The child side of `detection_keeps_this_process_s_sqlite_locks`: run as
 /// its own process, it tries to take the write lock on the database the
 /// parent names and fails when the parent still holds it. Without the
@@ -607,7 +684,8 @@ fn locked_for_others(db: &Path) -> bool {
 /// it never closes a descriptor of a live database this process holds
 /// open (a POSIX close drops every lock the process holds on the file).
 /// A rollback-mode writer mid-transaction keeps its lock through the
-/// inventory and through a snapshot.
+/// inventory and through a snapshot, which sees only committed rows; once
+/// it commits, the probe sees the database free (N5: the probe can tell).
 #[test]
 fn detection_keeps_this_process_s_sqlite_locks() {
     let (_dir, base) = temp();
@@ -621,8 +699,18 @@ fn detection_keeps_this_process_s_sqlite_locks() {
     assert!(locked_for_others(&live), "the probe sees the lock");
 
     let taken = inventory(&roots, &BackupOptions::default()).unwrap();
-    assert!(taken.files.iter().any(|file| file.sqlite));
+    let database = taken.files.iter().find(|file| file.sqlite).unwrap();
     assert!(locked_for_others(&live), "the inventory dropped the lock");
 
+    let into = base.join("mail-snapshot.sqlite3");
+    snapshot_sqlite(&database.path, &into).unwrap();
+    assert!(locked_for_others(&live), "the snapshot dropped the lock");
+    let snapshot = Connection::open_with_flags(&into, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let rows: i64 = snapshot
+        .query_row("SELECT count(*) FROM t", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rows, 0, "the snapshot holds committed rows only");
+
     writer.execute_batch("COMMIT").unwrap();
+    assert!(!locked_for_others(&live), "the probe sees the lock go");
 }

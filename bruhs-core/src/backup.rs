@@ -19,7 +19,7 @@ mod collect;
 mod disk;
 
 #[cfg(unix)]
-pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, SourceFile};
+pub use collect::{inventory, open_source, snapshot_sqlite, Inventory, RootId, SourceFile};
 #[cfg(unix)]
 pub use disk::{free_bytes, FREE_MARGIN};
 

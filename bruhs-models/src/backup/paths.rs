@@ -16,6 +16,10 @@ pub const MAX_ENTRIES: u64 = 1_000_000;
 const MAX_PATH_BYTES: usize = 4096;
 /// Each component of an entry path is at most this many bytes.
 const MAX_COMPONENT_BYTES: usize = 255;
+/// An entry path below `core/` or `desktop/` has at most this many
+/// components (B Task 5 N1 ruling): the backup's walk holds one folder
+/// handle a level, so a deeper tree would exhaust the server's open files.
+pub const MAX_ENTRY_DEPTH: usize = 64;
 
 /// Top-level entries of either root that never go in: machine-local state,
 /// caches and the backups themselves.
@@ -105,7 +109,8 @@ pub enum EntryPath {
 /// `web/part.bin`, or a relative path under `core/` or `desktop/` whose
 /// components are all normal names. Refuses with [`UNSAFE_ENTRY`]:
 /// - an empty, `.` or `..` component (so a doubled or trailing `/` too), a
-///   leading `/`, a component over 255 bytes and a path over 4096 bytes;
+///   leading `/`, a component over 255 bytes, a path over 4096 bytes and
+///   more than [`MAX_ENTRY_DEPTH`] components below the root's name;
 /// - a backslash, NUL or any control character, and the invisible format,
 ///   bidi and line or paragraph separator characters that can disguise a
 ///   name;
@@ -141,7 +146,10 @@ pub fn safe_entry_path(path: &str) -> Result<EntryPath, &'static str> {
             && component.len() <= MAX_COMPONENT_BYTES
     };
     let first = rest.split('/').next().unwrap_or_default();
-    if rest.split('/').all(normal) && !refused_top(first) {
+    if rest.split('/').count() <= MAX_ENTRY_DEPTH
+        && rest.split('/').all(normal)
+        && !refused_top(first)
+    {
         Ok(entry(rest.to_owned()))
     } else {
         Err(UNSAFE_ENTRY)
@@ -579,6 +587,19 @@ mod tests {
             assert_eq!(safe_entry_path(bad), Err(UNSAFE_ENTRY), "{bad:?}");
         }
         assert!(safe_entry_path(&format!("core/{}", "a".repeat(255))).is_ok());
+    }
+
+    /// B Task 5 N1 ruling: at most 64 levels below the root's name.
+    #[test]
+    fn entry_paths_are_at_most_64_levels_deep() {
+        let at = |levels: usize| vec!["a"; levels].join("/");
+        for root in ["core", "desktop"] {
+            assert!(safe_entry_path(&format!("{root}/{}", at(MAX_ENTRY_DEPTH))).is_ok());
+            assert_eq!(
+                safe_entry_path(&format!("{root}/{}", at(MAX_ENTRY_DEPTH + 1))),
+                Err(UNSAFE_ENTRY)
+            );
+        }
     }
 
     /// I1 ruling and the invisible-character minor.

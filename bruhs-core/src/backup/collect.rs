@@ -5,19 +5,22 @@
 //! Nothing here opens a database file with a plain descriptor: closing one
 //! drops every POSIX lock this process holds on the file, including the
 //! locks of the server's own connections. Databases are found and copied
-//! through SQLite, whose unix VFS shares one descriptor per file within a
-//! process.
+//! through SQLite: when one of its connections closes a file that another
+//! connection in this process still holds a lock on, its unix VFS keeps
+//! the descriptor open until that lock goes (`setPendingFd`), so no lock is
+//! dropped.
 
 use std::ffi::{CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::fd::OwnedFd;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bruhs_models::backup::{
     excluded, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS, DATA_NAME_REFUSED,
-    EXCLUDED_TOP,
+    EXCLUDED_TOP, MAX_ENTRY_DEPTH,
 };
 use rusqlite::{Connection, OpenFlags};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
@@ -48,6 +51,9 @@ pub struct SourceFile {
     /// The resolved folder `rel` is relative to: the root, or for the core
     /// root's `calendar/` on Linux, the config root.
     pub base: PathBuf,
+    /// `base`'s identity when the walk opened it. [`open_source`] refuses
+    /// a `base` that is another folder now (B Task 5 N3).
+    pub base_id: RootId,
     /// Its size when it was listed.
     pub bytes: u64,
     /// A database of Bruhs' own, copied with [`snapshot_sqlite`] rather
@@ -87,7 +93,9 @@ pub struct Inventory {
 /// would go in. Sockets, FIFOs and devices are left out.
 ///
 /// Names are judged where they would go in. One the restore would refuse
-/// (not UTF-8, or one `safe_entry_path` refuses under the root's prefix) is
+/// (not UTF-8, or one `safe_entry_path` refuses under the root's prefix,
+/// including more than `MAX_ENTRY_DEPTH` levels, so the walk never holds
+/// more than that many folder handles) is
 /// left out and counted in `skipped_names` in the owner's own files: the
 /// content folders and a bruh's `work` and `browser` folders. Anywhere else
 /// it refuses the backup with [`DATA_NAME_REFUSED`].
@@ -146,26 +154,60 @@ pub(super) fn inventory_with(
     Ok(walk.inventory)
 }
 
+/// A root folder's identity (device and inode) when it was opened, so a
+/// later step can tell that the folder at its path is still the same one
+/// (B Task 5 N3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RootId {
+    pub dev: u64,
+    pub ino: u64,
+}
+
+impl RootId {
+    /// The identity of the resolved folder `base` now, opened without
+    /// following a link in its last name. Compare it with
+    /// [`SourceFile::base_id`] before reading through `base` by path.
+    pub fn of(base: &Path) -> io::Result<Self> {
+        open_base(base).map(|(_, id)| id)
+    }
+}
+
+/// Opens the resolved folder `base` (no link in its last name) and reads
+/// its identity from the open handle.
+fn open_base(base: &Path) -> io::Result<(OwnedFd, RootId)> {
+    let fd = rustix::fs::open(
+        base,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let folder = File::from(fd);
+    let metadata = folder.metadata()?;
+    let id = RootId {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    };
+    Ok((OwnedFd::from(folder), id))
+}
+
 /// A root folder, resolved and open.
 struct OpenedRoot {
     base: PathBuf,
     fd: OwnedFd,
+    id: RootId,
 }
 
-/// Opens a root, or `None` when it doesn't exist yet. The root itself may
-/// be a link the owner made; nothing below it is followed.
+/// Opens a root, or `None` when it doesn't exist yet. The path to the root
+/// may hold a link the owner made; it is resolved once, then the resolved
+/// folder is opened without following a link and its identity recorded.
+/// Nothing below it is followed.
 fn opened_root(root: &Path) -> io::Result<Option<OpenedRoot>> {
     let base = match std::fs::canonicalize(root) {
         Ok(base) => base,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let fd = rustix::fs::open(
-        &base,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
-    Ok(Some(OpenedRoot { base, fd }))
+    let (fd, id) = open_base(&base)?;
+    Ok(Some(OpenedRoot { base, fd, id }))
 }
 
 /// The names in the folder `fd`, without `.` and `..`, sorted by bytes.
@@ -225,6 +267,11 @@ impl Walk<'_> {
             Excluded::Audio => self.options.audio,
             Excluded::Browser => self.options.browser_profiles,
         };
+        // The walk holds a folder handle a level: a measuring walk stops
+        // where a restore would refuse the depth (B Task 5 N1).
+        if !goes_in && rel.split('/').count() > MAX_ENTRY_DEPTH {
+            return Ok(());
+        }
         match kind {
             FileType::Symlink => {
                 self.skipped_link(goes_in);
@@ -290,6 +337,7 @@ impl Walk<'_> {
                 rel,
                 path,
                 base: root.base.clone(),
+                base_id: root.id,
                 bytes,
                 sqlite,
             });
@@ -349,8 +397,10 @@ enum Found {
 
 /// Asks SQLite whether the file at `path` is a database (B Task 5 C1):
 /// read-only, no link anywhere in the path, then `PRAGMA schema_version`.
-/// SQLite shares this process's descriptor for a file it already has open,
-/// so the check never drops a lock.
+/// Closing this connection drops no lock another connection in this
+/// process holds on the file: SQLite keeps its descriptor open until those
+/// locks go. Its no-follow check is by path, done before the open, and the
+/// open doesn't use `O_NONBLOCK` (recorded limits, N2).
 fn found(path: &Path) -> Found {
     let checked = Connection::open_with_flags(
         path,
@@ -380,15 +430,25 @@ fn found(path: &Path) -> Found {
 
 /// Opens a listed file for reading through folder handles from its `base`,
 /// following no link on the way (B Task 5 I1 ruling): a folder or the file
-/// swapped for a link since the walk fails with `ELOOP` or `ENOTDIR`, and
-/// anything but a regular file fails with `InvalidData`. Never use it on a
-/// [`SourceFile::sqlite`] file.
+/// swapped for a link since the walk fails with `ELOOP` or `ENOTDIR`, a
+/// `base` that is another folder than the walk's, or anything but a
+/// regular file, fails with `InvalidData`. A [`SourceFile::sqlite`] file is
+/// refused with `InvalidInput`: a plain descriptor on a live database
+/// drops this process's locks on it when it closes (C1, N4).
 pub fn open_source(file: &SourceFile) -> io::Result<File> {
-    let mut folder = rustix::fs::open(
-        &file.base,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
+    if file.sqlite {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a database is copied through SQLite, never opened directly",
+        ));
+    }
+    let (mut folder, id) = open_base(&file.base)?;
+    if id != file.base_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "a data root changed since the walk",
+        ));
+    }
     let mut parts = file.rel.split('/').peekable();
     while let Some(part) = parts.next() {
         if parts.peek().is_none() {
