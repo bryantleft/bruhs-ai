@@ -77,6 +77,7 @@ pub async fn postprocess_meeting(state: Arc<CaptureState>, opts: PostprocessOpts
             .await
             .map_err(crate::transcribe::TranscribeError::Remote)),
         crate::transcribe::TranscriptionJob::Whisper(model_for_task) => {
+            let _using_models = state.models.meeting_inference.read().await;
             let model_path = match state
                 .models
                 .ensure_whisper(model_for_task, |downloaded, total| {

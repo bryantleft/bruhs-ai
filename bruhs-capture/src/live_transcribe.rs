@@ -128,7 +128,7 @@ impl LiveTranscriber {
 
 /// Returns true if the energy in `samples` is above the speech
 /// threshold (reused from diarize's primitive — pure ƒ32 RMS).
-fn has_speech(samples: &[f32]) -> bool {
+pub(crate) fn has_speech(samples: &[f32]) -> bool {
     if samples.is_empty() {
         return false;
     }

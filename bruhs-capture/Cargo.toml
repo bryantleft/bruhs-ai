@@ -11,6 +11,8 @@ publish = false
 workspace = true
 
 [dependencies]
+keyring = { workspace = true }
+base64 = "0.22"
 bruhs-models = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
@@ -39,7 +41,7 @@ tempfile = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.12", default-features = false, features = ["metal"] }
-cidre = { git = "https://github.com/yury/cidre", rev = "b8631d2857e5d039594db7127cf5e3528016af90", default-features = false, features = ["sc", "cm", "cat", "blocks", "async", "dispatch", "vn", "macos_13_0"] }
+cidre = { git = "https://github.com/yury/cidre", rev = "b8631d2857e5d039594db7127cf5e3528016af90", default-features = false, features = ["mtl", "sc", "cm", "cat", "blocks", "async", "dispatch", "vn", "macos_13_0"] }
 sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }
 
 [dev-dependencies]

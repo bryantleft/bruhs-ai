@@ -91,6 +91,7 @@ type SharedClient = OnceLock<Result<reqwest::Client, Arc<reqwest::Error>>>;
 /// The model cache. One per daemon (it lives in `CaptureState`).
 pub struct ModelStore {
     dir: PathBuf,
+    pub meeting_inference: tokio::sync::RwLock<()>,
     client: SharedClient,
     /// One async lock per destination: concurrent `ensure` calls for the same
     /// file wait for a single download instead of racing.
@@ -104,6 +105,7 @@ impl ModelStore {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
+            meeting_inference: Default::default(),
             client: OnceLock::new(),
             locks: Mutex::new(HashMap::new()),
             verified: Mutex::new(HashSet::new()),
@@ -165,6 +167,93 @@ impl ModelStore {
         progress: impl Fn(u64, Option<u64>) + Send,
     ) -> Result<PathBuf, ModelError> {
         self.ensure(&ModelArtifact::whisper(model), progress).await
+    }
+
+    /// Stage a private snapshot so later changes to an external model cannot change
+    /// what the native decoder loads. The source stays owned by the caller.
+    pub async fn import_whisper(
+        &self,
+        model: WhisperModel,
+        source: PathBuf,
+    ) -> Result<(), ModelError> {
+        let artifact = ModelArtifact::whisper(model);
+        let path = self.path(&artifact);
+        let lock = self.lock_for(&path);
+        let _guard = lock.lock().await;
+        let dest = path.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), ModelError> {
+            use std::io::{self, Read};
+            if !source.is_absolute() {
+                return Err(io::Error::other("Enter an absolute path on the capture host.").into());
+            }
+            let source = if source.is_dir() {
+                source.join(&artifact.file)
+            } else {
+                source
+            };
+            let metadata = std::fs::metadata(&source)?;
+            if !metadata.is_file() {
+                return Err(io::Error::other("Choose a regular model file.").into());
+            }
+            if metadata.len() != artifact.len {
+                return Err(ModelError::Length {
+                    expected: artifact.len,
+                    actual: metadata.len(),
+                });
+            }
+            let dir = dest.parent().expect("model cache directory");
+            std::fs::create_dir_all(dir)?;
+            let mut staged = tempfile::NamedTempFile::new_in(dir)?;
+            let mut input = std::fs::File::open(source)?.take(artifact.len + 1);
+            let mut hasher = Sha256::new();
+            let mut buffer = vec![0; HASH_BUFFER_BYTES];
+            let mut length = 0;
+            loop {
+                let n = input.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                std::io::Write::write_all(staged.as_file_mut(), &buffer[..n])?;
+                hasher.update(&buffer[..n]);
+                length += n as u64;
+            }
+            if length != artifact.len {
+                return Err(ModelError::Length {
+                    expected: artifact.len,
+                    actual: length,
+                });
+            }
+            let actual = hex(&hasher.finalize());
+            if actual != artifact.sha256 {
+                return Err(ModelError::Checksum {
+                    expected: artifact.sha256,
+                    actual,
+                });
+            }
+            staged.as_file().sync_all()?;
+            staged.persist(&dest).map_err(|e| e.error)?;
+            Ok(())
+        })
+        .await??;
+        self.mark_verified(path);
+        Ok(())
+    }
+
+    /// Remove only a catalog file, serialized with all downloads and verification.
+    pub async fn remove_whisper(&self, model: WhisperModel) -> Result<(), ModelError> {
+        let path = self.path(&ModelArtifact::whisper(model));
+        let lock = self.lock_for(&path);
+        let _guard = lock.lock().await;
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        self.verified
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&path);
+        Ok(())
     }
 
     /// The sherpa speaker-embedding model (see [`Self::ensure_whisper`]).
