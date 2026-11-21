@@ -179,12 +179,15 @@ fn applier_command(exe: &Path, log: Option<File>, env: &[(OsString, OsString)]) 
             uuid::Uuid::new_v4().simple()
         ));
         // The unit starts with the user manager's environment; carry this
-        // process's settings and the folders the roots resolve from. Only
-        // names: systemd-run copies each value from its own environment.
+        // process's settings and the folders the roots resolve from, its
+        // home among them, so a scratch home's restore stays there (final
+        // review C-M6). Only names: systemd-run copies each value from its
+        // own environment.
         for (key, _) in env {
             let Some(key) = key.to_str() else { continue };
             let carried = (key.starts_with("BRUHS_") && key != EXIT_WITH_PARENT)
                 || key.starts_with("XDG_")
+                || key == "HOME"
                 || key == "PATH";
             if carried {
                 command.arg(format!("--setenv={key}"));
@@ -618,7 +621,11 @@ mod tests {
             .any(|arg| arg.starts_with("--unit=bruhs-restore-")));
         assert!(!args.iter().any(|arg| arg.contains(EXIT_WITH_PARENT)));
         // Names only, never values: the settings and the roots' folders.
-        for carried in ["--setenv=BRUHS_SECRET_STORE", "--setenv=XDG_DATA_HOME"] {
+        for carried in [
+            "--setenv=BRUHS_SECRET_STORE",
+            "--setenv=XDG_DATA_HOME",
+            "--setenv=HOME",
+        ] {
             assert!(args.iter().any(|arg| arg == carried), "{args:?}");
         }
         assert!(!args
