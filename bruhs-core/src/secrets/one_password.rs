@@ -407,19 +407,20 @@ printf 'op-canary\n'"#,
         let started = folder.path().join("started");
         let finished = folder.path().join("finished");
         // A child of `op` that outlives it, as a helper would: the whole
-        // group goes.
+        // group goes. The wait leaves the shell time to start under a full
+        // parallel test run; the child would finish 4 s after it started.
         let body = format!(
-            "( : > '{}'; /bin/sleep 2; : > '{}' ) & wait",
+            "( : > '{}'; /bin/sleep 4; : > '{}' ) & wait",
             started.display(),
             finished.display()
         );
-        let op = OnePassword::at(stand_in(folder.path(), &body), Duration::from_secs(1));
+        let op = OnePassword::at(stand_in(folder.path(), &body), Duration::from_secs(3));
         assert_eq!(
             op.read("op://P/I/password").await.unwrap_err(),
             OnePasswordError::NeedsOwner
         );
         assert!(started.exists(), "the child ran before the wait ended");
-        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        tokio::time::sleep(Duration::from_millis(4_500)).await;
         assert!(!finished.exists(), "op's child ran on after its wait");
     }
 
