@@ -994,10 +994,12 @@ mod tests {
     }
 
     #[test]
-    fn the_section_sits_after_apps() {
+    fn the_section_sits_after_people() {
+        // The desktop keeps it beside Maintenance, in its Application
+        // group; the web has no Maintenance, so it follows People there.
         assert_eq!(SECTIONS.len(), 13);
-        assert_eq!(SECTIONS[4].0, "apps");
-        assert_eq!(SECTIONS[5], ("backup", "archive", BACKUP_TITLE));
+        assert_eq!(SECTIONS[9].0, "people");
+        assert_eq!(SECTIONS[10], ("backup", "archive", BACKUP_TITLE));
     }
 
     #[test]

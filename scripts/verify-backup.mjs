@@ -690,14 +690,14 @@ try {
   await pageB.evaluate(`localStorage.setItem('bruhs.qa.b', 'before')`);
 
   // 1. Settings, Backup on A.
-  await check('Settings, Backup on A: after Apps, the option labels with sizes, WEB_INCLUDED, no horizontal scroll at 1280×800 and 390×844', async () => {
+  await check('Settings, Backup on A: after People, the option labels with sizes, WEB_INCLUDED, no horizontal scroll at 1280×800 and 390×844', async () => {
     await openSettings(pageA);
     const state = await pageA.evaluate(`(() => {
       const nav = [...document.querySelectorAll('nav[aria-label="Settings sections"] button')].map((b) => b.innerText.trim());
       const ids = [...document.querySelectorAll('section[id], [id="apps"], [id="backup"]')].map((n) => n.id).filter(Boolean);
       return {
-        nav, apps: nav.indexOf('Apps'), backup: nav.indexOf('Backup'),
-        afterApps: !!document.getElementById('apps') && !!(document.getElementById('apps').compareDocumentPosition(document.getElementById('backup')) & Node.DOCUMENT_POSITION_FOLLOWING),
+        nav, people: nav.indexOf('People'), backup: nav.indexOf('Backup'),
+        afterPeople: !!document.getElementById('people') && !!(document.getElementById('people').compareDocumentPosition(document.getElementById('backup')) & Node.DOCUMENT_POSITION_FOLLOWING),
         options: [...document.querySelectorAll('[data-backup-option] p:first-child')].map((p) => p.innerText.trim()),
         web: document.querySelector('[data-backup-web-included]')?.innerText.trim(),
         sideways: document.scrollingElement.scrollWidth - innerWidth,
@@ -713,8 +713,8 @@ try {
     await pageA.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
     const size = /\(\d+(\.\d+)? (B|KB|MB|GB)\)$/;
     const [keys, audio, browsers] = state.options;
-    record('Settings, Backup on A: after Apps, the option labels with sizes, WEB_INCLUDED, no horizontal scroll at 1280×800 and 390×844',
-      state.backup === state.apps + 1 && state.afterApps && keys === `Saved logins, keys and app tokens (${listed.keychain_items})` && listed.keychain_items === 3
+    record('Settings, Backup on A: after People, the option labels with sizes, WEB_INCLUDED, no horizontal scroll at 1280×800 and 390×844',
+      state.backup === state.people + 1 && state.afterPeople && keys === `Saved logins, keys and app tokens (${listed.keychain_items})` && listed.keychain_items === 3
         && audio?.startsWith('Meeting audio (') && size.test(audio) && browsers?.startsWith('Bruh browser sign-ins (') && size.test(browsers)
         && state.web === COPY.webIncluded && state.sideways <= 0 && narrow <= 0,
       `nav ${js(state.nav)}; options ${js(state.options)}; keychain items ${listed.keychain_items}; audio bytes ${listed.sizes.audio_bytes}; web ${js(state.web)}; sideways ${state.sideways} at 1280, ${narrow} at 390`);

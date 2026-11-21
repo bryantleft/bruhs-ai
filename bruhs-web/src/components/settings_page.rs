@@ -37,12 +37,12 @@ pub const SECTIONS: [(&str, &str, &str); 13] = [
     ("beta", "activity", "Beta"),
     ("vault", "shield", "Vault"),
     ("apps", "globe", "Apps"),
-    ("backup", "archive", BACKUP_TITLE),
     ("calendar", "calendar", "Calendar"),
     ("recording", "mic", "Recording"),
     ("transcription", "activity", "Transcription"),
     ("speakers", "users", "Speakers"),
     ("people", "book-open", "People"),
+    ("backup", "archive", BACKUP_TITLE),
     ("keyboard", "keyboard", "Keybindings"),
     ("about", "help-circle", "About"),
 ];
@@ -743,9 +743,6 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="apps" title=APPS_TITLE description=APPS_DESCRIPTION>
                             <AppsSettings />
                         </SettingsSection>
-                        <SettingsSection id="backup" title=BACKUP_TITLE description=BACKUP_DESCRIPTION>
-                            <BackupSettings />
-                        </SettingsSection>
                         <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and automatic meeting recording.">
                             <GoogleCalendarSettings />
                         </SettingsSection>
@@ -760,6 +757,9 @@ pub fn SettingsPage() -> impl IntoView {
                         </SettingsSection>
                         <SettingsSection id="people" title="People" description="What meeting summaries record about each person.">
                             <PersonalitySettingsPanel />
+                        </SettingsSection>
+                        <SettingsSection id="backup" title=BACKUP_TITLE description=BACKUP_DESCRIPTION>
+                            <BackupSettings />
                         </SettingsSection>
                         <SettingsSection id="keyboard" title="Keybindings" description="Customize shortcuts and when they apply. Some keys are reserved by your browser.">
                             <KeyboardSettings />
