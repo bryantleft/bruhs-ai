@@ -9,6 +9,7 @@
 //! Everything here is blocking file I/O: async callers use
 //! `spawn_blocking`.
 
+pub mod agents;
 mod archive;
 pub mod batch;
 mod chatgpt;

@@ -23,13 +23,14 @@
 //! Logs carry counts and fixed copy only: never a name, a path or text
 //! from an export.
 
+use super::agents::AgentRoots;
 use super::archive::{never_opened, walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport};
 use super::json_stream::for_each_record;
 use super::text::{clip_part, shown_name, TITLE_MAX_CHARS};
 use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
-    import_key, valid_batch_id, BatchCounts, ImportBatch, ImportJob, ImportJobState,
+    import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob, ImportJobState,
     MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT, EXPORT_TOO_LARGE,
     FOLDER_MISSING, GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES,
     MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
@@ -92,6 +93,8 @@ pub struct ImportHost {
     #[cfg(test)]
     record_hook: Option<RecordHook>,
     state: Arc<State>,
+    /// Where the local agents' folders are (F17).
+    agents: AgentRoots,
 }
 
 #[derive(Default)]
@@ -173,7 +176,6 @@ impl ImportHost {
     /// A host keeping its batches under `root`, with the shipped caps.
     pub fn new(root: PathBuf) -> Self {
         Self {
-            root,
             limits: Limits::DEFAULT,
             now: Arc::new(EpochMs::now),
             #[cfg(unix)]
@@ -181,13 +183,42 @@ impl ImportHost {
             #[cfg(test)]
             record_hook: None,
             state: Arc::default(),
+            // No agent folders until `from_env` or `with_agent_roots` names
+            // them: none are kept under `root`.
+            agents: AgentRoots::under(&root),
+            root,
         }
     }
 
-    /// The host for this account: `<core>/imports`. `None` when no home
-    /// folder can be named.
+    /// The host for this account: `<core>/imports`, and the agents' folders
+    /// in this home. `None` when no home folder can be named.
     pub fn from_env() -> Option<Self> {
-        crate::backup::Roots::from_env().map(|roots| Self::new(roots.core.join("imports")))
+        crate::backup::Roots::from_env().map(|roots| Self {
+            agents: AgentRoots::from_env(),
+            ..Self::new(roots.core.join("imports"))
+        })
+    }
+
+    /// The same host finding the local agents under `agents` (tests).
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_agent_roots(mut self, agents: AgentRoots) -> Self {
+        self.agents = agents;
+        self
+    }
+
+    /// The personas `source` has, from `picked` or its default places
+    /// ([`super::agents::scan`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`super::agents::scan`].
+    pub fn scan(
+        &self,
+        source: ImportSource,
+        picked: Option<&Path>,
+    ) -> Result<AgentScan, ImportError> {
+        super::agents::scan(&self.agents, source, picked)
     }
 
     /// The same host with other caps (tests).
