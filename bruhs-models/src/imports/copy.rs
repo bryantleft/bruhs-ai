@@ -88,6 +88,8 @@ pub const MEMORY_CHANGED: &str =
 // Templates the line functions fill: each `{name}` is replaced whole. A
 // `{chats}` slot takes the whole counted phrase, such as "3 chats".
 pub const READING_TEMPLATE: &str = "Reading the export: {done} of {files} files, {chats} so far";
+/// [`READING_TEMPLATE`] when the read has one file.
+pub const READING_ONE_FILE_TEMPLATE: &str = "Reading the export: {done} of 1 file, {chats} so far";
 pub const BATCH_SUMMARY_TEMPLATE: &str = "{chats} from {sources}.";
 // Counted sentences: `_ONE` when n is 1, else `_MANY` with `{n}` filled.
 pub const SKIPPED_EMPTY_ONE: &str = "1 empty chat was left out.";
@@ -115,11 +117,14 @@ pub const SKIPPED_LINK_TEMPLATE: &str = "Skipped {name}: it's a link.";
 pub const SKIPPED_TOO_LARGE_TEMPLATE: &str = "Skipped {name}: it's over 262 KB.";
 pub const SKIPPED_NOT_A_FILE_TEMPLATE: &str = "Skipped {name}: it isn't a file.";
 pub const SKIPPED_UNREADABLE_TEMPLATE: &str = "Skipped {name}: Bruhs couldn't read it.";
-pub const IDENTITY_DROPPED_TEMPLATE: &str = "{fields} isn't carried over: bruhs use faces.";
+// `_ONE` for one field, else `_MANY` with the fields joined by "and".
+pub const IDENTITY_DROPPED_ONE: &str = "{fields} isn't carried over: bruhs use faces.";
+pub const IDENTITY_DROPPED_MANY: &str = "{fields} aren't carried over: bruhs use faces.";
 pub const MEMORY_PROPOSED_TEMPLATE: &str = "Proposed. Approve it on {name}'s Memory tab.";
 pub const ATTACHMENT_TEMPLATE: &str = "Attachment not imported: {name}";
 pub const ATTACHED_TEMPLATE: &str = "Attached {name}:";
-pub const CUT_SHORT_TEMPLATE: &str = "[Cut short: {n} more characters]";
+pub const CUT_SHORT_ONE: &str = "[Cut short: 1 more character]";
+pub const CUT_SHORT_MANY: &str = "[Cut short: {n} more characters]";
 pub const PASTED_ANSWER_TEMPLATE: &str = "Pasted answer, {date}";
 pub const EXPORT_MEMORY_FROM_TEMPLATE: &str = "{label} export";
 pub const ROWS_SHOWN_TEMPLATE: &str = "Showing {shown} of {total}. Search to find the rest.";
@@ -186,6 +191,7 @@ pub const ALL_COPY: &[&str] = &[
     DECLINE,
     MEMORY_CHANGED,
     READING_TEMPLATE,
+    READING_ONE_FILE_TEMPLATE,
     BATCH_SUMMARY_TEMPLATE,
     SKIPPED_EMPTY_ONE,
     SKIPPED_EMPTY_MANY,
@@ -210,11 +216,13 @@ pub const ALL_COPY: &[&str] = &[
     SKIPPED_TOO_LARGE_TEMPLATE,
     SKIPPED_NOT_A_FILE_TEMPLATE,
     SKIPPED_UNREADABLE_TEMPLATE,
-    IDENTITY_DROPPED_TEMPLATE,
+    IDENTITY_DROPPED_ONE,
+    IDENTITY_DROPPED_MANY,
     MEMORY_PROPOSED_TEMPLATE,
     ATTACHMENT_TEMPLATE,
     ATTACHED_TEMPLATE,
-    CUT_SHORT_TEMPLATE,
+    CUT_SHORT_ONE,
+    CUT_SHORT_MANY,
     PASTED_ANSWER_TEMPLATE,
     EXPORT_MEMORY_FROM_TEMPLATE,
     ROWS_SHOWN_TEMPLATE,

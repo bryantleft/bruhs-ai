@@ -78,8 +78,14 @@ fn identity_line(line: &str) -> Option<(&str, &str)> {
     Some((label.trim(), value))
 }
 
+/// A field's value: trimmed, and out of one layer of `*` or `_` emphasis,
+/// so `*Pinch*` is Pinch and `_(how do you come across?)_` a placeholder.
 fn identity_value(raw: &str) -> Option<String> {
     let value = raw.trim();
+    let value = ['*', '_']
+        .into_iter()
+        .find_map(|mark| value.strip_prefix(mark)?.strip_suffix(mark))
+        .map_or(value, str::trim);
     let placeholder = value.starts_with('(') && value.ends_with(')');
     (!value.is_empty() && !placeholder).then(|| value.to_string())
 }
@@ -109,7 +115,8 @@ pub struct PersonaTexts {
     pub memory: Vec<(String, String)>,
 }
 
-/// A persona's name, job and memory, each within [`MAX_TEXT_CHARS`].
+/// A persona's name, job and memory, each within [`MAX_TEXT_CHARS`] and
+/// free of NUL, so the store takes them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AssembledPersona {
     pub name: String,
@@ -181,8 +188,8 @@ pub fn assemble_persona(texts: &PersonaTexts) -> AssembledPersona {
 }
 
 /// The shared cut rule: each non-empty section, as its heading (when there
-/// is one), a blank line and its trimmed text, joined by blank lines. Whole
-/// sections go in while they fit `budget` characters; the first that
+/// is one), a blank line and its trimmed text less any NUL, joined by blank
+/// lines. Whole sections go in while they fit `budget` characters; the first that
 /// doesn't is cut at a character to end with [`CUT_MARK`] inside the budget,
 /// and the ones after it are dropped. The flag says whether anything was cut.
 fn fit_sections(
@@ -193,6 +200,8 @@ fn fit_sections(
     let mut out = String::new();
     let mut used = 0;
     for (label, text) in sections {
+        // A NUL is invisible and makes the store refuse the whole text.
+        let text = text.replace('\0', "");
         let text = text.trim();
         if text.is_empty() {
             continue;
@@ -347,9 +356,11 @@ pub fn propose_memory(agent_id: String, memory: String) -> ReactiveCommand {
     }
 }
 
-/// Whether approving `proposed` would lose a change made to `current` after
-/// it was proposed: the proposed text doesn't start with the current memory
-/// (its trailing whitespace aside, as [`moved_in_memory`] drops it).
+/// Whether `proposed` doesn't start with the `current` memory (its trailing
+/// whitespace aside, as [`moved_in_memory`] drops it), meaning approving
+/// would replace a change made after it was proposed (D12). A deletion at
+/// the end of the memory, or clearing it, still leaves a prefix and isn't
+/// caught; the card shows the full proposed text.
 pub fn memory_proposal_drops(current: &str, proposed: &str) -> bool {
     !proposed.starts_with(current.trim_end())
 }
@@ -422,6 +433,11 @@ mod tests {
             identity_fields("Just prose: no labels\n"),
             IdentityFields::default()
         );
+        let id = identity_fields(
+            "- **Name:** *Pinch*\n- **Vibe:** _(how do you come across?)_\n- **Creature:** *(pick)*\n- Emoji: __\n",
+        );
+        assert_eq!(id.name.as_deref(), Some("Pinch"));
+        assert_eq!((id.vibe, id.creature, id.emoji), (None, None, None));
     }
 
     #[test]
@@ -491,6 +507,22 @@ mod tests {
             instructions: vec![("SOUL.md".into(), "  \n".into())],
             memory: Vec::new(),
         };
+        let nul = PersonaTexts {
+            source: ImportSource::OpenClaw,
+            fallback_name: "OpenClaw".into(),
+            identity: Some(IdentityFields {
+                creature: Some("a\0crab".into()),
+                ..Default::default()
+            }),
+            instructions: vec![("SOUL.md".into(), "Be\0 kind.".into())],
+            memory: vec![("USER.md".into(), "\0Tea\0".into())],
+        };
+        let p = assemble_persona(&nul);
+        assert_eq!(
+            p.instructions,
+            "Identity from IDENTITY.md\nCreature: acrab\n\n## SOUL.md\n\nBe kind."
+        );
+        assert_eq!(p.memory, "## OpenClaw: USER.md\n\nTea");
         let p = assemble_persona(&empty);
         assert_eq!(
             (p.name.as_str(), p.instructions.as_str(), p.memory.as_str()),
@@ -547,7 +579,15 @@ mod tests {
             text: Some("Tea".into()),
             from: Some(export_memory_from(ImportSource::ClaudeAi)),
         };
-        assert_eq!(start.from.as_deref(), Some("Claude.ai export"));
+        // Clearing the answer keeps the tab and heading it was opened with.
+        let cleared = MoveInStart {
+            text: None,
+            ..start.clone()
+        };
+        assert_eq!(cleared.tab, MoveInTab::ByPrompt);
+        assert_eq!(cleared.from.as_deref(), Some("Claude.ai export"));
+        assert_ne!(cleared, start);
+        assert_ne!(MoveInTab::OpenClaw, MoveInTab::Hermes);
         assert_eq!(moved_in_from("2026-11-21"), "Pasted answer, 2026-11-21");
     }
 
@@ -609,6 +649,12 @@ mod tests {
         ));
         assert!(!memory_proposal_drops("", "## X\n\nNew"));
         assert!(!memory_proposal_drops("Old  \n", "Old\n\n## X\n\nNew"));
+        // The known miss (D12): a deletion at the end of the memory, or
+        // clearing it, still leaves a prefix of the proposal, so it isn't
+        // flagged. The card shows the full proposed text instead.
+        let proposed = "Likes tea. Lives in Lisbon.\n\n## X\n\nNew";
+        assert!(!memory_proposal_drops("Likes tea.", proposed));
+        assert!(!memory_proposal_drops("", proposed));
 
         let agent = crate::reactive::ReactiveAgent {
             id: "b1".into(),

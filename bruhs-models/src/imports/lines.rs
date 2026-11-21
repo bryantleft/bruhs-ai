@@ -4,15 +4,15 @@
 
 use super::{
     plural, BatchCounts, FileUse, ImportBatch, PersonaCandidate, SkipReason, ATTACHED_TEMPLATE,
-    ATTACHMENT_TEMPLATE, BATCH_SUMMARY_TEMPLATE, BEST_EFFORT_SUFFIX, CUT_SHORT_TEMPLATE,
+    ATTACHMENT_TEMPLATE, BATCH_SUMMARY_TEMPLATE, BEST_EFFORT_SUFFIX, CUT_SHORT_MANY, CUT_SHORT_ONE,
     DROPPED_BRANCHES_MANY, DROPPED_BRANCHES_ONE, DUPLICATES_MANY, DUPLICATES_ONE,
-    IDENTITY_DROPPED_TEMPLATE, IMPORTED_TEMPLATE, IMPORTING_TEMPLATE, INSTRUCTIONS_FROM_TEMPLATE,
-    LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE, MEMORY_FROM_TEMPLATE, MEMORY_PROPOSED_TEMPLATE,
-    MEMORY_WAITS, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE, PERSONA_CLIPPED,
-    READING_TEMPLATE, ROWS_SHOWN_TEMPLATE, ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY,
-    SKIPPED_EMPTY_ONE, SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE,
-    SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE,
-    SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
+    IDENTITY_DROPPED_MANY, IDENTITY_DROPPED_ONE, IMPORTED_TEMPLATE, IMPORTING_TEMPLATE,
+    INSTRUCTIONS_FROM_TEMPLATE, LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE, MEMORY_FROM_TEMPLATE,
+    MEMORY_PROPOSED_TEMPLATE, MEMORY_WAITS, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE,
+    PERSONA_CLIPPED, READING_ONE_FILE_TEMPLATE, READING_TEMPLATE, ROWS_SHOWN_TEMPLATE,
+    ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE, SKIPPED_LINK_TEMPLATE,
+    SKIPPED_NOT_A_FILE_TEMPLATE, SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY,
+    SKIPPED_UNKNOWN_ONE, SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
 };
 use crate::logic::portable::{ImportCandidate, ImportSource};
 use crate::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
@@ -81,7 +81,11 @@ fn counted(n: u32, one: &str, many: &str) -> String {
 /// While a read runs: "Reading the export: 1 of 2 files, 40 chats so far".
 pub fn reading_line(done: u32, files: u32, chats_so_far: u32) -> String {
     fill(
-        READING_TEMPLATE,
+        if files == 1 {
+            READING_ONE_FILE_TEMPLATE
+        } else {
+            READING_TEMPLATE
+        },
         &[
             ("done", &done.to_string()),
             ("files", &files.to_string()),
@@ -228,9 +232,14 @@ pub fn persona_lines(persona: &PersonaCandidate) -> Vec<String> {
         };
         lines.push(fill(template, &[("name", &file.name)]));
     }
-    // One line a field: the template's "isn't" reads for one field only.
-    for field in &persona.dropped_identity {
-        lines.push(fill(IDENTITY_DROPPED_TEMPLATE, &[("fields", field)]));
+    let dropped = &persona.dropped_identity;
+    if !dropped.is_empty() {
+        let template = if dropped.len() == 1 {
+            IDENTITY_DROPPED_ONE
+        } else {
+            IDENTITY_DROPPED_MANY
+        };
+        lines.push(fill(template, &[("fields", &and_list(dropped))]));
     }
     if persona.clipped {
         lines.push(PERSONA_CLIPPED.to_string());
@@ -256,7 +265,11 @@ pub fn attached_line(name: &str) -> String {
 
 /// Where a long text part was cut: "[Cut short: 12 more characters]".
 pub fn cut_short_line(more: usize) -> String {
-    fill(CUT_SHORT_TEMPLATE, &[("n", &more.to_string())])
+    if more == 1 {
+        CUT_SHORT_ONE.to_string()
+    } else {
+        fill(CUT_SHORT_MANY, &[("n", &more.to_string())])
+    }
 }
 
 /// Under a list cut to [`super::MAX_ROWS_SHOWN`] rows.
@@ -304,7 +317,7 @@ mod tests {
         );
         assert_eq!(
             reading_line(0, 1, 1),
-            "Reading the export: 0 of 1 files, 1 chat so far"
+            "Reading the export: 0 of 1 file, 1 chat so far"
         );
         assert_eq!(importing_line(3, 100), "Importing 3 of 100");
         assert_eq!(
@@ -333,6 +346,7 @@ mod tests {
         );
         assert_eq!(attached_line("notes.txt"), "Attached notes.txt:");
         assert_eq!(cut_short_line(12), "[Cut short: 12 more characters]");
+        assert_eq!(cut_short_line(1), "[Cut short: 1 more character]");
         assert_eq!(
             rows_shown_line(500, 12_000),
             "Showing 500 of 12000. Search to find the rest."
@@ -449,8 +463,7 @@ mod tests {
                 "Skipped MEMORY.md: it's over 262 KB.".to_string(),
                 "Skipped memory/2026-01-27.md: it isn't a file.".to_string(),
                 "Skipped memory/2026-01-28.md: Bruhs couldn't read it.".to_string(),
-                "Emoji isn't carried over: bruhs use faces.".to_string(),
-                "Avatar isn't carried over: bruhs use faces.".to_string(),
+                "Emoji and Avatar aren't carried over: bruhs use faces.".to_string(),
                 PERSONA_CLIPPED.to_string(),
                 STARTS_READ_ONLY.to_string(),
             ]
@@ -459,13 +472,14 @@ mod tests {
             memory: String::new(),
             files: vec![file("SOUL.md", FileUse::Instructions)],
             clipped: false,
-            dropped_identity: Vec::new(),
+            dropped_identity: vec!["Emoji".into()],
             ..persona
         };
         assert_eq!(
             persona_lines(&bare),
             vec![
                 "Instructions from SOUL.md.".to_string(),
+                "Emoji isn't carried over: bruhs use faces.".to_string(),
                 STARTS_READ_ONLY.to_string(),
             ]
         );
