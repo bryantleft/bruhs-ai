@@ -42,6 +42,9 @@ import { launchChrome, newContext, newPage, sleep } from '../bruhs-web/tests/cdp
 
 const root = path.resolve(process.argv[2] ?? '');
 const dists = { a: path.resolve(process.argv[3] ?? ''), b: path.resolve(process.argv[4] ?? '') };
+// The web database version this build opens (`storage::DB_VERSION`), so a
+// database the script makes is at this build's version and no upgrade runs.
+const DB_VERSION = Number(fs.readFileSync(path.join(root, 'bruhs-web/src/storage.rs'), 'utf8').match(/const DB_VERSION: u32 = (\d+);/)?.[1]);
 const serverBin = path.join(root, 'target/debug/bruhs-server');
 for (const [label, file] of [['bruhs-server', serverBin], ['web bundle for A', path.join(dists.a, 'index.html')], ['web bundle for B', path.join(dists.b, 'index.html')]]) {
   if (!fs.existsSync(file)) {
@@ -1262,7 +1265,7 @@ try {
     await pageS.waitFor(`document.readyState === 'complete'`, 10000);
     const version = await pageS.evaluate(`new Promise((resolve, reject) => {
       const stores = ${js([['whiteboards', 'id'], ['whiteboard_index', 'id'], ['metadata', 'key'], ['threads', 'id'], ['messages', 'thread_id'], ['work_items', 'id'], ['projects', 'id'], ['events', 'id'], ['calendars', 'id'], ['meetings', 'id'], ['meeting_notes', 'id'], ['meeting_generations', 'id'], ['transcript_segments', 'id'], ['people', 'id'], ['captures', 'id'], ['knowledge_documents', 'id'], ['source_clips', 'id'], ['knowledge_attachments', 'id'], ['inbox_conversations', 'id'], ['relationships', 'person_id']])};
-      const open = indexedDB.open('bruhs', 13);
+      const open = indexedDB.open('bruhs', ${DB_VERSION});
       open.onupgradeneeded = () => {
         for (const [name, key] of stores) {
           const store = open.result.createObjectStore(name, { keyPath: key });
@@ -1288,7 +1291,7 @@ try {
     await sleep(1500);
     const again = await pageS.evaluate(`document.getElementById('backup')?.innerText.includes(${js(COPY.skipped)})`);
     record("A browser restore into a database without one of the dump's stores names it, and the line shows after the tab's reload (WEB_STORES_SKIPPED)",
-      outcome.back && version.v === 13 && version.names === 20 && field && reloaded && shown && !again,
+      outcome.back && version.v === DB_VERSION && version.names === 20 && field && reloaded && shown && !again,
       `restore ${js(outcome.restoredText)}; fresh database v${version.v} with ${version.names} stores; card asked for the password ${field}; reloaded ${reloaded}; line shown ${shown}; shown again on the next visit ${again}`);
   });
 
