@@ -268,9 +268,22 @@ fn a_cursor_chat_imports_as_a_transcript() {
 fn a_tool_that_is_not_installed_has_no_threads() {
     let home = tempfile::tempdir().unwrap();
     let roots = ImportRoots::under(home.path());
-    for source in ImportSource::ALL {
+    for source in ImportSource::LOCAL {
         assert!(
             list(&roots, source, None, None).unwrap().is_empty(),
+            "{source:?}"
+        );
+    }
+    for source in ImportSource::ALL
+        .into_iter()
+        .filter(|source| !ImportSource::LOCAL.contains(source))
+    {
+        assert!(
+            matches!(list(&roots, source, None, None), Err(ImportError::NotListed(s)) if s == source),
+            "{source:?}"
+        );
+        assert!(
+            matches!(load(&roots, source, "x"), Err(ImportError::NotListed(s)) if s == source),
             "{source:?}"
         );
     }
@@ -281,7 +294,7 @@ fn a_tool_that_is_not_installed_has_no_threads() {
 #[ignore = "reads the real ~/.claude, ~/.codex, ~/.t3 and Cursor data"]
 fn real_stores_list_and_load() {
     let roots = ImportRoots::from_env();
-    for source in ImportSource::ALL {
+    for source in ImportSource::LOCAL {
         let started = std::time::Instant::now();
         let listed = list(&roots, source, None, Some(20)).unwrap();
         println!(

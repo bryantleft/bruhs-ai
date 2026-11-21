@@ -320,7 +320,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
             <div class="border-b border-longan-800 px-4 py-3">
                 <h2 class="text-label-sm text-rambutan-200">"Import thread"</h2>
                 <div class="mt-2 flex gap-1" role="tablist" aria-label="Import from">
-                    {ImportSource::ALL
+                    {ImportSource::LOCAL
                         .into_iter()
                         .map(|tab| {
                             view! {

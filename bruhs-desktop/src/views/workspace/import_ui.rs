@@ -690,7 +690,7 @@ impl Workspace {
             .role(Role::TabList)
             .aria_label("Import from")
             .children(
-                ImportSource::ALL
+                ImportSource::LOCAL
                     .into_iter()
                     .enumerate()
                     .map(|(index, tab)| {

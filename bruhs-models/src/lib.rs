@@ -29,6 +29,7 @@ pub mod crew;
 pub mod database;
 pub mod delivery;
 pub mod ids;
+pub mod imports;
 pub mod local_tools;
 pub mod voice_dictionary;
 pub mod dictation_runtime;

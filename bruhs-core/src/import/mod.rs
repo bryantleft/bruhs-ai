@@ -81,6 +81,10 @@ pub enum ImportError {
     Io { path: String, error: std::io::Error },
     #[error("{0}'s database could not be read: {1}")]
     Database(&'static str, String),
+    /// The source's threads come from an export file or an agent folder,
+    /// not from a store on this machine that can be listed.
+    #[error("{} threads aren't listed from this machine", .0.label())]
+    NotListed(ImportSource),
 }
 
 impl ImportError {
@@ -109,7 +113,8 @@ pub const MAX_LIMIT: usize = 500;
 ///
 /// # Errors
 ///
-/// When the tool's store exists but cannot be read.
+/// [`ImportError::NotListed`] for an export or agent source, else when the
+/// tool's store exists but cannot be read.
 pub fn list(
     roots: &ImportRoots,
     source: ImportSource,
@@ -138,7 +143,13 @@ pub fn list(
             .into_iter()
             .filter_map(|candidate| candidate.session_id)
             .collect(),
-        ImportSource::T3 | ImportSource::Cursor => std::collections::HashSet::new(),
+        ImportSource::T3
+        | ImportSource::Cursor
+        | ImportSource::ChatGpt
+        | ImportSource::ClaudeAi
+        | ImportSource::Grok
+        | ImportSource::OpenClaw
+        | ImportSource::Hermes => std::collections::HashSet::new(),
     };
     let keep = |candidate: &ImportCandidate| {
         keep(candidate)
@@ -152,6 +163,11 @@ pub fn list(
         ImportSource::Codex => codex::list(&roots.codex, limit, &keep)?,
         ImportSource::T3 => t3::list(&roots.t3, &keep)?,
         ImportSource::Cursor => cursor::list(roots, limit, &keep)?,
+        ImportSource::ChatGpt
+        | ImportSource::ClaudeAi
+        | ImportSource::Grok
+        | ImportSource::OpenClaw
+        | ImportSource::Hermes => return Err(ImportError::NotListed(source)),
     };
     found.sort_by_key(|candidate| std::cmp::Reverse(candidate.updated_at));
     found.truncate(limit);
@@ -162,8 +178,9 @@ pub fn list(
 ///
 /// # Errors
 ///
-/// [`ImportError::NotFound`] when the source has no such thread, else when
-/// its store cannot be read.
+/// [`ImportError::NotFound`] when the source has no such thread,
+/// [`ImportError::NotListed`] for an export or agent source, else when its
+/// store cannot be read.
 pub fn load(
     roots: &ImportRoots,
     source: ImportSource,
@@ -174,6 +191,11 @@ pub fn load(
         ImportSource::Codex => codex::load(&roots.codex, id)?,
         ImportSource::T3 => t3::load(roots, id)?,
         ImportSource::Cursor => cursor::load(roots, id)?,
+        ImportSource::ChatGpt
+        | ImportSource::ClaudeAi
+        | ImportSource::Grok
+        | ImportSource::OpenClaw
+        | ImportSource::Hermes => return Err(ImportError::NotListed(source)),
     };
     Ok(ImportedThread::new(candidate, messages))
 }

@@ -19,7 +19,7 @@ fn source(name: Option<&str>) -> Result<ImportSource, AppError> {
     let name = name.unwrap_or_default();
     ImportSource::parse(name).ok_or_else(|| {
         AppError::BadRequest(format!(
-            "unknown source {name:?} (claude_code, codex, t3 or cursor)"
+            "unknown source {name:?} (claude_code, codex, t3, cursor, chatgpt, claude_ai, grok, openclaw or hermes)"
         ))
     })
 }

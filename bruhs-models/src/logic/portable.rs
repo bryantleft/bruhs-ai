@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::Write as _;
 
-/// A tool whose threads bruhs can import.
+/// A tool whose threads bruhs can import: an agent tool on this machine
+/// ([`Self::LOCAL`]), a chat service's data export ([`Self::EXPORTS`]), or a
+/// local agent whose persona and memory become a bruh ([`Self::AGENTS`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportSource {
@@ -27,11 +29,37 @@ pub enum ImportSource {
     Codex,
     T3,
     Cursor,
+    #[serde(rename = "chatgpt")]
+    ChatGpt,
+    ClaudeAi,
+    Grok,
+    #[serde(rename = "openclaw")]
+    OpenClaw,
+    Hermes,
 }
 
 impl ImportSource {
-    /// Every source, in picker order.
-    pub const ALL: [Self; 4] = [Self::ClaudeCode, Self::Codex, Self::T3, Self::Cursor];
+    /// Every source: the local tools, then the exports, then the agents.
+    pub const ALL: [Self; 9] = [
+        Self::ClaudeCode,
+        Self::Codex,
+        Self::T3,
+        Self::Cursor,
+        Self::ChatGpt,
+        Self::ClaudeAi,
+        Self::Grok,
+        Self::OpenClaw,
+        Self::Hermes,
+    ];
+
+    /// The agent tools on this machine, in picker order.
+    pub const LOCAL: [Self; 4] = [Self::ClaudeCode, Self::Codex, Self::T3, Self::Cursor];
+
+    /// The chat services whose data exports bruhs reads.
+    pub const EXPORTS: [Self; 3] = [Self::ChatGpt, Self::ClaudeAi, Self::Grok];
+
+    /// The local agents whose persona and memory become a bruh.
+    pub const AGENTS: [Self; 2] = [Self::OpenClaw, Self::Hermes];
 
     /// The wire string (`?source=`).
     pub fn as_str(self) -> &'static str {
@@ -40,6 +68,11 @@ impl ImportSource {
             Self::Codex => "codex",
             Self::T3 => "t3",
             Self::Cursor => "cursor",
+            Self::ChatGpt => "chatgpt",
+            Self::ClaudeAi => "claude_ai",
+            Self::Grok => "grok",
+            Self::OpenClaw => "openclaw",
+            Self::Hermes => "hermes",
         }
     }
 
@@ -55,7 +88,22 @@ impl ImportSource {
             Self::Codex => "Codex",
             Self::T3 => "T3 Code",
             Self::Cursor => "Cursor",
+            Self::ChatGpt => "ChatGPT",
+            Self::ClaudeAi => "Claude.ai",
+            Self::Grok => "Grok",
+            Self::OpenClaw => "OpenClaw",
+            Self::Hermes => "Hermes Agent",
         }
+    }
+
+    /// Whether the source's chats come from an uploaded data export.
+    pub fn is_export(self) -> bool {
+        Self::EXPORTS.contains(&self)
+    }
+
+    /// Whether the source is a local agent whose persona becomes a bruh.
+    pub fn is_agent(self) -> bool {
+        Self::AGENTS.contains(&self)
     }
 }
 
@@ -149,6 +197,9 @@ pub struct ImportListQuery {
 pub struct ImportThreadQuery {
     pub source: String,
     pub id: String,
+    /// The export batch the thread was read into, for an export source.
+    #[serde(default)]
+    pub upload: Option<String>,
 }
 
 /// A thread read from another tool, ready to become a bruhs thread.
@@ -445,13 +496,37 @@ mod tests {
     }
 
     #[test]
-    fn sources_round_trip_their_wire_names() {
+    fn every_source_round_trips_its_wire_name() {
         for source in ImportSource::ALL {
-            assert_eq!(ImportSource::parse(source.as_str()), Some(source));
             let json = serde_json::to_string(&source).unwrap();
             assert_eq!(json, format!("\"{}\"", source.as_str()));
+            assert_eq!(ImportSource::parse(source.as_str()), Some(source));
         }
         assert_eq!(ImportSource::parse("vim"), None);
+        assert_eq!(
+            (
+                ImportSource::ChatGpt.as_str(),
+                ImportSource::OpenClaw.as_str()
+            ),
+            ("chatgpt", "openclaw")
+        );
+        assert_eq!(
+            ImportSource::LOCAL,
+            [
+                ImportSource::ClaudeCode,
+                ImportSource::Codex,
+                ImportSource::T3,
+                ImportSource::Cursor
+            ]
+        );
+        assert!(
+            ImportSource::Grok.is_export()
+                && ImportSource::Hermes.is_agent()
+                && !ImportSource::Codex.is_export()
+        );
+        assert_eq!(ImportSource::Hermes.label(), "Hermes Agent");
+        let q: ImportThreadQuery = serde_json::from_str(r#"{"source":"codex","id":"x"}"#).unwrap();
+        assert_eq!(q.upload, None);
     }
 
     #[test]
