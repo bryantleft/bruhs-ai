@@ -325,6 +325,17 @@ pub fn root_text_fits(path: &str) -> bool {
     path.len() <= MANIFEST_PATH_MAX_BYTES && clean_absolute(path) && path.chars().all(visible)
 }
 
+/// Whether `version` can be a manifest's release name: printable ASCII of
+/// at most [`MANIFEST_VERSION_MAX_BYTES`]. Making a backup and opening one
+/// ask the same (final re-review m6).
+pub fn release_name_fits(version: &str) -> bool {
+    short_ascii(version, MANIFEST_VERSION_MAX_BYTES)
+}
+
+fn short_ascii(text: &str, max: usize) -> bool {
+    text.len() <= max && text.chars().all(|c| c.is_ascii_graphic())
+}
+
 /// `manifest.json`, the last entry of a backup. No `deny_unknown_fields`: a
 /// newer format is refused by its numbers ([`BackupManifest::readable`]).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -366,11 +377,8 @@ impl BackupManifest {
     /// ASCII, the home and roots as [`root_text_fits`] asks. A manifest
     /// past them is damaged.
     pub fn text_fits(&self) -> bool {
-        let short = |text: &str, max: usize| {
-            text.len() <= max && text.chars().all(|c| c.is_ascii_graphic())
-        };
-        short(&self.app_version, MANIFEST_VERSION_MAX_BYTES)
-            && short(&self.os, MANIFEST_OS_MAX_BYTES)
+        release_name_fits(&self.app_version)
+            && short_ascii(&self.os, MANIFEST_OS_MAX_BYTES)
             && [&self.home, &self.core_root, &self.desktop_root]
                 .iter()
                 .all(|root| root_text_fits(root))

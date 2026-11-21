@@ -159,6 +159,10 @@ pub const DATA_NAME_REFUSED: &str =
 /// A data root whose own path isn't UTF-8 (B Task 5 ruling).
 pub const ROOT_NAME_REFUSED: &str =
     "A Bruhs data folder has a name a backup can't hold, so no backup was made.";
+/// This build's own release name is one a restore would refuse (final
+/// re-review m6): a backup it made would never open.
+pub const RELEASE_NAME_REFUSED: &str =
+    "This Bruhs build has a release name a backup can't hold, so no backup was made.";
 pub const KEYCHAIN_NEEDS_YOU: &str =
     "Your keychain needs you. Allow access on this computer, or leave out saved logins and keys.";
 pub const KEYCHAIN_ITEM_REFUSED: &str = "That keychain item isn't one of Bruhs' own.";
@@ -357,6 +361,7 @@ pub const ALL_COPY: &[&str] = &[
     FILE_CHANGED,
     DATA_NAME_REFUSED,
     ROOT_NAME_REFUSED,
+    RELEASE_NAME_REFUSED,
     KEYCHAIN_NEEDS_YOU,
     KEYCHAIN_ITEM_REFUSED,
     KEYCHAIN_READ_FAILED,

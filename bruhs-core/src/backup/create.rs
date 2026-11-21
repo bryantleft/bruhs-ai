@@ -20,13 +20,13 @@ use std::sync::Arc;
 use bruhs_backup::{Encryptor, Kdf, Key, Kind};
 use bruhs_models::backup::{
     backup_file_name, browser_busy_line, changed_files_line, missing_items_line, no_space,
-    normalize_password, root_text_fits, skipped_names_line, validate_password, BackupApp,
-    BackupCounts, BackupFile, BackupManifest, BackupOptions, JobState, JobStep, LastBackup,
-    ManifestFile, BACKUP_EXTENSION, BACKUP_STOPPED, BACKUP_TOO_MANY, BRUHS_UNCOUNTED,
+    normalize_password, release_name_fits, root_text_fits, skipped_names_line, validate_password,
+    BackupApp, BackupCounts, BackupFile, BackupManifest, BackupOptions, JobState, JobStep,
+    LastBackup, ManifestFile, BACKUP_EXTENSION, BACKUP_STOPPED, BACKUP_TOO_MANY, BRUHS_UNCOUNTED,
     DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING, DESTINATION_NAME_LONG,
     FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED,
-    KEYCHAIN_TOO_LARGE, MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED, WEB_TOO_LARGE,
-    WEB_UPLOAD_MAX,
+    KEYCHAIN_TOO_LARGE, MANIFEST_FORMAT, NOT_A_BACKUP, RELEASE_NAME_REFUSED, ROOT_NAME_REFUSED,
+    WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use bruhs_models::crew::CREW_PROTOCOL;
 use bruhs_models::EpochMs;
@@ -231,6 +231,11 @@ pub(crate) async fn create(
         output,
     } = request;
     let info = utf8_roots(&roots)?;
+    // A release name a restore would refuse makes a backup that never
+    // opens (final re-review m6).
+    if !release_name_fits(&config.app_version) {
+        return Err(BackupError::Refused(RELEASE_NAME_REFUSED));
+    }
     validate_password(&password).map_err(BackupError::Refused)?;
     if web_part.is_some() && web_db_version.is_none() {
         return Err(BackupError::Refused(INVALID_REQUEST));

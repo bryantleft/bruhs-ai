@@ -1267,6 +1267,34 @@ async fn roots_with_extra_slashes_still_make_a_backup_that_opens() {
     ));
 }
 
+/// Final re-review m6: a build whose release name a restore would refuse
+/// (a space, or past 64 bytes) makes no backup, since it would never open.
+#[tokio::test]
+async fn a_release_name_a_restore_would_refuse_is_refused() {
+    let fixture = fixture().await;
+    for version in [
+        "0.2.0 beta".to_owned(),
+        "1".repeat(MANIFEST_VERSION_MAX_BYTES + 1),
+    ] {
+        let host = BackupHost::new(fixture.roots.clone(), fixture.store.clone())
+            .with_app_version(version)
+            .for_tests(false);
+        let job = host
+            .start_create(request(Output::Outgoing, BackupOptions::default()))
+            .await
+            .unwrap();
+        assert_eq!(
+            finished(&host, &job.id).await,
+            JobState::Failed {
+                message: RELEASE_NAME_REFUSED.into()
+            }
+        );
+    }
+    // The longest name a restore takes still makes a backup.
+    let host = host(&fixture).with_app_version("1".repeat(MANIFEST_VERSION_MAX_BYTES));
+    created(&host, request(Output::Outgoing, BackupOptions::default())).await;
+}
+
 #[tokio::test]
 async fn a_root_that_is_not_utf8_is_refused() {
     use std::os::unix::ffi::OsStrExt as _;
