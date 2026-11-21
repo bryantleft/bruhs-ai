@@ -69,7 +69,7 @@ impl ReactiveRuntime {
     /// Runs the worker again after a restore that was called off, and asks
     /// the sync loop for a pass so the bruhs' browsers come back. A worker
     /// the halt stopped may not have let go yet: the start is tried again
-    /// until it has, for up to [`RESUME_WAIT`] (final review B minor).
+    /// until it has, for up to `RESUME_WAIT` (final review B minor).
     pub async fn resume_after_restore(
         &self,
         app: std::sync::Arc<crate::AppState>,
