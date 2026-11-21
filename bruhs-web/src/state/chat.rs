@@ -113,6 +113,10 @@ pub struct Thread {
     /// session, then dropped; see `portable::with_import_context`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_context: Option<String>,
+    /// `imports::import_key(source, id)` of the export chat this thread
+    /// came from, so the Export file tab doesn't offer it again (D8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_key: Option<String>,
 }
 
 impl Thread {
@@ -145,6 +149,7 @@ impl Thread {
             role: None,
             instructions_stamp: None,
             import_context: None,
+            import_key: None,
         }
     }
 
@@ -1038,6 +1043,29 @@ pub(super) fn provide() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thread_records_without_a_key_still_read() {
+        let before = serde_json::json!({
+            "id": "t1",
+            "title": "Old chat",
+            "project_name": "",
+            "updated_at": 1_700_000_000_000_i64,
+            "import_context": "# Old chat",
+        });
+        let thread: Thread = serde_json::from_value(before).unwrap();
+        assert_eq!(thread.import_key, None);
+        assert_eq!(thread.import_context.as_deref(), Some("# Old chat"));
+        let json = serde_json::to_value(&thread).unwrap();
+        assert!(json.get("import_key").is_none(), "{json}");
+        let mut keyed = thread;
+        keyed.import_key = Some("chatgpt:abc".into());
+        let json = serde_json::to_value(&keyed).unwrap();
+        assert_eq!(json["import_key"], "chatgpt:abc");
+        assert_eq!(serde_json::from_value::<Thread>(json).unwrap(), keyed);
+        let fresh = Thread::new("New".into(), String::new(), None, EpochMs::UNIX_EPOCH);
+        assert_eq!(fresh.import_key, None);
+    }
 
     #[test]
     fn changing_project_retains_thread_identity_and_carries_history() {

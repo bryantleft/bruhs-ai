@@ -40,6 +40,7 @@ fn thread(id: &str, project: &str) -> Thread {
         role: None,
         instructions_stamp: None,
         import_context: None,
+        import_key: None,
     }
 }
 

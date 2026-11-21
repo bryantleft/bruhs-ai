@@ -419,9 +419,31 @@ fn clamp_selected_index(index: usize, count: usize) -> usize {
     }
 }
 
+/// A failed Continue in T3 Code as its notice. The server's copy already
+/// names T3 Code; any other failure gets the "T3: " prefix.
+fn t3_failure(error: &str) -> String {
+    if error.contains("T3") {
+        error.to_owned()
+    } else {
+        format!("T3: {error}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t3_failures_name_t3_once() {
+        use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
+        for copy in [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED] {
+            assert_eq!(t3_failure(copy), copy);
+        }
+        assert_eq!(
+            t3_failure("Could not reach the server: Failed to fetch"),
+            "T3: Could not reach the server: Failed to fetch"
+        );
+    }
 
     #[test]
     fn command_action_filter_should_match_desktop_raw_query_behavior() {
@@ -660,7 +682,7 @@ fn export_thread(
             leptos::task::spawn_local(async move {
                 match crate::api::export_to_t3(&request).await {
                     Ok(_) => notice.flash("Started a T3 thread"),
-                    Err(error) => notice.flash(format!("T3: {error}")),
+                    Err(error) => notice.flash(t3_failure(&error.to_string())),
                 }
             });
         }

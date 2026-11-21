@@ -3,12 +3,17 @@
 //! session (and stays usable in the tool it came from); a Cursor chat comes
 //! in as its transcript. See `bruhs_models::logic::portable`.
 //!
+//! The Export file tab brings in chats from a ChatGPT, Claude.ai or Grok
+//! data export, as transcripts (`export_tab`).
+//!
 //! Also the thread's way back out: [`portable_messages`] feeds the
 //! palette's "Copy thread as Markdown" and "Continue in T3 Code".
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use bruhs_models::agent::Role;
+use bruhs_models::imports::{import_key, EXPORT_TAB};
 use bruhs_models::logic::portable::{
     import_model, ImportCandidate, ImportSource, ImportedThread, PortableMessage, PortablePart,
     PortableToolCall,
@@ -23,6 +28,17 @@ use crate::state::{
     SetActiveView, Thread, ThreadNotice, ToolCallInfo,
 };
 use crate::ui::Dialog;
+
+mod export_tab;
+use export_tab::{ExportState, ExportTab};
+
+/// The dialog's tab: a local tool, or the Export file tab (F24). Only a
+/// local tab searches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportTab {
+    Local(ImportSource),
+    Export,
+}
 
 /// An imported message as a bruhs message.
 pub fn agent_message(message: &PortableMessage) -> AgentMessage {
@@ -124,6 +140,12 @@ pub fn imported_thread(
     // A resumed session lives in its folder: a new worktree would hide it
     // from the CLI.
     thread.run_locked = candidate.session_id.is_some();
+    // A chat from an export keeps its key, so it isn't offered again, and
+    // sorts by when it happened (D8).
+    if candidate.source.is_export() {
+        thread.import_key = Some(import_key(candidate.source, &candidate.id));
+        thread.updated_at = candidate.updated_at;
+    }
     thread
 }
 
@@ -161,7 +183,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
     let ActiveView(_active_view) = expect_context::<ActiveView>();
     let thread_notice = expect_context::<ThreadNotice>();
 
-    let source = RwSignal::new(ImportSource::ClaudeCode);
+    let tab = RwSignal::new(ImportTab::Local(ImportSource::ClaudeCode));
     let query = RwSignal::new(String::new());
     let found = RwSignal::new(Vec::<ImportCandidate>::new());
     let loading = RwSignal::new(false);
@@ -173,23 +195,45 @@ pub fn ImportThreadDialog() -> impl IntoView {
     let generation = StoredValue::new(0u64);
     let input_ref: NodeRef<leptos::html::Input> = NodeRef::new();
 
-    // Threads already here (by session) are not offered again.
+    // Threads already here (by session, or by import key) are not offered
+    // again.
+    let known_keys = Memo::new(move |_| {
+        threads.with(|ts| {
+            ts.iter()
+                .filter_map(|thread| thread.import_key.clone())
+                .collect::<HashSet<String>>()
+        })
+    });
+    let export = ExportState::new(known_keys.into());
+    provide_context(export);
     let visible = Memo::new(move |_| {
-        let known: std::collections::HashSet<String> = threads.with(|ts| {
+        let known: HashSet<String> = threads.with(|ts| {
             ts.iter()
                 .filter_map(|thread| thread.session_id.clone())
                 .collect()
         });
-        found.with(|rows| {
-            rows.iter()
-                .filter(|row| {
-                    row.session_id
-                        .as_ref()
-                        .is_none_or(|session| !known.contains(session))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
+        known_keys.with(|keys| {
+            found.with(|rows| {
+                rows.iter()
+                    .filter(|row| {
+                        row.session_id
+                            .as_ref()
+                            .is_none_or(|session| !known.contains(session))
+                            && !keys.contains(&import_key(row.source, &row.id))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
         })
+    });
+
+    // Closing the dialog, by any path, discards the export's batch (F23).
+    Effect::new(move |was_open: Option<bool>| {
+        let is_open = open.get();
+        if was_open == Some(true) && !is_open {
+            export.discard();
+        }
+        is_open
     });
 
     Effect::new(move |_| {
@@ -215,7 +259,9 @@ pub fn ImportThreadDialog() -> impl IntoView {
         if !open.get() {
             return;
         }
-        let source = source.get();
+        let ImportTab::Local(source) = tab.get() else {
+            return;
+        };
         let text = query.get();
         // Rows of another source must not stay pickable while this loads.
         if found.with_untracked(|rows| rows.first().is_some_and(|row| row.source != source)) {
@@ -256,6 +302,20 @@ pub fn ImportThreadDialog() -> impl IntoView {
     let close = move || open.set(false);
     let on_close = Callback::new(move |_: ()| close());
 
+    // Every import becomes a thread the same way: persisted, then made the
+    // active thread.
+    let import_one = Callback::new(move |imported: ImportedThread| {
+        let thread = imported_thread(&imported, home.get_untracked().as_deref(), now_epoch_ms());
+        let messages: Vec<AgentMessage> = imported.messages.iter().map(agent_message).collect();
+        let id = thread.id.clone();
+        set_threads.update(|ts| ts.push(thread.clone()));
+        catalog.persist(None, thread);
+        saves.edit_conversation(id.clone(), messages.clone());
+        set_active_view.set(AppView::Chat);
+        set_active_thread_id.set(Some(id));
+        set_messages.set(messages);
+    });
+
     let import = move |candidate: ImportCandidate| {
         if importing.get_untracked() {
             return;
@@ -265,17 +325,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
         spawn_local(async move {
             match import_thread(candidate.source, &candidate.id).await {
                 Ok(imported) => {
-                    let thread =
-                        imported_thread(&imported, home.get_untracked().as_deref(), now_epoch_ms());
-                    let messages: Vec<AgentMessage> =
-                        imported.messages.iter().map(agent_message).collect();
-                    let id = thread.id.clone();
-                    set_threads.update(|ts| ts.push(thread.clone()));
-                    catalog.persist(None, thread);
-                    saves.edit_conversation(id.clone(), messages.clone());
-                    set_active_view.set(AppView::Chat);
-                    set_active_thread_id.set(Some(id));
-                    set_messages.set(messages);
+                    import_one.run(imported);
                     thread_notice.flash(format!("Imported from {}", candidate.source.label()));
                     importing.set(false);
                     close();
@@ -287,6 +337,19 @@ pub fn ImportThreadDialog() -> impl IntoView {
             }
         });
     };
+
+    // An export row comes in behind the dialog, which stays open on the
+    // batch (F23). Import all queues every row it takes.
+    let import_export = Callback::new(move |row: ImportCandidate| {
+        if export.enqueue(row) {
+            spawn_local(async move {
+                if let Some(line) = export.drain(import_one).await {
+                    thread_notice.flash(line);
+                }
+            });
+        }
+    });
+    let busy = Signal::derive(move || importing.get() || export.importing.get());
 
     let on_keydown = move |event: web_sys::KeyboardEvent| {
         let count = visible.with_untracked(Vec::len);
@@ -315,49 +378,12 @@ pub fn ImportThreadDialog() -> impl IntoView {
         }
     };
 
-    view! {
-        <Dialog open=open on_close=on_close max_width="max-w-lg".to_string() label="Import thread" anchor_top=true>
-            <div class="border-b border-longan-800 px-4 py-3">
-                <h2 class="text-label-sm text-rambutan-200">"Import thread"</h2>
-                <div class="mt-2 flex gap-1" role="tablist" aria-label="Import from">
-                    {ImportSource::LOCAL
-                        .into_iter()
-                        .map(|tab| {
-                            view! {
-                                <button
-                                    type="button"
-                                    role="tab"
-                                    aria-selected=move || (source.get() == tab).to_string()
-                                    on:click=move |_| source.set(tab)
-                                    class=move || {
-                                        if source.get() == tab {
-                                            "rounded-grape bg-blueberry-600/20 px-2.5 py-1 text-label-sm text-blueberry-200 inset-ring inset-ring-blueberry-500/30 cursor-pointer"
-                                        } else {
-                                            "rounded-grape px-2.5 py-1 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-200 transition-colors cursor-pointer"
-                                        }
-                                    }
-                                >
-                                    {tab.label()}
-                                </button>
-                            }
-                        })
-                        .collect_view()}
-                </div>
-                <input
-                    node_ref=input_ref
-                    // The Dialog focuses this, not the first source tab, so
-                    // typing searches at once.
-                    data-autofocus=""
-                    type="text"
-                    placeholder="Search titles and folders"
-                    aria-label="Search threads"
-                    prop:value=move || query.get()
-                    on:input=move |event| query.set(event_target_value(&event))
-                    on:keydown=on_keydown
-                    class="mt-2 w-full rounded-grape bg-longan-900 px-2.5 py-1.5 text-label-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-longan-700 focus:outline-none focus:inset-ring-persimmon-500/60"
-                />
-            </div>
-
+    let local_source = move || match tab.get() {
+        ImportTab::Local(source) => source,
+        ImportTab::Export => ImportSource::ClaudeCode,
+    };
+    let local_rows = move || {
+        view! {
             <div class="max-h-80 overflow-y-auto py-1" role="listbox" aria-label="Threads">
                 {move || {
                     if let Some(message) = error.get() {
@@ -371,7 +397,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
                         let text = if loading.get() {
                             "Loading…".to_string()
                         } else {
-                            format!("No {} threads found", source.get().label())
+                            format!("No {} threads found", local_source().label())
                         };
                         return view! {
                             <div class="px-4 py-6 text-center text-label-sm text-rambutan-300">{text}</div>
@@ -408,10 +434,70 @@ pub fn ImportThreadDialog() -> impl IntoView {
                         .into_any()
                 }}
             </div>
+        }
+    };
+
+    view! {
+        <Dialog open=open on_close=on_close max_width="max-w-lg".to_string() label="Import thread" anchor_top=true>
+            <div class="border-b border-longan-800 px-4 py-3">
+                <h2 class="text-label-sm text-rambutan-200">"Import thread"</h2>
+                <div class="mt-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Import from">
+                    {ImportSource::LOCAL
+                        .into_iter()
+                        .map(ImportTab::Local)
+                        .chain([ImportTab::Export])
+                        .map(|each| {
+                            let label = match each {
+                                ImportTab::Local(source) => source.label(),
+                                ImportTab::Export => EXPORT_TAB,
+                            };
+                            view! {
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected=move || (tab.get() == each).to_string()
+                                    on:click=move |_| tab.set(each)
+                                    class=move || {
+                                        if tab.get() == each {
+                                            "shrink-0 whitespace-nowrap rounded-grape bg-blueberry-600/20 px-2.5 py-1 text-label-sm text-blueberry-200 inset-ring inset-ring-blueberry-500/30 cursor-pointer"
+                                        } else {
+                                            "shrink-0 whitespace-nowrap rounded-grape px-2.5 py-1 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-200 transition-colors cursor-pointer"
+                                        }
+                                    }
+                                >
+                                    {label}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+                <Show when=move || tab.get() != ImportTab::Export>
+                    <input
+                        node_ref=input_ref
+                        // The Dialog focuses this, not the first source tab, so
+                        // typing searches at once.
+                        data-autofocus=""
+                        type="text"
+                        placeholder="Search titles and folders"
+                        aria-label="Search threads"
+                        prop:value=move || query.get()
+                        on:input=move |event| query.set(event_target_value(&event))
+                        on:keydown=on_keydown
+                        class="mt-2 w-full rounded-grape bg-longan-900 px-2.5 py-1.5 text-label-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-longan-700 focus:outline-none focus:inset-ring-persimmon-500/60"
+                    />
+                </Show>
+            </div>
+
+            <Show
+                when=move || tab.get() == ImportTab::Export
+                fallback=local_rows
+            >
+                <ExportTab on_import=import_export busy=busy />
+            </Show>
 
             <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2.5 text-label-sm text-rambutan-300">
                 <span>
-                    {move || if importing.get() {
+                    {move || if busy.get() {
                         "Importing…"
                     } else {
                         "↑↓ to choose, enter to import"
@@ -454,6 +540,52 @@ mod tests {
                 model: None,
             }],
         )
+    }
+
+    #[test]
+    fn imported_threads_carry_their_key_and_time() {
+        let at = EpochMs::saturating_from_i64(1_600_000_000_000);
+        let export = ImportedThread::new(
+            ImportCandidate {
+                source: ImportSource::ChatGpt,
+                id: "abc".into(),
+                title: "Trip plan".into(),
+                cwd: None,
+                updated_at: at,
+                provider: None,
+                session_id: None,
+                model: None,
+            },
+            vec![PortableMessage {
+                role: Role::User,
+                parts: vec![PortablePart::Text("Where to?".into())],
+                started_at_ms: Some(1_600_000_000_000),
+                model: None,
+            }],
+        );
+        let now = EpochMs::saturating_from_i64(1_700_000_000_000);
+        let thread = imported_thread(&export, Some("/Users/me"), now);
+        assert_eq!(thread.import_key.as_deref(), Some("chatgpt:abc"));
+        assert_eq!(
+            thread.updated_at, at,
+            "an old chat sorts by when it happened"
+        );
+        assert_eq!(thread.project_path, None);
+        assert_eq!(thread.session_id, None);
+        assert!(!thread.run_locked);
+        assert!(export.context.is_some());
+        assert_eq!(thread.import_context, export.context);
+
+        // A local tool's thread keeps today's fields.
+        let local = imported_thread(
+            &imported(Some("/Users/me/shop"), Some("s-1")),
+            Some("/Users/me"),
+            now,
+        );
+        assert_eq!(local.import_key, None);
+        assert_eq!(local.updated_at, now);
+        assert_eq!(local.session_id.as_deref(), Some("s-1"));
+        assert!(local.run_locked);
     }
 
     #[test]

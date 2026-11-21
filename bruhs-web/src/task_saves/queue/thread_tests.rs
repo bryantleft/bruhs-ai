@@ -25,6 +25,7 @@ fn thread(title: &str) -> Record {
         role: None,
         instructions_stamp: None,
         import_context: None,
+        import_key: None,
     })
 }
 
