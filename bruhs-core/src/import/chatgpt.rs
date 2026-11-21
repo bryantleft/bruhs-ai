@@ -11,13 +11,14 @@
 
 use super::text::{clip_part, export_time, strip_citations, strip_writing_directives};
 use super::{ParsedConversation, Transcript};
-use bruhs_models::agent::Role;
 use bruhs_models::imports::{
-    attachment_line, conversation_key, IMAGE_NOT_IMPORTED, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
+    attachment_line, conversation_key, AUDIO_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_MESSAGES,
+    MAX_NODES, MAX_PART_CHARS,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortableMessage, PortablePart,
 };
+use bruhs_models::num::{ToFloatLossy as _, ToIntSaturating as _};
 use bruhs_models::EpochMs;
 use serde_json::{Map, Value};
 
@@ -55,10 +56,11 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
     if !is_conversation(v) {
         return None;
     }
-    let raw_id = ["conversation_id", "id"]
-        .iter()
-        .find_map(|key| v.get(*key).and_then(Value::as_str))
-        .filter(|id| !id.is_empty())?;
+    let raw_id = ["conversation_id", "id"].iter().find_map(|key| {
+        v.get(*key)
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+    })?;
     let mapping = v.get("mapping").and_then(Value::as_object)?;
     let tree = Tree::new(mapping);
     let leaf = v
@@ -66,7 +68,7 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
         .and_then(Value::as_str)
         .and_then(|id| tree.index(id))
         .or_else(|| tree.newest_leaf())?;
-    let dropped = tree.leaves().filter(|at| *at != leaf).count();
+    let dropped = tree.dropped_branches(leaf);
 
     // Only the newest MAX_MESSAGES messages are kept, so read from the
     // MAX_MESSAGES-th visible prompt from the end, which starts that many
@@ -91,14 +93,7 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
         .map(str::trim)
         .filter(|title| !title.is_empty())
         .map_or_else(
-            || {
-                let prompt = messages
-                    .iter()
-                    .find(|message| message.role == Role::User)
-                    .map(PortableMessage::text)
-                    .unwrap_or_default();
-                title_from_prompt(&prompt)
-            },
+            || title_from_prompt(&first_prompt(&tree, &branch).unwrap_or_default()),
             str::to_string,
         );
     let updated = v
@@ -119,7 +114,7 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
             model: None,
         },
         messages,
-        dropped_branches: u32::try_from(dropped).unwrap_or(u32::MAX),
+        dropped_branches: dropped.to_f64_lossy().to_u32_saturating(),
     })
 }
 
@@ -136,6 +131,17 @@ fn read(tree: &Tree<'_>, branch: &[usize]) -> (Vec<PortableMessage>, Option<i64>
         }
     }
     (transcript.finish(), newest)
+}
+
+/// The text of the first prompt along `branch` the owner saw, whether or
+/// not it was kept.
+fn first_prompt(tree: &Tree<'_>, branch: &[usize]) -> Option<String> {
+    branch.iter().find_map(|&at| {
+        let message = tree.message(at)?;
+        let (role, _) = shown(message)?;
+        let text = message_text(message.get("content")?, message);
+        (role == "user" && !text.trim().is_empty()).then(|| text.trim().to_string())
+    })
 }
 
 /// Where along `branch` the `MAX_MESSAGES`-th visible prompt from the end
@@ -165,8 +171,8 @@ struct Tree<'a> {
     nodes: Vec<(&'a str, &'a Value)>,
     /// For each node, its parent's index.
     parent: Vec<Option<usize>>,
-    /// For each node, whether another node names it as its parent.
-    has_child: Vec<bool>,
+    /// For each node, the first node that names it as its parent.
+    first_child: Vec<Option<usize>>,
 }
 
 impl<'a> Tree<'a> {
@@ -179,7 +185,7 @@ impl<'a> Tree<'a> {
         nodes.sort_unstable_by_key(|(id, _)| *id);
         let mut tree = Self {
             parent: Vec::with_capacity(nodes.len()),
-            has_child: vec![false; nodes.len()],
+            first_child: vec![None; nodes.len()],
             nodes,
         };
         for at in 0..tree.nodes.len() {
@@ -189,7 +195,7 @@ impl<'a> Tree<'a> {
                 .and_then(Value::as_str)
                 .and_then(|id| tree.index(id));
             if let Some(parent) = parent {
-                tree.has_child[parent] = true;
+                tree.first_child[parent].get_or_insert(at);
             }
             tree.parent.push(parent);
         }
@@ -206,7 +212,28 @@ impl<'a> Tree<'a> {
 
     /// Nodes no other node names as its parent.
     fn leaves(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.nodes.len()).filter(|&at| !self.has_child[at])
+        (0..self.nodes.len()).filter(|&at| self.first_child[at].is_none())
+    }
+
+    /// The leaves whose branch the owner didn't see from `chosen`. When
+    /// `chosen` isn't a leaf, the branch through it continues to one leaf
+    /// below it (followed through first children), which isn't counted.
+    fn dropped_branches(&self, chosen: usize) -> usize {
+        let mut seen = vec![false; self.nodes.len()];
+        let mut at = chosen;
+        let seen_leaf = loop {
+            if seen[at] {
+                break None;
+            }
+            seen[at] = true;
+            match self.first_child[at] {
+                Some(child) => at = child,
+                None => break Some(at),
+            }
+        };
+        self.leaves()
+            .filter(|leaf| Some(*leaf) != seen_leaf)
+            .count()
     }
 
     /// The leaf whose message is newest (the greatest id when times tie).
@@ -312,11 +339,23 @@ fn visible(message: &Value, transcript: &mut Transcript) -> Option<i64> {
     at
 }
 
-/// A message's text: its parts in order (an image or audio clip as a
-/// placeholder line), then a placeholder line per attachment.
+/// A message's text: its parts in order (an image as a placeholder line,
+/// and one placeholder line for its audio however many clips it holds),
+/// then a placeholder line per attachment.
 fn message_text(content: &Value, message: &Value) -> String {
+    let mut audio = false;
     let mut lines: Vec<String> = match content.get("parts").and_then(Value::as_array) {
-        Some(parts) => parts.iter().filter_map(part_text).collect(),
+        Some(parts) => parts
+            .iter()
+            .filter_map(|part| match part_text(part) {
+                Part::Text(text) => Some(text),
+                Part::Audio if !audio => {
+                    audio = true;
+                    Some(AUDIO_NOT_IMPORTED.to_string())
+                }
+                Part::Audio | Part::Nothing => None,
+            })
+            .collect(),
         None => content
             .get("text")
             .and_then(Value::as_str)
@@ -349,24 +388,27 @@ fn message_text(content: &Value, message: &Value) -> String {
     text
 }
 
+/// What one part of `content.parts` brings in.
+enum Part {
+    Text(String),
+    /// An audio clip, whose bytes (and provider pointer) stay behind.
+    Audio,
+    Nothing,
+}
+
 /// One part of `content.parts`: a string, a `{text}` object, a spoken
 /// transcription, or a placeholder for media whose bytes stay behind.
-fn part_text(part: &Value) -> Option<String> {
+fn part_text(part: &Value) -> Part {
     if let Some(text) = part.as_str() {
-        return Some(text.to_string());
+        return Part::Text(text.to_string());
     }
-    let kind = part.get("content_type").and_then(Value::as_str);
-    match kind {
-        Some("image_asset_pointer") => Some(IMAGE_NOT_IMPORTED.to_string()),
-        Some("audio_asset_pointer" | "real_time_user_audio_video_asset_pointer") => {
-            let pointer = part
-                .get("asset_pointer")
-                .or_else(|| part.pointer("/audio_asset_pointer/asset_pointer"))
-                .and_then(Value::as_str)
-                .or(kind)?;
-            Some(attachment_line(pointer))
-        }
-        _ => part.get("text").and_then(Value::as_str).map(str::to_string),
+    match part.get("content_type").and_then(Value::as_str) {
+        Some("image_asset_pointer") => Part::Text(IMAGE_NOT_IMPORTED.to_string()),
+        Some("audio_asset_pointer" | "real_time_user_audio_video_asset_pointer") => Part::Audio,
+        _ => part
+            .get("text")
+            .and_then(Value::as_str)
+            .map_or(Part::Nothing, |text| Part::Text(text.to_string())),
     }
 }
 

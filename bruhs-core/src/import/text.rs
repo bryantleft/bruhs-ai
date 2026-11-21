@@ -107,40 +107,50 @@ pub(crate) fn strip_citations(text: &str) -> String {
 }
 
 /// `text` without each `open … close` span whose inner text passes `drop`.
+/// A span starts at the last `open` before its `close`, so an opener that
+/// never closes stays as text and hides nothing after it. One forward pass.
 fn without_spans(text: &str, open: char, close: char, drop: impl Fn(&str) -> bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(start) = rest.find(open) {
-        let after = &rest[start + open.len_utf8()..];
-        let Some(end) = after.find(close) else {
-            break;
+    while let Some(end) = rest.find(close) {
+        let Some(start) = rest[..end].rfind(open) else {
+            out.push_str(&rest[..end + close.len_utf8()]);
+            rest = &rest[end + close.len_utf8()..];
+            continue;
         };
         out.push_str(&rest[..start]);
-        let inner = &after[..end];
+        let inner = &rest[start + open.len_utf8()..end];
         if !drop(inner) {
             out.push(open);
             out.push_str(inner);
             out.push(close);
         }
-        rest = &after[end + close.len_utf8()..];
+        rest = &rest[end + close.len_utf8()..];
     }
     out.push_str(rest);
     out
 }
 
 /// `text` without the opener and closer lines of ChatGPT's Canvas
-/// directives (`:::writing{…}` … `:::`); the text between them stays. A
-/// `:::` line outside a directive stays too.
+/// directives (`:::writing{…}` … `:::`); the text between them stays, and
+/// so does text after the opener's `}` on its line. A `:::` line outside a
+/// directive stays too.
 pub(crate) fn strip_writing_directives(text: &str) -> String {
-    if !text.contains(":::writing{") {
+    const OPENER: &str = ":::writing{";
+    if !text.contains(OPENER) {
         return text.to_string();
     }
     let mut open = false;
     let mut kept: Vec<&str> = Vec::new();
     for line in text.split('\n') {
         let trimmed = line.trim();
-        if trimmed.starts_with(":::writing{") {
+        if let Some(attributes) = trimmed.strip_prefix(OPENER) {
             open = true;
+            if let Some(after) = after_closing_brace(attributes).map(str::trim_start) {
+                if !after.is_empty() {
+                    kept.push(after);
+                }
+            }
             continue;
         }
         if open && trimmed == ":::" {
@@ -152,58 +162,103 @@ pub(crate) fn strip_writing_directives(text: &str) -> String {
     kept.join("\n")
 }
 
+/// What follows the first `}` outside double quotes.
+fn after_closing_brace(attributes: &str) -> Option<&str> {
+    let mut quoted = false;
+    for (at, c) in attributes.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            '}' if !quoted => return Some(&attributes[at + 1..]),
+            _ => {}
+        }
+    }
+    None
+}
+
 /// `text` without Grok's `<grok:render …>…</grok:render>` blocks (removed
 /// whole) and its `<xaiArtifact …>` tags (their inner text stays). A
-/// render block that never closes loses only its opening tag.
+/// render block that never closes loses only its opening tag; a
+/// `<grok:render` that never ends with `>` isn't a tag, so it and the text
+/// after it stay.
+///
+/// One forward pass: the next closing tag is searched for only past the
+/// last one found, and once none is left no opener searches again.
 pub(crate) fn strip_grok_markup(text: &str) -> String {
+    const OPEN: &str = "<grok:render";
+    const CLOSE: &str = "</grok:render>";
+    if !text.contains(OPEN) {
+        return without_tags(text, "xaiArtifact");
+    }
     let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find("<grok:render") {
-        out.push_str(&rest[..start]);
-        let block = &rest[start..];
-        let Some(tag_end) = block.find('>') else {
-            rest = "";
+    let mut pos = 0;
+    // The last closing tag found, and whether none is left after it.
+    let mut close_at: Option<usize> = None;
+    let mut none_left = false;
+    while let Some(found) = text[pos..].find(OPEN) {
+        let start = pos + found;
+        out.push_str(&text[pos..start]);
+        let Some(tag_len) = text[start..].find('>') else {
+            pos = start;
             break;
         };
-        if block[..tag_end].ends_with('/') {
-            rest = &block[tag_end + 1..];
+        let tag_end = start + tag_len + 1;
+        if text[start..tag_end - 1].ends_with('/') {
+            pos = tag_end;
             continue;
         }
-        rest = match block.find("</grok:render>") {
-            Some(end) => &block[end + "</grok:render>".len()..],
-            None => &block[tag_end + 1..],
+        if !none_left && close_at.is_none_or(|close| close < tag_end) {
+            close_at = text[tag_end..].find(CLOSE).map(|at| tag_end + at);
+            none_left = close_at.is_none();
+        }
+        pos = match close_at {
+            Some(close) => close + CLOSE.len(),
+            None => tag_end,
         };
     }
-    out.push_str(rest);
+    out.push_str(&text[pos..]);
     without_tags(&out, "xaiArtifact")
 }
 
-/// `text` without `<tag …>` and `</tag>` tags, keeping what they wrap.
+/// `text` without `<tag …>` and `</tag>` tags, keeping what they wrap. One
+/// forward pass over each `<`.
 fn without_tags(text: &str, tag: &str) -> String {
     let (open, close) = (format!("<{tag}"), format!("</{tag}>"));
+    if !text.contains(&open) {
+        return text.to_string();
+    }
     let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    loop {
-        let next_open = rest.find(&open).filter(|&at| {
-            rest[at + open.len()..]
+    let mut pos = 0;
+    while let Some(found) = text[pos..].find('<') {
+        let at = pos + found;
+        out.push_str(&text[pos..at]);
+        let rest = &text[at..];
+        if rest.starts_with(&close) {
+            pos = at + close.len();
+            continue;
+        }
+        let is_open = rest.strip_prefix(open.as_str()).is_some_and(|after| {
+            after
                 .chars()
                 .next()
                 .is_some_and(|c| c == '>' || c == '/' || c.is_whitespace())
         });
-        let next_close = rest.find(&close);
-        let (at, len) = match (next_open, next_close) {
-            (Some(o), Some(c)) if c < o => (c, close.len()),
-            (Some(o), _) => match rest[o..].find('>') {
-                Some(end) => (o, end + 1),
-                None => break,
-            },
-            (None, Some(c)) => (c, close.len()),
-            (None, None) => break,
-        };
-        out.push_str(&rest[..at]);
-        rest = &rest[at + len..];
+        if is_open {
+            match rest.find('>') {
+                Some(end) => {
+                    pos = at + end + 1;
+                    continue;
+                }
+                // No `>` is left, so no tag either: the rest stays.
+                None => {
+                    pos = at;
+                    break;
+                }
+            }
+        }
+        out.push('<');
+        pos = at + 1;
     }
-    out.push_str(rest);
+    out.push_str(&text[pos..]);
     out
 }
 

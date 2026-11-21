@@ -8,7 +8,9 @@ use super::text::{
 };
 use super::ParsedConversation;
 use bruhs_models::agent::Role;
-use bruhs_models::imports::{attachment_line, cut_short_line, IMAGE_NOT_IMPORTED, MAX_MESSAGES};
+use bruhs_models::imports::{
+    attachment_line, cut_short_line, AUDIO_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_MESSAGES,
+};
 use bruhs_models::logic::portable::{ImportSource, PortablePart};
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -147,6 +149,9 @@ fn multimodal_parts_and_attachments_leave_placeholders() {
     assert!(first.contains(&attachment_line("plan.pdf")), "{first}");
     let (role, voice) = &all[2];
     assert_eq!(*role, Role::User);
+    // Two clips, one line; the transcription doesn't replace it.
+    assert_eq!(voice.matches(AUDIO_NOT_IMPORTED).count(), 1, "{voice}");
+    assert!(all.iter().all(|(_, text)| !text.contains("sediment://")));
     assert!(
         voice.contains("Can we move the sink under the window?"),
         "{voice}"
@@ -241,6 +246,8 @@ fn cycles_and_huge_trees_stay_bounded() {
     let last = parsed.messages.last().map(|message| message.text());
     assert_eq!(last.as_deref(), Some("message 99999"));
     assert_eq!(parsed.messages[0].text(), "message 80000");
+    // Untitled: the branch's first prompt names it, though it wasn't kept.
+    assert_eq!(parsed.candidate.title, "message 0");
 }
 
 /// Empty prompts make fewer messages than prompts, so the newest
@@ -335,6 +342,220 @@ fn markup_is_stripped_and_long_parts_are_cut() {
     assert_eq!(cut, format!("ééé\n{}", cut_short_line(2)));
 }
 
+#[test]
+fn markup_edges_keep_the_text_around_them() {
+    // M3: a lone U+E200 before a real span deletes nothing.
+    assert_eq!(
+        strip_citations("A \u{e200} lone. Then \u{e200}cite\u{e202}x\u{e201} end"),
+        "A  lone. Then  end"
+    );
+    assert_eq!(strip_citations("Kept 【a】 and 【b"), "Kept 【a】 and 【b");
+    // M4: text after the opener's `}` on its line stays.
+    assert_eq!(
+        strip_writing_directives(":::writing{variant=\"email\" id=\"1\"} Hi there\nbody\n:::"),
+        "Hi there\nbody"
+    );
+    assert_eq!(
+        strip_writing_directives(":::writing{title=\"a } b\"}\nbody\n:::"),
+        "body"
+    );
+    // I1: a `<grok:render` that never ends keeps what follows it.
+    assert_eq!(
+        strip_grok_markup("Before <grok:render type=\"cite\" and after"),
+        "Before <grok:render type=\"cite\" and after"
+    );
+    assert_eq!(strip_grok_markup("A<grok:render/>B"), "AB");
+    assert_eq!(
+        strip_grok_markup("A<grok:render>x</grok:render>B<grok:render>y C"),
+        "ABy C"
+    );
+    // I1: a longer tag name hides nothing after it.
+    assert_eq!(
+        strip_grok_markup(
+            "<xaiArtifactX>keep</xaiArtifactX> <xaiArtifact id=\"1\">in</xaiArtifact>"
+        ),
+        "<xaiArtifactX>keep</xaiArtifactX> in"
+    );
+    assert_eq!(
+        strip_grok_markup("a <xaiArtifact never closes"),
+        "a <xaiArtifact never closes"
+    );
+}
+
+/// About 1 MB of each input that made a stripper search the rest of the
+/// text again for every tag.
+#[test]
+fn hostile_markup_strips_in_linear_time() {
+    const SIZE: usize = 1 << 20;
+    let repeat = |unit: &str, tail: &str| {
+        let mut text = unit.repeat(SIZE / unit.len());
+        text.push_str(tail);
+        text
+    };
+    let cases = [
+        repeat("<grok:render>", ""),
+        repeat("<grok:render", ""),
+        repeat("<grok:render>x", "</grok:render>"),
+        repeat("<grok:render/>", ""),
+        repeat("</grok:render>", ""),
+        repeat("</xaiArtifact>", ""),
+        repeat("<xaiArtifact ", ""),
+        repeat("<xaiArtifact>", ""),
+        repeat("<xaiArtifactX>", "<xaiArtifact>"),
+        repeat("<", ""),
+    ];
+    for text in &cases {
+        let started = Instant::now();
+        let _ = strip_grok_markup(text);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?} took {:?}",
+            &text[..20],
+            started.elapsed()
+        );
+    }
+    let citations = [
+        repeat("\u{e200}", "\u{e201}"),
+        repeat("\u{e201}", ""),
+        repeat("【", "】"),
+        repeat("【†", "】"),
+        repeat("】", ""),
+        repeat(":::writing{\n", ":::"),
+    ];
+    for text in &citations {
+        let started = Instant::now();
+        let _ = strip_writing_directives(&strip_citations(text));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+}
+
+#[test]
+fn an_empty_conversation_id_falls_back_to_id() {
+    let record = json!({
+        "conversation_id": "",
+        "id": "conv-from-id",
+        "mapping": { "u": node(None, "user", "Hello there.") },
+    });
+    let parsed = conversation(&record).expect("the record imports");
+    assert_eq!(parsed.candidate.id, "conv-from-id");
+}
+
+#[test]
+fn messages_hidden_by_recipient_or_tool_role_alone_stay_out() {
+    let mut memory = node(Some("u"), "assistant", "Remember: likes trams.");
+    memory["message"]["recipient"] = json!("bio");
+    let tool = node(Some("m"), "tool", "Model set context updated.");
+    let record = json!({
+        "conversation_id": "conv-bio",
+        "current_node": "a",
+        "mapping": {
+            "u": node(None, "user", "I like trams."),
+            "m": memory,
+            "t": tool,
+            "a": node(Some("t"), "assistant", "Noted."),
+        },
+    });
+    let parsed = conversation(&record).expect("the record imports");
+    assert_eq!(
+        texts(&parsed),
+        vec![
+            (Role::User, "I like trams.".into()),
+            (Role::Assistant, "Noted.".into()),
+        ]
+    );
+}
+
+#[test]
+fn wrong_typed_values_are_skipped_without_panicking() {
+    let mut huge = node(Some("n"), "user", "");
+    huge["message"]["content"]["parts"] = Value::Array(vec![json!("x"); 100_000]);
+    let record = json!({
+        "conversation_id": "conv-odd",
+        "current_node": "huge",
+        "title": 7,
+        "update_time": "soon",
+        "mapping": {
+            "root": null,
+            "n": 5,
+            "s": { "parent": "root", "message": { "author": { "role": "user" }, "content": { "content_type": "text", "parts": "a string" } } },
+            "a": { "parent": "s", "message": { "author": 3, "content": { "parts": ["x"] } } },
+            "b": { "parent": "a", "message": { "author": { "role": "user" }, "content": { "parts": ["Hi"] }, "metadata": { "attachments": { "name": "x.pdf" } } } },
+            "c": { "parent": ["b"], "message": { "author": { "role": "assistant" }, "content": 9 } },
+            "d": { "parent": "b", "message": { "author": { "role": "assistant" }, "create_time": [1], "content": { "content_type": "text", "parts": [null, 4, { "text": 5 }, "Hello."] } } },
+            "huge": huge,
+        },
+    });
+    assert!(conversation(&record).is_some_and(|parsed| parsed.messages.len() <= 1));
+    let parsed = conversation(&json!({
+        "conversation_id": "conv-odd-2",
+        "current_node": "d",
+        "mapping": record["mapping"].clone(),
+    }))
+    .expect("the visible part imports");
+    assert_eq!(
+        texts(&parsed),
+        vec![
+            (Role::User, "Hi".into()),
+            (Role::Assistant, "Hello.".into()),
+        ]
+    );
+    for odd in [
+        json!(null),
+        json!(3),
+        json!("x"),
+        json!([]),
+        json!({ "mapping": [] }),
+    ] {
+        assert!(conversation(&odd).is_none());
+    }
+}
+
+#[test]
+fn a_missing_parent_mid_branch_ends_the_walk() {
+    let record = json!({
+        "conversation_id": "conv-gap",
+        "current_node": "a2",
+        "mapping": {
+            "root": { "parent": null },
+            "u1": node(Some("root"), "user", "First."),
+            "a1": node(Some("u1"), "assistant", "One."),
+            "u2": node(Some("gone"), "user", "Second."),
+            "a2": node(Some("u2"), "assistant", "Two."),
+        },
+    });
+    let parsed = conversation(&record).expect("the record imports");
+    assert_eq!(
+        texts(&parsed),
+        vec![
+            (Role::User, "Second.".into()),
+            (Role::Assistant, "Two.".into())
+        ]
+    );
+    // The part above the gap is a branch the walk didn't reach.
+    assert_eq!(parsed.dropped_branches, 1);
+}
+
+#[test]
+fn an_interior_current_node_drops_only_the_other_branches() {
+    let record = json!({
+        "conversation_id": "conv-interior",
+        "current_node": "a1",
+        "mapping": {
+            "u1": node(None, "user", "Pick a bread."),
+            "a1": node(Some("u1"), "assistant", "Sourdough."),
+            "u2": node(Some("a1"), "user", "Why?"),
+            "u3": node(Some("a1"), "user", "And rye?"),
+        },
+    });
+    let parsed = conversation(&record).expect("the record imports");
+    assert_eq!(parsed.messages.len(), 2);
+    assert_eq!(parsed.dropped_branches, 1);
+}
+
 /// Fixtures stand in for real exports, so none may hold a real path, an
 /// address or a key.
 #[test]
@@ -344,39 +565,63 @@ fn fixtures_are_synthetic() {
     for entry in std::fs::read_dir(&dir).expect("the fixtures folder reads") {
         let path = entry.expect("a fixture entry").path();
         let text = std::fs::read_to_string(&path).expect("a fixture is text");
-        let name = path.display();
         seen += 1;
-        assert!(!text.contains("/Users/"), "{name} holds a home path");
-        assert!(!text.contains("/home/"), "{name} holds a home path");
-        for (at, _) in text.match_indices('@') {
-            assert!(
-                text[at..].starts_with("@example.com"),
-                "{name} holds an address outside example.com"
-            );
-        }
-        assert!(!has_key(&text, "sk-", |c| c.is_ascii_alphanumeric()
-            || c == '_'
-            || c == '-'));
-        assert!(!has_key(&text, "xai-", |c| c.is_ascii_alphanumeric()));
-        for (at, _) in text.match_indices("\"email_address\"") {
-            let rest = text[at + "\"email_address\"".len()..]
-                .trim_start()
-                .trim_start_matches(':')
-                .trim_start();
-            if rest.starts_with("null") {
-                continue;
-            }
-            let value = rest
-                .strip_prefix('"')
-                .and_then(|rest| rest.split('"').next())
-                .unwrap_or(rest);
-            assert!(
-                value.ends_with("@example.com"),
-                "{name} holds an email_address outside example.com"
-            );
-        }
+        assert_eq!(not_synthetic(&text), None, "{}", path.display());
     }
     assert!(seen >= 2, "the fixtures were found");
+}
+
+/// Why `text` can't be a synthetic fixture: a home path, an address or
+/// `email_address` outside example.com, or a key-shaped value (F32).
+fn not_synthetic(text: &str) -> Option<&'static str> {
+    if text.contains("/Users/") || text.contains("/home/") {
+        return Some("a home path");
+    }
+    if text
+        .match_indices('@')
+        .any(|(at, _)| !is_example_domain(&text[at + 1..]))
+    {
+        return Some("an address outside example.com");
+    }
+    if has_key(text, "sk-", |c| {
+        c.is_ascii_alphanumeric() || c == '_' || c == '-'
+    }) || has_key(text, "xai-", |c| c.is_ascii_alphanumeric())
+    {
+        return Some("a key");
+    }
+    for (at, _) in text.match_indices("\"email_address\"") {
+        let rest = text[at + "\"email_address\"".len()..]
+            .trim_start()
+            .trim_start_matches(':')
+            .trim_start();
+        if rest.starts_with("null") {
+            continue;
+        }
+        let value = rest
+            .strip_prefix('"')
+            .and_then(|rest| rest.split('"').next())
+            .unwrap_or(rest);
+        if !value
+            .rsplit_once('@')
+            .is_some_and(|(_, domain)| is_example_domain(domain))
+        {
+            return Some("an email_address outside example.com");
+        }
+    }
+    None
+}
+
+/// Whether `after` (what follows an `@`) starts with the domain
+/// example.com and nothing more of a domain.
+fn is_example_domain(after: &str) -> bool {
+    after.strip_prefix("example.com").is_some_and(|rest| {
+        let mut rest = rest.chars();
+        match rest.next() {
+            None => true,
+            Some('.') => !rest.next().is_some_and(|c| c.is_ascii_alphanumeric()),
+            Some(c) => !(c.is_ascii_alphanumeric() || c == '-'),
+        }
+    })
 }
 
 /// Whether `text` holds `prefix` followed by 16 or more key characters.
@@ -391,9 +636,29 @@ fn has_key(text: &str, prefix: &str, key_char: impl Fn(char) -> bool) -> bool {
 }
 
 #[test]
-fn the_key_guard_matches_shapes_not_words() {
-    assert!(!has_key("a task-list on the desk-side", "sk-", |c| c
-        .is_ascii_alphanumeric()));
-    assert!(has_key("key sk-abcdefghijklmnop0", "sk-", |c| c
-        .is_ascii_alphanumeric()));
+fn the_synthetic_guard_matches_shapes_not_words() {
+    assert_eq!(not_synthetic("a task-list on the desk-side"), None);
+    assert_eq!(not_synthetic("key sk-proj_abcdefghijklmnop"), Some("a key"));
+    assert_eq!(not_synthetic("xai-abcdefghijklmnop0"), Some("a key"));
+    assert_eq!(not_synthetic("xai-short and taxi-rank"), None);
+    assert_eq!(not_synthetic("pat@example.com."), None);
+    assert_eq!(not_synthetic("\"pat@example.com\""), None);
+    assert_eq!(
+        not_synthetic("pat@example.com.other.org"),
+        Some("an address outside example.com")
+    );
+    assert_eq!(
+        not_synthetic("pat@example.community"),
+        Some("an address outside example.com")
+    );
+    assert_eq!(
+        not_synthetic("pat@elsewhere.org"),
+        Some("an address outside example.com")
+    );
+    assert_eq!(
+        not_synthetic("\"email_address\": \"pat at elsewhere\""),
+        Some("an email_address outside example.com")
+    );
+    assert_eq!(not_synthetic("\"email_address\": null"), None);
+    assert_eq!(not_synthetic("/home/pat"), Some("a home path"));
 }

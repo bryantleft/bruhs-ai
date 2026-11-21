@@ -23,6 +23,7 @@ pub const CLAUDE_MANIFEST: &str = "This is Claude's list of export files. Downlo
 
 // Placeholders and headings inside imported text.
 pub const IMAGE_NOT_IMPORTED: &str = "[Image not imported]";
+pub const AUDIO_NOT_IMPORTED: &str = "[Audio not imported]";
 pub const CUT_MARK: &str = "\n[Cut to fit]";
 pub const IDENTITY_FROM: &str = "Identity from IDENTITY.md";
 pub const PROJECT_MEMORY: &str = "Project memory:";
@@ -143,6 +144,7 @@ pub const ALL_COPY: &[&str] = &[
     USE_AS_MEMORY,
     CLAUDE_MANIFEST,
     IMAGE_NOT_IMPORTED,
+    AUDIO_NOT_IMPORTED,
     CUT_MARK,
     IDENTITY_FROM,
     PROJECT_MEMORY,
