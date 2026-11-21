@@ -406,7 +406,7 @@ fn free(folder: &Path, target: &Path) -> Result<bool, BackupError> {
 /// Removes a seal key, a few times over (B Task 8 out of scope). One the
 /// keychain won't remove goes on the sweep's list, so no key outlives its
 /// set for good. Blocks on the keychain.
-pub(super) fn forget_key(store: &SecretStore, backups: &Path, account: &str) {
+pub(in crate::backup) fn forget_key(store: &SecretStore, backups: &Path, account: &str) {
     for _ in 0..FORGET_TRIES {
         if forget_seal_key(store, account).is_ok() {
             return;

@@ -67,9 +67,9 @@ mod rollback;
 pub use confirm::{
     check_restore, desktop_running, finish_web_part, unschedule, waiting_web_part_file,
 };
-pub(super) use kept::sweep_restore;
-use kept::{check_kept, forget_key, hold_restore_lock, kept_account, kept_dir, kept_info, park};
+use kept::{check_kept, hold_restore_lock, kept_account, kept_dir, kept_info, park};
 pub use kept::{delete_pre_restore, keep_previous_web_part, pre_restores};
+pub(super) use kept::{forget_key, sweep_restore};
 
 /// `<core>/logs/restore.log` (see [`open_restore_log`]).
 const RESTORE_LOG: &str = "restore.log";

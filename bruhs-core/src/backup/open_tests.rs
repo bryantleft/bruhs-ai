@@ -1059,6 +1059,39 @@ async fn one_job_at_a_time_and_none_while_a_restore_waits() {
     );
 }
 
+/// Final review B minor: a staged restore's key that won't go when its
+/// staging is swept is listed, and a later sweep removes it.
+#[tokio::test]
+async fn a_staged_key_that_wont_go_is_tried_again() {
+    let fixture = fixture(false);
+    let backup = make_backup(&fixture, "good").await;
+    let host = host(&fixture);
+    let (id, state) = open_with(&host, &backup, PASSWORD).await;
+    preview(state);
+    let preview_file = staging_dir(&fixture.roots, RootKey::Core, &id).join("meta/preview.json");
+    File::options()
+        .write(true)
+        .open(&preview_file)
+        .unwrap()
+        .set_modified(SystemTime::now() - Duration::from_secs(25 * 60 * 60))
+        .unwrap();
+    fixture.store.refuse_changes_after(Some(0));
+    host.sweep();
+    fixture.store.refuse_changes_after(None);
+    assert_eq!(staged_ids(&fixture.roots), Vec::<String>::new());
+    assert!(read_seal_key(&fixture.store, &format!("staged:{id}")).is_ok());
+    let listed = std::fs::read_to_string(
+        fixture
+            .roots
+            .backups(RootKey::Core)
+            .join("keys-to-forget.json"),
+    )
+    .unwrap();
+    assert!(listed.contains(&format!("staged:{id}")), "{listed}");
+    host.sweep();
+    no_seal_key(&fixture.store, &id);
+}
+
 #[tokio::test]
 async fn the_sweep_removes_old_and_unfinished_staging() {
     let fixture = fixture(false);

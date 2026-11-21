@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
+use super::apply::forget_key;
 use super::create::{backups_are_folders, private_dir, CancelFlag};
 use super::host::{
     new_private_file, random_bytes, read_small, web_part_header, BackupHost, Limits, PENDING,
@@ -237,11 +238,20 @@ impl BackupHost {
         }
     }
 
-    /// Removes a staged restore's folders and key, as far as it can.
+    /// Removes a staged restore's folders and key, as far as it can. A key
+    /// that won't go is listed for the sweep to try again (final review B
+    /// minor).
     fn forget_staged(&self, id: &str) {
         self.remove_staged(id);
-        if forget_seal_key(&self.config().store, &seal_account(id)).is_err() {
-            tracing::warn!("Bruhs couldn't remove a staged restore's key");
+        let store = &self.config().store;
+        let account = seal_account(id);
+        match self.private_folder(None) {
+            Some(backups) => forget_key(store, &backups, &account),
+            None => {
+                if forget_seal_key(store, &account).is_err() {
+                    tracing::warn!("Bruhs couldn't remove a staged restore's key");
+                }
+            }
         }
     }
 
