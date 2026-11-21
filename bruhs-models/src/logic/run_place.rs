@@ -2,10 +2,11 @@
 //! previous worktree. Claude effort levels are the ones `claude --help`
 //! lists for `--effort`.
 
+pub mod branch_naming;
+
 use serde::{Deserialize, Serialize};
 
-/// Static prefix for a branch created with a new worktree. Settings do not
-/// rename it.
+/// Prefix for the stable thread identity and the default thread-ID naming mode.
 pub const WORKTREE_BRANCH_PREFIX: &str = "bruhs/";
 
 /// `--effort` values Claude Code 2.1.311 accepts.
@@ -48,6 +49,23 @@ impl WorkspaceChoice {
             _ => Self::Checkout,
         }
     }
+}
+
+/// Settings used only when creating a new checkout for an agent thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorktreePreferences {
+    pub start_from_remote: bool,
+    pub submodules: WorktreeSubmodules,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorktreeSubmodules {
+    #[default]
+    None,
+    TopLevel,
+    Recursive,
 }
 
 /// A worktree the client can offer as "previous".

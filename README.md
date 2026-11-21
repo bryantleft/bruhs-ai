@@ -1,8 +1,11 @@
 # bruhs
 
-A local-first, keyboard-native agent for your whole day. Agent conversations,
-tasks, calendar, meetings, people, notes, money and health share one
-window, and your data stays on your machine.
+bruhs is your local-first digital brain. Capture a thought while you work,
+search a transcript for the decision you remember, or open Today to see
+who needs a follow-up. Your notes, people, tasks, calendar and agent
+conversations share one keyboard-native workspace.
+
+See the [product ideas](PERSONAL-SUITE.md#ideas-for-recalling-work) for proposed ways to explore that history.
 
 bruhs runs on macOS as a native app (GPUI) and in the browser (a Leptos WASM
 app served by a local Rust server). Agents run through Claude Code, Codex,

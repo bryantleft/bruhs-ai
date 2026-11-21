@@ -112,10 +112,10 @@ impl TaskSaves {
                     });
                     set_tasks.set(snapshot.tasks);
                     set_events.set(snapshot.events);
+                    self.clear_day_plan_error();
                     self.day_plan.update(|state| {
                         state.receipt = snapshot.receipt;
                         state.busy = false;
-                        state.error = None;
                     });
                     self.refresh_status();
                     self.save();
@@ -147,6 +147,7 @@ impl TaskSaves {
                     Err(error) => state.error = Some(error.to_string()),
                 }
             });
+            self.refresh_status();
             self.save();
         });
     }
@@ -187,13 +188,18 @@ impl TaskSaves {
         let SetCalendarEventsSignal(set_events) = expect_context();
         let baseline_tasks = tasks.get_untracked();
         let baseline_events = events.get_untracked();
-        if let Err(error) = bruhs_models::prepare_day_plan(
-            &proposal,
-            &baseline_tasks,
-            &baseline_events,
-            window,
-            crate::clock::now_ms(),
-        ) {
+        let prepared = crate::state::read_saved_scheduling_preferences().and_then(|preferences| {
+            bruhs_models::prepare_day_plan_with_availability(
+                &proposal,
+                &baseline_tasks,
+                &baseline_events,
+                window,
+                crate::clock::now_ms(),
+                &preferences.availability,
+                crate::clock::offset_minutes_east,
+            )
+        });
+        if let Err(error) = prepared {
             self.finish_day_plan_error(error.to_string());
             return false;
         }
@@ -210,6 +216,123 @@ impl TaskSaves {
             }
         });
         true
+    }
+
+    /// Find time against one committed policy/calendar snapshot, then publish.
+    pub fn place_task(self, task_id: String, done: Callback<Result<String, String>>) {
+        let crate::state::SchedulingPreferencesSignal(preferences) = expect_context();
+        if !preferences.ready() || preferences.busy() {
+            done.run(Err(
+                "Wait for saved scheduling preferences before finding time.".into(),
+            ));
+            return;
+        }
+        if !self.begin_day_plan() {
+            done.run(Err(self
+                .day_plan
+                .with_untracked(|state| state.error.clone())
+                .unwrap_or_else(|| {
+                    "Another planning operation is still running.".into()
+                })));
+            return;
+        }
+        let WorkItemsSignal(tasks) = expect_context();
+        let CalendarEventsSignal(events) = expect_context();
+        let SetWorkItemsSignal(set_tasks) = expect_context();
+        let SetCalendarEventsSignal(set_events) = expect_context();
+        let baseline_tasks = tasks.get_untracked();
+        let baseline_events = events.get_untracked();
+        let Some(task) = baseline_tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .cloned()
+        else {
+            let message = "Choose an unscheduled task first.".to_string();
+            self.finish_day_plan_error(message.clone());
+            done.run(Err(message));
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            match storage::scheduling::place_task(&task, &baseline_events).await {
+                Ok((before, after, event)) => {
+                    let event_id = event.id.clone();
+                    let receipt = self.day_plan.with_untracked(|state| state.receipt.clone());
+                    self.publish_day_plan(
+                        Commit {
+                            tasks: vec![(before, after)],
+                            events: vec![(None, Some(event))],
+                            receipt,
+                        },
+                        &baseline_tasks,
+                        &baseline_events,
+                        set_tasks,
+                        set_events,
+                    );
+                    done.run(Ok(event_id));
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    self.finish_day_plan_error(message.clone());
+                    done.run(Err(message));
+                }
+            }
+        });
+    }
+
+    /// The conflict decision and its event edits commit or abort together.
+    pub fn resolve_calendar_conflict(
+        self,
+        id: String,
+        resolution: bruhs_models::ConflictResolution,
+    ) {
+        if !self.begin_day_plan() {
+            return;
+        }
+        let crate::state::SchedulingPreferencesSignal(preferences) = expect_context();
+        let record = match preferences.begin() {
+            Ok(record) => record,
+            Err(error) => {
+                self.finish_day_plan_error(error.to_string());
+                return;
+            }
+        };
+        let WorkItemsSignal(tasks) = expect_context();
+        let CalendarEventsSignal(events) = expect_context();
+        let SetWorkItemsSignal(set_tasks) = expect_context();
+        let SetCalendarEventsSignal(set_events) = expect_context();
+        let baseline_tasks = tasks.get_untracked();
+        let baseline_events = events.get_untracked();
+        wasm_bindgen_futures::spawn_local(async move {
+            match storage::scheduling::resolve_conflict(
+                record.revision,
+                &id,
+                resolution,
+                &baseline_events,
+            )
+            .await
+            {
+                Ok(resolved) => {
+                    preferences.committed(resolved.policy);
+                    let receipt = self.day_plan.with_untracked(|state| state.receipt.clone());
+                    self.publish_day_plan(
+                        Commit {
+                            tasks: Vec::new(),
+                            events: resolved.events,
+                            receipt,
+                        },
+                        &baseline_tasks,
+                        &baseline_events,
+                        set_tasks,
+                        set_events,
+                    );
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    let _: Result<(), _> = preferences.failed(error).await;
+                    self.finish_day_plan_error(message);
+                }
+            }
+        });
     }
 
     pub fn undo_day_plan(self) {
@@ -239,23 +362,29 @@ impl TaskSaves {
         });
     }
 
+    pub fn clear_day_plan_error(self) {
+        let mut banner = None;
+        let _ = self.day_plan.try_update(|state| {
+            state.error = None;
+            banner = state.error_banner.take().map(|(id, _)| id);
+        });
+        if let Some(id) = banner {
+            self.banners.dismiss(&id);
+        }
+    }
+
     fn finish_day_plan_error(self, message: String) {
+        self.clear_day_plan_error();
         let banner = self.banners.push_keyed(
             crate::components::banner::BannerKind::Error,
             message.clone(),
             None,
         );
-        let replaced = self
-            .day_plan
-            .try_update(|state| {
-                state.busy = false;
-                state.error = Some(message.clone());
-                state.error_banner.replace((banner, message))
-            })
-            .flatten();
-        if let Some((old, _)) = replaced {
-            self.banners.dismiss(&old);
-        }
+        let _ = self.day_plan.try_update(|state| {
+            state.busy = false;
+            state.error = Some(message.clone());
+            state.error_banner = Some((banner, message));
+        });
         self.refresh_status();
         self.save();
     }
@@ -355,10 +484,10 @@ impl TaskSaves {
                 });
             }
         });
+        self.clear_day_plan_error();
         self.day_plan.update(|state| {
             state.receipt = commit.receipt;
             state.busy = false;
-            state.error = None;
         });
         self.refresh_status();
         self.save();

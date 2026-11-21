@@ -20,18 +20,18 @@ use gpui::*;
 #[cfg(any(test, debug_assertions))]
 use super::TurnState;
 use super::{
-    element_key, fold_duration_label, turn_duration_ms, turn_fold_label, ChatView, ChatViewEvent,
-    DesktopToolCall, Message, MessageRole,
+    ChatView, ChatViewEvent, DesktopToolCall, Message, MessageRole, element_key,
+    fold_duration_label, turn_duration_ms, turn_fold_label,
 };
 use crate::views::diff_panel::{changed_files_from_tool_calls, split_path};
 use crate::{assets, theme};
-pub use bruhs_models::logic::tools::{
-    tool_kind, tool_label, tool_state, work_summary, ToolKind, ToolState,
-};
 use bruhs_models::EpochMs;
+pub use bruhs_models::logic::tools::{
+    ToolKind, ToolState, tool_kind, tool_label, tool_state, work_summary,
+};
 
 // Web `Timeline`: `mx-auto max-w-3xl px-4 pt-4 pb-6`.
-pub const TRANSCRIPT_MAX_WIDTH_PX: f32 = 768.0;
+pub const TRANSCRIPT_MAX_WIDTH_PX: f32 = 736.0;
 pub const TRANSCRIPT_X_PADDING_PX: f32 = 16.0;
 pub const TRANSCRIPT_TOP_PADDING_PX: f32 = 16.0;
 pub const TRANSCRIPT_BOTTOM_PADDING_PX: f32 = 24.0;
@@ -104,21 +104,14 @@ pub fn working_label(elapsed_ms: f64) -> String {
     }
 }
 
-/// `3:07 PM` style clock label from local hours/minutes.
-pub fn format_clock(hours: u32, minutes: u32) -> String {
-    let (h12, suffix) = match hours {
-        0 => (12, "AM"),
-        1..=11 => (hours, "AM"),
-        12 => (12, "PM"),
-        _ => (hours - 12, "PM"),
-    };
-    format!("{h12}:{minutes:02} {suffix}")
-}
-
 fn clock_time(at_ms: i64) -> Option<String> {
-    use chrono::Timelike;
-    let local = Local.timestamp_millis_opt(at_ms).single()?;
-    Some(format_clock(local.hour(), local.minute()))
+    Some(
+        Local
+            .timestamp_millis_opt(at_ms)
+            .single()?
+            .format(crate::clock_format::pattern())
+            .to_string(),
+    )
 }
 
 /// Whether expanding a tool row would reveal anything.
@@ -321,7 +314,7 @@ impl ChatView {
                 .border_color(gpui::white().opacity(0.05))
                 .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
                 .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_family(BODY_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                 .text_color(theme::rambutan_300())
                 .child(msg.content.clone())
                 .into_any_element(),
@@ -362,7 +355,7 @@ impl ChatView {
                     .bg(theme::longan_800())
                     .px(px(USER_BUBBLE_X_PADDING_PX))
                     .py(px(USER_BUBBLE_Y_PADDING_PX))
-                    .font_family(BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .line_height(relative(1.5))
                     .text_color(theme::rambutan_100())
@@ -679,18 +672,30 @@ impl ChatView {
         let tools: Vec<ToolView<'_>> = msg
             .tool_calls
             .iter()
-            .map(|call| {
+            .filter_map(|call| {
                 let state = tool_state(call, streaming);
-                ToolView {
+                self.tool_visibility.shows(state).then(|| ToolView {
                     kind: tool_kind(&call.tool),
                     state,
                     label: tool_label(call, state, root.as_deref()),
                     call,
-                }
+                })
             })
             .collect();
         let latest = latest_assistant_index(&self.messages) == Some(index);
-        let has_text = !msg.content.trim().is_empty();
+        let visible =
+            self.paragraph_progress
+                .visible(&msg.content, self.response_stream, streaming);
+        let visible = self.tool_visibility.answer(
+            streaming,
+            visible,
+            msg.tool_calls
+                .iter()
+                .filter_map(|call| call.text_offset)
+                .max(),
+        );
+        let zen = self.tool_visibility == super::tool_visibility::Visibility::Zen;
+        let has_text = !visible.trim().is_empty();
 
         let mut turn = div()
             .id(("desktop-turn", index))
@@ -700,11 +705,19 @@ impl ChatView {
             .flex()
             .flex_col();
 
-        let thinking = (!msg.thinking.is_empty())
+        let has_tool_error = self.tool_visibility != super::tool_visibility::Visibility::ShowAll && tools.iter().any(|tool| tool.state == ToolState::Error);
+        let thinking = (!zen && !msg.thinking.is_empty())
             .then(|| self.render_thinking_row(index, msg, streaming && !has_text, cx));
-        let work = (!tools.is_empty())
-            .then(|| self.render_work_group(index, &tools, !streaming && tools.len() >= 2, cx));
-        let text = has_text.then(|| self.render_assistant_text_row(index, msg, window, cx));
+        let work = (!tools.is_empty()).then(|| {
+            self.render_work_group(
+                index,
+                &tools,
+                !streaming && tools.len() >= 2 && !has_tool_error,
+                cx,
+            )
+        });
+        let text =
+            has_text.then(|| self.render_assistant_text_row(index, visible, streaming, window, cx));
 
         if streaming {
             let thinking_only = !has_text && tools.is_empty() && msg.thinking.is_empty();
@@ -726,7 +739,7 @@ impl ChatView {
         }
 
         let has_activity = thinking.is_some() || work.is_some();
-        if has_activity && !latest {
+        if has_activity && !latest && !has_tool_error {
             let hidden: Vec<AnyElement> = thinking.into_iter().chain(work).collect();
             turn = turn.child(self.render_fold_row(index, msg, hidden, cx));
         } else {
@@ -735,12 +748,12 @@ impl ChatView {
 
         if has_text {
             turn = turn.children(text);
-        } else if !has_activity {
+        } else if !has_activity && msg.tool_calls.is_empty() && !zen {
             turn = turn.child(
                 div()
                     .px_1()
                     .pb_2()
-                    .font_family(BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_500())
                     .child("(empty response)"),
@@ -749,7 +762,7 @@ impl ChatView {
         turn = turn.children(self.render_published_artifacts(index, msg, cx));
 
         let files = changed_files(&msg.tool_calls, root.as_deref());
-        if !files.is_empty() {
+        if !files.is_empty() && !zen {
             turn = turn.child(self.render_changed_files_card(index, &files, latest, cx));
         }
         turn = turn.child(self.render_assistant_meta_row(index, msg, window, cx));
@@ -760,7 +773,8 @@ impl ChatView {
     fn render_assistant_text_row(
         &self,
         index: usize,
-        msg: &Message,
+        visible: &str,
+        streaming: bool,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
@@ -772,17 +786,11 @@ impl ChatView {
             .flex()
             .flex_col()
             .gap_1()
-            .font_family(BODY_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
             .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
             .line_height(relative(1.625))
             .text_color(theme::rambutan_200())
-            .children(self.render_assistant_content_blocks(
-                index,
-                &msg.content,
-                msg.state.is_streaming(),
-                window,
-                cx,
-            ))
+            .children(self.render_assistant_content_blocks(index, visible, streaming, window, cx))
             .into_any_element()
     }
 
@@ -811,7 +819,7 @@ impl ChatView {
                     .rounded(px(TRANSCRIPT_ROW_RADIUS_PX))
                     .px_1()
                     .py(px(2.0))
-                    .font_family(BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_400())
                     .tab_index(0)
@@ -880,7 +888,9 @@ impl ChatView {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .font_family(BODY_FONT_FAMILY)
+                            .font_family(
+                                crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_400())
                             .map(|el| {
@@ -906,7 +916,9 @@ impl ChatView {
                         .border_l_1()
                         .border_color(theme::longan_800().opacity(0.7))
                         .pl_3()
-                        .font_family(BODY_FONT_FAMILY)
+                        .font_family(
+                            crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY),
+                        )
                         .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                         .line_height(relative(1.5))
                         .text_color(theme::rambutan_400())
@@ -967,7 +979,9 @@ impl ChatView {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .font_family(BODY_FONT_FAMILY)
+                            .font_family(
+                                crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_400())
                             .map(|el| {
@@ -1067,7 +1081,9 @@ impl ChatView {
                         .min_w_0()
                         .flex_1()
                         .when(!open, |el| el.truncate())
-                        .font_family(BODY_FONT_FAMILY)
+                        .font_family(
+                            crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY),
+                        )
                         .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                         .text_color(label_color)
                         .map(|el| {
@@ -1152,7 +1168,10 @@ impl ChatView {
                         .child(icon_box(assets::BRAIN_ICON_PATH, theme::rambutan_500()))
                         .child(
                             div()
-                                .font_family(BODY_FONT_FAMILY)
+                                .font_family(
+                                    crate::theme::FontFace::Interface
+                                        .with_default(BODY_FONT_FAMILY),
+                                )
                                 .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                                 .text_color(theme::rambutan_300())
                                 .child("Thinking"),
@@ -1166,7 +1185,7 @@ impl ChatView {
                     .items_center()
                     .gap_2()
                     .px(px(6.0))
-                    .font_family(BODY_FONT_FAMILY)
+                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_400())
                     .font_features(theme::tabular_nums())
@@ -1274,7 +1293,10 @@ impl ChatView {
                                     .items_center()
                                     .gap(px(6.0))
                                     .whitespace_nowrap()
-                                    .font_family(LABEL_FONT_FAMILY)
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(LABEL_FONT_FAMILY),
+                                    )
                                     .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                                     .text_color(theme::rambutan_100())
@@ -1298,7 +1320,10 @@ impl ChatView {
                                     .min_w_0()
                                     .flex_1()
                                     .truncate()
-                                    .font_family(LABEL_FONT_FAMILY)
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(LABEL_FONT_FAMILY),
+                                    )
                                     .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                                     .text_color(theme::rambutan_500())
@@ -1318,7 +1343,9 @@ impl ChatView {
                             .px(px(10.0))
                             .border_1()
                             .border_color(gpui::white().opacity(0.10))
-                            .font_family(LABEL_FONT_FAMILY)
+                            .font_family(
+                                crate::theme::FontFace::Interface.with_default(LABEL_FONT_FAMILY),
+                            )
                             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                             .text_color(theme::rambutan_300())
@@ -1359,7 +1386,9 @@ impl ChatView {
                             .rounded(px(TRANSCRIPT_ROW_RADIUS_PX))
                             .px_2()
                             .py_1()
-                            .font_family(BODY_FONT_FAMILY)
+                            .font_family(
+                                crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
                             .tab_index(0)
                             .role(Role::Button)
@@ -1430,7 +1459,7 @@ impl ChatView {
             .border_color(theme::lychee_400().opacity(0.30))
             .px_3()
             .py_2()
-            .font_family(LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT_FAMILY))
             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::lychee_200())
@@ -1513,6 +1542,72 @@ impl ChatView {
 
     // ── Meta ─────────────────────────────────────────────────────────────
 
+    pub(crate) fn can_fork_response(&self, index: usize) -> bool {
+        let Some((reply, earlier)) = self
+            .messages
+            .get(..=index)
+            .and_then(|messages| messages.split_last())
+        else {
+            return false;
+        };
+        self.thread_id.is_some()
+            && reply.role == MessageRole::Assistant
+            && matches!(reply.state, super::TurnState::Finished)
+            && earlier
+                .iter()
+                .rev()
+                .find(|m| m.role != MessageRole::Tool)
+                .is_some_and(|m| m.role == MessageRole::User)
+    }
+
+    pub(super) fn render_fork_source(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
+        let fork = self.fork.as_ref()?;
+        let parent_title = cx
+            .try_global::<crate::app_state::ThreadCatalog>()
+            .and_then(|c| c.threads.iter().find(|(id, _)| id == &fork.parent))
+            .map(|(_, title)| title);
+        let title = parent_title.unwrap_or(&fork.title);
+        let row = div()
+            .min_w_0()
+            .px_4()
+            .py_1()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
+            .text_color(theme::rambutan_500())
+            .child(icon(
+                assets::GIT_BRANCH_ICON_PATH,
+                14.,
+                theme::rambutan_500(),
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .child(format!("Forked from {title}")),
+            );
+        Some(
+            row.when(parent_title.is_some(), |row| {
+                let link = web_button(
+                    "open-fork-source",
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(|| "open-fork-source".into())
+                .aria_label("Open source conversation")
+                .flex_shrink_0()
+                .child("Open source");
+                row.child(on_press_view(link, cx, |_, _, cx| {
+                    cx.emit(ChatViewEvent::OpenForkSource)
+                }))
+            })
+            .into_any_element(),
+        )
+    }
+
     /// Copy, citation and turn metadata, shown on hover or while focus is
     /// in the row (web: `group-hover/turn` or `focus-within`). Hidden rows
     /// stay in the tab order, so the keyboard still reaches them.
@@ -1552,7 +1647,7 @@ impl ChatView {
             .items_center()
             .gap_2()
             .px_1()
-            .font_family(LABEL_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT_FAMILY))
             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_500())
@@ -1601,6 +1696,28 @@ impl ChatView {
             .when(!has_text && self.has_published_artifacts(msg), |el| {
                 el.child(self.render_response_export(index, cx))
             })
+            .when(self.can_fork_response(index), |el| {
+                use crate::views::web_button::{
+                    web_button, ButtonState, WebButtonSize, WebButtonVariant,
+                };
+                let button = web_button(
+                    ("fork-from-reply", index),
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::IconSmall,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(move || format!("desktop-fork-from-reply-{index}"))
+                .aria_label("Fork from this response")
+                .tooltip(|w, cx| Tooltip::new("Fork from this response").build(w, cx))
+                .child(icon(
+                    assets::GIT_BRANCH_ICON_PATH,
+                    14.,
+                    theme::rambutan_400(),
+                ));
+                el.child(on_press_view(button, cx, move |_, _, cx| {
+                    cx.emit(ChatViewEvent::ForkFromReply { index })
+                }))
+            })
             .children(msg.model.clone().map(|m| div().truncate().child(m)))
             .children(duration.map(|d| div().child(d)))
             .children(tokens.map(|t| div().child(t)))
@@ -1627,6 +1744,7 @@ pub(super) fn transcript_fixture_messages(root: &str) -> Vec<Message> {
     use serde_json::json;
     let call =
         |id: &str, tool: &str, input: serde_json::Value, output: Option<&str>| DesktopToolCall {
+            text_offset: None,
             id: id.to_string(),
             tool: tool.to_string(),
             input,
@@ -1755,10 +1873,10 @@ pub(super) fn transcript_fixture_messages(root: &str) -> Vec<Message> {
 #[cfg(test)]
 mod tests {
     use super::{
-        changed_files, tool_label, tool_state, transcript_fixture_messages, work_summary,
-        working_label, DesktopToolCall, ToolKind, ToolState,
+        DesktopToolCall, ToolKind, ToolState, changed_files, tool_label, tool_state,
+        transcript_fixture_messages, work_summary, working_label,
     };
-    use gpui::{div, prelude::*, Context, Render, TestAppContext, Window};
+    use gpui::{Context, Render, TestAppContext, Window, div, prelude::*};
     use serde_json::json;
 
     #[gpui::test]
@@ -1798,6 +1916,7 @@ mod tests {
 
     fn call(tool: &str, input: serde_json::Value, output: Option<&str>) -> DesktopToolCall {
         DesktopToolCall {
+            text_offset: None,
             id: "c".into(),
             tool: tool.into(),
             input,

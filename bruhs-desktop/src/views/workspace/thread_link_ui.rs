@@ -1414,6 +1414,7 @@ mod tests {
         let (workspace, cx) = fixture(cx);
         workspace.update_in(cx, |workspace, window, cx| {
             workspace.open_settings(&crate::views::workspace::OpenSettings, window, cx);
+            workspace.set_settings_section(super::super::SettingsSection::Threads, cx);
             let id = workspace.roles.add("Writer");
             workspace.select_role(id, window, cx);
         });

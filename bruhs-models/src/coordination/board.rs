@@ -6,7 +6,7 @@
 //! request can merge, so the board cannot disagree with the work. The host
 //! supplies each task's [`TaskLink`] (branch and pull requests it read); this
 //! module only classifies, so every surface shows the same lanes.
-use super::{CoordinatedTask, CoordinationSnapshot, Relationship, TaskState};
+use super::{CoordinatedTask, CoordinationSnapshot, LivingSpec, Relationship, TaskState};
 use crate::{
     delivery::{Check, Pull},
     ids::ThreadId,
@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 pub enum Lane {
     /// The agent is writing, or has written, changes without a reviewable PR.
     Building,
-    /// A verification child or the PR's checks are proving the change.
+    /// An agent review is available or running, or PR checks need attention.
     Validating,
     /// A PR waits on people: review, requested changes or a conflict.
     InReview,
@@ -218,6 +218,28 @@ pub struct TaskLink {
     pub pulls: Vec<TaskPull>,
 }
 
+/// Whether a review still matches the owner's saved request and specification.
+/// This compares recorded context, not the contents of workspace files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewFreshness {
+    MatchesTask,
+    TaskChanged,
+    SpecificationChanged,
+    SpecificationUnavailable,
+    WorkspaceChanged,
+    ContextUnavailable,
+}
+
+/// An agent report to inspect, not an independently established test outcome.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationReview {
+    pub task_id: ThreadId,
+    pub state: TaskState,
+    pub freshness: ReviewFreshness,
+    pub spec_revision: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardCard {
     pub id: ThreadId,
@@ -237,6 +259,9 @@ pub struct BoardCard {
     pub active_children: u32,
     /// Verification runs folded into this card.
     pub verifications: u32,
+    /// The newest report, including why it may no longer cover this task.
+    #[serde(default)]
+    pub verification: Option<VerificationReview>,
     pub approvals: u32,
     pub archived: bool,
     pub updated_at: EpochMs,
@@ -323,8 +348,9 @@ fn card(
                 .collect()
         })
         .unwrap_or_default();
-    let (lane, pull_status) = lane(task, &pulls, &verifications);
-    let status = status(task, lane, pull_status, &verifications);
+    let verification = verification_review(task, &verifications, &snapshot.specs);
+    let (lane, pull_status) = lane(task, &pulls, verification.as_ref());
+    let status = status(task, pull_status, verification.as_ref());
     let updated_at = children
         .iter()
         .map(|child| child.updated_at)
@@ -351,6 +377,7 @@ fn card(
                 .count(),
         ),
         verifications: count(verifications.len()),
+        verification,
         approvals: count(task.approvals.len()),
         // Work that is running again belongs in the lanes even if a stale
         // archive mark survived.
@@ -377,7 +404,7 @@ fn count(n: usize) -> u32 {
 fn lane(
     task: &CoordinatedTask,
     pulls: &[TaskPull],
-    verifications: &[&CoordinatedTask],
+    verification: Option<&VerificationReview>,
 ) -> (Lane, Option<CardStatus>) {
     if let Some(behind) = pulls
         .iter()
@@ -393,20 +420,69 @@ fn lane(
             Some(CardStatus::new("Merged", Tone::Success, false)),
         );
     }
-    match current_verification(task, verifications) {
-        Some(_) => (Lane::Validating, None),
-        None => (Lane::Building, None),
+    if verification.is_some_and(|review| review.freshness == ReviewFreshness::MatchesTask) {
+        (Lane::Validating, None)
+    } else {
+        (Lane::Building, None)
     }
 }
 
-/// The newest verification run, if the task has not been asked for more work
-/// since it started. A new prompt sends the card back to Building.
-fn current_verification<'a>(
+fn verification_review(
     task: &CoordinatedTask,
-    verifications: &[&'a CoordinatedTask],
-) -> Option<&'a CoordinatedTask> {
-    let latest = verifications.iter().max_by_key(|run| run.created_at)?;
-    (latest.created_at >= last_prompt(task)).then_some(*latest)
+    verifications: &[&CoordinatedTask],
+    specs: &[LivingSpec],
+) -> Option<VerificationReview> {
+    let latest = verifications
+        .iter()
+        .max_by_key(|run| (run.created_at, run.source_revision, run.updated_at))?;
+    Some(VerificationReview {
+        task_id: latest.id.clone(),
+        state: latest.state,
+        freshness: review_freshness(task, latest, specs),
+        spec_revision: latest.spec_revision,
+    })
+}
+
+fn review_freshness(
+    task: &CoordinatedTask,
+    review: &CoordinatedTask,
+    specs: &[LivingSpec],
+) -> ReviewFreshness {
+    if task.spec_id != review.spec_id {
+        return ReviewFreshness::SpecificationChanged;
+    }
+    if let Some(spec_id) = &task.spec_id {
+        let Some(spec) = specs.iter().find(|spec| &spec.id == spec_id) else {
+            return ReviewFreshness::SpecificationUnavailable;
+        };
+        if review.spec_revision != Some(spec.revision) {
+            return ReviewFreshness::SpecificationChanged;
+        }
+    }
+    if task.working_path != review.working_path {
+        return ReviewFreshness::WorkspaceChanged;
+    }
+    if review.source_revision.is_none() {
+        return ReviewFreshness::ContextUnavailable;
+    }
+    // Compare the actual requests, so two messages in the same millisecond
+    // cannot leave a stale report current. Bringing back an assistant answer
+    // does not ask for new work and must not invalidate its own review.
+    let requests = task
+        .messages
+        .iter()
+        .filter(|message| message.role == "user");
+    let reviewed_requests = review
+        .source_context
+        .iter()
+        .filter(|message| message.role == "user");
+    if !requests
+        .map(|message| (message.at, message.text.as_str()))
+        .eq(reviewed_requests.map(|message| (message.at, message.text.as_str())))
+    {
+        return ReviewFreshness::TaskChanged;
+    }
+    ReviewFreshness::MatchesTask
 }
 
 /// Whether a merged request covers the task's latest work. A prompt sent
@@ -471,9 +547,8 @@ fn parse_utc(text: &str) -> Option<EpochMs> {
 
 fn status(
     task: &CoordinatedTask,
-    lane: Lane,
     pull_status: Option<CardStatus>,
-    verifications: &[&CoordinatedTask],
+    verification: Option<&VerificationReview>,
 ) -> CardStatus {
     match task.state {
         TaskState::Running => return CardStatus::new("Working", Tone::Info, true),
@@ -494,24 +569,34 @@ fn status(
     if let Some(status) = pull_status {
         return status;
     }
-    if lane == Lane::Validating {
-        if let Some(run) = current_verification(task, verifications) {
-            return match run.state {
-                TaskState::Completed => CardStatus::new("Verified", Tone::Success, false),
-                TaskState::Failed | TaskState::Interrupted | TaskState::Limited => {
-                    CardStatus::new("Verification failed", Tone::Danger, false)
-                }
-                TaskState::Cancelled => {
-                    CardStatus::new("Verification stopped", Tone::Neutral, false)
-                }
-                TaskState::WaitingApproval => {
-                    CardStatus::new("Verifier needs approval", Tone::Action, false)
-                }
-                TaskState::Running | TaskState::WaitingChild | TaskState::Ready => {
-                    CardStatus::new("Verifying", Tone::Info, true)
-                }
-            };
+    if let Some(review) = verification {
+        match review.freshness {
+            ReviewFreshness::SpecificationUnavailable => {
+                return CardStatus::new("Specification unavailable", Tone::Warning, false);
+            }
+            ReviewFreshness::ContextUnavailable => {
+                return CardStatus::new("Review context unavailable", Tone::Warning, false);
+            }
+            ReviewFreshness::TaskChanged
+            | ReviewFreshness::SpecificationChanged
+            | ReviewFreshness::WorkspaceChanged => {
+                return CardStatus::new("Review outdated", Tone::Warning, false);
+            }
+            ReviewFreshness::MatchesTask => {}
         }
+        return match review.state {
+            TaskState::Completed => CardStatus::new("Review ready", Tone::Action, false),
+            TaskState::Failed => CardStatus::new("Verifier failed", Tone::Danger, false),
+            TaskState::Interrupted => CardStatus::new("Review interrupted", Tone::Warning, false),
+            TaskState::Limited => CardStatus::new("Verifier usage limit", Tone::Warning, false),
+            TaskState::Cancelled => CardStatus::new("Review stopped", Tone::Neutral, false),
+            TaskState::WaitingApproval => {
+                CardStatus::new("Verifier needs approval", Tone::Action, false)
+            }
+            TaskState::Running | TaskState::WaitingChild | TaskState::Ready => {
+                CardStatus::new("Verifying", Tone::Info, true)
+            }
+        };
     }
     CardStatus::new("Idle", Tone::Neutral, false)
 }
@@ -521,9 +606,12 @@ mod tests {
     use super::*;
     use crate::{agent::PermissionMode, coordination::TaskMessage};
 
+    mod reviews;
+
     fn task(relationship: Relationship, state: TaskState, at: i64) -> CoordinatedTask {
         CoordinatedTask {
             id: ThreadId::new_v4(),
+            work_item_origin: None,
             parent_id: None,
             source_context: vec![],
             source_revision: None,
@@ -532,6 +620,8 @@ mod tests {
             project_path: "/p".into(),
             working_path: "/p".into(),
             model: "claude-sonnet-4-5".into(),
+            effort: None,
+            execution_timeout_seconds: None,
             permission_mode: PermissionMode::Default,
             spec_id: None,
             spec_revision: None,
@@ -563,6 +653,8 @@ mod tests {
     ) -> CoordinatedTask {
         let mut child = task(relationship, state, at);
         child.parent_id = Some(parent.id.clone());
+        child.source_context = parent.messages.clone();
+        child.source_revision = Some(1);
         child
     }
 
@@ -637,7 +729,7 @@ mod tests {
         let mut parent = task(Relationship::Root, TaskState::Completed, 1);
         let failed = child(&parent, Relationship::Verify, TaskState::Failed, 2);
         let cards = board(vec![parent.clone(), failed.clone()], &[]);
-        assert_eq!(only(&cards), (Lane::Validating, "Verification failed"));
+        assert_eq!(only(&cards), (Lane::Validating, "Verifier failed"));
 
         parent.messages.push(TaskMessage {
             role: "user".into(),

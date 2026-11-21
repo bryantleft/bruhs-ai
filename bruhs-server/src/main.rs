@@ -8,6 +8,7 @@ mod restore_control;
 mod routes;
 mod service;
 mod static_assets;
+mod telemetry;
 #[cfg(unix)]
 mod workspace_relay;
 
@@ -157,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
     state.start_background(&tokio::runtime::Handle::current());
+    routes::uploads::schedule_capture_cleanup();
     // One upstream subscription and bounded linking worker for the process,
     // including when no browser/native SSE clients are connected.
     let _capture_pump = routes::meetings_stream::start(state.clone());
@@ -214,6 +216,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _delivery_watcher = delivery.start_watcher(state.clone(), Some(coordination.clone()))?;
     // Removing a worktree refuses one a pull-request watch still reads.
     bruhs_core::worktrees::register_watch_source(std::sync::Arc::new(delivery.clone()));
+    let retention = bruhs_core::worktrees::retention::RetentionHost::new(state.clone(), coordination.clone(), delivery.clone());
+    if let Some(file) = bruhs_core::delivery::writer::desktop_state_file() {
+        tokio::spawn(retention.clone().run(file));
+    }
     let board_links = bruhs_core::coordination::BoardLinks::new(delivery.clone());
     let databases = bruhs_core::database::DatabaseHost::open(
         bruhs_core::database::DatabaseHost::default_path()?,
@@ -248,11 +254,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote_hosts.clone(),
             config.access.clone(),
         ))
+        .layer(axum::Extension(retention))
         .layer(axum::Extension(coordination.clone()))
         .layer(axum::Extension(board_links.clone()))
         .layer(axum::Extension(tools.clone()))
         .layer(axum::Extension(databases))
         .layer(axum::Extension(api_client));
+    let app = telemetry::attach(app, config.access.clone());
     if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
         let address: std::net::SocketAddr = bind.parse()?;
         let remote = tokio::net::TcpListener::bind(address).await?;
@@ -419,6 +427,20 @@ fn router_with_capture_daemon(
         .route("/api/coordination/ui", get(routes::coordination::ui))
         .route("/api/coordination/board", get(routes::coordination::board))
         .route(
+            "/api/coordination/handoffs",
+            get(routes::coordination::work_item_handoffs)
+                .post(routes::coordination::prepare_work_item),
+        )
+        .route(
+            "/api/coordination/handoffs/{id}",
+            get(routes::coordination::work_item_handoff)
+                .delete(routes::coordination::forget_work_item_handoff),
+        )
+        .route(
+            "/api/coordination/handoffs/{id}/start",
+            post(routes::coordination::start_work_item),
+        )
+        .route(
             "/api/coordination/commands",
             post(routes::coordination::command),
         )
@@ -426,6 +448,9 @@ fn router_with_capture_daemon(
         .route("/api/worktrees/ui", get(routes::worktrees::ui))
         .route("/api/worktrees/measure", get(routes::worktrees::measure))
         .route("/api/worktrees/remove", post(routes::worktrees::remove))
+        .route("/api/worktrees/cleanup-deleted-scratch",post(routes::worktrees::clean_deleted_scratch))
+        .route("/api/worktrees/cleanup-deleted-thread",post(routes::worktrees::clean_deleted_thread))
+        .route("/api/worktrees/cleanup-deleted-thread/with-file-policy",post(routes::worktrees::clean_deleted_thread))
         .route(
             "/api/worktrees/start-again",
             post(routes::worktrees::start_again),
@@ -453,6 +478,7 @@ fn router_with_capture_daemon(
         )
         .route("/api/local-tools", get(routes::local_tools::snapshot))
         .route("/api/local-tools/ui", get(routes::local_tools::ui))
+        .route("/api/voice/dictionaries",post(routes::local_tools::dictionary))
         .route("/api/local-tools/grants", post(routes::local_tools::grant))
         .route(
             "/api/local-tools/grants/{id}",
@@ -492,7 +518,16 @@ fn router_with_capture_daemon(
         )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))
+        .route("/api/reactive/task-threads",get(routes::reactive::task_threads))
         .route("/api/reactive/stream", get(routes::reactive::stream))
+        .route(
+            "/api/reactive/tasks/{task}/deliveries",
+            get(routes::reactive::webhook_deliveries),
+        )
+        .route(
+            "/api/reactive/tasks/{task}/deliveries/{delivery}",
+            get(routes::reactive::webhook_delivery),
+        )
         .route(
             "/api/reactive/agents/{id}/runs",
             get(routes::reactive::agent_runs),
@@ -577,6 +612,16 @@ fn router_with_capture_daemon(
         .route(
             "/api/reactive/sources/{id}/token",
             get(routes::reactive::token),
+        )
+        .route(
+            "/api/reactive/tasks/{id}/webhook-url",
+            get(routes::reactive::task_token).post(routes::reactive::rotate_task_token),
+        )
+        .route(
+            "/api/reactive/task-hooks/{id}/{token}",
+            post(routes::reactive::hook).layer(DefaultBodyLimit::max(
+                bruhs_models::reactive::MAX_PAYLOAD_BYTES,
+            )),
         )
         .route(
             "/api/reactive/hooks/{id}",
@@ -698,6 +743,8 @@ fn router_with_capture_daemon(
             post(routes::uploads::post_upload).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
         )
         .route("/api/agent/uploads/open", get(routes::uploads::get_open))
+        .route("/api/maintenance/browser-captures", get(routes::uploads::capture_retention).post(routes::uploads::set_capture_retention))
+        .route("/api/maintenance/browser-captures/prune", post(routes::uploads::prune_captures))
         .route(
             "/api/agent/artifacts/{id}",
             get(routes::artifacts::get_artifact),
@@ -955,6 +1002,11 @@ fn router_with_capture_daemon(
             access,
             local_access::guard,
         ))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(|req: &axum::extract::Request| {
+            // Route templates keep capability URLs and sensitive query strings out of logs.
+            let route = req.extensions().get::<axum::extract::MatchedPath>()
+                .map_or("<unmatched>", |path| path.as_str());
+            tracing::debug_span!("request", method = %req.method(), route, version = ?req.version())
+        }))
         .with_state(state)
 }

@@ -186,6 +186,9 @@ impl From<bruhs_core::SendMessageError> for AppError {
                 AppError::Conflict(e.to_string())
             }
             bruhs_core::SendMessageError::ThreadBusy(_) => AppError::Conflict(e.to_string()),
+            bruhs_core::SendMessageError::InvalidExecutionBudget => {
+                AppError::BadRequest(e.to_string())
+            }
             _ => AppError::internal(e),
         }
     }

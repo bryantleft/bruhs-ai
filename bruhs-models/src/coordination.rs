@@ -45,12 +45,16 @@ pub enum Isolation {
     Worktree { base_branch: String },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewTask {
     pub title: String,
     pub project_path: String,
     pub prompt: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_timeout_seconds: Option<u64>,
     #[serde(default)]
     pub permission_mode: PermissionMode,
     pub isolation: Isolation,
@@ -75,6 +79,8 @@ pub struct PendingApproval {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoordinatedTask {
     pub id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_item_origin: Option<crate::workbench_handoff::WorkItemTaskOrigin>,
     pub parent_id: Option<ThreadId>,
     #[serde(default)]
     pub source_context: Vec<TaskMessage>,
@@ -85,6 +91,10 @@ pub struct CoordinatedTask {
     pub project_path: String,
     pub working_path: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_timeout_seconds: Option<u64>,
     pub permission_mode: PermissionMode,
     pub spec_id: Option<ThreadId>,
     pub spec_revision: Option<u64>,
@@ -209,6 +219,14 @@ pub enum CoordinationCommand {
         id: ThreadId,
         prompt: String,
     },
+    SetEffort {
+        id: ThreadId,
+        effort: Option<String>,
+    },
+    SetExecutionBudget {
+        id: ThreadId,
+        seconds: Option<u64>,
+    },
     Cancel {
         id: ThreadId,
     },
@@ -218,6 +236,8 @@ pub enum CoordinationCommand {
         prompt: String,
         relationship: Relationship,
         model: String,
+        #[serde(default)]
+        effort: Option<String>,
         isolation: Isolation,
     },
     Fanout {
@@ -289,6 +309,9 @@ pub enum CoordinationCommand {
 }
 
 pub fn validate_new_task(task: &NewTask) -> Result<(), &'static str> {
+    if task.execution_timeout_seconds == Some(0) {
+        return Err("Choose a positive execution budget or leave it unlimited.");
+    }
     if task.title.trim().is_empty() {
         return Err("Task title cannot be empty.");
     }
@@ -304,12 +327,31 @@ pub fn validate_new_task(task: &NewTask) -> Result<(), &'static str> {
     if task.model.parse::<crate::agent::ModelId>().is_err() {
         return Err("Choose a valid runtime and model.");
     }
+    validate_task_effort(&task.model, task.effort.as_deref())?;
     if let Isolation::Worktree { base_branch } = &task.isolation {
         if crate::logic::git::BranchName::try_from(base_branch.as_str()).is_err() {
             return Err("Choose a valid worktree base branch.");
         }
     }
     Ok(())
+}
+
+pub fn validate_task_effort(model: &str, effort: Option<&str>) -> Result<(), &'static str> {
+    let Some(effort) = effort else { return Ok(()) };
+    if crate::logic::run_place::claude_effort(effort).is_none() {
+        return Err("Choose provider default, low, medium, high, xhigh or max reasoning effort.");
+    }
+    if !task_effort_supported(model) {
+        return Err("Reasoning effort overrides are available for Claude and Codex tasks. Choose provider default for this runtime.");
+    }
+    Ok(())
+}
+
+pub fn task_effort_supported(model: &str) -> bool {
+    matches!(
+        crate::agent::provider_for_model_id(model),
+        crate::agent::AgentProvider::Claude | crate::agent::AgentProvider::Codex
+    )
 }
 
 pub fn narrower(parent: PermissionMode, child: PermissionMode) -> bool {
@@ -332,10 +374,36 @@ mod tests {
             project_path: "/tmp/project".into(),
             prompt: "Fix the bug".into(),
             model: "codex/default".into(),
+            effort: None,
+            execution_timeout_seconds: None,
             permission_mode: PermissionMode::Default,
             isolation: Isolation::Shared,
             spec_id: None,
         }
+    }
+
+    #[test]
+    fn effort_is_validated_for_the_runtime_and_legacy_requests_keep_default() {
+        let mut task = task();
+        let legacy = serde_json::to_value(&task).unwrap();
+        assert!(legacy.get("effort").is_none());
+        assert!(serde_json::from_value::<NewTask>(legacy)
+            .unwrap()
+            .effort
+            .is_none());
+        for level in crate::logic::run_place::CLAUDE_EFFORTS {
+            task.effort = Some(level.into());
+            validate_new_task(&task).unwrap();
+        }
+        task.effort = Some("turbo".into());
+        assert!(validate_new_task(&task).is_err());
+        task.effort = Some("high".into());
+        task.model = "opencode/custom/local-model".into();
+        assert!(validate_new_task(&task)
+            .unwrap_err()
+            .contains("provider default"));
+        task.effort = None;
+        validate_new_task(&task).unwrap();
     }
 
     #[test]

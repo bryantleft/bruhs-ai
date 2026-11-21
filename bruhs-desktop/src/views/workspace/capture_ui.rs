@@ -103,6 +103,7 @@ impl Workspace {
                 CaptureKind::Task => {
                     let target_id = uuid::Uuid::new_v4().to_string();
                     self.work_items.push(DesktopWorkItem {
+                        source: None,
                         id: target_id.clone(),
                         project_id: None,
                         title: record.title.clone(),

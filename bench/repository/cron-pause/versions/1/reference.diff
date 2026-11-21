@@ -1,0 +1,178 @@
+--- a/cron.go
++++ b/cron.go
+@@ -16,6 +16,7 @@
+ 	stop      chan struct{}
+ 	add       chan *Entry
+ 	remove    chan EntryID
++	pause     chan pauseRequest
+ 	snapshot  chan chan []Entry
+ 	running   bool
+ 	logger    Logger
+@@ -26,6 +27,12 @@
+ 	jobWaiter sync.WaitGroup
+ }
+ 
++type pauseRequest struct {
++	id     EntryID
++	paused bool
++	reply  chan bool
++}
++
+ // ScheduleParser is an interface for schedule spec parsers that return a Schedule
+ type ScheduleParser interface {
+ 	Parse(spec string) (Schedule, error)
+@@ -55,8 +62,11 @@
+ 	// Schedule on which this job should be run.
+ 	Schedule Schedule
+ 
++	// Paused prevents future dispatch without removing this entry.
++	Paused bool
++
+ 	// Next time the job will run, or the zero time if Cron has not been
+-	// started or this entry's schedule is unsatisfiable
++	// started, the entry is paused, or its schedule is unsatisfiable
+ 	Next time.Time
+ 
+ 	// Prev is the last time this job was run, or the zero time if never.
+@@ -97,17 +107,17 @@
+ //
+ // Available Settings
+ //
+-//   Time Zone
+-//     Description: The time zone in which schedules are interpreted
+-//     Default:     time.Local
++//	Time Zone
++//	  Description: The time zone in which schedules are interpreted
++//	  Default:     time.Local
+ //
+-//   Parser
+-//     Description: Parser converts cron spec strings into cron.Schedules.
+-//     Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
++//	Parser
++//	  Description: Parser converts cron spec strings into cron.Schedules.
++//	  Default:     Accepts this spec: https://en.wikipedia.org/wiki/Cron
+ //
+-//   Chain
+-//     Description: Wrap submitted jobs to customize behavior.
+-//     Default:     A chain that recovers panics and logs them to stderr.
++//	Chain
++//	  Description: Wrap submitted jobs to customize behavior.
++//	  Default:     A chain that recovers panics and logs them to stderr.
+ //
+ // See "cron.With*" to modify the default behavior.
+ func New(opts ...Option) *Cron {
+@@ -118,6 +128,7 @@
+ 		stop:      make(chan struct{}),
+ 		snapshot:  make(chan chan []Entry),
+ 		remove:    make(chan EntryID),
++		pause:     make(chan pauseRequest),
+ 		running:   false,
+ 		runningMu: sync.Mutex{},
+ 		logger:    DefaultLogger,
+@@ -211,6 +222,42 @@
+ 	}
+ }
+ 
++// Pause prevents future dispatches of an entry and reports a state change.
++// It does not cancel work that the scheduler has already dispatched.
++func (c *Cron) Pause(id EntryID) bool { return c.changePaused(id, true) }
++
++// Resume reactivates a paused entry and reports a state change. While running,
++// its next occurrence is computed from current time without replaying missed work.
++func (c *Cron) Resume(id EntryID) bool { return c.changePaused(id, false) }
++
++func (c *Cron) changePaused(id EntryID, paused bool) bool {
++	c.runningMu.Lock()
++	defer c.runningMu.Unlock()
++	if !c.running {
++		return c.setPaused(id, paused, false, time.Time{})
++	}
++	reply := make(chan bool, 1)
++	c.pause <- pauseRequest{id: id, paused: paused, reply: reply}
++	return <-reply
++}
++
++func (c *Cron) setPaused(id EntryID, paused, running bool, now time.Time) bool {
++	for _, entry := range c.entries {
++		if entry.ID == id {
++			if entry.Paused == paused {
++				return false
++			}
++			entry.Paused = paused
++			entry.Next = time.Time{}
++			if !paused && running {
++				entry.Next = entry.Schedule.Next(now)
++			}
++			return true
++		}
++	}
++	return false
++}
++
+ // Start the cron scheduler in its own goroutine, or no-op if already started.
+ func (c *Cron) Start() {
+ 	c.runningMu.Lock()
+@@ -242,7 +289,9 @@
+ 	// Figure out the next activation times for each entry.
+ 	now := c.now()
+ 	for _, entry := range c.entries {
+-		entry.Next = entry.Schedule.Next(now)
++		if !entry.Paused {
++			entry.Next = entry.Schedule.Next(now)
++		}
+ 		c.logger.Info("schedule", "now", now, "entry", entry.ID, "next", entry.Next)
+ 	}
+ 
+@@ -292,6 +341,11 @@
+ 				c.logger.Info("stop")
+ 				return
+ 
++			case request := <-c.pause:
++				timer.Stop()
++				now = c.now()
++				request.reply <- c.setPaused(request.id, request.paused, true, now)
++
+ 			case id := <-c.remove:
+ 				timer.Stop()
+ 				now = c.now()
+--- a/README.md
++++ b/README.md
+@@ -123,3 +123,11 @@
+ The original version of this package included an optional "seconds" field, which
+ made it incompatible with both of these formats. Now, the "standard" format is
+ the default format accepted, and the Quartz format is opt-in.
++
++## Pause and resume
++
++Pause(id) keeps an entry and its history while preventing future dispatch. It
++returns true only on a state change. Resume(id) reactivates a paused entry from
++current time, without replaying missed runs. Stopped resumes defer scheduling.
++Inspect Entry.Paused and its zero Next to recognize a paused entry. Running jobs
++finish normally, and Stop still waits for them. Removed IDs cannot be resumed.
+--- /dev/null
++++ b/reference_pause_test.go
+@@ -0,0 +1,24 @@
++package cron_test
++
++import (
++	cron "github.com/robfig/cron/v3"
++	"testing"
++)
++
++func TestPauseReferenceDuplicate(t *testing.T) {
++	c := cron.New()
++	id, err := c.AddFunc("@every 1h", func() {})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !c.Pause(id) || c.Pause(id) {
++		t.Fatal("Pause did not report transitions")
++	}
++	if !c.Resume(id) || c.Resume(id) {
++		t.Fatal("Resume did not report transitions")
++	}
++	c.Remove(id)
++	if c.Resume(id) {
++		t.Fatal("removed entry was recreated")
++	}
++}

@@ -14,7 +14,7 @@
 //!     in Phase 3+)
 
 use crate::live_events::LiveEvents;
-use crate::state::{Calendar, CalendarEvent, GoogleCalendarSyncState, SchedulingPreferences};
+use crate::state::{Calendar, CalendarEvent, GoogleCalendarSyncState, SchedulingPreferencesStore};
 use bruhs_models::api::live_events::CALENDAR;
 use bruhs_models::CalendarSyncEvent;
 use leptos::prelude::*;
@@ -26,7 +26,7 @@ struct CalendarState {
     sync_state_read: ReadSignal<GoogleCalendarSyncState>,
     set_sync_state: WriteSignal<GoogleCalendarSyncState>,
     set_calendars: WriteSignal<Vec<Calendar>>,
-    scheduling_preferences: RwSignal<SchedulingPreferences>,
+    scheduling_preferences: SchedulingPreferencesStore,
     saves: crate::task_saves::TaskSaves,
 }
 
@@ -39,7 +39,7 @@ pub fn subscribe(
     sync_state_read: ReadSignal<GoogleCalendarSyncState>,
     set_sync_state: WriteSignal<GoogleCalendarSyncState>,
     set_calendars: WriteSignal<Vec<Calendar>>,
-    scheduling_preferences: RwSignal<SchedulingPreferences>,
+    scheduling_preferences: SchedulingPreferencesStore,
 ) {
     // Capture app-owned context before entering native stream callbacks.
     let state = CalendarState {
@@ -53,16 +53,32 @@ pub fn subscribe(
     };
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     let pending = RwSignal::new(Vec::<CalendarSyncEvent>::new());
+    let draining = RwSignal::new(false);
     Effect::new(move |_| {
         // A provider update needs the hydrated original for CAS and local-edit
         // conflict detection. Keep stream ordering, including SyncCompleted,
         // while an initial load or its Retry is still pending.
-        if !executor.ready.get() || pending.with(Vec::is_empty) {
+        if !executor.ready.get()
+            || !scheduling_preferences.ready()
+            || scheduling_preferences.busy()
+            || draining.get()
+            || pending.with(Vec::is_empty)
+        {
             return;
         }
-        for event in pending.try_update(std::mem::take).unwrap_or_default() {
-            apply_event(event, state);
-        }
+        let batch = pending.try_update(std::mem::take).unwrap_or_default();
+        draining.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            for (index, event) in batch.iter().enumerate() {
+                if apply_event(event.clone(), state).await.is_err() {
+                    pending.update(|queued| {
+                        queued.splice(0..0, batch[index..].iter().cloned());
+                    });
+                    break;
+                }
+            }
+            draining.set(false);
+        });
     });
     live.on(CALENDAR, move |data| {
         match serde_json::from_str::<CalendarSyncEvent>(&data) {
@@ -74,7 +90,7 @@ pub fn subscribe(
     });
 }
 
-fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
+async fn apply_event(event: CalendarSyncEvent, state: CalendarState) -> Result<(), ()> {
     let CalendarState {
         events_read,
         set_events,
@@ -97,7 +113,7 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
         set_sync_state.update(|state| {
             state.apply_status(&event);
         });
-        return;
+        return Ok(());
     }
     match event {
         CalendarSyncEvent::StreamOpened
@@ -130,22 +146,25 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
                 )
             });
             if let Some(existing) = existing_event.as_ref().filter(|_| locally_changed) {
-                scheduling_preferences.update(|preferences| {
-                    let already_pending = preferences.conflicts.iter().any(|conflict| {
-                        conflict.event_id == existing.id && conflict.resolution.is_none()
-                    });
-                    if !already_pending {
-                        preferences
-                            .conflicts
-                            .push(bruhs_models::SchedulingConflict::detected(
-                                existing,
-                                &event,
-                                crate::clock::now_ms(),
-                            ));
-                        preferences.updated_at_ms = crate::clock::now_ms();
-                    }
-                });
-                return;
+                scheduling_preferences
+                    .edit(|preferences| {
+                        let already_pending = preferences.conflicts.iter().any(|conflict| {
+                            conflict.event_id == existing.id && conflict.resolution.is_none()
+                        });
+                        if !already_pending {
+                            preferences
+                                .conflicts
+                                .push(bruhs_models::SchedulingConflict::detected(
+                                    existing,
+                                    &event,
+                                    crate::clock::now_ms(),
+                                ));
+                            preferences.updated_at_ms = crate::clock::now_ms();
+                        }
+                    })
+                    .await
+                    .map_err(|_| ())?;
+                return Ok(());
             }
             // Provider payloads receive fresh IDs during mapping. Keep the local
             // identity so a refresh cannot orphan links or create old-ID copies.
@@ -183,6 +202,7 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
             set_calendars.set(calendars);
         }
     }
+    Ok(())
 }
 
 fn preserve_local_identity(

@@ -1,5 +1,11 @@
 # Bench results
 
+Historical measurements below predate the benchmark integrity changes. Their
+raw run artifacts are not present in this checkout and have not been rescored
+with terminal-state, coverage and complete-usage checks. Retain these as prior
+observations; rerun matched campaigns before using them to claim current
+leadership. No Capy comparison is recorded here.
+
 Measured in November 2026 with `scripts/task-bench.sh` and
 `scripts/token-bench.sh` (see [README.md](README.md)) on one Mac. Claude
 rows use Claude Haiku 5.5 (Claude Code 2.1.319) unless noted; Codex rows use

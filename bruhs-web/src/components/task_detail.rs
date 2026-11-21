@@ -2,8 +2,9 @@ use crate::task_style::{PriorityStyle, WorkItemStatusStyle};
 use leptos::prelude::*;
 
 use crate::state::{
-    Priority, ProjectsSignal, RecurrenceRule, SelectedWorkItem, SetSelectedWorkItem,
-    SetWorkItemsSignal, WorkItem, WorkItemStatus, WorkItemsSignal,
+    AppView, MeetingsSignal, Priority, ProjectsSignal, RecurrenceRule, SelectedWorkItem,
+    SetActiveView, SetSelectedWorkItem, SetWorkItemsSignal, WorkItem, WorkItemStatus,
+    WorkItemsSignal,
 };
 use crate::storage;
 use crate::ui::{
@@ -44,6 +45,7 @@ fn change_status(
         let mut next = WorkItem::new_at(original.title.clone(), now);
         next.project_id.clone_from(&original.project_id);
         next.description.clone_from(&original.description);
+        next.source.clone_from(&original.source);
         next.status = WorkItemStatus::Todo;
         next.priority = original.priority;
         next.due_date = Some(due);
@@ -134,6 +136,10 @@ mod status_tests {
         original.due_date = Some("2026-10-01".into());
         original.priority = Priority::High;
         original.description = Some("Keep context".into());
+        original.source = Some(bruhs_models::WorkItemSource::Meeting {
+            meeting_id: "recording".into(),
+            title: "Source".into(),
+        });
         original.planning.recurrence = Some(RecurrenceRule::Daily);
         original
             .planning
@@ -150,6 +156,7 @@ mod status_tests {
         assert_eq!(items[1].due_date.as_deref(), Some("2026-10-02"));
         assert_eq!(items[1].priority, original.priority);
         assert_eq!(items[1].description, original.description);
+        assert_eq!(items[1].source, original.source);
         assert!(items[1].planning.time_block_event_ids.is_empty());
         assert_eq!(items[1].created_at, 20);
         assert!(change_status(&mut items, &original.id, WorkItemStatus::Done, 30).is_empty());
@@ -368,6 +375,10 @@ pub fn TaskDetail() -> impl IntoView {
                                 />
                             </div>
 
+                            {item.source.clone().map(|source| view! { <TaskSource source=source /> })}
+
+                            <super::task_workbench::TaskWorkbenchAction item=item.clone() />
+
                             <div class="space-y-1.5">
                                 <label class="text-label-sm text-rambutan-400">"Description"</label>
                                 <Textarea
@@ -569,5 +580,60 @@ pub fn TaskDetail() -> impl IntoView {
                 </div>
             </div>
         </Dialog>
+    }
+}
+
+#[component]
+fn TaskSource(source: bruhs_models::WorkItemSource) -> impl IntoView {
+    use crate::transcript_sync::{MeetingLookup, TranscriptSync};
+    let sync = expect_context::<TranscriptSync>();
+    let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
+    let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
+    let SetSelectedWorkItem(set_selected) = expect_context::<SetSelectedWorkItem>();
+    let bruhs_models::WorkItemSource::Meeting { meeting_id, title } = source;
+    let id = StoredValue::new(meeting_id);
+    Effect::new(move |_| sync.ensure_meeting_metadata(id.get_value()));
+    let current = Memo::new(move |_| {
+        meetings.with(|meetings| {
+            id.with_value(|id| {
+                meetings
+                    .iter()
+                    .find(|meeting| &meeting.id == id)
+                    .map(|meeting| meeting.title.clone())
+            })
+        })
+    });
+    let lookup = Memo::new(move |_| sync.meeting_lookup(&id.get_value()));
+    let available = Signal::derive(move || {
+        current.get().is_some() && !matches!(lookup.get(), Some(MeetingLookup::Missing))
+    });
+    let loading =
+        Signal::derive(move || matches!(lookup.get(), None | Some(MeetingLookup::Loading)));
+    let label = Signal::derive(move || {
+        format!(
+            "Open source meeting: {}",
+            current.get().unwrap_or_else(|| title.clone())
+        )
+    });
+    view! {
+        <div class="space-y-1.5" data-testid="task-source">
+            <p class="text-label-sm text-rambutan-400">"Source"</p>
+            <button type="button" data-testid="task-source-meeting"
+                class="min-h-11 sm:min-h-6 w-full rounded-grape px-2 py-1 text-left text-label-sm text-blueberry-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-60 [overflow-wrap:anywhere]"
+                disabled=move || !available.get()
+                on:click=move |_| {
+                    if available.get_untracked() {
+                        set_selected.set(None);
+                        set_active_view.set(AppView::MeetingDetail { meeting_id: id.get_value() });
+                    }
+                }>{move || label.get()}</button>
+            <Show when=move || !available.get()>
+                <p role="status" class="text-label-sm text-rambutan-500">{move || if loading.get() { "Loading source meeting…" } else { "Source meeting is unavailable." }}</p>
+                <Show when=move || !loading.get()>
+                    <button type="button" class="bruhs-control min-h-control-xs rounded-grape px-2 py-1 text-label-sm text-rambutan-300 hover:bg-longan-800"
+                        on:click=move |_| sync.refresh_meeting_metadata(id.get_value())>"Retry source meeting"</button>
+                </Show>
+            </Show>
+        </div>
     }
 }

@@ -7,32 +7,32 @@ import SurfacePanel from "../components/SurfacePanel.astro";
 const surfaces = [
   { id: "tasks", label: "Today", color: "tasks", file: "tasks", width: 1168,
     alt: "The Today view: a briefing, the current focus block and the rest of the day's schedule, a ranked focus queue with priorities and estimates, and columns for overdue work, waiting on, follow-ups and decisions.",
-    caption: "Today: what's due, what's blocked, and who you're waiting on." },
+    caption: "Everything due today, what is blocked, and who you are waiting on." },
   { id: "meetings", label: "Meetings", color: "meetings", file: "meetings", width: 1168,
     alt: "A recorded meeting: the end of a speaker-labeled transcript, then a summary, four action items with due dates, the decisions made, and topics.",
-    caption: "Meeting notes without a bot in the call, transcribed on your Mac." },
+    caption: "Meeting notes with no bot joining your call, transcribed right on your machine." },
   { id: "agents", label: "Agents", color: "agent", file: "hero", width: 1440,
     alt: "The bruhs app: a sidebar of Claude and Codex threads across several projects, and an open thread where Claude reads session.rs, runs cargo test, explains a race on a shared test clock, and shows a two-file diff.",
-    caption: "Claude Code and Codex threads, with every tool call, diff and a terminal." },
+    caption: "Run Claude Code, Codex, and other agents side by side, with every diff, tool call, and terminal right there." },
   { id: "calendar", label: "Calendar", color: "calendar", file: "calendar", width: 1168,
     alt: "A week in the bruhs calendar: meetings, blue focus blocks for tasks like the flaky auth test and the launch post, green workouts, and evening plans, with a line marking the current time on Wednesday.",
-    caption: "“Plan my day” turns estimates into focus blocks around your meetings." },
+    caption: "Ask bruhs to plan your day and it turns your task estimates into focus blocks around your meetings." },
   { id: "people", label: "People", color: "people", file: "people", width: 1168,
     alt: "A person in bruhs: company, role and contact details, private notes, a suggested follow-up, and a list of commitments, reminders and past interactions.",
-    caption: "A CRM that fills itself in from your meetings and messages." },
+    caption: "Every note, past conversation, and promise you made, organized by the person it belongs to." },
   { id: "notes", label: "Notes", color: "notes", file: "notes", width: 1168,
     alt: "The Notes view: tagged Markdown documents such as a pilot plan and a launch checklist, and saved web clips that keep their source.",
-    caption: "Docs and web clips your agent can read." },
+    caption: "Plain Markdown notes and saved web clips that your agents can actually read." },
   { id: "life", label: "Life", color: "life", file: "life", width: 1168,
     alt: "The finance side of Life: net worth, 30-day spend and expected income, the agent-access and redaction switches, a list of accounts, and recent transactions.",
-    caption: "Money and health, hidden from the agent until you opt in." },
+    caption: "Track your finances and health privately. Nothing is shared with an agent unless you turn it on." },
 ];
 ---
 
 <Base
-  title="bruhs: one window for your whole day"
-  description="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS, Windows and Linux."
-  ogDescription="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine."
+  title="bruhs | Your digital brain"
+  description="One local workspace where your AI agents, meeting notes, tasks, and people share context. Free and open source for macOS, Windows, and Linux."
+  ogDescription="Recall the decision from your last meeting, keep track of who you owe a reply, and see what matters today."
   path="/"
   current="home"
   palette
@@ -41,16 +41,16 @@ const surfaces = [
     <section class="hero">
       <div class="wrap hero-stack">
         <canvas class="bruh bruh-hero" data-bruh="hero" aria-hidden="true"></canvas>
-        <h1 class="display">One window for your whole day.</h1>
-        <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. Your work stays on your machine.</p>
+        <h1 class="display">Your digital brain.</h1>
+        <p class="lede">One local workspace where your AI agents, meeting notes, and daily work actually share context.</p>
         <div class="get-row">
           <GetButton />
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
         </div>
+        <p class="hero-note">Free and open source. No account required.</p>
       </div>
     </section>
 
-    <section class="section tour" id="surfaces" aria-label="What's inside">
+    <section class="section tour" id="surfaces" aria-label="Product tour">
       <div class="surfaces" data-surfaces>
         <div class="wrap tabs-row">
           <div class="tabs" role="tablist" aria-label="Surfaces">
@@ -67,106 +67,62 @@ const surfaces = [
       </div>
     </section>
 
-    <section class="section" id="subs" aria-labelledby="providers-title">
-      <div class="wrap providers">
-        <div class="provider-copy">
-          <h2 class="h2" id="providers-title" tabindex="-1">Bring your own model.</h2>
-          <p>Choose the agent runtime and model for each thread. Keep using your own login, or connect API providers and local models through OpenCode. Available tools and access modes vary by runtime.</p>
-        </div>
-        <ul class="provider-list" role="list" aria-label="Supported agent runtimes">
-          <li>
-            <div>
-              <h3 class="h3">Claude Code</h3>
-              <p>Your Claude login or API key.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Codex</h3>
-              <p>Your existing Codex login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Cursor</h3>
-              <p>Your Cursor CLI login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Antigravity</h3>
-              <p>CLI setup, with Full access required.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">Grok</h3>
-              <p>Your Grok CLI login.</p>
-            </div>
-          </li>
-          <li>
-            <div>
-              <h3 class="h3">OpenCode</h3>
-              <p>API providers and local models.</p>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </section>
-
     <section class="section" id="faq" aria-labelledby="faq-title">
       <div class="wrap faq">
         <h2 class="h2" id="faq-title" tabindex="-1">Questions</h2>
         <details>
-          <summary>What can I do in bruhs?</summary>
-          <p>Keep agent threads alongside your tasks, calendar, meetings, people and notes. Import an existing conversation or start a thread in a project, then review changes and run commands in the same window.</p>
+          <summary>Where does my data live?</summary>
+          <p>Right on your machine. Search works offline, and you decide what an agent gets to see. <a href="/privacy">Read about data and privacy.</a></p>
         </details>
         <details>
           <summary>Is it free?</summary>
-          <p>Yes. bruhs is MIT licensed, with no paid tier and no account to make. Your selected runtime uses its own subscription, API billing or local model.</p>
+          <p>Yes. bruhs is open source under the MIT license, with no paid tier and no account to create. Any AI runtime you connect uses your own subscription, API key, or local model.</p>
+        </details>
+        <details id="subs">
+          <summary>Which agents can I use?</summary>
+          <p>Pick Claude Code, Codex, Cursor, Antigravity, Grok, or OpenCode per thread. Each runtime uses the login or config you already have, and OpenCode lets you run local models too.</p>
         </details>
         <details>
           <summary>Can I use an API key instead?</summary>
-          <p>Yes. OpenCode uses your configured API providers, custom endpoints and local models. Pick its default model or enter <code>opencode/provider/model</code> in the model picker. Claude Code also supports an API key: set <code>BRUHS_CLAUDE_USE_API_KEY=1</code> to opt in. Codex uses whatever <code>codex login</code> set up.</p>
+          <p>Yes. OpenCode works with your own API providers, custom endpoints, and local models. Pick its default model or type <code>opencode/provider/model</code> in the picker. Claude Code supports an API key when you set <code>BRUHS_CLAUDE_USE_API_KEY=1</code>, and Codex uses whatever <code>codex login</code> configured.</p>
         </details>
         <details>
           <summary>Will an agent change my code without asking?</summary>
-          <p>Default asks for approval in Claude Code and uses a read-only policy in the other runtimes. A runtime that cannot enforce the selected mode reports an error instead of running with broader access. Choose Accept edits or Full access when you want to allow changes.</p>
+          <p>Not by default. Claude Code asks before editing, and other runtimes stay read only unless you switch to Accept edits or Full access. If a runtime cannot enforce the mode you picked, bruhs stops with an error instead of silently granting more access.</p>
         </details>
         <details>
           <summary>Does a bot join my calls?</summary>
-          <p>No. On macOS, bruhs records your microphone and system audio for calls in Zoom, Meet, Teams and other apps. Windows and Linux capture the microphone. Ask participants before recording.</p>
+          <p>Never. On macOS, bruhs captures your microphone and system audio directly from Zoom, Meet, Teams, or any other app. Windows and Linux record from your microphone. Just remember to let people know before you hit record.</p>
         </details>
         <details>
           <summary>What leaves my device?</summary>
-          <p>Prompts and files you send to remote models go through your selected runtime and provider. A meeting's transcript goes to Claude when it summarizes it. Google Calendar, if you connect it. Update checks, which you can turn off. Recordings stay on your device unless you point transcription at your own server.</p>
+          <p>Only what you explicitly send. Prompts and attached files go to whichever model provider you choose, and meeting transcripts go to Claude when you ask for a summary. If you connect Google Calendar, it syncs from there, and update checks can be turned off in Settings. Your audio recordings never leave your machine unless you point transcription at your own server.</p>
         </details>
         <details>
           <summary>Does it work with my calendar?</summary>
-          <p>Google Calendar, read-only, through a Google Cloud client you create (the README walks through it). Tasks and focus blocks live in bruhs's own calendar. Outlook and iCloud aren't supported yet.</p>
+          <p>It connects to Google Calendar in read only mode using your own Google Cloud client (the README walks you through setup). Tasks and focus blocks live inside bruhs. Outlook and iCloud are not supported yet.</p>
         </details>
         <details>
           <summary>Does it sync between my devices?</summary>
-          <p>No. There's no bruhs server to sync through, so your data stays on this device.</p>
+          <p>Not right now. There is no bruhs cloud server in the middle, so everything stays on the machine you run it on.</p>
         </details>
         <details>
           <summary>What do I need to run it?</summary>
-          <p>See the <a href="/download">download page</a> for platform requirements and the latest desktop builds.</p>
+          <p>Check the <a href="/download">download page</a> for supported systems and the latest builds.</p>
         </details>
       </div>
     </section>
 
     <section class="section" id="source" aria-labelledby="source-title">
       <div class="wrap open-source">
-        <h2 class="h2" id="source-title" tabindex="-1">Open source, all of it.</h2>
-        <p class="muted">MIT licensed. Read it, fork it, run it from source.</p>
+        <h2 class="h2" id="source-title" tabindex="-1">Run from source</h2>
         <div class="source-row">
           <p class="source" id="source-command" tabindex="0" aria-label="Run it from source"><span class="p" aria-hidden="true">$</span> <code>git clone https://github.com/bryantleft/bruhs-ai &amp;&amp; cd bruhs-ai &amp;&amp; scripts/dev.sh</code></p>
           <button class="btn btn-quiet copy" type="button" data-copy="source-command">Copy</button>
         </div>
         <p class="action-status" data-copy-status role="status"></p>
         <div class="get-row">
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />Read the source</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />Browse on GitHub</a>
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/blob/main/CONTRIBUTING.md">Contribute</a>
         </div>
       </div>
@@ -174,7 +130,7 @@ const surfaces = [
 
     <section class="section closing" id="get" aria-labelledby="get-title">
       <div class="wrap">
-        <h2 class="display display-sm" id="get-title" tabindex="-1">Close the other twelve tabs.</h2>
+        <h2 class="display display-sm" id="get-title" tabindex="-1">Ready to try it?</h2>
         <div class="get-row">
           <GetButton />
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases"><Icon name="github" />All releases</a>

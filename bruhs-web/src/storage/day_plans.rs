@@ -1,8 +1,8 @@
 //! Read, validate and commit a day plan and its Undo receipt atomically.
 
 use bruhs_models::{
-    prepare_day_plan, prepare_day_plan_undo, CalendarEvent, DayPlanChangeError, DayPlanOwnership,
-    DayPlanProposal, DayPlanWindow, WorkItem,
+    prepare_day_plan_undo, prepare_day_plan_with_availability, CalendarEvent, DayPlanChangeError,
+    DayPlanOwnership, DayPlanProposal, DayPlanWindow, WorkItem,
 };
 use idb::TransactionMode;
 use serde::{Deserialize, Serialize};
@@ -165,11 +165,20 @@ pub async fn apply(
         let (tasks, events) = read_records(&tx).await?;
         let now = crate::clock::now_ms();
         let window =
-            crate::clock::workday_window(bruhs_models::EpochMs::saturating_from_i64(now).as_f64());
+            crate::clock::day_plan_window(bruhs_models::EpochMs::saturating_from_i64(now).as_f64());
         if window != reviewed_window {
             return Err(DayPlanChangeError::InvalidWindow.into());
         }
-        let prepared = prepare_day_plan(proposal, &tasks, &events, window, now)?;
+        let preferences = super::scheduling::read_in(&tx).await?.value;
+        let prepared = prepare_day_plan_with_availability(
+            proposal,
+            &tasks,
+            &events,
+            window,
+            now,
+            &preferences.availability,
+            crate::clock::offset_minutes_east,
+        )?;
         let current: Metadata<Option<Receipt>> = metadata::read_in(&tx, KEY).await?;
         let changed_tasks = prepared
             .changed_tasks

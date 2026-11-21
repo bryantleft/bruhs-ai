@@ -36,6 +36,15 @@ pub enum Tools {
     None,
 }
 
+/// An image attached to the initial user message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageInput {
+    /// The image format, such as `image/png`.
+    pub media_type: String,
+    /// Image bytes encoded as standard base64.
+    pub data: String,
+}
+
 /// Options for one [`query`](crate::query()) to the Claude CLI.
 ///
 /// Build one with [`QueryOptions::new`] and the chainable setters; every field
@@ -57,6 +66,8 @@ pub enum Tools {
 pub struct QueryOptions {
     /// The user prompt. Always passed as text, never parsed as a flag.
     pub prompt: String,
+    /// Images to include with the initial user message.
+    pub images: Vec<ImageInput>,
     /// Working directory of the CLI process (the CLI has no `--cwd` flag).
     /// Defaults to `.`.
     pub cwd: PathBuf,
@@ -127,6 +138,7 @@ impl Default for QueryOptions {
     fn default() -> Self {
         Self {
             prompt: String::new(),
+            images: Vec::new(),
             cwd: PathBuf::from("."),
             tools: Tools::CliDefault,
             permission_mode: None,

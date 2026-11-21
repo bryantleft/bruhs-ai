@@ -157,12 +157,23 @@ kbd, .kbd {
 .shot-open:hover { background: var(--longan-800); }
 
 /* Hero: one centered column, the dot bruh above the line */
-.hero { padding: 48px 0 64px; }
-.hero-stack { display: grid; justify-items: center; text-align: center; gap: 24px; }
+.hero { padding: 36px 0 48px; }
+.hero-stack { display: grid; justify-items: center; text-align: center; gap: 20px; }
 .hero .display { font-size: clamp(2.25rem, 6.4vw, 5.25rem); line-height: 1; max-width: 16ch; text-wrap: balance; }
-.hero .lede { max-width: 40ch; text-wrap: balance; }
+.hero .lede { max-width: 46ch; text-wrap: balance; }
 .hero .get-row { justify-content: center; margin-top: 4px; }
+.hero-note { margin: -8px 0 0; font: 400 .8125rem/1.4 var(--argon); color: var(--rambutan-500); text-wrap: balance; }
 .get-row { display: flex; flex-wrap: wrap; max-width: 100%; gap: 8px; }
+:root:not([data-os="mac"]) .for-desktop .icon-apple,
+:root:not([data-os="mac"]) .for-desktop .os-mac,
+:root:not([data-os="windows"]) .for-desktop .icon-windows,
+:root:not([data-os="windows"]) .for-desktop .os-windows,
+:root:not([data-os="linux"]) .for-desktop .icon-linux,
+:root:not([data-os="linux"]) .for-desktop .os-linux,
+:root[data-os="mac"] .for-desktop .os-other,
+:root[data-os="windows"] .for-desktop .os-other,
+:root[data-os="linux"] .for-desktop .os-other { display: none; }
+:root[data-os="phone"] .for-desktop,
 :root:not([data-os="phone"]) .for-phone { display: none; }
 .share-url { flex-basis: 100%; width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--ring-15); border-radius: var(--grape); background: var(--longan-900); color: var(--rambutan-100); font: inherit; }
 .share-url[hidden] { display: none; }
@@ -170,7 +181,7 @@ kbd, .kbd {
 .icon, .works-with img { flex: none; translate: 0 var(--icon-lift, -0.1em); }
 
 .bruh { display: block; width: 100%; }
-.bruh-hero { aspect-ratio: 1; max-width: min(340px, 38vh); }
+.bruh-hero { aspect-ratio: 1; max-width: min(184px, 20vh); }
 
 /* Command bar (hero and ⌘K dialog share the markup) */
 .palette { background: var(--longan-900); border-radius: var(--lychee); box-shadow: inset 0 0 0 1px var(--ring-10); overflow: hidden; }
@@ -211,7 +222,7 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 .h2:focus, .display:focus { outline: none; }
 
 /* Surfaces tour */
-.tour { padding: 72px 0 96px; }
+.tour { padding: 48px 0 96px; }
 .tabs-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; }
 .tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
@@ -390,15 +401,13 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
   .nav .hide-sm { display: none; }
   .hero { padding: 24px 0 48px; }
   .hero-stack { gap: 20px; }
-  .bruh-hero { max-width: min(200px, 22vh); }
+  .bruh-hero { max-width: min(96px, 14vh); }
 }
 /* Landscape phones: short, so the headline and Download come first. */
 @media (max-height: 500px) and (orientation: landscape) {
   .hero { padding: 24px 0 32px; }
   .hero .display { font-size: clamp(2.25rem, 7vh, 3rem); }
-  /* No room above the line on a ~390px-tall screen: the peek at the end
-     still shows the bruh. */
-  .bruh-hero { display: none; }
+  .bruh-hero { max-width: 48px; }
   .hero-stack { gap: 14px; }
 }
 @media (max-width: 560px) {

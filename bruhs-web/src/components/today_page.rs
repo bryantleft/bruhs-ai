@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::task_saves::TaskSaves;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog};
-use bruhs_models::{propose_day_plan_in_window, today_copy, DayPlanProposal};
+use bruhs_models::{propose_day_plan_with_availability, today_copy, DayPlanProposal};
 
 fn local_day_bounds(now_ms: f64) -> (f64, f64) {
     let now = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(now_ms));
@@ -181,7 +181,7 @@ pub fn TodayPage() -> impl IntoView {
     let applied_plan = Signal::derive(move || planning.with(|state| state.receipt.clone()));
     let date_label = Memo::new(move |_| greeting_date(now_ms.get()));
     Effect::new(move |_| {
-        let window = crate::clock::workday_window(now_ms.get());
+        let window = crate::clock::day_plan_window(now_ms.get());
         if proposal.with_untracked(Option::is_some)
             && reviewed_window
                 .get_untracked()
@@ -240,13 +240,18 @@ pub fn TodayPage() -> impl IntoView {
     let draft = move || {
         let now = js_sys::Date::now();
         now_ms.set(now);
-        let window = crate::clock::workday_window(now);
-        match propose_day_plan_in_window(
-            now,
-            window,
-            &work_items.get_untracked(),
-            &events.get_untracked(),
-        ) {
+        let window = crate::clock::day_plan_window(now);
+        let result = crate::state::read_saved_scheduling_preferences().and_then(|preferences| {
+            propose_day_plan_with_availability(
+                now,
+                window,
+                &work_items.get_untracked(),
+                &events.get_untracked(),
+                &preferences.availability,
+                crate::clock::offset_minutes_east,
+            )
+        });
+        match result {
             Ok(plan) => {
                 reviewed_window.set(Some(window));
                 proposal.set(Some(plan));
@@ -298,7 +303,7 @@ pub fn TodayPage() -> impl IntoView {
                     <Show when=move || persistence_error.get().is_some() && proposal.get().is_none() fallback=|| ()>
                         <div role="alert" class="flex items-center justify-between gap-3 rounded-grape bg-lychee-500/10 inset-ring inset-ring-lychee-400/20 px-3 py-2 text-body-sm text-lychee-200">
                             <span>{move || persistence_error.get().unwrap_or_default()}</span>
-                            <button class="text-button hover:text-lychee-100 cursor-pointer" on:click=move |_| planning.update(|state| state.error = None)>"Dismiss"</button>
+                            <button class="text-button hover:text-lychee-100 cursor-pointer" on:click=move |_| saves.clear_day_plan_error()>"Dismiss"</button>
                         </div>
                     </Show>
                     <Show when=move || persistence_error.get().is_some() && proposal.get().is_none() && !planning.with(|state| state.busy) fallback=|| ()>
@@ -478,7 +483,7 @@ pub fn TodayPage() -> impl IntoView {
                 </Show>
                 <div class="border-b border-longan-800 px-4 py-3">
                     <h2 class="text-h4 text-rambutan-100">"Review day plan"</h2>
-                    <p class="mt-1 text-body-sm text-rambutan-500">{format!("{} focus block(s), respecting {} calendar commitment(s)", plan.blocks.len(), plan.busy_blocks_respected)}</p>
+                    <p class="mt-1 text-body-sm text-rambutan-500">{format!("{} focus block(s), using saved working hours and respecting {} calendar commitment(s)", plan.blocks.len(), plan.busy_blocks_respected)}</p>
                 </div>
                 <div class="max-h-[55vh] overflow-y-auto p-4 space-y-2">
                     {if plan.blocks.is_empty() {

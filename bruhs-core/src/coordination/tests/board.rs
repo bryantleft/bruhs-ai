@@ -68,6 +68,7 @@ fn pull(number: u64, head: &str, review: &str) -> Pull {
         checks: vec![],
         comments: vec![],
         reviews: vec![],
+        changed_files: None,
         files: vec![],
     }
 }

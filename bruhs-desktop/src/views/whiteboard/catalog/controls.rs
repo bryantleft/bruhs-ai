@@ -478,7 +478,7 @@ impl Render for WhiteboardLibrary {
                     div()
                         .max_h(px(180.0))
                         .overflow_y_scrollbar()
-                        .font_family("Monaspace Argon")
+                        .font_family(crate::theme::FontFace::Interface)
                         .text_size(px(11.0))
                         .child(exact),
                 )

@@ -1817,7 +1817,7 @@ impl Workspace {
                                         .border_color(theme::longan_600())
                                         .px_1()
                                         .py(px(2.0))
-                                        .font_family(LABEL_FONT)
+                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                                         .text_size(px(LABEL_SM_PX))
                                         .text_color(theme::rambutan_300())
                                         .child("NOT TRACKED"),
@@ -2184,7 +2184,7 @@ impl Workspace {
                 .border_1()
                 .border_color(gpui::transparent_black())
                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                .font_family(BODY_FONT)
+                .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
                 .text_size(px(BODY_SM_PX))
                 .line_height(relative(1.5))
                 .text_color(theme::rambutan_200())
@@ -2372,7 +2372,7 @@ impl Workspace {
                         theme::blueberry_200(),
                     )
                     // Web `block w-full truncate text-body-sm`.
-                    .font_family(BODY_FONT)
+                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
                     .font_weight(FontWeight::NORMAL)
                     .text_size(px(BODY_SM_PX))
                     .w_full()

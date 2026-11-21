@@ -10,5 +10,5 @@ pub use error::{Error, Result};
 pub use process::ProcessFailure;
 pub use query::{query, PermissionResponder, QueryStream};
 pub use types::{
-    McpServerInfo, PermissionDecision, PermissionMode, QueryEvent, QueryOptions, Tools, UsageInfo,
+    ImageInput, McpServerInfo, PermissionDecision, PermissionMode, QueryEvent, QueryOptions, Tools, UsageInfo,
 };

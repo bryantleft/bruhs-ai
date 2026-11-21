@@ -228,7 +228,7 @@ impl RenderOnce for TextView {
                                     },
                                 );
                                 let (up_state, up_registry) = (state.clone(), registry.clone());
-                                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                                     if !phase.bubble()
                                         || event.button != MouseButton::Left
                                         || !up_state.read(cx).selecting
@@ -252,6 +252,7 @@ impl RenderOnce for TextView {
                                             &up_registry,
                                             link_filter.as_ref(),
                                             event.position,
+                                            window,
                                             cx,
                                         );
                                     }
@@ -271,6 +272,7 @@ fn open_link(
     registry: &Registry,
     filter: Option<&LinkFilter>,
     at: Point<Pixels>,
+    window: &mut Window,
     cx: &mut App,
 ) {
     let Some(pos) = hit(registry, at, false) else {
@@ -287,6 +289,13 @@ fn open_link(
         (None, _) => None,
     };
     if let Some(link) = link {
+        if link.url.starts_with("https://") || link.url.starts_with("http://") {
+            let action = super::OpenWebLink(link.url.to_string());
+            if window.is_action_available(&action, cx) {
+                window.dispatch_action(Box::new(action), cx);
+                return;
+            }
+        }
         cx.open_url(&link.url);
     }
 }
@@ -475,15 +484,13 @@ fn render_blocks(
                     let padding = std::mem::take(&mut refinement.padding);
                     let mut block = gap(div(), BLOCK_GAP_REM).w_full();
                     block.style().refine(&refinement);
-                    let mut lines = div().whitespace_nowrap();
+                    let wrap=crate::theme::wrap_code();
+                    let mut lines = div().when(!wrap,|el|el.whitespace_nowrap());
                     lines.style().padding = padding;
-                    block
-                        .child(
-                            div().w_full().overflow_x_scrollbar().child(
-                                lines.child(code_segment(code, frame, font, code_color, cx)),
-                            ),
-                        )
-                        .into_any_element()
+                    let lines=lines.child(code_segment(code,frame,font,code_color,cx));
+                    if wrap {block.child(lines).into_any_element()}else{
+                        block.child(div().w_full().overflow_x_scrollbar().child(lines)).into_any_element()
+                    }
                 }
                 Block::List { start, items } => {
                     gap(div(), paragraph_gap)

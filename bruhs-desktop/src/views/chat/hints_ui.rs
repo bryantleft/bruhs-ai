@@ -4,6 +4,12 @@ use super::*;
 use bruhs_ui::zoom::px;
 
 pub(super) use bruhs_models::logic::commands::SLASH_COMMANDS as DESKTOP_SLASH_COMMANDS;
+#[derive(Clone)]
+struct SlashEntry {
+    label: String,
+    description: String,
+    skill: bool,
+}
 pub(super) const COMPOSER_HINT_EMPTY_LABEL: &str = "No matches";
 pub(super) const COMPOSER_SLASH_ICON: &str = "/";
 pub(super) const COMPOSER_DIRECTORY_ICON: &str = assets::FOLDER_ICON_PATH;
@@ -319,10 +325,7 @@ impl ChatView {
         }
     }
 
-    pub(super) fn slash_command_matches(
-        &self,
-        cx: &App,
-    ) -> Vec<&'static bruhs_models::logic::commands::SlashCommand> {
+    fn slash_command_matches(&self, cx: &App) -> Vec<SlashEntry> {
         let (value, cursor) = {
             let input = self.input_state.read(cx);
             (input.value().to_string(), input.cursor())
@@ -334,12 +337,40 @@ impl ChatView {
         ) else {
             return Vec::new();
         };
-        DESKTOP_SLASH_COMMANDS
+        let mut matches: Vec<_> = DESKTOP_SLASH_COMMANDS
             .iter()
-            .filter(|command| {
-                query.is_empty() || command.name.to_ascii_lowercase().contains(&query)
+            .filter(|c| c.name.contains(&query))
+            .map(|c| SlashEntry {
+                label: c.name.to_owned(),
+                description: c.description.to_owned(),
+                skill: false,
             })
-            .collect()
+            .collect();
+        if self.slash_skills && self.skill_query.as_deref() == Some(&query) {
+            matches.extend(self.skill_items.iter().map(|skill| SlashEntry {
+                label: format!("${}", skill.name),
+                description: skill.description.clone(),
+                skill: true,
+            }));
+        }
+        matches
+    }
+
+    fn apply_slash_entry(
+        &mut self,
+        entry: &SlashEntry,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if entry.skill {
+            self.insert_skill_mention(entry.label.trim_start_matches('$'), window, cx);
+            true
+        } else if self.run_slash_command(&entry.label, window, cx) {
+            self.clear_active_slash_trigger(window, cx);
+            true
+        } else {
+            false
+        }
     }
 
     pub(super) fn slash_command_trigger_active(&self, cx: &App) -> bool {
@@ -365,28 +396,31 @@ impl ChatView {
             clamp_composer_hint_index(self.composer_hint_selected_index, matches.len());
         let no_matches = matches.is_empty();
         let rows = if no_matches {
-            vec![div()
-                .px_3()
-                .py_2()
-                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::rambutan_500())
-                .child(COMPOSER_HINT_EMPTY_LABEL)
-                .into_any_element()]
+            vec![
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::rambutan_500())
+                    .child(COMPOSER_HINT_EMPTY_LABEL)
+                    .into_any_element(),
+            ]
         } else {
             matches
                 .into_iter()
                 .enumerate()
                 .map(|(index, command)| {
-                    let name = command.name;
-                    let debug_name = name.trim_start_matches('/');
+                    let name = command.label.clone();
+                    let selected = command.clone();
+                    let debug_name = name.trim_start_matches('/').to_owned();
                     let is_selected = index == selected_index;
                     div()
-                        .id(("desktop-slash-command-row", element_key(name)))
+                        .id(("desktop-slash-command-row", element_key(&name)))
                         .debug_selector(move || format!("desktop-slash-command-row-{debug_name}"))
                         .role(Role::ListBoxOption)
-                        .aria_label(format!("{}: {}", command.name, command.description))
+                        .aria_label(format!("{}: {}", command.label, command.description))
                         .aria_selected(is_selected)
                         .flex_shrink_0()
                         .w_full()
@@ -414,9 +448,7 @@ impl ChatView {
                             }
                         }))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
-                            if this.run_slash_command(name, window, cx) {
-                                this.clear_active_slash_trigger(window, cx);
-                            }
+                            this.apply_slash_entry(&selected, window, cx);
                         }))
                         .child(
                             div()
@@ -439,7 +471,7 @@ impl ChatView {
                                         .flex_1()
                                         .truncate()
                                         .font_weight(FontWeight::MEDIUM)
-                                        .child(command.name),
+                                        .child(command.label),
                                 )
                                 .child(
                                     div()
@@ -575,13 +607,10 @@ impl ChatView {
             let matches = self.slash_command_matches(cx);
             let selected_index =
                 clamp_composer_hint_index(self.composer_hint_selected_index, matches.len());
-            let Some(command) = matches.get(selected_index).copied() else {
+            let Some(command) = matches.get(selected_index) else {
                 return false;
             };
-            if self.run_slash_command(command.name, window, cx) {
-                self.clear_active_slash_trigger(window, cx);
-                return true;
-            }
+            return self.apply_slash_entry(command, window, cx);
         }
 
         if self.pull_query.is_some() {
@@ -705,6 +734,9 @@ impl ChatView {
     }
 
     fn refresh_skill_hints(&mut self, query: String, cx: &mut Context<'_, Self>) {
+        if self.skill_query.as_deref() != Some(&query) {
+            self.skill_items.clear();
+        }
         self.skill_query = Some(query.clone());
         let provider = bruhs_models::agent::AgentProvider::for_model(&self.model_id);
         let project = if self.project_path.is_empty() {
@@ -782,11 +814,12 @@ impl ChatView {
         });
         self.composer_hint_selected_index = 0;
         self.composer_hints_suppressed_value = None;
+        self.clear_skill_hints();
         self.clear_mention_hints();
         cx.notify();
     }
 
-    pub(super) fn refresh_mention_hints(&mut self, cx: &mut Context<'_, Self>) {
+    pub(crate) fn refresh_mention_hints(&mut self, cx: &mut Context<'_, Self>) {
         let (value, cursor) = {
             let input = self.input_state.read(cx);
             (input.value().to_string(), input.cursor())
@@ -806,7 +839,11 @@ impl ChatView {
         }
         self.clear_pull_hints();
 
-        if let Some(query) = detect_skill_query(&value, cursor) {
+        let slash_skill_query = self
+            .slash_skills
+            .then(|| slash_command_query(&value, cursor, None))
+            .flatten();
+        if let Some(query) = detect_skill_query(&value, cursor).or(slash_skill_query) {
             self.clear_mention_hints();
             self.refresh_skill_hints(query, cx);
             return;
@@ -1009,15 +1046,17 @@ impl ChatView {
 
         let thread_count = self.thread_hits.len();
         let rows = if self.thread_hits.is_empty() && self.mention_items.is_empty() {
-            vec![div()
-                .px_3()
-                .py_2()
-                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::rambutan_500())
-                .child(COMPOSER_HINT_EMPTY_LABEL)
-                .into_any_element()]
+            vec![
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::rambutan_500())
+                    .child(COMPOSER_HINT_EMPTY_LABEL)
+                    .into_any_element(),
+            ]
         } else {
             let selected_index = clamp_composer_hint_index(
                 self.composer_hint_selected_index,
@@ -1214,7 +1253,7 @@ impl ChatView {
     }
 
     pub(super) fn render_skill_hints(&self, cx: &Context<'_, Self>) -> AnyElement {
-        if self.skill_query.is_none() {
+        if self.skill_query.is_none() || self.slash_command_trigger_active(cx) {
             return div().into_any_element();
         }
         let rows = if self.skill_items.is_empty() {
@@ -1227,15 +1266,17 @@ impl ChatView {
             } else {
                 theme::rambutan_500()
             };
-            vec![div()
-                .px_3()
-                .py_2()
-                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(color)
-                .child(message)
-                .into_any_element()]
+            vec![
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(color)
+                    .child(message)
+                    .into_any_element(),
+            ]
         } else {
             let selected_index = clamp_composer_hint_index(
                 self.composer_hint_selected_index,
@@ -1355,15 +1396,17 @@ impl ChatView {
             } else {
                 theme::rambutan_500()
             };
-            vec![div()
-                .px_3()
-                .py_2()
-                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(color)
-                .child(message)
-                .into_any_element()]
+            vec![
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(color)
+                    .child(message)
+                    .into_any_element(),
+            ]
         } else {
             let selected_index =
                 clamp_composer_hint_index(self.composer_hint_selected_index, self.pull_items.len());

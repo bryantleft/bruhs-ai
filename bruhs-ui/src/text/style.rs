@@ -55,9 +55,9 @@ impl Default for TextViewStyle {
                 .py(px(10.0))
                 .text_size(px(12.0))
                 .line_height(gpui::relative(1.55))
-                .font_family(theme::CODE_FONT_FAMILY)
+                .font_family(theme::FontFace::Code)
                 .text_color(theme::rambutan_300()),
-            code_font_family: theme::CODE_FONT_FAMILY.into(),
+            code_font_family: theme::FontFace::Code.into(),
             heading_color: theme::rambutan_100(),
             strong_color: theme::rambutan_200(),
             muted_color: theme::rambutan_500(),

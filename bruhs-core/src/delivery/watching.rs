@@ -171,7 +171,7 @@ impl DeliveryService {
                     )
                 });
         }
-        self.read(path, "gh", &["api", "user", "--jq", ".login"])
+        self.github_read(path, &["api", "user", "--jq", ".login"])
             .await
     }
 

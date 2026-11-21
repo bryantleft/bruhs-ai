@@ -473,6 +473,7 @@ pub fn propose_day_plan(
         },
         work_items,
         events,
+        &[],
     )
 }
 
@@ -487,7 +488,28 @@ pub fn propose_day_plan_in_window(
     if !day_plan::valid_interval(window.start_at_ms, window.end_at_ms) {
         return Err(DayPlanChangeError::InvalidWindow);
     }
-    Ok(build_day_plan(now_ms, window, work_items, events))
+    Ok(build_day_plan(now_ms, window, work_items, events, &[]))
+}
+
+/// Propose only inside enabled working hours on this local date. Adjacent rules
+/// form one opening; gaps, disabled weekdays and offset transitions stay closed.
+pub fn propose_day_plan_with_availability(
+    now_ms: f64,
+    window: DayPlanWindow,
+    work_items: &[WorkItem],
+    events: &[CalendarEvent],
+    rules: &[super::AvailabilityRule],
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> Result<DayPlanProposal, DayPlanChangeError> {
+    EpochMs::try_from(now_ms).map_err(|_| DayPlanChangeError::InvalidClock)?;
+    let unavailable = day_plan::unavailable_time(window, rules, offset_at)?;
+    Ok(build_day_plan(
+        now_ms,
+        window,
+        work_items,
+        events,
+        &unavailable,
+    ))
 }
 
 fn build_day_plan(
@@ -495,6 +517,7 @@ fn build_day_plan(
     window: DayPlanWindow,
     work_items: &[WorkItem],
     events: &[CalendarEvent],
+    unavailable: &[(f64, f64)],
 ) -> DayPlanProposal {
     let workday_start = window.start_at_ms;
     let workday_end = window.end_at_ms;
@@ -534,7 +557,6 @@ fn build_day_plan(
 
     let mut busy = events
         .iter()
-        .filter(|event| !event.all_day)
         .filter(|event| event.end_at_ms > cursor && event.start_at_ms < workday_end)
         .map(|event| {
             (
@@ -543,8 +565,9 @@ fn build_day_plan(
             )
         })
         .collect::<Vec<_>>();
-    busy.sort_by(|left, right| left.0.total_cmp(&right.0));
     let busy_blocks_respected = busy.len();
+    busy.extend_from_slice(unavailable);
+    busy.sort_by(|left, right| left.0.total_cmp(&right.0));
 
     let mut blocks = Vec::new();
     let mut unscheduled_task_ids = Vec::new();

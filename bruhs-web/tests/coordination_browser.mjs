@@ -34,6 +34,18 @@ const server = createServer(async (request, response) => {
   if (request.method === 'GET' && ['/api/coordination', '/api/tasks'].includes(url.pathname)) {
     send(guest ? { ...data, can_control: false, tasks: [{ ...task, working_path: '', project_path: '', approvals: [] }], specs: [], guest_proposals: [] } : data); return;
   }
+  if (request.method === 'GET' && ['/api/coordination/board', '/api/board'].includes(url.pathname)) {
+    const status = task.state === 'waiting_approval'
+      ? { label: 'Needs approval', tone: 'action', busy: false }
+      : { label: 'Working', tone: 'info', busy: true };
+    send({ revision: data.revision, refreshing: false, link_error: null, cards: [{
+      id: task.id, title: task.title, lane: 'building', status,
+      project_path: guest ? '' : task.project_path, branch: null, pulls: [],
+      model: task.model, model_label: task.model, relationship: 'root', parent_id: null,
+      children: 0, active_children: 0, verifications: 0, verification: null,
+      approvals: guest ? 0 : task.approvals.length, archived: false, updated_at: task.updated_at,
+    }] }); return;
+  }
   if (request.method === 'GET' && url.pathname === '/api/coordination/access') { send([]); return; }
   let body = ''; for await (const chunk of request) body += chunk;
   if (request.method === 'POST' && url.pathname === '/fixture/event') { task.live_output += JSON.parse(body || '{}').text || ' next'; publish(); send({ ok: true }); return; }
@@ -59,8 +71,8 @@ if (process.argv.includes('--serve')) {
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const errors = []; page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${base}/api/coordination/ui`);
-    await page.getByRole('heading', { level: 2 }).waitFor();
+    await page.goto(`${base}/api/coordination/ui#task=${task.id}`);
+    await page.locator('#drawer-title').getByText(task.title, { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.fixtureXss), undefined);
     assert.equal(await page.locator('img').count(), 0);
     await page.locator('#next-message').fill('Keep this unfinished draft');
@@ -71,21 +83,21 @@ if (process.argv.includes('--serve')) {
     assert.equal(await page.evaluate(() => document.activeElement.id), 'next-message');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.getByRole('button', { name: 'Allow once', exact: true }).click();
-    await page.getByText('running', { exact: true }).first().waitFor();
+    await page.locator('#detail .status').getByText('Working', { exact: true }).waitFor();
     assert.equal(commands.some(command => command.action === 'approval' && command.request_id === 'approval-fixture'), true);
     await page.goto(base);
     await page.locator('#token').fill('guest-fixture');
     await page.getByRole('button', { name: 'Pair this device', exact: true }).click();
     await page.getByRole('button', { name: 'Propose message', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Stop task and children', exact: true }).count(), 0);
-    assert.equal(await page.locator('#create-section').isVisible(), false);
+    assert.equal(await page.locator('#create-pane').isVisible(), false);
     await page.locator('#guest-message').fill('Question for the owner');
     await page.getByRole('button', { name: 'Propose message', exact: true }).click();
     await page.getByText('Message sent to the owner for review.', { exact: true }).waitFor();
     assert.equal(commands.some(command => command.guest && command.text === 'Question for the owner'), true);
     await page.goto(`${base}/fixture/parent`);
     const frame = page.frameLocator('iframe');
-    await frame.locator('#create-section').waitFor();
+    await frame.locator('#board').waitFor();
     const commandsBefore = commands.length;
     await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({ type: 'bruhs:prefill-task', path: '/synthetic/issue', prompt: 'Fix issue 42', title: 'Issue 42' }, location.origin));
     await frame.locator('#prompt').waitFor({ state: 'visible' });
@@ -93,6 +105,6 @@ if (process.argv.includes('--serve')) {
     assert.equal(await frame.locator('#project').inputValue(), '/synthetic/issue');
     assert.equal(commands.length, commandsBefore, 'Prefill must never execute a task');
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ passed: true, assertions: ['draft and focus survive streaming', 'script-like title is inert', 'mobile fits', 'approval reaches server', 'guest has proposal-only controls'], source: fileURLToPath(new URL('../../bruhs-server/src/routes/coordination/remote.html', import.meta.url)) }));
+    console.log(JSON.stringify({ passed: true, assertions: ['draft and focus survive streaming', 'script-like title is inert', 'mobile fits', 'approval reaches server', 'guest has proposal-only controls', 'embedded prefill starts no run'], source: fileURLToPath(new URL('../../bruhs-server/src/routes/coordination/remote.html', import.meta.url)) }));
   } finally { await browser.close(); for (const stream of streams) stream.end(); server.close(); }
 }

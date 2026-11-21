@@ -13,8 +13,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use bruhs_models::updates::{
-    checksum_for, is_newer, release_asset_names, AppUpdate, AppUpdateState, ReleaseUpdate, Version,
-    RELEASE_CHECKSUMS,
+    checksum_for, release_asset_names, AppUpdate, AppUpdateState, ReleaseUpdate, RELEASE_CHECKSUMS,
 };
 use sha2::{Digest, Sha256};
 
@@ -41,6 +40,55 @@ pub fn current_app_bundle() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateTrack {
+    #[default]
+    Stable,
+    Nightly,
+}
+
+impl UpdateTrack {
+    pub fn for_installed(installed: &str) -> Self {
+        if version(installed).is_ok_and(|v| v.pre.as_str().starts_with("nightly.")) {
+            Self::Nightly
+        } else {
+            Self::Stable
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Nightly => "nightly",
+        }
+    }
+}
+
+fn version(tag: &str) -> Result<semver::Version, String> {
+    semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag))
+        .map_err(|_| format!("Invalid release version {tag:?}."))
+}
+
+fn nightly_candidate(json: &serde_json::Value) -> Result<&serde_json::Value, String> {
+    json.as_array()
+        .ok_or("GitHub sent an unreadable release list.")?
+        .iter()
+        .filter(|r| r["draft"] == false)
+        .filter_map(|r| {
+            let v = version(r["tag_name"].as_str()?).ok()?;
+            let allowed = if r["prerelease"] == true {
+                v.pre.as_str().starts_with("nightly.")
+            } else {
+                v.pre.is_empty()
+            };
+            allowed.then_some((v, r))
+        })
+        .max_by(|a, b| a.0.cmp_precedence(&b.0))
+        .map(|(_, r)| r)
+        .ok_or_else(|| "No stable or nightly release has been published yet.".into())
+}
+
 /// What the latest release offers this architecture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LatestRelease {
@@ -55,9 +103,7 @@ pub(crate) fn parse_latest(json: &serde_json::Value, arch: &str) -> Result<Lates
     let tag = json["tag_name"]
         .as_str()
         .ok_or("The latest release has no tag.")?;
-    let version = Version::find(tag)
-        .ok_or_else(|| format!("The latest release tag {tag:?} is not a version."))?
-        .to_string();
+    let version = version(tag)?.to_string();
     let (_, zip_name) = release_asset_names(arch);
     let asset = |name: &str| {
         json["assets"].as_array().and_then(|assets| {
@@ -85,7 +131,12 @@ fn client(timeout: Duration) -> Result<reqwest::Client, String> {
 }
 
 /// Check the running packaged build against the latest release.
-pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> AppUpdate {
+pub(crate) async fn check(
+    build: &BuildInfo,
+    installed: &str,
+    online: bool,
+    track: UpdateTrack,
+) -> AppUpdate {
     let mut app = AppUpdate {
         state: AppUpdateState::Unknown,
         built_commit: build.commit.clone(),
@@ -96,7 +147,7 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
         command: None,
         error: None,
         release: Some(ReleaseUpdate {
-            current_version: version.to_string(),
+            current_version: installed.to_string(),
             latest_version: None,
             release_url: None,
             download_url: None,
@@ -106,9 +157,18 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
     if !online {
         return app;
     }
-    match latest(&build.release_repo, release_arch()).await {
+    let installed_version = match version(installed) {
+        Ok(v) => v,
+        Err(error) => {
+            app.error = Some(error);
+            return app;
+        }
+    };
+    match latest(&build.release_repo, release_arch(), track).await {
         Ok((latest, sha256)) => {
-            app.state = if is_newer(&latest.version, version) {
+            app.state = if version(&latest.version)
+                .is_ok_and(|v| v.cmp_precedence(&installed_version).is_gt())
+            {
                 AppUpdateState::Behind
             } else {
                 AppUpdateState::UpToDate
@@ -124,7 +184,7 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
                 ));
             }
             app.release = Some(ReleaseUpdate {
-                current_version: version.to_string(),
+                current_version: installed.to_string(),
                 latest_version: Some(latest.version),
                 release_url: Some(latest.html_url),
                 download_url: if cfg!(target_os = "macos") {
@@ -140,9 +200,17 @@ pub(crate) async fn check(build: &BuildInfo, version: &str, online: bool) -> App
     app
 }
 
-async fn latest(repo: &str, arch: &str) -> Result<(LatestRelease, Option<String>), String> {
+async fn latest(
+    repo: &str,
+    arch: &str,
+    track: UpdateTrack,
+) -> Result<(LatestRelease, Option<String>), String> {
     let client = client(API_TIMEOUT)?;
-    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    let feed = match track {
+        UpdateTrack::Stable => "releases/latest",
+        UpdateTrack::Nightly => "releases?per_page=100",
+    };
+    let url = format!("https://api.github.com/repos/{repo}/{feed}");
     let response = client
         .get(&url)
         .header("Accept", "application/vnd.github+json")
@@ -158,7 +226,11 @@ async fn latest(repo: &str, arch: &str) -> Result<(LatestRelease, Option<String>
         .json()
         .await
         .map_err(|error| format!("GitHub sent an unreadable release: {error}"))?;
-    let latest = parse_latest(&json, arch)?;
+    let candidate = match track {
+        UpdateTrack::Stable => &json,
+        UpdateTrack::Nightly => nightly_candidate(&json)?,
+    };
+    let latest = parse_latest(candidate, arch)?;
     let (_, zip_name) = release_asset_names(arch);
     let sha256 = match &latest.checksums_url {
         Some(url) => {
@@ -267,15 +339,18 @@ async fn verify_developer_id(app: &Path, team: &str) -> Result<(), String> {
 async fn bundle_version(app: &Path) -> Option<String> {
     let plist = app.join("Contents/Info.plist");
     let plist = plist.to_string_lossy();
-    let out = run(
-        "/usr/libexec/PlistBuddy",
-        &["-c", "Print :CFBundleShortVersionString", &plist],
-    )
-    .await
-    .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    for command in [
+        "Print :BruhsReleaseVersion",
+        "Print :CFBundleShortVersionString",
+    ] {
+        let out = run("/usr/libexec/PlistBuddy", &["-c", command, &plist])
+            .await
+            .ok()?;
+        if out.status.success() {
+            return Some(String::from_utf8_lossy(&out.stdout).trim().to_owned());
+        }
+    }
+    None
 }
 
 /// Where updates are staged: beside the app, so the swap is a rename on one
@@ -284,9 +359,24 @@ pub fn staging_dir(current_app: &Path) -> Option<PathBuf> {
     current_app.parent().map(|dir| dir.join(".bruhs-update"))
 }
 
+/// Progress of a packaged update before it can be installed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StageProgress {
+    Downloading(Option<u8>),
+    Verifying,
+}
+
 /// Download `release`'s update zip, check it, unpack it and verify the app
 /// inside. Returns the staged app, ready for [`install_on_exit`].
 pub async fn stage_update(release: &ReleaseUpdate, current_app: &Path) -> Result<PathBuf, String> {
+    stage_update_with_progress(release, current_app, |_| {}).await
+}
+
+pub async fn stage_update_with_progress(
+    release: &ReleaseUpdate,
+    current_app: &Path,
+    progress: impl FnMut(StageProgress),
+) -> Result<PathBuf, String> {
     let (Some(url), Some(expected), Some(version)) = (
         release.download_url.as_deref(),
         release.sha256.as_deref(),
@@ -299,7 +389,7 @@ pub async fn stage_update(release: &ReleaseUpdate, current_app: &Path) -> Result
     )?;
     let stage = staging_dir(current_app).ok_or("The app's folder could not be found.")?;
     let _ = tokio::fs::remove_dir_all(&stage).await;
-    let staged = download_and_verify(url, expected, version, &team, &stage).await;
+    let staged = download_and_verify(url, expected, version, &team, &stage, progress).await;
     if staged.is_err() {
         let _ = tokio::fs::remove_dir_all(&stage).await;
     }
@@ -312,6 +402,7 @@ async fn download_and_verify(
     version: &str,
     team: &str,
     stage: &Path,
+    mut progress: impl FnMut(StageProgress),
 ) -> Result<PathBuf, String> {
     tokio::fs::create_dir_all(stage).await.map_err(|error| {
         format!(
@@ -327,21 +418,38 @@ async fn download_and_verify(
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
-        .map_err(|error| format!("The update could not be downloaded: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "The update could not be downloaded: {}",
+                error.without_url()
+            )
+        })?;
     let mut file = tokio::fs::File::create(&zip)
         .await
         .map_err(|error| format!("The update could not be saved: {error}"))?;
+    let total = response.content_length().filter(|total| *total > 0);
+    let mut received = 0_u64;
+    let mut last_percent = total.map(|_| 0);
+    progress(StageProgress::Downloading(last_percent));
     let mut hasher = Sha256::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| format!("The download stopped: {error}"))?
+        .map_err(|error| format!("The download stopped: {}", error.without_url()))?
     {
         hasher.update(&chunk);
         tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
             .await
             .map_err(|error| format!("The update could not be saved: {error}"))?;
+        received = received.saturating_add(chunk.len() as u64);
+        let percent =
+            total.map(|length| (u128::from(received) * 100 / u128::from(length)).min(100) as u8);
+        if percent != last_percent {
+            progress(StageProgress::Downloading(percent));
+            last_percent = percent;
+        }
     }
+    progress(StageProgress::Verifying);
     tokio::io::AsyncWriteExt::flush(&mut file)
         .await
         .map_err(|error| format!("The update could not be saved: {error}"))?;
@@ -476,6 +584,31 @@ mod tests {
     }
 
     #[test]
+    fn nightly_feed_compares_prerelease_versions_and_skips_other_tracks_and_drafts() {
+        assert_eq!(UpdateTrack::for_installed("1.3.0-nightly.2"), UpdateTrack::Nightly);
+        assert_eq!(UpdateTrack::for_installed("1.3.0"), UpdateTrack::Stable);
+        assert_eq!(UpdateTrack::for_installed(""), UpdateTrack::Stable);
+        let mut releases = serde_json::json!([
+            {"tag_name":"v1.3.0-nightly.11","draft":false,"prerelease":true},
+            {"tag_name":"v1.3.0-nightly.2","draft":false,"prerelease":true},
+            {"tag_name":"v1.3.0-beta.7","draft":false,"prerelease":true},
+            {"tag_name":"v2.0.0-nightly.1","draft":true,"prerelease":true},
+            {"tag_name":"nightly","draft":false,"prerelease":true},
+            {"tag_name":"v1.2.0","draft":false,"prerelease":false}
+        ]);
+        let selected = nightly_candidate(&releases).unwrap();
+        assert_eq!(
+            parse_latest(selected, "arm64").unwrap().version,
+            "1.3.0-nightly.11"
+        );
+        releases.as_array_mut().unwrap().push(serde_json::json!({
+            "tag_name":"v1.3.0", "draft":false, "prerelease":false
+        }));
+        assert_eq!(nightly_candidate(&releases).unwrap()["tag_name"], "v1.3.0");
+        assert!(nightly_candidate(&serde_json::json!([])).is_err());
+    }
+
+    #[test]
     fn the_swap_script_waits_restores_and_quotes() {
         let staged = Path::new("/Applications/.bruhs-update/unpacked/Bruhs.app");
         let script = swap_script(
@@ -584,6 +717,7 @@ mod live {
     async fn stage_a_real_signed_update() {
         let app = PathBuf::from(std::env::var("BRUHS_TEST_APP").unwrap());
         let url = std::env::var("BRUHS_TEST_ZIP_URL").unwrap();
+        let version = std::env::var("BRUHS_TEST_VERSION").unwrap_or_else(|_| "0.1.0".into());
         let sha = std::env::var("BRUHS_TEST_ZIP_SHA").unwrap();
         // Stage beside a copy, so the build in dist/ stays as it is.
         let dir = tempfile::tempdir().unwrap();
@@ -596,7 +730,7 @@ mod live {
             .success());
         let release = |sha: &str| ReleaseUpdate {
             current_version: "0.0.9".into(),
-            latest_version: Some("0.1.0".into()),
+            latest_version: Some(version.clone()),
             release_url: None,
             download_url: Some(url.clone()),
             sha256: Some(sha.into()),
@@ -605,7 +739,17 @@ mod live {
             .await
             .unwrap_err();
         assert!(bad.contains("checksum"), "{bad}");
-        let staged = stage_update(&release(&sha), &current).await.unwrap();
+        let mut progress = Vec::new();
+        let staged =
+            stage_update_with_progress(&release(&sha), &current, |step| progress.push(step))
+                .await
+                .unwrap();
+        assert_eq!(progress.last(), Some(&StageProgress::Verifying));
+        assert!(
+            progress.contains(&StageProgress::Downloading(Some(100)))
+                || progress.contains(&StageProgress::Downloading(None))
+        );
+        assert!(progress.windows(2).all(|pair| pair[0] != pair[1]));
         assert!(staged.ends_with("Bruhs.app"), "{}", staged.display());
         assert_eq!(signing_team(&staged).await, signing_team(&app).await);
         // The swap moves it into place.
@@ -626,6 +770,10 @@ mod live {
             .unwrap()
             .success());
         assert!(current.join("Contents/MacOS/bruhs-desktop").is_file());
+        assert_eq!(
+            bundle_version(&current).await.as_deref(),
+            Some(version.as_str())
+        );
         assert!(!stage.exists());
     }
 }

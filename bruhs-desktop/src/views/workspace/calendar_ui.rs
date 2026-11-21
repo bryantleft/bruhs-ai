@@ -776,7 +776,7 @@ impl Workspace {
             .overflow_hidden()
             .debug_selector(|| "desktop-calendar-page".to_string())
             .bg(cx.theme().background)
-            .font_family(CALENDAR_BODY_FONT_FAMILY)
+            .font_family(crate::theme::FontFace::Interface.with_default(CALENDAR_BODY_FONT_FAMILY))
             .flex()
             .flex_row()
             .child(

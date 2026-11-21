@@ -9,7 +9,7 @@ use axum::{
 };
 use bruhs_core::reactive::{ReactiveError, ReactiveRuntime};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveEvent, ReactiveSnapshot, MAX_PAYLOAD_BYTES};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::config::Config;
 use crate::error::AppError;
@@ -118,9 +118,30 @@ pub async fn report_command(
 }
 
 #[derive(serde::Deserialize)]
+pub struct ThreadSearch {
+    project:String,
+    #[serde(default)]
+    query:String,
+}
+
+pub async fn task_threads(
+    value: Option<Extension<ReactiveRuntime>>,
+    Query(search): Query<ThreadSearch>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let threads = runtime(value)?
+        .task_threads(search.project, search.query)
+        .await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(threads),
+    ))
+}
+
+#[derive(serde::Deserialize)]
 pub struct RunPage {
     /// The id of the last run on the previous page.
     before: Option<String>,
+    thread: Option<bruhs_models::ids::ThreadId>,
 }
 
 /// `GET /api/reactive/agents/{id}/runs?before=<run id>`: one agent's runs, newest first.
@@ -129,7 +150,7 @@ pub async fn agent_runs(
     Path(id): Path<String>,
     Query(page): Query<RunPage>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let runs = runtime(value)?.agent_runs(id, page.before).await?;
+    let runs = runtime(value)?.agent_thread_runs(id, page.before, page.thread).await?;
     Ok((
         [(axum::http::header::CACHE_CONTROL, "no-store")],
         Json(runs),
@@ -171,6 +192,28 @@ pub async fn stream(
     )
 }
 
+pub async fn webhook_deliveries(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(task): Path<String>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let deliveries = runtime(value)?.webhook_deliveries(task).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(deliveries),
+    ))
+}
+
+pub async fn webhook_delivery(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path((task, delivery)): Path<(String, String)>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let detail = runtime(value)?.webhook_delivery(task, delivery).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(detail),
+    ))
+}
+
 pub async fn token(
     value: Option<Extension<ReactiveRuntime>>,
     Path(id): Path<String>,
@@ -182,9 +225,57 @@ pub async fn token(
     ))
 }
 
-pub async fn hook(
+/// Local owner endpoints keep the credential out of snapshots and browser caches.
+pub async fn task_token(
     value: Option<Extension<ReactiveRuntime>>,
     Path(id): Path<String>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let token = runtime(value)?.task_webhook_token(id, None).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(token),
+    ))
+}
+
+pub async fn rotate_task_token(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+    Json(previous): Json<String>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let token = runtime(value)?
+        .task_webhook_token(id, Some(previous))
+        .await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(token),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct HookPath {
+    id: String,
+    token: Option<String>,
+}
+
+pub struct HookArrival(bruhs_models::EpochMs);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for HookArrival {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _: &mut axum::http::request::Parts,
+        _: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self(bruhs_models::EpochMs::now()))
+    }
+}
+
+pub async fn hook(
+    HookArrival(received): HookArrival,
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(path): Path<HookPath>,
+    uri: axum::http::Uri,
+    Query(query): Query<Vec<(String, String)>>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<ReactiveEvent>), AppError> {
@@ -193,11 +284,34 @@ pub async fn hook(
             "Event payload exceeds the 64 KiB source budget.".into(),
         ));
     }
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|header| header.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or_else(|| AppError::Forbidden("A source-specific Bearer token is required.".into()))?;
+    use bruhs_core::reactive::WebhookTarget;
+    let (target, token, receipt_uri) = if let Some(token) = path.token {
+        // Templates and delivery history may display the URI. Omit the capability segment.
+        let mut safe = uri
+            .path()
+            .rsplit_once('/')
+            .map_or("", |(prefix, _)| prefix)
+            .to_owned();
+        safe.push_str("/[redacted]");
+        if let Some(query) = uri.query() {
+            safe.push('?');
+            safe.push_str(query);
+        }
+        (WebhookTarget::Task(path.id), token, safe)
+    } else {
+        let token = headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|header| header.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .ok_or_else(|| {
+                AppError::Forbidden("A source-specific Bearer token is required.".into())
+            })?;
+        (
+            WebhookTarget::Source(path.id),
+            token.to_owned(),
+            uri.to_string(),
+        )
+    };
     // A stable delivery id makes retries idempotent. Without one, each HTTP
     // delivery is distinct; producers that retry must supply the header.
     let key = headers
@@ -208,11 +322,33 @@ pub async fn hook(
             || bruhs_models::ids::ThreadId::new_v4().to_string(),
             str::to_string,
         );
-    let payload: Value = serde_json::from_slice(&body)
-        .map_err(|_| AppError::BadRequest("Webhook body must be JSON.".into()))?;
-    let event = runtime(value)?
-        .publish_hook(&id, token, &key, payload)
+    let mut request = bruhs_models::reactive::WebhookMetadata {
+        raw_body: Some(body.to_vec()),
+        uri: Some(receipt_uri),
+        ..Default::default()
+    };
+    for (name, value) in &headers {
+        if matches!(
+            name.as_str(),
+            "authorization" | "proxy-authorization" | "cookie"
+        ) {
+            continue;
+        }
+        // Keep each field occurrence so an unreadable second signature cannot disappear.
+        request
+            .headers
+            .entry(name.as_str().into())
+            .or_default()
+            .push(value.to_str().unwrap_or_default().into());
+    }
+    for (name, value) in query {
+        request.query.entry(name).or_default().push(value);
+    }
+    let mut event = runtime(value)?
+        .receive_addressed_webhook(target, &token, &key, None, request, received)
         .await?;
+    // Subscription identities belong to the host. The sender receives its delivery receipt.
+    event.filtered_subscriptions.clear();
     Ok((StatusCode::ACCEPTED, Json(event)))
 }
 

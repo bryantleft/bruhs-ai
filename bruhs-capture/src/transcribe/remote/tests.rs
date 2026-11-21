@@ -284,3 +284,55 @@ async fn worker_panic_payload_is_not_forwarded_into_meeting_errors() {
         .to_string()
         .contains("synthetic-private-worker-payload"));
 }
+
+#[tokio::test]
+async fn cloud_destinations_use_the_selected_model_language_and_transport() {
+    let (base, server, mut received) = stub(
+        StatusCode::OK,
+        serde_json::json!({"text":"synthetic result"}),
+    )
+    .await;
+    for (provider, expected_url) in [
+        (
+            CloudProvider::OpenAi,
+            "https://api.openai.com/v1/audio/transcriptions",
+        ),
+        (CloudProvider::Xai, "https://api.x.ai/v1/stt"),
+        (
+            CloudProvider::OpenRouter,
+            "https://openrouter.ai/api/v1/audio/transcriptions",
+        ),
+    ] {
+        let model = provider.fixed_model().unwrap_or("scratch/test");
+        let mut job = RemoteJob::cloud(provider, model.into(), "private-fixture-key").unwrap();
+        assert_eq!(job.remote.endpoint.as_str(), expected_url);
+        job.remote.endpoint = Url::parse(&format!("{base}/audio/transcriptions")).unwrap();
+        assert_eq!(
+            job.dictate(vec![1, 2, 3], Some("es")).await.unwrap(),
+            "synthetic result"
+        );
+        let (headers, bytes) = received.recv().await.unwrap();
+        assert_eq!(headers[header::AUTHORIZATION], "Bearer private-fixture-key");
+        if provider == CloudProvider::OpenRouter {
+            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(json["model"], model);
+            assert_eq!(
+                json["input_audio"],
+                serde_json::json!({"data":"AQID","format":"wav"})
+            );
+            assert_eq!(json["provider"]["zdr"], true);
+            assert_eq!(json["language"], "es");
+        } else {
+            let body = String::from_utf8_lossy(&bytes);
+            assert!(body.contains(&format!("name=\"model\"\r\n\r\n{model}")));
+            let field = if provider == CloudProvider::OpenAi {
+                "languages[]"
+            } else {
+                "language"
+            };
+            assert!(body.contains(&format!("name=\"{field}\"\r\n\r\nes")));
+            assert!(body.contains("filename=\"dictation.wav\""));
+        }
+    }
+    server.abort();
+}

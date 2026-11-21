@@ -5,20 +5,20 @@
 # The hidden tests (`<task-dir>/hidden/*.py`) and pristine copies of the
 # repo's own visible tests (`<task-dir>/repo/tests/test_*.py`, so an agent
 # cannot pass by weakening them) go into `<workdir>/_bench_hidden/`, which is
-# run with unittest from the workdir root. Only called after the agent
-# finished, so the agent never sees the hidden tests.
+# run with the shared completion-accounting runner from the workdir root.
+# Only called after the agent finishes. Campaigns grade private copies.
 
 run_hidden_tests() {
-  local task_dir="$1" work="$2" dest
-  dest="$work/_bench_hidden"
-  rm -rf "$dest"
-  mkdir -p "$dest"
-  : >"$dest/__init__.py"
-  cp "$task_dir"/hidden/*.py "$dest/"
-  if [ -d "$task_dir/repo/tests" ]; then
-    find "$task_dir/repo/tests" -maxdepth 1 -name 'test_*.py' -exec cp {} "$dest/" \;
+  local task_dir="$1" work="$2" lib
+  local args=()
+  lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -n "${BRUHS_BENCH_CHECK_OUTPUT:-}" ]; then
+    args+=(--output "$BRUHS_BENCH_CHECK_OUTPUT")
   fi
-  (cd "$work" && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s _bench_hidden -t . 2>&1)
+  if [ -n "${BRUHS_BENCH_CHECK_TIMEOUT:-}" ]; then
+    args+=(--timeout "$BRUHS_BENCH_CHECK_TIMEOUT")
+  fi
+  python3 -I -S "$lib/check.py" "$task_dir" "$work" ${args[@]+"${args[@]}"}
 }
 
 # Fails (returns 1) when an existing template file other than the allowed

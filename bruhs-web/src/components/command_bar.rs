@@ -557,6 +557,7 @@ pub struct ActiveThreadExport {
     notice: ThreadNotice,
     model: ReadSignal<String>,
     permission_mode: ReadSignal<bruhs_models::PermissionMode>,
+    effort: RwSignal<Option<String>>,
     set_view: WriteSignal<AppView>,
     turns: crate::state::Turns,
 }
@@ -570,6 +571,7 @@ impl ActiveThreadExport {
             notice: expect_context::<ThreadNotice>(),
             model: expect_context::<crate::state::CurrentModel>().0,
             permission_mode: expect_context::<crate::state::PermissionModeSignal>().0,
+            effort: expect_context::<crate::state::ClaudeEffortSignal>().0,
             set_view: expect_context::<SetActiveView>().0,
             turns: expect_context::<crate::state::Turns>(),
         }
@@ -669,6 +671,7 @@ fn export_thread(
                 &path,
                 &context.model.get_untracked(),
                 context.permission_mode.get_untracked(),
+                context.effort.get_untracked().as_deref(),
                 &markdown(),
             ) {
                 Ok(task) => task,

@@ -10,18 +10,29 @@ use std::{
 use tokio::sync::{watch, Mutex};
 
 mod branches;
+mod credits;
 mod command;
+#[cfg(test)]
+mod fingerprint_tests;
 mod forge;
 mod github;
 mod gitlab;
 mod native_stack;
 mod plan;
+mod preferences;
+mod review_guide;
+#[cfg(all(test, unix))]
+mod repository_tests;
 mod stack;
 mod storage;
 #[cfg(test)]
+mod task_source_tests;
+#[cfg(test)]
 mod tests;
 mod trackers;
+mod verification;
 mod watching;
+pub mod writer;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeliveryError {
@@ -54,6 +65,7 @@ impl Drop for DeliveryOwner {
 pub struct DeliveryService {
     root: Arc<PathBuf>,
     state: Arc<Mutex<Journal>>,
+    guide_locks: Arc<Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>>,
     cancellations: Arc<Mutex<HashMap<String, watch::Sender<bool>>>>,
     changed: Arc<tokio::sync::Notify>,
     watching: Arc<std::sync::atomic::AtomicBool>,
@@ -70,6 +82,8 @@ pub struct DeliveryService {
 #[serde(deny_unknown_fields)]
 struct Journal {
     version: u32,
+    #[serde(default,skip_serializing_if="std::collections::BTreeMap::is_empty")]
+    preferences:std::collections::BTreeMap<String,DeliveryOverrides>,
     actions: Vec<ActionReceipt>,
     watches: Vec<PullWatch>,
     events: Vec<WatchEvent>,
@@ -79,6 +93,7 @@ impl Default for Journal {
     fn default() -> Self {
         Self {
             version: 1,
+            preferences:Default::default(),
             actions: Vec::new(),
             watches: Vec::new(),
             events: Vec::new(),
@@ -105,6 +120,7 @@ impl DeliveryService {
         let service = Self {
             root: Arc::new(root),
             state: Arc::new(Mutex::new(journal)),
+            guide_locks: Default::default(),
             cancellations: Arc::new(Mutex::new(HashMap::new())),
             _lock: Arc::new(DeliveryOwner(lock)),
             changed: Arc::new(tokio::sync::Notify::new()),
@@ -208,11 +224,61 @@ impl DeliveryService {
     }
 
     pub async fn prepare(&self, request: PrepareRequest) -> DeliveryResult<PreparedAction> {
-        let prepared = plan::prepare(self, request).await?;
+        self.prepare_with_source(request, None).await
+    }
+
+    pub async fn task_context(
+        &self,
+        task: &bruhs_models::coordination::CoordinatedTask,
+    ) -> DeliveryResult<TaskDeliveryContext> {
+        let path = tokio::fs::canonicalize(&task.working_path)
+            .await
+            .map_err(|error| {
+                DeliveryError::Invalid(format!("The task workspace is unavailable: {error}"))
+            })?;
+        let (head, branch) = self.repository_state(&path).await?;
+        Ok(TaskDeliveryContext {
+            source: TaskDeliverySource::from(task),
+            path: path.to_string_lossy().into_owned(),
+            branch,
+            head,
+            state: task.state,
+        })
+    }
+
+    /// Preparation still runs no commands that publish or alter the checkout.
+    /// A running agent may prepare a review; the receipt's Git/file leases are
+    /// checked again when the owner explicitly executes it.
+    pub async fn prepare_task(
+        &self,
+        task: &bruhs_models::coordination::CoordinatedTask,
+        request: TaskPrepareRequest,
+    ) -> DeliveryResult<PreparedAction> {
+        self.prepare_with_source(
+            PrepareRequest {
+                path: task.working_path.clone(),
+                forge: request.forge,
+                action: request.action,
+                timeout_seconds: request.timeout_seconds,
+            },
+            Some(TaskDeliverySource::from(task)),
+        )
+        .await
+    }
+
+    async fn prepare_with_source(
+        &self,
+        request: PrepareRequest,
+        source: Option<TaskDeliverySource>,
+    ) -> DeliveryResult<PreparedAction> {
+        let mut prepared = plan::prepare(self, request).await?;
+        prepared.source_task = source;
         let receipt = ActionReceipt {
             prepared: prepared.clone(),
             status: ActionStatus::Prepared,
             completed_commands: 0,
+            checked_tree: None,
+            checked_commit: None,
             output: String::new(),
             error: None,
             updated_at_ms: now(),
@@ -225,6 +291,28 @@ impl DeliveryService {
             state.actions.push(receipt); Ok(())
         }).await?;
         Ok(prepared)
+    }
+
+    /// Forget copied personal context without changing the reviewed commands,
+    /// checkout leases, execution status or the independent source run.
+    pub async fn forget_task_source(&self, id: &str) -> DeliveryResult<ActionReceipt> {
+        self.mutate(|state| {
+            let receipt = state
+                .actions
+                .iter_mut()
+                .find(|receipt| receipt.prepared.id == id)
+                .ok_or_else(|| {
+                    DeliveryError::NotFound("The delivery receipt does not exist.".into())
+                })?;
+            if receipt.status == ActionStatus::Running {
+                return Err(DeliveryError::Conflict(
+                    "Wait for the action to stop before removing its source details.".into(),
+                ));
+            }
+            receipt.prepared.source_task = None;
+            Ok(receipt.clone())
+        })
+        .await
     }
 
     /// An opaque proposal ID is the complete execution input. Clients cannot substitute commands.
@@ -283,7 +371,11 @@ impl DeliveryService {
                             )
                         })?;
                     match result {
-                        Ok(()) => receipt.status = ActionStatus::Completed,
+                        Ok(()) => {
+                            if receipt.status == ActionStatus::Running {
+                                receipt.status = ActionStatus::Completed;
+                            }
+                        }
                         Err(error) => {
                             if receipt.status != ActionStatus::Cancelled {
                                 receipt.status =
@@ -360,6 +452,18 @@ impl DeliveryService {
                 "The reviewed action is no longer running; no command was started.".into(),
             ));
         }
+        if prepared.repository.is_none()
+            && (plan::requires_repository(&prepared.action)
+                || prepared
+                    .commands
+                    .iter()
+                    .any(|command| command.program == "gh"))
+        {
+            return Err(DeliveryError::Conflict(
+                "This action has no reviewed repository. Prepare it again before any command can run."
+                    .into(),
+            ));
+        }
         let path = Path::new(&prepared.path);
         if let Some(repository) = &prepared.repository {
             let current = self.forge_repository(path, repository.forge).await?;
@@ -372,9 +476,22 @@ impl DeliveryService {
             return Err(DeliveryError::Conflict("The repository HEAD or branch changed after review. Prepare and review the action again.".into()));
         }
         if let DeliveryAction::CommitPushPull { files, .. } = &prepared.action {
-            if Some(self.fingerprint(path, files).await?) != prepared.worktree_fingerprint {
-                return Err(DeliveryError::Conflict("Selected file contents or tracked changes changed after review. Prepare and review the action again.".into()));
+            if !prepared
+                .worktree_fingerprint
+                .as_deref()
+                .is_some_and(|value| value.starts_with("v2:"))
+            {
+                return Err(DeliveryError::Conflict("This action has a missing or older source review fingerprint. Prepare and review it again before execution.".into()));
             }
+            if Some(self.fingerprint(path, files).await?) != prepared.worktree_fingerprint {
+                return Err(DeliveryError::Conflict("Selected files or tracked changes changed after review. Prepare and review the action again.".into()));
+            }
+        }
+        if matches!(&prepared.action, DeliveryAction::Verify { .. }) {
+            return self.run_verification(prepared, cancel).await;
+        }
+        if matches!(&prepared.action, DeliveryAction::CommitPushPull { .. }) {
+            self.validate_delivery_verification(prepared).await?;
         }
         if let Some(destination) = prepared.workspace_path.as_deref().map(Path::new) {
             if let Some(parent) = destination.parent() {
@@ -402,91 +519,101 @@ impl DeliveryService {
         if let Some(native) = &prepared.native_stack {
             return self.run_native_stack(prepared, native, cancel).await;
         }
-        let execute = async {
-            for (index, specification) in prepared.commands.iter().enumerate() {
-                if self
-                    .state
-                    .lock()
-                    .await
-                    .actions
-                    .iter()
-                    .find(|action| action.prepared.id == prepared.id)
-                    .is_none_or(|action| action.status != ActionStatus::Running)
-                {
-                    return Err(DeliveryError::Command("Execution stopped before the next command; earlier completed steps remain applied.".into()));
-                }
-                if *cancel.borrow() {
-                    return Err(DeliveryError::Command(
-                        "Execution cancelled; earlier completed steps remain applied.".into(),
-                    ));
-                }
-                let cwd = if index > 0 {
-                    prepared.workspace_path.as_deref().unwrap_or(&prepared.path)
-                } else {
-                    &prepared.path
-                };
-                let output = self
-                    .run_command(Path::new(cwd), specification, &mut cancel)
-                    .await?;
-                gitlab::validate_mutation_output(specification, &output)?;
-                let output_full = self
-                    .mutate(|state| {
-                        let receipt = state
-                            .actions
-                            .iter_mut()
-                            .find(|item| item.prepared.id == prepared.id)
-                            .ok_or_else(|| {
-                                DeliveryError::NotFound(
-                                    "Delivery receipt was removed while running.".into(),
-                                )
-                            })?;
-                        receipt.completed_commands = index + 1;
-                        let full = receipt.output.len().saturating_add(output.len())
-                            > command::OUTPUT_BYTES;
-                        if !full {
-                            receipt.output.push_str(&output);
-                            if !output.ends_with('\n') {
-                                receipt.output.push('\n');
-                            }
-                        }
-                        receipt.updated_at_ms = now();
-                        Ok(full)
-                    })
-                    .await?;
-                if output_full {
-                    return Err(DeliveryError::Command("The last command completed but its output exceeded the combined 1 MiB receipt budget. Its completed-step count was saved. Inspect the repository before preparing another action.".into()));
-                }
-                if let (0, Some(workspace)) = (index, prepared.workspace_path.as_deref()) {
-                    // The reviewed `git worktree add` just made the issue
-                    // workspace; reuse the checkout's build output before
-                    // setup runs. Clones only, so nothing is copied or
-                    // committed and the owner's checkout is untouched.
-                    let seeded = crate::git::seed_worktree_build_dirs(
-                        Path::new(&prepared.path),
-                        Path::new(workspace),
-                    )
-                    .await;
-                    if !seeded.is_empty() {
-                        tracing::info!(
-                            "issue workspace {workspace} shares build folders {seeded:?}"
-                        );
-                    }
-                }
-            }
-            Ok(())
-        };
         match tokio::time::timeout(
             std::time::Duration::from_secs(prepared.timeout_seconds),
-            execute,
-        )
-        .await
-        {
+            self.run_commands(prepared, &mut cancel, None),
+        ).await {
             Ok(result) => result,
             Err(_) => Err(DeliveryError::Command(format!(
                 "Execution exceeded the reviewed {} second budget. The active process was stopped; inspect earlier completed steps before preparing another action.",
                 prepared.timeout_seconds
             ))),
         }
+    }
+
+    async fn run_commands(
+        &self,
+        prepared: &PreparedAction,
+        cancel: &mut watch::Receiver<bool>,
+        checkout: Option<&Path>,
+    ) -> DeliveryResult<()> {
+        for (index, specification) in prepared.commands.iter().enumerate() {
+            if self
+                .state
+                .lock()
+                .await
+                .actions
+                .iter()
+                .find(|action| action.prepared.id == prepared.id)
+                .is_none_or(|action| action.status != ActionStatus::Running)
+            {
+                return Err(DeliveryError::Command("Execution stopped before the next command; earlier completed steps remain applied.".into()));
+            }
+            if *cancel.borrow() {
+                return Err(DeliveryError::Command(
+                    "Execution cancelled; earlier completed steps remain applied.".into(),
+                ));
+            }
+            let cwd = if let Some(checkout) = checkout {
+                checkout
+            } else if index > 0 {
+                Path::new(prepared.workspace_path.as_deref().unwrap_or(&prepared.path))
+            } else {
+                Path::new(&prepared.path)
+            };
+            let checked_push = self
+                .resolve_checked_command(prepared, specification)
+                .await?;
+            let specification = checked_push.as_ref().unwrap_or(specification);
+            let output = self
+                .run_command(cwd, specification, cancel, prepared.repository.as_ref())
+                .await?;
+            gitlab::validate_mutation_output(specification, &output)?;
+            let output_full = self
+                .mutate(|state| {
+                    let receipt = state
+                        .actions
+                        .iter_mut()
+                        .find(|item| item.prepared.id == prepared.id)
+                        .ok_or_else(|| {
+                            DeliveryError::NotFound(
+                                "Delivery receipt was removed while running.".into(),
+                            )
+                        })?;
+                    receipt.completed_commands = index + 1;
+                    let full =
+                        receipt.output.len().saturating_add(output.len()) > command::OUTPUT_BYTES;
+                    if !full {
+                        receipt.output.push_str(&output);
+                        if !output.ends_with('\n') {
+                            receipt.output.push('\n');
+                        }
+                    }
+                    receipt.updated_at_ms = now();
+                    Ok(full)
+                })
+                .await?;
+            if output_full {
+                return Err(DeliveryError::Command("The last command completed but its output exceeded the combined 1 MiB receipt budget. Its completed-step count was saved. Inspect the repository before preparing another action.".into()));
+            }
+            if let (0, None, Some(workspace)) =
+                (index, checkout, prepared.workspace_path.as_deref())
+            {
+                // The reviewed `git worktree add` just made the issue
+                // workspace; reuse the checkout's build output before
+                // setup runs. Clones only, so nothing is copied or
+                // committed and the owner's checkout is untouched.
+                let seeded = crate::git::seed_worktree_build_dirs(
+                    Path::new(&prepared.path),
+                    Path::new(workspace),
+                )
+                .await;
+                if !seeded.is_empty() {
+                    tracing::info!("issue workspace {workspace} shares build folders {seeded:?}");
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn repository_state(&self, path: &Path) -> DeliveryResult<(String, String)> {

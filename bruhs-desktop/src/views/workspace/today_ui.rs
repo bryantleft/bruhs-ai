@@ -5,6 +5,8 @@ use bruhs_ui::zoom::px;
 
 use bruhs_models::today_copy;
 
+#[cfg(test)]
+mod availability_tests;
 /// Web "Calendar →" at the right of Now & next.
 const TODAY_CALENDAR_LINK_LABEL: &str = "Calendar →";
 /// Web `text-h4`: each Today card's title.
@@ -55,18 +57,7 @@ impl Workspace {
     pub(super) fn planning_work_items(&self) -> Vec<WorkItem> {
         self.work_items
             .iter()
-            .map(|item| WorkItem {
-                id: item.id.clone(),
-                project_id: item.project_id.clone(),
-                title: item.title.clone(),
-                description: item.description.clone(),
-                status: item.status,
-                priority: item.priority,
-                due_date: item.due_date.clone(),
-                planning: item.planning.clone(),
-                created_at: 0,
-                updated_at: item.updated_at.as_millis(),
-            })
+            .map(DesktopWorkItem::to_work_item)
             .collect()
     }
 
@@ -140,12 +131,14 @@ impl Workspace {
 
     pub(super) fn draft_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
         let now = self.planning_now();
-        let result = native_workday_window(now.date_naive()).and_then(|window| {
-            bruhs_models::propose_day_plan_in_window(
+        let result = native_day_plan_window(now.date_naive()).and_then(|window| {
+            bruhs_models::propose_day_plan_with_availability(
                 EpochMs::saturating_from_i64(now.timestamp_millis()).as_f64(),
                 window,
                 &self.planning_work_items(),
                 &self.planning_calendar_events(cx),
+                &self.scheduling_preferences.availability,
+                local_offset_minutes_east,
             )
         });
         match result {
@@ -177,13 +170,15 @@ impl Workspace {
             return;
         }
         let now = self.planning_now();
-        let result = native_workday_window(now.date_naive()).and_then(|window| {
-            bruhs_models::prepare_day_plan(
+        let result = native_day_plan_window(now.date_naive()).and_then(|window| {
+            bruhs_models::prepare_day_plan_with_availability(
                 proposal,
                 &self.planning_work_items(),
                 &self.planning_calendar_events(cx),
                 window,
                 now.timestamp_millis(),
+                &self.scheduling_preferences.availability,
+                local_offset_minutes_east,
             )
         });
         let prepared = match result {
@@ -1119,7 +1114,7 @@ impl Workspace {
                     "Now".to_string()
                 } else {
                     local_datetime_from_ms(event.start_at_ms)
-                        .map_or_else(String::new, |time| time.format("%-I:%M%P").to_string())
+                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string())
                 };
                 let event_id = event.event_id.clone();
                 let event_title = event.title.clone();
@@ -1353,9 +1348,9 @@ impl Workspace {
                 .iter()
                 .map(|block| {
                     let start = local_datetime_from_ms(block.start_at_ms)
-                        .map_or_else(String::new, |time| time.format("%-I:%M%P").to_string());
+                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string());
                     let end = local_datetime_from_ms(block.end_at_ms)
-                        .map_or_else(String::new, |time| time.format("%-I:%M%P").to_string());
+                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string());
                     div()
                         .flex()
                         .gap_3()
@@ -1406,6 +1401,12 @@ impl Workspace {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme::rambutan_100())
                         .child(format!("Review {} focus block(s)", proposal.blocks.len())),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme::rambutan_400())
+                        .child("Using saved working hours and existing calendar commitments."),
                 )
                 .children(rows)
                 .child(
@@ -1749,39 +1750,44 @@ mod audit_tests {
     }
 }
 
-fn native_workday_window(
+fn native_day_plan_window(
     date: NaiveDate,
 ) -> Result<bruhs_models::DayPlanWindow, bruhs_models::DayPlanChangeError> {
-    let at = |hour| {
-        date.and_hms_opt(hour, 0, 0)
-            .and_then(|local| Local.from_local_datetime(&local).single())
-            .map(|time| EpochMs::saturating_from_i64(time.timestamp_millis()).as_f64())
-            .ok_or(bruhs_models::DayPlanChangeError::InvalidWindow)
+    let next = date
+        .succ_opt()
+        .ok_or(bruhs_models::DayPlanChangeError::InvalidWindow)?;
+    let at = |date: NaiveDate| {
+        EpochMs::new(instant_from_wall_clock(
+            date.and_time(NaiveTime::MIN),
+            local_offset_minutes_east,
+        ))
+        .map(EpochMs::as_f64)
+        .map_err(|_| bruhs_models::DayPlanChangeError::InvalidWindow)
     };
     Ok(bruhs_models::DayPlanWindow {
-        start_at_ms: at(9)?,
-        end_at_ms: at(18)?,
+        start_at_ms: at(date)?,
+        end_at_ms: at(next)?,
     })
 }
 
 #[cfg(test)]
 mod clock_tests {
-    use super::{native_workday_window, EpochMs, NaiveDate};
+    use super::{native_day_plan_window, EpochMs, NaiveDate};
     use chrono::TimeZone as _;
 
     #[test]
-    fn native_workday_preserves_local_hours_on_dst_transition_dates() {
+    fn native_planning_date_preserves_boundaries_on_dst_transition_dates() {
         const CHILD: &str = "BRUHS_PLANNING_CLOCK_TEST_CHILD";
         let zone = std::env::var(CHILD)
             .ok()
             .or_else(|| cfg!(windows).then(|| String::from("system")));
         if let Some(zone) = zone {
             for (month, day, la_start, la_end) in [
-                (3, 8, 1_772_985_600_000_i64, 1_773_018_000_000_i64),
-                (11, 1, 1_793_552_400_000_i64, 1_793_584_800_000_i64),
+                (3, 8, 1_772_956_800_000_i64, 1_773_039_600_000_i64),
+                (11, 1, 1_793_516_400_000_i64, 1_793_606_400_000_i64),
             ] {
                 let date = NaiveDate::from_ymd_opt(2026, month, day).unwrap();
-                let window = native_workday_window(date).unwrap();
+                let window = native_day_plan_window(date).unwrap();
                 let (start, end) = if zone == "America/Los_Angeles" {
                     (la_start, la_end)
                 } else if zone == "system" {
@@ -1796,12 +1802,12 @@ mod clock_tests {
                 } else {
                     (
                         chrono::Utc
-                            .with_ymd_and_hms(2026, month, day, 9, 0, 0)
+                            .with_ymd_and_hms(2026, month, day, 0, 0, 0)
                             .single()
                             .unwrap()
                             .timestamp_millis(),
                         chrono::Utc
-                            .with_ymd_and_hms(2026, month, day, 18, 0, 0)
+                            .with_ymd_and_hms(2026, month, day + 1, 0, 0, 0)
                             .single()
                             .unwrap()
                             .timestamp_millis(),
@@ -1823,7 +1829,7 @@ mod clock_tests {
         // TZ is per child process, never mutated in the parallel test runner.
         let full_name = concat!(
             module_path!(),
-            "::native_workday_preserves_local_hours_on_dst_transition_dates"
+            "::native_planning_date_preserves_boundaries_on_dst_transition_dates"
         );
         let (_, name) = full_name.split_once("::").unwrap();
         for zone in ["America/Los_Angeles", "UTC"] {

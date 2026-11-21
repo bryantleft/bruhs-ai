@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 tower-http = { workspace = true, features = ["cors", "fs", "trace", "set-header", "compression-gzip"] }
 thiserror = { workspace = true }
 directories = { workspace = true }
+tempfile = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures-core = { workspace = true }
@@ -44,7 +45,6 @@ tar = { version = "0.4", default-features = false }
 bruhs-core = { workspace = true, features = ["test-support"] }
 wiremock = "0.6"
 rusqlite = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-tungstenite = "0.29"
 # The desktop's server client (included above for tests) queues live view frames.

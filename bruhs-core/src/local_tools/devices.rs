@@ -116,7 +116,7 @@ async fn android(
     let args = android_args(id, &action)?;
     let bytes = process::run("adb", &args, policy).await?;
     if is_screenshot {
-        super::screenshot(bytes).await
+        super::screenshot(bytes, crate::uploads::write_upload).await
     } else {
         Ok(ToolReply {
             value: json!({"output":process::text(&bytes)?}),
@@ -189,7 +189,7 @@ async fn ios(
                 "The simulator screenshot exceeds the capture budget.".into(),
             ));
         }
-        return super::screenshot(tokio::fs::read(&path).await?).await;
+        return super::screenshot(tokio::fs::read(&path).await?, crate::uploads::write_upload).await;
     }
     let operation = match action {
         DeviceAction::Boot => vec!["boot".into(), id.into()],

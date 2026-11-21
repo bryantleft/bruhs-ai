@@ -31,12 +31,6 @@ pub(super) fn form_dialog_height(window: &Window) -> f32 {
         )
 }
 
-impl Overlay {
-    /// Every dialog but Settings dims and blurs the workspace behind it.
-    pub(super) fn blurs_backdrop(&self) -> bool {
-        !matches!(self, Self::Settings { .. })
-    }
-}
 pub(super) const PROJECT_DELETE_LABEL: &str = "Delete project";
 pub(super) const PROJECT_DELETE_CANCEL_LABEL: &str = "Cancel";
 pub(super) const PROJECT_DELETE_CONFIRM_LABEL: &str = "Delete";
@@ -48,17 +42,27 @@ pub(super) const TASK_DELETE_LABEL: &str = "Delete task";
 
 impl Workspace {
     fn cancel_picker_tasks(&mut self) {
+        self.clone_editor.generation=self.clone_editor.generation.wrapping_add(1);
+        self.clone_editor.open=false;
         self.project_picker_task = None;
         self.import_picker.cancel();
     }
 
     pub(super) fn close_transient_surfaces(&mut self) {
+        self.details.close();
+        self.reset_generator_dialog();
+        if self.settings_visible() {self.microphone_test.clear();self.voice_cloud.dismiss();self.voice_models.close();}
         self.cancel_picker_tasks();
+        self.action_editor.open = false;
+        self.keybinding_recording = false;
+        self.keybinding_new_for = None;
+        self.keybinding_choosing_command = false;
         self.date_picker = None;
         if self.event_create_visible() {
             self.selected_calendar_event_id = None;
             self.event_create_error = None;
         }
+        self.theme_navigation = Default::default();
         self.overlay = None;
         self.top_layer = None;
         self.capture_edit_id = None;
@@ -157,24 +161,58 @@ impl Workspace {
         self.step_modal_focus(event.keystroke.modifiers.shift, window, cx);
     }
 
+    pub(super) fn scheduled_task_dialog_visible(&self, cx: &App) -> bool {
+        self.top_layer.is_none()
+            && self.settings_visible()
+            && self.settings_section == SettingsSection::ScheduledTasks
+            && self.reactive_automations.read(cx).scheduled_editor_open()
+    }
+
+    pub(super) fn secret_provider_dialog_visible(&self, cx: &App) -> bool {
+        self.top_layer.is_none() && self.settings_visible() && self.settings_section == SettingsSection::Vault
+            && self.vault_settings.read(cx).secret_sources().read(cx).dialog_open()
+    }
+
+    pub(super) fn active_modal_focus_bounds(&self, cx: &App) -> (FocusHandle, FocusHandle) {
+        if self.secret_provider_dialog_visible(cx) {
+            return self.vault_settings.read(cx).secret_sources().read(cx).focus_bounds();
+        }
+        if let Some(bounds)=self.generators.focus_bounds(){return bounds;}
+        if self.scheduled_task_dialog_visible(cx) {
+            self.reactive_automations.read(cx).scheduled_focus_bounds()
+        } else {
+            (self.modal_start_focus_handle.clone(), self.modal_end_focus_handle.clone())
+        }
+    }
+
     pub(super) fn step_modal_focus(
         &self,
         reverse: bool,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.scheduled_task_dialog_visible(cx) {
+            self.reactive_automations.update(cx, |panel, cx| panel.close_task_picker_for_tab(window, cx));
+        }
+        if self.settings_visible() && self.settings_section == SettingsSection::ScheduledTasks {
+            self.reactive_automations.update(cx, |panel,cx| panel.dismiss_task_menu(window,cx));
+        }
+        let (start, end) = self.active_modal_focus_bounds(cx);
         if reverse {
             window.focus_prev(cx);
-            if !self.modal_start_focus_handle.contains_focused(window, cx) {
-                self.modal_end_focus_handle.focus(window, cx);
+            if !start.contains_focused(window, cx) {
+                end.focus(window, cx);
                 window.focus_prev(cx);
             }
         } else {
             window.focus_next(cx);
-            if !self.modal_start_focus_handle.contains_focused(window, cx) {
-                self.modal_start_focus_handle.focus(window, cx);
+            if !start.contains_focused(window, cx) {
+                start.focus(window, cx);
                 window.focus_next(cx);
             }
+        }
+        if self.scheduled_task_dialog_visible(cx) {
+            self.reactive_automations.update(cx, |panel, cx| panel.dismiss_unfocused_schedule_picker(window, cx));
         }
     }
 
@@ -211,10 +249,12 @@ impl Workspace {
     /// Opens a form dialog, replacing any other and closing the command bar
     /// or project picker it was started from.
     pub(super) fn open_overlay(&mut self, overlay: Overlay) {
+        self.details.close();
         self.cancel_picker_tasks();
         self.close_sidebar_menus();
         self.modal_scroll.set_offset(Point::default());
         self.top_layer = None;
+        self.theme_navigation.collapse();
         self.overlay = Some(overlay);
     }
 
@@ -223,7 +263,7 @@ impl Workspace {
     pub(super) fn open_top_layer(&mut self, top_layer: TopLayer) {
         self.cancel_picker_tasks();
         self.close_sidebar_menus();
-        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. }));
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. } | Overlay::Welcome));
         self.top_layer = Some(top_layer);
     }
 
@@ -286,7 +326,7 @@ impl Workspace {
     }
 
     pub(super) fn settings_listbox(&self, dropdown: &'static str) -> Listbox {
-        Listbox::open_if(self.settings_open_dropdown() == Some(dropdown))
+        if self.settings_open_dropdown() == Some(dropdown) { Listbox::Popover } else { Listbox::Closed }
     }
 
     pub(super) fn set_settings_open_dropdown(&mut self, dropdown: Option<&'static str>) {
@@ -329,6 +369,51 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.secret_provider_dialog_visible(cx) {
+            self.vault_settings.read(cx).secret_sources().update(cx, |view, cx| view.dismiss(cx));
+            cx.stop_propagation();
+            return;
+        }
+        if self.settings_visible() && self.generators.focus_bounds().is_some() {
+            if self.settings_open_dropdown().is_some() {
+                self.set_settings_open_dropdown(None);
+            } else if self.dismiss_generator() {
+                self.focus_modal_dialog(window,cx);
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if self.settings_visible() && self.settings_section == SettingsSection::Worktrees
+            && self.retention_editor.take().is_some()
+        {
+            self.focus_modal_dialog(window, cx);
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if self.settings_visible() && self.settings_section == SettingsSection::ScheduledTasks
+            && self.reactive_automations.update(cx, |panel,cx| panel.dismiss_task_menu(window,cx)) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.scheduled_task_dialog_visible(cx) {
+            self.reactive_automations.update(cx, |panel, cx| panel.close_scheduled_overlay(window, cx));
+            cx.stop_propagation();
+            return;
+        }
+        if self.dismiss_thread_details(window,cx) || self.clear_focused_settings_query(window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.top_layer.is_none() && (self.dismiss_theme_fan(window,cx) || self.dismiss_community_sort(window, cx)) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.top_layer.is_none() && (self.dismiss_theme_editor(window,cx) || self.dismiss_restart_confirm(window, cx)) {
+            cx.stop_propagation();
+            return;
+        }
         let had_overlay = self.overlay_open();
         let thread_menu = self.thread_menu_id.clone();
         let had_menu = thread_menu.is_some();
@@ -686,7 +771,8 @@ impl Workspace {
             .items_center()
             .justify_center()
             .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
+            .on_click(cx.listener(|this, _ev, window, cx| {
+                if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) { return; }
                 this.close_transient_surfaces();
                 cx.notify();
             }))
@@ -694,7 +780,7 @@ impl Workspace {
                 div()
                     .id("desktop-modal-dialog")
                     .debug_selector(|| "desktop-modal-dialog".to_string())
-                    .role(Role::Dialog)
+                    .role(if matches!(self.overlay, Some(Overlay::RemoveThemeVariants(_))) { Role::AlertDialog } else { Role::Dialog })
                     .aria_label(title.clone())
                     .child(self.blur_scrim.backdrop())
                     .w(px(width_px))
@@ -703,7 +789,7 @@ impl Workspace {
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
+                    .bg(theme::glass_surface(theme::longan_800()))
                     .text_color(cx.theme().popover_foreground)
                     .flex()
                     .flex_col()
@@ -755,7 +841,8 @@ impl Workspace {
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .map(|el| {
-                                    on_press_view(el, cx, |this, _window, cx| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) { return; }
                                         this.close_transient_surfaces();
                                         cx.notify();
                                     })
@@ -798,6 +885,8 @@ pub(super) struct ModalFocus {
     pub(super) close: FocusHandle,
     /// Set by [`Workspace::focus_first_modal_tab_stop`], taken by render.
     pub(super) first_control_pending: bool,
+    pub(super) restart_row: FocusHandle,
+    pub(super) restart_sidebar: FocusHandle,
 }
 
 impl ModalFocus {
@@ -809,6 +898,8 @@ impl ModalFocus {
             // button that tracks it names itself.
             close: cx.focus_handle().tab_index(0).tab_stop(true),
             first_control_pending: false,
+            restart_row: cx.focus_handle().tab_stop(true),
+            restart_sidebar: cx.focus_handle().tab_stop(true),
         }
     }
 }

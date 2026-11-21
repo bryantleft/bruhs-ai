@@ -11,6 +11,14 @@ struct DraftMessage {
 
 #[component]
 pub fn Workbench() -> impl IntoView {
+    let handoff = expect_context::<crate::state::WorkbenchTaskHandoff>().0;
+    let selected_handoff = handoff.get_untracked();
+    handoff.set(None);
+    let source = format!(
+        "{}/api/workbench/ui{}",
+        crate::api::BASE_URL,
+        selected_handoff.map_or_else(String::new, |id| format!("#handoff={id}"))
+    );
     let frame = NodeRef::<leptos::html::Iframe>::new();
     let draft = expect_context::<crate::state::ComposerDraft>().0;
     let active_thread = expect_context::<crate::state::ActiveThreadId>().0;
@@ -62,7 +70,7 @@ pub fn Workbench() -> impl IntoView {
     });
     view! {
         <iframe node_ref=frame class="h-full min-h-0 w-full flex-1 border-0"
-            src=format!("{}/api/workbench/ui",crate::api::BASE_URL)
+            src=source
             on:load=move |_| {
                 if let Some(child)=frame.get_untracked().and_then(|frame|frame.content_window()) {
                     let message=js_sys::Object::new();

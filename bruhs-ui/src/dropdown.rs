@@ -5,11 +5,15 @@
 
 use crate::zoom::px;
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet},
     rc::Rc,
 };
 
-use crate::scroll::ScrollableElement;
+use crate::{
+    input::{Input, InputState},
+    scroll::ScrollableElement,
+};
 use gpui::prelude::*;
 use gpui::*;
 
@@ -27,10 +31,42 @@ const OPTION_RADIUS_PX: f32 = 6.0;
 const GROUP_TEXT_SIZE_PX: f32 = 12.0;
 const HOVER_BG_OPACITY: f32 = 0.60;
 
+/// A dropdown value is `'static` and a saved identifier is not, so each
+/// distinct identifier is kept once for the life of the app.
+pub fn saved_option_value(name: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, PoisonError};
+    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(known) = values.get(name) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
+    values.insert(kept);
+    kept
+}
+
 pub struct DropdownOption {
     pub value: &'static str,
     pub label: String,
     pub description: Option<String>,
+}
+
+impl DropdownOption {
+    /// Match every search word against the group, display name, id or details.
+    pub fn matches_search(&self, group: Option<&str>, query: &str) -> bool {
+        let haystack = format!(
+            "{} {} {} {}",
+            group.unwrap_or_default(),
+            self.label,
+            self.value,
+            self.description.as_deref().unwrap_or_default()
+        )
+        .to_lowercase();
+        query
+            .split_whitespace()
+            .all(|word| haystack.contains(&word.to_lowercase()))
+    }
 }
 
 pub struct DropdownGroup {
@@ -56,6 +92,7 @@ pub fn current_label(groups: &[DropdownGroup], value: &str) -> Option<String> {
 /// Whether a dropdown's listbox is showing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Listbox {
+    Popover,
     Open,
     Closed,
 }
@@ -81,19 +118,11 @@ pub fn dropdown(
     on_toggle: ToggleHandler,
     on_select: SelectHandler,
 ) -> AnyElement {
-    Dropdown {
-        id,
-        label: aria_label.to_string().into(),
-        value: value.into(),
-        groups,
-        listbox,
-        on_toggle,
-        on_select,
-    }
-    .into_any_element()
+    Dropdown::new(id, aria_label, value, groups, listbox, on_toggle, on_select).into_any_element()
 }
 
 struct DropdownFocus {
+    bounds: Rc<Cell<Bounds<Pixels>>>,
     trigger: FocusHandle,
     options: HashMap<&'static str, FocusHandle>,
     scroll: ScrollHandle,
@@ -117,9 +146,15 @@ fn focus_targets(
     groups: &[DropdownGroup],
     window: &mut Window,
     cx: &mut App,
-) -> (FocusHandle, Rc<[OptionFocus]>, ScrollHandle) {
+) -> (
+    FocusHandle,
+    Rc<[OptionFocus]>,
+    ScrollHandle,
+    Rc<Cell<Bounds<Pixels>>>,
+) {
     let state = window.use_keyed_state(SharedString::from(format!("{id}-focus")), cx, |_, cx| {
         DropdownFocus {
+            bounds: Rc::new(Cell::new(Bounds::default())),
             trigger: cx.focus_handle().tab_index(0).tab_stop(true),
             options: HashMap::new(),
             scroll: ScrollHandle::new(),
@@ -149,7 +184,12 @@ fn focus_targets(
         state
             .options
             .retain(|value, _| current_values.contains(value));
-        (state.trigger.clone(), targets.into(), state.scroll.clone())
+        (
+            state.trigger.clone(),
+            targets.into(),
+            state.scroll.clone(),
+            state.bounds.clone(),
+        )
     })
 }
 
@@ -172,8 +212,14 @@ fn focus_option(target: &OptionFocus, scroll: &ScrollHandle, window: &mut Window
     target.handle.focus(window, cx);
 }
 
+struct GroupSelection {
+    summary: String,
+    checked: Vec<&'static str>,
+    defaults: Vec<&'static str>,
+}
+
 #[derive(IntoElement)]
-struct Dropdown {
+pub struct Dropdown {
     id: &'static str,
     label: SharedString,
     value: String,
@@ -181,17 +227,119 @@ struct Dropdown {
     listbox: Listbox,
     on_toggle: ToggleHandler,
     on_select: SelectHandler,
+    search: Option<(Entity<InputState>, &'static str, FocusHandle)>,
+    compact: bool,
+    trigger_icon: Option<&'static str>,
+    group_selection: Option<GroupSelection>,
+    placeholder: Option<&'static str>,
+    empty_label: &'static str,
+}
+
+impl Dropdown {
+    pub fn new(
+        id: &'static str,
+        label: &str,
+        value: &str,
+        groups: Vec<DropdownGroup>,
+        listbox: Listbox,
+        on_toggle: ToggleHandler,
+        on_select: SelectHandler,
+    ) -> Self {
+        Self {
+            id,
+            label: label.to_owned().into(),
+            value: value.into(),
+            groups,
+            listbox,
+            on_toggle,
+            on_select,
+            search: None,
+            placeholder: None,
+            compact: false,
+            trigger_icon: None,
+            group_selection: None,
+            empty_label:"No matches",
+        }
+    }
+
+    /// Fit this trigger to its text when several controls share a row.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
+
+    /// Use a compact icon trigger. The tooltip and accessibility value retain the selected label.
+    pub fn icon_trigger(mut self, path: &'static str) -> Self {
+        self.trigger_icon = Some(path);
+        self.compact = true;
+        self
+    }
+
+    /// Show a summary on the trigger and mark the selections in the other groups.
+    pub fn group_selection(mut self, summary: String, checked: Vec<&'static str>, defaults: Vec<&'static str>) -> Self {
+        self.group_selection = Some(GroupSelection { summary, checked, defaults });
+        self
+    }
+
+    /// The owner observes the query, clears it and focuses it when opening.
+    pub fn searchable(
+        mut self,
+        input: &Entity<InputState>,
+        name: &'static str,
+        trigger: &FocusHandle,
+    ) -> Self {
+        self.search = Some((input.clone(), name, trigger.clone()));
+        self
+    }
+
+    pub fn empty_label(mut self, text:&'static str) -> Self {
+        self.empty_label=text;
+        self
+    }
+
+    pub fn placeholder(mut self, label: &'static str) -> Self {
+        self.placeholder = Some(label);
+        self
+    }
 }
 
 impl RenderOnce for Dropdown {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let (trigger_focus, targets, scroll) = focus_targets(self.id, &self.groups, window, cx);
-        let label = current_label(&self.groups, &self.value).unwrap_or_else(|| self.value.clone());
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let grouped = self.group_selection.take();
+        let summary = grouped.as_ref().map(|g| g.summary.clone());
+        let label = summary.or_else(|| current_label(&self.groups, &self.value)).unwrap_or_else(|| {
+            if self.value.is_empty() {
+                self.placeholder.unwrap_or_default().to_owned()
+            } else {
+                self.value.clone()
+            }
+        });
+        if let Some((query, _, _)) = &self.search {
+            let text = query.read(cx).value().to_lowercase();
+            if self.listbox != Listbox::Closed && !text.trim().is_empty() {
+                for group in &mut self.groups {
+                    group
+                        .options
+                        .retain(|option| option.matches_search(group.label, &text));
+                }
+                self.groups.retain(|g| !g.options.is_empty());
+            }
+        }
+        let (trigger_focus, targets, scroll, bounds) =
+            focus_targets(self.id, &self.groups, window, cx);
+        let trigger_focus = self
+            .search
+            .as_ref()
+            .map(|(_, _, trigger)| trigger.clone())
+            .unwrap_or(trigger_focus);
         let selected = targets
             .iter()
             .position(|target| target.value == self.value)
             .unwrap_or(0);
-        let open = self.listbox == Listbox::Open;
+        let floating = self.listbox == Listbox::Popover;
+        let open = self.listbox != Listbox::Closed;
+        let trigger_bounds = bounds.clone();
+        let toggle_outside = self.on_toggle.clone();
         let toggle_for_key = self.on_toggle.clone();
         let toggle_for_close = self.on_toggle.clone();
         let toggle_for_action = self.on_toggle.clone();
@@ -200,7 +348,8 @@ impl RenderOnce for Dropdown {
         let selection_focus = trigger_focus.clone();
         let trigger_targets = targets.clone();
         let trigger_scroll = scroll.clone();
-        let trigger = dropdown_trigger(self.id, self.label.clone(), label, open, &trigger_focus)
+        let trigger = dropdown_trigger(self.id, self.label.clone(), label, self.trigger_icon, open, &trigger_focus)
+            .when(self.compact, |el| el.w_auto().max_w_full().px_2().gap_1())
             .on_click(move |_, window, cx| (self.on_toggle)(window, cx))
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
@@ -232,7 +381,14 @@ impl RenderOnce for Dropdown {
             selection_focus.focus(window, cx);
         });
         div()
-            .w_full()
+            .relative()
+            .on_children_prepainted(move |children, _, _| {
+                if let Some(trigger) = children.first() {
+                    trigger_bounds.set(*trigger);
+                }
+            })
+            .when(!self.compact, |el| el.w_full())
+            .max_w_full()
             .min_w_0()
             .flex()
             .flex_col()
@@ -272,10 +428,39 @@ impl RenderOnce for Dropdown {
             })
             .child(trigger)
             .when(open, |el| {
-                el.child(render_dropdown_list(
+                let search = self.search.map(|(input, name, _)| {
+                    let rows = targets.clone();
+                    let scroll = scroll.clone();
+                    let choose = on_select.clone();
+                    let input_for_key = input.clone();
+                    div()
+                        .p_1()
+                        .capture_key_down(move |event: &KeyDownEvent, window, cx| {
+                            if event.keystroke.modifiers.modified() {
+                                return;
+                            }
+                            let Some(first) = rows.first() else {
+                                return;
+                            };
+                            match event.keystroke.key.as_str() {
+                                "down" => focus_option(first, &scroll, window, cx),
+                                "up" => focus_option(rows.last().unwrap(), &scroll, window, cx),
+                                "enter" if !input_for_key.read(cx).is_composing() => {
+                                    choose(first.value, window, cx)
+                                }
+                                _ => return,
+                            }
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        })
+                        .child(Input::new(&input).tab_index(-1).aria_label(name))
+                });
+                let empty = targets.is_empty() && search.is_some();
+                let list = render_dropdown_list(
                     self.id,
                     self.label,
                     &self.value,
+                    grouped.as_ref(),
                     self.groups,
                     on_select,
                     ListNavigation {
@@ -283,7 +468,45 @@ impl RenderOnce for Dropdown {
                         scroll,
                         tab_stops: false,
                     },
-                ))
+                );
+                let list = if let Some(search) = search {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .rounded(px(LIST_RADIUS_PX))
+                        .bg(theme::longan_900())
+                        .child(search)
+                        .when(empty, |el| {
+                            el.child(
+                                div()
+                                    .p_2()
+                                    .text_color(theme::rambutan_400())
+                                    .child(self.empty_label),
+                            )
+                        })
+                        .when(!empty, |el| el.child(list))
+                        .into_any_element()
+                } else {
+                    list
+                };
+                if floating {
+                    let size = bounds.get().size;
+                    let content = div()
+                        .id(SharedString::from(format!("{}-popover", self.id)))
+                        .occlude()
+                        .w(size.width.max(px(192.)).min(window.viewport_size().width))
+                        .on_mouse_down_out(move |event, window, cx| {
+                            if !bounds.get().contains(&event.position) {
+                                toggle_outside(window, cx);
+                            }
+                        })
+                        .child(list);
+                    el.child(div().absolute().left_0().top_0().child(
+                        crate::menu_popover::menu_popover(size, content.into_any_element()),
+                    ))
+                } else {
+                    el.child(list)
+                }
             })
     }
 }
@@ -292,6 +515,7 @@ fn dropdown_trigger(
     id: &'static str,
     aria_label: SharedString,
     label: String,
+    icon: Option<&'static str>,
     open: bool,
     focus: &FocusHandle,
 ) -> Stateful<Div> {
@@ -309,18 +533,30 @@ fn dropdown_trigger(
         .items_center()
         .justify_between()
         .gap_2()
-        .font_family(theme::CODE_FONT_FAMILY)
+        .font_family(theme::FontFace::Code)
         .text_size(px(TRIGGER_TEXT_SIZE_PX))
         .text_color(theme::rambutan_100())
         .tab_index(0)
         .track_focus(focus)
         .role(Role::ComboBox)
         .aria_label(aria_label)
+        .aria_value(label.clone())
         .aria_expanded(open)
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .cursor_pointer()
         .hover(|el| el.border_color(theme::rambutan_500().opacity(0.5)))
-        .child(div().min_w_0().truncate().child(label))
+        .map(|el| match icon {
+            Some(path) => el
+                .child(
+                    svg()
+                        .path(path)
+                        .size(px(theme::ICON_PX))
+                        .flex_shrink_0()
+                        .text_color(theme::rambutan_400()),
+                )
+                .tooltip(move |window, cx| crate::tooltip::Tooltip::new(label.clone()).build(window, cx)),
+            None => el.child(div().min_w_0().truncate().child(label)),
+        })
         .child(
             svg()
                 .path(icons::CHEVRON_DOWN)
@@ -360,11 +596,12 @@ struct DropdownList {
 
 impl RenderOnce for DropdownList {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let (_, targets, scroll) = focus_targets(self.id, &self.groups, window, cx);
+        let (_, targets, scroll, _) = focus_targets(self.id, &self.groups, window, cx);
         render_dropdown_list(
             self.id,
             self.label,
             &self.value,
+            None,
             self.groups,
             self.on_select,
             ListNavigation {
@@ -380,6 +617,7 @@ fn render_dropdown_list(
     id: &'static str,
     aria_label: SharedString,
     value: &str,
+    grouped: Option<&GroupSelection>,
     groups: Vec<DropdownGroup>,
     on_select: SelectHandler,
     navigation: ListNavigation,
@@ -402,7 +640,7 @@ fn render_dropdown_list(
                     .pt_2()
                     .pb_1()
                     .text_size(px(GROUP_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_family(theme::FontFace::Small)
                     .text_color(theme::rambutan_500())
                     .children(group.mark)
                     .child(header.to_ascii_uppercase())
@@ -410,7 +648,8 @@ fn render_dropdown_list(
             );
         }
         for option in group.options {
-            let is_current = option.value == value;
+            let is_current = option.value == value || grouped.is_some_and(|g| g.checked.contains(&option.value));
+            let is_default = grouped.is_some_and(|g| g.defaults.contains(&option.value));
             let option_value = option.value;
             let select_for_click = on_select.clone();
             let select_for_key = on_select.clone();
@@ -440,7 +679,7 @@ fn render_dropdown_list(
                     .items_center()
                     .gap_2()
                     .text_size(px(OPTION_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_family(theme::FontFace::Small)
                     .text_color(if is_current {
                         theme::rambutan_100()
                     } else {
@@ -449,9 +688,10 @@ fn render_dropdown_list(
                     .tab_index(0)
                     .tab_stop(tab_stops)
                     .track_focus(&focus)
-                    .role(Role::ListBoxOption)
                     .aria_label(option.label.clone())
-                    .aria_selected(is_current)
+                    .when(grouped.is_some(), |row| row.role(Role::MenuItemRadio)
+                        .aria_toggled(if is_current { gpui::Toggled::True } else { gpui::Toggled::False }))
+                    .when(grouped.is_none(), |row| row.role(Role::ListBoxOption).aria_selected(is_current))
                     .border_1()
                     .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -479,7 +719,11 @@ fn render_dropdown_list(
                             .flex_1()
                             .flex()
                             .flex_col()
-                            .child(div().truncate().child(option.label))
+                            .child(div().flex().items_center().gap_1()
+                                .child(div().truncate().child(option.label))
+                                .when(is_default, |row| row.child(div().flex_shrink_0()
+                                    .px_1().rounded(px(3.)).bg(theme::longan_800())
+                                    .text_size(px(10.)).text_color(theme::rambutan_400()).child("Default"))))
                             .children(
                                 option
                                     .description
@@ -505,7 +749,7 @@ fn render_dropdown_list(
     div()
         .id(ElementId::Name(format!("{id}-list").into()))
         .debug_selector(move || format!("{id}-list"))
-        .role(Role::ListBox)
+        .role(if grouped.is_some() { Role::Menu } else { Role::ListBox })
         .aria_label(aria_label)
         .w_full()
         .max_h(px(LIST_MAX_HEIGHT_PX))
@@ -514,7 +758,7 @@ fn render_dropdown_list(
         .rounded(px(LIST_RADIUS_PX))
         .border_1()
         .border_color(theme::ring_floating())
-        .bg(theme::longan_700())
+        .bg(theme::glass_surface(theme::longan_700()))
         .py_1()
         .children(rows)
         .vertical_scrollbar(&scroll)
@@ -732,6 +976,7 @@ mod tests {
                     "focus-dropdown",
                     "Model".into(),
                     "Claude Sonnet 4.6".into(),
+                    None,
                     false,
                     &self.focus,
                 )

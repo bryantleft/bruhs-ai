@@ -22,12 +22,13 @@ const SWITCH_DISABLED_OPACITY: f32 = 0.5;
 /// A `role="switch"` named `label`, on when `checked`. `id` doubles as its
 /// debug selector.
 pub fn switch(
-    id: &'static str,
+    id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     checked: bool,
     state: Interactivity,
 ) -> Stateful<Div> {
     // The focus border is reserved in both states; the thumb sits inside it.
+    let id = id.into();
     let border = 1.0;
     let thumb_x = if checked {
         SWITCH_THUMB_ON_X_PX
@@ -36,7 +37,7 @@ pub fn switch(
     } - border;
     let thumb_y = (SWITCH_HEIGHT_PX - SWITCH_THUMB_PX) / 2.0 - border;
     focusable_control(
-        div().id(id).debug_selector(move || id.to_string()),
+        div().id(id.clone()).debug_selector(move || id.to_string()),
         Role::Switch,
         label,
         state,

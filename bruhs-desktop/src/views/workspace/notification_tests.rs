@@ -130,3 +130,34 @@ fn native_notification_dismiss_supports_pointer_and_keyboard_and_restores_focus(
         assert!(cx.debug_bounds("desktop-hub-notice").is_none());
     }
 }
+
+#[gpui::test]
+fn settings_in_app_notifications_open_the_thread_that_requested_input(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    cx.run_until_parked();
+    let chat = workspace.update_in(cx, |workspace, window, _cx| {
+        window.activate_window();
+        workspace.thread_notifications.in_app = true;
+        workspace.active_thread().unwrap().chat.clone()
+    });
+    cx.run_until_parked();
+    chat.update_in(cx, |_, _, cx| {
+        cx.emit(super::ChatViewEvent::ThreadAttention("Approval needed"))
+    });
+    cx.run_until_parked();
+    let open = cx
+        .debug_bounds("desktop-hub-notice-action")
+        .expect("thread notice action");
+    cx.simulate_click(open.center(), Modifiers::none());
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _, cx| {
+        assert_eq!(workspace.active_view, AppView::Chat);
+        assert_eq!(workspace.active_thread().unwrap().chat, chat);
+        assert!(workspace.meetings_hub.read(cx).notice.is_none());
+    });
+    chat.update_in(cx, |_, _, cx| {
+        cx.emit(super::ChatViewEvent::ThreadAttention("Approval needed"))
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-hub-notice-action").is_none());
+}

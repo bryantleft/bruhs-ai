@@ -241,6 +241,10 @@ impl<K: FieldKind> EditorState<K> {
         self.core.text.clone().into()
     }
 
+    pub(crate) fn is_composing(&self) -> bool {
+        self.marked.is_some()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.core.text.is_empty()
     }

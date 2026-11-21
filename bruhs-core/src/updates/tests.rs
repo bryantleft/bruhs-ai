@@ -193,6 +193,15 @@ async fn an_outdated_cli_is_updated_and_verified() {
         InstallManager::Npm
     );
     assert_eq!(report.updatable_providers(), vec![AgentProvider::Claude]);
+    let app_only = checker
+        .report_with_provider_checks(false, true, false)
+        .await;
+    assert!(app_only.online);
+    assert!(app_only.updatable_providers().is_empty());
+    assert_eq!(
+        checker.report(false, true).await.updatable_providers(),
+        vec![AgentProvider::Claude]
+    );
     // Codex is not installed here; offline reports skip the registry.
     assert_eq!(
         report.provider(AgentProvider::Codex).unwrap().state,

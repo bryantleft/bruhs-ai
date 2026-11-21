@@ -247,7 +247,7 @@ impl Workspace {
                 RightPanelSurface::Preview => self.set_preview_panel_visible(true, cx),
                 RightPanelSurface::Files => self.set_files_panel_visible(true, cx),
                 RightPanelSurface::Pull => {
-                    if self.branch_pull.is_some() {
+                    if self.displayed_pull().is_some() {
                         self.show_pull_surface(cx);
                     } else {
                         self.set_tasks_panel_visible(true, cx);
@@ -504,7 +504,7 @@ impl Workspace {
     ) {
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());
-        push_recent_project(&mut self.recent_projects, project.clone());
+        self.remember_project(project.clone());
         if self.active_view == AppView::Chat {
             self.terminal_drawer_open = true;
         }
@@ -581,13 +581,13 @@ impl Workspace {
     /// Right panel shell: tab bar (Diff · Tasks · Preview · Files) over the
     /// chosen surface.
     pub(super) fn render_right_panel(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let surface = showing_surface(
+        let surface = if self.right_panel_open(){showing_surface(
             self.file_surface,
             self.pull_panel_visible,
             self.files_panel_visible,
             self.diff_panel_visible,
             self.preview_panel_visible,
-        );
+        )}else{self.last_panel_surface};
         let body: AnyElement = match surface {
             RightPanelSurface::Diff => self.diff_panel.clone().into_any_element(),
             RightPanelSurface::Tasks => self.tasks_panel.clone().into_any_element(),
@@ -1236,7 +1236,7 @@ impl Workspace {
         showing: RightPanelSurface,
         cx: &Context<'_, Self>,
     ) -> Option<AnyElement> {
-        let pull = self.branch_pull.as_ref()?;
+        let pull = self.displayed_pull()?;
         let label = format!("#{}", pull.number);
         let active = showing == RightPanelSurface::Pull;
         Some(
@@ -1301,13 +1301,24 @@ impl Workspace {
     }
 
     pub(super) fn refresh_branch_pull(&mut self, cx: &mut Context<'_, Self>) {
+        self.refresh_pull_or_changes(None, cx);
+    }
+
+    pub(super) fn refresh_pull_or_changes(
+        &mut self,
+        completed_turn: Option<usize>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.pull_generation = self.pull_generation.wrapping_add(1);
         let Some((thread_id, path, branch)) = self.active_repo_branch(cx) else {
             self.branch_pull = None;
+            self.open_substantial_changes(completed_turn, cx);
             cx.notify();
             return;
         };
-        self.pull_generation = self.pull_generation.wrapping_add(1);
         let generation = self.pull_generation;
+        let lookup_started=std::time::Instant::now();
+        let source_path=self.active_thread().map(|t|t.chat.read(cx).settings_project_path().to_owned()).unwrap_or_else(||path.clone());
         let lookup_branch = branch.clone();
         let loaded = spawn_tokio(cx, async move {
             bruhs_core::pulls::pull_for_branch(Path::new(&path), &lookup_branch).await
@@ -1319,8 +1330,10 @@ impl Workspace {
                 if this.pull_generation != generation {
                     return;
                 }
+                this.observe_thread_pull(&thread_id,&source_path,&branch,&lookup,lookup_started,cx);
                 let Some(pull) = lookup.pull else {
                     this.branch_pull = None;
+                    this.open_substantial_changes(completed_turn, cx);
                     cx.notify();
                     return;
                 };
@@ -1339,7 +1352,14 @@ impl Workspace {
                     url: pull.url,
                     state: pull.state,
                 });
-                if open {
+                if open
+                    && this
+                        .linked_pull
+                        .as_ref()
+                        .is_none_or(|(id, _)| id != &this.active_thread_id)
+                    && this.active_view == AppView::Chat
+                    && this.diff_panel.read(cx).prefs.proactive_panels
+                {
                     this.opened_pull_key = Some(key);
                     this.show_pull_surface(cx);
                 } else {
@@ -1350,8 +1370,42 @@ impl Workspace {
         .detach();
     }
 
+    fn open_substantial_changes(&mut self, turn: Option<usize>, cx: &mut Context<'_, Self>) {
+        let Some(index) = turn else {
+            return;
+        };
+        if self.active_view != AppView::Chat || !self.diff_panel.read(cx).prefs.proactive_panels {
+            return;
+        }
+        let Some(thread) = self.active_thread() else {
+            return;
+        };
+        let chat = thread.chat.read(cx);
+        if chat.is_streaming
+            || index.checked_add(1) != Some(chat.messages.len())
+            || !chat.project_scoped
+        {
+            return;
+        }
+        let Some(message) = chat
+            .messages
+            .get(index)
+            .filter(|m| m.role == MessageRole::Assistant && m.state == TurnState::Finished)
+        else {
+            return;
+        };
+        let files = crate::views::diff_panel::changed_files_from_tool_calls(
+            &message.tool_calls,
+            Some(&chat.project_path),
+        );
+        let (added, removed) = crate::views::diff_panel::diff_totals(&files);
+        if files.len() >= 3 || added.saturating_add(removed) >= 50 {
+            self.open_diff_for_turn(index, cx);
+        }
+    }
+
     fn render_branch_pull(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let Some(pull) = self.branch_pull.clone() else {
+        let Some(pull) = self.displayed_pull().cloned() else {
             return div()
                 .debug_selector(|| "desktop-branch-pull".to_string())
                 .p_4()
@@ -1605,7 +1659,11 @@ impl Workspace {
                     .text_size(px(12.0))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_100())
-                    .child(ready.text.clone().unwrap_or_default())
+                    .child({
+                        let text=div().font_family(theme::CODE_FONT_FAMILY).child(ready.text.clone().unwrap_or_default());
+                        if self.fonts.wrap==Some(false) {div().w_full().overflow_x_scrollbar().child(text.whitespace_nowrap()).into_any_element()}
+                        else{text.into_any_element()}
+                    })
                     .children(
                         notes
                             .into_iter()
@@ -1692,6 +1750,9 @@ impl Workspace {
         };
         let terminal_panel =
             cx.new(|cx| TerminalPanelView::new(terminal_manager, terminal_runtime, cx));
+        subscriptions.push(cx.observe(&terminal_panel, |this: &mut Self, _, cx| {
+            if this.details.open_for_active_thread(this.active_thread_id.as_deref()) { cx.notify(); }
+        }));
         subscriptions.push(cx.subscribe_in(
             &terminal_panel,
             window,

@@ -508,6 +508,7 @@ impl Workspace {
                 // a comparison with the web's. Use a scratch state file: the
                 // fixture role is saved.
                 self.open_settings(&OpenSettings, window, cx);
+                self.set_settings_section(SettingsSection::Threads, cx);
                 if self.roles.is_empty() {
                     self.smoke_add_role(
                         "Writer",
@@ -720,7 +721,7 @@ impl Workspace {
             );
         };
         let view = view.read(cx);
-        let (rows, cursor) = view.snapshot();
+        let (rows, cursor) = view.snapshot(cx);
         let lines: Vec<&str> = rows
             .iter()
             .filter(|row| !row.text.is_empty())

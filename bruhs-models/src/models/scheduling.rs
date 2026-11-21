@@ -35,6 +35,7 @@ impl AvailabilityRule {
 
     pub fn is_valid(&self) -> bool {
         self.start_minute < self.end_minute
+            && self.end_minute <= 1_440
             && !self.weekdays.is_empty()
             && self.weekdays.iter().all(|day| *day <= 6)
     }

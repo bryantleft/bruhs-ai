@@ -5,6 +5,63 @@
 use crate::EpochMs;
 use serde::{Deserialize, Serialize};
 
+/// Which local files protect a linked checkout from automatic cleanup.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KeepWhen {
+    AnyLocalFiles,
+    #[default]
+    UncommittedChanges,
+    TrackedChanges,
+}
+
+impl KeepWhen {
+    pub const CHOICES: [(Self, &'static str, &'static str); 3] = [
+        (Self::AnyLocalFiles, "any-local-files", "Any local files"),
+        (Self::UncommittedChanges, "uncommitted-changes", "Uncommitted changes"),
+        (Self::TrackedChanges, "tracked-changes", "Edited tracked files"),
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::AnyLocalFiles => "any-local-files",
+            Self::UncommittedChanges => "uncommitted-changes",
+            Self::TrackedChanges => "tracked-changes",
+        }
+    }
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::AnyLocalFiles => "Keep tracked edits, untracked files and ignored files, except untracked files in node_modules.",
+            Self::UncommittedChanges => "Keep edits and untracked files. Cleanup removes ignored files, including an ignored .env.",
+            Self::TrackedChanges => "Keep staged and unstaged edits to tracked files. Cleanup removes untracked and ignored files, including .env.",
+        }
+    }
+}
+
+/// Saved with the deletion of a desktop thread so a restarted host can finish cleanup.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScratchCleanup {
+    pub thread_id: crate::ids::ThreadId,
+    pub path: String,
+    pub keep_when: KeepWhen,
+}
+
+/// Periodic cleanup is opt-in. Missing values keep earlier installations' checkouts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorktreeRetention {
+    pub merged: bool,
+    pub unchanged: bool,
+    pub inactive_days: Option<u16>,
+    pub settled_days: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupMode {
+    Off,
+    Custom,
+}
+
 /// A worktree the owner removed. `branch` is checked out again at the
 /// task's working path before its next run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

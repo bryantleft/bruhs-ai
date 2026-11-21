@@ -40,8 +40,12 @@ pub const ROOMS_PROTOCOL: u32 = 2;
 /// First version that has a bruh's Computer.
 pub const COMPUTER_PROTOCOL: u32 = 3;
 
+/// The last version before the crew's vault: 4 and 5 are main's own wire
+/// changes (`SourceKind::Once`, webhook filters, task conversations).
+pub const PRE_VAULT_PROTOCOL: u32 = 5;
+
 /// First version that has vault grants on a bruh.
-pub const VAULT_PROTOCOL: u32 = 4;
+pub const VAULT_PROTOCOL: u32 = PRE_VAULT_PROTOCOL + 1;
 
 /// First version that has app and mailbox grants on a bruh and app sources.
 pub const APPS_PROTOCOL: u32 = VAULT_PROTOCOL + 1;

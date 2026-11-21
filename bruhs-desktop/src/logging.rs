@@ -90,6 +90,34 @@ fn rotate_if_large(path: &Path, limit: u64) -> io::Result<()> {
     }
 }
 
+/// Remove an expired inactive desktop log. Only the app's numbered rotation belongs here.
+pub(crate) fn prune_rotated_log(
+    dir: &Path,
+    days: u16,
+    now: std::time::SystemTime,
+) -> io::Result<bool> {
+    if days == 0 {
+        return Ok(false);
+    }
+    let path = dir.join(format!("{LOG_FILE_NAME}.1"));
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if !metadata.is_file()
+        || now.duration_since(metadata.modified()?).unwrap_or_default()
+            < std::time::Duration::from_secs(u64::from(days) * 86400)
+    {
+        return Ok(false);
+    }
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{open_log_file, rotate_if_large, LOG_FILE_NAME};
@@ -117,6 +145,25 @@ mod tests {
         let (_, mut again) = open_log_file(dir.path()).unwrap();
         writeln!(again, "again").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello\nagain\n");
+    }
+
+    #[test]
+    fn retention_only_removes_expired_rotations() {
+        let dir = tempfile::tempdir().unwrap();
+        let active = dir.path().join(LOG_FILE_NAME);
+        let rotated = dir.path().join(format!("{LOG_FILE_NAME}.1"));
+        fs::write(&active, "active").unwrap();
+        fs::write(&rotated, "previous").unwrap();
+        let now = std::time::SystemTime::now();
+        assert!(!super::prune_rotated_log(dir.path(), 1, now).unwrap());
+        assert!(super::prune_rotated_log(
+            dir.path(),
+            1,
+            now + std::time::Duration::from_secs(86401)
+        )
+        .unwrap());
+        assert!(active.is_file());
+        assert!(!rotated.exists());
     }
 
     #[test]

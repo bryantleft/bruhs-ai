@@ -33,6 +33,13 @@ fn subscription(auto_run: bool) -> Subscription {
         auto_run,
         debounce_ms: 0,
         throttle_ms: 0,
+        webhook_filters: Vec::new(),
+        webhook_prompt: None,
+        webhook_security: Default::default(),
+        webhook_dedupe: Default::default(),
+        task_title: None,
+        task_conversation: Default::default(),
+        task_checkout: Default::default(),
         on_busy: Default::default(),
     }
 }
@@ -755,6 +762,137 @@ async fn webhook_credentials_are_private_and_checked_before_publication() {
 }
 
 #[tokio::test]
+async fn task_webhook_rotation_preserves_isolated_retry_history() {
+    use super::WebhookTarget;
+    let (dir, runtime) = configured(false).await;
+    let mut hook = source("scans");
+    hook.kind = SourceKind::Webhook;
+    let other = Subscription {
+        id: "other".into(),
+        ..subscription(false)
+    };
+    for change in [
+        ReactiveChange::SaveSource { source: hook },
+        ReactiveChange::SaveSubscription {
+            subscription: other,
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    async fn send(
+        runtime: &ReactiveRuntime,
+        task: &str,
+        token: &str,
+        content: i32,
+    ) -> Result<ReactiveEvent, ReactiveError> {
+        runtime
+            .receive_addressed_webhook(
+                WebhookTarget::Task(task.into()),
+                token,
+                "same-delivery",
+                Some(json!(content)),
+                Default::default(),
+                bruhs_models::EpochMs::now(),
+            )
+            .await
+    }
+    let first = runtime
+        .task_webhook_token("paperwork".into(), None)
+        .await
+        .unwrap();
+    let other = runtime
+        .task_webhook_token("other".into(), None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        send(&runtime, "other", &first, 1).await,
+        Err(ReactiveError::Unauthorized)
+    ));
+    let event = send(&runtime, "paperwork", &first, 1).await.unwrap();
+    assert!(runtime
+        .webhook_deliveries("other".into())
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        send(&runtime, "paperwork", &first, 2).await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    assert!(runtime
+        .webhook_deliveries("other".into())
+        .await
+        .unwrap()
+        .is_empty());
+    let sibling = send(&runtime, "other", &other, 2).await.unwrap();
+    assert_ne!(sibling.id, event.id);
+    let rotated = runtime
+        .task_webhook_token("paperwork".into(), Some(first.clone()))
+        .await
+        .unwrap();
+    assert_ne!(first, rotated);
+    assert!(matches!(
+        runtime
+            .task_webhook_token("paperwork".into(), Some(first.clone()))
+            .await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        send(&runtime, "paperwork", &first, 1).await,
+        Err(ReactiveError::Unauthorized)
+    ));
+    assert_eq!(
+        send(&runtime, "paperwork", &rotated, 1).await.unwrap().id,
+        event.id
+    );
+    assert_eq!(
+        send(&runtime, "other", &other, 2).await.unwrap().id,
+        sibling.id
+    );
+    let source_key = runtime.webhook_token("scans").await.unwrap();
+    runtime
+        .publish_hook("scans", &source_key, "same-delivery", json!(3))
+        .await
+        .unwrap();
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(), 4);
+    for secret in [first, rotated.clone(), other, source_key] {
+        assert!(!serde_json::to_string(&snapshot).unwrap().contains(&secret));
+    }
+    for change in [
+        ReactiveChange::DeleteSubscription {
+            id: "paperwork".into(),
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: subscription(false),
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    assert!(matches!(
+        send(&runtime, "paperwork", &rotated, 1).await,
+        Err(ReactiveError::Unauthorized)
+    ));
+    let fresh = runtime
+        .task_webhook_token("paperwork".into(), None)
+        .await
+        .unwrap();
+    assert_ne!(
+        send(&runtime, "paperwork", &fresh, 1).await.unwrap().id,
+        event.id
+    );
+}
+
+#[tokio::test]
 async fn debounce_coalesces_pending_runs_and_new_content_requires_new_review() {
     let (_dir, runtime) = configured(false).await;
     let mut delayed = subscription(false);
@@ -879,5 +1017,439 @@ async fn app_completion_markers_are_idempotent_persistent_and_independent_of_sou
     assert_eq!(
         recovered.app_completions("meeting.summary").await.unwrap(),
         vec!["meeting-2"]
+    );
+}
+
+#[tokio::test]
+async fn webhook_filters_route_individual_tasks_and_retain_the_delivery_decision() {
+    let (dir, runtime) = configured(false).await;
+    let mut hook = source("hook");
+    hook.kind = SourceKind::Webhook;
+    let mut filtered = subscription(false);
+    filtered.id = "filtered".into();
+    filtered.source_id = hook.id.clone();
+    filtered.webhook_filters = vec![
+        WebhookFilter { path: "body.items.[].name".into(), test: WebhookTest::In(vec!["apple".into(), "pear".into()]) },
+        WebhookFilter { path: "headers.X-Event".into(), test: WebhookTest::StartsWith("ready".into()) },
+        WebhookFilter { path: "query.queue".into(), test: WebhookTest::Equals("local".into()) },
+        WebhookFilter { path: "body.items[].name".into(), test: WebhookTest::NotEquals("skip".into()) },
+        WebhookFilter { path: "body.details".into(), test: WebhookTest::Exists },
+    ];
+    let mut always = filtered.clone();
+    always.id = "always".into();
+    always.webhook_filters.clear();
+    for change in [ReactiveChange::SaveSource { source: hook }, ReactiveChange::SaveSubscription { subscription: filtered.clone() }, ReactiveChange::SaveSubscription { subscription: always }] {
+        runtime.command(ReactiveCommand::Apply { change }).await.unwrap();
+    }
+    let token = runtime.webhook_token("hook").await.unwrap();
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3")).await.unwrap();
+    let request = || WebhookMetadata {
+        headers: [("x-event".into(), vec!["ready.fixture-only".into()])].into_iter().collect(),
+        query: [("queue".into(), vec!["first".into(),"local".into()])].into_iter().collect(),
+        ..Default::default()
+    };
+    let payload = json!({"items":[{"name":"pear"},{"name":"berry"}],"details":{}});
+    let matched = runtime.publish_hook_request("hook",&token,"accepted",payload.clone(),request()).await.unwrap();
+    assert!(matched.filtered_subscriptions.is_empty());
+    let skipped = runtime.publish_hook("hook",&token,"missing-header",payload.clone()).await.unwrap();
+    assert_eq!(skipped.filtered_subscriptions, ["filtered"]);
+    let retried = runtime.publish_hook_request("hook",&token,"missing-header",payload,request()).await.unwrap();
+    assert_eq!(skipped,retried);
+    let excluded = runtime.publish_hook_request("hook",&token,"excluded",json!({"items":[{"name":"pear"},{"name":"skip"}],"details":{}}),request()).await.unwrap();
+    assert_eq!(excluded.filtered_subscriptions, ["filtered"]);
+    let snapshot=runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(),4);
+    assert!(!serde_json::to_string(&snapshot).unwrap().contains("ready.fixture-only"));
+    let mut changed_source = source("hook");
+    changed_source.kind = SourceKind::Custom;
+    let change = ReactiveChange::SaveSource { source: changed_source };
+    assert!(runtime.command(ReactiveCommand::Apply { change }).await.is_err());
+    assert_eq!(
+        runtime.snapshot().await.unwrap().sources.into_iter().find(|source| source.id == "hook").unwrap().kind,
+        SourceKind::Webhook,
+    );
+    filtered.webhook_filters[0].path="invalid.root".into();
+    assert!(runtime.command(ReactiveCommand::Apply { change: ReactiveChange::SaveSubscription {subscription: filtered}}).await.is_err());
+}
+
+#[tokio::test]
+async fn webhook_template_deliveries_isolate_task_prompts_and_mask_owner_previews() {
+    let (_dir, runtime) = configured(false).await;
+    let mut src = source("scans");
+    src.kind = SourceKind::Webhook;
+    let mut task = subscription(false);
+    task.webhook_prompt = Some("Review {{body.subject}} {{headers.x-event}} {{query.zone}} {{body.password}} {{headers.authorization}} {{body.absent}}".into());
+    let mut legacy = subscription(false);
+    legacy.id = "legacy".into();
+    for change in [
+        ReactiveChange::SaveSource { source: src },
+        ReactiveChange::SaveSubscription {
+            subscription: legacy,
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: task.clone(),
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    let token = runtime.webhook_token("scans").await.unwrap();
+    let request = WebhookMetadata {
+        headers: [
+            ("x-event".into(), vec!["triage".into()]),
+            ("authorization".into(), vec![format!("Bearer {token}")]),
+        ]
+        .into(),
+        query: [("zone".into(), vec!["central".into()])].into(),
+        ..Default::default()
+    };
+    let body = json!({"subject":"Invoice", "password":"demo-secret", "internal":"only-in-legacy"});
+    runtime
+        .publish_hook_request("scans", &token, "one", body, request)
+        .await
+        .unwrap();
+    let runs = runtime.snapshot().await.unwrap().runs;
+    let prompt_for = |id: &str| {
+        &runs
+            .iter()
+            .find(|r| r.subscription_id.as_deref() == Some(id))
+            .unwrap()
+            .prompt
+    };
+    let prompt = prompt_for(&task.id);
+    for used in ["Invoice", "triage", "central", "demo-secret"] {
+        assert!(prompt.contains(used));
+    }
+    for omitted in ["only-in-legacy", "<event_data>", token.as_str()] {
+        assert!(!prompt.contains(omitted));
+    }
+    assert!(prompt_for("legacy").contains("only-in-legacy"));
+    let row = runtime
+        .webhook_deliveries(task.id.clone())
+        .await
+        .unwrap()
+        .remove(0);
+    let detail = runtime
+        .webhook_delivery(task.id.clone(), row.id)
+        .await
+        .unwrap();
+    assert_eq!(detail.missing_fields, ["body.absent"]);
+    let preview = detail.prompt.unwrap();
+    assert!(preview.contains("central") && preview.contains("[redacted]"));
+    assert!(!preview.contains("demo-secret") && !preview.contains(&token));
+    let row = runtime
+        .webhook_deliveries("legacy".into())
+        .await
+        .unwrap()
+        .remove(0);
+    let sibling = runtime
+        .webhook_delivery("legacy".into(), row.id)
+        .await
+        .unwrap();
+    assert!(sibling.missing_fields.is_empty());
+    assert!(sibling.prompt.unwrap().contains("only-in-legacy"));
+}
+
+#[tokio::test]
+async fn oversized_webhook_prompt_does_not_replace_a_window_or_claim_its_replay_key() {
+    let (_dir, runtime) = configured(false).await;
+    let mut src = source("scans");
+    src.kind = SourceKind::Webhook;
+    let mut task = subscription(false);
+    task.webhook_prompt = Some("{{body.text}} {{body.text}}".into());
+    task.webhook_dedupe = WebhookDedupe {
+        replay_key: "{{body.id}}".into(),
+        coalesce_key: "{{body.group}}".into(),
+        coalesce_window_seconds: Some(10),
+    };
+    for change in [
+        ReactiveChange::SaveSource { source: src },
+        ReactiveChange::SaveSubscription {
+            subscription: task.clone(),
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    let token = runtime.webhook_token("scans").await.unwrap();
+    for (key, id, text, expected) in [
+        ("a", "a", "accepted".into(), WebhookOutcome::WindowOpened),
+        ("b", "b", "x".repeat(61_000), WebhookOutcome::Rejected),
+        ("c", "b", "retry".into(), WebhookOutcome::Coalesced),
+    ] {
+        runtime
+            .publish_hook(
+                "scans",
+                &token,
+                key,
+                json!({"id":id, "group":"one", "text":text}),
+            )
+            .await
+            .unwrap();
+        let deliveries = runtime.webhook_deliveries(task.id.clone()).await.unwrap();
+        assert_eq!(deliveries[0].outcome, expected);
+        if expected == WebhookOutcome::Rejected {
+            let rejected = runtime
+                .webhook_delivery(task.id.clone(), deliveries[0].id.clone())
+                .await
+                .unwrap();
+            assert!(rejected.error.unwrap().contains("120,000"));
+            assert!(rejected.prompt.is_none());
+            let opener = runtime
+                .webhook_delivery(task.id.clone(), deliveries[1].id.clone())
+                .await
+                .unwrap();
+            assert!(opener.prompt.unwrap().contains("accepted"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn keyed_webhooks_keep_fixed_windows_and_seven_day_replay_across_restart() {
+    let (dir, runtime) = configured(false).await;
+    let mut src = source("scans");
+    src.kind = SourceKind::Webhook;
+    let mut task = subscription(false);
+    task.webhook_dedupe = WebhookDedupe {
+        replay_key: "{{body.delivery}}".into(),
+        coalesce_key: "{{body.issue}}".into(),
+        coalesce_window_seconds: Some(10),
+    };
+    let mut sibling = subscription(false);
+    sibling.id = "legacy".into();
+    for change in [
+        ReactiveChange::SaveSource { source: src },
+        ReactiveChange::SaveSubscription {
+            subscription: task.clone(),
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: sibling,
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    let token = runtime.webhook_token("scans").await.unwrap();
+    let publish = async |runtime: &ReactiveRuntime, delivery: &str, issue: &str, version: u32| {
+        runtime
+            .publish_hook(
+                "scans",
+                &token,
+                "stable-transport",
+                json!({"delivery":delivery,"issue":issue,"version":version}),
+            )
+            .await
+            .unwrap()
+    };
+    let first = publish(&runtime, "a", "A", 1).await;
+    let original = runtime.webhook_deliveries(task.id.clone()).await.unwrap()[0].clone();
+    assert_eq!(original.outcome, WebhookOutcome::WindowOpened);
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    publish(&runtime, "a", "A", 2).await;
+    assert_eq!(
+        runtime.webhook_deliveries(task.id.clone()).await.unwrap()[0].outcome,
+        WebhookOutcome::Duplicate
+    );
+    publish(&runtime, "b", "A", 3).await;
+    publish(&runtime, "c", "B", 4).await;
+    publish(&runtime, "d", "", 5).await;
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(
+        snapshot.runs.len(),
+        2,
+        "one unkeyed immediate run and one legacy sibling"
+    );
+    let detail = runtime
+        .webhook_delivery(task.id.clone(), original.id.clone())
+        .await
+        .unwrap();
+    assert_eq!(detail.summary.received_at, original.received_at);
+    assert!(detail.prompt.unwrap().contains("\"version\":3"));
+    assert_eq!(
+        runtime
+            .call(store::webhook_windows::flush_due)
+            .await
+            .unwrap(),
+        0
+    );
+    let first_time = first.created_at.as_millis();
+    runtime
+        .call(move |db| {
+            let expires: i64 =
+                db.query_row("SELECT MIN(expires) FROM webhook_replay", [], |r| r.get(0))?;
+            let due: i64 =
+                db.query_row("SELECT MIN(due) FROM webhook_windows", [], |r| r.get(0))?;
+            assert_eq!(expires - first_time, 7 * 24 * 60 * 60 * 1000);
+            assert_eq!(due - first_time, 10000);
+            db.execute("UPDATE webhook_windows SET due=0", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime
+            .call(store::webhook_windows::flush_due)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        runtime
+            .call(store::webhook_windows::flush_due)
+            .await
+            .unwrap(),
+        0
+    );
+    let snapshot = runtime.snapshot().await.unwrap();
+    let grouped: Vec<_> = snapshot
+        .runs
+        .iter()
+        .filter(|r| r.trigger == Some(RunTrigger::WebhookWindow))
+        .collect();
+    assert_eq!(grouped.len(), 2);
+    assert!(grouped
+        .iter()
+        .all(|run| run.status == RunStatus::AwaitingReview));
+    assert!(grouped.iter().any(|r| r.prompt.contains("\"version\":3")));
+    assert!(grouped.iter().any(|r| r.prompt.contains("\"version\":4")));
+    assert_eq!(
+        runtime
+            .webhook_delivery(task.id.clone(), original.id)
+            .await
+            .unwrap()
+            .summary
+            .outcome,
+        WebhookOutcome::AwaitingReview
+    );
+    runtime
+        .call(|db| {
+            db.execute("UPDATE webhook_replay SET expires=0", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    publish(&runtime, "a", "A", 6).await;
+    assert_eq!(
+        runtime.webhook_deliveries(task.id.clone()).await.unwrap()[0].outcome,
+        WebhookOutcome::WindowOpened
+    );
+    runtime
+        .command(ReactiveCommand::SetAutomationEnabled {
+            id: task.id.clone(),
+            enabled: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime.webhook_deliveries(task.id.clone()).await.unwrap()[0].outcome,
+        WebhookOutcome::Rejected
+    );
+    runtime
+        .command(ReactiveCommand::SetAutomationEnabled {
+            id: task.id.clone(),
+            enabled: true,
+        })
+        .await
+        .unwrap();
+    publish(&runtime, "a", "A", 7).await;
+    assert_eq!(
+        runtime.webhook_deliveries(task.id.clone()).await.unwrap()[0].outcome,
+        WebhookOutcome::WindowOpened
+    );
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::DeleteSubscription {
+                id: task.id.clone(),
+            },
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription {
+                subscription: task.clone(),
+            },
+        })
+        .await
+        .unwrap();
+    publish(&runtime, "a", "A", 7).await;
+    assert_eq!(
+        runtime.webhook_deliveries(task.id).await.unwrap()[0].outcome,
+        WebhookOutcome::WindowOpened
+    );
+}
+
+#[tokio::test]
+async fn full_webhook_queue_accepts_existing_windows_and_retries_failed_new_windows() {
+    let (_dir, runtime) = configured(false).await;
+    let mut src = source("scans");
+    src.kind = SourceKind::Webhook;
+    let mut task = subscription(false);
+    task.webhook_dedupe = WebhookDedupe {
+        replay_key: "{{body.delivery}}".into(),
+        coalesce_key: "{{body.issue}}".into(),
+        coalesce_window_seconds: None,
+    };
+    for change in [
+        ReactiveChange::SaveSource { source: src },
+        ReactiveChange::SaveSubscription {
+            subscription: task.clone(),
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    let token = runtime.webhook_token("scans").await.unwrap();
+    let send = async |identity: String, issue: usize| {
+        runtime
+            .publish_hook(
+                "scans",
+                &token,
+                &identity,
+                json!({"delivery":identity,"issue":issue}),
+            )
+            .await
+    };
+    for n in 0..HISTORY_LIMIT {
+        send(format!("open-{n}"), n).await.unwrap();
+    }
+    assert!(matches!(
+        send("backlog".into(), HISTORY_LIMIT).await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    send("update".into(), 0).await.unwrap();
+    runtime.call(|db| {
+        db.execute("UPDATE webhook_windows SET due=0 WHERE rowid=(SELECT MIN(rowid) FROM webhook_windows)",[])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        runtime
+            .call(store::webhook_windows::flush_due)
+            .await
+            .unwrap(),
+        1
+    );
+    let run = runtime.snapshot().await.unwrap().runs.remove(0);
+    assert!(run.prompt.contains("update"));
+    runtime
+        .command(ReactiveCommand::CancelRun { id: run.id })
+        .await
+        .unwrap();
+    send("backlog".into(), HISTORY_LIMIT).await.unwrap();
+    assert_eq!(
+        runtime.webhook_deliveries(task.id).await.unwrap()[0].outcome,
+        WebhookOutcome::WindowOpened
     );
 }

@@ -3,6 +3,7 @@
 
 use super::{segment_sink::SegmentSink, whisper::DecodedSegment};
 use crate::state::CaptureState;
+use bruhs_models::cloud_speech::Provider as CloudProvider;
 use bruhs_models::{num::ToIntSaturating, TranscriptSegment};
 use reqwest::{header, multipart, redirect, Client, Url};
 use serde::Deserialize;
@@ -22,7 +23,7 @@ pub enum RemoteError {
     Configuration(&'static str),
     #[error("Transcription server request failed: {0}")]
     Request(#[source] reqwest::Error),
-    #[error("Transcription server returned HTTP {0}. Check the endpoint, API key, model, and verbose_json support.")]
+    #[error("Transcription server returned HTTP {0}. Check the endpoint, API key and requested transcription model.")]
     Status(reqwest::StatusCode),
     #[error("Transcription server response: {0}")]
     Response(&'static str),
@@ -79,10 +80,19 @@ impl RemoteProvider {
         }
     }
 
+    pub fn origin(&self) -> Option<String> {
+        self.configuration
+            .as_ref()
+            .ok()?
+            .as_ref()
+            .map(|remote| remote.endpoint.origin().ascii_serialization())
+    }
+
     pub fn prepare(&self, model: &str) -> Result<RemoteJob, RemoteError> {
         match &self.configuration {
             Ok(Some(remote)) => Ok(RemoteJob {
                 remote: remote.clone(),
+                cloud: None,
                 model: model.trim().to_owned(),
             }),
             Ok(None) => Err(RemoteError::Configuration(
@@ -169,6 +179,7 @@ fn remote_client(
 #[derive(Clone)]
 pub struct RemoteJob {
     remote: RemoteClient,
+    cloud: Option<CloudProvider>,
     model: String,
 }
 
@@ -181,6 +192,101 @@ impl std::fmt::Debug for RemoteJob {
 }
 
 impl RemoteJob {
+    pub(crate) fn cloud(
+        provider: CloudProvider,
+        model: String,
+        key: &str,
+    ) -> Result<Self, RemoteError> {
+        let (base, path) = match provider {
+            CloudProvider::OpenAi => ("https://api.openai.com/v1", None),
+            CloudProvider::Xai => ("https://api.x.ai/v1", Some("/v1/stt")),
+            CloudProvider::OpenRouter => ("https://openrouter.ai/api/v1", None),
+        };
+        let mut remote = remote_client(base, Some(key), Duration::from_secs(55))
+            .map_err(RemoteError::Configuration)?;
+        if let Some(path) = path {
+            remote.endpoint.set_path(path);
+        }
+        Ok(Self {
+            remote,
+            cloud: Some(provider),
+            model,
+        })
+    }
+
+    /// Composer dictation needs only plain transcript text. Some compatible
+    /// services support JSON text but do not produce timestamped segments.
+    pub async fn dictate(
+        &self,
+        wav: Vec<u8>,
+        language: Option<&str>,
+    ) -> Result<String, RemoteError> {
+        if wav.len() > MAX_UPLOAD_BYTES {
+            return Err(RemoteError::Response(
+                "This recording exceeds the transcription service’s file limit.",
+            ));
+        }
+        let request = self.remote.client.post(self.remote.endpoint.clone());
+        let request = if self.cloud == Some(CloudProvider::OpenRouter) {
+            use base64::Engine as _;
+            let mut body = serde_json::json!({"model":self.model,"input_audio":{"data":base64::engine::general_purpose::STANDARD.encode(wav),"format":"wav"},"provider":{"zdr":true}});
+            if let Some(language) = language {
+                body["language"] = language.into();
+            }
+            request.json(&body)
+        } else {
+            let audio = multipart::Part::bytes(wav)
+                .file_name("dictation.wav")
+                .mime_str("audio/wav")
+                .map_err(|e| RemoteError::Request(e.without_url()))?;
+            let mut form = multipart::Form::new()
+                .text("model", self.model.clone())
+                .part("file", audio);
+            if self.cloud.is_none() {
+                form = form.text("response_format", "json");
+            }
+            if let Some(language) = language {
+                let field = if self.cloud == Some(CloudProvider::OpenAi) {
+                    "languages[]"
+                } else {
+                    "language"
+                };
+                form = form.text(field, language.to_owned());
+                if self.cloud == Some(CloudProvider::Xai) {
+                    form = form.text("format", "true");
+                }
+            }
+            request.multipart(form)
+        };
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| RemoteError::Request(e.without_url()))?;
+        if !response.status().is_success() {
+            return Err(RemoteError::Status(response.status()));
+        }
+        let mut data = Vec::new();
+        while let Some(bytes) = response
+            .chunk()
+            .await
+            .map_err(|e| RemoteError::Request(e.without_url()))?
+        {
+            if data.len().saturating_add(bytes.len()) > 1024 * 1024 {
+                return Err(RemoteError::Response(
+                    "The transcription response is too large.",
+                ));
+            }
+            data.extend_from_slice(&bytes);
+        }
+        #[derive(Deserialize)]
+        struct Transcript {
+            text: String,
+        }
+        serde_json::from_slice::<Transcript>(&data)
+            .map(|response| response.text)
+            .map_err(|_| RemoteError::Response("Expected a JSON transcription with a text field."))
+    }
+
     pub async fn transcribe(
         self,
         state: Arc<CaptureState>,

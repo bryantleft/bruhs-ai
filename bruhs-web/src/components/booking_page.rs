@@ -48,6 +48,10 @@ pub fn BookingPage(slug: String) -> impl IntoView {
         <div class="flex min-h-full items-start justify-center overflow-auto bg-longan-950 px-4 py-10 text-rambutan-300">
             <div class="w-full max-w-xl rounded-grape bg-longan-900/65 p-5 inset-ring inset-ring-longan-800">
                 <button type="button" class="mb-5 text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Calendar)>{BOOKING_BACK}</button>
+                <Show when=move || !preferences.ready()>
+                    <p role="status">"Booking is paused until scheduling preferences are restored."</p>
+                </Show>
+                <Show when=move || preferences.ready()>
                 {move || match link.get() {
                     None => view! { <div role="status"><p class="text-h3 text-rambutan-100">{BOOKING_UNAVAILABLE_TITLE}</p><p class="mt-2 text-body-sm text-rambutan-500">{BOOKING_UNAVAILABLE_DETAIL}</p></div> }.into_any(),
                     Some(link) => {
@@ -57,6 +61,9 @@ pub fn BookingPage(slug: String) -> impl IntoView {
                         let slot_buttons = candidate_slots.into_iter().map(|(start, end)| {
                             let booked_link = link.clone();
                             view! { <button type="button" aria-label=format!("Book {}", slot_label(start)) class="rounded-seed bg-longan-800 px-3 py-3 text-left text-body-sm text-blueberry-300 inset-ring inset-ring-longan-700 hover:bg-blueberry-500/10 cursor-pointer" on:click=move |_| {
+                                if !preferences.ready() {
+                                    return;
+                                }
                                 let event = booking_event(
                                     &booked_link,
                                     &guest_name.get_untracked(),
@@ -94,6 +101,7 @@ pub fn BookingPage(slug: String) -> impl IntoView {
                         }.into_any()
                     }
                 }}
+                </Show>
             </div>
         </div>
     }

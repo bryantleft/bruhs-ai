@@ -200,6 +200,8 @@ impl VaultFormState {
 pub(super) struct VaultSettings {
     client: ServerClient,
     connections: Entity<crate::views::service_connections::ServiceConnections>,
+    /// Main's secret providers (Credentials before Vault replaced it).
+    sources: Entity<super::secret_source_settings::SourceSettings>,
     listing: VaultListing,
     load: Load,
     busy: VaultBusy,
@@ -249,6 +251,7 @@ impl VaultSettings {
             connections: cx.new(|cx| {
                 crate::views::service_connections::ServiceConnections::new(None, None, cx)
             }),
+            sources: cx.new(|cx| super::secret_source_settings::SourceSettings::new(cx)),
             listing: VaultListing::default(),
             load: Load::Idle,
             busy: VaultBusy::Idle,
@@ -272,6 +275,11 @@ impl VaultSettings {
             #[cfg(test)]
             last_request: None,
         }
+    }
+
+    /// The secret providers shown at the top of the page.
+    pub(super) fn secret_sources(&self) -> Entity<super::secret_source_settings::SourceSettings> {
+        self.sources.clone()
     }
 
     /// A form or a Delete question is open.
@@ -327,6 +335,7 @@ impl VaultSettings {
         }
         self.connections
             .update(cx, |connections, cx| connections.refresh(cx));
+        self.sources.update(cx, |sources, cx| sources.reload(cx));
         self.clear_editor(window, cx);
         self.notice = None;
         self.checked.clear();
@@ -1787,6 +1796,7 @@ impl Render for VaultSettings {
             .flex()
             .flex_col()
             .gap_2()
+            .child(self.sources.clone())
             .child(self.connections.clone())
             .child(
                 div()

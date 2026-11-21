@@ -12,7 +12,7 @@ sleep 1
 "$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=1 --window-size=1200,630 \
   --virtual-time-budget=4000 --screenshot=public/og.png http://127.0.0.1:8492/brand/og.html 2>/dev/null
 "$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=1 --window-size=180,180 \
-  --virtual-time-budget=2000 --screenshot=public/apple-touch-icon.png http://127.0.0.1:8492/brand/touch-icon.html 2>/dev/null
+  --default-background-color=00000000 --virtual-time-budget=2000 --screenshot=public/apple-touch-icon.png http://127.0.0.1:8492/brand/touch-icon.html 2>/dev/null
 WORK=$(mktemp -d)
 trap 'kill $SERVER; rm -rf "$WORK"' EXIT
 for SCALE in 1 2; do

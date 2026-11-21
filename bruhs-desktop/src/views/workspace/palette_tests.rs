@@ -30,6 +30,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestCont
 
 fn task(id: &str, title: &str) -> DesktopWorkItem {
     DesktopWorkItem {
+        source: None,
         id: id.into(),
         title: title.into(),
         project_id: None,

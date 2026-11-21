@@ -76,6 +76,7 @@ fn rich_thread(index: usize, messages: usize) -> PersistedThread {
             "a".repeat(40)
         });
         message.tool_calls = (0..2).map(|tool| super::super::super::DesktopToolCall {
+            text_offset: None,
             id:format!("tool-{index}-{message_index}-{tool}"), tool:"Read".into(),
             input:json!({"path":format!("/synthetic/{index}/{message_index}/{tool}"),"nested":[{"text":"Saved tool input. ".repeat(8)}]}),
             output:Some("Complete tool output, café 👩🏽‍💻 and \"quotes\".\n".repeat(32)),

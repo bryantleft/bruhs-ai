@@ -1,6 +1,6 @@
 //! Roles and models by task: how the user spreads work across models.
 //!
-//! A **role** is a named setup for a thread: a model, a Claude effort, an
+//! A **role** is a named setup for a thread: a model, a native reasoning effort, an
 //! access mode and instructions. An agent starts a thread with a role
 //! (`message_thread`'s `role`), so one thread can orchestrate while others
 //! write or execute on the models the user chose for that work. A project
@@ -43,7 +43,7 @@ pub struct Role {
     /// Model id. `None` keeps the model of the thread that starts it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Claude effort. `None` keeps the user's default. Codex ignores it.
+    /// Claude or Codex effort. `None` keeps the provider's configured default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// Access mode. It can only narrow the mode the user is in; see
@@ -117,7 +117,7 @@ fn known_model(model: Option<String>) -> Option<String> {
     })
 }
 
-/// A Claude effort level, or `None`.
+/// An app-supported native reasoning effort level, or `None`.
 fn known_effort(effort: Option<String>) -> Option<String> {
     effort
         .as_deref()

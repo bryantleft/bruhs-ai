@@ -249,3 +249,76 @@ fn lsof_records_pair_each_process_with_its_directory() {
         ]
     );
 }
+
+#[tokio::test]
+async fn cleanup_protects_local_files_according_to_the_selected_rule() {
+    use KeepWhen::{AnyLocalFiles, TrackedChanges, UncommittedChanges};
+    let host = host();
+    let path = &host.chat;
+    let protected = |rule| crate::git::has_protected_worktree_files(path, rule);
+    // The fixture has one ignored build artifact.
+    assert!(protected(AnyLocalFiles).await.unwrap());
+    assert!(!protected(UncommittedChanges).await.unwrap());
+    std::fs::remove_dir_all(path.join("target")).unwrap();
+    std::fs::create_dir_all(path.join("packages/a/node_modules/pkg")).unwrap();
+    let dependency = path.join("packages/a/node_modules/pkg/index.js");
+    std::fs::write(&dependency, "module").unwrap();
+    assert!(!protected(AnyLocalFiles).await.unwrap());
+    std::fs::write(path.join("notes.txt"), "notes").unwrap();
+    assert!(protected(AnyLocalFiles).await.unwrap());
+    assert!(protected(UncommittedChanges).await.unwrap());
+    assert!(!protected(TrackedChanges).await.unwrap());
+    git(path, &["add", "-f", "packages/a/node_modules/pkg/index.js"]);
+    for rule in [AnyLocalFiles, UncommittedChanges, TrackedChanges] {
+        assert!(protected(rule).await.unwrap());
+    }
+    git(path, &["commit", "-qm", "track a dependency"]);
+    std::fs::write(&dependency, "modified tracked dependency").unwrap();
+    assert!(protected(TrackedChanges).await.unwrap());
+    git(path, &["restore", "."]);
+    let _guard = lock(&host.root).await.unwrap();
+    let cleanup =
+        |branch, rule| cleanup_thread_checkout(&host.root, &host.project, path, branch, rule);
+    assert!(cleanup("bruhs/chat", UncommittedChanges).await.is_err());
+    assert!(cleanup("wrong-branch", TrackedChanges).await.is_err());
+    assert!(path.join("notes.txt").exists());
+    assert!(record(&host.root, path).await.unwrap().is_none());
+    cleanup("bruhs/chat", TrackedChanges).await.unwrap();
+    assert!(!path.exists());
+    restore_branch(&host.root, &host.project, path, "bruhs/chat", None)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(dependency).unwrap(), "module");
+    assert!(!path.join("notes.txt").exists());
+}
+
+#[tokio::test]
+async fn cleanup_rechecks_moved_files_and_recovers_interrupted_inspection() {
+    let host = host();
+    let _guard = lock(&host.root).await.unwrap();
+    // A file appeared between the initial check and the rename.
+    std::fs::write(host.chat.join("local"), "save me").unwrap();
+    let refused = move_and_unregister(
+        &host.project,
+        &host.chat,
+        "bruhs/chat",
+        Some(KeepWhen::UncommittedChanges),
+        None,
+    )
+    .await;
+    assert!(refused.unwrap_err().contains("cleanup protection"));
+    let pending = pending_path(&host.chat).unwrap();
+    std::fs::rename(&host.chat, &pending).unwrap();
+    sweep_staging(pending.parent().unwrap());
+    restore_branch(&host.root, &host.project, &host.chat, "bruhs/chat", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(host.chat.join("local")).unwrap(),
+        "save me"
+    );
+    assert_eq!(
+        git(&host.chat, &["branch", "--show-current"]).trim(),
+        "bruhs/chat"
+    );
+}

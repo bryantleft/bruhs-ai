@@ -20,6 +20,16 @@ fn running(task: &CoordinatedTask) -> bool {
 }
 
 impl CoordinationRuntime {
+    async fn task_worktree_root(&self, id: &ThreadId) -> Result<PathBuf, CoordinationError> {
+        let task = self.task(id).await?;
+        match host::locations::for_path(Path::new(&task.working_path))
+            .map_err(|e| invalid(&e.to_string()))?
+        {
+            Some(path) => Ok(path),
+            None => host::root().map_err(|e| invalid(&e)),
+        }
+    }
+
     /// Where `id`'s worktree stands and whether it can be removed. With
     /// `measure`, the configured meter (see `worktree_meter`) reports what
     /// deleting it frees.
@@ -28,7 +38,7 @@ impl CoordinationRuntime {
         id: &ThreadId,
         measure: bool,
     ) -> Result<TaskWorktree, CoordinationError> {
-        let root = host::root().map_err(|error| invalid(&error))?;
+        let root = self.task_worktree_root(id).await?;
         self.task_worktree_in(id, measure, &root).await
     }
 
@@ -152,6 +162,23 @@ impl CoordinationRuntime {
             .collect()
     }
 
+    /// Scratch cleanup also protects tasks whose project or working directory
+    /// is nested below the folder, including tasks that run in place.
+    pub(crate) async fn uses_scratch_folder(&self, path: &Path) -> bool {
+        let folders: Vec<_> = self
+            .0
+            .data
+            .lock()
+            .await
+            .tasks
+            .values()
+            .flat_map(|task| [task.working_path.clone(), task.project_path.clone()])
+            .collect();
+        folders
+            .iter()
+            .any(|folder| !folder.is_empty() && host::resolve(Path::new(folder)).starts_with(path))
+    }
+
     /// The task whose own worktree is `path`, if any.
     pub async fn task_in_worktree(&self, path: &Path) -> Option<CoordinatedTask> {
         let wanted = host::resolve(path);
@@ -171,7 +198,7 @@ impl CoordinationRuntime {
     /// `RemoveWorktree`: delete `id`'s own worktree folder under bruhs's
     /// worktrees folder and keep its branch.
     pub(super) async fn remove_worktree(&self, id: &ThreadId) -> Result<(), CoordinationError> {
-        let root = host::root().map_err(|error| invalid(&error))?;
+        let root = self.task_worktree_root(id).await?;
         // A spawned task finishes even if the request that asked is dropped
         // midway, so a removal never stops between its steps.
         let (runtime, id) = (self.clone(), id.clone());
@@ -278,7 +305,7 @@ impl CoordinationRuntime {
         if self.removal_of(id).await?.is_none() {
             return Ok(());
         }
-        let root = host::root().map_err(|error| invalid(&error))?;
+        let root = self.task_worktree_root(id).await?;
         self.restore_worktree_in(id, &root).await
     }
 
@@ -375,6 +402,7 @@ mod tests {
     fn task(project: &Path, working: &Path, state: TaskState) -> CoordinatedTask {
         CoordinatedTask {
             id: ThreadId::new_v4(),
+            work_item_origin: None,
             parent_id: None,
             source_context: vec![],
             source_revision: None,
@@ -383,6 +411,8 @@ mod tests {
             project_path: project.to_string_lossy().into_owned(),
             working_path: working.to_string_lossy().into_owned(),
             model: "claude-sonnet-4-5".into(),
+            effort: None,
+            execution_timeout_seconds: None,
             permission_mode: PermissionMode::Plan,
             spec_id: None,
             spec_revision: None,
@@ -503,13 +533,14 @@ mod tests {
             git(&path, &["branch", "--show-current"]).trim(),
             "bruhs/task"
         );
-        assert!(f
-            .runtime
-            .task(&id)
-            .await
-            .unwrap()
-            .removed_worktree
-            .is_none());
+        assert!(
+            f.runtime
+                .task(&id)
+                .await
+                .unwrap()
+                .removed_worktree
+                .is_none()
+        );
         // The staged folder is deleted in the background.
         let parent = f.root.join("p");
         for _ in 0..200 {
@@ -610,25 +641,27 @@ mod tests {
             .remove_worktree_in(&ids[0], &f.root)
             .await
             .unwrap();
-        assert!(f
-            .runtime
-            .task(&ids[1])
-            .await
-            .unwrap()
-            .removed_worktree
-            .is_some());
+        assert!(
+            f.runtime
+                .task(&ids[1])
+                .await
+                .unwrap()
+                .removed_worktree
+                .is_some()
+        );
         f.runtime
             .restore_worktree_in(&ids[1], &f.root)
             .await
             .unwrap();
         assert!(path.join("README.md").is_file());
-        assert!(f
-            .runtime
-            .task(&ids[0])
-            .await
-            .unwrap()
-            .removed_worktree
-            .is_none());
+        assert!(
+            f.runtime
+                .task(&ids[0])
+                .await
+                .unwrap()
+                .removed_worktree
+                .is_none()
+        );
     }
 
     /// Work `git status` cannot see keeps the worktree: an agent's own
@@ -730,13 +763,14 @@ mod tests {
             git(&path, &["branch", "--show-current"]).trim(),
             "bruhs/cut"
         );
-        assert!(f
-            .runtime
-            .task(&id)
-            .await
-            .unwrap()
-            .removed_worktree
-            .is_none());
+        assert!(
+            f.runtime
+                .task(&id)
+                .await
+                .unwrap()
+                .removed_worktree
+                .is_none()
+        );
     }
 
     /// A chat turn that checked a task's worktree out again leaves the task
@@ -765,12 +799,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(view.state, WorktreeState::Present, "{view:?}");
-        assert!(f
-            .runtime
-            .task(&id)
-            .await
-            .unwrap()
-            .removed_worktree
-            .is_none());
+        assert!(
+            f.runtime
+                .task(&id)
+                .await
+                .unwrap()
+                .removed_worktree
+                .is_none()
+        );
     }
 }

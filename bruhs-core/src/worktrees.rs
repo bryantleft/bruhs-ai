@@ -10,11 +10,15 @@
 //! it. A record of each removal is saved before anything moves, so a turn
 //! in that folder, in either app, checks the branch out again.
 
+pub mod locations;
+pub mod retention;
+pub mod scratch;
+
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use bruhs_models::coordination::worktree::{ManagedWorktree, RemovedRecord, WorktreeState};
+use bruhs_models::coordination::worktree::{KeepWhen, ManagedWorktree, RemovedRecord, WorktreeState};
 use bruhs_models::EpochMs;
 use tokio::io::AsyncReadExt;
 
@@ -202,7 +206,7 @@ async fn removed_ancestor(
 /// (a running task, a wake).
 pub async fn check(root: &Path, project: &Path, path: &Path) -> Result<String, String> {
     let programs = programs().await?;
-    check_with(root, project, path, &programs).await
+    check_with(root, project, path, &programs, None).await
 }
 
 /// [`check`] with the programs' working directories read once by the caller.
@@ -211,6 +215,7 @@ async fn check_with(
     project: &Path,
     path: &Path,
     programs: &[Program],
+    keep: Option<KeepWhen>,
 ) -> Result<String, String> {
     if !inside(root, path) {
         return Err("Only worktrees bruhs created can be removed here.".into());
@@ -237,19 +242,23 @@ async fn check_with(
                     .into(),
             );
         }
-        let status = crate::git::status(path)
-            .await
-            .map_err(|error| format!("Git cannot read this worktree: {error}"))?;
-        if !status.dirty.is_empty() {
-            let count = status.dirty.len();
-            return Err(format!(
-                "{count} {} not committed. Commit or discard them first.",
-                if count == 1 {
-                    "change is"
-                } else {
-                    "changes are"
-                }
-            ));
+        if let Some(keep) = keep {
+            check_protected_files(path, keep).await?;
+        } else {
+            let status = crate::git::status(path)
+                .await
+                .map_err(|error| format!("Git cannot read this worktree: {error}"))?;
+            if !status.dirty.is_empty() {
+                let count = status.dirty.len();
+                return Err(format!(
+                    "{count} {} not committed. Commit or discard them first.",
+                    if count == 1 {
+                        "change is"
+                    } else {
+                        "changes are"
+                    }
+                ));
+            }
         }
         if let Some(reason) = nested_checkout(project, path).await {
             return Err(reason);
@@ -274,6 +283,35 @@ async fn check_with(
     Ok(branch)
 }
 
+async fn check_protected_files(path: &Path, keep: KeepWhen) -> Result<(), String> {
+    if crate::git::has_protected_worktree_files(path, keep)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Local files match the cleanup protection rule. {}",
+            keep.description()
+        ));
+    }
+    Ok(())
+}
+
+/// Release an exact thread checkout with its owner's file policy. The caller
+/// holds the root lock and has checked for other thread and task owners.
+pub async fn cleanup_thread_checkout(
+    root: &Path,
+    project: &Path,
+    path: &Path,
+    expected_branch: &str,
+    keep: KeepWhen,
+) -> Result<(), String> {
+    let branch = check_with(root, project, path, &programs().await?, Some(keep)).await?;
+    if branch != expected_branch {
+        return Err("The active branch changed. The worktree was kept.".into());
+    }
+    unregister_with_policy(root, project, path, &branch, Some(keep), None).await
+}
+
 /// Remove the checked worktree at `path`: save its record, move the folder
 /// aside, let Git drop its record, then delete the folder in the
 /// background. A Git refusal moves the folder back and drops the record.
@@ -283,6 +321,17 @@ pub async fn unregister(
     project: &Path,
     path: &Path,
     branch: &str,
+) -> Result<(), String> {
+    unregister_with_policy(root, project, path, branch, None, None).await
+}
+
+async fn unregister_with_policy(
+    root: &Path,
+    project: &Path,
+    path: &Path,
+    branch: &str,
+    keep: Option<KeepWhen>,
+    guard: Option<&retention::Check<'_>>,
 ) -> Result<(), String> {
     let mut records = read_records(root).await?;
     records.insert(
@@ -294,7 +343,7 @@ pub async fn unregister(
         },
     );
     write_records(root, &records)?;
-    let result = move_and_unregister(project, path).await;
+    let result = move_and_unregister(project, path, branch, keep, guard).await;
     if result.is_err() {
         records.remove(&key(path));
         if let Err(error) = write_records(root, &records) {
@@ -304,7 +353,13 @@ pub async fn unregister(
     result
 }
 
-async fn move_and_unregister(project: &Path, path: &Path) -> Result<(), String> {
+async fn move_and_unregister(
+    project: &Path,
+    path: &Path,
+    branch: &str,
+    keep: Option<KeepWhen>,
+    guard: Option<&retention::Check<'_>>,
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         sweep_staging(parent);
     }
@@ -313,7 +368,15 @@ async fn move_and_unregister(project: &Path, path: &Path) -> Result<(), String> 
             .await
             .map_err(|error| format!("Git kept the worktree: {error}"));
     }
-    let staging = staging_path(path)?;
+    let disposable = staging_path(path)?;
+    // Only a folder that Git has released can be swept after a restart.
+    let staging = pending_path(path)?;
+    if staging.try_exists().map_err(|e| e.to_string())? {
+        return Err(format!(
+            "An unfinished cleanup is at {}. Its files were kept.",
+            staging.display()
+        ));
+    }
     std::fs::rename(path, &staging)
         .map_err(|error| format!("Cannot move the worktree aside: {error}"))?;
     // A turn could have started after the check. A program working in the
@@ -324,27 +387,42 @@ async fn move_and_unregister(project: &Path, path: &Path) -> Result<(), String> 
             .map(|program| format!("{program} started working in this folder")),
         Err(error) => Some(error),
     };
-    if let Some(reason) = late {
-        if let Err(undo) = std::fs::rename(&staging, path) {
-            tracing::error!(
-                "worktree {} stayed at {}: {undo}",
-                path.display(),
+    // Git no longer sees this path by its registration name. Recheck the
+    // moved files before unregistering, including edits made since inspection.
+    let late = match (late, keep) {
+        (None, Some(keep)) => match crate::git::current_branch_matches(&staging, branch).await {
+            Ok(true) => check_protected_files(&staging, keep).await.err(),
+            Ok(_) => Some("The checked-out branch changed while cleaning up".to_owned()),
+            Err(e) => Some(e.to_string()),
+        },
+        (other, _) => other,
+    };
+    let late = match (late, guard) {
+        (None, Some(guard)) => guard.validate(&staging).await.err(),
+        (reason, _) => reason,
+    };
+    let refusal = match late {
+        Some(reason) => Some(reason),
+        None => crate::git::remove_worktree(project, path)
+            .await
+            .err()
+            .map(|error| format!("Git kept the worktree: {error}")),
+    };
+    if let Some(reason) = refusal {
+        if path.symlink_metadata().is_ok() || std::fs::rename(&staging, path).is_err() {
+            return Err(format!(
+                "{reason}. Recover the original files at {}.",
                 staging.display()
-            );
+            ));
         }
-        return Err(format!("{reason}. Nothing was removed."));
+        return Err(reason);
     }
-    if let Err(error) = crate::git::remove_worktree(project, path).await {
-        if let Err(undo) = std::fs::rename(&staging, path) {
-            tracing::error!(
-                "worktree {} stayed at {} after Git refused removal: {undo}",
-                path.display(),
-                staging.display()
-            );
-        }
-        return Err(format!("Git kept the worktree: {error}"));
+    // A failed rename can leave recoverable files, never an unverified
+    // checkout in the sweep directory.
+    match std::fs::rename(&staging, &disposable) {
+        Ok(()) => delete_in_background(disposable),
+        Err(error) => tracing::warn!("unused files remain at {}: {error}", staging.display()),
     }
-    delete_in_background(staging);
     Ok(())
 }
 
@@ -364,16 +442,33 @@ pub async fn restore_branch(
                 .into(),
         );
     }
-    if !path.exists()
-        && crate::git::worktree_branch(project, path)
-            .await
-            .ok()
-            .flatten()
-            .is_some()
-    {
-        crate::git::remove_worktree(project, path)
-            .await
-            .map_err(|error| format!("Git kept a stale worktree record: {error}"))?;
+    if !path.exists() {
+        let registered = crate::git::worktree_branch(project, path).await.map_err(|e| e.to_string())?;
+        let pending = pending_path(path)?;
+        if pending.try_exists().map_err(|e| e.to_string())? {
+            if registered.as_ref().and_then(Option::as_deref) != Some(branch)
+                || !pending.symlink_metadata().is_ok_and(|meta| meta.is_dir())
+                || !pending.join(".git").is_file()
+                || !crate::git::current_branch_matches(&pending, branch)
+                    .await
+                    .map_err(|e| e.to_string())?
+                || !crate::git::main_checkout(&pending)
+                    .await
+                    .is_some_and(|main| resolve(&main) == resolve(project))
+            {
+                return Err(format!(
+                    "Inspect the interrupted worktree at {} before restoring.",
+                    pending.display()
+                ));
+            }
+            std::fs::rename(&pending, path).map_err(|e| e.to_string())?;
+            return forget(root, path).await;
+        }
+        if registered.is_some() {
+            crate::git::remove_worktree(project, path)
+                .await
+                .map_err(|error| format!("Git kept a stale worktree record: {error}"))?;
+        }
     }
     crate::git::add_worktree(project, base.unwrap_or(branch), path, branch)
         .await
@@ -403,7 +498,7 @@ pub async fn restore_for_turn(folder: &Path) -> Result<(), String> {
     if folder.exists() {
         return Ok(());
     }
-    let Ok(root) = root() else {
+    let Some(root) = locations::for_path(folder).map_err(|e|e.to_string())? else {
         return Ok(());
     };
     restore_for_turn_in(&root, folder).await
@@ -519,7 +614,7 @@ async fn describe(
     if row.blocked.is_none() {
         row.blocked = match &row.project {
             Some(project) => match programs {
-                Ok(programs) => check_with(root, Path::new(project), folder, programs)
+                Ok(programs) => check_with(root, Path::new(project), folder, programs, None)
                     .await
                     .err(),
                 Err(error) => Some(error.clone()),
@@ -584,7 +679,8 @@ fn working_directories() -> std::io::Result<Vec<Program>> {
         return Ok(Vec::new());
     }
     // -b avoids kernel calls that block on network mounts; -w hides warnings.
-    let mut child = std::process::Command::new("lsof")
+    let program=if cfg!(target_os="macos"){"/usr/sbin/lsof"}else{"lsof"};
+    let mut child = std::process::Command::new(program)
         .args(["-nP", "-b", "-w", "-d", "cwd", "-F", "pcn"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -726,6 +822,14 @@ fn find_git_below(root: &Path) -> Result<Option<PathBuf>, TooManyEntries> {
         }
     }
     Ok(None)
+}
+
+/// The original files stay recoverable here until the last checks and Git succeed.
+fn pending_path(path: &Path) -> Result<PathBuf, String> {
+    let name = path.file_name().ok_or("The worktree path has no name.")?;
+    let mut pending = std::ffi::OsString::from(".bruhs-checking-");
+    pending.push(name);
+    Ok(path.with_file_name(pending))
 }
 
 /// A fresh name beside `path` to move it to before deletion.

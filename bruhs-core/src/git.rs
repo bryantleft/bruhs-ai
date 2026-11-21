@@ -9,6 +9,8 @@
 //! dropped and has a deadline ([`GIT_TIMEOUT`]). Read-only commands run with
 //! `GIT_OPTIONAL_LOCKS=0` so polling never contends for the user's index lock.
 
+pub(crate) mod retention;
+
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
@@ -17,10 +19,20 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
-use bruhs_models::logic::git::{parse_porcelain, BranchName, BranchNameError, GitStatus};
+use bruhs_models::logic::git::{BranchName, BranchNameError, GitStatus, parse_porcelain};
 use bruhs_models::logic::text::truncate_utf8;
 
+mod background;
 mod clone_fs;
+#[cfg(target_os = "macos")]
+pub mod checkout_cache;
+mod project_clone;
+mod project_setup;
+mod thread_worktree;
+pub use thread_worktree::{ThreadCheckout, prepare_thread_worktree};
+pub use project_setup::{run_project_setup,SetupAction};
+pub use background::{fast_forward_clean_default, fetch_project_remote};
+pub use project_clone::clone_project;
 mod cow;
 
 /// Working-tree diffs beyond this size are cut so UIs stay responsive.
@@ -45,6 +57,8 @@ const INHERITED_REPOSITORY_ENV: [&str; 6] = [
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GitError {
+    #[error("Project setup failed: {0}")]
+    ProjectSetup(String),
     /// `git` could not be started (not installed, bad cwd) or its pipes
     /// failed.
     #[error("git could not run: {0}")]
@@ -159,6 +173,10 @@ impl<'a> GitCommand<'a> {
     }
 
     async fn run(self) -> Result<GitOutput, GitError> {
+        self.run_with_timeout(GIT_TIMEOUT).await
+    }
+
+    async fn run_with_timeout(self, deadline: Duration) -> Result<GitOutput, GitError> {
         let mut command = Command::new("git");
         command
             .args(self.args)
@@ -245,9 +263,16 @@ impl<'a> GitCommand<'a> {
         };
         // On timeout the future (and with it the child) is dropped, and
         // `kill_on_drop` kills git.
-        tokio::time::timeout(GIT_TIMEOUT, work)
-            .await
-            .map_err(|_| GitError::TimedOut)?
+        tokio::time::timeout(deadline, work).await.map_err(|_| {
+            if deadline == GIT_TIMEOUT {
+                GitError::TimedOut
+            } else {
+                GitError::Failed(format!(
+                    "Git timed out after {} seconds.",
+                    deadline.as_secs()
+                ))
+            }
+        })?
     }
 }
 
@@ -323,6 +348,67 @@ pub async fn recently_changed_files(dir: &Path, commits: u32) -> Result<Vec<Stri
         .collect())
 }
 
+pub(crate) async fn current_branch_matches(dir: &Path, branch: &str) -> Result<bool, GitError> {
+    let out = git(dir, &["symbolic-ref", "--quiet", "HEAD"]).await?;
+    Ok(out.success() && out.stdout_lossy().trim_end() == format!("refs/heads/{branch}"))
+}
+
+/// Check tracked edits separately from other files so even tracked paths in
+/// node_modules are protected. Any output is enough, including non-UTF-8 names.
+pub(crate) async fn has_protected_worktree_files(
+    dir: &Path,
+    keep: bruhs_models::coordination::worktree::KeepWhen,
+) -> Result<bool, GitError> {
+    use bruhs_models::coordination::worktree::KeepWhen;
+    let tracked = [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+        "--ignore-submodules=none",
+    ];
+    let others: &[&str] = match keep {
+        KeepWhen::TrackedChanges => &[],
+        KeepWhen::UncommittedChanges => &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+            "--directory",
+            "--no-empty-directory",
+        ],
+        KeepWhen::AnyLocalFiles => &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--directory",
+            "--no-empty-directory",
+            "--",
+            ".",
+            ":(exclude,glob)**/node_modules/**",
+        ],
+    };
+    for args in [tracked.as_slice(), others]
+        .into_iter()
+        .filter(|args| !args.is_empty())
+    {
+        let out = GitCommand::new(dir, args).cap_stdout(1).run().await?;
+        if out.capped() {
+            return Ok(true);
+        }
+        if !out.success() {
+            return Err(out.failure());
+        }
+        if !out.stderr.trim().is_empty() {
+            return Err(GitError::Failed(out.stderr));
+        }
+        if !out.stdout.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Branch / ahead-behind / dirty files for the working tree at `dir`.
 pub async fn status(dir: &Path) -> Result<GitStatus, GitError> {
     let out = git(
@@ -348,13 +434,55 @@ const DIFF_ARGS: &[&str] = &["--no-color", "--no-ext-diff"];
 /// unified diff of at most [`DIFF_LIMIT_BYTES`]. Falls back to the index
 /// diff on an unborn HEAD.
 pub async fn diff(dir: &Path) -> Result<GitDiff, GitError> {
-    let head_args = [&["diff", "HEAD"][..], DIFF_ARGS].concat();
+    diff_with_whitespace(dir, false).await
+}
+
+/// Read the working tree using Git’s whitespace comparison when requested.
+pub async fn diff_with_whitespace(
+    dir: &Path,
+    ignore_whitespace: bool,
+) -> Result<GitDiff, GitError> {
+    diff_paths(dir, ignore_whitespace, &[]).await
+}
+
+pub(crate) async fn diff_paths(
+    dir: &Path,
+    ignore_whitespace: bool,
+    files: &[String],
+) -> Result<GitDiff, GitError> {
+    let mut paths = vec!["--"];
+    paths.extend(files.iter().map(String::as_str));
+    let extra: &[&str] = if ignore_whitespace {
+        &["--ignore-all-space"]
+    } else {
+        &[]
+    };
+    let conversion: &[&str] = if files.is_empty() {
+        &[]
+    } else {
+        &["--no-textconv"]
+    };
+    let head_args = [
+        &["--literal-pathspecs", "diff", "HEAD"][..],
+        DIFF_ARGS,
+        conversion,
+        extra,
+        &paths,
+    ]
+    .concat();
     let mut out = GitCommand::new(dir, &head_args)
         .cap_stdout(DIFF_LIMIT_BYTES)
         .run()
         .await?;
     if !out.capped() && !out.success() {
-        let index_args = [&["diff"][..], DIFF_ARGS].concat();
+        let index_args = [
+            &["--literal-pathspecs", "diff"][..],
+            DIFF_ARGS,
+            conversion,
+            extra,
+            &paths,
+        ]
+        .concat();
         out = GitCommand::new(dir, &index_args)
             .cap_stdout(DIFF_LIMIT_BYTES)
             .run()
@@ -368,14 +496,42 @@ pub async fn diff(dir: &Path) -> Result<GitDiff, GitError> {
         return Ok(finish(bytes, true));
     }
 
-    let (files, mut truncated) = untracked_files(dir).await?;
+    let (files, mut truncated) = untracked_files(dir, &paths).await?;
     if !files.is_empty() {
         let budget = DIFF_LIMIT_BYTES - bytes.len();
-        let (mut more, complete) = untracked_diff(dir, &files, budget).await?;
+        let (mut more, complete) = untracked_diff(dir, &files, budget, conversion).await?;
         truncated |= !complete || more.len() > budget;
         bytes.append(&mut more);
     }
     Ok(finish(bytes, truncated))
+}
+
+/// Bounded merge-base diff for a pull request draft, including large changes.
+pub(crate) async fn committed_diff(
+    dir: &Path,
+    base: &str,
+    head: &str,
+) -> Result<GitDiff, GitError> {
+    let range = format!("{base}...{head}");
+    let output = GitCommand::new(
+        dir,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            &range,
+            "--",
+        ],
+    )
+    .cap_stdout(DIFF_LIMIT_BYTES)
+    .run()
+    .await?;
+    if !output.capped() && !output.success() {
+        return Err(output.failure());
+    }
+    let truncated = output.capped();
+    Ok(finish(output.stdout, truncated))
 }
 
 /// Lossy-decode `bytes`, cut to [`DIFF_LIMIT_BYTES`] on a char boundary.
@@ -393,8 +549,9 @@ fn finish(bytes: Vec<u8>, truncated: bool) -> GitDiff {
 /// there were more.
 /// Paths are the raw bytes git printed (not decoded), so names that are not
 /// UTF-8 reach `git add` unchanged.
-async fn untracked_files(dir: &Path) -> Result<(Vec<Vec<u8>>, bool), GitError> {
-    let out = git(dir, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+async fn untracked_files(dir: &Path, paths: &[&str]) -> Result<(Vec<Vec<u8>>, bool), GitError> {
+    let args = [&["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z"][..], paths].concat();
+    let out = git(dir, &args).await?;
     if !out.success() {
         return Err(out.failure());
     }
@@ -487,6 +644,7 @@ async fn untracked_diff(
     dir: &Path,
     files: &[Vec<u8>],
     budget: usize,
+    conversion: &[&str],
 ) -> Result<(Vec<u8>, bool), GitError> {
     let index = ScratchIndex::new();
     let mut complete = true;
@@ -520,7 +678,7 @@ async fn untracked_diff(
             return Ok((Vec::new(), complete));
         }
     }
-    let diff_args = [&["diff"][..], DIFF_ARGS].concat();
+    let diff_args = [&["diff"][..], DIFF_ARGS, conversion].concat();
     let out = GitCommand::new(dir, &diff_args)
         .env("GIT_INDEX_FILE", index.0.as_os_str())
         .cap_stdout(budget)
@@ -590,17 +748,24 @@ pub async fn checkout(dir: &Path, branch: &str) -> Result<(), GitError> {
 
 /// Bruhs data directory `worktrees/`, where new worktrees are created.
 pub fn worktrees_root() -> Result<PathBuf, GitError> {
-    directories::ProjectDirs::from("dev", "bruhs", "bruhs-ai")
-        .map(|dirs| dirs.data_dir().join("worktrees"))
-        .ok_or_else(|| GitError::Failed("no data directory for worktrees".into()))
+    crate::worktrees::locations::active().map_err(|e| GitError::Failed(e.to_string()))
 }
 
 /// Destination for a worktree of `project` on `branch`.
 pub fn worktree_dest(project: &Path, branch: &str) -> Result<PathBuf, GitError> {
     let name = project.to_string_lossy();
-    Ok(worktrees_root()?
+    let root = worktrees_root()?;
+    let dest = root
         .join(bruhs_models::logic::run_place::worktree_project_dir(&name))
-        .join(bruhs_models::logic::run_place::worktree_dir_name(branch)))
+        .join(bruhs_models::logic::run_place::worktree_dir_name(
+            BranchName::try_from(branch)?.as_str(),
+        ));
+    if !resolve(&dest).starts_with(resolve(&root)) {
+        return Err(GitError::Failed(
+            "The worktree path points outside its managed folder.".into(),
+        ));
+    }
+    Ok(dest)
 }
 
 /// Add a worktree of `repo` at `dest` on `branch`, starting from `base`
@@ -619,6 +784,29 @@ pub async fn add_worktree(
     dest: &Path,
     branch: &str,
 ) -> Result<(), GitError> {
+    add_worktree_with_preferences(repo, base, dest, branch, Default::default()).await
+}
+
+/// Create a checkout from the chosen starting point and populate its submodules.
+/// Retrying after a submodule failure resumes initialization in the same checkout.
+pub async fn add_worktree_with_preferences(
+    repo: &Path,
+    base: &str,
+    dest: &Path,
+    branch: &str,
+    prefs: bruhs_models::logic::run_place::WorktreePreferences,
+) -> Result<(), GitError> {
+    add_worktree_inner(repo, base, dest, branch, prefs, None).await
+}
+
+async fn add_worktree_inner(
+    repo: &Path,
+    base: &str,
+    dest: &Path,
+    branch: &str,
+    prefs: bruhs_models::logic::run_place::WorktreePreferences,
+    new_thread: Option<&str>,
+) -> Result<(), GitError> {
     let branch = BranchName::try_from(branch)?;
     let base = BranchName::try_from(base)?;
     let base_ref = format!("refs/heads/{base}");
@@ -630,11 +818,11 @@ pub async fn add_worktree(
     }
 
     if dest.exists() {
-        let head = GitCommand::new(dest, &["rev-parse", "--abbrev-ref", "HEAD"])
-            .run()
-            .await?;
-        if head.success() && head.stdout_lossy().trim() == branch.as_str() {
-            return Ok(());
+        if new_thread.is_none()
+            && resolve(repo) != resolve(dest)
+            && worktree_branch(repo, dest).await?.flatten().as_deref() == Some(branch.as_str())
+        {
+            return initialize_worktree_submodules(dest, prefs.submodules).await;
         }
         return Err(GitError::Failed(
             "worktree destination already exists".into(),
@@ -650,28 +838,31 @@ pub async fn add_worktree(
     let existing = GitCommand::new(repo, &["rev-parse", "--verify", "--quiet", &branch_ref])
         .run()
         .await?;
-    let out = if existing.success() {
-        GitCommand::new(repo, &["worktree", "add", &dest_string, branch.as_str()])
-            .run()
-            .await?
+    let create_branch = !existing.success() || new_thread.is_some();
+    let remote = if create_branch && prefs.start_from_remote {
+        remote_worktree_base(repo, base.as_str()).await?
     } else {
-        GitCommand::new(
-            repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                branch.as_str(),
-                &dest_string,
-                base.as_str(),
-            ],
-        )
-        .run()
-        .await?
+        None
     };
-    if !out.success() {
-        return Err(out.failure());
+    let start = if create_branch {
+        remote.as_deref().unwrap_or(base.as_str())
+    } else {
+        branch.as_str()
+    };
+    let new_branch = create_branch.then_some(branch.as_str());
+    #[cfg(target_os = "macos")]
+    let cached = checkout_cache::try_checkout(repo, dest, new_branch, start).await?;
+    #[cfg(not(target_os = "macos"))]
+    let cached = false;
+    if !cached {
+        register_checkout(repo, &dest_string, new_branch, start, false).await?;
     }
+    #[cfg(target_os = "macos")]
+    checkout_cache::warm_after_checkout(dest);
+    if let Some(identity) = new_thread {
+        thread_worktree::write_owner(dest, branch.as_str(), identity).await?;
+    }
+    initialize_worktree_submodules(dest, prefs.submodules).await?;
     let seeded = seed_worktree_build_dirs(repo, dest).await;
     if !seeded.is_empty() {
         tracing::info!(
@@ -681,6 +872,138 @@ pub async fn add_worktree(
         );
     }
     Ok(())
+}
+
+async fn register_checkout(
+    repo: &Path,
+    destination: &str,
+    new_branch: Option<&str>,
+    start: &str,
+    no_checkout: bool,
+) -> Result<(), GitError> {
+    let mut args = vec!["worktree", "add"];
+    if no_checkout {
+        args.push("--no-checkout");
+    }
+    if let Some(branch) = new_branch {
+        args.extend(["-b", branch]);
+    }
+    args.extend(["--", destination, start]);
+    let out = git(repo, &args).await?;
+    if out.success() { Ok(()) } else { Err(out.failure()) }
+}
+
+async fn initialize_worktree_submodules(
+    checkout: &Path,
+    mode: bruhs_models::logic::run_place::WorktreeSubmodules,
+) -> Result<(), GitError> {
+    use bruhs_models::logic::run_place::WorktreeSubmodules;
+    let args: &[&str] = match mode {
+        WorktreeSubmodules::None => return Ok(()),
+        WorktreeSubmodules::TopLevel => &["submodule", "update", "--init"],
+        WorktreeSubmodules::Recursive => &["submodule", "update", "--init", "--recursive"],
+    };
+    let update = GitCommand::new(checkout, args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .run()
+        .await?;
+    if update.success() {
+        Ok(())
+    } else {
+        Err(update.failure())
+    }
+}
+
+/// Resolve the tracked branch on the remote (or the same name on origin).
+/// A missing remote branch falls back to the local base. A transport error
+/// is reported so the user can retry without silently branching from old code.
+async fn remote_worktree_base(repo: &Path, base: &str) -> Result<Option<String>, GitError> {
+    let local_ref = format!("refs/heads/{base}");
+    let upstream = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:remotename)%09%(upstream:remoteref)",
+            &local_ref,
+        ],
+    )
+    .await?;
+    if !upstream.success() {
+        return Err(upstream.failure());
+    }
+    let text = upstream.stdout_lossy();
+    let fallback = format!("refs/heads/{base}");
+    let (remote, remote_ref) = text
+        .trim_end()
+        .split_once('\t')
+        .filter(|(remote, reference)| !remote.is_empty() && reference.starts_with("refs/heads/"))
+        .unwrap_or(("origin", fallback.as_str()));
+    if remote == "." {
+        return Ok(Some(remote_ref.to_owned()));
+    }
+    let remotes = git(repo, &["remote"]).await?;
+    if !remotes.success() {
+        return Err(remotes.failure());
+    }
+    if !remotes.stdout_lossy().lines().any(|entry| entry == remote) {
+        return Ok(None);
+    }
+    let advertised = GitCommand::new(
+        repo,
+        &[
+            "ls-remote",
+            "--exit-code",
+            "--heads",
+            "--",
+            remote,
+            remote_ref,
+        ],
+    )
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .run()
+    .await?;
+    if advertised.status.and_then(|s| s.code()) == Some(2) {
+        return Ok(None);
+    }
+    if !advertised.success() {
+        return Err(advertised.failure());
+    }
+    let revision = advertised
+        .stdout_lossy()
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .find(|(oid, reference)| {
+            *reference == remote_ref
+                && matches!(oid.len(), 40 | 64)
+                && oid.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .map(|(oid, _)| oid.to_owned())
+        .ok_or_else(|| {
+            GitError::Failed("Git did not return the requested remote revision.".into())
+        })?;
+    if !git(repo, &["cat-file", "-e", &format!("{revision}^{{commit}}")])
+        .await?
+        .success()
+    {
+        let fetch = GitCommand::new(
+            repo,
+            &[
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--",
+                remote,
+                remote_ref,
+            ],
+        )
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .run()
+        .await?;
+        if !fetch.success() {
+            return Err(fetch.failure());
+        }
+    }
+    Ok(Some(revision))
 }
 
 /// Clone the build folders of `repo`'s checkout into the checked-out
@@ -702,12 +1025,8 @@ pub async fn seed_worktree_build_dirs(repo: &Path, dest: &Path) -> Vec<String> {
 /// `git worktree list --porcelain -z`. `Ok(None)` when Git does not list
 /// that worktree; `Ok(Some(None))` when its HEAD is detached.
 pub async fn worktree_branch(repo: &Path, path: &Path) -> Result<Option<Option<String>>, GitError> {
-    let out = git(repo, &["worktree", "list", "--porcelain", "-z"]).await?;
-    if !out.success() {
-        return Err(out.failure());
-    }
     let wanted = resolve(path);
-    Ok(parse_worktree_list(&out.stdout)
+    Ok(registered_worktrees(repo).await?
         .into_iter()
         .find(|(listed, _)| resolve(listed) == wanted)
         .map(|(_, branch)| branch))
@@ -744,31 +1063,32 @@ pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> 
 /// The main checkout a linked worktree at `worktree` belongs to: the parent
 /// of the common Git directory. `None` for a bare repository or no repository.
 pub async fn main_checkout(worktree: &Path) -> Option<PathBuf> {
-    let out = git(
-        worktree,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )
-    .await
-    .ok()?;
-    if !out.success() {
-        return None;
-    }
-    let common = PathBuf::from(out.stdout_lossy().trim());
+    let common = common_git_dir(worktree).await.ok()?;
     (common.file_name()? == ".git")
         .then(|| common.parent().map(Path::to_path_buf))
         .flatten()
 }
 
+/// Shared repository identity, including when a working copy uses a separate Git directory.
+pub(crate) async fn common_git_dir(checkout: &Path) -> Result<PathBuf, GitError> {
+    let out = git(checkout, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
+    if !out.success() {
+        return Err(out.failure());
+    }
+    Ok(PathBuf::from(out.stdout_lossy().trim()))
+}
+
 /// Every worktree of `repo`, the main one included.
 pub async fn worktree_paths(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
+    Ok(registered_worktrees(repo).await?.into_iter().map(|(path, _)| path).collect())
+}
+
+pub(crate) async fn registered_worktrees(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {
     let out = git(repo, &["worktree", "list", "--porcelain", "-z"]).await?;
     if !out.success() {
         return Err(out.failure());
     }
-    Ok(parse_worktree_list(&out.stdout)
-        .into_iter()
-        .map(|(path, _)| path)
-        .collect())
+    Ok(parse_worktree_list(&out.stdout))
 }
 
 /// `(path, branch)` per entry of `git worktree list --porcelain -z`.
@@ -901,11 +1221,11 @@ pub async fn restore_worktree(dir: &Path, tree: &str) -> Result<(), GitError> {
 /// that canonicalizes outside that root, is refused. Snapshot and restore
 /// do not call this, so a temp repository can still be tested.
 pub fn ensure_bruhs_worktree(path: &Path) -> Result<PathBuf, GitError> {
-    let root = worktrees_root()?;
-    std::fs::create_dir_all(&root).map_err(|error| GitError::Failed(error.to_string()))?;
-    let root = std::fs::canonicalize(&root).map_err(|error| GitError::Failed(error.to_string()))?;
-    let path = std::fs::canonicalize(path).map_err(|error| GitError::Failed(error.to_string()))?;
-    if path.starts_with(&root) {
+    let path = std::fs::canonicalize(path).map_err(|e| GitError::Failed(e.to_string()))?;
+    if crate::worktrees::locations::for_path(&path)
+        .map_err(|e| GitError::Failed(e.to_string()))?
+        .is_some()
+    {
         Ok(path)
     } else {
         Err(GitError::Failed("path is not a bruhs worktree".into()))
@@ -915,16 +1235,16 @@ pub fn ensure_bruhs_worktree(path: &Path) -> Result<PathBuf, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bruhs_models::logic::git::{is_valid_branch, DirtyFile, FileStatus};
+    use bruhs_models::logic::git::{DirtyFile, FileStatus, is_valid_branch};
 
     /// A throwaway repository with one commit on `main`. Git runs with an
     /// isolated config so the user's settings and hooks never apply.
-    struct Repo {
+    pub(super) struct Repo {
         dir: tempfile::TempDir,
     }
 
     impl Repo {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let repo = Self {
                 dir: tempfile::tempdir().unwrap(),
             };
@@ -935,11 +1255,11 @@ mod tests {
             repo
         }
 
-        fn path(&self) -> &Path {
+        pub(super) fn path(&self) -> &Path {
             self.dir.path()
         }
 
-        fn git(&self, args: &[&str]) -> String {
+        pub(super) fn git(&self, args: &[&str]) -> String {
             let out = std::process::Command::new("git")
                 .args([
                     "-c",
@@ -1057,6 +1377,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn worktree_settings_follow_the_latest_upstream_even_when_its_name_differs() {
+        use bruhs_models::logic::run_place::WorktreePreferences;
+        let repo = Repo::new();
+        let remote = Repo::new();
+        remote.git(&["switch", "-qc", "trunk"]);
+        repo.git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        repo.git(&["fetch", "origin"]);
+        repo.git(&["branch", "--set-upstream-to=origin/trunk", "main"]);
+        remote.write("upstream.txt", "remote only");
+        remote.git(&["add", "upstream.txt"]);
+        remote.git(&["commit", "-qm", "upstream"]);
+        let output = tempfile::tempdir().unwrap();
+        let dest = output.path().join("thread");
+        add_worktree_with_preferences(
+            repo.path(),
+            "main",
+            &dest,
+            "bruhs/thread",
+            WorktreePreferences {
+                start_from_remote: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dest.join("upstream.txt")).unwrap(),
+            "remote only"
+        );
+        assert!(!repo.path().join("upstream.txt").exists());
+        let local = Repo::new();
+        let local_dest = output.path().join("offline");
+        add_worktree_with_preferences(
+            local.path(),
+            "main",
+            &local_dest,
+            "bruhs/local",
+            WorktreePreferences {
+                start_from_remote: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(local_dest.join("README.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn worktree_settings_retry_submodule_initialization_in_the_same_checkout() {
+        use bruhs_models::logic::run_place::{WorktreePreferences, WorktreeSubmodules};
+        let sub = Repo::new();
+        let repo = Repo::new();
+        repo.git(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "--",
+            sub.path().to_str().unwrap(),
+            "module",
+        ]);
+        repo.git(&["commit", "-qm", "submodule"]);
+        let output = tempfile::tempdir().unwrap();
+        let dest = output.path().join("thread");
+        add_worktree(repo.path(), "main", &dest, "bruhs/module")
+            .await
+            .unwrap();
+        assert!(!dest.join("module/README.md").exists());
+        // A registered checkout can resume using an existing local clone without
+        // changing Git’s security policy for submodule transports.
+        repo.git(&[
+            "clone",
+            "--",
+            sub.path().to_str().unwrap(),
+            dest.join("module").to_str().unwrap(),
+        ]);
+        add_worktree_with_preferences(
+            repo.path(),
+            "main",
+            &dest,
+            "bruhs/module",
+            WorktreePreferences {
+                submodules: WorktreeSubmodules::Recursive,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(dest.join("module/README.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn working_tree_whitespace_preference_preserves_files_with_real_changes() {
+        let repo = Repo::new();
+        repo.write("README.md", "  hello  \n");
+        repo.write("new.txt", "new content\n");
+        let shown = diff(repo.path()).await.unwrap();
+        assert!(shown.diff.contains("README.md"));
+        let hidden = diff_with_whitespace(repo.path(), true).await.unwrap();
+        assert!(!hidden.diff.contains("README.md"));
+        assert!(hidden.diff.contains("+new content"));
+    }
+
+    #[tokio::test]
+    async fn writer_diff_reads_only_the_literal_selected_paths_and_keeps_the_index() {
+        let repo = Repo::new();
+        repo.write("README.md", "included tracked change");
+        repo.write("notes[1].md", "included untracked change");
+        repo.write("notes1.md", "excluded glob match");
+        repo.write("other.md", "excluded file");
+        let before = repo.git(&["write-tree"]);
+        let patch = diff_paths(
+            repo.path(),
+            false,
+            &["README.md".into(), "notes[1].md".into()],
+        )
+        .await
+        .unwrap();
+        assert!(patch.diff.contains("included tracked change"));
+        assert!(patch.diff.contains("included untracked change"));
+        assert!(!patch.diff.contains("excluded"));
+        assert_eq!(repo.git(&["write-tree"]), before);
+    }
+
+    #[tokio::test]
     async fn diff_includes_tracked_and_untracked_changes_without_touching_the_index() {
         let repo = Repo::new();
         repo.write("README.md", "edited\n");
@@ -1088,7 +1533,7 @@ mod tests {
         let repo = Repo::new();
         repo.write("kept.txt", "kept\n");
         let files = vec![b"kept.txt".to_vec(), b"gone.txt".to_vec()];
-        let (out, complete) = untracked_diff(repo.path(), &files, DIFF_LIMIT_BYTES)
+        let (out, complete) = untracked_diff(repo.path(), &files, DIFF_LIMIT_BYTES, &[])
             .await
             .unwrap();
         let out = String::from_utf8(out).unwrap();
@@ -1097,7 +1542,7 @@ mod tests {
         assert!(!complete);
 
         // Nothing left at all: an empty, incomplete untracked part.
-        let (out, complete) = untracked_diff(repo.path(), &[b"gone.txt".to_vec()], 1024)
+        let (out, complete) = untracked_diff(repo.path(), &[b"gone.txt".to_vec()], 1024, &[])
             .await
             .unwrap();
         assert!(out.is_empty());
@@ -1122,7 +1567,7 @@ mod tests {
         if std::fs::write(&path, "x\n").is_err() {
             return; // filesystem only allows UTF-8 names
         }
-        let (files, more) = untracked_files(repo.path()).await.unwrap();
+        let (files, more) = untracked_files(repo.path(), &[]).await.unwrap();
         assert!(!more);
         assert_eq!(files, vec![name.to_vec()]);
         let got = diff(repo.path()).await.unwrap();
@@ -1275,6 +1720,14 @@ mod tests {
             Err(GitError::InvalidBranch(_))
         ));
 
+        let unrelated = Repo::new();
+        for occupied in [repo.path(), unrelated.path()] {
+            assert!(
+                add_worktree(repo.path(), "main", occupied, "main")
+                    .await
+                    .is_err()
+            );
+        }
         let occupied = dest_root.path().join("occupied");
         std::fs::create_dir_all(&occupied).unwrap();
         assert!(matches!(
@@ -1442,9 +1895,11 @@ mod tests {
         assert_eq!(repo.git(&["write-tree"]).trim(), tree);
 
         assert!(restore_worktree(repo.path(), "nope").await.is_err());
-        assert!(restore_worktree(repo.path(), &"a".repeat(40))
-            .await
-            .is_err());
+        assert!(
+            restore_worktree(repo.path(), &"a".repeat(40))
+                .await
+                .is_err()
+        );
         assert_eq!(repo.read("README.md"), "edited\n");
     }
 

@@ -107,11 +107,13 @@ impl PersistentContext {
     /// (Metal init). Subsequent inference via [`Self::transcribe`] skips
     /// this overhead.
     pub fn new(model_path: &Path) -> Result<Self, WhisperError> {
-        let ctx = WhisperContext::new_with_params(
-            &model_path.to_string_lossy(),
-            WhisperContextParameters::default(),
-        )
-        .map_err(|e| WhisperError::Init(format!("{e}")))?;
+        Self::with_hardware(model_path, WhisperContextParameters::default().use_gpu)
+    }
+    pub fn with_hardware(model_path: &Path, use_gpu: bool) -> Result<Self, WhisperError> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(use_gpu);
+        let ctx = WhisperContext::new_with_params(&model_path.to_string_lossy(), params)
+            .map_err(|e| WhisperError::Init(format!("{e}")))?;
         Ok(Self { ctx })
     }
 

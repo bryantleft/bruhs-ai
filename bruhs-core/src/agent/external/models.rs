@@ -222,7 +222,7 @@ printf 'Available models\n\nauto - Auto (current, default)\ngpt-5 - GPT-5\n\nTip
 
     /// A wrapper script that does not `exec` leaves its child running; the
     /// timeout kills the whole process group.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_hung_listing_times_out_and_kills_what_it_started() {
         let directory = tempfile::tempdir().unwrap();
         let pid_file = directory.path().join("child.pid");
@@ -230,9 +230,29 @@ printf 'Available models\n\nauto - Auto (current, default)\ngpt-5 - GPT-5\n\nTip
             &directory,
             &format!("sleep 30 &\necho $! > '{}'\nwait", pid_file.display()),
         );
-        let listed = list_cursor(program.as_os_str(), Duration::from_millis(500)).await;
+        let timeout = Duration::from_millis(500);
+        let mut listing = Box::pin(list_cursor(program.as_os_str(), timeout));
+        // Start the real child without letting virtual time outrun OS startup.
+        assert!(matches!(
+            futures_util::poll!(&mut listing),
+            std::task::Poll::Pending
+        ));
+        let started = Instant::now();
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+                if pid.trim().parse::<u32>().is_ok_and(|pid| pid > 0) {
+                    break pid;
+                }
+            }
+            assert!(
+                started.elapsed() < LIST_TIMEOUT,
+                "The owned listing fixture did not start; cannot verify child cleanup."
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        tokio::time::advance(timeout).await;
+        let listed = listing.await;
         assert!(listed.error.unwrap().contains("did not list models"));
-        let pid = std::fs::read_to_string(&pid_file).unwrap();
         let alive = || {
             std::process::Command::new("kill")
                 .args(["-0", pid.trim()])

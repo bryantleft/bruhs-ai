@@ -29,6 +29,7 @@ fn ready_task(id: &str, title: &str) -> DesktopWorkItem {
         priority: DesktopPriority::High,
         due_date: None,
         planning: WorkItemPlanning::default(),
+        source: None,
         updated_at: EpochMs::UNIX_EPOCH,
     }
 }

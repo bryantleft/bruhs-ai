@@ -208,8 +208,8 @@ fn computer_is_its_own_command_and_survives_an_access_save() {
     )
     .unwrap();
     assert!(!state.computer, "an older service's bruh reads as off");
-    assert!(computer_ready(3) && !computer_ready(2) && computer_ready(CREW_PROTOCOL));
     assert_eq!(COMPUTER_PROTOCOL, 3);
+    assert!(computer_ready(3) && !computer_ready(2) && computer_ready(CREW_PROTOCOL));
 
     let agent = crate::reactive::ReactiveAgent {
         id: "a".into(),
@@ -304,6 +304,15 @@ fn set_vault_is_its_own_command_and_never_sent_to_an_older_service() {
         "an older service's bruh has no grants"
     );
     assert!(vault_ready(VAULT_PROTOCOL) && !vault_ready(COMPUTER_PROTOCOL));
+    // A service at main's protocol 5 has neither the vault nor apps, and
+    // no two features share a number.
+    assert_eq!(PRE_VAULT_PROTOCOL, 5);
+    assert_eq!(VAULT_PROTOCOL, 6);
+    assert!(!vault_ready(PRE_VAULT_PROTOCOL) && !apps_ready(PRE_VAULT_PROTOCOL));
+    assert_eq!(
+        vault_reason(Some(PRE_VAULT_PROTOCOL)),
+        Some(ServiceNotice::ServingOld.message())
+    );
     assert!(vault_ready(CREW_PROTOCOL));
     assert_eq!(
         vault_reason(Some(3)),

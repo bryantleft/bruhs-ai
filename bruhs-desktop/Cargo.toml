@@ -34,13 +34,20 @@ workspace = true
 # SIGTERM for the bundled helpers on quit: bruhs-server shuts down cleanly on
 # it; anything still running after 5 s is killed.
 libc = "0.2"
+sysinfo = { version = "0.31.4", default-features = false, features = ["system"] }
 alacritty_terminal = "0.26"
 async-channel = "2"
+base64 = "0.22"
+unicode-segmentation = "1"
+regex = "1"
 bruhs-core = { workspace = true }
 bruhs-models = { workspace = true }
 bruhs-ui = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 cpal = { workspace = true }
+csscolorparser = "0.9.2"
+zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2"] }
+serde_json_lenient = "0.2.4"
 directories = { workspace = true }
 futures-util = { workspace = true, features = ["sink", "std"] }
 # gpui comes from upstream zed, pinned once in the root Cargo.toml
@@ -62,6 +69,7 @@ tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", 
 tokio-stream = { workspace = true }
 # The live view's socket; plain ws:// to the local server, so no TLS.
 tokio-tungstenite = "0.29"
+tempfile = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
@@ -70,13 +78,14 @@ zeroize = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
+core-foundation = "0.10"
 # Embedded preview (WKWebView as a child of the gpui window).
 wry = { version = "0.55", default-features = false, features = ["fullscreen"] }
 # Backdrop blur behind modal scrims (a Core Image filter on a native layer
 # above the Metal one).
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics"] }
-objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics", "NSWindow", "NSAccessibilityProtocols", "NSApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSUndoManager", "NSDateFormatter", "NSLocale"] }
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -96,8 +105,10 @@ gdkx11 = "0.18"
 x11-dl = "2.21"
 raw-window-handle = "0.6"
 
+[build-dependencies]
+cc = "1"
+
 [dev-dependencies]
 bruhs-core = { workspace = true, features = ["test-support"] }
 bruhs-ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
-tempfile = { workspace = true }

@@ -1,0 +1,19 @@
+{
+  "modules": [
+    "huey.tests.test_api",
+    "huey.tests.test_asyncio",
+    "huey.tests.test_crontab",
+    "huey.tests.test_registry",
+    "huey.tests.test_serializer",
+    "huey.tests.test_signals",
+    "huey.tests.test_priority",
+    "huey.tests.test_immediate",
+    "huey.tests.test_utils",
+    "huey.tests.test_storage.TestSqliteStorage",
+    "huey.tests.test_storage.TestMemoryStorage"
+  ],
+  "scope": "Pristine standard-library core API, asyncio, crontab, registry, serialization, signals, priority, immediate, utils, SQLite and Memory regressions. Slow-marked selected tests are enabled. Redis/backend-wrapper matrices and optional integrations, consumer-wide tests and other external-service backends are excluded.",
+  "exclude_tests": {
+    "huey.tests.test_utils.TestFileLock.test_construct_preserves_lock_file": "Hard-coded /tmp/huey-test-filelock is outside the grading write boundary. Keep the upstream body unchanged; exclude this unrelated FileLock case before model access."
+  }
+}

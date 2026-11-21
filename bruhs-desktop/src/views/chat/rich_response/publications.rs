@@ -96,6 +96,7 @@ mod tests {
         let mut message = Message::assistant_streaming(1, None);
         message.state = TurnState::Finished;
         message.tool_calls.push(DesktopToolCall {
+            text_offset: None,
             id: "tool".into(),
             tool: "mcp__bruhs_artifacts__publish_artifact".into(),
             input: serde_json::Value::Null,

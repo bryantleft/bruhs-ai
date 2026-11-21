@@ -68,8 +68,25 @@ step mobile mobile_checks
 # Harness benchmark fixtures: each hidden check fails on the starting repo
 # and passes on its reference solution. No agent runs, so no tokens.
 step bench-check sh -c 'bash -n scripts/task-bench.sh scripts/token-bench.sh && scripts/task-bench.sh --self-check'
+step bench-integrity python3 -m unittest discover -s bench/tests
+
+workbench_checks() {
+  cargo build -p bruhs-server --locked --message-format=json-render-diagnostics >"$logs/workbench-build.json" || return
+  local executable
+  executable="$(python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    artifacts = [json.loads(line) for line in handle]
+print(next(item["executable"] for item in artifacts
+           if item.get("reason") == "compiler-artifact"
+           and item.get("target", {}).get("name") == "bruhs-server"
+           and item.get("executable")))
+' "$logs/workbench-build.json")" || return
+  python3 bench/workbench/run.py --server "$executable"
+}
 
 if [ "$quick" -eq 0 ]; then
+  step workbench-flow workbench_checks
   step wasm-build cargo build -p bruhs-web --target wasm32-unknown-unknown --locked
   step desktop-release cargo check -p bruhs-desktop --release --locked
   step rustdoc env RUSTDOCFLAGS="-D warnings" \

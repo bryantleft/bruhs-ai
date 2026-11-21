@@ -21,7 +21,7 @@
 # BENCH_AIDER_MODEL, BENCH_OPENCODE_MODEL, BENCH_T3_BIN (default `t3` on PATH,
 # else ~/.t3/bin/t3), BENCH_T3_PORT (its isolated server, default 3998),
 # BENCH_CLAUDE_ARGS / BENCH_CODEX_ARGS
-# (extra flags, word-split), BENCH_TIMEOUT (seconds per run,
+# (extra flags, word-split), BENCH_TIMEOUT (seconds per provider/grading step,
 # default 600), BENCH_WORK_ROOT (default ~/.cache/bruhs-bench), BRUHS_URL
 # (default http://127.0.0.1:3001).
 #
@@ -136,8 +136,20 @@ make_workdir() { # make_workdir <task> <dir>
   )
 }
 
-grade() { # grade <task> <dir> <log> -> exit status of check.sh
-  "$TASKS_DIR/$1/check.sh" "$2" >"$3" 2>&1
+grade() { # grade <task> <dir> <log> -> verified check status
+  local receipt_prefix="$3.tests"
+  if [ -e "$3" ] || [ -L "$3" ]; then
+    say "Grading log already exists: $3. Choose a fresh attempt path."
+    return 1
+  fi
+  if BRUHS_BENCH_CHECK_OUTPUT="$receipt_prefix" BRUHS_BENCH_CHECK_TIMEOUT="$TIMEOUT" \
+    "$TASKS_DIR/$1/check.sh" "$2" >"$3" 2>&1; then
+    if [ "$(task_kind "$1")" = code ]; then
+      python3 -I -S "$LIB/check.py" "$TASKS_DIR/$1" --verify-result --output "$receipt_prefix" >>"$3" 2>&1
+    fi
+  else
+    return $?
+  fi
 }
 
 codex_default_model() {
@@ -275,7 +287,7 @@ prepare_mode() { # --prepare <task> [dir]
 check_mode() { # --check <task> <dir>
   local task="${1:-}" dir="${2:-}"
   [ -n "$task" ] && [ -d "$dir" ] || die "usage: --check <task> <dir>"
-  if "$TASKS_DIR/$task/check.sh" "$dir"; then
+  if BRUHS_BENCH_CHECK_TIMEOUT="$TIMEOUT" "$TASKS_DIR/$task/check.sh" "$dir"; then
     echo "PASS"
   else
     echo "FAIL"
@@ -553,14 +565,19 @@ tool_ready() {
 bench() {
   local ts out_dir results tasks tools tool task kind skipped_kinds
   ts="$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$ROOT/target/bench"
+  out_dir="$(mktemp -d "$ROOT/target/bench/$ts-XXXXXX")"
+  ts="$(basename "$out_dir")"
   RUN_ID="$ts"
-  out_dir="$ROOT/target/bench/$ts"
-  mkdir -p "$out_dir"
   results="$out_dir/results.tsv"
-  printf 'tool\ttask\tkind\trun\tpass\ttokens\tpeak_ctx\tturns\ttool_calls\twall_s\texit\tnote\n' >"$results"
+  printf 'tool\ttask\tkind\trun\tpass\ttokens\tpeak_ctx\tturns\ttool_calls\twall_s\texit\tnote\tcheck_pass\tcompletion\n' >"$results"
   tasks="$(selected_tasks)"
   tools="$(selected_tools)"
   BRUHS_CODEX_MODEL="${BENCH_BRUHS_CODEX_MODEL:-${CODEX_MODEL:-$(codex_default_model)}}"
+  python3 "$LIB/provenance.py" "$ROOT" "$out_dir" "$tasks" "$tools" "$RUNS" "$TIMEOUT" \
+    "$MODEL" "$CODEX_MODEL" "$BRUHS_MODEL" "$BRUHS_CODEX_MODEL"
+  TASKS_DIR="$out_dir/snapshot/bench/tasks"
+  LIB="$out_dir/snapshot/bench/lib"
 
   for tool in $tools; do
     tool_ready "$tool" || continue
@@ -585,7 +602,7 @@ bench() {
     echo "run $ts, tasks: $(echo "$tasks" | tr '\n' ' ')"
     echo "runs per tool/task: $RUNS"
     echo "claude model: $MODEL; codex model: ${CODEX_MODEL:-configured default ($(codex_default_model))}; bruhs model: $BRUHS_MODEL; bruhs-codex model: ${BRUHS_CODEX_MODEL:-none}"
-    echo "per-run timeout ${TIMEOUT}s (per step in review mode); logs and results.tsv in target/bench/$ts/; workdirs in $WORK_ROOT/$ts/"
+    echo "timeout ${TIMEOUT}s per provider or grading step; logs and results.tsv in target/bench/$ts/; workdirs in $WORK_ROOT/$ts/"
     [ -z "$SKIPPED" ] || echo "not run: $SKIPPED"
   } >"$out_dir/meta.txt"
   render_report "$out_dir" >"$report"
@@ -596,7 +613,7 @@ bench() {
 
 run_one() { # run_one <tool> <task> <kind> <ts> <out_dir> <results>; RUN_N is the repeat
   local tool="$1" task="$2" kind="$3" ts="$4" out_dir="$5" results="$6"
-  local work logbase status pass metrics note wall format
+  local work logbase status pass check_pass metrics note wall format completion
   work="$WORK_ROOT/$ts/$tool/$task-$RUN_N"
   logbase="$out_dir/$tool-$task-$RUN_N"
   format="$(format_for "$tool")"
@@ -612,15 +629,21 @@ run_one() { # run_one <tool> <task> <kind> <ts> <out_dir> <results>; RUN_N is th
   TOOL="$tool"
   status=0
   "run_${tool//-/_}" "$task" "$work" "$logbase" "$TASKS_DIR/$task/prompt.md" || status=$?
+  completion="$(python3 "$LIB/completion.py" "$format" "$logbase.log")"
   python3 "$LIB/metrics.py" --reply "$format" "$logbase.log" >"$logbase.reply.txt" || true
   [ "$kind" = chat ] && cp "$logbase.reply.txt" "$work/reply.txt"
   pass=0
-  if grade "$task" "$work" "$logbase.check"; then pass=1; fi
+  check_pass=0
+  if grade "$task" "$work" "$logbase.check"; then
+    check_pass=1
+    if [ "$status" = 0 ] && { [ "$completion" = completed ] || [ "$completion" = process-only ]; }; then pass=1; fi
+  fi
   metrics="$(python3 "$LIB/metrics.py" "$format" "$logbase.log")"
   wall="$(cat "$logbase.time" 2>/dev/null || echo "-")"
   note="$(status_note "$status" "$(printf '%s' "$metrics" | cut -f5)")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$tool" "$task" "$kind" "$RUN_N" "$pass" \
-    "$(printf '%s' "$metrics" | cut -f1-4)" "$wall" "$status" "$note" >>"$results"
+  [ "$completion" = completed ] || note="completion $completion; $note"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$tool" "$task" "$kind" "$RUN_N" "$pass" \
+    "$(printf '%s' "$metrics" | cut -f1-4)" "$wall" "$status" "$note" "$check_pass" "$completion" >>"$results"
   say "  $([ "$pass" = 1 ] && echo PASS || echo FAIL)  tokens=$(printf '%s' "$metrics" | cut -f1)  wall=${wall}s"
 }
 
@@ -653,34 +676,11 @@ format_for() { # metrics.py format of a tool's log
 }
 
 rescore_mode() { # --rescore <timestamp>
-  local ts="${1:-}" dir results tmp tool task kind run pass wall status note metrics stem
+  local ts="${1:-}" dir results
   dir="$ROOT/target/bench/$ts"
   results="$dir/results.tsv"
   [ -n "$ts" ] && [ -f "$results" ] || die "usage: --rescore <timestamp> (a directory under target/bench/)"
-  tmp="$results.new"
-  # Runs before BENCH_RUNS had no kind/run columns and logs named <tool>-<task>.
-  if head -1 "$results" | grep -q "$(printf '\tkind\t')"; then
-    head -1 "$results" >"$tmp"
-    # shellcheck disable=SC2034 # the _ fields are recomputed
-    tail -n +2 "$results" | while IFS=$'\t' read -r tool task kind run pass _ _ _ _ wall status _; do
-      metrics="$(python3 "$LIB/metrics.py" "$(format_for "$tool")" "$dir/$tool-$task-$run.log")"
-      note="$(status_note "$status" "$(printf '%s' "$metrics" | cut -f5)")"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$tool" "$task" "$kind" "$run" "$pass" \
-        "$(printf '%s' "$metrics" | cut -f1-4)" "$wall" "$status" "$note" >>"$tmp"
-    done
-  else
-    printf 'tool\ttask\tkind\trun\tpass\ttokens\tpeak_ctx\tturns\ttool_calls\twall_s\texit\tnote\n' >"$tmp"
-    # shellcheck disable=SC2034 # the _ fields are recomputed
-    tail -n +2 "$results" | while IFS=$'\t' read -r tool task pass _ _ _ _ wall status _; do
-      stem="$dir/$tool-$task"
-      metrics="$(python3 "$LIB/metrics.py" "$(format_for "$tool")" "$stem.log")"
-      note="$(status_note "$status" "$(printf '%s' "$metrics" | cut -f5)")"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$tool" "$task" code 1 "$pass" \
-        "$(printf '%s' "$metrics" | cut -f1-4)" "$wall" "$status" "$note" >>"$tmp"
-    done
-  fi
-  mv "$tmp" "$results"
-  echo "rescored $(date +%Y-%m-%d) with the current parsers" >>"$dir/meta.txt"
+  python3 "$LIB/rescore.py" "$dir"
   render_report "$dir" >"$ROOT/target/bench/$ts.md"
   cat "$ROOT/target/bench/$ts.md"
 }

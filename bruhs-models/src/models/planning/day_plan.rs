@@ -5,9 +5,12 @@ use crate::EventSource;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+mod availability;
+pub(super) use availability::unavailable_time;
+
 const MINUTE_MS: f64 = 60_000.0;
 
-/// Platform callers construct these instants from local wall-clock 09:00/18:00.
+/// Platform callers resolve these boundaries from local calendar fields.
 /// Adding elapsed hours to local midnight is incorrect across DST transitions.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DayPlanWindow {
@@ -31,6 +34,9 @@ pub enum DayPlanChangeError {
     AlreadyApplied,
     GeneratedEventChanged,
     GeneratedLinkChanged,
+    AvailabilityChanged,
+    InvalidAvailability,
+    AvailabilityUnavailable,
 }
 
 impl fmt::Display for DayPlanChangeError {
@@ -54,6 +60,9 @@ impl fmt::Display for DayPlanChangeError {
             Self::GeneratedLinkChanged => {
                 "A focus block was linked to another task. Review it before undoing the plan."
             }
+            Self::AvailabilityChanged => "Working hours changed. Review a new day plan.",
+            Self::InvalidAvailability => "An enabled working-hours rule is invalid. Fix scheduling controls, then review a new day plan.",
+            Self::AvailabilityUnavailable => "Working hours could not be read. Open scheduling controls, then review a new day plan.",
         })
     }
 }
@@ -201,7 +210,7 @@ pub fn prepare_day_plan(
         {
             return Err(DayPlanChangeError::TaskChanged);
         }
-        if events.iter().filter(|event| !event.all_day).any(|event| {
+        if events.iter().any(|event| {
             !valid_interval(event.start_at_ms, event.end_at_ms)
                 || (block.start_at_ms < event.end_at_ms && block.end_at_ms > event.start_at_ms)
         }) || intervals
@@ -227,6 +236,28 @@ pub fn prepare_day_plan(
         added_events,
         ownership,
     })
+}
+
+/// Validate current working hours as well as task/calendar state before applying.
+/// No task or calendar input is changed when any reviewed block is unavailable.
+pub fn prepare_day_plan_with_availability(
+    proposal: &DayPlanProposal,
+    tasks: &[WorkItem],
+    events: &[CalendarEvent],
+    window: DayPlanWindow,
+    now_ms: i64,
+    rules: &[crate::AvailabilityRule],
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> Result<PreparedDayPlan, DayPlanChangeError> {
+    let unavailable = unavailable_time(window, rules, offset_at)?;
+    if proposal.blocks.iter().any(|block| {
+        unavailable
+            .iter()
+            .any(|&(start, end)| block.start_at_ms < end && block.end_at_ms > start)
+    }) {
+        return Err(DayPlanChangeError::AvailabilityChanged);
+    }
+    prepare_day_plan(proposal, tasks, events, window, now_ms)
 }
 
 /// Timestamps do not establish ownership: they can change without changing

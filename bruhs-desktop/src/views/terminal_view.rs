@@ -22,6 +22,8 @@ use gpui::*;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::theme;
+use bruhs_ui::ActiveTheme;
+mod scrollback;
 
 pub const TERMINAL_FONT_FAMILY: &str = "Monaspace Neon";
 pub const TERMINAL_FONT_SIZE_PX: f32 = 12.0;
@@ -45,6 +47,13 @@ const ANSI_BRIGHT: [u32; 8] = [
 ];
 const ANSI_DIM: [u32; 8] = [
     0x1f1a15, 0x9e5050, 0x628f62, 0xa08748, 0x5773b0, 0x8a6b9b, 0x579090, 0x968d80,
+];
+// The light terminal uses the reference palette for the first sixteen slots.
+const LIGHT_ANSI_NORMAL: [u32; 8] = [
+    0x000000, 0xcd3131, 0x107c10, 0x949800, 0x0451a5, 0xbc05bc, 0x0598bc, 0x555555,
+];
+const LIGHT_ANSI_BRIGHT: [u32; 8] = [
+    0x666666, 0xcd3131, 0x14ce14, 0xb5ba00, 0x0451a5, 0xbc05bc, 0x0598bc, 0xa5a5a5,
 ];
 const DEFAULT_FOREGROUND: u32 = 0xd9cdb9;
 const CUBE_STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
@@ -147,6 +156,7 @@ pub struct RenderedCursor {
     pub col: usize,
     pub shape: CursorShape,
     pub ch: char,
+    pub wide: bool,
 }
 
 fn hsla_from_hex(hex: u32) -> Hsla {
@@ -157,24 +167,89 @@ fn hsla_from_rgb(c: Rgb) -> Hsla {
     hsla_from_hex((u32::from(c.r) << 16) | (u32::from(c.g) << 8) | u32::from(c.b))
 }
 
-fn named_hex(named: NamedColor) -> u32 {
-    match named {
-        NamedColor::Black => ANSI_NORMAL[0],
-        NamedColor::Red => ANSI_NORMAL[1],
-        NamedColor::Green => ANSI_NORMAL[2],
-        NamedColor::Yellow => ANSI_NORMAL[3],
-        NamedColor::Blue => ANSI_NORMAL[4],
-        NamedColor::Magenta => ANSI_NORMAL[5],
-        NamedColor::Cyan => ANSI_NORMAL[6],
-        NamedColor::White => ANSI_NORMAL[7],
-        NamedColor::BrightBlack => ANSI_BRIGHT[0],
-        NamedColor::BrightRed => ANSI_BRIGHT[1],
-        NamedColor::BrightGreen => ANSI_BRIGHT[2],
-        NamedColor::BrightYellow => ANSI_BRIGHT[3],
-        NamedColor::BrightBlue => ANSI_BRIGHT[4],
-        NamedColor::BrightMagenta => ANSI_BRIGHT[5],
-        NamedColor::BrightCyan => ANSI_BRIGHT[6],
-        NamedColor::BrightWhite => ANSI_BRIGHT[7],
+#[derive(Clone, Copy)]
+struct TerminalColors {
+    normal: &'static [u32; 8],
+    bright: &'static [u32; 8],
+    background: Hsla,
+    foreground: Hsla,
+    cursor: Hsla,
+    selection: Hsla,
+    scrollbar: Hsla,
+    scrollbar_hover: Hsla,
+}
+impl TerminalColors {
+    fn resolve(theme: &theme::Theme, overrides: &alacritty_terminal::term::color::Colors) -> Self {
+        // Terminal emulators accept RGB for their three default colors. The
+        // selection and scrollbar are overlays and keep their alpha.
+        let opaque = |named: NamedColor, role, fallback| {
+            overrides[named]
+                .map(hsla_from_rgb)
+                .or_else(|| {
+                    theme
+                        .color_role(role)
+                        .filter(|color| color.a > 0.)
+                        .map(|color| Hsla { a: 1., ..color })
+                })
+                .unwrap_or(fallback)
+        };
+        let foreground = theme.color_role("text").unwrap_or_else(|| {
+            if theme.is_dark() {
+                hsla_from_hex(DEFAULT_FOREGROUND)
+            } else {
+                theme::rambutan_200()
+            }
+        });
+        Self {
+            normal: if theme.is_dark() {
+                &ANSI_NORMAL
+            } else {
+                &LIGHT_ANSI_NORMAL
+            },
+            bright: if theme.is_dark() {
+                &ANSI_BRIGHT
+            } else {
+                &LIGHT_ANSI_BRIGHT
+            },
+            background: opaque(
+                NamedColor::Background,
+                "terminalBackground",
+                theme::longan_950(),
+            ),
+            foreground: opaque(NamedColor::Foreground, "terminalForeground", foreground),
+            cursor: opaque(NamedColor::Cursor, "terminalCursor", theme::persimmon_400()),
+            selection: theme
+                .color_role("terminalSelection")
+                .filter(|c| c.a > 0.)
+                .unwrap_or_else(theme::longan_700),
+            scrollbar: theme
+                .color_role("terminalScrollbar")
+                .unwrap_or_else(theme::rambutan_500),
+            scrollbar_hover: theme
+                .color_role("terminalScrollbarHover")
+                .unwrap_or_else(theme::rambutan_400),
+        }
+    }
+}
+
+fn named_color(named: NamedColor, palette: &TerminalColors) -> Hsla {
+    hsla_from_hex(match named {
+        NamedColor::Black => palette.normal[0],
+        NamedColor::Red => palette.normal[1],
+        NamedColor::Green => palette.normal[2],
+        NamedColor::Yellow => palette.normal[3],
+        NamedColor::Blue => palette.normal[4],
+        NamedColor::Magenta => palette.normal[5],
+        NamedColor::Cyan => palette.normal[6],
+        NamedColor::White => palette.normal[7],
+        NamedColor::BrightBlack => palette.bright[0],
+        NamedColor::BrightRed => palette.bright[1],
+        NamedColor::BrightGreen => palette.bright[2],
+        NamedColor::BrightYellow => palette.bright[3],
+        NamedColor::BrightBlue => palette.bright[4],
+        NamedColor::BrightMagenta => palette.bright[5],
+        NamedColor::BrightCyan => palette.bright[6],
+        NamedColor::BrightWhite => palette.bright[7],
         NamedColor::DimBlack => ANSI_DIM[0],
         NamedColor::DimRed => ANSI_DIM[1],
         NamedColor::DimGreen => ANSI_DIM[2],
@@ -183,19 +258,20 @@ fn named_hex(named: NamedColor) -> u32 {
         NamedColor::DimMagenta => ANSI_DIM[5],
         NamedColor::DimCyan => ANSI_DIM[6],
         NamedColor::DimWhite => ANSI_DIM[7],
-        NamedColor::Foreground | NamedColor::BrightForeground => DEFAULT_FOREGROUND,
-        NamedColor::DimForeground => ANSI_DIM[7],
-        NamedColor::Background => 0x141210,
-        NamedColor::Cursor => 0xec7f2c,
-    }
+        NamedColor::Foreground | NamedColor::BrightForeground => return palette.foreground,
+        NamedColor::DimForeground => return palette.foreground.opacity(0.6),
+        NamedColor::Background => return palette.background,
+        NamedColor::Cursor => return palette.cursor,
+    })
 }
 
 /// Resolve an ANSI colour to a bruhs tone. `bold` promotes the eight base
 /// colours to their bright variants (xterm's "bold text in bright colors").
-pub fn ansi_color(
+fn ansi_color(
     color: AnsiColor,
     overrides: &alacritty_terminal::term::color::Colors,
     bold: bool,
+    palette: &TerminalColors,
 ) -> Hsla {
     match color {
         AnsiColor::Spec(rgb) => hsla_from_rgb(rgb),
@@ -214,7 +290,7 @@ pub fn ansi_color(
                 (true, NamedColor::White) => NamedColor::BrightWhite,
                 _ => named,
             };
-            hsla_from_hex(named_hex(promoted))
+            named_color(promoted, palette)
         }
         AnsiColor::Indexed(i) => {
             if let Some(rgb) = overrides[i as usize] {
@@ -222,11 +298,11 @@ pub fn ansi_color(
             }
             match i {
                 0..=7 => hsla_from_hex(if bold {
-                    ANSI_BRIGHT[i as usize]
+                    palette.bright[i as usize]
                 } else {
-                    ANSI_NORMAL[i as usize]
+                    palette.normal[i as usize]
                 }),
-                8..=15 => hsla_from_hex(ANSI_BRIGHT[i as usize - 8]),
+                8..=15 => hsla_from_hex(palette.bright[i as usize - 8]),
                 16..=231 => {
                     let n = i as usize - 16;
                     let (r, g, b) = (n / 36, (n % 36) / 6, n % 6);
@@ -249,27 +325,28 @@ fn cell_style(
     cell: &alacritty_terminal::term::cell::Cell,
     colors: &alacritty_terminal::term::color::Colors,
     selected: bool,
+    palette: &TerminalColors,
 ) -> CellStyle {
     let flags = cell.flags;
     let bold = flags.contains(Flags::BOLD);
-    let mut fg = ansi_color(cell.fg, colors, bold);
+    let mut fg = ansi_color(cell.fg, colors, bold, palette);
     let mut bg = match cell.bg {
         AnsiColor::Named(NamedColor::Background) => None,
-        other => Some(ansi_color(other, colors, false)),
+        other => Some(ansi_color(other, colors, false, palette)),
     };
     if flags.contains(Flags::INVERSE) {
-        let old_bg = bg.unwrap_or_else(theme::longan_950);
+        let old_bg = bg.unwrap_or(palette.background);
         bg = Some(fg);
         fg = old_bg;
     }
     if flags.contains(Flags::DIM) {
         fg = fg.opacity(0.6);
     }
-    if flags.contains(Flags::HIDDEN) {
-        fg = bg.unwrap_or_else(theme::longan_950);
-    }
     if selected {
-        bg = Some(theme::longan_700());
+        bg = Some(bg.unwrap_or(palette.background).blend(palette.selection));
+    }
+    if flags.contains(Flags::HIDDEN) {
+        fg = bg.unwrap_or(palette.background);
     }
     CellStyle {
         fg,
@@ -293,8 +370,9 @@ fn is_plain(style: &CellStyle) -> bool {
 
 /// Snapshot the viewport as rows of merged style runs plus the cursor
 /// (`None` when hidden or scrolled out of view).
-pub fn rows_from_term<T: EventListener>(
+fn rows_from_term<T: EventListener>(
     term: &Term<T>,
+    palette: &TerminalColors,
 ) -> (Vec<RenderedRow>, Option<RenderedCursor>) {
     let content = term.renderable_content();
     let rows = term.screen_lines();
@@ -322,7 +400,7 @@ pub fn rows_from_term<T: EventListener>(
         let selected = content
             .selection
             .is_some_and(|range| range.contains(indexed.point));
-        let style = cell_style(cell, content.colors, selected);
+        let style = cell_style(cell, content.colors, selected, palette);
         let ch = if cell.c == '\0' { ' ' } else { cell.c };
         let target = &mut out[row];
         target.text.push(ch);
@@ -353,7 +431,17 @@ pub fn rows_from_term<T: EventListener>(
             row,
             col: content.cursor.point.column.0,
             shape: content.cursor.shape,
-            ch: term.grid()[content.cursor.point].c,
+            ch: if term.grid()[content.cursor.point]
+                .flags
+                .contains(Flags::HIDDEN)
+            {
+                ' '
+            } else {
+                term.grid()[content.cursor.point].c
+            },
+            wide: term.grid()[content.cursor.point]
+                .flags
+                .contains(Flags::WIDE_CHAR),
         });
     (out, cursor)
 }
@@ -510,6 +598,8 @@ pub struct TerminalView {
     bounds: Bounds<Pixels>,
     selecting: bool,
     scroll_remainder: f32,
+    scrollbar_focus: FocusHandle,
+    scrollbar_grab: Option<Pixels>,
     status: TerminalStatus,
     /// Where the output forwarder runs; `None` for a view without a PTY.
     runtime: Option<Arc<tokio::runtime::Runtime>>,
@@ -704,6 +794,8 @@ impl TerminalView {
             bounds: Bounds::default(),
             selecting: false,
             scroll_remainder: 0.0,
+            scrollbar_focus: cx.focus_handle().tab_stop(true),
+            scrollbar_grab: None,
             status: TerminalStatus::Live,
             runtime: None,
             _pump: None,
@@ -746,8 +838,11 @@ impl TerminalView {
 
     /// Rows and cursor as they would be drawn.
     #[cfg(any(test, debug_assertions))]
-    pub fn snapshot(&self) -> (Vec<RenderedRow>, Option<RenderedCursor>) {
-        rows_from_term(&self.term)
+    pub fn snapshot(&self, cx: &App) -> (Vec<RenderedRow>, Option<RenderedCursor>) {
+        rows_from_term(
+            &self.term,
+            &TerminalColors::resolve(cx.theme(), self.term.colors()),
+        )
     }
 
     #[cfg(test)]
@@ -773,6 +868,7 @@ impl TerminalView {
     }
 
     fn set_content_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<'_, Self>) {
+        let height_changed = self.bounds.size.height != bounds.size.height;
         self.bounds = bounds;
         let next = grid_size_for(bounds.size, self.cell_width, px(TERMINAL_LINE_HEIGHT_PX));
         if next != self.size {
@@ -786,6 +882,8 @@ impl TerminalView {
                 );
             }
             cx.notify();
+        } else if height_changed {
+            cx.notify();
         }
     }
 
@@ -797,7 +895,7 @@ impl TerminalView {
             .floor()
             .to_usize_saturating()
             .min(self.size.cols.saturating_sub(1));
-        let row = (y / TERMINAL_LINE_HEIGHT_PX)
+        let row = (y / f32::from(px(TERMINAL_LINE_HEIGHT_PX)))
             .floor()
             .to_usize_saturating()
             .min(self.size.rows.saturating_sub(1));
@@ -816,10 +914,35 @@ impl TerminalView {
     fn handle_key(
         &mut self,
         event: &KeyDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         let keystroke = &event.keystroke;
+        if self.scrollbar_focus.is_focused(window) {
+            return;
+        }
+        let m = &keystroke.modifiers;
+        if m.shift && !m.alt && !self.term.mode().contains(TermMode::ALT_SCREEN) {
+            let command = if cfg!(target_os = "macos") {
+                m.platform && !m.control
+            } else {
+                m.control && !m.platform
+            };
+            let scroll = match keystroke.key.as_str() {
+                "pageup" if !m.platform && !m.control => Some(Scroll::PageUp),
+                "pagedown" if !m.platform && !m.control => Some(Scroll::PageDown),
+                "home" if command => Some(Scroll::Top),
+                "end" if command => Some(Scroll::Bottom),
+                _ => None,
+            };
+            if let Some(scroll) = scroll {
+                self.term.scroll_display(scroll);
+                window.prevent_default();
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
         if keystroke.modifiers.platform {
             match keystroke.key.as_str() {
                 "v" if !keystroke.modifiers.shift => {
@@ -947,7 +1070,7 @@ impl TerminalView {
     }
 
     fn run_font(style: &CellStyle) -> Font {
-        let mut f = font(TERMINAL_FONT_FAMILY);
+        let mut f = font(crate::theme::FontFace::Terminal.with_default(TERMINAL_FONT_FAMILY));
         if style.bold {
             f.weight = FontWeight::BOLD;
         }
@@ -986,9 +1109,15 @@ impl TerminalView {
             .into_any_element()
     }
 
-    fn render_cursor(&self, cursor: &RenderedCursor, focused: bool) -> AnyElement {
+    fn render_cursor(
+        &self,
+        cursor: &RenderedCursor,
+        focused: bool,
+        palette: &TerminalColors,
+    ) -> AnyElement {
         let left = self.cell_width * cursor.col.to_f32_lossy();
         let top = px(TERMINAL_LINE_HEIGHT_PX * cursor.row.to_f32_lossy());
+        let width = self.cell_width * if cursor.wide { 2. } else { 1. };
         let base = div()
             .debug_selector(|| "desktop-terminal-cursor".to_string())
             .absolute()
@@ -996,25 +1125,24 @@ impl TerminalView {
             .top(top)
             .h(px(TERMINAL_LINE_HEIGHT_PX));
         match (cursor.shape, focused) {
-            (CursorShape::Beam, _) => base.w(px(CURSOR_BAR_PX)).bg(theme::persimmon_400()),
+            (_, false) | (CursorShape::HollowBlock, true) => {
+                base.w(width).border_1().border_color(palette.cursor)
+            }
+            (CursorShape::Beam, _) => base.w(px(CURSOR_BAR_PX)).bg(palette.cursor),
             (CursorShape::Underline, _) => base
-                .w(self.cell_width)
+                .w(width)
                 .top(top + px(TERMINAL_LINE_HEIGHT_PX - CURSOR_BAR_PX))
                 .h(px(CURSOR_BAR_PX))
-                .bg(theme::persimmon_400()),
-            (_, false) => base
-                .w(self.cell_width)
-                .border_1()
-                .border_color(theme::persimmon_400()),
+                .bg(palette.cursor),
             (_, true) => {
                 let ch = if cursor.ch == '\0' || cursor.ch == ' ' {
                     String::new()
                 } else {
                     cursor.ch.to_string()
                 };
-                base.w(self.cell_width)
-                    .bg(theme::persimmon_400())
-                    .text_color(theme::longan_950())
+                base.w(width)
+                    .bg(palette.cursor)
+                    .text_color(palette.background)
                     .child(ch)
             }
         }
@@ -1024,9 +1152,9 @@ impl TerminalView {
 
 impl Render for TerminalView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        let font_id = window
-            .text_system()
-            .resolve_font(&font(TERMINAL_FONT_FAMILY));
+        let font_id = window.text_system().resolve_font(&font(
+            crate::theme::FontFace::Terminal.with_default(TERMINAL_FONT_FAMILY),
+        ));
         if let Ok(width) = window
             .text_system()
             .em_advance(font_id, px(TERMINAL_FONT_SIZE_PX))
@@ -1036,9 +1164,10 @@ impl Render for TerminalView {
             }
         }
         let focused = self.focus_handle.is_focused(window);
-        let (rows, cursor) = rows_from_term(&self.term);
+        let palette = TerminalColors::resolve(cx.theme(), self.term.colors());
+        let (rows, cursor) = rows_from_term(&self.term, &palette);
         let row_elements: Vec<AnyElement> = rows.into_iter().map(Self::render_row).collect();
-        let cursor_element = cursor.map(|c| self.render_cursor(&c, focused));
+        let cursor_element = cursor.map(|c| self.render_cursor(&c, focused, &palette));
         let view = cx.entity();
         let measure = canvas(
             move |bounds, _window, cx| {
@@ -1059,7 +1188,8 @@ impl Render for TerminalView {
             .size_full()
             .min_h_0()
             .overflow_hidden()
-            .bg(theme::longan_950())
+            .relative()
+            .bg(palette.background)
             .cursor(CursorStyle::IBeam)
             .px(px(TERMINAL_PADDING_X_PX))
             .py(px(TERMINAL_PADDING_Y_PX))
@@ -1073,16 +1203,19 @@ impl Render for TerminalView {
                     .relative()
                     .size_full()
                     .overflow_hidden()
-                    .font_family(TERMINAL_FONT_FAMILY)
+                    .font_family(
+                        crate::theme::FontFace::Terminal.with_default(TERMINAL_FONT_FAMILY),
+                    )
                     .text_size(px(TERMINAL_FONT_SIZE_PX))
                     .line_height(px(TERMINAL_LINE_HEIGHT_PX))
-                    .text_color(hsla_from_hex(DEFAULT_FOREGROUND))
+                    .text_color(palette.foreground)
                     .flex()
                     .flex_col()
                     .child(measure)
                     .children(row_elements)
                     .children(cursor_element),
             )
+            .children(self.render_scrollback(&palette, window, cx))
     }
 }
 
@@ -1245,36 +1378,119 @@ mod tests {
     #[test]
     fn colors_map_to_bruhs_tones() {
         let colors = Colors::default();
+        let palette = super::TerminalColors::resolve(&crate::theme::Theme::default(), &colors);
         assert_eq!(
-            ansi_color(AnsiColor::Named(NamedColor::Red), &colors, false),
+            ansi_color(AnsiColor::Named(NamedColor::Red), &colors, false, &palette),
             hex(ANSI_NORMAL[1])
         );
         assert_eq!(
-            ansi_color(AnsiColor::Named(NamedColor::Red), &colors, true),
+            ansi_color(AnsiColor::Named(NamedColor::Red), &colors, true, &palette),
             hex(ANSI_BRIGHT[1])
         );
         assert_eq!(
-            ansi_color(AnsiColor::Indexed(9), &colors, false),
+            ansi_color(AnsiColor::Indexed(9), &colors, false, &palette),
             hex(ANSI_BRIGHT[1])
         );
         assert_eq!(
-            ansi_color(AnsiColor::Indexed(196), &colors, false),
+            ansi_color(AnsiColor::Indexed(196), &colors, false, &palette),
             hex(0xff0000)
         );
         assert_eq!(
-            ansi_color(AnsiColor::Indexed(232), &colors, false),
+            ansi_color(AnsiColor::Indexed(232), &colors, false, &palette),
             hex(0x080808)
         );
         assert_eq!(
-            ansi_color(AnsiColor::Spec(Rgb { r: 1, g: 2, b: 3 }), &colors, false),
+            ansi_color(
+                AnsiColor::Spec(Rgb { r: 1, g: 2, b: 3 }),
+                &colors,
+                false,
+                &palette
+            ),
             hex(0x010203)
         );
+    }
+
+    #[gpui::test]
+    fn imported_terminal_roles_selection_and_program_overrides(cx: &mut gpui::TestAppContext) {
+        use super::TerminalColors;
+        use alacritty_terminal::{
+            index::{Column, Line, Point, Side},
+            selection::{Selection, SelectionType},
+        };
+        use bruhs_ui::{ActiveTheme, Theme, ThemeMode};
+        let roles = [
+            ("terminalForeground", [0xdf, 0xec, 0xfa, 255]),
+            ("terminalBackground", [0x11, 0x21, 0x32, 255]),
+            ("terminalCursor", [0xff, 0x79, 0x00, 255]),
+            ("terminalSelection", [0x24, 0xba, 0xca, 136]),
+            ("terminalScrollbar", [0xee, 0x99, 0xee, 255]),
+            ("terminalScrollbarHover", [0x87, 0xe3, 0x98, 255]),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect();
+        cx.update(|cx| {
+            let mode = ThemeMode::Dark;
+            Theme::use_color_roles(
+                *crate::theme::ThemeFamily::Bruhs.palette(mode),
+                Some(std::sync::Arc::new(roles)),
+                mode,
+                None,
+                cx,
+            );
+            let mut term = term_with(b"A\x1b[48;2;32;64;96mB\x1b[0mC", 10, 2);
+            let mut selection = Selection::new(
+                SelectionType::Simple,
+                Point::new(Line(0), Column(0)),
+                Side::Left,
+            );
+            selection.update(Point::new(Line(0), Column(1)), Side::Right);
+            term.selection = Some(selection);
+            let colors = TerminalColors::resolve(cx.theme(), term.colors());
+            assert_eq!(colors.background, hex(0x112132));
+            assert_eq!(colors.cursor, hex(0xff7900));
+            assert_eq!(colors.scrollbar, hex(0xee99ee));
+            assert_eq!(colors.scrollbar_hover, hex(0x87e398));
+            let (rows, _) = rows_from_term(&term, &colors);
+            let runs = &rows[0].runs;
+            assert_eq!(runs[0].1.fg, hex(0xdfecfa));
+            let selection = gpui::rgba(0x24baca88).into();
+            assert_eq!(runs[0].1.bg, Some(hex(0x112132).blend(selection)));
+            assert_eq!(runs[1].1.bg, Some(hex(0x204060).blend(selection)));
+            assert_eq!(runs[2].1.bg, None);
+            let mut parser: Processor = Processor::new();
+            parser.advance(
+                &mut term,
+                b"\x1b]10;#abcdef\x07\x1b]11;#fedcba\x07\x1b]12;#112233\x07",
+            );
+            let colors = TerminalColors::resolve(cx.theme(), term.colors());
+            assert_eq!(
+                (colors.foreground, colors.background, colors.cursor),
+                (hex(0xabcdef), hex(0xfedcba), hex(0x112233))
+            );
+            parser.advance(&mut term, b"\x1b]110\x07\x1b]111\x07\x1b]112\x07");
+            assert_eq!(
+                TerminalColors::resolve(cx.theme(), term.colors()).cursor,
+                hex(0xff7900)
+            );
+            Theme::change(ThemeMode::Light, None, cx);
+            let colors = TerminalColors::resolve(cx.theme(), term.colors());
+            assert_eq!(colors.cursor, crate::theme::persimmon_400());
+            assert_eq!(
+                ansi_color(AnsiColor::Indexed(1), term.colors(), false, &colors),
+                hex(0xcd3131)
+            );
+            Theme::change(ThemeMode::Dark, None, cx);
+        });
     }
 
     #[test]
     fn rows_merge_runs_and_track_the_cursor() {
         let term = term_with(b"hi \x1b[31mred\x1b[0m!\r\nnext", 20, 3);
-        let (rows, cursor) = rows_from_term(&term);
+        let (rows, cursor) = rows_from_term(
+            &term,
+            &super::TerminalColors::resolve(&crate::theme::Theme::default(), term.colors()),
+        );
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].text, "hi red!");
         let styles: Vec<(usize, bool)> = rows[0]
@@ -1313,7 +1529,10 @@ mod tests {
     #[test]
     fn inverse_and_hidden_cells_swap_or_erase() {
         let term = term_with(b"\x1b[7mX\x1b[0m\x1b[8mY", 10, 1);
-        let (rows, _) = rows_from_term(&term);
+        let (rows, _) = rows_from_term(
+            &term,
+            &super::TerminalColors::resolve(&crate::theme::Theme::default(), term.colors()),
+        );
         let (_, inverse) = &rows[0].runs[0];
         let plain = CellStyle {
             fg: hex(0xd9cdb9),
@@ -1369,8 +1588,8 @@ mod pump_tests {
 
         assert!(keep_going);
         assert_eq!(notifies.get(), 1);
-        view.read_with(cx, |view, _| {
-            assert_eq!(view.snapshot().0[0].text, "one two three");
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.snapshot(cx).0[0].text, "one two three");
             assert_eq!(view.status(), TerminalStatus::Live);
         });
     }
@@ -1382,8 +1601,8 @@ mod pump_tests {
             view.apply_pump(vec![output("bye"), PumpMessage::Closed], cx)
         });
         assert!(!keep_going);
-        view.read_with(cx, |view, _| {
-            assert_eq!(view.snapshot().0[0].text, "bye");
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.snapshot(cx).0[0].text, "bye");
             assert_eq!(view.status(), TerminalStatus::Ended);
         });
     }

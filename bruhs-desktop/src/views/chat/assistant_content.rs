@@ -46,7 +46,7 @@ pub(crate) fn desktop_markdown_style(_cx: &App) -> TextViewStyle {
                 .py(px(CHAT_PROSE_CODE_Y_PADDING_PX))
                 .text_size(px(CHAT_PROSE_CODE_TEXT_SIZE_PX))
                 .line_height(relative(CHAT_PROSE_CODE_LINE_HEIGHT))
-                .font_family(TOOL_CODE_FONT_FAMILY)
+                .font_family(crate::theme::FontFace::Code.with_default(TOOL_CODE_FONT_FAMILY))
                 .text_color(theme::rambutan_300()),
         )
 }
@@ -107,6 +107,10 @@ pub(super) enum ParsedAssistantBlock {
 /// mermaid fence that is not closed yet stays a code block: rendering every
 /// partial diagram would render (and cache) one per streamed token.
 pub(super) fn parse_assistant_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> {
+    parse_content_with_math(raw, streaming, true)
+}
+
+pub(super) fn parse_content_with_math(raw: &str, streaming: bool, render_math: bool) -> Vec<ParsedAssistantBlock> {
     response_blocks(raw, streaming)
         .into_iter()
         .flat_map(|block| match block {
@@ -115,13 +119,14 @@ pub(super) fn parse_assistant_content(raw: &str, streaming: bool) -> Vec<ParsedA
             {
                 Vec::new()
             }
-            ResponseBlock::Markdown(markdown) => parse_prose_content(&markdown, streaming),
+            ResponseBlock::Markdown(markdown) => parse_prose_content(&markdown, streaming, render_math),
             block => vec![ParsedAssistantBlock::Rich(block)],
         })
         .collect()
 }
 
-fn parse_prose_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> {
+fn parse_prose_content(raw: &str, streaming: bool, render_math: bool) -> Vec<ParsedAssistantBlock> {
+    let push_prose = if render_math { push_markdown_block } else { push_plain_markdown_block };
     // The prose renderer already parses Markdown. Only parse it here when a
     // fence's info string could name Mermaid, not when prose mentions the word.
     let parsed = if may_have_mermaid_fence(raw) {
@@ -131,7 +136,7 @@ fn parse_prose_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> 
     };
     let Some(ast) = parsed else {
         let mut blocks = Vec::new();
-        push_markdown_block(&mut blocks, raw);
+        push_prose(&mut blocks, raw);
         if blocks.is_empty() {
             blocks.push(ParsedAssistantBlock::Markdown(raw.to_string()));
         }
@@ -146,7 +151,7 @@ fn parse_prose_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> 
 
     if ranges.is_empty() {
         let mut blocks = Vec::new();
-        push_markdown_block(&mut blocks, raw);
+        push_prose(&mut blocks, raw);
         if blocks.is_empty() {
             blocks.push(ParsedAssistantBlock::Markdown(raw.to_string()));
         }
@@ -162,12 +167,12 @@ fn parse_prose_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> 
             continue;
         }
 
-        push_markdown_block(&mut blocks, &raw[cursor..range.start]);
+        push_prose(&mut blocks, &raw[cursor..range.start]);
         blocks.push(ParsedAssistantBlock::Mermaid(range.source));
         cursor = range.end;
     }
 
-    push_markdown_block(&mut blocks, &raw[cursor..]);
+    push_prose(&mut blocks, &raw[cursor..]);
 
     if blocks.is_empty() {
         blocks.push(ParsedAssistantBlock::Markdown(String::new()));
@@ -730,13 +735,13 @@ impl ChatView {
                 )
                 .child(
                     div()
-                        .font_family(CHAT_DIAGRAM_ERROR_FONT_FAMILY)
+                        .font_family(crate::theme::FontFace::Interface.with_default(CHAT_DIAGRAM_ERROR_FONT_FAMILY))
                         .text_color(theme::rambutan_500())
                         .child(error.clone()),
                 )
                 .child(
                     div()
-                        .font_family(CHAT_DIAGRAM_ERROR_FONT_FAMILY)
+                        .font_family(crate::theme::FontFace::Interface.with_default(CHAT_DIAGRAM_ERROR_FONT_FAMILY))
                         .text_color(theme::rambutan_500())
                         .child(source.clone()),
                 )
@@ -812,13 +817,13 @@ impl ChatView {
                 )
                 .child(
                     div()
-                        .font_family(CHAT_DIAGRAM_ERROR_FONT_FAMILY)
+                        .font_family(crate::theme::FontFace::Interface.with_default(CHAT_DIAGRAM_ERROR_FONT_FAMILY))
                         .text_color(theme::rambutan_500())
                         .child(error.clone()),
                 )
                 .child(
                     div()
-                        .font_family(CHAT_DIAGRAM_ERROR_FONT_FAMILY)
+                        .font_family(crate::theme::FontFace::Interface.with_default(CHAT_DIAGRAM_ERROR_FONT_FAMILY))
                         .text_color(theme::rambutan_500())
                         .child(source.clone()),
                 )

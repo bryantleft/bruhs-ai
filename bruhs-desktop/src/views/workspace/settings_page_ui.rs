@@ -5,9 +5,6 @@ use bruhs_ui::input::{Input, Textarea};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 
-/// Web `<BrailleBruh size=96.0 />` in Settings → About.
-const SETTINGS_ABOUT_BRUH_PX: f32 = 96.0;
-
 fn follow_up_button(
     id: &'static str,
     label: &'static str,
@@ -54,24 +51,58 @@ fn follow_up_button(
 }
 
 impl SettingsSection {
-    pub(super) const ALL: [SettingsSection; 13] = [
+    pub(super) const ALL: [SettingsSection; 30] = [
         Self::General,
+        Self::Appearance,
+        Self::Chat,
+        Self::Diffs,
+        Self::Keyboard,
+        Self::Voice,
+        Self::SnapShots,
         Self::Updates,
-        Self::Beta,
+        Self::Threads,
+        Self::Browser,
+        Self::Devices,
+        Self::ScheduledTasks,
+        Self::Archived,
+        Self::Projects,
+        Self::SourceControl,
+        Self::Worktrees,
+        Self::Environments,
+        Self::Access,
         Self::Vault,
         Self::Apps,
-        Self::Backup,
         Self::Calendar,
         Self::Recording,
         Self::Transcription,
         Self::Speakers,
         Self::People,
-        Self::Keyboard,
+        Self::Maintenance,
+        Self::Backup,
+        Self::Diagnostics,
+        Self::Labs,
         Self::About,
     ];
 
-    pub(super) fn index(self) -> usize {
-        Self::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    fn group_heading(self) -> Option<&'static str> {
+        match self {
+                SettingsSection::Updates => Some("Agents"),
+                SettingsSection::Projects => Some("Code"),
+                SettingsSection::Environments => Some("Connections"),
+                SettingsSection::Recording => Some("Meetings"),
+                SettingsSection::Maintenance => Some("Application"),
+                _ => None,
+            }
+    }
+
+    fn nav_index(self) -> usize {
+        let mut row = 0;
+        for section in Self::ALL {
+            row += usize::from(section.group_heading().is_some());
+            if section == self { break; }
+            row += 1;
+        }
+        row
     }
 
     /// Web section ids (`SECTIONS[i].0`).
@@ -82,7 +113,24 @@ impl SettingsSection {
             Self::Backup => "backup",
             Self::General => "general",
             Self::Updates => "updates",
-            Self::Beta => "beta",
+            Self::Appearance => "appearance",
+            Self::Chat => "chat",
+            Self::Diffs => "diffs",
+            Self::Projects => "projects",
+            Self::SourceControl => "source-control",
+            Self::Diagnostics => "diagnostics",
+            Self::Maintenance => "maintenance",
+            Self::Worktrees => "worktrees",
+            Self::Voice => "voice",
+            Self::Threads => "threads",
+            Self::Browser => "browser",
+            Self::SnapShots => "snap-shot",
+            Self::ScheduledTasks => "scheduled-tasks",
+            Self::Environments => "connections",
+            Self::Devices => "devices",
+            Self::Labs => "labs",
+            Self::Access => "access",
+            Self::Archived => "archived",
             Self::Calendar => "calendar",
             Self::Recording => "recording",
             Self::Transcription => "transcription",
@@ -95,6 +143,9 @@ impl SettingsSection {
 
     #[cfg(any(test, debug_assertions))]
     pub(super) fn from_id(id: &str) -> Option<Self> {
+        if id == "beta" {
+            return Some(Self::General);
+        }
         Self::ALL.into_iter().find(|section| section.id() == id)
     }
 
@@ -107,7 +158,24 @@ impl SettingsSection {
             Self::Backup => assets::ARCHIVE_ICON_PATH,
             Self::General => "icons/settings.svg",
             Self::Updates => assets::DOWNLOAD_ICON_PATH,
-            Self::Beta => assets::ACTIVITY_ICON_PATH,
+            Self::Appearance => assets::SUN_ICON_PATH,
+            Self::Chat => "icons/message-square.svg",
+            Self::Diffs => assets::FILE_DIFF_ICON_PATH,
+            Self::Projects => assets::FOLDER_ICON_PATH,
+            Self::SourceControl => assets::GIT_BRANCH_ICON_PATH,
+            Self::Diagnostics => assets::ACTIVITY_ICON_PATH,
+            Self::Maintenance => assets::ACTIVITY_ICON_PATH,
+            Self::Worktrees => assets::GIT_BRANCH_ICON_PATH,
+            Self::Voice => assets::MIC_ICON_PATH,
+            Self::Threads => assets::BOT_ICON_PATH,
+            Self::Browser => assets::TOOL_GLOBE_ICON_PATH,
+            Self::SnapShots => assets::CAMERA_ICON_PATH,
+            Self::ScheduledTasks => assets::CALENDAR_ICON_PATH,
+            Self::Environments => assets::TOOL_TERMINAL_ICON_PATH,
+            Self::Devices => assets::SQUARE_ICON_PATH,
+            Self::Labs => assets::ACTIVITY_ICON_PATH,
+            Self::Access => "icons/shield.svg",
+            Self::Archived => assets::INBOX_ICON_PATH,
             Self::Calendar => assets::CALENDAR_ICON_PATH,
             Self::Recording => assets::MIC_ICON_PATH,
             Self::Transcription => assets::ACTIVITY_ICON_PATH,
@@ -124,8 +192,25 @@ impl SettingsSection {
             Self::Apps => bruhs_models::apps::APPS_TITLE,
             Self::Backup => bruhs_models::backup::BACKUP_TITLE,
             Self::General => "General",
-            Self::Updates => "Updates",
-            Self::Beta => "Beta",
+            Self::Updates => "Providers & updates",
+            Self::Appearance => "Appearance",
+            Self::Chat => "Chat",
+            Self::Diffs => "Diffs & pull requests",
+            Self::Projects => "Projects",
+            Self::SourceControl => "Source control",
+            Self::Diagnostics => "Diagnostics",
+            Self::Maintenance => "Maintenance",
+            Self::Worktrees => "Worktrees",
+            Self::Voice => "Voice",
+            Self::Threads => "Threads",
+            Self::Browser => "Browser",
+            Self::SnapShots => "SnapShots",
+            Self::ScheduledTasks => "Scheduled tasks",
+            Self::Environments => "Environments",
+            Self::Devices => "Devices",
+            Self::Labs => "Labs",
+            Self::Access => "Sharing & access",
+            Self::Archived => "Archived threads",
             Self::Calendar => "Calendar",
             Self::Recording => "Recording",
             Self::Transcription => "Transcription",
@@ -142,12 +227,12 @@ impl SettingsSection {
             Self::Vault => bruhs_models::vault::VAULT_DESCRIPTION,
             Self::Apps => bruhs_models::apps::APPS_DESCRIPTION,
             Self::Backup => bruhs_models::backup::BACKUP_DESCRIPTION,
-            Self::General => "Defaults for new turns.",
+            Self::General => "",
+            Self::Environments | Self::Devices | Self::Labs => "",
+            Self::Access => "Manage network access, Tailscale HTTPS and paired phones on this machine.",
             Self::Updates => "Provider CLIs and this build of bruhs.",
-            Self::Beta => "Sidebar sections that are still settling in.",
-            Self::Calendar => {
-                "Google Calendar sync for the calendar view and automatic meeting recording."
-            }
+            Self::Diagnostics | Self::SourceControl | Self::Maintenance | Self::Appearance | Self::Projects => "", Self::ScheduledTasks | Self::SnapShots | Self::Browser | Self::Chat | Self::Voice | Self::Diffs | Self::Worktrees => "", Self::Threads | Self::Archived => "",
+            Self::Calendar => "Google Calendar sync for the calendar view and automatic meeting recording.",
             Self::Recording => "When bruhs starts recording meetings on its own.",
             Self::Transcription => {
                 "Provider and model for the final transcript, plus a live preview on this device."
@@ -166,7 +251,24 @@ impl SettingsSection {
             Self::Backup => "desktop-settings-nav-backup",
             Self::General => "desktop-settings-nav-general",
             Self::Updates => "desktop-settings-nav-updates",
-            Self::Beta => "desktop-settings-nav-beta",
+            Self::Appearance => "desktop-settings-nav-appearance",
+            Self::Chat => "desktop-settings-nav-chat",
+            Self::Diffs => "desktop-settings-nav-diffs",
+            Self::Projects => "desktop-settings-nav-projects",
+            Self::SourceControl => "desktop-settings-nav-source-control",
+            Self::Diagnostics => "desktop-settings-nav-diagnostics",
+            Self::Maintenance => "desktop-settings-nav-maintenance",
+            Self::Worktrees => "desktop-settings-nav-worktrees",
+            Self::Voice => "desktop-settings-nav-voice",
+            Self::Threads => "desktop-settings-nav-threads",
+            Self::Browser => "desktop-settings-nav-browser",
+            Self::SnapShots => "desktop-settings-nav-snap-shot",
+            Self::ScheduledTasks => "desktop-settings-nav-scheduled-tasks",
+            Self::Environments => "desktop-settings-nav-environments",
+            Self::Devices => "desktop-settings-nav-devices",
+            Self::Labs => "desktop-settings-nav-labs",
+            Self::Access => "desktop-settings-nav-access",
+            Self::Archived => "desktop-settings-nav-archived",
             Self::Calendar => "desktop-settings-nav-calendar",
             Self::Recording => "desktop-settings-nav-recording",
             Self::Transcription => "desktop-settings-nav-transcription",
@@ -178,38 +280,42 @@ impl SettingsSection {
     }
 }
 
-/// Web `settings_page::active_section`: the last section whose top is above
-/// the fold line, else the first.
-pub(super) fn active_settings_section(tops: &[f32], fold_px: f32) -> Option<usize> {
-    tops.iter()
-        .rposition(|top| *top <= fold_px)
-        .or((!tops.is_empty()).then_some(0))
+fn settings_inset(width: f32) -> f32 {
+    if width < 768.0 {
+        24.0
+    } else {
+        40.0
+    }
 }
 
-/// Web settings nav column.
-pub(super) const SETTINGS_NAV_WIDTH_PX: f32 = 184.0;
+fn settings_nav_width(width: f32) -> f32 {
+    if width < 768.0 {
+        56.0
+    } else {
+        240.0
+    }
+}
+
 pub(super) const SETTINGS_ROW_CONTROL_WIDTH_PX: f32 = 240.0;
-/// The rows that end `render_settings_general_rows`: thread and project
-/// title instructions.
-const GENERAL_TITLE_ROWS: usize = 2;
-pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
+pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = 14.0;
 pub(super) const SETTINGS_MODEL_DROPDOWN_ID: &str = "desktop-model";
-const CURRENT_CUSTOM_MODEL_OPTION: &str = "current-custom-model";
+pub(super) const CURRENT_CUSTOM_MODEL_OPTION: &str = "current-custom-model";
 pub(super) const SETTINGS_ACCESS_MODE_DROPDOWN_ID: &str = "desktop-access-mode";
 pub(super) const SETTINGS_EDITOR_DROPDOWN_ID: &str = "desktop-editor";
 pub(super) const SETTINGS_COMPACT_IDLE_DROPDOWN_ID: &str = "desktop-compact-idle";
 pub(super) const SETTINGS_THREAD_ACCESS_DROPDOWN_ID: &str = "desktop-thread-access";
+const SETTINGS_SEND_SHORTCUT: &str = "desktop-send-shortcut";
 pub(super) const SETTINGS_THREAD_HOPS_DROPDOWN_ID: &str = "desktop-thread-hops";
 pub(super) const SETTINGS_TITLE_PROJECT_DROPDOWN_ID: &str = "desktop-title-project";
 /// [`bruhs_models::thread_link::HOP_CHOICES`] as dropdown values.
 const THREAD_HOP_OPTIONS: [&str; 4] = ["2", "4", "6", "10"];
 
 pub(super) fn settings_cards_width(viewport_width: f32) -> f32 {
-    let available = viewport_width - SETTINGS_NAV_WIDTH_PX - 2.0 * SETTINGS_BODY_X_PADDING_PX;
-    available.clamp(
-        SETTINGS_PAGE_CONTENT_MIN_WIDTH_PX,
-        SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX,
-    )
+    let available = (viewport_width - 2.0 * settings_inset(viewport_width)).min(1280.0)
+        - settings_nav_width(viewport_width)
+        - 2.0 * SETTINGS_BODY_X_PADDING_PX
+        - 2.0;
+    available.clamp(1.0, SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX)
 }
 
 /// App breadcrumb header and 44rem card column.
@@ -219,7 +325,6 @@ pub(super) const SETTINGS_PAGE_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE
 pub(super) const SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = theme::ICON_PX;
 pub(super) const SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX: f32 = 704.0;
-pub(super) const SETTINGS_PAGE_CONTENT_MIN_WIDTH_PX: f32 = 320.0;
 pub(super) const SETTINGS_CODE_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = theme::CONTROL_SM_PX;
 pub(super) const SETTINGS_CONTROL_RADIUS_PX: f32 = 8.0;
@@ -227,65 +332,105 @@ pub(super) const SETTINGS_CONTROL_RADIUS_PX: f32 = 8.0;
 pub(super) const SETTINGS_BODY_X_PADDING_PX: f32 = 24.0;
 pub(super) const SETTINGS_BODY_Y_PADDING_PX: f32 = 20.0;
 pub(super) const SETTINGS_BODY_GAP_PX: f32 = 24.0;
-pub(super) const SETTINGS_SECTION_SCROLL_MARGIN_PX: f32 = 16.0;
-pub(super) const SETTINGS_SCROLL_SPY_FOLD_PX: f32 = 96.0;
-/// Web `SettingsRow`: `opacity-60` when disabled, text column `max-w-[60%]`.
+/// Disabled settings rows use the same opacity as the web component.
 pub(super) const SETTINGS_ROW_DISABLED_OPACITY: f32 = 0.6;
 /// Web rows are `px-4` inside an inset ring; the desktop card ring is a real
-/// 1px border, so 15px keeps the same 672px content box (and 60% text cap).
+/// 1px border, so 15px keeps the same 672px content box.
 pub(super) const SETTINGS_ROW_X_PADDING_PX: f32 = 15.0;
-pub(super) const SETTINGS_ROW_TEXT_MAX_FRACTION: f32 = 0.6;
 pub(super) const SETTINGS_SECTION_GAP_PX: f32 = 8.0;
 pub(super) const SETTINGS_CLOSE_HOVER_BG_OPACITY: f32 = 0.50;
 pub(super) const SETTINGS_BODY_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_META_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_CODE_RADIUS_PX: f32 = 4.0;
 pub(super) const SETTINGS_MODEL_ROW_MIN_HEIGHT_PX: f32 = 44.0;
-pub(super) const SETTINGS_MODEL_ID_GAP_PX: f32 = 2.0;
+pub(super) const SETTINGS_ROW_TEXT_GAP_PX: f32 = 4.0;
 pub(super) const SETTINGS_MODEL_LABEL_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_CLOSE_LABEL: &str = "Close settings";
 pub(super) const SETTINGS_DESIGN_SYSTEM_URL: &str = "https://design.bruhs.dev";
 
+fn settings_row_padding(viewport_width: f32) -> f32 {
+    if viewport_width < 640.0 { 11.0 } else { SETTINGS_ROW_X_PADDING_PX }
+}
+
 fn settings_rows_stack(viewport_width: f32) -> bool {
-    // A 320px transcription control needs a readable 240px label beside it,
-    // plus the row's 12px gap, 15px side padding and 1px card borders.
-    let inline_width = 320.0 + 240.0 + 12.0 + 2.0 * (SETTINGS_ROW_X_PADDING_PX + 1.0);
-    settings_cards_width(viewport_width) < inline_width
+    let content_width = settings_cards_width(viewport_width)
+        - 2.0 * (settings_row_padding(viewport_width) + 1.0);
+    content_width < theme::SETTINGS_INLINE_CONTENT_WIDTH_PX
+}
+
+#[derive(Clone)]
+pub(super) struct SettingsHit {
+    keywords: SharedString,
+    section: SettingsSection,
+    title: SharedString,
+    selector: Option<&'static str>,
+}
+
+#[derive(Clone)]
+pub(super) struct SettingsReveal {
+    selector: &'static str,
+    pending: Rc<std::cell::Cell<bool>>,
+    scroll: ScrollHandle,
+    workspace: gpui::EntityId,
 }
 
 #[derive(IntoElement)]
 struct SettingsRow {
+    reveal: Option<SettingsReveal>,
     selector: &'static str,
     title: SharedString,
     description: SharedString,
     live_description: Option<SharedString>,
     disabled: bool,
-    control: AnyElement,
+    control: Option<AnyElement>,
+    reset: Option<AnyElement>,
 }
 
 impl RenderOnce for SettingsRow {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let stacked = settings_rows_stack(bruhs_ui::zoom::css_px(window.viewport_size().width));
+        let viewport_width = bruhs_ui::zoom::css_px(window.viewport_size().width);
+        let stacked = settings_rows_stack(viewport_width);
         let selector = self.selector;
         let meta = |text: SharedString| {
             div()
-                .mt(px(SETTINGS_MODEL_ID_GAP_PX))
+                .mt(px(SETTINGS_ROW_TEXT_GAP_PX))
                 .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
                 .font_family(theme::UI_SMALL_FONT_FAMILY)
                 .font_weight(FontWeight::MEDIUM)
-                .line_height(relative(1.625))
+                .line_height(relative(1.5))
                 .text_color(theme::rambutan_500())
                 .child(text)
         };
         div()
+            .when_some(self.reveal, |row, reveal| {
+                row.bg(theme::persimmon_500().opacity(0.09))
+                    .on_children_prepainted(move |children, _, cx| {
+                        let Some(label) = children.first() else {
+                            return;
+                        };
+                        if reveal.pending.replace(false) {
+                            let scroll = reveal.scroll.clone();
+                            let id = reveal.workspace;
+                            let top = label.top();
+                            cx.defer(move |cx| {
+                                let y = scroll.offset().y + scroll.bounds().top() - top + px(20.);
+                                scroll.set_offset(point(
+                                    px(0.),
+                                    y.clamp(-scroll.max_offset().y, px(0.)),
+                                ));
+                                cx.notify(id);
+                            });
+                        }
+                    })
+            })
             .debug_selector(move || selector.to_string())
             .min_h(px(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX))
-            .px(px(SETTINGS_ROW_X_PADDING_PX))
-            .py(px(10.0))
+            .min_w_0()
+            .px(px(settings_row_padding(viewport_width)))
+            .py_3()
             .flex()
-            .when(stacked, |el| el.flex_col().items_start())
-            .when(!stacked, |el| el.items_center().justify_between())
-            .gap_3()
+            .when(stacked, |el| el.flex_col().items_start().gap_3())
+            .when(!stacked, |el| el.items_center().justify_between().gap_8())
             .when(self.disabled, |el| {
                 el.opacity(SETTINGS_ROW_DISABLED_OPACITY)
             })
@@ -294,36 +439,37 @@ impl RenderOnce for SettingsRow {
                     .debug_selector(move || format!("{selector}-label"))
                     .min_w_0()
                     .when(stacked, |el| el.w_full())
-                    .when(!stacked, |el| {
-                        el.flex_1().max_w(relative(SETTINGS_ROW_TEXT_MAX_FRACTION))
-                    })
+                    .when(!stacked, |el| el.flex_1())
                     .flex()
                     .flex_col()
                     .child(
                         div()
                             .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
-                            .line_height(relative(1.5))
+                            .line_height(px(20.0))
                             .text_color(theme::rambutan_100())
-                            .child(self.title),
+                            .when(self.reset.is_some(), |title| title.flex().items_center().gap_1())
+                            .child(self.title)
+                            .children(self.reset),
                     )
                     .when(!self.description.is_empty(), |el| {
                         el.child(meta(self.description))
                     })
                     .when_some(self.live_description, |el, live| el.child(meta(live))),
             )
-            .child(
+            .when_some(self.control, |row, control| row.child(
                 div()
                     .debug_selector(move || format!("{selector}-control"))
                     .min_w_0()
+                    .max_w_full()
                     .flex_shrink_0()
                     .flex()
                     .items_center()
                     .when(stacked, |el| el.w_full().flex_wrap())
                     .when(!stacked, |el| el.justify_end())
                     .gap_2()
-                    .child(self.control),
-            )
+                    .child(control),
+            ))
     }
 }
 
@@ -334,9 +480,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.scheduled_task_dialog_visible(cx) || self.secret_provider_dialog_visible(cx) {
+            return;
+        }
         if !self.settings_visible() {
+            self.settings_search
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.settings_search_open = false;
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+            self.settings_search_anchor = None;
             self.settings_section = SettingsSection::General;
-            self.settings_scroll_target = None;
+            self.settings_nav_reveal.set(true);
             self.settings_scroll.set_offset(point(px(0.0), px(0.0)));
         }
         self.open_overlay(Overlay::Settings {
@@ -353,60 +509,45 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Web `jump`: highlight the section now and scroll it under the header.
+    /// Select one settings pane and start at its first control.
     pub(super) fn set_settings_section(
         &mut self,
         section: SettingsSection,
         cx: &mut Context<'_, Self>,
     ) {
+        self.retention_editor = None;
+        self.details.close_menu();
+        self.settings_search_open = false;
+        self.settings_search_catalog.clear();
+        self.settings_search_anchor = None;
+        if self.settings_section == SettingsSection::Voice && section != SettingsSection::Voice {self.microphone_test.clear(); self.voice_models.close(); self.voice_cloud.dismiss();}
+        let section_changed = self.settings_section != section;
+        if section_changed { self.settings_advanced.clear(); self.theme_navigation=Default::default(); }
         self.settings_section = section;
-        self.settings_scroll_target = Some(section);
+        if section != SettingsSection::Projects {self.action_editor.open=false;}
+        self.settings_nav_reveal.set(true);
+        self.diagnostics.poll=None;
+        if section == SettingsSection::Updates {self.check_provider_health(cx);self.load_generators(cx);self.load_delivery_preferences(cx);}
+        if section == SettingsSection::Maintenance {self.refresh_capture_retention(None,cx);}
+        if section == SettingsSection::Worktrees {self.read_worktree_location(cx);}
+        if section == SettingsSection::Keyboard {self.refresh_keymap_file(cx);}
+        if section == SettingsSection::About {self.refresh_launcher(false,cx);}
+        if section==SettingsSection::Diagnostics {self.open_diagnostics(cx);}
+        self.environments.poll = None;
+        if matches!(section, SettingsSection::Devices | SettingsSection::Browser) { self.refresh_tool_access(cx); }
+        if section == SettingsSection::Environments { self.open_environments(cx); }
+        if section_changed && section == SettingsSection::SourceControl { self.load_delivery_preferences(cx); }
+        if section == SettingsSection::Voice {
+            self.reload_voice_dictionary(cx);
+            self.refresh_voice_runtime(None, cx);
+            self.refresh_voice_devices(cx);
+        }
+        self.keybinding_recording = false;
+        self.keybinding_new_for = None;
+        self.keybinding_choosing_command = false;
+        self.settings_scroll.set_offset(point(px(0.), px(0.)));
         self.set_settings_open_dropdown(None);
         cx.notify();
-    }
-
-    /// Top of each section relative to the scroll container, from the last
-    /// frame's layout plus the current offset (web `on_scroll` tops), in CSS
-    /// pixels like the margins they are compared with.
-    pub(super) fn settings_section_tops(&self) -> Option<Vec<f32>> {
-        let container_top = self.settings_scroll.bounds().top();
-        let offset_y = bruhs_ui::zoom::css_px(self.settings_scroll.offset().y);
-        SettingsSection::ALL
-            .iter()
-            .enumerate()
-            .map(|(ix, _)| {
-                let bounds = self.settings_scroll.bounds_for_item(ix)?;
-                Some(bruhs_ui::zoom::css_px(bounds.top() - container_top) + offset_y)
-            })
-            .collect()
-    }
-
-    /// Runs every frame while settings are open: apply a pending jump,
-    /// otherwise let the scroll spy pick the section under the fold line.
-    pub(super) fn sync_settings_scroll(&mut self, window: &mut Window) {
-        let Some(tops) = self.settings_section_tops() else {
-            if self.settings_scroll_target.is_some() {
-                // No layout yet; try again next frame.
-                window.request_animation_frame();
-            }
-            return;
-        };
-        if let Some(target) = self.settings_scroll_target.take() {
-            let offset_y = bruhs_ui::zoom::css_px(self.settings_scroll.offset().y);
-            let layout_top = tops[target.index()] - offset_y;
-            let max_scroll = bruhs_ui::zoom::css_px(self.settings_scroll.max_offset().y).max(0.0);
-            let y = (SETTINGS_SECTION_SCROLL_MARGIN_PX - layout_top).clamp(-max_scroll, 0.0);
-            self.settings_scroll.set_offset(point(px(0.0), px(y)));
-            // The spy re-reads the post-scroll layout on the next frame.
-            window.request_animation_frame();
-            return;
-        }
-        let max_scroll = self.settings_scroll.max_offset().y;
-        if max_scroll > px(0.0) && self.settings_scroll.offset().y <= -max_scroll {
-            self.settings_section = SettingsSection::About;
-        } else if let Some(ix) = active_settings_section(&tops, SETTINGS_SCROLL_SPY_FOLD_PX) {
-            self.settings_section = SettingsSection::ALL[ix];
-        }
     }
 
     pub(super) fn toggle_settings_dropdown(
@@ -419,6 +560,7 @@ impl Workspace {
         } else {
             Some(id)
         };
+        if open.is_some() && id.starts_with("settings-font-"){self.load_font_names(cx);}
         self.set_settings_open_dropdown(open);
         cx.notify();
     }
@@ -430,7 +572,24 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.select_generator_option(id,value,window,cx) || self.select_worktree_cleanup(id, value, cx) || self.select_model_filter(id,value,cx) || self.select_cleanup(id,value,cx) || self.select_voice_runtime(id,value,cx) || self.select_project_default(id, value, cx) {
+            self.set_settings_open_dropdown(None);
+            return;
+        }
         match id {
+            "settings-project-defaults-scope" => {
+                self.commit_writer_instructions(window,cx);
+                self.commit_branch_fields(window, cx);
+                self.retention_editor = None;
+                self.settings_project_scope = value.to_owned();
+                self.load_branch_fields(window, cx);
+                self.worktree_cleanup_status = None;
+                self.settings_advanced.clear();
+                if self.settings_section==SettingsSection::SourceControl {self.load_delivery_preferences(cx);}
+                self.action_editor.open = false;
+                self.action_editor.art_open=false; self.action_editor.art_error=None;
+                self.snooze_editor.open = false;
+            }
             SETTINGS_MODEL_DROPDOWN_ID => {
                 if value == CURRENT_CUSTOM_MODEL_OPTION {
                     self.set_default_model(self.current_model.clone(), cx);
@@ -462,6 +621,185 @@ impl Workspace {
             settings_ui::SETTINGS_LIVE_WHISPER_DROPDOWN_ID => {
                 if let Some(model) = settings_ui::whisper_model_for_key(value) {
                     self.update_meeting_prefs(|prefs| prefs.live_whisper_model = model, cx);
+                }
+            }
+            thread_notifications::MODE_ID => {
+                if let Some((mode, _, _)) = thread_notifications::NotificationMode::OPTIONS
+                    .into_iter()
+                    .find(|(_, id, _)| *id == value)
+                {
+                    self.thread_notifications.mode = mode;
+                    self.persist(cx);
+                }
+            }
+            "settings-diff-colors" | "settings-diff-layout" | "settings-diff-file-state" => {
+                let mut prefs = self.diff_panel.read(cx).prefs;
+                match id {
+                    "settings-diff-colors" => prefs.blue_orange = value == "blue-orange",
+                    "settings-diff-layout" => prefs.split = value == "split",
+                    _ => prefs.collapsed = value == "collapsed",
+                }
+                self.diff_panel
+                    .update(cx, |panel, cx| panel.set_preferences(prefs, cx));
+                self.persist(cx);
+            }
+            "settings-response-streaming" => {
+                if let Some(mode)=crate::views::chat::response_stream::Mode::parse(value) {self.response_stream=mode;self.stamp_run_prefs_on_threads(cx);self.persist_and_notify(cx);}
+            }
+            "settings-writing-style" | "settings-writer-options" | "settings-guide-options" | "settings-writer-model" | "settings-guide-model" | "settings-delivery-merge" | "settings-delivery-templates" | "settings-delivery-credits" => self.save_delivery_preference(id,value,cx),
+            "settings-update-track" => {
+                let track = match value {
+                    "stable" => updates_ui::UpdateTrack::Stable,
+                    "nightly" => updates_ui::UpdateTrack::Nightly,
+                    _ => return,
+                };
+                self.updates.update(cx, |updates, cx| updates.set_track(track, cx));
+                self.persist(cx);
+            }
+            "settings-text-generation-model" => self.choose_title_model(value,cx),
+            "diagnostic-metric" | "diagnostic-range" => self.choose_diagnostic(id,value,cx),
+            "settings-effort-display" => {
+                self.appearance.effort_label = value == "label";
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist_and_notify(cx);
+            }
+            "settings-environment-mark" => {if let Some(mark)=environment_mark::Mark::parse(value){self.appearance.environment_mark=mark;self.persist_and_notify(cx);}}
+            "settings-tool-visibility" => {
+                if let Some(mode)=crate::views::chat::tool_visibility::Visibility::parse(value) {
+                    self.tool_visibility=mode;self.stamp_run_prefs_on_threads(cx);self.persist_and_notify(cx);
+                }
+            }
+            "background-profile" | "background-active" | "background-idle" => self.set_background_option(id,value,window,cx),
+            "settings-quit-shortcut" => self.choose_quit_mode(value,cx),
+            "settings-fallback-model" => self.choose_fallback_model(value,cx),
+            "settings-branch-naming" => self.choose_branch_naming(value,cx),
+            "settings-settle-merged" | "settings-keep-pull" => self.choose_pull_policy(id,value,cx),
+            "settings-project-order" => self.choose_project_order(value,cx),
+            "settings-quota-snooze" | "settings-quota-resume" => self.choose_quota_preference(id,value,cx),
+            "settings-snooze-day" => self.choose_snooze_day(value,window,cx),
+            "settings-capture-sound" => {
+                let Some(sound) = snapshots::CaptureSound::from_key(value) else { return };
+                self.snapshots.sound = sound;
+                self.persist(cx);
+            }
+            "settings-word-wrap"=>{
+                let wrap=match value {"default"=>None,"on"=>Some(true),"off"=>Some(false),_=>return};
+                self.fonts.wrap=wrap;
+                self.fonts.apply(cx);
+                self.diff_panel.update(cx,|panel,cx|panel.set_default_wrap(wrap,cx));
+                self.persist_and_notify(cx);
+            }
+            "settings-log-retention" => {
+                let Ok(days) = value.parse::<u16>() else {
+                    return;
+                };
+                self.maintenance.prefs.retention_days = days;
+                self.schedule_log_cleanup(cx);
+                self.persist_and_notify(cx);
+            }
+            id if id.starts_with("settings-font-")=>self.select_typeface(id,value,cx),
+            "settings-clock-format" => {
+                use crate::clock_format::ClockFormat;
+                self.appearance.clock = match value {
+                    "12h" => ClockFormat::Twelve,
+                    "24h" => ClockFormat::TwentyFour,
+                    "system" => ClockFormat::System,
+                    _ => return,
+                };
+                self.appearance.clock.apply();
+                self.persist_and_notify(cx);
+                cx.refresh_windows();
+            }
+            "settings-reader-announcements" => {
+                use crate::views::chat::screen_reader::Announcements;
+                self.screen_reader.announcements = match value {
+                    "status" => Announcements::Status,
+                    "messages" => Announcements::Messages,
+                    "everything" => Announcements::Everything,
+                    _ => return,
+                };
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist_and_notify(cx);
+            }
+            "settings-browser-viewport" => {
+                cx.default_global::<crate::views::browser_preferences::BrowserPreferences>()
+                    .viewport
+                    .select(value);
+                self.refresh_viewport_fields(window, cx);
+                self.persist_and_notify(cx);
+                cx.refresh_windows();
+            }
+            "settings-browser-search-engine"
+            | "settings-browser-zoom"
+            | "settings-browser-appearance"
+            | "settings-browser-link-target" => {
+                self.change_browser_preference(id, value, cx);
+            }
+            "settings-voice-destination" => {
+                use crate::voice_capture::Destination;
+                if let Some(provider)=voice_cloud::provider(value) {
+                    self.open_voice_cloud(provider,window,cx);
+                    self.set_settings_open_dropdown(None);
+                    return;
+                }
+                self.voice_cloud.close(window,cx);
+                self.dictation_prefs.destination=match value {"off"=>Destination::Off,"local"=>Destination::Local,"compatible"=>Destination::Compatible,_=>return};
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            "settings-voice-shortcut-mode" => {
+                use crate::voice_capture::ShortcutMode;
+                self.dictation_prefs.shortcut_mode = match value {
+                    "Auto" => ShortcutMode::Auto, "Hold" => ShortcutMode::Hold,
+                    "Toggle" => ShortcutMode::Toggle, _ => return,
+                };
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            "settings-voice-model" => {
+                if let Some(model) = settings_ui::whisper_model_for_key(value) {
+                    self.dictation_prefs.model = model;
+                    self.stamp_run_prefs_on_threads(cx);
+                    self.persist(cx);
+                }
+            }
+            "settings-voice-language" => {
+                self.dictation_prefs.language = (value != "auto").then(|| value.to_owned());
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            "settings-worktree-submodules" => {
+                use bruhs_models::logic::run_place::WorktreeSubmodules;
+                self.worktree_prefs.submodules = match value {
+                    "top-level" => WorktreeSubmodules::TopLevel,
+                    "recursive" => WorktreeSubmodules::Recursive,
+                    _ => WorktreeSubmodules::None,
+                };
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            "settings-new-thread-placement" => {
+                self.run_choice = WorkspaceChoice::parse(value);
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            "settings-chat-width" => {
+                self.chat_width = match value {
+                    "wide" => ChatWidth::Wide,
+                    "full" => ChatWidth::Full,
+                    _ => ChatWidth::Comfortable,
+                };
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
+            SETTINGS_SEND_SHORTCUT => {
+                if let Some((mode, _)) = SendShortcut::OPTIONS
+                    .into_iter()
+                    .find(|(_, id)| *id == value)
+                {
+                    self.send_shortcut = mode;
+                    self.stamp_run_prefs_on_threads(cx);
+                    self.persist(cx);
                 }
             }
             SETTINGS_COMPACT_IDLE_DROPDOWN_ID => {
@@ -513,6 +851,38 @@ impl Workspace {
             });
         });
         (on_toggle, on_select)
+    }
+
+    pub(super) fn choice_control(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        current: &str,
+        choices: &[(&'static str, &'static str)],
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let options = choices
+            .iter()
+            .map(|&(value, label)| DropdownOption {
+                value,
+                label: label.into(),
+                description: None,
+            })
+            .collect();
+        let (toggle, select) = self.settings_dropdown_handlers(id, cx);
+        dropdown(
+            id,
+            label,
+            current,
+            vec![DropdownGroup {
+                label: None,
+                mark: None,
+                options,
+            }],
+            self.settings_listbox(id),
+            toggle,
+            select,
+        )
     }
 
     fn render_follow_up_control(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -697,13 +1067,42 @@ impl Workspace {
         disabled: bool,
         control: AnyElement,
     ) -> AnyElement {
+        self.settings_row_with_reset(selector, title, description, live_description, disabled, Some(control), None)
+    }
+
+    pub(super) fn settings_row_with_reset(
+        &self,
+        selector: &'static str,
+        title: impl Into<SharedString>,
+        description: impl Into<SharedString>,
+        live_description: Option<SharedString>,
+        disabled: bool,
+        control: Option<AnyElement>,
+        reset: Option<AnyElement>,
+    ) -> AnyElement {
+        let title = title.into();
+        let description = description.into();
+        if let Some(rows) = self.settings_search_inventory.borrow_mut().as_mut() {
+            rows.push(SettingsHit {
+                title: title.clone(),
+                keywords: description.clone(),
+                section: self.settings_section,
+                selector: Some(selector),
+            });
+        }
         SettingsRow {
+            reveal: self
+                .settings_search_anchor
+                .as_ref()
+                .filter(|reveal| reveal.selector == selector)
+                .cloned(),
             selector,
-            title: title.into(),
-            description: description.into(),
+            title,
+            description,
             live_description,
             disabled,
             control,
+            reset,
         }
         .into_any_element()
     }
@@ -741,27 +1140,325 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_settings_nav(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let mut nav = div()
+    fn focus_settings_search(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.settings_search_open = true;
+        let field = self.settings_search.clone();
+        cx.defer_in(window, move |_, window, cx| {
+            field.update(cx, |input, cx| input.focus(window, cx))
+        });
+        cx.notify();
+    }
+
+    pub(super) fn clear_focused_settings_query(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
+        if !self.settings_visible() || !self.settings_search.focus_handle(cx).is_focused(window)
+            || self.settings_search.read(cx).value().is_empty()
+        {
+            return false;
+        }
+        self.settings_search.update(cx, |input, cx| input.set_value("", window, cx));
+        self.refresh_settings_search(cx);
+        true
+    }
+
+    pub(super) fn refresh_settings_search(&mut self, cx: &mut Context<'_, Self>) {
+        let query = self.settings_search.read(cx).value().trim().to_lowercase();
+        self.settings_search_index = 0;
+        self.settings_nav_scroll.set_offset(point(px(0.), px(0.)));
+        self.settings_search_results.clear();
+        if query.is_empty() {
+            self.settings_nav_reveal.set(true);
+            self.settings_search_catalog.clear();
+            cx.notify();
+            return;
+        }
+        if self.settings_search_catalog.is_empty() {
+            // Snapshot available controls once per search, including conditional rows.
+            for section in SettingsSection::ALL {
+                self.settings_search_inventory.replace(Some(Vec::new()));
+                drop(self.render_settings_section(section, SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX, cx));
+                let mut entries = self.settings_search_inventory.take().unwrap_or_default();
+                if section == SettingsSection::Appearance {
+                    for hit in &mut entries {
+                        match hit.selector {
+                            Some("desktop-settings-row-color-scheme") => {
+                                hit.keywords = "system light dark appearance mode".into();
+                            }
+                            Some("desktop-settings-row-themes") => {
+                                let names = theme::ThemeFamily::ALL.map(|family| family.label()).join(" ");
+                                hit.keywords = format!("palette light dark {names}").into();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if section == SettingsSection::SourceControl {
+                    // T3 keeps both search entries available while guides are off.
+                    // Both lead to the switch that reveals their controls.
+                    entries.retain(|hit| !matches!(hit.selector, Some("settings-row-guide-model" | "settings-row-guide-instructions")));
+                    for (title, keywords) in [
+                        ("Review guide model", "pull request PR guided review coding agent maintainer"),
+                        ("Review guide instructions", "pull request PR guided review preferences prompt custom"),
+                    ] {
+                        entries.push(SettingsHit {
+                            title: title.into(), keywords: keywords.into(), section,
+                            selector: Some("settings-row-review-guides"),
+                        });
+                    }
+                }
+                self.settings_search_catalog
+                    .extend(entries.into_iter().map(|mut hit| {
+                        hit.section = section;
+                        hit
+                    }));
+                self.settings_search_catalog.push(SettingsHit {
+                    section,
+                    title: section.label().into(),
+                    keywords: if section == SettingsSection::General {
+                        "Notifications alerts quiet hours sidebar external editor".into()
+                    } else {
+                        section.description().into()
+                    },
+                    selector: None,
+                });
+            }
+        }
+        self.settings_search_results.extend(
+            self.settings_search_catalog
+                .iter()
+                .filter(|hit| {
+                    palette_ui::text_matches_query(
+                        &format!("{} {} {}", hit.title, hit.section.label(), hit.keywords),
+                        &query,
+                    )
+                })
+                .cloned(),
+        );
+        self.settings_search_results
+            .sort_by_key(|hit| !palette_ui::text_matches_query(&hit.title, &query));
+        cx.notify();
+    }
+
+    pub(super) fn open_settings_hit(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.settings_search.read(cx).value().trim().is_empty() {
+            return;
+        }
+        let Some(hit) = self.settings_search_results.get(index).cloned() else {
+            return;
+        };
+        self.set_settings_section(hit.section, cx);
+        if let Some(id) = hit.selector {
+            match id {
+                "desktop-settings-row-pr-templates" | "settings-row-writer-model" => { self.settings_advanced.insert("source-writer-advanced"); }
+                "desktop-settings-row-worktree-submodules" => { self.settings_advanced.insert("worktree-creation-advanced"); }
+                "settings-row-cleanup-settled" | "settings-row-cleanup-unchanged" | "settings-row-worktree-keep-when" => { self.settings_advanced.insert("worktree-cleanup-advanced"); }
+                _ => {}
+            }
+            self.settings_search_anchor = Some(SettingsReveal {
+                selector: id,
+                pending: Rc::new(std::cell::Cell::new(true)),
+                scroll: self.settings_scroll.clone(),
+                workspace: cx.entity_id(),
+            });
+        }
+        self.settings_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.focus_modal_dialog(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn render_settings_nav(&self, width: f32, cx: &Context<'_, Self>) -> AnyElement {
+        let compact = width < 768.0;
+        let expanded = compact && self.settings_search_open;
+        let rail = compact && !expanded;
+        let has_query = !self.settings_search.read(cx).value().trim().is_empty();
+        let search = if rail {
+            div()
+                .id("desktop-settings-show-search")
+                .debug_selector(|| "desktop-settings-show-search".to_owned())
+                .tab_index(0)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .role(Role::Button)
+                .aria_label("Search settings")
+                .cursor_pointer()
+                .h(px(40.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    svg()
+                        .path(assets::TOOL_SEARCH_ICON_PATH)
+                        .size(px(theme::ICON_PX))
+                        .text_color(theme::rambutan_400()),
+                )
+                .map(|el| {
+                    on_press_view(el, cx, |this, window, cx| {
+                        this.focus_settings_search(window, cx)
+                    })
+                })
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_2()
+                .h(px(48.))
+                .child(
+                    svg()
+                        .path(assets::TOOL_SEARCH_ICON_PATH)
+                        .size(px(theme::ICON_PX))
+                        .text_color(theme::rambutan_500()),
+                )
+                .child(
+                    div().min_w_0().flex_1().child(
+                        Input::new(&self.settings_search)
+                            .appearance(false)
+                            .role(Role::EditableComboBox)
+                            .aria_label("Search settings"),
+                    ),
+                )
+                .when(!has_query, |el| {
+                    el.child(div().text_xs().text_color(theme::rambutan_500()).child("/"))
+                })
+                .when(has_query, |el| {
+                    let button = web_button("settings-clear-search", WebButtonVariant::Ghost, WebButtonSize::IconSmall, ButtonState::Enabled)
+                        .debug_selector(|| "settings-clear-search".to_owned())
+                        .aria_label("Clear settings search")
+                        .flex_shrink_0()
+                        .child(svg().path(assets::CLOSE_ICON_PATH).size(px(theme::ICON_PX)).text_color(theme::rambutan_500()));
+                    el.child(on_press_view(button, cx, |this, window, cx| {
+                        this.settings_search.update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                            input.focus(window, cx);
+                        });
+                        this.refresh_settings_search(cx);
+                    }))
+                })
+                .into_any_element()
+        };
+        let shell = div()
             .id("desktop-settings-nav")
-            .w(px(SETTINGS_NAV_WIDTH_PX))
+            .debug_selector(|| "desktop-settings-nav".to_owned())
+            .when(expanded, |nav| nav.flex_1().min_w_0())
+            .when(!expanded, |nav| nav.w(px(settings_nav_width(width))))
+            .bg(theme::longan_900())
             .flex_shrink_0()
-            .p_3()
             .border_r_1()
             .border_color(theme::longan_800().opacity(0.6))
             .flex()
             .flex_col()
+            .child(search);
+        let index = self.settings_section.nav_index();
+        let show_sections = !has_query;
+        let pending = self.settings_nav_reveal.clone();
+        let scroll = self.settings_nav_scroll.clone();
+        let view = cx.entity_id();
+        let mut nav = div().on_children_prepainted(move |_, _, cx| {
+            if show_sections && pending.replace(false) {
+                let scroll = scroll.clone();
+                cx.defer(move |cx| {
+                    scroll.scroll_to_item(index);
+                    cx.notify(view);
+                });
+            }
+        })
+            .id("desktop-settings-links")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.settings_nav_scroll)
+            .px(px(8.))
+            .pb_2()
+            .flex()
+            .flex_col()
             .gap(px(2.0))
-            .role(Role::TabList)
-            .aria_label("Settings sections");
+            .when(show_sections, |nav| nav.role(Role::TabList).aria_label("Settings sections"))
+            .when(has_query, |nav| nav.role(Role::ListBox).aria_label("Settings search results"));
+        if has_query {
+            for (index, hit) in self.settings_search_results.iter().enumerate() {
+                nav = nav.child(
+                    div()
+                        .id(("settings-hit", index))
+                        .debug_selector(move || format!("desktop-settings-hit-{index}"))
+                        .tab_index(0)
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .role(Role::ListBoxOption)
+                        .aria_selected(index == self.settings_search_index)
+                        .aria_label(format!("{} in {}", hit.title, hit.section.label()))
+                        .cursor_pointer()
+                        .flex()
+                        .flex_col()
+                        .flex_shrink_0()
+                        .p_2()
+                        .rounded(px(8.0))
+                        .when(index == self.settings_search_index, |el| {
+                            el.bg(theme::longan_800())
+                        })
+                        .hover(|el| el.bg(theme::longan_800()))
+                        .child(div().truncate().child(hit.title.clone()))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::rambutan_500())
+                                .child(hit.section.label()),
+                        )
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, window, cx| {
+                                this.open_settings_hit(index, window, cx)
+                            })
+                        }),
+                );
+            }
+            if self.settings_search_results.is_empty() {
+                nav = nav.child(div()
+                    .id("settings-no-results")
+                    .debug_selector(|| "desktop-settings-no-results".to_owned())
+                    .px_2()
+                    .text_xs()
+                    .role(Role::Status)
+                    .aria_label("No settings found")
+                    .child("No settings found"));
+            }
+            return shell.child(nav).into_any_element();
+        }
         for section in SettingsSection::ALL {
+            let group = section.group_heading();
+            if let Some(group) = group {
+                nav = if rail {
+                    nav.child(div().my_2().border_t_1().border_color(theme::longan_800()))
+                } else {
+                    nav.child(
+                        div()
+                            .mt_3()
+                            .px_2()
+                            .text_xs()
+                            .text_color(theme::rambutan_500())
+                            .child(group),
+                    )
+                };
+            }
             let active = section == self.settings_section;
+            let target = cx.weak_entity();
             let selector = section.selector();
             nav = nav.child(
                 div()
                     .id(selector)
                     .debug_selector(move || selector.to_string())
-                    .h(px(32.0))
+                    .h(px(36.0))
+                    .flex_shrink_0()
+                    .when(rail, |el| {
+                        el.justify_center()
+                            .tooltip(move |w, cx| Tooltip::new(section.label()).build(w, cx))
+                    })
                     .px_2()
                     .gap_2()
                     .rounded(px(8.0))
@@ -782,6 +1479,9 @@ impl Workspace {
                     })
                     .tab_index(0)
                     .role(Role::Tab)
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
+                        let _ = target.update(cx, |this, cx| this.set_settings_section(section, cx));
+                    })
                     .aria_label(section.label())
                     .aria_selected(active)
                     .border_1()
@@ -800,83 +1500,13 @@ impl Workspace {
                             .text_color(theme::rambutan_500())
                             .flex_shrink_0(),
                     )
-                    .child(section.label()),
+                    .when(!rail, |el| el.child(section.label())),
             );
         }
-        nav.into_any_element()
+        shell.child(nav).into_any_element()
     }
 
-    pub(super) fn render_settings_general_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
-        // Model: providers as groups with their logo, like the web dropdown.
-        let mut model_groups: Vec<DropdownGroup> = desktop_model_provider_groups_like_web()
-            .into_iter()
-            .map(|(provider, models)| DropdownGroup {
-                label: Some(provider_label(provider)),
-                mark: Some(provider_mark(provider, cx)),
-                options: models
-                    .into_iter()
-                    .map(|(_, model)| DropdownOption {
-                        value: model.id,
-                        label: model.label.to_string(),
-                        description: Some(model.id.to_string()),
-                    })
-                    .collect(),
-            })
-            .collect();
-        let custom_current = model_info(&self.current_model).is_none()
-            && bruhs_models::agent::custom_model_selection(&self.current_model).is_some();
-        if custom_current {
-            let provider = AgentProvider::for_model(&self.current_model);
-            model_groups.push(DropdownGroup {
-                label: Some(provider_label(provider)),
-                mark: Some(provider_mark(provider, cx)),
-                options: vec![DropdownOption {
-                    value: CURRENT_CUSTOM_MODEL_OPTION,
-                    label: self.current_model.clone(),
-                    description: Some("Your configured model".into()),
-                }],
-            });
-        }
-        let (model_toggle, model_select) =
-            self.settings_dropdown_handlers(SETTINGS_MODEL_DROPDOWN_ID, cx);
-        let model_control = dropdown(
-            SETTINGS_MODEL_DROPDOWN_ID,
-            "Default model",
-            if custom_current {
-                CURRENT_CUSTOM_MODEL_OPTION
-            } else {
-                &self.current_model
-            },
-            model_groups,
-            self.settings_listbox(SETTINGS_MODEL_DROPDOWN_ID),
-            model_toggle,
-            model_select,
-        );
-
-        let mode_groups = vec![DropdownGroup {
-            label: None,
-            mark: None,
-            options: PermissionMode::all()
-                .iter()
-                .map(|mode| DropdownOption {
-                    value: mode.as_str(),
-                    label: mode.label().to_string(),
-                    description: Some(mode.description(None).to_string()),
-                })
-                .collect(),
-        }];
-        let (mode_toggle, mode_select) =
-            self.settings_dropdown_handlers(SETTINGS_ACCESS_MODE_DROPDOWN_ID, cx);
-        let mode_control = dropdown(
-            SETTINGS_ACCESS_MODE_DROPDOWN_ID,
-            "Access mode",
-            self.permission_mode.as_str(),
-            mode_groups,
-            self.settings_listbox(SETTINGS_ACCESS_MODE_DROPDOWN_ID),
-            mode_toggle,
-            mode_select,
-        );
-
+    fn render_settings_general(&self, cx: &Context<'_, Self>) -> AnyElement {
         let editor_groups = vec![DropdownGroup {
             label: None,
             mark: None,
@@ -901,29 +1531,157 @@ impl Workspace {
             editor_select,
         );
 
+        let editor = vec![self.settings_row(
+            "desktop-settings-row-editor",
+            "Editor",
+            "Where ⌘O and the diff panel's Open button send the project and files.",
+            settings_ui::control_column(editor_control),
+        )];
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
+            .child(self.settings_card("Notifications", "", self.thread_notification_rows(cx)))
+            .child(self.settings_card("Sidebar", "", self.render_settings_sidebar_rows(cx)))
+            .child(self.settings_card(
+                "Confirmations",
+                "",
+                vec![
+                    self.settings_row(
+                        "desktop-settings-row-confirm-unpin",
+                        "Unpin confirmation",
+                        "Ask before removing a thread from Pinned.",
+                        settings_ui::switch(
+                            "settings-confirm-unpin",
+                            self.confirm_thread_unpin,
+                            false,
+                            "Unpin confirmation",
+                            cx,
+                            |this, _, cx| {
+                                this.confirm_thread_unpin = !this.confirm_thread_unpin;
+                                this.persist_and_notify(cx);
+                            },
+                        ),
+                    ),
+                    self.settings_row(
+                        "desktop-settings-row-confirm-archive",
+                        "Archive confirmation",
+                        "Ask before moving a thread to Archived threads.",
+                        settings_ui::switch(
+                            "settings-confirm-archive",
+                            self.confirm_thread_archive,
+                            false,
+                            "Archive confirmation",
+                            cx,
+                            |this, _, cx| {
+                                this.confirm_thread_archive = !this.confirm_thread_archive;
+                                this.persist_and_notify(cx);
+                            },
+                        ),
+                    ),
+                    self.settings_row(
+                        "desktop-settings-row-confirm-delete",
+                        "Delete confirmation",
+                        "Ask before deleting a thread and its chat history.",
+                        settings_ui::switch(
+                            "settings-confirm-delete",
+                            self.confirm_thread_delete,
+                            false,
+                            "Delete confirmation",
+                            cx,
+                            |this, _, cx| {
+                                this.confirm_thread_delete = !this.confirm_thread_delete;
+                                this.persist_and_notify(cx);
+                            },
+                        ),
+                    ),
+                    self.quit_shortcut_row(cx),
+                ],
+            ))
+            .child(self.settings_card(
+                "Region",
+                "",
+                vec![self.settings_row(
+                    "desktop-settings-row-clock",
+                    "Time format",
+                    "System default follows your device’s clock preference.",
+                    settings_ui::control_column(self.choice_control(
+                        "settings-clock-format",
+                        "Time format",
+                        self.appearance.clock.key(),
+                        &[
+                            ("system", "System default"),
+                            ("12h", "12-hour"),
+                            ("24h", "24-hour"),
+                        ],
+                        cx,
+                    )),
+                )],
+            ))
+            .child(self.settings_card("External editor", "", editor))
+            .child(
+                crate::views::reactive_automations::AgentNotificationSettings(
+                    self.reactive_automations.clone(),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_chat_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        let modifier = if cfg!(target_os = "macos") {
+            "⌘"
+        } else {
+            "Ctrl"
+        };
+        let groups = vec![DropdownGroup {
+            label: None,
+            mark: None,
+            options: SendShortcut::OPTIONS
+                .into_iter()
+                .map(|(mode, value)| DropdownOption {
+                    value,
+                    label: match mode {
+                        SendShortcut::Enter => "Enter".to_string(),
+                        SendShortcut::ModEnterMultiline => {
+                            format!("{modifier} + Enter for multiline prompts")
+                        }
+                        SendShortcut::ModEnter => format!("{modifier} + Enter always"),
+                    },
+                    description: None,
+                })
+                .collect(),
+        }];
+        let (toggle, select) = self.settings_dropdown_handlers(SETTINGS_SEND_SHORTCUT, cx);
+        let alternate = match self.send_shortcut {
+            SendShortcut::Enter => format!("Press {modifier} + Enter to switch actions for one message."),
+            SendShortcut::ModEnter => format!("Press {modifier} + Shift + Enter to switch actions for one message."),
+            SendShortcut::ModEnterMultiline => format!("Switch actions with {modifier} + Enter for one line or {modifier} + Shift + Enter for multiple lines."),
+        };
         vec![
+            self.settings_row("settings-row-tool-visibility","Tool calls in chat","Choose how much agent activity appears. Zen shows the final answer. Errors and approval requests stay visible.",settings_ui::control_column(self.choice_control("settings-tool-visibility","Tool calls in chat",self.tool_visibility.key(),&[("all","Show all"),("failures","Hide successful"),("hide","Hide all"),("zen","Zen")],cx))),
+            self.settings_row("desktop-settings-row-slash-skills","Show skills in slash menu","Include installed provider and project skills in the / menu. Type $ to search skills directly.",settings_ui::switch("settings-slash-skills",self.slash_skills,false,"Show skills in slash menu",cx,|this,_,cx|{
+                this.slash_skills=!this.slash_skills;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);
+            })),
+            self.settings_row("desktop-settings-row-reader-announcements","Screen reader announcements",
+                "Announce turn status, assistant messages before tool calls, or each tool step.",
+                settings_ui::control_column(self.choice_control("settings-reader-announcements","Screen reader announcements",self.screen_reader.announcements.key(),
+                    &[("status","Status only"),("messages","Status and messages"),("everything","Everything")],cx))),
+            self.settings_row("desktop-settings-row-reader-title","Screen reader window title",
+                "Start the window title with the active thread’s status and name. Both appear in app switchers and shared screens.",
+                settings_ui::switch("settings-reader-title",self.screen_reader.window_title,false,"Screen reader window title",cx,|this,_,cx|{
+                    this.screen_reader.window_title=!this.screen_reader.window_title;
+                    this.persist_and_notify(cx);
+                })),
             self.settings_row(
-                "desktop-settings-row-model",
-                "Model",
-                "Change it per thread in the composer. Enter provider/model in model search to use a configured model.",
-                settings_ui::control_column(model_control),
-            ),
-            self.settings_row(
-                "desktop-settings-row-access-mode",
-                "Access mode",
-                "Choose whether the agent may edit files or run commands. Permission support depends on its runtime.",
-                settings_ui::control_column(mode_control),
-            ),
-            self.settings_row(
-                "desktop-settings-row-editor",
-                "Editor",
-                "Where ⌘O and the diff panel's Open button send the project and files.",
-                settings_ui::control_column(editor_control),
+                "desktop-settings-row-send-shortcut",
+                "Send shortcut",
+                "Choose which keys send a prompt. Shift + Enter starts a new line.",
+                dropdown(SETTINGS_SEND_SHORTCUT, "Send shortcut", self.send_shortcut.id(), groups, self.settings_listbox(SETTINGS_SEND_SHORTCUT), toggle, select),
             ),
             self.settings_row(
                 "desktop-settings-row-follow-up",
                 "Follow up behavior",
-                "Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one.",
+                &format!("Queue for the next turn or steer the current Claude turn. {alternate} Codex always queues."),
                 settings_ui::control_column(self.render_follow_up_control(cx)),
             ),
             self.settings_row(
@@ -932,7 +1690,7 @@ impl Workspace {
                 "Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no automatic compaction.",
                 settings_ui::control_column(
                     div()
-                        .w(px(240.0))
+                        .w_full()
                         .h(px(theme::CONTROL_PX))
                         .child(Input::new(&self.autocompact_input).aria_label("Automatic compaction token count"))
                         .into_any_element(),
@@ -941,9 +1699,377 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-compact-idle",
                 "Compact idle threads",
-                "When you return, a Compact chip sits beside send after the prompt cache expires on a Claude thread over 200,000 tokens. Enter summarizes, then sends the draft. Before the cache expires compacts that thread while bruhs is open. Never skips both. Manual /compact still works.",
+                "For Claude threads over 200,000 tokens, compact before the cache expires or offer Compact when you return. Choose Never to use /compact manually.",
                 settings_ui::control_column(self.render_compact_idle_control(cx)),
             ),
+        ]
+    }
+
+    fn render_diff_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        let prefs = self.diff_panel.read(cx).prefs;
+        vec![
+            self.settings_row(
+                "desktop-settings-row-diff-colors",
+                "Diff colors",
+                "Choose colors for added and removed lines.",
+                self.choice_control(
+                    "settings-diff-colors",
+                    "Diff colors",
+                    if prefs.blue_orange {
+                        "blue-orange"
+                    } else {
+                        "red-green"
+                    },
+                    &[
+                        ("red-green", "Red & green"),
+                        ("blue-orange", "Blue & orange"),
+                    ],
+                    cx,
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-diff-whitespace",
+                "Hide whitespace changes",
+                "Ignore whitespace-only edits in working tree and thread diffs.",
+                settings_ui::switch(
+                    "settings-diff-whitespace",
+                    prefs.hide_whitespace,
+                    false,
+                    "Hide whitespace changes",
+                    cx,
+                    |this, _, cx| {
+                        let mut prefs = this.diff_panel.read(cx).prefs;
+                        prefs.hide_whitespace = !prefs.hide_whitespace;
+                        this.diff_panel
+                            .update(cx, |panel, cx| panel.set_preferences(prefs, cx));
+                        if this.diff_panel_visible {
+                            this.sync_diff_panel_project(cx);
+                        }
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-diff-file-state",
+                "Default diff file state",
+                "Choose how files open in the changes panel.",
+                self.choice_control(
+                    "settings-diff-file-state",
+                    "Default diff file state",
+                    if prefs.collapsed {
+                        "collapsed"
+                    } else {
+                        "expanded"
+                    },
+                    &[("expanded", "Expanded"), ("collapsed", "Collapsed")],
+                    cx,
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-diff-layout",
+                "Diff layout",
+                "Read changes in one column or compare both versions side by side.",
+                self.choice_control(
+                    "settings-diff-layout",
+                    "Diff layout",
+                    if prefs.split { "split" } else { "stacked" },
+                    &[("stacked", "Stacked"), ("split", "Side by side")],
+                    cx,
+                ),
+            ),
+            self.settings_row("desktop-settings-row-proactive-panels","Open pull requests and changes panels proactively",
+                "Open a linked pull request first. Otherwise, open changes when a turn edits at least three files or 50 lines.",
+                settings_ui::switch("settings-proactive-panels",prefs.proactive_panels,false,"Open panels proactively",cx,|this,_,cx|{
+                    this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.proactive_panels=!prefs.proactive_panels;panel.set_preferences(prefs,cx)});
+                    this.persist_and_notify(cx);
+                })),
+            self.settings_row("desktop-settings-row-open-pull-links","Open pull requests in bruhs",
+                "Open GitHub pull request links in bruhs. Turn off to use the usual link destination.",
+                settings_ui::switch("settings-open-pull-links",prefs.open_pull_links_in_app,false,"Open pull requests in bruhs",cx,|this,_,cx|{
+                    this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.open_pull_links_in_app=!prefs.open_pull_links_in_app;panel.set_preferences(prefs,cx)});
+                    this.persist_and_notify(cx);
+                })),
+        ]
+    }
+
+    fn render_appearance(&self, width: f32, cx: &Context<'_, Self>) -> AnyElement {
+        let percent_slider = |kind, value: u8| {
+            settings_ui::control_column(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.render_settings_slider(kind, cx)),
+                    )
+                    .child(div().flex_shrink_0().child(format!("{value}%")))
+                    .into_any_element(),
+            )
+        };
+        let step = |increase: bool| {
+            let (id, text) = if increase {
+                ("settings-zoom-in", "Zoom in")
+            } else {
+                ("settings-zoom-out", "Zoom out")
+            };
+            let level = if increase {
+                crate::zoom::zoom_in(self.zoom)
+            } else {
+                crate::zoom::zoom_out(self.zoom)
+            };
+            web_button(
+                id,
+                WebButtonVariant::Outline,
+                WebButtonSize::Small,
+                ButtonState::disabled_if(level == self.zoom),
+            )
+            .aria_label(text)
+            .child(if increase { "+" } else { "−" })
+            .on_click(cx.listener(move |this, _, window, cx| this.set_zoom(level, window, cx)))
+        };
+        let colors = vec![
+            self.settings_row(
+                "desktop-settings-row-contrast",
+                "Contrast",
+                "Adjust contrast across the interface.",
+                percent_slider(
+                    settings_ui::SettingsSlider::Contrast,
+                    self.appearance.contrast,
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-glass-opacity",
+                "Glass opacity",
+                "Adjust the opacity of menus, dialogs and the composer.",
+                percent_slider(
+                    settings_ui::SettingsSlider::GlassOpacity,
+                    self.appearance.glass_opacity,
+                ),
+            ),
+        ];
+        let interface = vec![
+            self.environment_mark_row(cx),
+            self.settings_row("desktop-settings-row-panel-animations","Panel animations","Set how fast panels open and close. Zero turns animation off.",
+                settings_ui::control_column(div().w_full().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(self.render_settings_slider(settings_ui::SettingsSlider::PanelDuration,cx))).child(format!("{} ms",self.appearance.panel_duration_ms)).into_any_element())),
+
+            self.settings_row(
+                "desktop-settings-row-chat-width",
+                "Chat width",
+                "Set the width of the conversation and composer.",
+                self.choice_control(
+                    "settings-chat-width",
+                    "Chat width",
+                    self.chat_width.id(),
+                    &[
+                        ("comfortable", "Comfortable"),
+                        ("wide", "Wide"),
+                        ("full", "Full width"),
+                    ],
+                    cx,
+                ),
+            ),
+            self.thread_detail_settings_row(cx),
+            self.settings_row(
+                "desktop-settings-row-effort-display", "Effort display",
+                "Show reasoning effort in the composer as a word or bars.",
+                self.choice_control("settings-effort-display", "Effort display",
+                    if self.appearance.effort_label { "label" } else { "bars" },
+                    &[("label", "Word (default)"), ("bars", "Bars")], cx),
+            ),
+            self.settings_row(
+                "desktop-settings-row-render-math",
+                "Render math",
+                "Typeset LaTeX in chat messages.",
+                settings_ui::switch(
+                    "settings-render-math",
+                    self.appearance.render_math,
+                    false,
+                    "Render math",
+                    cx,
+                    |this, _, cx| {
+                        this.appearance.render_math = !this.appearance.render_math;
+                        this.stamp_run_prefs_on_threads(cx);
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-zoom",
+                "Interface size",
+                "Adjust the size of text and controls on this device.",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(step(false))
+                    .child(format!("{:.0}%", self.zoom * 100.))
+                    .child(step(true))
+                    .into_any_element(),
+            ),
+        ];
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
+            .child(self.scheme_picker(cx))
+            .child(self.theme_library(width, cx))
+            .child(self.settings_card("Contrast & opacity", "", colors))
+            .child(self.settings_card("Interface", "", interface.into_iter().chain(self.text_layout_rows(cx)).collect()))
+            .child(self.settings_card("Fonts","",self.render_font_rows(cx)))
+            .into_any_element()
+    }
+
+    pub(super) fn catalog_model_groups(cx:&Context<'_,Self>, include:impl Fn(AgentProvider)->bool)->Vec<DropdownGroup> {
+        desktop_model_provider_groups_like_web()
+            .into_iter()
+            .filter(|(provider,_)| include(*provider))
+            .map(|(provider, models)| DropdownGroup {
+                label: Some(provider_label(provider)),
+                mark: Some(provider_mark(provider, cx)),
+                options: models
+                    .into_iter()
+                    .map(|(_, model)| DropdownOption {
+                        value: model.id,
+                        label: model.label.to_string(),
+                        description: Some(model.id.to_string()),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn render_settings_threads(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let mut model_groups = Self::catalog_model_groups(cx, |_|true);
+        let scoped = !self.settings_project_scope.is_empty();
+        let project = self.project_defaults.get(&self.settings_project_scope);
+        let project_model = project.and_then(|prefs| prefs.model.as_deref());
+        let mut custom_models = vec![self.current_model.as_str()];
+        if let Some(model) = project_model.filter(|model| *model != self.current_model) {
+            custom_models.push(model);
+        }
+        for model in custom_models.into_iter().filter(|model| {
+            model_info(model).is_none()
+                && bruhs_models::agent::custom_model_selection(model).is_some()
+        }) {
+            let provider = AgentProvider::for_model(model);
+            model_groups.push(DropdownGroup {
+                label: Some(provider_label(provider)),
+                mark: Some(provider_mark(provider, cx)),
+                options: vec![DropdownOption {
+                    value: if scoped {
+                        role_settings_ui::project_value(model)
+                    } else {
+                        CURRENT_CUSTOM_MODEL_OPTION
+                    },
+                    label: model.to_string(),
+                    description: Some("Your configured model".into()),
+                }],
+            });
+        }
+        let inherited_group = |label: String| DropdownGroup {
+            label: None,
+            mark: None,
+            options: vec![DropdownOption {
+                value: "inherit",
+                label: format!("Use environment default ({label})"),
+                description: None,
+            }],
+        };
+        if scoped {
+            model_groups.insert(0, inherited_group(self.current_model.clone()));
+        }
+        let (model_toggle, model_select) =
+            self.settings_dropdown_handlers(SETTINGS_MODEL_DROPDOWN_ID, cx);
+        let model_control = dropdown(
+            SETTINGS_MODEL_DROPDOWN_ID,
+            "Default model",
+            if scoped {
+                project_model.unwrap_or("inherit")
+            } else if model_info(&self.current_model).is_none() {
+                CURRENT_CUSTOM_MODEL_OPTION
+            } else {
+                &self.current_model
+            },
+            model_groups,
+            self.settings_listbox(SETTINGS_MODEL_DROPDOWN_ID),
+            model_toggle,
+            model_select,
+        );
+
+        let mut mode_groups = vec![DropdownGroup {
+            label: None,
+            mark: None,
+            options: PermissionMode::all()
+                .iter()
+                .map(|mode| DropdownOption {
+                    value: mode.as_str(),
+                    label: mode.label().to_string(),
+                    description: Some(mode.description(None).to_string()),
+                })
+                .collect(),
+        }];
+        if scoped {
+            mode_groups.insert(0, inherited_group(self.permission_mode.label().to_owned()));
+        }
+        let (mode_toggle, mode_select) =
+            self.settings_dropdown_handlers(SETTINGS_ACCESS_MODE_DROPDOWN_ID, cx);
+        let mode_control = dropdown(
+            SETTINGS_ACCESS_MODE_DROPDOWN_ID,
+            "Access mode",
+            if scoped {
+                project
+                    .and_then(|p| p.permissions)
+                    .map(|m| m.as_str())
+                    .unwrap_or("inherit")
+            } else {
+                self.permission_mode.as_str()
+            },
+            mode_groups,
+            self.settings_listbox(SETTINGS_ACCESS_MODE_DROPDOWN_ID),
+            mode_toggle,
+            mode_select,
+        );
+
+        let mut placements = vec![
+            ("checkout", "Local checkout"),
+            ("new_worktree", "New worktree"),
+        ];
+        if self.previous_worktree.is_some() {
+            placements.push(("previous_worktree", "Previous worktree"));
+        }
+        let placement = self.settings_row(
+            "desktop-settings-row-new-thread-placement",
+            "New threads",
+            "Choose where a new project thread runs its first turn.",
+            self.choice_control(
+                "settings-new-thread-placement",
+                "New threads",
+                self.run_choice.as_str(),
+                &placements,
+                cx,
+            ),
+        );
+        let mut defaults = vec![
+            self.defaults_scope_row(cx),
+            self.settings_row(
+                "desktop-settings-row-model",
+                "Default model",
+                "Override in the composer. Search for provider/model to use a custom model.",
+                settings_ui::control_column(model_control),
+            ),
+            self.settings_row(
+                "desktop-settings-row-access-mode",
+                "Access mode",
+                "Choose whether the agent may edit files or run commands. Permission support depends on its runtime.",
+                settings_ui::control_column(mode_control),
+            ),
+        ];
+        if !scoped {defaults.insert(2,self.fallback_row(cx));}
+        let messages = vec![
             self.settings_row(
                 "desktop-settings-row-thread-access",
                 "Messages between threads",
@@ -956,13 +2082,16 @@ impl Workspace {
                 "How many messages agents may send each other in a row before the chain stops and hands back to you. A message you type starts the count again.",
                 settings_ui::control_column(self.render_thread_hops_control(cx)),
             ),
+        ];
+        let titles = vec![
+            self.text_generation_model_row(cx),
             self.settings_row(
                 "desktop-settings-row-title-instructions",
                 "Thread title instructions",
-                "Applied to new titles and Regenerate title. A prefix: line is added in front. max N caps the length. This build does not send the other lines to a model.",
+                "Describe how new and regenerated titles should read. Local titles support a prefix and a maximum length.",
                 settings_ui::control_column(
                     div()
-                        .w(px(288.0))
+                        .w_full()
                         .h(px(96.0))
                         .child(
                             Textarea::new(&self.title_instructions_input)
@@ -978,7 +2107,7 @@ impl Workspace {
                 "Optional extra lines for one project. They are applied after the instructions above.",
                 settings_ui::control_column(
                     div()
-                        .w(px(288.0))
+                        .w_full()
                         .flex()
                         .flex_col()
                         .gap_2()
@@ -996,7 +2125,38 @@ impl Workspace {
                         .into_any_element(),
                 ),
             ),
-        ]
+        ];
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(24.0))
+            .child(self.settings_card(
+                "New projects",
+                "",
+                vec![self.settings_row(
+                    "desktop-settings-row-project-start-folder",
+                    "Add project starts in",
+                    "Starting folder for the project browser. Leave empty to use your home folder.",
+                    settings_ui::control_column(
+                        Input::new(&self.project_start_folder_input)
+                            .aria_label("Add project starts in")
+                            .into_any_element(),
+                    ),
+                ),self.settings_row("desktop-settings-row-clone-host-folders","Clone into host folders","Place cloned repositories in host and owner folders under the selected directory.",
+                    settings_ui::switch("settings-clone-host-folders",self.clone_host_folders,false,"Clone into host folders",cx,|this,_,cx|{
+                        this.clone_host_folders=!this.clone_host_folders;this.persist_and_notify(cx);
+                    }))],
+            ))
+            .child(self.settings_card("New threads", "", vec![placement,self.response_stream_row(cx)]))
+            .child(self.settings_card("New thread defaults", "", defaults))
+            .child(self.settings_card("Thread lifecycle", "", self.render_settlement_rows(cx)))
+            .child(self.render_snooze_settings(cx))
+            .child(self.render_quota_settings(cx))
+            .child(self.settings_card("Messages between threads", "", messages))
+            .child(self.settings_card("Roles", "", self.render_role_settings_rows(cx)))
+            .child(self.settings_card("Task models", "", self.render_task_model_rows(cx)))
+            .child(self.settings_card("Thread titles", "", titles))
+            .into_any_element()
     }
 
     /// Web: a list of the projects threads are in, "Choose a project" first.
@@ -1034,11 +2194,147 @@ impl Workspace {
         )
     }
 
-    pub(super) fn render_settings_beta_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    fn changed_device_settings(&self, cx: &App) -> Vec<&'static str> {
+        let mut changed = Vec::new();
+        if self.appearance.scheme != appearance::ColorScheme::default() {
+            changed.push("Color scheme");
+        }
+        if self.custom_themes.has_selection() || self.appearance.light_theme != Default::default() || self.appearance.dark_theme != Default::default() {
+            changed.push("Themes");
+        }
+        if self.appearance.clock != Default::default() {
+            changed.push("Time format");
+        }
+        if self.snapshots != Default::default() {changed.push("SnapShots");}
+        if self.fonts!=Default::default(){changed.push("Fonts");}
+        if self.appearance.contrast != 100 {
+            changed.push("Contrast");
+        }
+        if self.appearance.glass_opacity != 100 {
+            changed.push("Glass opacity");
+        }
+        if self.appearance.thread_details != Default::default() {changed.push("Thread details");}
+        if !self.appearance.effort_label { changed.push("Effort display"); }
+        if !self.appearance.render_math {
+            changed.push("Render math");
+        }
+        if crate::views::browser_preferences::BrowserPreferences::get(cx).has_changed_settings() {
+            changed.push("Browser preferences");
+        }
+        if self.dictation_prefs.has_changed_settings() {
+            changed.push("Voice preferences");
+        }
+        if self.diff_panel.read(cx).prefs != Default::default() {
+            changed.push("Diff preferences");
+        }
+        if self.screen_reader != Default::default() {
+            changed.push("Screen reader preferences");
+        }
+        if self.send_shortcut != SendShortcut::default() {
+            changed.push("Send shortcut");
+        }
+        if self.thread_notifications.mode != thread_notifications::NotificationMode::Off {
+            changed.push("Thread notifications");
+        }
+        if self.thread_notifications.in_app {
+            changed.push("In-app notifications");
+        }
+        if self.confirm_thread_archive {
+            changed.push("Archive confirmation");
+        }
+        if self.confirm_thread_unpin {
+            changed.push("Unpin confirmation");
+        }
+        if !self.confirm_thread_delete {
+            changed.push("Delete confirmation");
+        }
+        if !self.sidebar_working_section {
+            changed.push("Working section");
+        }
+        if self.editor_id != bruhs_models::logic::editor::DEFAULT_EDITOR_ID {
+            changed.push("External editor");
+        }
+        if self.chat_width != ChatWidth::default() {
+            changed.push("Chat width");
+        }
+        if !crate::zoom::is_default(self.zoom) {
+            changed.push("Interface size");
+        }
+        if !self.updates.read(cx).enabled {
+            changed.push("Check for updates");
+        }
+        changed
+    }
+
+    fn confirm_restore_device_settings(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let changed = self.changed_device_settings(cx);
+        if changed.is_empty() {
+            return;
+        }
+        let detail = format!(
+            "Restore these device preferences to their defaults? {}",
+            changed.join(", ")
+        );
+        let answer = window.prompt(
+            gpui::PromptLevel::Info,
+            "Restore device defaults?",
+            Some(&detail),
+            &[
+                gpui::PromptButton::Cancel("Cancel".into()),
+                gpui::PromptButton::Ok("Restore defaults".into()),
+            ],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if answer.await == Ok(1) {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    Arc::make_mut(&mut this.custom_themes).reset_selection();
+                    this.appearance = Default::default();
+                    this.snapshots = Default::default();
+                    this.sync_capture_shortcut(cx);
+                    this.fonts=Default::default();
+                    this.diff_panel.update(cx,|p,cx|p.set_default_wrap(None,cx));
+                    this.apply_device_appearance(window, cx);
+                    cx.default_global::<crate::views::browser_preferences::BrowserPreferences>()
+                        .restore_defaults();
+                    this.refresh_viewport_fields(window, cx);
+                    this.browser_search_url_input
+                        .update(cx, |field, cx| field.set_value("", window, cx));
+                    this.dictation_prefs.restore_defaults();
+                    this.voice_cleanup_fields.reset(window,cx);
+                    this.voice_model_input.update(cx,|field,cx|field.set_value("",window,cx));
+                    this.send_shortcut = Default::default();
+                    this.screen_reader = Default::default();
+                    this.diff_panel.update(cx, |panel, cx| {
+                        panel.set_preferences(Default::default(), cx)
+                    });
+                    if this.diff_panel_visible {
+                        this.sync_diff_panel_project(cx);
+                    }
+                    this.chat_width = ChatWidth::default();
+                    this.stamp_run_prefs_on_threads(cx);
+                    this.thread_notifications = Default::default();
+                    this.confirm_thread_archive = false;
+                    this.confirm_thread_unpin = false;
+                    this.confirm_thread_delete = true;
+                    this.sidebar_working_section = true;
+                    this.editor_id = bruhs_models::logic::editor::DEFAULT_EDITOR_ID.to_string();
+                    if !this.updates.read(cx).enabled {
+                        this.updates
+                            .update(cx, |updates, cx| updates.set_enabled(true, cx));
+                    }
+                    this.set_zoom(crate::zoom::DEFAULT, window, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    pub(super) fn render_settings_sidebar_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         let toggle = settings_ui::switch(
             "desktop-settings-working-section",
-            self.sidebar_working_section,
-            false,
+            self.sidebar_working_section && !self.labs_sidebar.enabled,
+            self.labs_sidebar.enabled,
             "Working section",
             cx,
             |this, _window, cx| {
@@ -1046,15 +2342,17 @@ impl Workspace {
                 this.persist_and_notify(cx);
             },
         );
-        vec![self.settings_row(
+        let mut rows=self.render_project_order_rows(cx);
+        rows.push(self.settings_row(
             "desktop-settings-row-working-section",
             "Working section",
-            "Threads that are working, or waiting on work they will resume, move into a collapsed section under the active list. A dev server left running does not count. An approval comes back to the active list. This device only.",
-            settings_ui::control_column(toggle),
-        )]
+            if self.labs_sidebar.enabled {"Project folders are enabled in Labs. Working threads appear in their project folder."} else {"Group working threads in the sidebar. Threads return to the active list when they need your approval."},
+            toggle,
+        ));
+        rows
     }
 
-    pub(super) fn render_settings_about_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    fn render_about(&self, cx: &Context<'_, Self>) -> AnyElement {
         // Web `AboutSettings`: the packaged release version (from the bundle,
         // the one updates compare), else the crate version in a dev build.
         let version = self
@@ -1063,18 +2361,13 @@ impl Workspace {
             .report
             .as_ref()
             .and_then(|report| report.installed_release().map(str::to_owned))
-            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
-        let code = |text: String| {
-            div()
-                .text_size(px(SETTINGS_BODY_TEXT_SIZE_PX))
-                .text_color(theme::rambutan_200())
-                .font_family(SETTINGS_CODE_FONT_FAMILY)
-                .child(text)
-                .into_any_element()
-        };
+            .unwrap_or_else(|| {
+                let release = env!("BRUHS_RELEASE_VERSION");
+                if release.is_empty() { env!("CARGO_PKG_VERSION") } else { release }.to_owned()
+            });
         let muted = |text: &'static str| {
             div()
-                .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
+                .text_size(px(SETTINGS_BODY_TEXT_SIZE_PX))
                 .text_color(theme::rambutan_500())
                 .child(text)
                 .into_any_element()
@@ -1110,33 +2403,59 @@ impl Workspace {
                     .text_color(theme::rambutan_500()),
             )
             .into_any_element();
-        vec![
-                // Web `AboutSettings` header: the dithered Bruh beside name and version.
-                div()
-                    .debug_selector(|| "desktop-settings-about-version".to_string())
-                    .px(px(SETTINGS_ROW_X_PADDING_PX))
-                    .py_3()
-                    .flex()
-                    .items_center()
-                    .gap_4()
-                    .child(crate::views::braille::braille_bruh(SETTINGS_ABOUT_BRUH_PX))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .line_height(relative(1.5))
-                                    .text_color(theme::rambutan_100())
-                                    .child("bruhs"),
-                            )
-                            .child(code(version)),
-                    )
-                    .into_any_element(),
+        let action = |id: &'static str, label: &'static str| {
+            web_button(id, WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
+                .aria_label(label)
+                .child(label)
+        };
+        let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_owned));
+        let notices = exe_dir.iter().flat_map(|dir| [
+            dir.join("../Resources/THIRD_PARTY_LICENSES"),
+            dir.join("THIRD_PARTY_LICENSES"),
+        ]).find(|file| file.is_file());
+        let packaged = !env!("BRUHS_RELEASE_VERSION").is_empty() ||
+            self.updates.read(cx).report.as_ref().is_some_and(|r| r.app.release.is_some());
+        let mut app = self.render_app_version_row(Some(&version), cx);
+        app.extend([
+                self.settings_row(
+                    "settings-update-track", "Update track",
+                    if packaged { "Stable releases or the latest published nightly build." } else { "This development build follows its Git checkout." },
+                    if packaged { self.choice_control("settings-update-track", "Update track", self.updates.read(cx).track.key(), &[("stable", "Stable"), ("nightly", "Nightly")], cx) } else { muted("Source checkout") },
+                ),
+                self.launcher_row(cx),
+                self.settings_row(
+                    "settings-about-mobile", "Mobile app", "Pair a phone with this host and choose its access.",
+                    on_press_view(action("about-open-mobile", "Pair a device"), cx,
+                        |this, _, cx| this.set_settings_section(SettingsSection::Access, cx)).into_any_element(),
+                ),
+                self.settings_row(
+                    "settings-about-welcome", "Welcome page", "See your agents, open a project or connect your phone.",
+                    on_press_view(action("about-open-welcome", "Open welcome page"), cx, |this, window, cx| {
+                        this.open_overlay(Overlay::Welcome);
+                        this.focus_first_modal_tab_stop(window, cx);
+                        cx.notify();
+                    }).into_any_element(),
+                ),
+        ]);
+        let legal = vec![
+                self.settings_row(
+                    "settings-about-privacy", "Privacy policy", "Read how bruhs handles your data.",
+                    on_press_view(action("about-open-privacy", "Read policy"), cx,
+                        |_, _, cx| cx.open_url("https://bruhs.ai/privacy")).into_any_element(),
+                ),
+                self.settings_row(
+                    "settings-about-licenses", "Open source licenses",
+                    if notices.is_some() { "Licenses for components included in this build." } else { "The bruhs source license. Packaged builds include dependency notices." },
+                    on_press_view(action("about-open-licenses", "View licenses"), cx, move |_, _, cx| {
+                        if let Some(path) = &notices {
+                            cx.open_with_system(path);
+                        } else {
+                            cx.open_url("https://github.com/bryantleft/bruhs-ai/blob/main/LICENSE");
+                        }
+                    }).into_any_element(),
+                ),
+        ];
+        let more = vec![
                 self.settings_row(
                     "desktop-settings-about-mcp",
                     "MCP servers",
@@ -1149,7 +2468,12 @@ impl Workspace {
                     "Bruhs: fruit tokens, monospace type, no shadows.",
                     design_link,
                 ),
-        ]
+        ];
+        div().flex().flex_col().gap(px(24.))
+            .child(self.settings_card("App", "", app))
+            .child(self.settings_card("Legal", "", legal))
+            .child(self.settings_card("bruhs", "", more))
+            .into_any_element()
     }
 
     /// One stacked section: heading + card, sized to the cards column.
@@ -1159,6 +2483,11 @@ impl Workspace {
         width: f32,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        let id = section.id();
+        let container = div()
+            .debug_selector(move || format!("desktop-settings-section-{id}"))
+            .w(px(width))
+            .flex_shrink_0();
         let rows = match section {
             SettingsSection::Vault => {
                 vec![div().child(self.vault_settings.clone()).into_any_element()]
@@ -1170,44 +2499,99 @@ impl Workspace {
                 vec![div().child(self.backup_settings.clone()).into_any_element()]
             }
             SettingsSection::General => {
-                // Web order: roles and task models sit above the two title
-                // instruction rows, which close the section.
-                let mut rows = self.render_settings_general_rows(cx);
-                let titles = rows.split_off(rows.len().saturating_sub(GENERAL_TITLE_ROWS));
-                rows.extend(self.render_role_settings_rows(cx));
-                rows.extend(self.render_task_model_rows(cx));
-                rows.extend(titles);
-                rows
+                return container
+                    .child(self.render_settings_general(cx))
+                    .into_any_element()
             }
-            SettingsSection::Updates => self.render_settings_updates_rows(cx),
-            SettingsSection::Beta => self.render_settings_beta_rows(cx),
+            SettingsSection::Updates => return container.child(div().flex().flex_col().gap(px(24.)).child(self.settings_card(section.label(),section.description(),self.render_settings_updates_rows(cx))).child(self.generators_card(cx))).into_any_element(),
+            SettingsSection::Archived => self.render_archived_threads(cx),
+            SettingsSection::Projects => {
+                return container
+                    .child(self.render_project_actions(cx))
+                    .into_any_element()
+            }
+            SettingsSection::SourceControl => {
+                return container
+                    .child(self.render_source_control(cx))
+                    .into_any_element()
+            }
+            SettingsSection::Maintenance => {
+                return container
+                    .child(self.render_maintenance(cx))
+                    .into_any_element()
+            }
+            SettingsSection::Worktrees => {
+                return container.child(self.worktree_settings(cx)).into_any_element();
+            }
+            SettingsSection::ScheduledTasks => {
+                let projects = self.settings_project_options(cx);
+                let initial_project = if !self.settings_project_scope.is_empty() {
+                    self.settings_project_scope.clone()
+                } else {
+                    self.active_project_path(cx).filter(|path| projects.iter().any(|p| p.value == path))
+                        .or_else(|| projects.first().map(|p| p.value.to_owned())).unwrap_or_default()
+                };
+                let initial_model = self.project_defaults.get(&initial_project).and_then(|p| p.model.clone())
+                    .unwrap_or_else(|| self.current_model.clone());
+                vec![self.defaults_scope_row(cx), crate::views::reactive_automations::ScheduledTaskSettings {
+                    panel: self.reactive_automations.clone(),
+                    card_width: width,
+                    project: self.settings_project_scope.clone(), initial_project, initial_model,
+                }.into_any_element()]
+            }
+            SettingsSection::Diagnostics => self.diagnostic_rows(cx),
+            SettingsSection::Environments => self.environment_rows(cx),
+            SettingsSection::Devices => self.device_rows(cx),
+            SettingsSection::Labs => self.labs_rows(cx),
+            SettingsSection::Access => vec![self.render_mobile(cx).into_any_element()],
+            SettingsSection::Browser => self.render_browser_rows(cx),
+            SettingsSection::SnapShots => self.render_snapshot_rows(cx),
+            SettingsSection::Voice => return container.child(self.render_voice_settings(cx)).into_any_element(),
+            SettingsSection::Diffs => self.render_diff_rows(cx),
+            SettingsSection::Chat => self.render_chat_rows(cx),
+            SettingsSection::Appearance => {
+                return container
+                    .child(self.render_appearance(width, cx))
+                    .into_any_element()
+            }
+            SettingsSection::Threads => {
+                return container
+                    .child(self.render_settings_threads(cx))
+                    .into_any_element()
+            }
             SettingsSection::Calendar => self.render_settings_calendar_rows(cx),
             SettingsSection::Recording => self.render_settings_recording_rows(cx),
             SettingsSection::Transcription => self.render_settings_transcription_rows(cx),
             SettingsSection::Speakers => self.render_settings_speakers_rows(cx),
             SettingsSection::People => self.render_settings_people_rows(cx),
-            SettingsSection::Keyboard => self.render_keybinding_rows(cx),
-            SettingsSection::About => self.render_settings_about_rows(cx),
+            SettingsSection::Keyboard => {
+                return container
+                    .child(self.render_keybinding_settings(cx))
+                    .into_any_element()
+            }
+            SettingsSection::About => {
+                return container.child(self.render_about(cx)).into_any_element();
+            }
         };
-        let id = section.id();
-        div()
-            .debug_selector(move || format!("desktop-settings-section-{id}"))
-            .w(px(width))
-            .flex_shrink_0()
+        container
             .child(self.settings_card(section.label(), section.description(), rows))
             .into_any_element()
     }
 
-    /// Settings as a page (web `settings_page.rs`): a `Settings / Section`
-    /// breadcrumb with ×, the section nav on the left and the stacked cards
-    /// on the right. It covers the whole window, so the header also carries
-    /// the traffic-light inset and the drag region.
+    /// A centered settings dialog with its own navigation, header, and scrolling pane.
     pub(super) fn render_settings(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let section_label = self.settings_section.label();
         // A percentage width inside the vertical scroll container measures as
         // indefinite and collapses the row labels, so size the column here.
-        let cards_width =
-            settings_cards_width(bruhs_ui::zoom::css_px(window.viewport_size().width));
+        let width = bruhs_ui::zoom::css_px(window.viewport_size().width);
+        let inset = settings_inset(width);
+        // The native traffic lights sit above the GPUI overlay in a windowed Mac app.
+        let titlebar_clearance = if cfg!(target_os = "macos") && !window.is_fullscreen() {
+            (theme::APP_HEADER_HEIGHT_PX - inset).max(0.)
+        } else {
+            0.
+        };
+        let cards_width = settings_cards_width(width);
         div()
             .absolute()
             .top_0()
@@ -1219,9 +2603,16 @@ impl Workspace {
             .debug_selector(|| "desktop-settings-overlay".to_string())
             .w(window.viewport_size().width)
             .h(window.viewport_size().height)
+            .pt(px(titlebar_clearance))
             .flex()
             .flex_col()
-            .bg(theme::longan_950())
+            .items_center()
+            .justify_center()
+            .bg(theme::longan_950().opacity(0.65))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.close_transient_surfaces();
+                cx.notify();
+            }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 this.continue_settings_slider_drag(event, cx);
             }))
@@ -1235,143 +2626,244 @@ impl Workspace {
                     .role(Role::Dialog)
                     .aria_label("Settings")
                     .debug_selector(|| "desktop-settings-dialog".to_string())
-                    .flex_1()
+                    .child(self.blur_scrim.backdrop())
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .rounded(px(14.0))
+                    .border_1()
+                    .border_color(theme::ring_modal())
+                    .bg(theme::glass_surface(theme::longan_950()))
+                    .h(px((bruhs_ui::zoom::css_px(window.viewport_size().height)
+                        - 2.0 * inset
+                        - titlebar_clearance)
+                        .clamp(1.0, 960.0)))
+                    .w(px((width - 2.0 * inset).clamp(1.0, 1280.0)))
                     .min_h_0()
                     .min_w_0()
-                    .w_full()
                     .text_color(cx.theme().popover_foreground)
                     .font_family(theme::UI_FONT_FAMILY)
                     .flex()
-                    .flex_col()
                     .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
+                    .when(self.settings_visible(), |dialog| dialog.track_focus(&self.modal_start_focus_handle).tab_group())
+                    .capture_action(cx.listener(|this, _: &FocusChatInput, window, cx| {
+                        if window.has_focused_input(cx) {
+                            cx.propagate();
+                        } else {
+                            this.focus_settings_search(window, cx);
+                            cx.stop_propagation();
+                        }
                     }))
-                    .child(
-                        div()
-                            .id("desktop-settings-header")
-                            .debug_selector(|| "desktop-settings-header".to_string())
-                            .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
-                            .pl(self.traffic_light_inset())
-                            .pr(px(SETTINGS_PAGE_X_PADDING_PX))
-                            .flex_shrink_0()
-                            .border_b_1()
-                            .border_color(
-                                theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY),
-                            )
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .window_control_area(WindowControlArea::Drag)
-                            .child(
-                                div()
-                                    .text_size(px(SETTINGS_PAGE_TITLE_TEXT_SIZE_PX))
-                                    .text_color(theme::rambutan_100())
-                                    .child("Settings"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .text_color(theme::rambutan_600())
-                                    .child("/"),
-                            )
-                            .child(
-                                div()
-                                    .debug_selector(|| "desktop-settings-crumb".to_string())
-                                    .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .text_color(theme::rambutan_400())
-                                    .child(section_label),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .id("desktop-settings-close")
-                                    .debug_selector(|| "desktop-settings-close".to_string())
-                                    .size(px(SETTINGS_CLOSE_BUTTON_SIZE_PX))
-                                    .rounded(px(SETTINGS_CONTROL_RADIUS_PX))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_color(theme::rambutan_500())
-                                    .tab_index(0)
-                                    .role(Role::Button)
-                                    .aria_label(SETTINGS_CLOSE_LABEL)
-                                    .border_1()
-                                    .border_color(gpui::transparent_black())
-                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                    .cursor_pointer()
-                                    .hover(|el| {
-                                        el.bg(theme::longan_800()
-                                            .opacity(SETTINGS_CLOSE_HOVER_BG_OPACITY))
-                                            .text_color(theme::rambutan_100())
-                                    })
-                                    .tooltip(|window, cx| {
-                                        Tooltip::new(SETTINGS_CLOSE_LABEL).build(window, cx)
-                                    })
-                                    .map(|el| {
-                                        on_press_view(el, cx, |this, _window, cx| {
-                                            this.close_transient_surfaces();
-                                            cx.notify();
-                                        })
-                                    })
-                                    .child(
-                                        svg()
-                                            .path(assets::CLOSE_ICON_PATH)
-                                            .size(px(SETTINGS_PAGE_CLOSE_ICON_PX))
-                                            .text_color(theme::rambutan_500()),
-                                    ),
-                            ),
-                    )
-                    .child(
+                    .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        let query_focused =
+                            this.settings_search.focus_handle(cx).is_focused(window);
+                        let handled = match event.keystroke.key.as_str() {
+                            "/" if !event.keystroke.modifiers.modified()
+                                && !bruhs_ui::input::WindowExt::has_focused_input(window, cx) =>
+                            {
+                                this.focus_settings_search(window, cx);
+                                true
+                            }
+                            "escape" => this.clear_focused_settings_query(window, cx),
+                            "up" | "down"
+                                if query_focused
+                                    && !this.settings_search_results.is_empty()
+                                    && !this.settings_search.read(cx).value().is_empty() =>
+                            {
+                                if let Some(next) = bruhs_models::logic::menu::menu_step(
+                                    Some(this.settings_search_index),
+                                    this.settings_search_results.len(),
+                                    event.keystroke.key.as_str(),
+                                ) {
+                                    this.settings_search_index = next;
+                                    this.settings_nav_scroll.scroll_to_item(next);
+                                }
+                                cx.notify();
+                                true
+                            }
+                            _ => false,
+                        };
+                        if handled {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        this.trap_modal_tab_focus(event, window, cx)
+                    }))
+                    .child(self.render_settings_nav(width, cx))
+                    .when(width >= 768.0 || !self.settings_search_open, |dialog| dialog.child(
                         div()
                             .flex_1()
+                            .min_w_0()
                             .min_h_0()
                             .flex()
-                            .child(self.render_settings_nav(cx))
+                            .flex_col()
                             .child(
                                 div()
-                                    .id("desktop-settings-content")
-                                    .debug_selector(|| "desktop-settings-content".to_string())
-                                    .relative()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .min_h_0()
+                                    .id("desktop-settings-header")
+                                    .debug_selector(|| "desktop-settings-header".to_string())
+                                    .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
+                                    .pl(px(SETTINGS_PAGE_X_PADDING_PX))
+                                    .pr(px(SETTINGS_PAGE_X_PADDING_PX))
+                                    .flex_shrink_0()
+                                    .border_b_1()
+                                    .border_color(
+                                        theme::longan_800()
+                                            .opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY),
+                                    )
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
-                                            .id("desktop-settings-scroll")
-                                            .relative()
-                                            .size_full()
-                                            .overflow_y_scroll()
-                                            .track_scroll(&self.settings_scroll)
-                                            .px(px(SETTINGS_BODY_X_PADDING_PX))
-                                            .py(px(SETTINGS_BODY_Y_PADDING_PX))
+                                            .text_size(px(SETTINGS_PAGE_TITLE_TEXT_SIZE_PX))
+                                            .text_color(theme::rambutan_100())
+                                            .child("Settings"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
+                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                            .text_color(theme::rambutan_600())
+                                            .child("/"),
+                                    )
+                                    .child(
+                                        div()
+                                            .debug_selector(|| "desktop-settings-crumb".to_string())
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
+                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                            .text_color(theme::rambutan_400())
+                                            .child(section_label),
+                                    )
+                                    .when(self.settings_section == SettingsSection::General, |el| {
+                                        el.child(
+                                            web_button(
+                                                "desktop-settings-restore",
+                                                WebButtonVariant::Ghost,
+                                                WebButtonSize::Small,
+                                                ButtonState::disabled_if(
+                                                    self.changed_device_settings(cx).is_empty(),
+                                                ),
+                                            )
+                                            .debug_selector(|| {
+                                                "desktop-settings-restore".to_owned()
+                                            })
+                                            .aria_label("Restore device defaults")
+                                            .child(
+                                                svg()
+                                                    .path(assets::ROTATE_CCW_ICON_PATH)
+                                                    .size(px(14.))
+                                                    .text_color(theme::rambutan_400()),
+                                            )
+                                            .when(width >= 768., |el| {
+                                                el.child("Restore device defaults")
+                                            })
+                                            .on_click(
+                                                cx.listener(|this, _, window, cx| {
+                                                    this.confirm_restore_device_settings(window, cx)
+                                                }),
+                                            ),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .id("desktop-settings-close")
+                                            .debug_selector(|| "desktop-settings-close".to_string())
+                                            .flex_shrink_0()
+                                            .size(px(SETTINGS_CLOSE_BUTTON_SIZE_PX))
+                                            .rounded(px(SETTINGS_CONTROL_RADIUS_PX))
                                             .flex()
-                                            .flex_col()
                                             .items_center()
-                                            .gap(px(SETTINGS_BODY_GAP_PX))
-                                            .children(SettingsSection::ALL.iter().map(|section| {
-                                                self.render_settings_section(
-                                                    *section,
+                                            .justify_center()
+                                            .text_color(theme::rambutan_500())
+                                            .tab_index(0)
+                                            .role(Role::Button)
+                                            .aria_label(SETTINGS_CLOSE_LABEL)
+                                            .border_1()
+                                            .border_color(gpui::transparent_black())
+                                            .focus_visible(|el| {
+                                                el.border_color(theme::persimmon_400())
+                                            })
+                                            .cursor_pointer()
+                                            .hover(|el| {
+                                                el.bg(theme::longan_800()
+                                                    .opacity(SETTINGS_CLOSE_HOVER_BG_OPACITY))
+                                                    .text_color(theme::rambutan_100())
+                                            })
+                                            .tooltip(|window, cx| {
+                                                Tooltip::new(SETTINGS_CLOSE_LABEL).build(window, cx)
+                                            })
+                                            .map(|el| {
+                                                on_press_view(el, cx, |this, _window, cx| {
+                                                    this.close_transient_surfaces();
+                                                    cx.notify();
+                                                })
+                                            })
+                                            .child(
+                                                svg()
+                                                    .path(assets::CLOSE_ICON_PATH)
+                                                    .size(px(SETTINGS_PAGE_CLOSE_ICON_PX))
+                                                    .text_color(theme::rambutan_500()),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div().flex_1().min_h_0().flex().child(
+                                    div()
+                                        .id("desktop-settings-content")
+                                        .debug_selector(|| "desktop-settings-content".to_string())
+                                        .relative()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .min_h_0()
+                                        .child(
+                                            div()
+                                                .id("desktop-settings-scroll")
+                                                .relative()
+                                                .size_full()
+                                                .overflow_y_scroll()
+                                                .track_scroll(&self.settings_scroll)
+                                                .px(px(SETTINGS_BODY_X_PADDING_PX))
+                                                .py(px(SETTINGS_BODY_Y_PADDING_PX))
+                                                .flex()
+                                                .flex_col()
+                                                .items_center()
+                                                .gap(px(SETTINGS_BODY_GAP_PX))
+                                                .child(self.render_settings_section(
+                                                    self.settings_section,
                                                     cards_width,
                                                     cx,
-                                                )
-                                            }))
-                                            .vertical_scrollbar(&self.settings_scroll),
-                                    ),
+                                                ))
+                                                .vertical_scrollbar(&self.settings_scroll),
+                                        ),
+                                ),
                             ),
-                    )
-                    .child(self.render_modal_focus_sentinel()),
+                    ))
+                    .when(self.settings_visible(), |dialog| dialog.child(self.render_modal_focus_sentinel())),
             )
+            .when(self.settings_section == SettingsSection::ScheduledTasks
+                && self.reactive_automations.read(cx).scheduled_editor_open(), |layer| {
+                    layer.child(crate::views::reactive_automations::ScheduledTaskDialog {
+                        panel: self.reactive_automations.clone(),
+                        projects: self.settings_project_options(cx),
+                        project_models: self.project_defaults.iter().filter_map(|(path, p)| p.model.clone().map(|model| (path.clone(), model))).collect(),
+                        default_model: self.current_model.clone(),
+                    })
+                })
+            .when(self.secret_provider_dialog_visible(cx), |layer| {
+                layer.child(div().absolute().inset_0()
+                    .on_key_down(cx.listener(Self::trap_modal_tab_focus))
+                    .child(secret_source_settings::SecretProviderDialog(self.vault_settings.read(cx).secret_sources())))
+            })
+            .children(self.render_generator_dialog(window,cx))
             .into_any_element()
     }
 
     pub(super) fn settings_heading(&self, title: &'static str, description: &'static str) -> Div {
         div()
-            .px_1()
+            .px(px(SETTINGS_ROW_X_PADDING_PX + 1.0))
             .flex()
             .flex_col()
             .child(
@@ -1405,10 +2897,13 @@ mod ui_audit_tests {
 
     #[test]
     fn settings_rows_stack_when_labels_and_controls_cannot_fit() {
-        assert!(settings_rows_stack(640.0));
-        assert!(settings_rows_stack(768.0));
-        assert!(!settings_rows_stack(1024.0));
-        assert!(!settings_rows_stack(1920.0));
+        // Switching from the icon rail to the full navigation reduces the row width.
+        for (viewport, stacked) in [
+            (640., true), (697., true), (698., false), (767., false),
+            (768., true), (913., true), (914., false), (1920., false),
+        ] {
+            assert_eq!(settings_rows_stack(viewport), stacked, "{viewport}px viewport");
+        }
     }
 
     #[gpui::test]
@@ -1434,7 +2929,7 @@ mod ui_audit_tests {
                 .title_instructions_by_project
                 .insert("Alpha".into(), "prefix: A".into());
             workspace.open_settings(&super::OpenSettings, window, cx);
-            workspace.set_settings_section(SettingsSection::General, cx);
+            workspace.set_settings_section(SettingsSection::Threads, cx);
             assert!(workspace.title_project.is_empty(), "nothing chosen yet");
             // Choosing a project loads its lines into the field.
             workspace.select_settings_option(
@@ -1473,6 +2968,83 @@ mod ui_audit_tests {
     }
 
     #[gpui::test]
+    fn settings_search_opens_the_selected_row_from_the_keyboard(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().expect("desktop state"));
+        });
+        let (workspace, cx) = cx.add_window_view(|window, cx| Workspace::new(window, cx));
+        for width in [1100., 650.] {
+            cx.simulate_resize(size(px(width), px(700.)));
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace.open_settings(&super::OpenSettings, window, cx);
+                workspace.set_settings_section(SettingsSection::General, cx);
+            });
+            cx.run_until_parked();
+            if width < 768. {
+                let search = cx.debug_bounds("desktop-settings-show-search").expect("compact search button");
+                cx.simulate_click(search.center(), gpui::Modifiers::default());
+            } else {
+                cx.simulate_keystrokes("/");
+            }
+            cx.run_until_parked();
+            let nav = cx.debug_bounds("desktop-settings-nav").expect("search navigation");
+            let dialog = cx.debug_bounds("desktop-settings-dialog").expect("settings dialog");
+            if width < 768. {
+                assert!(nav.size.width >= dialog.size.width - px(2.));
+                assert!(cx.debug_bounds("desktop-settings-content").is_none());
+            } else {
+                assert!(nav.size.width < dialog.size.width / 2.);
+                assert!(cx.debug_bounds("desktop-settings-content").is_some());
+            }
+            cx.simulate_input("project");
+            cx.run_until_parked();
+            let count = workspace.read_with(cx, |workspace, _| workspace.settings_search_results.len());
+            assert!(count > 1);
+            cx.simulate_keystrokes("up");
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, _| assert_eq!(workspace.settings_search_index, count - 1));
+            cx.simulate_keystrokes("down");
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, _| assert_eq!(workspace.settings_search_index, 0));
+            cx.simulate_keystrokes("escape");
+            cx.run_until_parked();
+            workspace.read_with(cx, |workspace, cx| {
+                assert!(workspace.settings_visible());
+                assert!(workspace.settings_search.read(cx).value().is_empty());
+            });
+            cx.simulate_input("no such setting exists");
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("desktop-settings-no-results").is_some());
+            let clear = cx.debug_bounds("settings-clear-search").expect("clear search button");
+            cx.simulate_click(clear.center(), gpui::Modifiers::default());
+            cx.run_until_parked();
+            cx.simulate_input("project title instructions");
+            cx.run_until_parked();
+            assert!(
+                cx.debug_bounds("desktop-settings-hit-0").is_some(),
+                "missing search result at {width}"
+            );
+            cx.simulate_keystrokes("enter");
+            cx.run_until_parked();
+            let row = cx
+                .debug_bounds("desktop-settings-row-project-title")
+                .expect("selected setting");
+            let viewport = cx
+                .debug_bounds("desktop-settings-content")
+                .expect("viewport");
+            assert!(
+                row.top() < viewport.bottom() && row.bottom() > viewport.top(),
+                "selected row {row:?} should be visible in {viewport:?}"
+            );
+            workspace.read_with(cx, |workspace, _| {
+                assert_eq!(workspace.settings_section, SettingsSection::Threads)
+            });
+        }
+    }
+
+    #[gpui::test]
     fn desktop_settings_minimum_window_keeps_visible_stack_and_jump(cx: &mut TestAppContext) {
         cx.update(|cx| {
             bruhs_ui::init(cx);
@@ -1500,7 +3072,7 @@ mod ui_audit_tests {
             .debug_bounds("desktop-settings-dialog")
             .expect("settings dialog");
         assert_eq!(overlay.size, size(px(641.0), px(481.0)));
-        assert_eq!(dialog.size, overlay.size);
+        assert!(dialog.left() > overlay.left() && dialog.right() < overlay.right());
         let label = cx
             .debug_bounds("desktop-settings-row-transcription-provider-label")
             .expect("provider label");
@@ -1517,22 +3089,47 @@ mod ui_audit_tests {
             "section jump must bring its label into view: {label:?}"
         );
 
-        cx.simulate_resize(size(px(1280.0), px(800.0)));
+        for (width, stacked) in [(913., true), (914., false), (767., false), (768., true)] {
+            cx.simulate_resize(size(px(width), px(850.)));
+            cx.run_until_parked();
+            let label = cx.debug_bounds("desktop-settings-row-transcription-provider-label").unwrap();
+            let control = cx.debug_bounds("desktop-transcription-provider").unwrap();
+            let row = cx.debug_bounds("desktop-settings-row-transcription-provider").unwrap();
+            assert_eq!(control.size.width, px(320.));
+            assert!(control.right() <= row.right());
+            if stacked {
+                assert_eq!(control.left(), label.left());
+                assert_eq!(control.top() - label.bottom(), px(12.));
+            } else {
+                assert_eq!(control.left() - label.right(), px(32.));
+                assert!((control.center().y - label.center().y).abs() <= px(1.));
+            }
+            if width == 913. {
+                cx.simulate_click(control.center(), gpui::Modifiers::default());
+                cx.run_until_parked();
+                assert!(cx.debug_bounds("desktop-transcription-provider-list").is_some());
+            }
+            if width == 914. {
+                let menu = cx.debug_bounds("desktop-transcription-provider-list").unwrap();
+                assert!((menu.left() - control.left()).abs() <= px(1.));
+                cx.simulate_keystrokes("escape");
+                cx.run_until_parked();
+                assert!(cx.debug_bounds("desktop-transcription-provider-list").is_none());
+                assert!(cx.debug_bounds("desktop-settings-dialog").is_some());
+            }
+        }
+
+        cx.simulate_resize(size(px(641.), px(950.)));
+        workspace.update_in(cx, |ws, window, cx| ws.set_zoom(2.0, window, cx));
         cx.run_until_parked();
-        workspace.update(cx, |workspace, cx| {
-            workspace.set_settings_section(SettingsSection::Transcription, cx)
-        });
-        cx.run_until_parked();
-        let label = cx
-            .debug_bounds("desktop-settings-row-transcription-provider-label")
-            .expect("wide provider label");
-        let control = cx
-            .debug_bounds("desktop-settings-row-transcription-provider-control")
-            .expect("wide provider control");
-        assert!(control.left() > label.left(), "wide rows remain inline");
-        assert!(
-            control.top() < label.bottom(),
-            "wide row controls align beside their label"
-        );
+        let control = cx.debug_bounds("desktop-transcription-provider").unwrap();
+        let row = cx.debug_bounds("desktop-settings-row-transcription-provider").unwrap();
+        let pane = cx.debug_bounds("desktop-settings-content").unwrap();
+        let close = cx.debug_bounds("desktop-settings-close").unwrap();
+        assert!(close.left() >= pane.left() && close.right() <= pane.right());
+        assert!(row.left() >= pane.left() && row.right() <= pane.right());
+        assert!(control.left() >= row.left() && control.right() <= row.right());
+        assert!(control.size.width < px(320. * 2.), "the wide selector shrinks with its column");
+        workspace.update_in(cx, |ws, window, cx| ws.set_zoom(1.0, window, cx));
     }
 }

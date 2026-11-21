@@ -65,6 +65,7 @@ pub fn TaskCreateDialog() -> impl IntoView {
         let st = status.get().parse().unwrap_or(WorkItemStatus::Backlog);
 
         let item = WorkItem {
+            source: None,
             id: Uuid::new_v4().to_string(),
             project_id: pid_opt,
             title: t,

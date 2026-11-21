@@ -15,6 +15,8 @@ use bruhs_models::logic::attachments::{
     COULD_NOT_READ, FILE_TOO_LARGE, MAX_FILE_BYTES, TEXT_PREVIEW_BYTES, UPLOAD_DID_NOT_FINISH,
 };
 
+pub mod browser_captures;
+
 const ATTACHMENT_DIR: &str = "bruhs-attachments";
 
 /// The shared output location for media in chats without a project. Merely
@@ -77,9 +79,13 @@ pub struct OpenedFile {
 
 /// Write `bytes` under the attachment directory and return the absolute path.
 pub fn write_upload(name: &str, bytes: &[u8]) -> Result<UploadedFile, &'static str> {
+    let root = attachment_root().ok_or(UPLOAD_DID_NOT_FINISH)?;
+    write_in(root, name, bytes)
+}
+
+fn write_in(root: PathBuf, name: &str, bytes: &[u8]) -> Result<UploadedFile, &'static str> {
     let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     admit(0, 0, name, len)?;
-    let root = attachment_root().ok_or(UPLOAD_DID_NOT_FINISH)?;
     static SEQ: AtomicU64 = AtomicU64::new(1);
     let unique = upload_unique_id(SEQ.fetch_add(1, Ordering::Relaxed));
     let file_name = upload_disk_name(&unique, name);

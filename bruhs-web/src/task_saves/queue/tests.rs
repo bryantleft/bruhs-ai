@@ -3,6 +3,7 @@ use crate::state::WorkItem;
 
 fn task(title: &str) -> Record {
     Record::Task(WorkItem {
+        source: None,
         id: "task-a".into(),
         title: title.into(),
         project_id: None,

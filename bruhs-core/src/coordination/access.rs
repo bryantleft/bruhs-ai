@@ -103,6 +103,7 @@ impl CoordinationRuntime {
                 task.parent_id = None;
                 task.source_context.clear();
                 task.source_revision = None;
+                task.work_item_origin = None;
                 task.project_path.clear();
                 task.working_path.clear();
                 task.spec_id = None;

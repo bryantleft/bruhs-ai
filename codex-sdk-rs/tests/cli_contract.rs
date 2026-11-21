@@ -58,6 +58,21 @@ fn arguments(directory: &Path) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn reasoning_effort_is_a_quoted_config_override_on_new_and_resumed_turns() {
+    for session in [Session::New, Session::Resume("thread-1".into())] {
+        let directory = tempfile::tempdir().unwrap();
+        recording_fixture(directory.path(), STARTED);
+        let opts = options(directory.path(), "hi")
+            .session(session)
+            .config(ConfigOverride::reasoning_effort("max"));
+        collect(query(opts).unwrap()).await;
+        assert!(arguments(directory.path())
+            .iter()
+            .any(|arg| arg == "--config=model_reasoning_effort=\"max\""));
+    }
+}
+
+#[tokio::test]
 async fn flag_like_prompts_are_sent_on_stdin_not_argv() {
     // `codex exec` reads the prompt from stdin when the operand is `-`, so a
     // literal `-` prompt cannot be passed as an argument at all.
@@ -160,6 +175,29 @@ async fn unsuccessful_exit_surfaces_exit_code_and_stderr_tail() {
         }
         other => panic!("expected only a ProcessFailed event, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn closing_stdout_without_exiting_reports_forced_termination() {
+    let directory = tempfile::tempdir().unwrap();
+    fixture(
+        directory.path(),
+        &format!(
+            "/bin/cat >/dev/null\nprintf '%s\\n' '{STARTED}' '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":10,\"output_tokens\":2}}}}'\nexec 1>&-\nexec /bin/sleep 30"
+        ),
+    );
+    let mut stream = query(options(directory.path(), "hi")).unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        events.push(event);
+    }
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, QueryEvent::Usage(_))));
+    assert!(
+        matches!(events.last(), Some(QueryEvent::ProcessFailed(failure)) if failure.message.contains("after closing stdout") && failure.exit_code.is_none()),
+        "{events:?}"
+    );
 }
 
 #[tokio::test]

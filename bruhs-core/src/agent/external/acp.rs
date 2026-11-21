@@ -201,9 +201,10 @@ async fn run_config(
         &mut command,
         true,
         &crate::connections::PRIVATE_ENV.map(String::from),
-        &[],
+        &options.secret_env,
     );
     let mut child = process::CliProcess::spawn("ACP agent", &mut command)?;
+    turn.register_process(child.pid());
     let mut stdin = child
         .take_stdin()
         .ok_or_else(|| io::Error::other("ACP stdin unavailable."))?;

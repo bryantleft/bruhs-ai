@@ -49,6 +49,8 @@ impl BusyPolicy {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunTrigger {
     Event,
+    WebhookWindow,
+    ManualTask,
     Chat,
     FollowUp {
         follow_up_id: String,
@@ -87,6 +89,8 @@ impl RunTrigger {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Event => "Event",
+            Self::WebhookWindow => "Webhook window",
+            Self::ManualTask => "Run now",
             Self::Chat => "Message",
             Self::FollowUp { .. } => "Follow-up",
             Self::Answer { .. } => "Your answer",

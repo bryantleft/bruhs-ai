@@ -7,6 +7,12 @@ pub(super) fn repository() -> tempfile::TempDir {
         vec!["init", "-q", "--initial-branch=main"],
         vec!["config", "user.email", "fixture@example.invalid"],
         vec!["config", "user.name", "Fixture"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/fixture/repo.git",
+        ],
     ] {
         assert!(Process::new("git")
             .args(arguments)
@@ -162,6 +168,7 @@ async fn selected_files_cannot_escape_the_repository_or_include_directories() {
     for file in ["../secret", "/etc/passwd", ".git/config", ".git"] {
         let action = DeliveryAction::CommitPushPull {
             files: vec![file.into()],
+            verification_id: None,
             message: "message".into(),
             title: "title".into(),
             body: String::new(),
@@ -190,6 +197,7 @@ async fn an_explicit_tracked_file_deletion_can_be_prepared_for_commit() {
             repository.path(),
             DeliveryAction::CommitPushPull {
                 files: vec!["sample.txt".into()],
+                verification_id: None,
                 message: "Remove sample".into(),
                 title: "Remove sample".into(),
                 body: String::new(),
@@ -256,6 +264,7 @@ fn own_comments_do_not_wake_watchers_and_new_failures_do() {
         checks: Vec::new(),
         comments: Vec::new(),
         reviews: Vec::new(),
+        changed_files: None,
         files: Vec::new(),
     };
     let mut after = before.clone();

@@ -24,6 +24,8 @@ use bruhs_models::logic::queue::PromptQueue;
 use bruhs_models::logic::run_place::{RememberedWorktree, WorkspaceChoice};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::EpochMs;
+use gpui::prelude::*;
+use gpui::*;
 use bruhs_ui::input::{
     Enter as InputEnter, Escape as InputEscape, Input, InputEvent, InputState,
     MoveDown as InputMoveDown, MoveUp as InputMoveUp, TextareaState,
@@ -32,8 +34,6 @@ use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::text::{TextView, TextViewStyle};
 use bruhs_ui::zoom::px;
 use bruhs_ui::ActiveTheme;
-use gpui::prelude::*;
-use gpui::*;
 use markdown::{mdast, ParseOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -54,6 +54,7 @@ actions!(
         ClearInput,
         CyclePermissionMode,
         StashDraft,
+        ToggleDictation,
         FindInThread
     ]
 );
@@ -78,10 +79,13 @@ mod mobile;
 mod model_picker_ui;
 pub(crate) use mobile::mobile_label;
 mod prompt_suggestion;
+pub(crate) mod response_stream;
+pub(crate) mod tool_visibility;
 mod rich_response;
 mod secret_prompt;
 #[cfg(debug_assertions)]
 mod smoke;
+pub(crate) mod screen_reader;
 mod streaming;
 mod svg_cache;
 mod timeline_ui;
@@ -167,6 +171,30 @@ struct SignedOut {
 enum DesktopAuthStatus {
     SignedIn(ClaudeAccount),
     SignedOut(SignedOut),
+}
+
+pub(crate) fn cli_health(cx:&App)->impl std::future::Future<Output=[&'static str;2]>+Send+'static {
+    let claude=auth::auth_check_program(cx);
+    let codex=codex_auth::codex_program(cx);
+    async move {
+        let (claude,codex)=tokio::join!(
+            async {match claude{Some(p)=>Some(auth::fetch_auth_status_with(&p).await),None=>None}},
+            async {match codex{Some(p)=>Some(codex_auth::fetch_codex_status_with(&p).await),None=>None}}
+        );
+        [claude,codex].map(|status| match status {
+            Some(DesktopAuthStatus::SignedIn(_))=>"Signed in",
+            Some(DesktopAuthStatus::SignedOut(account)) if account.error.is_none()=>"Signed out",
+            _=>"Unavailable",
+        })
+    }
+}
+
+/// A fork keeps the chosen reply boundary even if its parent is edited or removed.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ForkContext {
+    pub parent: String,
+    pub title: String,
+    pub history: Vec<bruhs_models::logic::portable::PortableMessage>,
 }
 
 /// Named apart from gpui's accessibility `Role`, which views also use.
@@ -271,6 +299,9 @@ enum DesktopMermaidRender {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesktopToolCall {
+    /// Bytes of assistant prose preceding this call. Older transcripts lack this boundary.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub text_offset:Option<usize>,
     pub id: String,
     pub tool: String,
     #[serde(default)]
@@ -341,6 +372,22 @@ impl Message {
         let mut message = Self::user(content);
         message.files = files;
         message
+    }
+
+    /// The transcript includes a display label for each upload. The title
+    /// writer receives those uploads separately from the user's message.
+    pub(crate) fn text_for_title(&self) -> &str {
+        if self.files.is_empty() {
+            return &self.content;
+        }
+        let labels = files::visible_with_files("", &[], &self.files);
+        if self.content == labels {
+            return "";
+        }
+        self.content.strip_suffix(&labels)
+            .and_then(|prefix| prefix.strip_suffix('\n'))
+            .map(str::trim_end)
+            .unwrap_or(&self.content)
     }
 
     pub fn assistant_streaming(started_at_ms: i64, model: Option<String>) -> Self {
@@ -422,6 +469,7 @@ enum AgentUiEvent {
     Session(String),
     /// The saved session could not be resumed; the turn retries fresh.
     SessionRejected,
+    QuotaBlocked(Option<i64>),
     Error(String),
     Done,
 }
@@ -431,11 +479,15 @@ pub use bruhs_models::PermissionMode;
 // --- ChatView entity ---
 
 pub enum ChatViewEvent {
+    UsageLimitReached { reset_ms: Option<i64>, generation: u64 },
     OpenSettings,
     /// The access-mode menu or the Build/Plan chip picked a mode.
     SetPermissionMode(PermissionMode),
     ToggleTasks,
     ToggleDiff,
+    ToggleThreadDetails,
+    ForkFromReply { index: usize },
+    OpenForkSource,
     /// The header's panel-right button (⌘⌥B).
     TogglePanel,
     /// The hero heading / context strip project buttons.
@@ -447,6 +499,8 @@ pub enum ChatViewEvent {
         model_id: String,
         branch: Option<String>,
     },
+    /// The thread needs the owner’s attention (approval or input).
+    ThreadAttention(&'static str),
     /// The turn ended (done, error, or stopped).
     TurnFinished,
     /// A `/handoff` brief is ready: open a fresh thread in this thread's
@@ -462,7 +516,9 @@ pub enum ChatViewEvent {
     RoleCommand(String),
     /// Something the user should know about failed (shown as a banner).
     Notice(String),
-    /// Saved chat content (messages or title) changed outside a turn's start
+    /// The user committed a new title in the header.
+    TitleRenamed,
+    /// Saved chat content changed outside a turn's start
     /// or end, e.g. `/clear` or `/help`. Streaming deltas, the spinner and
     /// other view-only changes never emit this, so they never cause a save.
     MessagesChanged,
@@ -494,11 +550,70 @@ pub enum ChatViewEvent {
         base_branch: String,
         composer: ComposerPrefs,
     },
+    /// A newly prepared checkout is ready for background project actions.
+    WorktreeReady,
     /// The first send moved this thread onto a worktree. The card follows.
     ThreadPlaced {
         project_path: String,
         branch: Option<String>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChatWidth {
+    #[default]
+    Comfortable,
+    Wide,
+    Full,
+}
+
+impl ChatWidth {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Wide => "wide",
+            Self::Full => "full",
+        }
+    }
+
+    fn limit(self) -> Option<f32> {
+        match self {
+            Self::Comfortable => Some(CHAT_MESSAGE_LIST_MAX_WIDTH_PX),
+            Self::Wide => Some(1152.0),
+            Self::Full => None,
+        }
+    }
+}
+
+/// Which drafts need the platform modifier to send.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SendShortcut {
+    #[default]
+    Enter,
+    ModEnterMultiline,
+    ModEnter,
+}
+
+impl SendShortcut {
+    pub const OPTIONS: [(Self, &'static str); 3] = [
+        (Self::Enter, "enter"),
+        (Self::ModEnterMultiline, "mod-enter-multiline"),
+        (Self::ModEnter, "mod-enter"),
+    ];
+
+    pub fn requires_modifier(self, draft: &str) -> bool {
+        match self {
+            Self::Enter => false,
+            Self::ModEnterMultiline => draft.contains(['\n', '\r']),
+            Self::ModEnter => true,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        Self::OPTIONS.iter().find(|(mode, _)| *mode == self).unwrap().1
+    }
 }
 
 /// Follow-up, auto-compact, and idle compact. One value is copied onto every
@@ -526,12 +641,22 @@ pub struct ChatView {
     #[cfg(test)]
     rendered_message_rows: std::cell::Cell<usize>,
     pub is_streaming: bool,
+    readout: screen_reader::Readout,
+    pub send_shortcut: SendShortcut,
+    pub(crate) slash_skills:bool,
+    pub(crate) tool_visibility:tool_visibility::Visibility,
+    chat_width: ChatWidth,
     pub spinner_frame: usize,
     stream_started_at: Option<Instant>,
     pub tasks_panel_visible: bool,
     pub diff_panel_visible: bool,
+    pub(crate) details_trigger: FocusHandle,
+    pub(crate) details_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    pub(crate) details_open: bool,
+    pub(crate) reported_limit: Option<(u64,Option<i64>)>,
     pub running_tasks_count: usize,
     pub permission_mode: PermissionMode,
+    pub(crate) project_permission_override: bool,
     pub model_id: String,
     pub project_path: String,
     /// Shown in the breadcrumb, hero heading and context strip.
@@ -567,6 +692,12 @@ pub struct ChatView {
     /// Composer text applied on the next paint. Stream tasks have no window.
     pending_composer: Option<String>,
     dictation: dictation::ComposerDictation,
+    pub(crate) setup_actions:Vec<bruhs_core::git::SetupAction>,
+    pub(crate) branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
+    pub(crate) worktree_prefs: bruhs_models::logic::run_place::WorktreePreferences,
+    pub(crate) effort_label: bool,
+    pub(crate) text_generation_model: String,
+    pub(crate) dictation_prefs: crate::voice_capture::DictationPreferences,
     /// Edit from here focuses the composer after that write.
     focus_pending_composer: bool,
     recall: Option<bruhs_models::logic::recall::RecallCursor>,
@@ -581,6 +712,7 @@ pub struct ChatView {
     /// Transcript of a thread imported without a session. Turns send it
     /// ahead of the prompt until a provider session holds it.
     pub import_context: Option<String>,
+    pub(crate) fork: Option<std::sync::Arc<ForkContext>>,
     /// Provider of the newest turn, which owns the session it reports.
     turn_provider: AgentProvider,
     /// The running turn is a `/handoff`: when it ends, its reply seeds a
@@ -626,12 +758,13 @@ pub struct ChatView {
     chat_focus: FocusHandle,
     /// Mode to return to when leaving Plan via the Build/Plan chip.
     plan_return_mode: PermissionMode,
-    git_dirty_count: usize,
-    git_current_branch: Option<String>,
+    pub(crate) git_dirty_count: usize,
+    pub(crate) git_current_branch: Option<String>,
     git_branches: Vec<String>,
     branch_menu_open: bool,
     /// Worktree this thread runs in after the first send creates or reuses one.
     pub worktree_path: Option<String>,
+    pub project_settings_root: Option<String>,
     /// Set once a send has a place, including a plain checkout.
     pub run_locked: bool,
     /// Effort on the last successful send. The chip shows `claude_effort`.
@@ -730,6 +863,9 @@ pub struct ChatView {
     /// Bumped whenever a turn starts or is abandoned; events tagged with an
     /// older generation are ignored.
     turn_generation: u64,
+    pub(super) wait_on_quota: bool,
+    response_stream: response_stream::Mode,
+    paragraph_progress:response_stream::ParagraphProgress,
     _input_subscription: Subscription,
     _composer_key_subscription: Subscription,
     spinner_task: Option<Task<()>>,
@@ -874,6 +1010,10 @@ impl ChatView {
             if key == "escape" && !modifiers.modified() {
                 if let Some(chat) = chat.upgrade() {
                     let closed = chat.update(cx, |this, cx| {
+                        if this.dictation.active() && this.chat_focus.contains_focused(window,cx) {
+                            this.cancel_dictation(cx);
+                            return true;
+                        }
                         if this.composer_options_open
                             && (this.composer_options_focus.contains_focused(window, cx)
                                 || this.composer_options_trigger_focus.is_focused(window))
@@ -1046,8 +1186,14 @@ impl ChatView {
             stream_started_at: None,
             tasks_panel_visible: false,
             diff_panel_visible: false,
+            details_trigger: cx.focus_handle().tab_stop(true),
+            details_trigger_bounds: Default::default(),
+            details_open: Default::default(),
+            reported_limit: None,
             running_tasks_count: 0,
             permission_mode: PermissionMode::Default,
+            project_permission_override: false,
+            text_generation_model: bruhs_models::logic::prompt_suggestion::default_suggestion_model(AgentProvider::for_model(&model_id)).to_owned(),
             model_id,
             project_path,
             project_scoped: false,
@@ -1073,6 +1219,11 @@ impl ChatView {
             queue_edit: None,
             pending_composer: None,
             dictation: Default::default(),
+            dictation_prefs: Default::default(),
+            worktree_prefs: Default::default(),
+            branch_naming: Default::default(),
+            setup_actions:Vec::new(),
+            effort_label: true,
             focus_pending_composer: false,
             recall: None,
             rewind_confirm: None,
@@ -1080,6 +1231,7 @@ impl ChatView {
             session_id: None,
             session_provider: None,
             import_context: None,
+            fork: None,
             turn_provider: AgentProvider::Claude,
             handoff_pending: false,
             goal: None,
@@ -1111,10 +1263,16 @@ impl ChatView {
             git_branches: Vec::new(),
             branch_menu_open: false,
             worktree_path: None,
+            project_settings_root: None,
             run_locked: false,
             effort: None,
             run_choice: WorkspaceChoice::Checkout,
             claude_effort: None,
+            readout: Default::default(),
+            send_shortcut: SendShortcut::default(),
+            slash_skills:true,
+            tool_visibility:Default::default(),
+            chat_width: ChatWidth::default(),
             follow_up_steer: false,
             claude_autocompact: None,
             compact_idle: IdleCompact::Return,
@@ -1166,6 +1324,9 @@ impl ChatView {
             agent_task: None,
             stream_task: None,
             turn_generation: 0,
+            wait_on_quota:false,
+            response_stream:Default::default(),
+            paragraph_progress:Default::default(),
             _input_subscription,
             _composer_key_subscription,
             spinner_task: None,
@@ -1203,6 +1364,7 @@ impl ChatView {
         title: impl Into<String>,
         cx: &mut Context<'_, Self>,
     ) {
+        self.readout.status("");
         self.cancel_dictation(cx);
         self.dismiss_prompt_suggestion(cx);
         self.thread_id = Some(id.into());
@@ -1223,8 +1385,10 @@ impl ChatView {
         self.session_id = None;
         self.session_provider = None;
         self.import_context = None;
+        self.fork = None;
         self.goal = None;
         self.worktree_path = None;
+        self.project_settings_root = None;
         self.run_locked = false;
         self.effort = None;
         self.placing = false;
@@ -1289,10 +1453,12 @@ impl ChatView {
         self.run_locked || self.worktree_path.is_some()
     }
 
-    /// Claude shows the effort chip. Codex has no `--effort` flag.
+    /// Native Claude and Codex turns support the composer's effort control.
     pub(super) fn effort_chip_visible(&self) -> bool {
-        bruhs_models::agent::AgentProvider::for_model(&self.model_id)
-            == bruhs_models::agent::AgentProvider::Claude
+        matches!(
+            bruhs_models::agent::AgentProvider::for_model(&self.model_id),
+            bruhs_models::agent::AgentProvider::Claude | bruhs_models::agent::AgentProvider::Codex
+        )
     }
 
     pub(super) fn apply_run_prefs(
@@ -1389,6 +1555,20 @@ impl ChatView {
         cx.notify();
     }
 
+    pub(crate) fn scratch_folder(&self) -> Option<&std::path::Path> {
+        self.worktree_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .filter(|path| {
+                !self.project_scoped && bruhs_core::worktrees::scratch::is_managed_path(path)
+            })
+    }
+
+    /// Original project of a thread placed on a managed worktree.
+    pub(crate) fn settings_project_path(&self)->&str {
+        self.project_settings_root.as_deref().unwrap_or(&self.project_path)
+    }
+
     /// Keep this conversation while changing the folder its next turn can use.
     pub fn change_project(
         &mut self,
@@ -1413,6 +1593,7 @@ impl ChatView {
             self.fresh_session = true;
             self.instructions_stamp = None;
             self.worktree_path = None;
+        self.project_settings_root = None;
             self.run_locked = false;
             self.run_choice = WorkspaceChoice::Checkout;
             self.previous_worktree = None;
@@ -1465,13 +1646,43 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Web `max-w-3xl` transcript column, clamped to the painted chat width.
+    pub(super) fn set_response_stream(&mut self,mode:response_stream::Mode) {
+        if self.response_stream != mode {
+            self.response_stream=mode;
+            self.refresh_paragraph_progress(true);
+            self.messages_viewport.remeasure();
+        }
+    }
+
+    fn refresh_paragraph_progress(&mut self, reset:bool) {
+        if reset { self.paragraph_progress=Default::default(); }
+        if self.response_stream==response_stream::Mode::Paragraph {
+            if let Some(message)=self.messages.last().filter(|m|m.role==MessageRole::Assistant && m.state.is_streaming()){
+                self.paragraph_progress.advance(&message.content);
+            }
+        }
+    }
+
+    pub(super) fn set_render_math(&mut self, enabled: bool) {
+        if self.content_blocks.set_render_math(enabled) {
+            self.messages_viewport.remeasure();
+        }
+    }
+
+    pub(super) fn set_chat_width(&mut self, width: ChatWidth) {
+        if self.chat_width != width {
+            self.chat_width = width;
+            self.messages_viewport.remeasure();
+        }
+    }
+
     fn transcript_column_width(&self) -> f32 {
-        let measured = self.measured_width.get();
-        if measured <= 0.0 {
-            CHAT_MESSAGE_LIST_MAX_WIDTH_PX
+        let available = self.measured_width.get();
+        let limit = self.chat_width.limit();
+        if available <= 0.0 {
+            limit.unwrap_or(CHAT_MESSAGE_LIST_MAX_WIDTH_PX)
         } else {
-            measured.min(CHAT_MESSAGE_LIST_MAX_WIDTH_PX)
+            available.min(limit.unwrap_or(available))
         }
     }
 
@@ -1655,7 +1866,7 @@ impl ChatView {
                     .flex_1()
                     .min_w_0()
                     .text_size(px(14.0))
-                    .font_family("Monaspace Neon")
+                    .font_family(crate::theme::FontFace::Code)
                     .text_color(if self.find_query.is_empty() {
                         theme::rambutan_500()
                     } else {
@@ -1916,6 +2127,10 @@ impl Render for ChatView {
         div()
             .track_focus(&self.chat_focus)
             .key_context("Chat")
+            .on_action(cx.listener(|this, _: &ToggleDictation, _, cx| {
+                if this.dictation.recording() { this.stop_dictation(cx); }
+                else if !this.dictation.active() { this.start_dictation(cx); }
+            }))
             .on_action(cx.listener(Self::send_message))
             .on_action(cx.listener(Self::stash_draft))
             .on_action(cx.listener(|this, _: &FindInThread, window, cx| {
@@ -1948,7 +2163,9 @@ impl Render for ChatView {
             .bg(cx.theme().background)
             .flex()
             .flex_col()
+            .child(self.readout.element())
             .child(self.render_header(cx))
+            .children(self.render_fork_source(cx))
             .when(self.find_open, |el| el.child(self.render_find_bar(cx)))
             .child(self.render_auth_banner(cx))
             .when(hero, |el| {
@@ -1971,7 +2188,7 @@ impl Render for ChatView {
                         .child(
                             div()
                                 .w_full()
-                                .max_w(px(composer_ui::CHAT_COMPOSER_MAX_WIDTH_PX))
+                                .when_some(self.chat_width.limit(), |el, limit| el.max_w(px(limit)))
                                 .min_w_0()
                                 .my_auto()
                                 .flex_shrink_0()
@@ -2034,6 +2251,7 @@ mod find_tests {
             started_at_ms: None,
             completed_at_ms: None,
             tool_calls: vec![DesktopToolCall {
+                text_offset: None,
                 id: "1".into(),
                 tool: "Bash".into(),
                 input: serde_json::json!({"command": "cargo test"}),

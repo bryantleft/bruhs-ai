@@ -221,9 +221,8 @@ impl DeliveryService {
             return self.gitlab_stack_graph(path).await;
         }
         let repository = self
-            .read(
+            .github_read(
                 path,
-                "gh",
                 &[
                     "repo",
                     "view",
@@ -250,7 +249,7 @@ impl DeliveryService {
         }
         let endpoint = format!("repos/{repository}/pulls?state=open&per_page=100");
         // All pages are required: a missing 51st PR could hide an ambiguous branch owner.
-        let json = self.read(path, "gh", &["api", &endpoint, "--paginate", "--slurp", "--jq",
+        let json = self.github_read(path, &["api", &endpoint, "--paginate", "--slurp", "--jq",
             "map(map({number,head:.head.ref,base:.base.ref,head_oid:.head.sha,base_oid:.base.sha,head_repository:.head.repo.full_name,base_repository:.base.repo.full_name}))"]).await?;
         let pages: Vec<Vec<GraphPull>> = serde_json::from_str(&json).map_err(|error| {
             DeliveryError::Command(format!(
@@ -291,7 +290,7 @@ impl DeliveryService {
         }
         let endpoint = format!("repos/{repository}/git/ref/heads/{}", component(branch));
         let oid = self
-            .read(path, "gh", &["api", &endpoint, "--jq", ".object.sha"])
+            .github_read(path, &["api", &endpoint, "--jq", ".object.sha"])
             .await?
             .trim()
             .to_owned();
@@ -310,7 +309,7 @@ impl DeliveryService {
             return Ok(());
         }
         let endpoint = format!("repos/{repository}/stacks?pull_request={number}");
-        let json = match self.read(path, "gh", &["api", &endpoint]).await {
+        let json = match self.github_read(path, &["api", &endpoint]).await {
             Ok(json) => json,
             // This optional GitHub API returns 404 when native stacks are not enabled.
             Err(DeliveryError::Command(message)) if message.contains("(HTTP 404)") => return Ok(()),
@@ -552,7 +551,9 @@ impl DeliveryService {
             ),
         )
         .await?;
-        let output = self.run_command(cwd, &specification, cancel).await?;
+        let output = self
+            .run_command(cwd, &specification, cancel, prepared.repository.as_ref())
+            .await?;
         self.stack_log(prepared, None, &output).await?;
         Ok(output)
     }

@@ -12,6 +12,35 @@ pub struct ReactiveHookToken {
 }
 
 impl ServerClient {
+    pub async fn task_threads(
+        &self,
+        project: &str,
+        query: &str,
+    ) -> Result<Vec<bruhs_models::reactive::TaskThreadChoice>, ServerError> {
+        let request = "Search project threads";
+        let response = Self::check(
+            self.http()?
+                .get(format!(
+                    "{}/api/reactive/task-threads",
+                    self.base.trim_end_matches('/')
+                ))
+                .query(&[("project", project), ("query", query)])
+                .send()
+                .await,
+            request,
+        )
+        .await?;
+        Self::decode(response, request).await
+    }
+
+    pub async fn task_runtime_models(&self, provider: bruhs_models::agent::AgentProvider) -> Result<bruhs_models::runtime_models::RuntimeModels, ServerError> {
+        self.get_json(&format!("/api/agent/models/{}", provider.as_str())).await
+    }
+
+    pub async fn task_base_branches(&self, project: &str) -> Result<bruhs_core::git::Branches, ServerError> {
+        self.send_json(reqwest::Method::POST, "/api/agent/git-branches", Some(&serde_json::json!({"path":project}))).await
+    }
+
     pub async fn weekly_reports(
         &self,
         before: Option<&str>,
@@ -54,11 +83,54 @@ impl ServerClient {
         self.get_json("/api/reactive").await
     }
 
+    pub async fn webhook_deliveries(
+        &self,
+        task: &str,
+    ) -> Result<Vec<bruhs_models::reactive::WebhookDeliverySummary>, ServerError> {
+        self.read_webhook_history(task, None).await
+    }
+
+    pub async fn webhook_delivery(
+        &self,
+        task: &str,
+        id: &str,
+    ) -> Result<bruhs_models::reactive::WebhookDelivery, ServerError> {
+        self.read_webhook_history(task, Some(id)).await
+    }
+
+    async fn read_webhook_history<T: serde::de::DeserializeOwned>(
+        &self,
+        task: &str,
+        id: Option<&str>,
+    ) -> Result<T, ServerError> {
+        let mut url = reqwest::Url::parse(&self.base)
+            .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
+        {
+            let mut path = url
+                .path_segments_mut()
+                .map_err(|()| ServerError::Invalid("Invalid local server URL"))?;
+            path.pop_if_empty()
+                .extend(["api", "reactive", "tasks", task, "deliveries"]);
+            if let Some(id) = id {
+                path.push(id);
+            }
+        }
+        let request = "Read task webhook deliveries";
+        let response = Self::check(self.http()?.get(url).send().await, request).await?;
+        Self::decode(response, request).await
+    }
+
     /// One agent's runs, newest first; `before` is the id of the last run already shown.
     pub async fn agent_runs(
         &self,
         agent_id: &str,
         before: Option<&str>,
+    ) -> Result<Vec<ReactiveRun>, ServerError> {
+        self.agent_thread_runs(agent_id, before, None).await
+    }
+
+    pub async fn agent_thread_runs(
+        &self, agent_id: &str, before: Option<&str>, thread: Option<&str>,
     ) -> Result<Vec<ReactiveRun>, ServerError> {
         let mut url = reqwest::Url::parse(&self.base)
             .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
@@ -68,6 +140,9 @@ impl ServerClient {
             .extend(["api", "reactive", "agents", agent_id, "runs"]);
         if let Some(before) = before {
             url.query_pairs_mut().append_pair("before", before);
+        }
+        if let Some(thread) = thread {
+            url.query_pairs_mut().append_pair("thread", thread);
         }
         let request = "Read agent runs";
         let response = Self::check(self.http()?.get(url).send().await, request).await?;
@@ -123,6 +198,35 @@ impl ServerClient {
             std::time::Duration::from_secs(60),
         )
         .await
+    }
+
+    pub async fn task_webhook_address(
+        &self,
+        task: &str,
+        previous: Option<&str>,
+    ) -> Result<reqwest::Url, ServerError> {
+        let base = reqwest::Url::parse(&self.base)
+            .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
+        let mut owner_url = base.clone();
+        owner_url
+            .path_segments_mut()
+            .map_err(|()| ServerError::Invalid("Invalid local server URL"))?
+            .pop_if_empty()
+            .extend(["api", "reactive", "tasks", task, "webhook-url"]);
+        let http = self.local_owner_http().await?;
+        let request = match previous {
+            Some(token) => http.post(owner_url).json(token),
+            None => http.get(owner_url),
+        };
+        let action = "Access task webhook URL";
+        let response = Self::check(request.send().await, action).await?;
+        let token: String = Self::decode(response, action).await?;
+        let mut url = base;
+        url.path_segments_mut()
+            .map_err(|()| ServerError::Invalid("Invalid local server URL"))?
+            .pop_if_empty()
+            .extend(["api", "reactive", "task-hooks", task, &token]);
+        Ok(url)
     }
 
     pub async fn reactive_hook_token(

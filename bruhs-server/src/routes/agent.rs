@@ -49,7 +49,8 @@ pub struct AgentRequest {
     /// Files already stored by `POST /api/agent/uploads`.
     #[serde(default)]
     pub file_attachments: Vec<bruhs_models::logic::attachments::UploadedFile>,
-    /// Claude `--effort`. Missing leaves the CLI default. Codex ignores it.
+    /// Claude `--effort` or Codex `model_reasoning_effort`.
+    /// Missing leaves the provider's configured default.
     #[serde(default)]
     pub effort: Option<String>,
     /// Claude `--autocompact`. Missing omits the flag. Codex ignores it.
@@ -63,6 +64,8 @@ pub struct AgentRequest {
     /// longer than a role may hold is rejected.
     #[serde(default)]
     pub instructions: Option<String>,
+    #[serde(default)]
+    pub execution_timeout_seconds: Option<u64>,
 }
 
 /// Convert a `QueryEvent` into a `serde_json::Value`.
@@ -178,6 +181,10 @@ fn orchestrator_event_to_json(event: &OrchestratorEvent) -> Value {
             v["envelope"] = json!("query");
             v
         }
+        OrchestratorEvent::ExecutionBudgetExceeded { seconds } => json!({
+            "envelope":"query","type":"error","kind":"execution_budget_exceeded",
+            "execution_timeout_seconds":seconds,"message":bruhs_core::agent::execution_budget_message(*seconds)
+        }),
         OrchestratorEvent::BackgroundTaskRegistered(task) => {
             // BackgroundTask has Serialize
             json!({
@@ -217,6 +224,7 @@ pub async fn post_agent(
             "role instructions are too long".into(),
         ));
     }
+    bruhs_core::agent::validate_execution_budget(body.execution_timeout_seconds)?;
     crate::routes::uploads::reject_foreign_uploads(&body.file_attachments).await?;
     let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
     let model = body.model.unwrap_or_else(ModelId::default_agent_model);
@@ -246,6 +254,7 @@ pub async fn post_agent(
     .autocompact(body.autocompact.as_deref())
     .thread_access(body.thread_access.unwrap_or_default())
     .instructions(body.instructions)
+    .execution_timeout_seconds(body.execution_timeout_seconds)
     // A chat with no project (life surfaces, meetings) runs in the home
     // directory and needs no coding plugins.
     .lean(project.is_home());

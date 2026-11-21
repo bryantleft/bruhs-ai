@@ -127,6 +127,15 @@ impl ConfigOverride {
         Self::new(key, toml_basic_string(text))
     }
 
+    /// Set `model_reasoning_effort` to a literal string. The installed CLI
+    /// validates whether the selected model supports the requested level.
+    pub fn reasoning_effort(effort: &str) -> Self {
+        Self {
+            key: "model_reasoning_effort".to_string(),
+            value: toml_basic_string(effort),
+        }
+    }
+
     /// The dotted config path.
     pub fn key(&self) -> &str {
         &self.key
@@ -184,6 +193,8 @@ fn toml_basic_string(text: &str) -> String {
 pub struct QueryOptions {
     /// The user prompt, written to the CLI's stdin.
     pub prompt: String,
+    /// Images to include with the initial user message.
+    pub images: Vec<PathBuf>,
     /// Workspace root (`--cd`). Defaults to `.`.
     pub cwd: PathBuf,
     /// Model (`--model`); `None` uses the configured default.
@@ -218,6 +229,7 @@ impl Default for QueryOptions {
     fn default() -> Self {
         Self {
             prompt: String::new(),
+            images: Vec::new(),
             cwd: PathBuf::from("."),
             model: None,
             profile: None,

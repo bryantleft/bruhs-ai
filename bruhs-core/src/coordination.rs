@@ -17,13 +17,14 @@ use tokio_stream::StreamExt;
 
 mod access;
 mod board;
+mod handoffs;
 mod recovery;
 mod wait;
 mod wakes;
 mod worktrees;
 pub use access::{AccessGrant, AccessScope, IssuedAccess};
 pub use board::{BoardLinks, LinkFuture, LinkSource};
-pub use recovery::ResetWorker;
+pub use recovery::{provider_quota_reset, ResetWorker};
 pub use wakes::WakeWorker;
 
 // Match the existing 120,000-character composer budget at the maximum UTF-8
@@ -60,6 +61,8 @@ struct Data {
     wake_subscriptions: BTreeMap<ThreadId, WakeSubscription>,
     #[serde(default)]
     wakes: BTreeMap<ThreadId, TaskWake>,
+    #[serde(default)]
+    work_item_handoffs: BTreeMap<ThreadId, bruhs_models::workbench_handoff::WorkItemHandoff>,
 }
 
 struct CoordinationOwner(std::fs::File);
@@ -84,6 +87,7 @@ struct Inner {
     permits: std::sync::Mutex<BTreeMap<ThreadId, wait::TaskSlot>>,
     changes: watch::Sender<u64>,
     wake_error: Mutex<Option<String>>,
+    handoff_starts: Mutex<()>,
     capacity: usize,
 }
 
@@ -141,6 +145,7 @@ impl CoordinationRuntime {
             permits: std::sync::Mutex::new(BTreeMap::new()),
             changes,
             wake_error: Mutex::new(None),
+            handoff_starts: Mutex::new(()),
             capacity: slots,
         }));
         runtime.save().await?;
@@ -195,6 +200,12 @@ impl CoordinationRuntime {
             CoordinationCommand::Send { id, prompt } => {
                 self.send(&id, prompt).await?;
             }
+            CoordinationCommand::SetEffort { id, effort } => {
+                self.set_effort(&id, effort).await?;
+            }
+            CoordinationCommand::SetExecutionBudget { id, seconds } => {
+                self.set_execution_budget(&id, seconds).await?;
+            }
             CoordinationCommand::Cancel { id } => self.cancel(&id).await?,
             CoordinationCommand::Fork {
                 id,
@@ -202,6 +213,7 @@ impl CoordinationRuntime {
                 prompt,
                 relationship,
                 model,
+                effort,
                 isolation,
             } => {
                 if relationship == Relationship::Root {
@@ -218,6 +230,8 @@ impl CoordinationRuntime {
                     title,
                     prompt,
                     model,
+                    effort,
+                    execution_timeout_seconds: parent.execution_timeout_seconds,
                     isolation,
                     permission_mode,
                     project_path: parent.project_path,
@@ -459,10 +473,23 @@ impl CoordinationRuntime {
         parent_id: Option<ThreadId>,
         relationship: Relationship,
     ) -> Result<ThreadId, CoordinationError> {
+        self.create_with_handoff(request, parent_id, relationship, None)
+            .await
+    }
+
+    async fn create_with_handoff(
+        &self,
+        mut request: NewTask,
+        parent_id: Option<ThreadId>,
+        relationship: Relationship,
+        handoff: Option<bruhs_models::workbench_handoff::WorkItemHandoff>,
+    ) -> Result<ThreadId, CoordinationError> {
         validate_new_task(&request).map_err(invalid)?;
+        crate::agent::validate_execution_budget(request.execution_timeout_seconds)
+            .map_err(|error| invalid(&error.to_string()))?;
         let project_path = canonical_project(&request.project_path).await?;
         let id = ThreadId::new_v4();
-        let (source_context, source_revision, shared_path) = {
+        let (source_context, source_revision, shared_path, work_item_origin) = {
             let data = self.0.data.lock().await;
             if let Some(parent_id) = &parent_id {
                 let parent = data
@@ -477,6 +504,11 @@ impl CoordinationRuntime {
                 if !narrower(parent.permission_mode, request.permission_mode) {
                     return Err(invalid("A child task cannot increase its parent's access."));
                 }
+                request.execution_timeout_seconds = request
+                    .execution_timeout_seconds
+                    .or(parent.execution_timeout_seconds);
+                crate::agent::validate_execution_budget(request.execution_timeout_seconds)
+                    .map_err(|error| invalid(&error.to_string()))?;
             }
             if let Some(spec_id) = &request.spec_id {
                 let spec = data.specs.get(spec_id).ok_or_else(|| not_found(spec_id))?;
@@ -502,16 +534,25 @@ impl CoordinationRuntime {
                 .and_then(|id| data.tasks.get(id))
                 .map_or_else(|| project_path.clone(), |task| task.working_path.clone());
             let source_revision = parent_id.as_ref().map(|_| data.revision);
+            let work_item_origin = handoff
+                .as_ref()
+                .map(|handoff| handoff.origin())
+                .or_else(|| {
+                    parent_id
+                        .as_ref()
+                        .and_then(|id| data.tasks.get(id))
+                        .and_then(|parent| parent.work_item_origin.clone())
+                });
             drop(data);
-            (source, source_revision, shared_path)
+            (source, source_revision, shared_path, work_item_origin)
         };
-        let working_path = match request.isolation {
+        let working_path = match &request.isolation {
             Isolation::Shared => shared_path,
             Isolation::Worktree { base_branch } => {
                 let branch = format!("bruhs/task-{id}");
                 let dest = crate::git::worktree_dest(Path::new(&project_path), &branch)
                     .map_err(|error| invalid(&error.to_string()))?;
-                crate::git::add_worktree(Path::new(&project_path), &base_branch, &dest, &branch)
+                crate::git::add_worktree(Path::new(&project_path), base_branch, &dest, &branch)
                     .await
                     .map_err(|error| invalid(&error.to_string()))?;
                 dest.to_string_lossy().into_owned()
@@ -519,6 +560,16 @@ impl CoordinationRuntime {
         };
         let now = EpochMs::now();
         let mut data = self.0.data.lock().await;
+        if let Some(handoff) = handoff {
+            let retained = data
+                .work_item_handoffs
+                .get_mut(&handoff.id)
+                .ok_or_else(|| not_found(&handoff.id))?;
+            retained.started = Some(bruhs_models::workbench_handoff::StartedWorkItemHandoff {
+                task_id: id.clone(),
+                request: request.clone(),
+            });
+        }
         let spec_revision = request
             .spec_id
             .as_ref()
@@ -528,6 +579,7 @@ impl CoordinationRuntime {
             id.clone(),
             CoordinatedTask {
                 id: id.clone(),
+                work_item_origin,
                 parent_id,
                 source_context,
                 source_revision,
@@ -536,6 +588,8 @@ impl CoordinationRuntime {
                 project_path,
                 working_path,
                 model: request.model,
+                effort: request.effort,
+                execution_timeout_seconds: request.execution_timeout_seconds,
                 permission_mode: request.permission_mode,
                 spec_id: request.spec_id,
                 spec_revision,
@@ -579,6 +633,61 @@ impl CoordinationRuntime {
             return Ok(());
         }
         task.archived_at = next;
+        self.persist(&mut data).await?;
+        drop(data);
+        Ok(())
+    }
+
+    async fn set_execution_budget(
+        &self,
+        id: &ThreadId,
+        seconds: Option<u64>,
+    ) -> Result<(), CoordinationError> {
+        crate::agent::validate_execution_budget(seconds)
+            .map_err(|error| invalid(&error.to_string()))?;
+        if self.0.cancels.lock().await.contains_key(id) {
+            return Err(conflict(
+                "The previous provider process is still stopping. Wait before changing its budget.",
+            ));
+        }
+        let mut data = self.0.data.lock().await;
+        let task = data.tasks.get_mut(id).ok_or_else(|| not_found(id))?;
+        if task.state.active() || task.state == TaskState::Ready {
+            return Err(conflict(
+                "Wait for this task to stop before changing its execution budget.",
+            ));
+        }
+        if task.execution_timeout_seconds == seconds {
+            return Ok(());
+        }
+        task.execution_timeout_seconds = seconds;
+        task.updated_at = EpochMs::now();
+        self.persist(&mut data).await?;
+        drop(data);
+        Ok(())
+    }
+
+    async fn set_effort(
+        &self,
+        id: &ThreadId,
+        effort: Option<String>,
+    ) -> Result<(), CoordinationError> {
+        if self.0.cancels.lock().await.contains_key(id) {
+            return Err(conflict("The previous provider process is still stopping. Retry after it releases this task."));
+        }
+        let mut data = self.0.data.lock().await;
+        let task = data.tasks.get_mut(id).ok_or_else(|| not_found(id))?;
+        validate_task_effort(&task.model, effort.as_deref()).map_err(invalid)?;
+        if task.state.active() || task.state == TaskState::Ready {
+            return Err(conflict(
+                "Wait for this task to stop before changing its reasoning effort.",
+            ));
+        }
+        if task.effort == effort {
+            return Ok(());
+        }
+        task.effort = effort;
+        task.updated_at = EpochMs::now();
         self.persist(&mut data).await?;
         drop(data);
         Ok(())
@@ -652,6 +761,7 @@ impl CoordinationRuntime {
             if task.state != TaskState::Ready || *cancelled.borrow() {
                 return Ok(());
             }
+            validate_task_effort(&task.model, task.effort.as_deref()).map_err(invalid)?;
             let revision = task
                 .spec_id
                 .as_ref()
@@ -721,6 +831,8 @@ impl CoordinationRuntime {
             task.permission_mode,
         )
         .resume(task.session_id)
+        .effort(task.effort.as_deref())
+        .execution_timeout_seconds(task.execution_timeout_seconds)
         .instructions(Some(context))
         .thread_access(ThreadAccess::Off);
         if fresh {
@@ -753,7 +865,7 @@ impl CoordinationRuntime {
                             return Ok(());
                         }
                         task.session_id = Some(session_id);
-                        if task.live_output.is_empty() {
+                        if !result.is_empty() && (!is_error || task.live_output.is_empty()) {
                             if result.len() > TEXT_BUDGET {
                                 return Err(invalid(
                                     "The provider result exceeds this task's retained text budget.",
@@ -793,6 +905,15 @@ impl CoordinationRuntime {
                 }
                 crate::OrchestratorEvent::Query(event) => {
                     self.observe(id, event).await?;
+                }
+                crate::OrchestratorEvent::ExecutionBudgetExceeded { seconds } => {
+                    return self
+                        .stop_tree(
+                            id,
+                            TaskState::Interrupted,
+                            Some(crate::agent::execution_budget_message(seconds)),
+                        )
+                        .await;
                 }
                 crate::OrchestratorEvent::BackgroundTaskRegistered(_) => {}
             }
@@ -910,6 +1031,16 @@ impl CoordinationRuntime {
     }
 
     async fn cancel(&self, id: &ThreadId) -> Result<(), CoordinationError> {
+        self.stop_tree(id, TaskState::Cancelled, None).await
+    }
+
+    async fn stop_tree(
+        &self,
+        id: &ThreadId,
+        root_state: TaskState,
+        root_error: Option<String>,
+    ) -> Result<(), CoordinationError> {
+        let root_id = id.clone();
         let mut data = self.0.data.lock().await;
         if !data.tasks.contains_key(id) {
             return Err(not_found(id));
@@ -945,7 +1076,11 @@ impl CoordinationRuntime {
                 && matches!(wake.state, TaskWakeState::Queued | TaskWakeState::Reserved)
         }) {
             wake.state = TaskWakeState::Dismissed;
-            wake.error = Some("The owner stopped this task tree.".into());
+            wake.error = Some(if root_error.is_some() {
+                "The run budget stopped this task tree. Review it before approving further continuation.".into()
+            } else {
+                "The owner stopped this task tree.".into()
+            });
         }
         for id in &ids {
             if let Some(task) = data.tasks.get_mut(id) {
@@ -956,7 +1091,18 @@ impl CoordinationRuntime {
                 .get_mut(id)
                 .filter(|task| task.state.active() || task.state == TaskState::Ready)
             {
-                task.state = TaskState::Cancelled;
+                task.state = if *id == root_id {
+                    root_state
+                } else {
+                    TaskState::Cancelled
+                };
+                if root_error.is_some() {
+                    task.error = Some(if *id == root_id {
+                        root_error.clone().unwrap_or_default()
+                    } else {
+                        "The parent run reached its execution budget. Files and partial output were retained.".into()
+                    });
+                }
                 task.approvals.clear();
                 task.updated_at = EpochMs::now();
                 if !task.live_output.is_empty() {

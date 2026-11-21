@@ -45,6 +45,7 @@ pub(super) fn starts_when_options(apps: bool, current: &str) -> Vec<(&'static st
         ("command", "A command reports a change"),
         ("schedule", "On a repeating schedule"),
         ("calendar", "At set times of day"),
+        ("once", "Once at a set time"),
         ("webhook", "A webhook arrives"),
         ("app_event", "A meeting event occurs"),
         ("custom", "A custom event arrives"),
@@ -68,6 +69,7 @@ pub(super) fn source_type_options(current: &str) -> Vec<(&'static str, &'static 
         ("command", "Command"),
         ("schedule", "Schedule"),
         ("calendar", "Calendar"),
+        ("once", "Once"),
         ("webhook", "Webhook"),
         ("app_event", "App event"),
         ("custom", "Custom event"),
@@ -580,6 +582,13 @@ mod tests {
                 debounce_ms: 0,
                 throttle_ms: 0,
                 on_busy: BusyPolicy::Queue,
+                webhook_filters: Vec::new(),
+                webhook_prompt: None,
+                webhook_security: Default::default(),
+                webhook_dedupe: Default::default(),
+                task_title: None,
+                task_conversation: Default::default(),
+                task_checkout: Default::default(),
             },
             source,
         }
@@ -846,6 +855,6 @@ mod tests {
             super::source_type_options("other").last(),
             Some(&("other", "Other"))
         );
-        assert_eq!(super::source_type_options("folder").len(), 8);
+        assert_eq!(super::source_type_options("folder").len(), 9);
     }
 }

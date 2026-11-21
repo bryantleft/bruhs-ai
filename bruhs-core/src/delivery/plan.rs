@@ -6,6 +6,15 @@ use bruhs_models::{
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path};
 
+pub(super) fn requires_repository(action: &DeliveryAction) -> bool {
+    !matches!(
+        action,
+        DeliveryAction::Lifecycle { .. }
+            | DeliveryAction::StartTrackerIssue { .. }
+            | DeliveryAction::Verify { .. }
+    )
+}
+
 fn command(program: &str, args: &[&str], stdin: Option<String>) -> Command {
     Command {
         program: program.into(),
@@ -43,7 +52,10 @@ pub(super) fn relative_file(value: &str) -> DeliveryResult<()> {
     {
         return Err(DeliveryError::Invalid("Choose a file relative to the repository, without parent or current-directory components.".into()));
     }
-    if path.components().any(|part| part.as_os_str() == ".git") {
+    if path
+        .components()
+        .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"))
+    {
         return Err(DeliveryError::Invalid(
             "Repository internals cannot be selected for delivery.".into(),
         ));
@@ -83,14 +95,13 @@ pub(super) async fn prepare(
         .map_err(|error| {
             DeliveryError::Invalid(format!("The repository path is unavailable: {error}"))
         })?;
-    let (head, current_branch) = service.repository_state(&path).await?;
-    let repository = if matches!(
-        &request.action,
-        DeliveryAction::Lifecycle { .. } | DeliveryAction::StartTrackerIssue { .. }
-    ) {
+    let (head_oid, current_branch) = service.repository_state(&path).await?;
+    let mut repository = if !requires_repository(&request.action) {
         None
     } else {
-        service.forge_repository(&path, request.forge).await?
+        Some(service.forge_repository(&path, request.forge).await?.ok_or_else(|| {
+            DeliveryError::Invalid("Delivery requires remote.origin.url. Add the intended forge origin before preparing an action.".into())
+        })?)
     };
     let forge = repository
         .as_ref()
@@ -99,6 +110,7 @@ pub(super) async fn prepare(
     let mut workspace_path = None;
     let mut issue = None;
     let mut fingerprint = None;
+    let mut verification = None;
     let mut stack = None;
     let mut native_stack = None;
     let commands = match &request.action {
@@ -111,6 +123,7 @@ pub(super) async fn prepare(
         } => create_pull(title, body, base, head, *draft)?,
         DeliveryAction::CommitPushPull {
             files,
+            verification_id,
             message,
             title,
             body,
@@ -118,47 +131,21 @@ pub(super) async fn prepare(
             head,
             draft,
         } => {
-            if files.is_empty() {
-                return Err(DeliveryError::Invalid(
-                    "Select the exact files to commit.".into(),
-                ));
-            }
             if *head != current_branch {
                 return Err(DeliveryError::Invalid(
                     "Commit/push must use this workspace's current branch as its head.".into(),
                 ));
             }
             required(message, "Commit message")?;
-            for file in files {
-                relative_file(file)?;
-                let metadata = match tokio::fs::symlink_metadata(path.join(file)).await {
-                    Ok(metadata) => metadata,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        service.read(&path, "git", &["ls-files", "--error-unmatch", "--", file]).await
-                            .map_err(|_| DeliveryError::Invalid(format!("Selected file {file} does not exist and is not a tracked deletion.")))?;
-                        continue;
-                    }
-                    Err(error) => {
-                        return Err(DeliveryError::Invalid(format!(
-                            "Selected file {file} is unavailable: {error}"
-                        )));
-                    }
-                };
-                if !metadata.file_type().is_file() {
-                    return Err(DeliveryError::Invalid(format!(
-                        "Select individual regular files; {file} is a directory or symlink."
-                    )));
-                }
-                let resolved = tokio::fs::canonicalize(path.join(file))
-                    .await
-                    .map_err(|error| DeliveryError::Invalid(error.to_string()))?;
-                if !resolved.starts_with(&path) {
-                    return Err(DeliveryError::Invalid(format!(
-                        "Selected file {file} resolves outside the repository."
-                    )));
-                }
-            }
+            validate_source_files(service, &path, files).await?;
             fingerprint = Some(service.fingerprint(&path, files).await?);
+            if let Some(id) = verification_id {
+                verification = Some(
+                    service
+                        .verification_for(&path, files, &head_oid, id)
+                        .await?,
+                );
+            }
             let mut add = command("git", &["add", "--"], None);
             add.args.extend(files.iter().cloned());
             let mut commit = command(
@@ -170,7 +157,36 @@ pub(super) async fn prepare(
             let mut commands = vec![
                 add,
                 commit,
-                command("git", &["push", "--set-upstream", "origin", head], None),
+                command(
+                    "git",
+                    &[
+                        "push",
+                        &repository
+                            .as_ref()
+                            .ok_or_else(|| {
+                                DeliveryError::Invalid(
+                                    "A reviewed origin is required before push.".into(),
+                                )
+                            })?
+                            .remote_url,
+                        &format!("<checked-commit>:refs/heads/{head}"),
+                    ],
+                    None,
+                ),
+                command(
+                    "git",
+                    &[
+                        "update-ref",
+                        &format!("refs/remotes/origin/{head}"),
+                        "<checked-commit>",
+                    ],
+                    None,
+                ),
+                command(
+                    "git",
+                    &["branch", &format!("--set-upstream-to=origin/{head}"), head],
+                    None,
+                ),
             ];
             commands.extend(create_pull(title, body, base, head, *draft)?);
             commands
@@ -306,6 +322,24 @@ pub(super) async fn prepare(
             native_stack = Some(service.prepare_native_stack(&path, *number).await?);
             Vec::new()
         }
+        DeliveryAction::Verify { files } => {
+            validate_source_files(service, &path, files).await?;
+            fingerprint = Some(service.payload_fingerprint(&path, files).await?);
+            workspace_path = Some(
+                service
+                    .verification_path(&id)
+                    .await?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            let commands = service.scripts(&path).await?.check;
+            if commands.is_empty() {
+                return Err(DeliveryError::Invalid(
+                    "No independent checks are configured. Add check commands to .bruhs/config.json, then prepare and review them.".into(),
+                ));
+            }
+            commands
+        }
         DeliveryAction::Lifecycle { phase } => {
             let scripts = service.scripts(&path).await?;
             match phase {
@@ -372,7 +406,12 @@ pub(super) async fn prepare(
             commands
         }
     };
-    let commands = if let Some(repository) = &repository {
+    if repository.is_none() && commands.iter().any(|command| command.program == "gh") {
+        repository = Some(service.forge_repository(&path, Forge::GitHub).await?.ok_or_else(|| {
+            DeliveryError::Invalid("A GitHub project command requires remote.origin.url. Add the intended origin and prepare the action again.".into())
+        })?);
+    }
+    let mut commands = if let Some(repository) = &repository {
         if forge == Forge::GitLab {
             service
                 .gitlab_plan(&path, repository, &request.action, commands)
@@ -383,6 +422,11 @@ pub(super) async fn prepare(
     } else {
         commands
     };
+    if let (DeliveryAction::Merge { number, head_oid, method, .. }, Some(repo), [command]) = (&request.action, &repository, commands.as_mut_slice()) {
+        if *method != MergeMethod::Rebase && service.preferences(Some(&path)).await.remove_agent_credits {
+            service.clean_merge_message(&path, repo, *number, head_oid, *method, command).await?;
+        }
+    }
     if commands.is_empty() && stack.is_none() && native_stack.is_none() {
         return Err(DeliveryError::Invalid(
             "No commands are configured for this lifecycle phase. Add them to .bruhs/config.json."
@@ -397,9 +441,11 @@ pub(super) async fn prepare(
         path: path.to_string_lossy().into_owned(),
         forge,
         repository,
+        source_task: None,
+        verification,
         action: request.action,
         commands,
-        expected_head: head,
+        expected_head: head_oid,
         expected_branch: current_branch,
         worktree_fingerprint: fingerprint,
         timeout_seconds: request.timeout_seconds,
@@ -409,6 +455,62 @@ pub(super) async fn prepare(
         stack,
         native_stack,
     })
+}
+
+pub(super) async fn validate_source_files(
+    service: &DeliveryService,
+    path: &Path,
+    files: &[String],
+) -> DeliveryResult<()> {
+    if files.is_empty() {
+        return Err(DeliveryError::Invalid(
+            "Select the exact files to check or commit.".into(),
+        ));
+    }
+    let mut unique = std::collections::HashSet::new();
+    for file in files {
+        if !unique.insert(file) {
+            return Err(DeliveryError::Invalid(
+                "Select each source file only once.".into(),
+            ));
+        }
+    }
+    for file in files {
+        relative_file(file)?;
+        let metadata = match tokio::fs::symlink_metadata(path.join(file)).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                service
+                    .read(path, "git", &["ls-files", "--error-unmatch", "--", file])
+                    .await
+                    .map_err(|_| {
+                        DeliveryError::Invalid(format!(
+                            "Selected file {file} does not exist and is not a tracked deletion."
+                        ))
+                    })?;
+                continue;
+            }
+            Err(error) => {
+                return Err(DeliveryError::Invalid(format!(
+                    "Selected file {file} is unavailable: {error}"
+                )));
+            }
+        };
+        if !metadata.file_type().is_file() {
+            return Err(DeliveryError::Invalid(format!(
+                "Select individual regular files; {file} is a directory or symlink."
+            )));
+        }
+        let resolved = tokio::fs::canonicalize(path.join(file))
+            .await
+            .map_err(|error| DeliveryError::Invalid(error.to_string()))?;
+        if !resolved.starts_with(path) {
+            return Err(DeliveryError::Invalid(format!(
+                "Selected file {file} resolves outside the repository."
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn positive(number: u64) -> DeliveryResult<()> {
@@ -491,6 +593,7 @@ impl DeliveryService {
                     .setup
                     .iter()
                     .chain(&scripts.run)
+                    .chain(&scripts.check)
                     .chain(&scripts.teardown)
                 {
                     validate_command(command)?;
@@ -512,41 +615,139 @@ impl DeliveryService {
         path: &Path,
         files: &[String],
     ) -> DeliveryResult<String> {
-        let patch = self
-            .read(path, "git", &["diff", "--binary", "HEAD"])
-            .await?;
+        self.fingerprint_scoped(path, files, false).await
+    }
+
+    pub(super) async fn payload_fingerprint(
+        &self,
+        path: &Path,
+        files: &[String],
+    ) -> DeliveryResult<String> {
+        Ok(format!(
+            "payload-v2:{}",
+            self.fingerprint_scoped(path, files, true).await?
+        ))
+    }
+
+    async fn fingerprint_scoped(
+        &self,
+        path: &Path,
+        files: &[String],
+        selected_only: bool,
+    ) -> DeliveryResult<String> {
+        let mut sorted = files.to_vec();
+        if selected_only {
+            sorted.sort();
+        }
+        // Payload identity is independent of staging. HEAD is a separate lease;
+        // selected paths, contents, kinds and modes define its pending changes.
+        let patch = if selected_only {
+            String::new()
+        } else {
+            self.read(
+                path,
+                "git",
+                &[
+                    "-c",
+                    "core.quotePath=true",
+                    "diff",
+                    "--binary",
+                    "--full-index",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "HEAD",
+                    "--",
+                ],
+            )
+            .await?
+        };
+        let files = if selected_only {
+            sorted.as_slice()
+        } else {
+            files
+        };
         let root = path.to_owned();
         let files = files.to_owned();
         tokio::task::spawn_blocking(move || {
             use std::io::Read;
+
+            fn frame(hash: &mut Sha256, bytes: &[u8]) -> DeliveryResult<()> {
+                let length = u64::try_from(bytes.len()).map_err(|_| {
+                    DeliveryError::Invalid("Source review field exceeds its encoding range.".into())
+                })?;
+                hash.update(length.to_be_bytes());
+                hash.update(bytes);
+                Ok(())
+            }
+
+            let root = std::fs::canonicalize(root)
+                .map_err(|error| DeliveryError::Invalid(format!("Cannot read the reviewed repository: {error}")))?;
             let mut hash = Sha256::new();
-            hash.update(patch.as_bytes());
-            for path in files {
-                hash.update(path.as_bytes());
-                let mut file = match std::fs::File::open(root.join(&path)) {
-                    Ok(file) => file,
+            hash.update(b"bruhs.delivery.source.v2\0");
+            frame(&mut hash, patch.as_bytes())?;
+            for relative in files {
+                frame(&mut hash, relative.as_bytes())?;
+                let path = root.join(&relative);
+                let entry = match std::fs::symlink_metadata(&path) {
+                    Ok(metadata) => metadata,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        hash.update(b"\0tracked-deletion\0");
+                        hash.update([0_u8]);
                         continue;
                     }
-                    Err(error) => {
-                        return Err(DeliveryError::Invalid(format!(
-                            "Cannot fingerprint {path}: {error}"
-                        )));
-                    }
+                    Err(error) => return Err(DeliveryError::Invalid(format!("Cannot fingerprint {relative}: {error}"))),
                 };
+                if !entry.file_type().is_file() {
+                    return Err(DeliveryError::Conflict(format!("Selected file {relative} is no longer a regular file. Prepare and review the action again.")));
+                }
+                let resolved = std::fs::canonicalize(&path)
+                    .map_err(|error| DeliveryError::Invalid(format!("Cannot fingerprint {relative}: {error}")))?;
+                if !resolved.starts_with(&root) {
+                    return Err(DeliveryError::Conflict(format!("Selected file {relative} resolves outside the reviewed repository. Prepare the action again.")));
+                }
+                let mut options = std::fs::OpenOptions::new();
+                options.read(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    // A replaced symlink or FIFO must not redirect or block a review.
+                    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+                }
+                let mut file = options.open(&path)
+                    .map_err(|error| DeliveryError::Invalid(format!("Cannot fingerprint {relative}: {error}")))?;
+                let before = file.metadata()
+                    .map_err(|error| DeliveryError::Invalid(format!("Cannot inspect {relative}: {error}")))?;
+                if !before.is_file() {
+                    return Err(DeliveryError::Conflict(format!("Selected file {relative} changed type during review. Prepare the action again.")));
+                }
+                hash.update([1_u8]);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    hash.update(before.permissions().mode().to_be_bytes());
+                }
+                #[cfg(not(unix))]
+                hash.update([u8::from(before.permissions().readonly())]);
+                let expected = before.len();
+                hash.update(expected.to_be_bytes());
+                let mut observed = 0_u64;
                 let mut buffer = [0; 8192];
                 loop {
-                    let count = file
-                        .read(&mut buffer)
-                        .map_err(|error| DeliveryError::Invalid(error.to_string()))?;
-                    if count == 0 {
-                        break;
+                    let count = file.read(&mut buffer)
+                        .map_err(|error| DeliveryError::Invalid(format!("Cannot read {relative}: {error}")))?;
+                    if count == 0 { break; }
+                    observed = observed.checked_add(u64::try_from(count).map_err(|_| {
+                        DeliveryError::Invalid("Source review file exceeds its encoding range.".into())
+                    })?).ok_or_else(|| DeliveryError::Invalid("Source review file exceeds its encoding range.".into()))?;
+                    if observed > expected {
+                        return Err(DeliveryError::Conflict(format!("Selected file {relative} changed while being read. Prepare the action again.")));
                     }
                     hash.update(&buffer[..count]);
                 }
+                if observed != expected {
+                    return Err(DeliveryError::Conflict(format!("Selected file {relative} changed while being read. Prepare the action again.")));
+                }
             }
-            Ok(format!("{:x}", hash.finalize()))
+            Ok(format!("v2:{:x}", hash.finalize()))
         })
         .await
         .map_err(|error| DeliveryError::Storage(error.to_string()))?

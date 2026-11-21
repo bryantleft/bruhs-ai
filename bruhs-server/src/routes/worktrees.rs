@@ -4,17 +4,17 @@
 //! the task's `remove_worktree` command, so task rules still apply.
 use crate::error::AppError;
 use axum::{
+    Extension, Json,
     extract::Query,
     http::header,
     response::{Html, IntoResponse},
-    Extension, Json,
 };
 use bruhs_core::coordination::CoordinationRuntime;
 use bruhs_core::worktrees as host;
+use bruhs_models::coordination::CoordinationCommand;
 use bruhs_models::coordination::worktree::{
     ManagedWorktree, WorktreeFrees, WorktreeState, WorktreeTask,
 };
-use bruhs_models::coordination::CoordinationCommand;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -25,8 +25,12 @@ pub async fn ui() -> impl IntoResponse {
     )
 }
 
-fn root() -> Result<PathBuf, AppError> {
-    host::root().map_err(AppError::Unavailable)
+fn root_for(path: &str) -> Result<PathBuf, AppError> {
+    host::locations::for_path(Path::new(path))
+        .map_err(|e| AppError::Unavailable(e.to_string()))?
+        .ok_or_else(|| {
+            AppError::BadRequest("Choose a worktree in a registered bruhs folder.".into())
+        })
 }
 
 /// A folder named in a request, confined to the worktrees folder.
@@ -63,7 +67,7 @@ pub struct Measured {
 
 /// What removing one worktree frees, by the configured meter.
 pub async fn measure(Query(query): Query<PathQuery>) -> Result<Json<Measured>, AppError> {
-    let path = confined(&root()?, &query.path)?;
+    let path = confined(&root_for(&query.path)?, &query.path)?;
     let measured = match bruhs_core::worktree_meter::load(
         bruhs_core::worktree_meter::config_path().as_deref(),
     )
@@ -89,11 +93,55 @@ pub struct PathBody {
     path: String,
 }
 
+#[derive(Deserialize)]
+pub struct Cleanup {
+    path: String,
+    branch: String,
+    #[serde(default)]
+    keep_when: bruhs_models::coordination::worktree::KeepWhen,
+}
+
+pub async fn clean_deleted_scratch(
+    Extension(retention): Extension<host::retention::RetentionHost>,
+    Json(body): Json<bruhs_models::coordination::worktree::ScratchCleanup>,
+) -> Result<axum::http::StatusCode, AppError> {
+    detached(async move { retention.remove_deleted_scratch(&body).await }).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// Release the deleted thread’s checkout when its branch, owners and local
+/// files still satisfy the policy captured at deletion.
+pub async fn clean_deleted_thread(
+    Extension(runtime): Extension<CoordinationRuntime>,
+    Json(body): Json<Cleanup>,
+) -> Result<axum::http::StatusCode, AppError> {
+    let root = root_for(&body.path)?;
+    let path = confined(&root, &body.path)?;
+    if !path.exists() {
+        return Ok(axum::http::StatusCode::NO_CONTENT);
+    }
+    detached(async move {
+        let _lock = host::lock(&root).await?;
+        if !path.exists() {
+            return Ok(());
+        }
+        if runtime.task_in_worktree(&path).await.is_some() {
+            return Err("A Workbench task uses this worktree.".into());
+        }
+        let project = bruhs_core::git::main_checkout(&path)
+            .await
+            .ok_or("Git could not identify the main checkout.")?;
+        host::cleanup_thread_checkout(&root, &project, &path, &body.branch, body.keep_when).await
+    })
+    .await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 pub async fn remove(
     runtime: Option<Extension<CoordinationRuntime>>,
     Json(body): Json<PathBody>,
 ) -> Result<Json<Vec<ManagedWorktree>>, AppError> {
-    let root = root()?;
+    let root = root_for(&body.path)?;
     let path = confined(&root, &body.path)?;
     let task = match &runtime {
         Some(Extension(runtime)) => runtime.task_in_worktree(&path).await,
@@ -130,7 +178,7 @@ pub async fn start_again(
     runtime: Option<Extension<CoordinationRuntime>>,
     Json(body): Json<StartAgain>,
 ) -> Result<Json<Vec<ManagedWorktree>>, AppError> {
-    let root = root()?;
+    let root = root_for(&body.path)?;
     let path = confined(&root, &body.path)?;
     if bruhs_models::logic::git::BranchName::try_from(body.base.as_str()).is_err() {
         return Err(AppError::BadRequest("Choose a valid base branch.".into()));
@@ -164,7 +212,7 @@ pub async fn forget(
     runtime: Option<Extension<CoordinationRuntime>>,
     Json(body): Json<PathBody>,
 ) -> Result<Json<Vec<ManagedWorktree>>, AppError> {
-    let root = root()?;
+    let root = root_for(&body.path)?;
     let path = confined(&root, &body.path)?;
     if let Some(Extension(runtime)) = &runtime {
         if runtime.task_in_worktree(&path).await.is_some() {
@@ -184,8 +232,11 @@ pub async fn forget(
 async fn rows(
     runtime: Option<Extension<CoordinationRuntime>>,
 ) -> Result<Vec<ManagedWorktree>, AppError> {
-    let root = root()?;
-    let mut rows = host::list(&root).await;
+    let mut rows = Vec::new();
+    for root in host::locations::all().map_err(|e| AppError::Unavailable(e.to_string()))? {
+        rows.extend(host::list(&root).await);
+    }
+    rows.sort_by(|a, b| a.path.cmp(&b.path));
     if let Some(Extension(runtime)) = runtime {
         let owners = runtime.worktree_owners().await;
         for row in &mut rows {

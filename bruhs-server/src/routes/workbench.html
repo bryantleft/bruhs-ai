@@ -7,7 +7,7 @@ const panel=document.getElementById('panel');let pendingTask=null,parentOrigin=n
 // The desktop app shows this page top-level in its own web view, which offers window.ipc.
 const desktopComposer=parent===window&&typeof window.ipc?.postMessage==='function';
 function deliverTask(){if(!panelReady)return;if(pendingTask&&panel.getAttribute('src')==='/api/coordination/ui'){panel.contentWindow.postMessage(pendingTask,location.origin);pendingTask=null}if(parentOrigin||desktopComposer)panel.contentWindow.postMessage({type:'bruhs:composer-bridge-ready'},location.origin)}
-function select(){const links=[...document.querySelectorAll('nav a')],choice=links.find(a=>a.hash===location.hash)||links[0];for(const a of links){if(a===choice)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}if(panel.getAttribute('src')!==choice.dataset.src){panelReady=false;panel.src=choice.dataset.src}else deliverTask();panel.title='Workbench '+choice.textContent.toLowerCase()}
+function select(){const links=[...document.querySelectorAll('nav a')],taskDelivery=new URLSearchParams(location.hash.slice(1)).get('delivery'),choice=links.find(a=>a.hash===(taskDelivery?'#delivery':location.hash))||links[0];for(const a of links){if(a===choice)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}const taskHash=choice.hash==='#tasks'&&/^#(?:handoff|task)=/.test(location.hash)?location.hash:'';const source=choice.dataset.src+(taskDelivery?'?task='+encodeURIComponent(taskDelivery):taskHash);if(panel.getAttribute('src')!==source){panelReady=false;panel.src=source}else deliverTask();panel.title='Workbench '+choice.textContent.toLowerCase()}
 panel.addEventListener('load',()=>{panelReady=true;deliverTask()});
 addEventListener('message',event=>{
  // frame-ancestors restricts the embedding page to the configured Bruhs web
@@ -18,7 +18,11 @@ addEventListener('message',event=>{
  if(event.origin!==location.origin||event.source!==panel.contentWindow||!event.data||typeof event.data!=='object')return;
  const data=event.data;
  if(data.type==='bruhs:open-workspace'&&typeof data.path==='string'&&typeof data.prompt==='string'){
-  pendingTask={type:'bruhs:prefill-task',path:data.path,prompt:data.prompt,title:'Work on issue'};location.hash='#tasks';select();
+  pendingTask={type:'bruhs:prefill-task',path:data.path,prompt:data.prompt,title:typeof data.title==='string'?data.title:'Work on issue'};location.hash='#tasks';select();
+ }else if(data.type==='bruhs:review-task-delivery'&&typeof data.task_id==='string'){
+  pendingTask=null;location.hash='#delivery='+encodeURIComponent(data.task_id);select();
+ }else if(data.type==='bruhs:open-task'&&typeof data.task_id==='string'){
+  pendingTask=null;location.hash='#task='+encodeURIComponent(data.task_id);select();
  }else if(data.type==='bruhs-dictation-draft'&&typeof data.text==='string'&&(parentOrigin||desktopComposer)){
   const draft={type:data.type,text:data.text};
   if(parentOrigin)parent.postMessage(draft,parentOrigin);else window.ipc.postMessage(JSON.stringify(draft));

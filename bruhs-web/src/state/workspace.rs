@@ -87,6 +87,10 @@ pub struct ActiveProjectSignal(pub ReadSignal<Option<ActiveProject>>);
 #[derive(Copy, Clone)]
 pub struct SetActiveProjectSignal(pub WriteSignal<Option<ActiveProject>>);
 
+/// One navigation request into Workbench's shared personal-task review form.
+#[derive(Copy, Clone)]
+pub struct WorkbenchTaskHandoff(pub RwSignal<Option<bruhs_models::ids::ThreadId>>);
+
 /// The "Import thread" dialog (⌘K → Import thread...).
 #[derive(Copy, Clone)]
 pub struct ImportThreadOpen(pub RwSignal<bool>);
@@ -294,6 +298,7 @@ pub(super) fn provide() {
     provide_context(SetActiveView(set_active_view));
     provide_context(ActiveProjectSignal(active_project));
     provide_context(SetActiveProjectSignal(set_active_project));
+    provide_context(WorkbenchTaskHandoff(RwSignal::new(None)));
     provide_context(RecentProjectsSignal(recent_projects));
     provide_context(SetRecentProjectsSignal(set_recent_projects));
     provide_context(ImportThreadOpen(RwSignal::new(false)));

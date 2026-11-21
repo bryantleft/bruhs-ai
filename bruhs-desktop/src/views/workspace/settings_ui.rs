@@ -127,7 +127,7 @@ pub(super) fn whisper_model_for_key(key: &str) -> Option<WhisperModel> {
 }
 
 /// Web `whisper_model_settings::options`: "{label} ({size} MB)".
-fn whisper_options() -> Vec<DropdownGroup> {
+pub(super) fn whisper_options() -> Vec<DropdownGroup> {
     vec![DropdownGroup {
         label: None,
         mark: None,
@@ -148,16 +148,24 @@ fn whisper_options() -> Vec<DropdownGroup> {
 /// The two range sliders in the Speakers section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SettingsSlider {
+    MicrophonePlayback,
+    PanelDuration,
+    Contrast,
+    GlassOpacity,
     MaxSpeakers,
     LinkThreshold,
 }
 
 impl SettingsSlider {
-    pub(super) const COUNT: usize = 2;
+    pub(super) const COUNT: usize = 6;
 
     fn index(self) -> usize {
         match self {
+            Self::MicrophonePlayback => 5,
+            Self::PanelDuration => 4,
             Self::MaxSpeakers => 0,
+            Self::Contrast => 2,
+            Self::GlassOpacity => 3,
             Self::LinkThreshold => 1,
         }
     }
@@ -165,21 +173,33 @@ impl SettingsSlider {
     /// `(min, max, step)` — web `DiarizeSettingsPanel` sliders.
     fn spec(self) -> (f64, f64, f64) {
         match self {
+            Self::MicrophonePlayback => (0., 100., 1.),
             Self::MaxSpeakers => (2.0, 20.0, 1.0),
+            Self::Contrast => (50.0, 200.0, 5.0),
+            Self::PanelDuration => (0.0,400.0,25.0),
+            Self::GlassOpacity => (40.0, 100.0, 5.0),
             Self::LinkThreshold => (0.5, 0.95, 0.05),
         }
     }
 
     fn selector(self) -> &'static str {
         match self {
+            Self::MicrophonePlayback => "settings-voice-playback-position",
             Self::MaxSpeakers => "desktop-settings-slider-max-speakers",
+            Self::Contrast => "desktop-settings-slider-contrast",
+            Self::PanelDuration => "desktop-settings-slider-panel-duration",
+            Self::GlassOpacity => "desktop-settings-slider-glass-opacity",
             Self::LinkThreshold => "desktop-settings-slider-link-threshold",
         }
     }
 
     fn aria_label(self) -> &'static str {
         match self {
+            Self::MicrophonePlayback => "Recording playback position",
             Self::MaxSpeakers => "Max speakers",
+            Self::Contrast => "Contrast",
+            Self::PanelDuration => "Panel animation duration",
+            Self::GlassOpacity => "Glass opacity",
             Self::LinkThreshold => "Linking threshold",
         }
     }
@@ -524,7 +544,11 @@ impl Workspace {
     fn settings_slider_value(&self, kind: SettingsSlider, cx: &Context<'_, Self>) -> f64 {
         let prefs = &self.meetings_hub.read(cx).prefs;
         match kind {
+            SettingsSlider::MicrophonePlayback => self.microphone_test.fraction(),
             SettingsSlider::MaxSpeakers => f64::from(prefs.diarize.max_speakers),
+            SettingsSlider::Contrast => f64::from(self.appearance.contrast),
+            SettingsSlider::PanelDuration=>f64::from(self.appearance.panel_duration_ms),
+            SettingsSlider::GlassOpacity => f64::from(self.appearance.glass_opacity),
             SettingsSlider::LinkThreshold => {
                 f64::from(prefs.diarize.cross_meeting_linking_threshold)
             }
@@ -542,17 +566,26 @@ impl Workspace {
         if value == self.settings_slider_value(kind, cx) {
             return;
         }
-        self.update_meeting_prefs(
-            |prefs| match kind {
-                SettingsSlider::MaxSpeakers => {
-                    prefs.diarize.max_speakers = value.to_u32_saturating().clamp(2, 20);
-                }
-                SettingsSlider::LinkThreshold => {
-                    prefs.diarize.cross_meeting_linking_threshold = value.to_f32_lossy();
-                }
-            },
-            cx,
-        );
+        match kind {
+            SettingsSlider::PanelDuration=>{self.appearance.panel_duration_ms=value.to_u32_saturating().min(400) as u16;self.persist_and_notify(cx);}
+            SettingsSlider::MicrophonePlayback => {self.microphone_test.seek(value);cx.notify();}
+            SettingsSlider::GlassOpacity => {
+                self.appearance.glass_opacity = u8::try_from(value.to_u32_saturating()).unwrap_or(100);
+                theme::set_glass_opacity(self.appearance.glass_opacity, cx);
+                self.persist_and_notify(cx);
+            }
+            SettingsSlider::Contrast => {
+                self.appearance.contrast = u8::try_from(value.to_u32_saturating().clamp(50, 200)).unwrap_or(100);
+                bruhs_ui::theme::set_contrast(self.appearance.contrast, cx);
+                self.persist_and_notify(cx);
+            }
+            SettingsSlider::MaxSpeakers => self.update_meeting_prefs(|prefs| {
+                prefs.diarize.max_speakers = value.to_u32_saturating().clamp(2, 20);
+            }, cx),
+            SettingsSlider::LinkThreshold => self.update_meeting_prefs(|prefs| {
+                prefs.diarize.cross_meeting_linking_threshold = value.to_f32_lossy();
+            }, cx),
+        }
     }
 
     fn set_settings_slider_from_x(
@@ -608,7 +641,11 @@ impl Workspace {
 
     /// Web `Slider`: longan track, persimmon fill up to the thumb centre,
     /// rambutan thumb; click or drag sets, ←/→ step.
-    fn render_settings_slider(&self, kind: SettingsSlider, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_settings_slider(
+        &self,
+        kind: SettingsSlider,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let (min, max, step) = kind.spec();
         let value = self.settings_slider_value(kind, cx);
         let fraction = slider_fraction(value, min, max).to_f32_lossy();
@@ -1111,7 +1148,7 @@ impl Workspace {
         let (provider_toggle, provider_select) =
             self.settings_dropdown_handlers(SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID, cx);
         let provider_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
             .child(dropdown(
                 SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID,
                 "Transcription provider",
@@ -1144,7 +1181,7 @@ impl Workspace {
                 "desktop-settings-row-transcription-server-model",
                 "Server transcription model",
                 "Enter a model ID supported by your configured server. It must return timestamped segments in verbose_json format. Configure the server URL, key, and request deadline in the capture daemon environment.",
-                div().w(px(WHISPER_DROPDOWN_WIDTH_PX))
+                div().w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
                     .child(Input::new(&self.settings_transcription_model_input)
                         .aria_label("Server transcription model"))
                     .into_any_element(),
@@ -1166,7 +1203,7 @@ impl Workspace {
         let (final_toggle, final_select) =
             self.settings_dropdown_handlers(SETTINGS_WHISPER_DROPDOWN_ID, cx);
         let final_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
             .child(dropdown(
                 SETTINGS_WHISPER_DROPDOWN_ID,
                 "Transcription model",
@@ -1180,7 +1217,7 @@ impl Workspace {
         let (live_toggle, live_select) =
             self.settings_dropdown_handlers(SETTINGS_LIVE_WHISPER_DROPDOWN_ID, cx);
         let live_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
             .child(dropdown(
                 SETTINGS_LIVE_WHISPER_DROPDOWN_ID,
                 "Live preview model",
@@ -1347,7 +1384,7 @@ impl Workspace {
 /// Fixed-width column for a row's dropdown (web `ROW_CONTROL` / `sm:w-80`).
 pub(super) fn control_column(control: AnyElement) -> AnyElement {
     div()
-        .w(px(SETTINGS_ROW_CONTROL_WIDTH_PX))
+        .w(px(SETTINGS_ROW_CONTROL_WIDTH_PX)).max_w_full().min_w_0()
         .child(control)
         .into_any_element()
 }

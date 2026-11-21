@@ -1,21 +1,30 @@
 //! Only row geometry and focus targets live here; cards read current thread data.
 use super::*;
+use crate::views::workspace::labs;
 use bruhs_ui::zoom::px;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum RowKey {
     Thread(EntityId),
     Shelf(&'static str),
+    Folder(SharedString),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SidebarRow {
     Thread {
         index: usize,
         entity: EntityId,
         has_meta: bool,
+        folder: bool,
+    },
+    Folder {
+        path: SharedString,
+        name: SharedString,
+        count: usize,
+        open: bool,
     },
     Shelf {
         section: SidebarSection,
@@ -25,17 +34,18 @@ pub(super) enum SidebarRow {
 }
 
 impl SidebarRow {
-    fn target_count(self) -> usize {
+    fn target_count(&self) -> usize {
         match self {
             Self::Thread { .. } => 3,
-            Self::Shelf { .. } => 1,
+            Self::Shelf { .. } | Self::Folder { .. } => 1,
         }
     }
 
-    fn key(self) -> RowKey {
+    fn key(&self) -> RowKey {
         match self {
-            Self::Thread { entity, .. } => RowKey::Thread(entity),
-            Self::Shelf { section, .. } => RowKey::Shelf(shelf_labels(section).0),
+            Self::Thread { entity, .. } => RowKey::Thread(*entity),
+            Self::Shelf { section, .. } => RowKey::Shelf(shelf_labels(*section).0),
+            Self::Folder { path, .. } => RowKey::Folder(path.clone()),
         }
     }
 }
@@ -62,20 +72,57 @@ pub(super) fn sidebar_rows(
         .enumerate()
         .map(|(index, thread)| (thread.chat.entity_id(), index))
         .collect();
-    let card = |thread: &&DesktopThread| {
+    let card = |thread: &DesktopThread, folder: bool| {
         let chat = thread.chat.read(cx);
         SidebarRow::Thread {
             index: indices[&thread.chat.entity_id()],
             entity: thread.chat.entity_id(),
-            has_meta: thread.branch.is_some() || !chat.messages.is_empty() || chat.role.is_some(),
+            folder,
+            has_meta: if folder {
+                workspace.labs_sidebar.two_lines
+            } else {
+                thread.branch.is_some() || !chat.messages.is_empty() || chat.role.is_some()
+            },
         }
     };
-    let mut rows: Vec<_> = shelves
-        .pinned
-        .iter()
-        .chain(&shelves.active)
-        .map(card)
-        .collect();
+    let mut rows: Vec<_> = shelves.pinned.iter().map(|t| card(t, false)).collect();
+    if workspace.labs_sidebar.enabled {
+        let mut folders = std::collections::BTreeMap::<&str, Vec<&DesktopThread>>::new();
+        for t in &shelves.active {
+            folders.entry(labs::folder(t, cx)).or_default().push(t);
+        }
+        let ranks: HashMap<_, _> = workspace
+            .listed_projects()
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (p.path, i))
+            .collect();
+        let mut ordered: Vec<_> = folders.into_iter().collect();
+        ordered.sort_by_key(|(path, _)| ranks.get(*path).copied().unwrap_or(usize::MAX));
+        let searching = !workspace.sidebar_query(cx).trim().is_empty();
+        for (path, threads) in ordered {
+            let open = searching || !workspace.labs_sidebar.collapsed.contains(path);
+            let first = threads[0];
+            let name = if first.chat.read(cx).scratch_folder().is_some() {
+                "Scratch"
+            } else if first.project_name.is_empty() {
+                SIDEBAR_NO_PROJECT_LABEL
+            } else {
+                &first.project_name
+            };
+            rows.push(SidebarRow::Folder {
+                path: path.to_owned().into(),
+                name: name.to_owned().into(),
+                count: threads.len(),
+                open,
+            });
+            if open {
+                rows.extend(threads.into_iter().map(|t| card(t, true)));
+            }
+        }
+    } else {
+        rows.extend(shelves.active.iter().map(|t| card(t, false)));
+    }
     for (section, threads, open) in [
         (
             SidebarSection::Working,
@@ -100,7 +147,7 @@ pub(super) fn sidebar_rows(
                 open,
             });
             if open {
-                rows.extend(threads.iter().map(card));
+                rows.extend(threads.iter().map(|t| card(t, false)));
             }
         }
     }

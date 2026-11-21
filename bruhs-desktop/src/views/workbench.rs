@@ -31,6 +31,7 @@ impl WorkbenchPanel {
         let (sender, page_messages) = async_channel::unbounded();
         let preview = cx.new(|cx| {
             let mut panel = PreviewPanelView::new(window, cx);
+            panel.use_application_session();
             // The page relays Verification's draft through `window.ipc`.
             panel.set_page_messages(sender);
             // Web shows the Workbench page without browser chrome.
@@ -87,6 +88,29 @@ impl WorkbenchPanel {
     }
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<'_, Self>) {
         self.preview.update(cx, |p, _| p.set_shown(shown));
+    }
+    pub fn open_handoff(
+        &mut self,
+        id: &bruhs_models::ids::ThreadId,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let base = std::env::var("BRUHS_SERVER_URL")
+            .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());
+        self.preview.update(cx, |preview, cx| {
+            preview.go_to(
+                &format!(
+                    "{}/api/workbench/ui#handoff={id}",
+                    base.trim_end_matches('/')
+                ),
+                window,
+                cx,
+            );
+        });
+    }
+    #[cfg(test)]
+    pub(crate) fn current_url(&self, cx: &App) -> Option<String> {
+        self.preview.read(cx).url().map(str::to_owned)
     }
 }
 impl Render for WorkbenchPanel {

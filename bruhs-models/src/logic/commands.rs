@@ -30,7 +30,7 @@ Keyboard: ⌘K command bar, ⌘B sidebar, ⌘⇧T tasks panel, / focus chat, c n
 /second-opinion [focus] asks the other provider to review the last answer. \
 /role <name> gives this thread a role from Settings. /role none removes it.";
 
-/// `/` menu. Skills stay on `$`.
+/// Built-in slash commands. Clients can also include discovered skills in the menu.
 pub const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/clear",

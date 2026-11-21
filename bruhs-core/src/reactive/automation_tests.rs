@@ -28,6 +28,13 @@ fn setup() -> AutomationSetup {
             auto_run: true,
             debounce_ms: 0,
             throttle_ms: 0,
+            webhook_filters: Vec::new(),
+            webhook_prompt: None,
+            webhook_security: Default::default(),
+            webhook_dedupe: Default::default(),
+            task_title: None,
+            task_conversation: Default::default(),
+            task_checkout: Default::default(),
             on_busy: Default::default(),
         },
     }
@@ -334,6 +341,100 @@ async fn enabling_dedicated_dependencies_is_atomic_and_preserves_the_existing_ru
 }
 
 #[tokio::test]
+async fn scheduled_task_edit_and_activation_commit_together() {
+    let (dir, runtime) = empty_runtime().await;
+    let mut task = setup();
+    task.source.kind = SourceKind::Webhook;
+    let set = |automation: AutomationSetup, enabled| ReactiveCommand::SaveScheduledTask { destination: None,
+        automation: Box::new(automation),
+        enabled,
+        signing_secret: None,
+    };
+    let saved = runtime.command(set(task.clone(), false)).await.unwrap();
+    assert!(!saved.subscriptions[0].enabled);
+    assert!(saved.sources[0].enabled && saved.agents[0].enabled);
+    drop(runtime);
+
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    let token = runtime.webhook_token(&task.source.id).await.unwrap();
+    runtime
+        .publish_hook(&task.source.id, &token, "paused", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(runtime.snapshot().await.unwrap().runs.is_empty());
+    task.subscription.enabled = false;
+    task.subscription.instructions = "Prepare the new review".into();
+    let saved = runtime.command(set(task.clone(), true)).await.unwrap();
+    assert!(saved.subscriptions[0].enabled);
+    assert_eq!(
+        saved.subscriptions[0].instructions,
+        "Prepare the new review"
+    );
+    runtime
+        .publish_hook(&task.source.id, &token, "active", serde_json::json!({}))
+        .await
+        .unwrap();
+    let queued = runtime.snapshot().await.unwrap().runs[0].clone();
+    task.source.enabled = false;
+    let retried = runtime.command(set(task.clone(), true)).await.unwrap();
+    assert_eq!(retried.runs[0], queued);
+    assert!(retried.sources[0].enabled);
+    task.source.enabled = true;
+
+    let mut sibling = saved.subscriptions[0].clone();
+    sibling.id = "shared".into();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription {
+                subscription: sibling,
+            },
+        })
+        .await
+        .unwrap();
+    task.subscription.task_title = Some("  Morning receipts  ".into());
+    let renamed = runtime.command(set(task.clone(), true)).await.unwrap();
+    assert_eq!(renamed.runs[0], queued);
+    for sub in &renamed.subscriptions {
+        let title = if sub.id == task.subscription.id { "Morning receipts" } else { "Paperwork" };
+        assert_eq!(sub.title(&renamed.agents[0]), title);
+    }
+    assert_eq!(renamed.agents[0], task.agent);
+    task.subscription.task_title = None;
+    let legacy_save = runtime.command(set(task.clone(), true)).await.unwrap();
+    assert_eq!(legacy_save.subscriptions, renamed.subscriptions);
+    assert_eq!(legacy_save.runs[0], queued);
+    task.subscription.task_title = Some("   ".into());
+    assert!(runtime.command(set(task.clone(), true)).await.unwrap_err().to_string().contains("Task name"));
+    task.subscription.task_title = None;
+
+    task.agent.enabled = false;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAgent {
+                agent: task.agent.clone(),
+            },
+        })
+        .await
+        .unwrap();
+    task.subscription.instructions = "This edit must roll back".into();
+    let error = runtime.command(set(task.clone(), true)).await.unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("also activate another automation"));
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(!snapshot.agents[0].enabled);
+    assert!(snapshot
+        .subscriptions
+        .iter()
+        .all(|s| s.enabled && s.instructions == "Prepare the new review"));
+
+    task.source.kind = SourceKind::Custom;
+    assert!(runtime.command(set(task, false)).await.is_err());
+}
+
+#[tokio::test]
 async fn shared_component_definitions_cannot_be_silently_changed_by_a_bundle() {
     let (_dir, runtime) = empty_runtime().await;
     let automation = setup();
@@ -380,4 +481,138 @@ fn existing_snapshot_and_individual_change_wire_shapes_remain_compatible() {
         .subscriptions
         .push(automation.subscription.clone());
     assert!(AutomationSetup::from_subscription(&incomplete, &automation.subscription).is_none());
+}
+
+#[tokio::test]
+async fn one_time_schedule_queues_one_run_across_database_reopen() {
+    let (dir, runtime) = empty_runtime().await;
+    let mut task = setup();
+    let due_at = bruhs_models::EpochMs::now();
+    task.source.kind = SourceKind::Once { due_at };
+    task.subscription.auto_run = false;
+    let initial = save(&runtime, task.clone()).await;
+    assert_eq!(initial.next_run_by_source.unwrap()[&task.source.id], due_at);
+    let client = reqwest::Client::new();
+    super::sources::poll_once(&runtime, &task.source, &client)
+        .await
+        .unwrap();
+    drop(runtime);
+    let reopened = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    super::sources::poll_once(&reopened, &task.source, &client)
+        .await
+        .unwrap();
+    let snapshot = reopened.snapshot().await.unwrap();
+    assert!(snapshot.next_run_by_source.unwrap().is_empty());
+    assert_eq!(snapshot.events.len(), 1);
+    assert_eq!(snapshot.runs.len(), 1);
+    assert_eq!(
+        snapshot.runs[0].subscription_id.as_ref(),
+        Some(&task.subscription.id)
+    );
+}
+
+#[tokio::test]
+async fn webhook_security_survives_restart_and_expires_from_trusted_arrival() {
+    use bruhs_models::EpochMs;
+    const BODY: &str = "{ \"fixture\": true }";
+    const ORIGINAL: &str = "8WXw8yasdfbIup88Pro+U1z5zaZm7jo+BI41BM+2izA=";
+    const ROTATED: &str = "qED+Sau62g2R8yUsSR7EULRtaOicq3TcTt6AwZASiYc=";
+    let (dir, runtime) = empty_runtime().await;
+    let mut task = setup();
+    task.source.kind = SourceKind::Webhook;
+    task.subscription.webhook_security = WebhookSecurity {
+        signature: Some(WebhookSignature {
+            header: "x-check".into(),
+            prefix: String::new(),
+            encoding: WebhookSignatureEncoding::Base64,
+        }),
+        max_delivery_age_minutes: Some(1),
+    };
+    let save_task =
+        |task: &AutomationSetup, secret: Option<&str>| ReactiveCommand::SaveScheduledTask { destination: None,
+            automation: Box::new(task.clone()),
+            enabled: true,
+            signing_secret: secret.map(|s| WebhookSigningSecret(s.into())),
+        };
+    assert!(runtime.command(save_task(&task, None)).await.is_err());
+    runtime
+        .command(save_task(&task, Some("fixture-signing-key")))
+        .await
+        .unwrap();
+    runtime.command(save_task(&task, None)).await.unwrap();
+    let mut invalid = task.clone();
+    invalid
+        .subscription
+        .webhook_security
+        .max_delivery_age_minutes = Some(0);
+    assert!(runtime
+        .command(save_task(&invalid, Some("uncommitted replacement")))
+        .await
+        .is_err());
+    drop(runtime);
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    let token = runtime.webhook_token("scans").await.unwrap();
+    let deliver = |id: &'static str, values: Vec<&str>, received| {
+        let request = WebhookMetadata {
+            raw_body: Some(BODY.into()),
+            headers: [
+                (
+                    "x-check".into(),
+                    values.into_iter().map(String::from).collect(),
+                ),
+                ("x-received-at".into(), vec!["2099-12-01".into()]),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        runtime.publish_hook_received(
+            "scans",
+            &token,
+            id,
+            json!({"fixture":true}),
+            request,
+            received,
+        )
+    };
+    let old = EpochMs::new(EpochMs::now().as_millis() - 61_000).unwrap();
+    deliver("same", vec![ORIGINAL], old).await.unwrap();
+    assert!(runtime.snapshot().await.unwrap().runs.is_empty());
+    let history = runtime
+        .webhook_deliveries(task.subscription.id.clone())
+        .await
+        .unwrap();
+    assert_eq!(history[0].outcome, WebhookOutcome::Expired);
+    assert_eq!(history[0].received_at, old);
+    assert!(deliver("same", vec![ORIGINAL, ORIGINAL], EpochMs::now())
+        .await
+        .is_err());
+    runtime
+        .command(ReactiveCommand::Publish {
+            source_id: "scans".into(),
+            key: "same".into(),
+            payload: json!({"fixture":true}),
+        })
+        .await
+        .unwrap();
+    assert!(runtime.snapshot().await.unwrap().runs.is_empty());
+    deliver("same", vec![ORIGINAL], EpochMs::now())
+        .await
+        .unwrap();
+    runtime
+        .command(save_task(&task, Some("replacement-key")))
+        .await
+        .unwrap();
+    assert!(deliver("two", vec![ORIGINAL], EpochMs::now())
+        .await
+        .is_err());
+    deliver("two", vec![ROTATED], EpochMs::now()).await.unwrap();
+    let mut disabled = task.clone();
+    disabled.subscription.webhook_security.signature = None;
+    runtime.command(save_task(&disabled, None)).await.unwrap();
+    assert!(runtime.command(save_task(&task, None)).await.is_err());
+    assert_eq!(runtime.snapshot().await.unwrap().runs.len(), 2);
 }

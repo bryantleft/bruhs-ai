@@ -507,7 +507,7 @@ impl Workspace {
             .flex()
             .items_baseline()
             .pl_3()
-            .font_family(BODY_FONT)
+            .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT))
             .text_size(px(BODY_SM_PX))
             .line_height(relative(1.375))
             .text_color(if detail {

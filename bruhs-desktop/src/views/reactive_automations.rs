@@ -23,15 +23,25 @@ mod editor_fields;
 mod face_editor;
 mod memory;
 mod notifications;
+pub(crate) use notifications::AgentNotificationSettings;
 mod room_dialog;
 mod room_page;
 mod runs;
+mod scheduled_tasks;
+mod task_checkout;
+mod task_deliveries;
+mod task_webhook_url;
+mod task_choices;
 mod setup;
+pub(crate) use scheduled_tasks::{ScheduledTaskDialog, ScheduledTaskSettings};
 mod transcript_list;
 mod updates;
 mod vault_grants;
 mod weekly_reports;
-pub(crate) use bruh_page::ReactiveOpenAutomations;
+mod webhook_filters;
+mod webhook_dedupe;
+mod webhook_security;
+pub(crate) use bruh_page::{ReactiveOpenAutomations, TaskThreadDeletion, TaskThreadLocation};
 use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_ui::text_field::{TextField, TextInput};
 pub(crate) use create_bruh::ReactiveBruhCreated;
@@ -53,6 +63,21 @@ static AUTO_UPDATE_TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// A local date and time for an instant, as the automation cards write it.
 pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
     updates::local_time(at)
+}
+
+fn once_time(at: bruhs_models::EpochMs) -> String {
+    chrono::DateTime::from_timestamp_millis(at.as_millis()).map(|t| t.with_timezone(&chrono::Local).to_rfc3339()).unwrap_or_default()
+}
+
+fn once_source(text: &str) -> Result<SourceKind, String> {
+    use chrono::TimeZone;
+    let text = text.trim();
+    let time = chrono::DateTime::parse_from_rfc3339(text).ok().map(|time| time.timestamp_millis())
+        .or_else(|| {
+            let local = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").ok()?;
+            chrono::Local.from_local_datetime(&local).single().map(|time| time.timestamp_millis())
+        }).ok_or("Enter a local date and time as YYYY-MM-DD HH:MM, or include an explicit UTC offset.")?;
+    Ok(SourceKind::Once { due_at: bruhs_models::EpochMs::new(time).map_err(|e| e.to_string())? })
 }
 
 /// Why ⌘. stopped nothing before the service ever answered.
@@ -258,6 +283,8 @@ pub(crate) struct ReactiveAutomations {
     request: Option<Task<()>>,
     poll: Option<Task<()>>,
     last_render: Instant,
+    last_scheduled_render: Option<Instant>,
+    task_dialog: scheduled_tasks::TaskDialogState,
     last_refresh: Option<Instant>,
     weekly: weekly_reports::WeeklyReportsState,
     /// Agent names from the unfiltered snapshot, so managed agents still have names.
@@ -440,17 +467,18 @@ fn heading(text: impl Into<SharedString>) -> Div {
         .text_color(theme::rambutan_100())
         .child(text.into())
 }
-fn field(label: &'static str, input: &impl TextInput, multiline: bool, disabled: bool) -> Div {
+fn field(label: impl Into<SharedString>, input: &impl TextInput, multiline: bool, disabled: bool) -> Div {
+    let label = label.into();
     div()
         .min_w_0()
         .w_full()
         .flex()
         .flex_col()
         .gap_1()
-        .child(muted(label))
+        .child(muted(label.clone()))
         .child(
             input
-                .text_element(label.into(), disabled)
+                .text_element(label, disabled)
                 .h(px(if multiline { 96.0 } else { 32.0 }))
                 .text_size(px(14.0)),
         )
@@ -475,6 +503,7 @@ fn reactive_error(error: ServerError) -> String {
 #[derive(Debug, PartialEq, Eq)]
 enum Effect {
     CloseAutomation,
+    DeletedThread(bruhs_models::ids::ThreadId),
     CloseReply(String),
     CloseMemory {
         agent_id: String,
@@ -492,6 +521,7 @@ enum Effect {
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
+            ReactiveCommand::DeleteTaskThread {thread_id,..} => Self::DeletedThread(thread_id.clone()),
             ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
             ReactiveCommand::CreateRoom { room } | ReactiveCommand::UpdateRoom { room } => {
                 Self::RoomDone(room.id.clone())
@@ -500,7 +530,7 @@ impl Effect {
             ReactiveCommand::PostRoom { .. } => Self::RoomPosted,
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
-            } => Self::CloseAutomation,
+            } | ReactiveCommand::SaveScheduledTask { .. } => Self::CloseAutomation,
             ReactiveCommand::AnswerOutbox { id, .. } => Self::CloseReply(id.clone()),
             ReactiveCommand::EditMemory { agent_id, key, .. }
             | ReactiveCommand::ForgetMemory { agent_id, key } => Self::CloseMemory {
@@ -530,6 +560,7 @@ fn source_label(kind: &SourceKind) -> &'static str {
         SourceKind::Folder { .. } => "Folder",
         SourceKind::Http { .. } => "Website",
         SourceKind::Command { .. } => "Command",
+        SourceKind::Once { .. } => "Once",
         SourceKind::Schedule { .. } => "Schedule",
         SourceKind::Calendar { .. } => "Calendar",
         SourceKind::Webhook => "Webhook",
@@ -592,6 +623,8 @@ impl ReactiveAutomations {
             request: None,
             poll: None,
             last_render: Instant::now(),
+            last_scheduled_render: None,
+            task_dialog: scheduled_tasks::TaskDialogState::new(cx),
             last_refresh: None,
             weekly: weekly_reports::WeeklyReportsState::default(),
             agent_names: HashMap::new(),
@@ -640,8 +673,8 @@ impl ReactiveAutomations {
                     .update(cx, |this, cx| {
                         if this.last_render.elapsed() < REFRESH.saturating_mul(2) {
                             this.refresh(cx);
-                        } else if this
-                            .last_refresh
+                        } else if this.last_scheduled_render.is_some_and(|render| render.elapsed() < REFRESH.saturating_mul(2))
+                            || this.last_refresh
                             .is_none_or(|at| at.elapsed() >= BACKGROUND_REFRESH)
                         {
                             this.refresh_snapshot(cx);
@@ -729,6 +762,7 @@ impl ReactiveAutomations {
             asking.confirming = false;
             asking.focus_new_agent = true;
         }
+        self.reconcile_task_deliveries(&snapshot);
         let changed = self.snapshot.as_ref() != Some(&snapshot);
         self.snapshot = Some(snapshot);
         if changed {
@@ -755,7 +789,7 @@ impl ReactiveAutomations {
         self.refresh_weekly(cx);
         self.refresh_snapshot(cx);
     }
-    fn refresh_snapshot(&mut self, cx: &mut Context<'_, Self>) {
+    pub(crate) fn refresh_snapshot(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy || self.reading {
             return;
         }
@@ -881,6 +915,7 @@ impl ReactiveAutomations {
     }
     fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
+            Effect::DeletedThread(id) => cx.emit(TaskThreadDeletion::Deleted(id)),
             Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
             Effect::RoomDone(room_id) => self.room_done(&room_id, cx),
             Effect::RoomPosted => self.room_posted(),
@@ -1105,6 +1140,7 @@ impl ReactiveAutomations {
             time_zone: edit_input(&editor_fields::local_zone(), window, cx),
             change_type: None,
         };
+        let once_text;
         let (kind, text) = match &source.kind {
             SourceKind::Folder {
                 path,
@@ -1168,6 +1204,7 @@ impl ReactiveAutomations {
                 editor.weekdays.clone_from(weekdays);
                 ("calendar", "")
             }
+            SourceKind::Once { due_at } => { once_text = once_time(*due_at); ("once", once_text.as_str()) }
             SourceKind::Webhook => ("webhook", ""),
             SourceKind::AppEvent { topic } => ("app_event", topic.as_str()),
             SourceKind::Custom => ("custom", ""),
@@ -1187,7 +1224,7 @@ impl ReactiveAutomations {
         cx: &mut Context<'_, Self>,
     ) {
         self.advanced_open = true;
-        let subscription=subscription.unwrap_or_else(||bruhs_models::reactive::Subscription{id:uuid::Uuid::new_v4().to_string(),agent_id:self.snapshot.as_ref().and_then(|s|s.agents.first()).map(|a|a.id.clone()).unwrap_or_default(),source_id:self.snapshot.as_ref().and_then(|s|s.sources.first()).map(|a|a.id.clone()).unwrap_or_default(),instructions:"Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into(),enabled:false,auto_run:false,debounce_ms:0,throttle_ms:0,on_busy:BusyPolicy::Queue});
+        let subscription=subscription.unwrap_or_else(||bruhs_models::reactive::Subscription{id:uuid::Uuid::new_v4().to_string(),agent_id:self.snapshot.as_ref().and_then(|s|s.agents.first()).map(|a|a.id.clone()).unwrap_or_default(),source_id:self.snapshot.as_ref().and_then(|s|s.sources.first()).map(|a|a.id.clone()).unwrap_or_default(),instructions:"Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into(),enabled:false,auto_run:false,debounce_ms:0,throttle_ms:0, webhook_filters: Vec::new(), webhook_prompt: None, webhook_security: Default::default(), webhook_dedupe: Default::default(), task_title: None, task_conversation: Default::default(), task_checkout: Default::default(), on_busy:BusyPolicy::Queue});
         self.editor = Some(Editor::Subscription(SubscriptionEditor {
             instructions: edit_area(&subscription.instructions, window, cx),
             debounce: edit_input(&seconds(subscription.debounce_ms), window, cx),
@@ -1242,6 +1279,7 @@ impl ReactiveAutomations {
                             &editor.weekdays,
                             &value(&editor.time_zone, cx),
                         )?,
+                        "once" => once_source(&text)?,
                         "webhook" => SourceKind::Webhook,
                         "app_event" => SourceKind::AppEvent { topic: text },
                         "custom" => SourceKind::Custom,
@@ -1385,6 +1423,7 @@ impl ReactiveAutomations {
                     "http"=>body.child(field("Website URL", &editor.value, false, self.busy)),
                     "command"=>body.child(field("Command to run", &editor.value, true, self.busy)).child(field("Command working folder", &editor.cwd, false, self.busy)).child(field("Command timeout in seconds", &editor.timeout, false, self.busy)).child(muted("This command runs on your machine when the source is enabled. Use a command you trust.")),
                     "app_event"=>body.child(muted("Meeting event")).child(self.render_topic_picker(editor, cx)),
+                    "once"=>body.child(field("Run at (local date and time)", &editor.value, false, self.busy)),
                     "calendar"=>body.child(self.render_calendar_fields(editor, cx)),
                     "webhook"=>body.child(muted("Save the source, then reveal its private token from the source row.")),
                     "custom"=>body.child(muted("MQTT and Zigbee bridges can publish through the local API. Use a folder source for an FTP upload folder.")),
@@ -1463,7 +1502,14 @@ impl ReactiveAutomations {
                                     move |this, _, cx| {
                                         if let Some(Editor::Subscription(editor)) = &mut this.editor
                                         {
-                                            editor.subscription.source_id = id.clone();
+                                            if editor.subscription.source_id != id {
+                                                editor.subscription.webhook_filters.clear();
+                                                editor.subscription.webhook_prompt = None;
+                                                editor.subscription.webhook_dedupe = Default::default();
+                                                editor.subscription.task_conversation = TaskConversation::Agent;
+                                                editor.subscription.task_checkout = TaskCheckout::Project;
+                                                editor.subscription.source_id = id.clone();
+                                            }
                                         }
                                         cx.notify();
                                     },
@@ -2086,6 +2132,8 @@ impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
 impl EventEmitter<ReactiveRoomDone> for ReactiveAutomations {}
+impl EventEmitter<TaskThreadDeletion> for ReactiveAutomations {}
+impl EventEmitter<TaskThreadLocation> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenRoomSettings> for ReactiveAutomations {}
 impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}
@@ -2538,7 +2586,7 @@ impl Render for ReactiveAutomations {
                     ),
                     _ => AccessLevel::ReadOnly,
                 };
-                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>bruhs_models::crew::delete_agent_line_for(self.snapshot.as_ref(),id),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
+                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.title(),event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>bruhs_models::crew::delete_agent_line_for(self.snapshot.as_ref(),id),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
                 let payload = serde_json::to_string_pretty(&proposal.change)
                     .unwrap_or_else(|error| format!("Cannot display proposal: {error}"));
                 let mut proposal_card = card()

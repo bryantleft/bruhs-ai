@@ -26,7 +26,7 @@ assert(process.argv[2], 'Explicit fresh WASM dist required; do not use the old g
 const dist = path.resolve(process.argv[2]);
 const evidenceRoot = path.join(root, 'target/pillar-completion-qa');
 const startedAt = new Date().toISOString();
-const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-'));
+const output = path.join(evidenceRoot, 'today-browser', startedAt.replace(/[:.]/g, '-') + '-clock');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceFiles = [
   'bruhs-web/src/components/today_page.rs', 'bruhs-web/src/storage.rs',
@@ -145,7 +145,7 @@ function event(id, title, start, end, now) {
 }
 const cells = [{ name: 'desktop', width: 1280, height: 800, hasTouch: false }, { name: 'compact', width: 640, height: 480, hasTouch: false }, { name: 'touch', width: 390, height: 844, hasTouch: true }];
 const semanticCases = ['mounted-rollover'];
-const specifications = cells.flatMap(cell => semanticCases.map(kind => ({ id: `${cell.name}-${kind}`, kind, cell, date: '2026-11-13', timezoneId: 'America/Los_Angeles', now: '2026-11-13T16:00:00Z', expectedHour: 8 })));
+const specifications = cells.flatMap(cell => semanticCases.map(kind => ({ id: `${cell.name}-${kind}`, kind, cell, date: '2026-11-16', timezoneId: 'America/Los_Angeles', now: '2026-11-16T16:00:00Z', expectedHour: 8 })));
 
 try {
   for (const spec of specifications) {
@@ -268,6 +268,9 @@ try {
       check(initial.tasks.length === 0 && initial.events.length === 0, 'isolated browser context starts with no task/event data', { tasks: [], events: [] }, { tasks: initial.tasks, events: initial.events });
       const now = Date.parse(spec.now), mainId = `${spec.id}-task-0`, doneId = `${spec.id}-completed-dependency`;
       const tasks = spec.kind === 'workday-boundaries' ? Array.from({ length: 6 }, (_, index) => task(`${spec.id}-task-${index}`, now, spec.date, 90)) : [task(mainId, now, spec.date), { ...task(doneId, now, spec.date), status: 'Done' }];
+      // This boundary fixture intentionally uses a saved nine-hour day so all
+      // six 90-minute tasks fit. Default hours and weekends have their own suite.
+      if (spec.kind === 'workday-boundaries') await writer.evaluate(now => localStorage.setItem('bruhs.scheduling', JSON.stringify({ id: 'default', availability: [{ id: 'clock-boundary', label: 'Boundary fixture', weekdays: [1, 2, 3, 4, 5], start_minute: 540, end_minute: 1080, enabled: true }], focus: { enabled: true, daily_target_minutes: 120, minimum_block_minutes: 45, preferred_start_minute: 540 }, links: [], conflicts: [], updated_at_ms: now })), now);
       await writeDB(writer, { puts: { work_items: tasks } });
       await page.reload();
       await today.getByRole('heading', { name: 'Today', exact: true }).waitFor();
@@ -300,9 +303,9 @@ try {
           document.dispatchEvent(new Event('visibilitychange'));
           window.dispatchEvent(new FocusEvent('focus'));
         }, next);
-        await page.waitForFunction(() => document.querySelector('#today-title')?.parentElement.querySelector('p')?.textContent === 'Saturday, November 14');
+        await page.waitForFunction(() => document.querySelector('#today-title')?.parentElement.querySelector('p')?.textContent === 'Tuesday, November 17');
         await review.waitFor({ state: 'hidden' });
-        check(await page.locator('#today-title').locator('..').locator('p').innerText() === 'Saturday, November 14', 'mounted Today refreshes its local date after resume/visibility', 'Saturday, November 14');
+        check(await page.locator('#today-title').locator('..').locator('p').innerText() === 'Tuesday, November 17', 'mounted Today refreshes its local date after resume/visibility', 'Tuesday, November 17');
         check(!await review.isVisible(), 'rollover invalidates an open prior-day review instead of applying its blocks', false, await review.isVisible());
         const unchanged = await capture('after-rollover-before-new-review');
         check(equal(unchanged.tasks, before.tasks) && equal(unchanged.events, before.events), 'date refresh and review invalidation write no task or event data', before, unchanged);
@@ -313,7 +316,7 @@ try {
         await apply();
         await undo.waitFor();
         const refreshed = await capture('new-day-applied');
-        const expectedStart = await page.evaluate(() => new Date(2026, 10, 14, 9).getTime());
+        const expectedStart = await page.evaluate(() => new Date(2026, 10, 17, 9).getTime());
         check(refreshed.events.length === 1 && refreshed.events[0].start_at_ms === expectedStart, 'new review uses the new local workday rather than mount-time bounds', expectedStart, refreshed.events);
         await screenshot('new-local-day-applied');
         await undoApplied();

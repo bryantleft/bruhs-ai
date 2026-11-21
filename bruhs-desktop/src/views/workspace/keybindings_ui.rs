@@ -26,7 +26,7 @@ use crate::views::chat::{FindInThread, StashDraft};
 use crate::views::diff_panel::FindInDiff;
 
 use super::{
-    CloseOverlays, ClosePanel, ContinueInT3, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
+    CaptureWindow, CloseOverlays, ClosePanel, ContinueInT3, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
     CopyResumeCommand, CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar,
     FocusCrew, ImportThread, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread,
     NextThread, OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
@@ -48,6 +48,8 @@ pub(super) struct InstalledBinding {
 }
 
 enum KeyDecision {
+    Dictation,
+    ProjectAction(super::project_actions::ProjectAction, String),
     Undo,
     SidebarFocus(bool),
     /// Tab (true: Shift+Tab) in an open thread menu: close it and move on
@@ -62,12 +64,28 @@ enum KeyDecision {
     Pass,
 }
 
-pub(super) fn rules_from_saved(saved: Vec<Keybinding>) -> Vec<Keybinding> {
+pub(super) fn rules_from_saved(mut saved: Vec<Keybinding>, schema: u8) -> Vec<Keybinding> {
     if saved.is_empty() {
-        stored_keybindings(None)
-    } else {
-        stored_keybindings(Some(saved))
+        return stored_keybindings(None);
     }
+    if schema == 0 {
+        let is_mac = cfg!(target_os = "macos");
+        let chord = bruhs_models::logic::keybindings::parse_chord("mod+,", is_mac)
+            .expect("shipped shortcut");
+        let mut settings = saved.iter().filter(|rule| rule.command == "settings.open");
+        let untouched = settings
+            .next()
+            .is_some_and(|rule| rule.key == "mod+/" && rule.when.is_none())
+            && settings.next().is_none();
+        if untouched && !chord_claimed(&saved, &chord, is_mac) {
+            saved.push(Keybinding {
+                key: "mod+,".into(),
+                command: "settings.open".into(),
+                when: None,
+            });
+        }
+    }
+    stored_keybindings(Some(saved))
 }
 
 /// Bindings `main` installs before the workspace exists. The first sync
@@ -167,6 +185,8 @@ pub(super) fn binding_names(command: &str) -> &'static [&'static str] {
         "terminal.toggle" => &["workspace::ToggleTerminal"],
         "preview.toggle" => &["workspace::TogglePreview"],
         "draft.stash" => &["chat::StashDraft", "workspace::SaveKnowledgeDocument"],
+        "snapshot.capture" => &["workspace::CaptureWindow"],
+        "voice.dictate" => &["chat::ToggleDictation"],
         "search.open" => &["workspace::SearchThreads"],
         "chat.find" => &["chat::FindInThread", "diff_panel::FindInDiff"],
         "project.openInEditor" => &["workspace::OpenProjectInEditor"],
@@ -244,11 +264,78 @@ fn intercept_keybinding(
     let Some(workspace) = workspace.upgrade() else {
         return;
     };
+    if workspace.read(cx).keybinding_recording
+        && workspace
+            .read(cx)
+            .keybinding_record_focus
+            .is_focused(window)
+    {
+        cx.stop_propagation();
+        workspace.update(cx, |this, cx| {
+            let stroke = &event.keystroke;
+            let add_for = this.keybinding_new_for.take();
+            this.keybinding_recording = false;
+            if stroke.key != "escape" || stroke.modifiers.modified() {
+                let modifiers = stroke.modifiers;
+                let mut parts = Vec::new();
+                if cfg!(target_os = "macos") {
+                    if modifiers.platform {
+                        parts.push("mod");
+                    }
+                    if modifiers.control {
+                        parts.push("ctrl");
+                    }
+                } else {
+                    if modifiers.control {
+                        parts.push("mod");
+                    }
+                    if modifiers.platform {
+                        parts.push("meta");
+                    }
+                }
+                if modifiers.alt {
+                    parts.push("alt");
+                }
+                if modifiers.shift {
+                    parts.push("shift");
+                }
+                parts.push(&stroke.key);
+                let shortcut = parts.join("+");
+                if let Some(index) = add_for {
+                    let mut rule = this.keybindings[index].clone();
+                    rule.key = shortcut;
+                    let existing = this.keybindings.iter().position(|candidate| candidate == &rule);
+                    let index = existing.unwrap_or_else(|| {
+                        this.keybindings.push(rule);
+                        this.keybindings.len() - 1
+                    });
+                    this.select_keybinding(index, window, cx);
+                    this.keymap_changed(cx);
+                    this.persist_and_notify(cx);
+                    return;
+                }
+                this.keybinding_key_input
+                    .update(cx, |field, cx| field.set_value(shortcut, window, cx));
+                this.commit_keybinding_edit(window, cx);
+            }
+            cx.notify();
+        });
+        return;
+    }
     let editable_input = window.has_focused_input(cx);
     let decision = workspace.update(cx, |this, cx| {
         this.key_decision(event, editable_input, window, cx)
     });
     match decision {
+        KeyDecision::Dictation => {
+            cx.stop_propagation();
+            window.prevent_default();
+            workspace.update(cx, |this, cx| this.press_voice_shortcut(&event.keystroke, cx));
+        }
+        KeyDecision::ProjectAction(action, cwd) => {
+            cx.stop_propagation();
+            workspace.update(cx, |this, cx| this.run_action_in(&action, cwd, window, cx));
+        }
         KeyDecision::Undo => {
             cx.stop_propagation();
             workspace.update(cx, |this, cx| this.undo_sidebar(window, cx));
@@ -308,6 +395,7 @@ impl Workspace {
             cx.bind_keys(add);
         }
         self.keybinding_installed = installed;
+        self.sync_capture_shortcut(cx);
     }
 
     fn key_decision(
@@ -338,7 +426,7 @@ impl Workspace {
             && !modifiers.control
             && !modifiers.alt
             && self.overlay_open()
-            && self.modal_start_focus_handle.contains_focused(window, cx)
+            && self.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
         {
             return KeyDecision::DialogFocus(modifiers.shift);
         }
@@ -353,6 +441,11 @@ impl Workspace {
         let ctx = self.key_context(event, editable_input, window, cx);
         let mac = cfg!(target_os = "macos");
         if let Some(command) = resolve(&self.keybindings, &chord, &ctx, mac) {
+            if command == "voice.dictate" && !self.overlay_open() && !ctx.terminal_focus
+                && event.context_stack.iter().any(|stack| stack.primary().is_some_and(|entry| entry.key.as_ref() == "Chat"))
+            {
+                return KeyDecision::Dictation;
+            }
             if command == "thread.undo" && self.sidebar_undo.is_some() {
                 return KeyDecision::Undo;
             }
@@ -372,6 +465,13 @@ impl Workspace {
         let claimed = chord_claimed(&self.keybindings, &chord, mac);
         if claimed && !plain_text_key(event) {
             return KeyDecision::Swallow;
+        }
+        if !claimed && !self.overlay_open() && !ctx.terminal_focus
+            && self.workspace_focus_handle.contains_focused(window, cx)
+        {
+            if let Some((action, cwd)) = self.shortcut_project_action(&chord, cx) {
+                return KeyDecision::ProjectAction(action, cwd);
+            }
         }
         if !claimed
             && event.keystroke.key == "tab"
@@ -423,6 +523,18 @@ impl Workspace {
         }
     }
 
+    fn record_new_binding(&mut self, index: usize, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.keybinding_new_for = Some(index);
+        self.keybinding_recording = true;
+        self.keybinding_choosing_command = false;
+        self.keybinding_edit_open = false;
+        let command = self.keybindings[index].command.clone();
+        self.keybinding_filter.update(cx, |input, cx| input.set_value(command, window, cx));
+        self.settings_scroll.set_offset(Default::default());
+        self.keybinding_record_focus.focus(window, cx);
+        cx.notify();
+    }
+
     pub(super) fn select_keybinding(
         &mut self,
         index: usize,
@@ -432,7 +544,9 @@ impl Workspace {
         if index >= self.keybindings.len() {
             return;
         }
+        self.keybinding_recording = false;
         self.keybinding_index = index;
+        self.keybinding_edit_open = true;
         let key = self.keybindings[index].key.clone();
         let when = self.keybindings[index].when.clone().unwrap_or_default();
         self.keybinding_key_input
@@ -465,7 +579,7 @@ impl Workspace {
             row.key = key;
             row.when = when;
         }
-        self.sync_keybindings(cx);
+        self.keymap_changed(cx);
         self.persist_and_notify(cx);
     }
 
@@ -500,7 +614,7 @@ impl Workspace {
         }
         self.keybindings[index] = original;
         self.select_keybinding(index, window, cx);
-        self.sync_keybindings(cx);
+        self.keymap_changed(cx);
         self.persist_and_notify(cx);
     }
 
@@ -542,20 +656,133 @@ impl Workspace {
         self.open_path_in_editor(&path, None, cx);
     }
 
-    pub(super) fn render_keybinding_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
-        let command = self
-            .keybindings
-            .get(self.keybinding_index)
-            .map(|row| row.command.clone())
-            .unwrap_or_default();
-        let when_text = self.keybinding_when_input.read(cx).value();
-        let when_broken = !when_text.trim().is_empty()
-            && !bruhs_models::logic::keybindings::when_syntax_ok(&when_text);
-        let mut rows = vec![self.render_keybinding_editor(&command, when_broken, cx)];
-        for (index, rule) in self.keybindings.iter().enumerate() {
-            rows.push(self.render_keybinding_rule(index, rule, cx));
+    pub(super) fn render_keybinding_settings(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let choosing = self.keybinding_choosing_command;
+        let toolbar = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .child(
+                div().flex_1().min_w_0().child(
+                    Input::new(&self.keybinding_filter)
+                        .aria_label("Search keybindings")
+                        .cleanable(true),
+                ),
+            )
+            .child(
+                super::web_button(
+                    "desktop-keybindings-add",
+                    super::WebButtonVariant::Outline,
+                    super::WebButtonSize::Small,
+                    super::ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-keybindings-add".to_string())
+                .aria_label(if choosing {
+                    "Cancel adding keybinding"
+                } else {
+                    "Add keybinding"
+                })
+                .child(if choosing {
+                    "Cancel"
+                } else {
+                    "+ Add keybinding"
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.keybinding_choosing_command = !this.keybinding_choosing_command;
+                    this.keybinding_edit_open = false;
+                    this.keybinding_recording = false;
+                    this.keybinding_new_for = None;
+                    this.keybinding_filter.update(cx, |field, cx| {
+                        field.set_value("", window, cx);
+                        field.focus(window, cx);
+                    });
+                    cx.notify();
+                })),
+            );
+        let mut layout = div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
+            .child(self.settings_card("Keybindings", "", vec![toolbar.into_any_element(),self.keymap_file_buttons(cx)]));
+        if let Some(index) = self.keybinding_new_for {
+            let command = &self.keybindings[index].command;
+            let recorder = super::web_button(
+                "desktop-record-new-shortcut",
+                super::WebButtonVariant::Outline,
+                super::WebButtonSize::Small,
+                super::ButtonState::Enabled,
+            )
+            .debug_selector(|| "desktop-record-new-shortcut".to_string())
+            .track_focus(&self.keybinding_record_focus)
+            .child(format!("Press a shortcut for {} · Esc cancels", command_label(command)))
+            .on_click(cx.listener(|this, _, window, cx| this.keybinding_record_focus.focus(window, cx)));
+            return layout.child(recorder).into_any_element();
         }
-        rows
+        let query = self.keybinding_filter.read(cx).value();
+        let mut commands = std::collections::HashSet::new();
+        let mut groups: [Vec<AnyElement>; 4] = Default::default();
+        for (index, rule) in self.keybindings.iter().enumerate() {
+            let label = command_label(&rule.command);
+            if !super::palette_ui::text_matches_query(
+                &format!(
+                    "{label} {} {} {}",
+                    rule.command,
+                    rule.key,
+                    rule.when.as_deref().unwrap_or("")
+                ),
+                &query,
+            ) {
+                continue;
+            }
+            if choosing && !commands.insert(&rule.command) {
+                continue;
+            }
+            let group = match rule.command.split('.').next().unwrap_or("") {
+                "thread" | "chat" => 1,
+                "composer" | "draft" | "model" | "effort" => 2,
+                "workspace" | "project" | "git" | "terminal" => 3,
+                _ => 0,
+            };
+            let rows = &mut groups[group];
+            if choosing {
+                let button = super::web_button(
+                    ("desktop-choose-command", index),
+                    super::WebButtonVariant::Ghost,
+                    super::WebButtonSize::Small,
+                    super::ButtonState::Enabled,
+                )
+                .debug_selector(move || format!("desktop-choose-command-{index}"))
+                .child(label)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.record_new_binding(index, window, cx);
+                }));
+                rows.push(button.into_any_element());
+                continue;
+            }
+            rows.push(self.render_keybinding_rule(index, rule, cx));
+            if self.keybinding_edit_open && index == self.keybinding_index {
+                let when = self.keybinding_when_input.read(cx).value();
+                rows.push(self.render_keybinding_editor(
+                    &rule.command,
+                    !bruhs_models::logic::keybindings::when_syntax_ok(&when),
+                    cx,
+                ));
+            }
+        }
+        if groups.iter().all(Vec::is_empty) {
+            layout = layout.child(div().p_4().child("No matching keybindings"));
+        }
+        for (title, rows) in ["Navigation", "Threads", "Composer", "Workspace"]
+            .into_iter()
+            .zip(groups)
+        {
+            if !rows.is_empty() {
+                layout = layout.child(self.settings_card(title, "", rows));
+            }
+        }
+        layout.into_any_element()
     }
 
     fn render_keybinding_editor(
@@ -573,6 +800,27 @@ impl Workspace {
             .min_w_0()
             .items_center()
             .gap_2()
+            .child(
+                super::web_button(
+                    "desktop-record-shortcut",
+                    super::WebButtonVariant::Outline,
+                    super::WebButtonSize::Small,
+                    super::ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-record-shortcut".to_string())
+                .track_focus(&self.keybinding_record_focus)
+                .aria_label("Record shortcut")
+                .child(if self.keybinding_recording {
+                    "Press shortcut… Esc cancels"
+                } else {
+                    "Record shortcut"
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.keybinding_recording = !this.keybinding_recording;
+                    this.keybinding_record_focus.focus(window, cx);
+                    cx.notify();
+                })),
+            )
             .child(keybinding_field(
                 "desktop-settings-keybinding-key",
                 SharedString::from(format!("Key for {command}")),
@@ -614,6 +862,50 @@ impl Workspace {
                     }))
                     .child("Reset"),
             )
+            .child(
+                super::web_button(
+                    "desktop-add-shortcut",
+                    super::WebButtonVariant::Ghost,
+                    super::WebButtonSize::Small,
+                    super::ButtonState::Enabled,
+                )
+                .aria_label("Add shortcut for this command")
+                .child("Add shortcut")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.record_new_binding(this.keybinding_index, window, cx);
+                })),
+            )
+            .child(
+                super::web_button(
+                    "desktop-remove-shortcut",
+                    super::WebButtonVariant::Ghost,
+                    super::WebButtonSize::Small,
+                    super::ButtonState::Enabled,
+                )
+                .aria_label("Remove selected shortcut")
+                .child("Remove")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let index = this.keybinding_index;
+                    let command = &this.keybindings[index].command;
+                    // Keep a disabled entry for a default command so restoring an older
+                    // profile will not reinstate the shortcut on the next launch.
+                    if this
+                        .keybindings
+                        .iter()
+                        .filter(|rule| &rule.command == command)
+                        .count()
+                        == 1
+                    {
+                        this.keybindings[index].key.clear();
+                    } else {
+                        this.keybindings.remove(index);
+                    }
+                    this.select_keybinding(index.min(this.keybindings.len() - 1), window, cx);
+                    this.keybinding_edit_open = false;
+                    this.keymap_changed(cx);
+                    this.persist_and_notify(cx);
+                })),
+            )
             .into_any_element()
     }
 
@@ -623,9 +915,18 @@ impl Workspace {
         rule: &Keybinding,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let selected = index == self.keybinding_index;
-        let command = rule.command.clone();
-        let key = rule.key.clone();
+        let selected = self.keybinding_edit_open && index == self.keybinding_index;
+        let command = command_label(&rule.command);
+        let key = gpui_shortcut(&rule.key)
+            .and_then(|shortcut| Keystroke::parse_with_os(&shortcut, host_os()).ok())
+            .map(|key| key.display(host_os()).to_string())
+            .unwrap_or_else(|| {
+                if rule.key.is_empty() {
+                    "Unassigned".into()
+                } else {
+                    rule.key.clone()
+                }
+            });
         let when = rule.when.clone().unwrap_or_default();
         let label = if when.is_empty() {
             format!("{command}: {key}")
@@ -654,16 +955,36 @@ impl Workspace {
             .focus_visible(|el| el.border_color(crate::theme::persimmon_400()))
             .when(selected, |el| el.bg(crate::theme::longan_800()))
             .hover(|el| el.bg(crate::theme::longan_800()))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.select_keybinding(index, window, cx);
-            }))
+            .map(|el| {
+                bruhs_ui::press::on_press_view(el, cx, move |this, window, cx| {
+                    if this.keybinding_edit_open && this.keybinding_index == index {
+                        this.keybinding_edit_open = false;
+                        cx.notify();
+                    } else {
+                        this.select_keybinding(index, window, cx);
+                    }
+                })
+            })
             .child(
                 div()
                     .min_w(px(KEY_INPUT_WIDTH_PX))
                     .flex_1()
                     .text_size(px(SETTINGS_MODEL_LABEL_TEXT_SIZE_PX))
                     .text_color(crate::theme::rambutan_200())
-                    .child(command),
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(command)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(crate::theme::rambutan_500())
+                            .child(if when.is_empty() {
+                                "Always".to_owned()
+                            } else {
+                                format!("When {when}")
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -676,12 +997,40 @@ impl Workspace {
                     .text_size(px(12.0))
                     .text_color(crate::theme::rambutan_300())
                     .font_family(crate::theme::CODE_FONT_FAMILY)
-                    .child(key)
-                    .when(!when.is_empty(), |el| {
-                        el.child(div().text_color(crate::theme::rambutan_500()).child(when))
-                    }),
+                    .px_2()
+                    .py_1()
+                    .rounded(px(4.))
+                    .bg(crate::theme::longan_800())
+                    .child(key),
             )
             .into_any_element()
+    }
+}
+
+fn command_label(command: &str) -> String {
+    match command {
+        "command.palette" => "Open command palette".into(),
+        "settings.open" => "Open settings".into(),
+        "chat.new" => "New thread".into(),
+        "snapshot.capture" => "Capture a window".into(),
+        _ => command
+            .split('.')
+            .map(|part| {
+                let mut label = String::new();
+                for (i, ch) in part.chars().enumerate() {
+                    if i == 0 {
+                        label.extend(ch.to_uppercase());
+                    } else if ch.is_uppercase() {
+                        label.push(' ');
+                        label.extend(ch.to_lowercase());
+                    } else {
+                        label.push(ch);
+                    }
+                }
+                label
+            })
+            .collect::<Vec<_>>()
+            .join(" · "),
     }
 }
 
@@ -781,6 +1130,8 @@ fn push_rule_bindings(
             add,
             installed,
         ),
+        "snapshot.capture" => bind(&shortcut, CaptureWindow, name, None, add, installed),
+        "voice.dictate" => bind(&shortcut, crate::views::chat::ToggleDictation, name, Some("Chat"), add, installed),
         "draft.stash" => {
             bind(
                 &shortcut,
@@ -939,7 +1290,7 @@ mod tests {
     #[test]
     fn empty_storage_loads_the_defaults() {
         assert_eq!(
-            rules_from_saved(Vec::new()).len(),
+            rules_from_saved(Vec::new(), 0).len(),
             default_keybindings().len()
         );
     }

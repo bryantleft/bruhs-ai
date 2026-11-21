@@ -9,7 +9,9 @@ use bruhs_models::meeting_suggestions::{
     event_in_window, ContextItem, LiveInput, LiveSuggestions, MeetingSuggestionPrefs, Proactivity,
     Round, SuggestionState,
 };
-use bruhs_models::{CalendarEvent, Meeting, PersonProfile, TranscriptSegment, WorkItem};
+use bruhs_models::{
+    CalendarEvent, Meeting, PersonProfile, TranscriptSegment, WorkItem, WorkItemSource,
+};
 use gloo_timers::callback::Interval;
 use leptos::prelude::*;
 
@@ -282,6 +284,11 @@ impl MeetingSuggestions {
     /// Add task, Copy or Dismiss. Each decision is final and tunes how much
     /// a thought must score before it is shown.
     pub fn decide(self, id: &str, state: SuggestionState) {
+        // The suggestion session owns its source, even if capture has already
+        // switched to another meeting before its UI effect runs.
+        let meeting_id = self
+            .live
+            .with_untracked(|live| live.meeting_id().map(str::to_string));
         let Some(decision) = self
             .live
             .try_update(|live| live.decide(id, state))
@@ -297,18 +304,22 @@ impl MeetingSuggestions {
         }
         match state {
             SuggestionState::Added => {
-                let meeting = self.live_id.get_untracked().and_then(|id| {
+                let meeting = meeting_id.as_ref().and_then(|id| {
                     self.meetings.with_untracked(|meetings| {
                         meetings
                             .iter()
-                            .find(|m| m.id == id)
+                            .find(|m| &m.id == id)
                             .map(|m| m.title.clone())
                     })
                 });
                 let mut task = WorkItem::new_at(&suggestion.text, crate::clock::now_ms());
-                task.description = Some(match meeting {
+                task.description = Some(match &meeting {
                     Some(title) => format!("Suggested during the meeting {title}."),
                     None => "Suggested during a meeting.".to_string(),
+                });
+                task.source = meeting_id.map(|meeting_id| WorkItemSource::Meeting {
+                    meeting_id,
+                    title: meeting.unwrap_or_else(|| "Meeting".into()),
                 });
                 self.set_work_items.update(|tasks| tasks.push(task.clone()));
                 crate::storage::persist_work_item(None, task);

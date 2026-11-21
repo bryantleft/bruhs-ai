@@ -254,6 +254,8 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                     }}
                 </section>
 
+                <MeetingTasks meeting_id=mid.get_value() />
+
                 // ── Observation extraction ────────────────────────────────
                 <section>
                     <div class="text-label-sm text-rambutan-400 mb-2">"Observation extraction"</div>
@@ -326,6 +328,70 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                 </section>
             </div>
         </div>
+    }
+}
+
+#[component]
+fn MeetingTasks(meeting_id: String) -> impl IntoView {
+    use super::task_list::PAGE_SIZE;
+    use super::task_pagination::{page_start, TaskPagination};
+
+    let crate::state::WorkItemsSignal(tasks) = expect_context();
+    let crate::state::SetSelectedWorkItem(set_selected) = expect_context();
+    let crate::state::SetActiveView(set_active) = expect_context();
+    let meeting_id = StoredValue::new(meeting_id);
+    let page = RwSignal::new(0usize);
+    let total = Signal::derive(move || {
+        tasks.with(|tasks| {
+            meeting_id.with_value(|meeting_id| {
+                tasks
+                    .iter()
+                    .filter(|task| {
+                        task.source
+                            .as_ref()
+                            .is_some_and(|source| source.is_meeting(meeting_id))
+                    })
+                    .count()
+            })
+        })
+    });
+    let related = Memo::new(move |_| {
+        let start = page_start(total.get(), page.get(), PAGE_SIZE);
+        tasks.with(|tasks| {
+            meeting_id.with_value(|meeting_id| {
+                tasks
+                    .iter()
+                    .filter(|task| {
+                        task.source
+                            .as_ref()
+                            .is_some_and(|source| source.is_meeting(meeting_id))
+                    })
+                    .skip(start)
+                    .take(PAGE_SIZE)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+        })
+    });
+    view! {
+        <Show when=move || { total.get() > 0 }>
+            <section aria-label="Tasks from this meeting" data-testid="meeting-tasks">
+                <h2 class="mb-2 text-label-sm text-rambutan-400">"Tasks from this meeting"</h2>
+                <ul class="space-y-1">
+                    <For each=move || related.get() key=|task| task.id.clone() let:task>
+                        <li><button type="button" data-testid="meeting-linked-task"
+                            class="bruhs-control min-h-11 sm:min-h-6 w-full rounded-grape px-2 py-1 text-left text-label-sm text-rambutan-200 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 [overflow-wrap:anywhere]"
+                            on:click=move |_| {
+                                set_selected.set(Some(task.id.clone()));
+                                set_active.set(AppView::Tasks);
+                            }>
+                            <span>{task.title}</span><span class="ml-2 text-rambutan-400">{task.status.label()}</span>
+                        </button></li>
+                    </For>
+                </ul>
+                <TaskPagination total page page_size=PAGE_SIZE label="Meeting task pages" />
+            </section>
+        </Show>
     }
 }
 

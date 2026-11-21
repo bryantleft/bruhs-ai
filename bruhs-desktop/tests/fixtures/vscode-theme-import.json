@@ -1,0 +1,158 @@
+{
+  "cases": [
+    {
+      "source": {
+        "displayName": "harbor-dark",
+        "type": "hc-black",
+        "colors": {
+          "editor.background": "#16202c",
+          "editor.foreground": "#eff1f5",
+          "focusBorder": "#78b9ff",
+          "editorWidget.background": "#263847",
+          "sideBar.background": "#1238",
+          "sideBar.foreground": "#eeddcc",
+          "list.hoverBackground": "#abcdef44",
+          "terminal.background": "#121a21",
+          "terminal.selectionBackground": "#ff880060",
+          "editor.findMatchBackground": "#fedb7b",
+          "button.foreground": "#010203",
+          "editorError.foreground": "#ed3344",
+          "terminalCursor.foreground": "color(display-p3 0.4 0.8 0.2)"
+        }
+      },
+      "id": "harbor-dark",
+      "name": "Harbor Dark",
+      "appearance": "dark"
+    },
+    {
+      "source": {
+        "name": "paper-light",
+        "colors": {
+          "editor.background": "#f4f4ef",
+          "editor.foreground": "#f4f4ef",
+          "focusBorder": "#f4f4ef",
+          "button.background": "#f4f4ef",
+          "input.background": "#f4f4ef",
+          "sideBar.background": "#fff",
+          "descriptionForeground": "#ddddd5"
+        }
+      },
+      "id": "paper-light",
+      "name": "Paper Light",
+      "appearance": "light"
+    },
+    {
+      "source": {
+        "colors": {
+          "editorPane.background": "#090908"
+        }
+      },
+      "id": "vs-code-theme",
+      "name": "VS Code theme",
+      "appearance": "dark"
+    },
+    {
+      "source": {
+        "name": "t3-chat",
+        "type": "light",
+        "colors": {
+          "editor.background": "#141310",
+          "editorWidget.background": "#346bf1",
+          "button.background": "color(srgb 75% 36% 50% / 60%)",
+          "scrollbarSlider.background": "#fff4"
+        }
+      },
+      "id": "t3-chat-vscode",
+      "name": "T3 Chat",
+      "appearance": "light"
+    },
+    {
+      "source": {
+        "name": "Neutral dark",
+        "colors": {
+          "editor.background": "#282828",
+          "focusBorder": "#3c3836"
+        }
+      },
+      "id": "neutral-dark",
+      "name": "Neutral dark",
+      "appearance": "dark"
+    },
+    {
+      "source": {
+        "name": "P3 light",
+        "colors": {
+          "editor.background": "#fdf6e3",
+          "focusBorder": "color(display-p3 0.308664 0.645271 1.0)",
+          "terminal.selectionBackground": "color(display-p3 75% 36% 99% / 45%)"
+        }
+      },
+      "id": "p3-light",
+      "name": "P3 light",
+      "appearance": "light"
+    }
+  ],
+  "colors": {
+    "canvas": ["#16202c", "#f4f4ef", "#090908", "#141310", "#282828", "#fdf6e3"],
+    "chrome": ["#16202c", "#f4f4ef", "#090908", "#141310", "#282828", "#fdf6e3"],
+    "toolbar": ["#16202c", "#f4f4ef", "#090908", "#141310", "#282828", "#fdf6e3"],
+    "toolbarForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "toolbarBorder": ["#3b434d", "#cfd3dc", "#242933", "#3b3233", "#4c4c4c", "#cfd7d8"],
+    "toolbarControl": ["#30363c", "#e0e3ea", "#191d24", "#2d2627", "#413f39", "#dee8e9"],
+    "toolbarControlForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "toolbarControlHover": ["#3c434b", "#d2d6df", "#242932", "#3b3233", "#4f4c44", "#cfdbdd"],
+    "surface": ["#263847", "#eceff4", "#0a0c11", "#346bf1", "#2d2c27", "#ebf3f4"],
+    "surfaceRaised": ["#263847", "#e1e3e9", "#111419", "#346bf1", "#363430", "#e0e7e8"],
+    "surfaceOverlay": ["#2e3237", "#d8dbe0", "#17191f", "#282324", "#3d3b36", "#d8dfe0"],
+    "text": ["#eff1f5", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "textMuted": ["#88909a", "#6c6d6d", "#7e8185", "#898584", "#989898", "#6f6f67"],
+    "border": ["#414851", "#c9ccd4", "#292e37", "#3f3739", "#525251", "#c9d0d1"],
+    "input": ["#4e5660", "#bbbfc9", "#353a46", "#4d4446", "#605f5f", "#bbc4c5"],
+    "focus": ["#78b9ff", "#1b4ed8", "#346bf1", "#7b3f53", "#3c3836", "#1ba7ff"],
+    "accent": ["#78b9ff", "#1b4ed8", "#346bf1", "#7b3f53", "#3c3836", "#1ba7ff"],
+    "accentForeground": ["#010203", "#ffffff", "#fffaff", "#fffaff", "#fffaff", "#241523"],
+    "secondary": ["#2f3944", "#dbe0ec", "#191f2c", "#322729", "#424141", "#dae5e6"],
+    "secondaryForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "muted": ["#282f36", "#e3e6ef", "#12161e", "#261f20", "#373737", "#e3ebec"],
+    "mutedForeground": ["#91979f", "#64666c", "#7c8189", "#8e8788", "#a1a1a1", "#64696a"],
+    "placeholder": ["#ffffff", "#626469", "#7b7f86", "#ffffff", "#9e9d9c", "#626767"],
+    "secondaryLabel": ["#88909a", "#6c6d6d", "#7e8185", "#898584", "#989898", "#6f6f67"],
+    "iconMuted": ["#88909a", "#6c6d6d", "#7e8185", "#898584", "#989898", "#6f6f67"],
+    "error": ["#f73e4c", "#e10023", "#fb414a", "#fb414a", "#ff4d52", "#e40023"],
+    "errorForeground": ["#ff6467", "#c10007", "#ff6467", "#ff6467", "#ff7070", "#c10007"],
+    "errorSurface": ["#3b2531", "#f5e4e0", "#301213", "#391a19", "#4a2c2d", "#fde6d5"],
+    "warning": ["#fe9a00", "#a26000", "#fe9a00", "#fe9a00", "#fe9a00", "#a46200"],
+    "warningForeground": ["#ffb900", "#b34a00", "#ffb900", "#ffb900", "#ffb900", "#b74b00"],
+    "warningSurface": ["#3b3425", "#f5eddc", "#302007", "#39290d", "#4a3a22", "#fdefd1"],
+    "update": ["#2a3f56", "#c9d3ea", "#121d37", "#362226", "#2c2b2b", "#d0e6e9"],
+    "updateForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "updateSurface": ["#384450", "#d0d6e3", "#222937", "#3d3133", "#4c4c4c", "#cfdbdd"],
+    "accentSurface": ["#3e4e60", "#d4d9e6", "#1f2635", "#3a2e31", "#4a4949", "#d3dee0"],
+    "accentSurfaceForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "messageSurface": ["#3c4957", "#cdd3e1", "#262d3e", "#433638", "#525251", "#cbd8da"],
+    "messageForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "messageAction": ["#78b9ff", "#1b4ed8", "#346bf1", "#7b3f53", "#3c3836", "#1ba7ff"],
+    "messageActionForeground": ["#010203", "#ffffff", "#fffaff", "#fffaff", "#fffaff", "#241523"],
+    "messageActionHover": ["#64567b", "#c9aed3", "#574061", "#634229", "#395233", "#a2bde1"],
+    "codeBackground": ["#25282c", "#e6e8ec", "#0e1015", "#1e1a1a", "#32312d", "#e6eced"],
+    "codeForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "searchMatchBackground": ["#445a72", "#a3adc3", "#2f3c59", "#594347", "#636261", "#9fb4b7"],
+    "searchMatchForeground": ["#eff1f5", "#241523", "#fffaff", "#fffaff", "#fffaff", "#241523"],
+    "searchMatchActiveBackground": ["#fedb7b", "#6d768b", "#606e8e", "#8e7579", "#979796", "#697d7f"],
+    "searchMatchActiveForeground": ["#241523", "#000000", "#fffaff", "#000000", "#241523", "#000000"],
+    "sidebar": ["#132130", "#ffffff", "#0f121a", "#221b1c", "#35332d", "#dfeaeb"],
+    "sidebarForeground": ["#eeddcc", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "sidebarMutedForeground": ["#959ba2", "#616469", "#81858e", "#928b8c", "#a5a4a2", "#606767"],
+    "sidebarControlSurface": ["#323940", "#d9dde5", "#1b1f28", "#302829", "#44413a", "#d7e2e3"],
+    "sidebarRowHover": ["#3c4f63", "#dbe0ea", "#151a26", "#2c2324", "#3c3c3c", "#dbe5e6"],
+    "sidebarRowActive": ["#3c4f63", "#d0d6e3", "#1d2432", "#382c2e", "#474746", "#cfdbdd"],
+    "sidebarRowSelected": ["#374452", "#cdd3e1", "#212839", "#3d3133", "#4c4c4c", "#cbd8da"],
+    "sidebarBorder": ["#434b55", "#c8ccd5", "#2b303b", "#423a3b", "#545454", "#c8d1d2"],
+    "terminalBackground": ["#121a21", "#f4f4ef", "#090908", "#141310", "#282828", "#fdf6e3"],
+    "terminalForeground": ["#e9eff7", "#14161a", "#eaeff8", "#f3eced", "#eeeeee", "#131717"],
+    "terminalCursor": ["#2ecf00", "#c9d3ea", "#121d37", "#362226", "#2c2b2b", "#d0e6e9"],
+    "terminalSelection": ["#6b4315", "#c7ccd9", "#2b3342", "#473b3d", "#575757", "#e8adf0"],
+    "terminalScrollbar": ["#54595e", "#bdbfc5", "#3a3d43", "#535250", "#64625d", "#bcc4c4"],
+    "terminalScrollbarHover": ["#6a6f75", "#aaadb2", "#4f5259", "#645e5f", "#7b7974", "#aab1b1"]
+  }
+}

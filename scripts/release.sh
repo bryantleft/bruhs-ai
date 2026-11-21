@@ -23,10 +23,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version=${1:-}
-[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: scripts/release.sh <version like 0.1.0>" >&2; exit 2; }
+[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-nightly\.(0|[1-9][0-9]*))?$ ]] || { echo "usage: scripts/release.sh <version like 0.1.0 or 0.1.1-nightly.1>" >&2; exit 2; }
 native_run=${2:?pass the successful release-native.yml run ID for this commit and version}
 command -v dpkg-deb >/dev/null || { echo "Install dpkg to assemble the Linux package" >&2; exit 1; }
 tag="v$version"
+release_flags=(--latest)
+if [[ $version == *-nightly.* ]]; then
+  release_flags=(--prerelease --latest=false)
+fi
 repo=bryantleft/bruhs-ai
 
 [[ -z $(git status --porcelain --untracked-files=no) ]] || { echo "commit or stash changes first" >&2; exit 1; }
@@ -70,6 +74,6 @@ gh release create "$tag" \
   "dist/Bruhs-macOS-$arch.zip" \
   dist/Bruhs-Windows-x64.zip dist/Bruhs-Linux-x64.deb \
   dist/SHA256SUMS
-gh release edit "$tag" --repo "$repo" --draft=false --latest
+gh release edit "$tag" --repo "$repo" --draft=false "${release_flags[@]}"
 git fetch -q origin "refs/tags/$tag:refs/tags/$tag"
 echo "released https://github.com/$repo/releases/tag/$tag"

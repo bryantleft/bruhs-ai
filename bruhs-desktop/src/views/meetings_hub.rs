@@ -78,15 +78,17 @@ pub struct HubNotice {
 }
 
 /// Where a notice's action button takes the owner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoticeAction {
     /// An agent update arrived; open the automations view.
     OpenAutomations,
+    OpenThread(String),
 }
 
 impl NoticeAction {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
+            Self::OpenThread(_) => "Open thread",
             Self::OpenAutomations => "Open",
         }
     }
@@ -259,7 +261,7 @@ pub fn format_started_at(ms: f64) -> String {
     Local
         .timestamp_millis_opt(EpochMs::saturating_from_f64(ms).as_millis())
         .single()
-        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .map(|d| format!("{} {}", d.format("%Y-%m-%d"), d.format(crate::clock_format::pattern())))
         .unwrap_or_default()
 }
 
@@ -1200,7 +1202,9 @@ impl MeetingsHub {
                 }
                 match result {
                     Ok(updated) => {
+                        let ended_id = updated.id.clone();
                         hub.replace_meeting(updated, cx);
+                        hub.ensure_segments(&ended_id, cx);
                         if same_session {
                             hub.live_meeting_id = None;
                         }

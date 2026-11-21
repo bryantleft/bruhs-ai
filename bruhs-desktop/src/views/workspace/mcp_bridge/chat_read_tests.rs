@@ -162,6 +162,7 @@ async fn chat_history_pages_preserve_completed_content_without_drafts_streams_or
                 error: "Stored interruption".into(),
             };
             completed.tool_calls.push(DesktopToolCall {
+                text_offset: None,
                 id: "tool-1".into(),
                 tool: "read".into(),
                 input: json!({"path":"local"}),

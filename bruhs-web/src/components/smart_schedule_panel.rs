@@ -1,99 +1,95 @@
 //! Local scheduling controls layered onto the calendar.
 
 use bruhs_models::{
-    AvailabilityRule, CalendarEvent, ConflictResolution, EventSource, FocusProtection,
-    SchedulingLink, WorkItem,
+    AvailabilityRule, ConflictResolution, FocusProtection, SchedulingLink, WorkItem,
 };
 use leptos::prelude::*;
 
 use crate::state::{
     AppView, CalendarEventsSignal, ComposerDraft, SchedulingPreferencesSignal, SetActiveView,
-    SetCalendarEventsSignal, SetWorkItemsSignal, WorkItemsSignal,
+    WorkItemsSignal,
 };
 use crate::ui::{Dialog, Dropdown, DropdownOption, Input};
+
+#[derive(Clone)]
+enum Notice {
+    Saved(String),
+    Error(String),
+}
 
 #[component]
 pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
     let SchedulingPreferencesSignal(preferences) = expect_context::<SchedulingPreferencesSignal>();
+    Effect::new(move |_| {
+        if open.get() {
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = preferences.reload().await;
+            });
+        }
+    });
     let CalendarEventsSignal(events) = expect_context::<CalendarEventsSignal>();
-    let SetCalendarEventsSignal(set_events) = expect_context::<SetCalendarEventsSignal>();
     let WorkItemsSignal(work_items) = expect_context::<WorkItemsSignal>();
-    let SetWorkItemsSignal(set_work_items) = expect_context::<SetWorkItemsSignal>();
     let ComposerDraft(composer_draft) = expect_context::<ComposerDraft>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let saves = expect_context::<crate::task_saves::TaskSaves>();
     let link_title = RwSignal::new(String::new());
     let link_duration = RwSignal::new("30".to_string());
     let selected_task = RwSignal::new(String::new());
-    let notice = RwSignal::new(Option::<String>::None);
+    let notice = RwSignal::new(Option::<Notice>::None);
     let scheduled_event = RwSignal::new(Option::<String>::None);
 
     let add_link = move || {
         scheduled_event.set(None);
         let title = link_title.get_untracked();
         if title.trim().is_empty() {
-            notice.set(Some("Give the scheduling link a title.".to_string()));
+            notice.set(Some(Notice::Error(
+                "Give the scheduling link a title.".to_string(),
+            )));
             return;
         }
         let duration = link_duration_minutes(&link_duration.get_untracked());
-        preferences.update(|prefs| {
-            prefs.add_link(SchedulingLink::new(title, duration), crate::clock::now_ms())
+        wasm_bindgen_futures::spawn_local(async move {
+            if preferences
+                .edit(|prefs| {
+                    prefs.add_link(
+                        SchedulingLink::new(title.clone(), duration),
+                        crate::clock::now_ms(),
+                    )
+                })
+                .await
+                .is_err()
+            {
+                notice.set(None);
+                return;
+            }
+            if link_title.get_untracked() == title {
+                link_title.set(String::new());
+            }
+            notice.set(Some(Notice::Saved(
+                "Scheduling link saved locally.".to_string(),
+            )));
         });
-        link_title.set(String::new());
-        notice.set(Some("Scheduling link saved locally.".to_string()));
     };
 
     let schedule_task = move || {
         scheduled_event.set(None);
-        let task_id = selected_task.get_untracked();
-        let Some(task) = work_items
-            .with_untracked(|tasks| tasks.iter().find(|task| task.id == task_id).cloned())
-        else {
-            notice.set(Some("Choose an unscheduled task first.".to_string()));
-            return;
-        };
-        let duration = task.planning.estimate_minutes.unwrap_or(60).max(15);
-        let now = crate::clock::now_ms();
-        // Per-instant offsets keep working hours right after a DST change
-        // inside the 30-day search.
-        let slot = preferences.with_untracked(|prefs| {
-            events.with_untracked(|evs| {
-                prefs.first_available_slot_in_zone(
-                    evs,
-                    now,
-                    now + 30 * 86_400_000,
-                    duration,
-                    crate::clock::offset_minutes_east,
-                )
-            })
-        });
-        let Some((start, end)) = slot else {
-            notice.set(Some(
-                "No open slot matches your availability in the next 30 days.".to_string(),
-            ));
-            return;
-        };
-        let event = focus_block(&task, start, end, now);
-        let event_id = event.id.clone();
-        set_events.update(|items| items.push(event.clone()));
-        let mut saved = None;
-        set_work_items.update(|items| {
-            if let Some(item) = items.iter_mut().find(|item| item.id == task_id) {
-                let original = item.clone();
-                item.planning.time_block_event_ids.push(event_id.clone());
-                item.updated_at = now;
-                saved = Some((original, item.clone()));
-            }
-        });
-        if let Some((original, item)) = saved {
-            saves.schedule_task(original, item, event);
-        }
-        selected_task.set(String::new());
-        notice.set(None);
-        scheduled_event.set(Some(event_id));
+        saves.place_task(
+            selected_task.get_untracked(),
+            Callback::new(move |result| match result {
+                Ok(id) => {
+                    selected_task.set(String::new());
+                    notice.set(None);
+                    scheduled_event.set(Some(id));
+                }
+                Err(message) => notice.set(Some(Notice::Error(message))),
+            }),
+        );
     };
 
     let ask_agent = move |_| {
+        if !preferences.ready() {
+            return;
+        }
         let prompt = preferences.with_untracked(|prefs| {
             work_items.with_untracked(|tasks| {
                 events
@@ -105,25 +101,34 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
         set_active_view.set(AppView::Chat);
     };
     let toggle_focus = move |_| {
-        preferences.update(|prefs| {
-            prefs.focus.enabled = !prefs.focus.enabled;
-            prefs.updated_at_ms = crate::clock::now_ms();
-        })
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = preferences
+                .edit(|prefs| {
+                    prefs.focus.enabled = !prefs.focus.enabled;
+                    prefs.updated_at_ms = crate::clock::now_ms();
+                })
+                .await;
+        });
     };
     let focus_on = move || preferences.with(|prefs| prefs.focus.enabled);
     let nudge_button = move |nudge: Nudge, label: &'static str| {
         let on_click = move |_| {
-            preferences.update(|prefs| {
-                if let Some(rule) = prefs.availability.first_mut() {
-                    nudge.apply(rule);
-                    prefs.updated_at_ms = crate::clock::now_ms();
-                }
-            })
+            wasm_bindgen_futures::spawn_local(async move {
+                let _ = preferences
+                    .edit(|prefs| {
+                        if let Some(rule) = prefs.availability.first_mut() {
+                            nudge.apply(rule);
+                            prefs.updated_at_ms = crate::clock::now_ms();
+                        }
+                    })
+                    .await;
+            });
         };
         view! {
             <button
                 type="button"
                 class="rounded-seed px-2 py-1 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer"
+                disabled=move || preferences.busy() || saves.day_plan.with(|state|state.busy)
                 on:click=on_click
             >
                 {label}
@@ -164,9 +169,9 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                     move |resolution: ConflictResolution, label: &'static str, class: &'static str| {
                         let id = conflict.id.clone();
                         let on_click = move |_| {
-                            resolve_calendar_conflict(preferences, events, set_events, saves, &id, resolution)
+                            saves.resolve_calendar_conflict(id.clone(), resolution)
                         };
-                        view! { <button type="button" class=class on:click=on_click>{label}</button> }
+                        view! { <button type="button" class=class disabled=move || preferences.busy() || saves.day_plan.with(|state|state.busy) on:click=on_click>{label}</button> }
                     };
                 let neutral = "rounded-seed px-2 py-1 text-label-sm text-rambutan-300 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer";
                 view! {
@@ -214,19 +219,33 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                         <div>
                             <h2 class="text-h4 text-rambutan-100">"Smart scheduling"</h2>
                             <p class="mt-1 text-body-sm text-rambutan-500">
-                                "Protect intent first. Availability and task placement are local and instant; remote conflicts wait for your decision."
+                                "Protect intent first. Saved availability guides local task placement; remote conflicts wait for your decision."
                             </p>
                         </div>
                         <button
                             type="button"
                             class="shrink-0 rounded-grape bg-blueberry-500/15 px-3 py-2 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer"
+                            disabled=move || !preferences.ready()
                             on:click=ask_agent
                         >
                             "Ask agent to plan"
                         </button>
                     </div>
                 </div>
+                <super::scheduling_status::SchedulingStatus />
+                <Show when=move || preferences.error().is_some() || saves.day_plan.with(|state|state.error.is_some())>
+                    <section aria-label="Scheduling data recovery" class="shrink-0 border-b border-longan-700 px-4 py-3 text-body-sm text-rambutan-300">
+                        {move || saves.day_plan.with(|state|state.error.clone()).map(|message|view! {<p role="alert" class="text-lychee-300">{message}</p>})}
+                        <p>"If calendar data changed in another tab, refresh tasks and calendar, then reload saved preferences before repeating the conflict decision."</p>
+                        <button type="button" class="bruhs-control mt-2 rounded-grape bg-longan-800 px-3 py-2 cursor-pointer"
+                            disabled=move || saves.pending()
+                            on:click=move |_| saves.refresh_day_plan_sources()>
+                            "Refresh saved tasks and calendar"
+                        </button>
+                    </section>
+                </Show>
                 <div class="min-h-0 max-h-[70vh] space-y-4 overflow-auto px-4 py-3">
+                    <Show when=move || preferences.ready()>
                     <section class="rounded-grape bg-longan-900/55 p-3 inset-ring inset-ring-longan-800">
                         <div class="flex items-center justify-between gap-3">
                             <div>
@@ -243,6 +262,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                                 } else {
                                     "rounded-seed bg-longan-800 px-2.5 py-1.5 text-label-sm text-rambutan-500 cursor-pointer"
                                 }
+                                disabled=move || preferences.busy() || saves.day_plan.with(|state|state.busy)
                                 on:click=toggle_focus
                             >
                                 {move || if focus_on() { "Protected" } else { "Off" }}
@@ -272,6 +292,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                             <button
                                 type="button"
                                 class="rounded-grape bg-blueberry-500/15 px-3 py-2 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer"
+                                disabled=move || preferences.busy() || saves.pending()
                                 on:click=move |_| schedule_task()
                             >
                                 "Find time"
@@ -295,6 +316,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                             <button
                                 type="button"
                                 class="rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 cursor-pointer"
+                                disabled=move || preferences.busy() || saves.day_plan.with(|state|state.busy)
                                 on:click=move |_| add_link()
                             >
                                 "Create"
@@ -309,13 +331,18 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                         </section>
                     </Show>
                     <Show when=move || notice.get().is_some()>
-                        {move || notice.get().map(|message| view! {
-                            <p role="status" class="text-body-sm text-pandan-300">{message}</p>
+                        {move || notice.get().map(|notice| {
+                            let (role,class,message)=match notice {
+                                Notice::Saved(message)=>("status","text-body-sm text-pandan-300",message),
+                                Notice::Error(message)=>("alert","text-body-sm text-lychee-300",message),
+                            };
+                            view! {<p role=role class=class>{message}</p>}
                         })}
                     </Show>
                     {move || scheduled_event.get().map(|id| view! {
                         <p role="status" class="text-body-sm text-rambutan-300">{save_status(id)}</p>
                     })}
+                    </Show>
                 </div>
                 </div>
             </Dialog>
@@ -396,64 +423,6 @@ fn unscheduled_task_options(tasks: &[WorkItem]) -> Vec<DropdownOption> {
 /// A scheduling link's length: the typed minutes, else 30.
 fn link_duration_minutes(text: &str) -> u16 {
     text.parse::<u16>().unwrap_or(30)
-}
-
-/// The local calendar block that holds `task` from `start_ms` to `end_ms`.
-fn focus_block(task: &WorkItem, start_ms: i64, end_ms: i64, now_ms: i64) -> CalendarEvent {
-    CalendarEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        title: format!("Focus: {}", task.title),
-        start_at_ms: bruhs_models::EpochMs::saturating_from_i64(start_ms).as_f64(),
-        end_at_ms: bruhs_models::EpochMs::saturating_from_i64(end_ms).as_f64(),
-        all_day: false,
-        color: Some("blueberry".to_string()),
-        notes: Some(format!("Time block for task {}", task.id)),
-        created_at: now_ms,
-        updated_at: now_ms,
-        source: EventSource::Local,
-        google_event_id: None,
-        calendar_id: None,
-        attendees: Vec::new(),
-        organizer: None,
-        location: None,
-        conferencing: None,
-        recurring_event_id: None,
-        html_link: None,
-    }
-}
-
-/// Resolve a remote-change conflict and save the events it changed. The
-/// panel reads the saves handle once and passes it in.
-fn resolve_calendar_conflict(
-    preferences: RwSignal<bruhs_models::SchedulingPreferences>,
-    events: ReadSignal<Vec<CalendarEvent>>,
-    set_events: WriteSignal<Vec<CalendarEvent>>,
-    saves: crate::task_saves::TaskSaves,
-    conflict_id: &str,
-    resolution: ConflictResolution,
-) {
-    let originals = events.get_untracked();
-    let mut updated = originals.clone();
-    let resolved = preferences.try_update(|preferences| {
-        preferences.resolve_conflict(
-            conflict_id,
-            resolution,
-            &mut updated,
-            crate::clock::now_ms(),
-        )
-    });
-    if resolved == Some(true) {
-        set_events.set(updated.clone());
-        let changes = updated
-            .into_iter()
-            .filter_map(|event| {
-                let original = originals.iter().find(|item| item.id == event.id);
-                (original != Some(&event))
-                    .then(|| (event.id.clone(), original.cloned(), Some(event)))
-            })
-            .collect();
-        saves.edit_events(changes);
-    }
 }
 
 #[cfg(test)]

@@ -4,11 +4,11 @@
 
 use super::*;
 use crate::app_state::spawn_tokio;
-use bruhs_core::updates::{BuildInfo, UpdateChecker};
+use bruhs_core::updates::{release::StageProgress, BuildInfo, UpdateChecker};
 use bruhs_models::agent::AgentProvider;
 use bruhs_models::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
 use bruhs_models::updates::{
-    confirm_title, provider_cli_label, running_label, sidebar_label, AppUpdateState, ProviderRun,
+    provider_cli_label, running_label, sidebar_label, AppUpdateState, ProviderRun,
     ProviderUpdate, ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS,
     RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
 };
@@ -23,11 +23,15 @@ const RESTART_CONFIRM_LABEL: &str = "Restart to update";
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum AppInstall {
     Idle,
-    Downloading(String),
+    Staging {
+        version: String,
+        progress: StageProgress,
+    },
     /// Verified and unpacked beside the app; restart swaps it in.
     Ready {
         version: String,
         staged: std::path::PathBuf,
+        restart_error: Option<String>,
     },
     /// Retried after [`APP_RETRY_AFTER`] (or on the next launch).
     Failed {
@@ -35,6 +39,21 @@ pub(super) enum AppInstall {
         error: String,
         at: std::time::Instant,
     },
+}
+
+impl AppInstall {
+    fn progress_label(&self) -> Option<String> {
+        let Self::Staging { version, progress } = self else {
+            return None;
+        };
+        Some(match progress {
+            StageProgress::Downloading(Some(percent)) => {
+                format!("Downloading v{version} · {percent}%")
+            }
+            StageProgress::Downloading(None) => format!("Downloading v{version}…"),
+            StageProgress::Verifying => format!("Verifying v{version}…"),
+        })
+    }
 }
 
 /// How long a failed app update waits before the next check tries again.
@@ -48,10 +67,15 @@ pub(super) enum SidebarRuns {
     Finished(ProviderRun),
 }
 
+pub(super) use bruhs_core::updates::release::UpdateTrack;
+
 pub(super) struct DesktopUpdates {
+    pub track: UpdateTrack,
     checker: UpdateChecker,
+    pub(super) bundle: Option<std::path::PathBuf>,
     /// Online checks (registries, the remote) run only while this is on.
     pub enabled: bool,
+    pub provider_checks:bool,
     pub report: Option<UpdatesReport>,
     pub checking: bool,
     /// Why the last check failed.
@@ -71,8 +95,9 @@ pub(super) struct DesktopUpdates {
 }
 
 impl DesktopUpdates {
-    pub(super) fn new(enabled: bool, cx: &mut Context<'_, Self>) -> Self {
+    pub(super) fn new(enabled: bool, provider_checks:bool, track: UpdateTrack, cx: &mut Context<'_, Self>) -> Self {
         let mut this = Self {
+            bundle: bruhs_core::updates::release::current_app_bundle(),
             checker: UpdateChecker::new(
                 BuildInfo::new(
                     env!("BRUHS_BUILD_COMMIT"),
@@ -82,6 +107,8 @@ impl DesktopUpdates {
                 .with_release(env!("BRUHS_RELEASE_VERSION")),
             ),
             enabled,
+            provider_checks,
+            track,
             report: None,
             checking: false,
             error: None,
@@ -135,6 +162,20 @@ impl DesktopUpdates {
         }));
     }
 
+    pub(super) fn set_track(&mut self, track: UpdateTrack, cx: &mut Context<'_, Self>) {
+        if self.track == track {
+            return;
+        }
+        self.track = track;
+        self.report = None;
+        // Let an active writer finish before reusing the shared staging directory.
+        if !matches!(self.install, AppInstall::Staging { .. }) {
+            self.install = AppInstall::Idle;
+        }
+        self.check(true, cx);
+        cx.notify();
+    }
+
     pub(super) fn set_enabled(&mut self, on: bool, cx: &mut Context<'_, Self>) {
         self.enabled = on;
         self.check(false, cx);
@@ -142,22 +183,41 @@ impl DesktopUpdates {
     }
 
     pub(super) fn check(&mut self, force: bool, cx: &mut Context<'_, Self>) {
+        self.run_check(force, false, cx);
+    }
+
+    fn check_now(&mut self, cx: &mut Context<'_, Self>) {
+        self.start_error = None;
+        self.run_check(true, true, cx);
+    }
+
+    fn run_check(&mut self, force: bool, manual: bool, cx: &mut Context<'_, Self>) {
         if self.checking || cx.try_global::<crate::app_state::DesktopState>().is_none() {
             return;
         }
         self.checking = true;
         cx.notify();
         let checker = self.checker.clone();
-        let online = self.enabled;
-        let task = spawn_tokio(cx, async move { checker.report(force, online).await });
+        let enabled = self.enabled;
+        let online = manual || enabled;
+        let providers = self.provider_checks;
+        let track = self.track;
+        let task = spawn_tokio(cx, async move {
+            checker
+                .report_on_track(force, online, providers, track)
+                .await
+        });
         cx.spawn(async move |this, cx| {
             let report = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.checking = false;
                 this.error = None;
-                if report.online == this.enabled {
+                if track == this.track
+                    && enabled == this.enabled
+                    && providers == this.provider_checks
+                {
                     this.report = Some(report);
-                    this.stage_app_update(cx);
+                    this.stage_app_update(false, cx);
                 } else {
                     // The switch flipped while this ran: ask again for the
                     // side it is on now.
@@ -200,8 +260,8 @@ impl DesktopUpdates {
     }
 
     /// Download and verify a newer release in the background, once per
-    /// version (a failure is not retried until another version appears).
-    fn stage_app_update(&mut self, cx: &mut Context<'_, Self>) {
+    /// version. A user-initiated retry bypasses the automatic failure backoff.
+    fn stage_app_update(&mut self, retry: bool, cx: &mut Context<'_, Self>) {
         let Some(release) = self
             .report
             .as_ref()
@@ -215,27 +275,59 @@ impl DesktopUpdates {
         };
         let current = match &self.install {
             AppInstall::Idle => None,
-            AppInstall::Failed { at, .. } if at.elapsed() >= APP_RETRY_AFTER => None,
-            AppInstall::Downloading(v)
-            | AppInstall::Ready { version: v, .. }
-            | AppInstall::Failed { version: v, .. } => Some(v),
+            AppInstall::Failed { at, .. } if retry || at.elapsed() >= APP_RETRY_AFTER => None,
+            // Releases share a staging directory. Finish this download before
+            // starting a newer release discovered by another poll.
+            AppInstall::Staging { .. } => return,
+            AppInstall::Ready { version: v, .. } | AppInstall::Failed { version: v, .. } => Some(v),
         };
         if current == Some(&version) {
             return;
         }
-        let Some(app) = bruhs_core::updates::release::current_app_bundle() else {
+        let Some(app) = self.bundle.clone() else {
             return;
         };
-        self.install = AppInstall::Downloading(version.clone());
+        let track = self.track;
+        let initial = StageProgress::Downloading(None);
+        self.install = AppInstall::Staging {
+            version: version.clone(),
+            progress: initial,
+        };
+        let (sender, mut progress) = tokio::sync::watch::channel(initial);
         cx.notify();
-        let task = spawn_tokio(cx, async move {
-            bruhs_core::updates::release::stage_update(&release, &app).await
+        let runtime = &cx.global::<crate::app_state::DesktopState>().runtime;
+        let task = runtime.spawn(async move {
+            bruhs_core::updates::release::stage_update_with_progress(&release, &app, move |state| {
+                sender.send_replace(state);
+            })
+            .await
         });
         cx.spawn(async move |this, cx| {
-            let staged = task.await;
+            while progress.changed().await.is_ok() {
+                let next = *progress.borrow_and_update();
+                let _ = this.update(cx, |this, cx| {
+                    if let AppInstall::Staging { progress, .. } = &mut this.install {
+                        *progress = next;
+                        cx.notify();
+                    }
+                });
+            }
+            let staged = task
+                .await
+                .unwrap_or_else(|error| Err(format!("The update download stopped: {error}")));
             let _ = this.update(cx, |this, cx| {
+                if this.track != track {
+                    this.install = AppInstall::Idle;
+                    this.stage_app_update(false, cx);
+                    cx.notify();
+                    return;
+                }
                 this.install = match staged {
-                    Ok(staged) => AppInstall::Ready { version, staged },
+                    Ok(staged) => AppInstall::Ready {
+                        version,
+                        staged,
+                        restart_error: None,
+                    },
                     Err(error) => {
                         tracing::warn!("app update v{version}: {error}");
                         AppInstall::Failed {
@@ -245,6 +337,7 @@ impl DesktopUpdates {
                         }
                     }
                 };
+                this.stage_app_update(false, cx);
                 cx.notify();
             });
         })
@@ -379,7 +472,7 @@ fn update_spinner(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn icon_svg(path: &'static str, size: f32, color: gpui::Hsla) -> Svg {
+pub(super) fn icon_svg(path: &'static str, size: f32, color: gpui::Hsla) -> Svg {
     svg()
         .path(path)
         .size(px(size))
@@ -526,7 +619,13 @@ impl Workspace {
                 })
                 .into_any_element()
             }
-            SidebarRuns::None if matches!(updates.install, AppInstall::Ready { .. }) => {
+            SidebarRuns::None
+                if matches!(updates.install, AppInstall::Ready { .. })
+                    && !updates
+                        .report
+                        .as_ref()
+                        .is_some_and(|report| !report.updatable_providers().is_empty()) =>
+            {
                 let AppInstall::Ready { version, .. } = &updates.install else {
                     return None;
                 };
@@ -535,6 +634,7 @@ impl Workspace {
                 pill("desktop-sidebar-update", tone_action())
                     .role(Role::Button)
                     .aria_label(RESTART_CONFIRM_LABEL)
+                    .track_focus(&self.modal_focus.restart_sidebar)
                     .tab_index(0)
                     .cursor_pointer()
                     .hover(|el| {
@@ -564,14 +664,14 @@ impl Workspace {
             }
             SidebarRuns::None => {
                 let report = updates.report.as_ref().filter(|r| r.has_updates())?;
-                let can_update = !report.updatable_providers().is_empty();
-                let label = sidebar_label(report);
+                let can_update = !report.updatable_providers().is_empty() || report.app.state == AppUpdateState::Behind;
+                let label = updates.install.progress_label().unwrap_or_else(|| sidebar_label(report).to_string());
                 let tooltip: SharedString = report.summary().into();
                 let count = report.providers.iter().filter(|p| p.is_outdated()).count()
                     + usize::from(report.app.needs_action());
                 pill("desktop-sidebar-update", tone_action())
                     .role(Role::Button)
-                    .aria_label(label)
+                    .aria_label(label.clone())
                     .tab_index(0)
                     .cursor_pointer()
                     .hover(|el| {
@@ -628,18 +728,38 @@ impl Workspace {
     }
 
     pub(super) fn open_restart_confirm(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.open_overlay(Overlay::RestartConfirm);
+        let previous = self.overlay.take().map(Box::new);
+        self.open_overlay(Overlay::RestartConfirm { previous });
         self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
+    }
+
+    pub(super) fn dismiss_restart_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let Some(Overlay::RestartConfirm { previous }) = &mut self.overlay else {
+            return false;
+        };
+        self.overlay = previous.take().map(|overlay| *overlay);
+        let focus = if self.overlay.is_some() {
+            self.modal_focus.restart_row.clone()
+        } else {
+            self.modal_focus.restart_sidebar.clone()
+        };
+        cx.defer_in(window, move |_, window, cx| focus.focus(window, cx));
+        cx.notify();
+        true
     }
 
     /// Swap in the staged update once this process exits, then quit; the
     /// bundled helpers stop with it and the new app opens.
     fn restart_to_update(&mut self, cx: &mut Context<'_, Self>) {
-        let AppInstall::Ready { version, staged } = self.updates.read(cx).install.clone() else {
+        let AppInstall::Ready { staged, .. } = self.updates.read(cx).install.clone() else {
             return;
         };
-        let Some(app) = bruhs_core::updates::release::current_app_bundle() else {
+        let Some(app) = self.updates.read(cx).bundle.clone() else {
             return;
         };
         match bruhs_core::updates::release::install_on_exit(&app, &staged) {
@@ -648,11 +768,9 @@ impl Workspace {
                 cx.quit();
             }
             Err(error) => self.updates.update(cx, |updates, cx| {
-                updates.install = AppInstall::Failed {
-                    version,
-                    error,
-                    at: std::time::Instant::now(),
-                };
+                if let AppInstall::Ready { restart_error, .. } = &mut updates.install {
+                    *restart_error = Some(error);
+                }
                 cx.notify();
             }),
         }
@@ -664,9 +782,13 @@ impl Workspace {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let version = match &self.updates.read(cx).install {
-            AppInstall::Ready { version, .. } => version.clone(),
-            _ => String::new(),
+        let (version, error) = match &self.updates.read(cx).install {
+            AppInstall::Ready {
+                version,
+                restart_error,
+                ..
+            } => (version.clone(), restart_error.clone()),
+            _ => (String::new(), None),
         };
         let title = if version.is_empty() {
             "Restart to update?".to_string()
@@ -679,6 +801,7 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap(px(12.0))
+            .when_some(error, |el, error| el.child(meta(error).id("restart-error").role(Role::Alert).text_color(theme::lychee_200())))
             .child(meta(
                 "Bruhs quits, swaps in the new version and opens again. Running chats stop; their threads stay.",
             ))
@@ -698,9 +821,8 @@ impl Workspace {
                         .tab_index(0)
                         .role(Role::Button)
                         .child("Later")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.dismiss_overlay(|o| matches!(o, Overlay::RestartConfirm));
-                            cx.notify();
+                        .map(|el| on_press_view(el, cx, |this, window, cx| {
+                            this.dismiss_restart_confirm(window, cx);
                         })),
                     )
                     .child(
@@ -714,7 +836,7 @@ impl Workspace {
                         .tab_index(0)
                         .role(Role::Button)
                         .child("Restart")
-                        .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
+                        .map(|el| on_press_view(el, cx, |this, _, cx| this.restart_to_update(cx))),
                     ),
             );
         self.render_modal_shell(title, content, None, window, cx)
@@ -741,7 +863,7 @@ impl Workspace {
             .map(UpdatesReport::skipped_providers)
             .unwrap_or_default();
         let app_behind = report.as_ref().is_some_and(|r| r.app.needs_action());
-        let skipped_count = skipped.len() + usize::from(app_behind);
+        let skipped_count = skipped.len();
         let rows = targets
             .iter()
             .filter_map(|p| report.as_ref().and_then(|r| r.provider(*p)).cloned())
@@ -773,30 +895,26 @@ impl Workspace {
                     .child(
                         div()
                             .truncate()
-                            .font_family(SETTINGS_CODE_FONT_FAMILY)
+                            .font_family(crate::theme::FontFace::Code.with_default(SETTINGS_CODE_FONT_FAMILY))
                             .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .child(p.command_line().unwrap_or_default()),
                     )
             });
-        let mut skipped_lines: Vec<String> = skipped
+        let skipped_lines: Vec<String> = skipped
             .iter()
             .map(|(p, why)| format!("{}, {why}", provider_cli_label(*p)))
             .collect();
-        if app_behind {
-            skipped_lines
-                .push("bruhs, needs a manual update (Settings → Updates has the command)".into());
-        }
         let content = div()
             .debug_selector(|| "desktop-update-confirm".to_string())
             .p(px(16.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(meta(
-                "Running chats keep the CLI they started with. New sessions use the update.",
-            ))
-            .child(div().flex().flex_col().gap(px(6.0)).children(rows))
+            .children(self.render_app_update_row(cx))
+            .when(!targets.is_empty(), |el| el.child(meta(
+                "Running chats keep the CLI they started with. New sessions use the updated providers.",
+            )).child(div().flex().flex_col().gap(px(6.0)).children(rows)))
             .when(skipped_count > 0, |el| {
                 el.child(
                     div()
@@ -827,29 +945,29 @@ impl Workspace {
                 .tab_index(0)
                 .role(Role::Button)
                 .child("Cancel")
-                .on_click(cx.listener(|this, _, _, cx| this.close_update_confirm(cx))),
+                .map(|el| on_press_view(el, cx, |this, _, cx| this.close_update_confirm(cx))),
             )
-            .child(
+            .when(!targets.is_empty(), |el| el.child(
                 web_button(
                     "update-confirm-run",
                     WebButtonVariant::Primary,
                     WebButtonSize::Small,
-                    ButtonState::disabled_if(targets.is_empty()),
+                    ButtonState::Enabled,
                 )
                 .debug_selector(|| "desktop-update-confirm-run".to_string())
                 .aria_label("Update providers")
                 .tab_index(0)
                 .role(Role::Button)
-                .child("Update")
-                .on_click(cx.listener(|this, _, _, cx| {
+                .child("Update providers")
+                .map(|el| on_press_view(el, cx, |this, _, cx| {
                     this.close_update_confirm(cx);
                     this.updates
                         .update(cx, |updates, cx| updates.update_all(cx));
                 })),
-            );
+            ));
 
         self.render_modal_shell(
-            confirm_title(targets.len()),
+            if targets.is_empty() && app_behind { "Desktop update" } else { "Provider and desktop updates" },
             content,
             Some(footer),
             window,
@@ -870,8 +988,8 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-update-checks",
             "Check for updates",
-            "Check installed provider CLIs for newer versions, and this checkout's origin for new commits. When off, bruhs still reads the installed versions but asks nothing online. This device only.",
-            settings_ui::control_column(toggle),
+            "Automatically check for desktop and provider updates. Check now runs once. Source builds check the current repository for new commits.",
+            toggle,
         )];
         let status: SharedString = if let Some(error) = &updates.start_error {
             error.clone().into()
@@ -913,8 +1031,7 @@ impl Workspace {
         .child("Check now")
         .on_click(cx.listener(|this, _, _, cx| {
             this.updates.update(cx, |updates, cx| {
-                updates.start_error = None;
-                updates.check(true, cx);
+                updates.check_now(cx);
             });
         }));
         let status_controls = div()
@@ -956,6 +1073,7 @@ impl Workspace {
             rows.extend(self.render_provider_update_row(provider, cx));
         }
         rows.extend(self.render_app_update_row(cx));
+        rows.extend(self.provider_health_rows(cx));
         rows
     }
 
@@ -1099,7 +1217,7 @@ impl Workspace {
                                         .mt(px(8.0))
                                         .max_h(px(160.0))
                                         .overflow_y_scroll()
-                                        .font_family(SETTINGS_CODE_FONT_FAMILY)
+                                        .font_family(crate::theme::FontFace::Code.with_default(SETTINGS_CODE_FONT_FAMILY))
                                         .text_color(theme::rambutan_300())
                                         .child(run.output.clone()),
                                 )
@@ -1173,7 +1291,15 @@ impl Workspace {
         }
     }
 
-    fn render_app_update_row(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    pub(super) fn render_app_update_row(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        self.render_app_version_row(None, cx)
+    }
+
+    pub(super) fn render_app_version_row(
+        &self,
+        version: Option<&str>,
+        cx: &Context<'_, Self>,
+    ) -> Vec<AnyElement> {
         let app = self
             .updates
             .read(cx)
@@ -1203,14 +1329,46 @@ impl Workspace {
             )
             .debug_selector(|| "desktop-settings-restart-update".to_string())
             .aria_label("Restart to update")
+            .track_focus(&self.modal_focus.restart_row)
             .child(RESTART_CONFIRM_LABEL)
-            .on_click(cx.listener(|this, _, window, cx| this.open_restart_confirm(window, cx)))
+            .map(|el| {
+                on_press_view(el, cx, |this, window, cx| {
+                    this.open_restart_confirm(window, cx)
+                })
+            })
             .into_any_element(),
-            (_, AppInstall::Downloading(version)) => meta(format!("Downloading v{version}…"))
+            (_, AppInstall::Staging { .. }) => meta(install.progress_label().unwrap_or_default())
+                .id("desktop-settings-update-progress")
+                .debug_selector(|| "desktop-settings-update-progress".into())
+                .role(Role::Status)
                 .text_color(theme::rambutan_300())
                 .into_any_element(),
+            (Some(AppUpdateState::Behind), _)
+                if self.updates.read(cx).bundle.is_some()
+                    && app.as_ref().and_then(|a| a.installable_release()).is_some() =>
+            {
+                let label = if matches!(install, AppInstall::Failed { .. }) {
+                    "Retry download"
+                } else {
+                    "Download"
+                };
+                let button = web_button(
+                    "desktop-settings-stage-update",
+                    WebButtonVariant::Outline,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-settings-stage-update".into())
+                .aria_label(label)
+                .child(label);
+                on_press_view(button, cx, |this, _, cx| {
+                    this.updates
+                        .update(cx, |updates, cx| updates.stage_app_update(true, cx));
+                })
+                .into_any_element()
+            }
             (Some(AppUpdateState::Behind), _) if release_url.is_some() => {
-                let url = release_url.unwrap_or_default();
+                let url = release_url.clone().unwrap_or_default();
                 web_button(
                     "desktop-settings-release-download",
                     WebButtonVariant::Outline,
@@ -1220,7 +1378,28 @@ impl Workspace {
                 .debug_selector(|| "desktop-settings-release-download".to_string())
                 .aria_label("Download update")
                 .child("Download")
-                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
+                .map(|el| on_press_view(el, cx, move |_, _, cx| cx.open_url(&url)))
+                .into_any_element()
+            }
+            _ if version.is_some() => {
+                let checking = self.updates.read(cx).checking;
+                let label = if checking {
+                    "Checking…"
+                } else {
+                    "Check for updates"
+                };
+                let button = web_button(
+                    "desktop-about-check-update",
+                    WebButtonVariant::Outline,
+                    WebButtonSize::Small,
+                    ButtonState::disabled_if(checking),
+                )
+                .debug_selector(|| "desktop-about-check-update".into())
+                .aria_label(label)
+                .child(label);
+                on_press_view(button, cx, |this, _, cx| {
+                    this.updates.update(cx, |updates, cx| updates.check_now(cx));
+                })
                 .into_any_element()
             }
             (Some(AppUpdateState::UpToDate), _) => up_to_date_badge(),
@@ -1242,28 +1421,75 @@ impl Workspace {
                     .debug_selector(|| "desktop-settings-release-notes".to_string())
                     .aria_label("Release notes")
                     .child("Release notes")
-                    .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
+                    .map(|el| on_press_view(el, cx, move |_, _, cx| cx.open_url(&url))),
                 )
                 .child(control)
                 .into_any_element(),
             None => control,
         };
+        let control = if let Some(version) = version {
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(control)
+                .child(copy_button(
+                    "desktop-settings-copy-version",
+                    version.to_owned(),
+                    "Copy version",
+                    self.updates
+                        .read(cx)
+                        .copied
+                        .is_shown("desktop-settings-copy-version"),
+                    cx,
+                ))
+                .into_any_element()
+        } else {
+            control
+        };
         let mut rows = vec![self.settings_row_opts(
-            "desktop-settings-row-update-app",
-            "bruhs",
+            if version.is_some() {
+                "desktop-settings-about-version"
+            } else {
+                "desktop-settings-row-update-app"
+            },
+            version.map_or_else(|| "bruhs".to_string(), |v| format!("Version  {v}")),
             line,
             None,
             false,
             control,
         )];
-        if let AppInstall::Failed { error, .. } = &install {
+        if let AppInstall::Failed { error, .. }
+        | AppInstall::Ready {
+            restart_error: Some(error),
+            ..
+        } = &install
+        {
             rows.push(
                 div()
                     .px(px(16.0))
                     .pb(px(12.0))
                     .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
                     .text_color(theme::lychee_200())
+                    .id("desktop-settings-update-error")
+                    .debug_selector(|| "desktop-settings-update-error".into())
+                    .role(Role::Alert)
                     .child(error.clone())
+                    .when_some(
+                        release_url.filter(|_| matches!(install, AppInstall::Failed { .. })),
+                        |el, url| {
+                            let button = web_button(
+                                "desktop-settings-manual-download",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .aria_label("Open release page")
+                            .child("Open release page");
+                            el.child(on_press_view(button, cx, move |_, _, cx| cx.open_url(&url)))
+                        },
+                    )
                     .into_any_element(),
             );
         }
@@ -1296,7 +1522,7 @@ impl Workspace {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .font_family(SETTINGS_CODE_FONT_FAMILY)
+                                    .font_family(crate::theme::FontFace::Code.with_default(SETTINGS_CODE_FONT_FAMILY))
                                     .text_color(theme::rambutan_200())
                                     .child(command.clone()),
                             )
@@ -1316,9 +1542,11 @@ impl Workspace {
         }
         vec![div().flex().flex_col().children(rows).into_any_element()]
     }
+
+
 }
 
-fn copy_button(
+pub(super) fn copy_button(
     id: &'static str,
     text: String,
     label: &'static str,

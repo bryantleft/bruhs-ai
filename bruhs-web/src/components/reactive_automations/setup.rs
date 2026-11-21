@@ -2,7 +2,7 @@
 use super::app_poll::{AppPollFields, NewerSourceConfirm};
 use super::calendar::{calendar_source, local_time_zone, WeekdayToggles};
 use super::{
-    apply, command_button, id, milliseconds, seconds, source_kind, Check, Field, CARD, SELECT,
+    apply, command_button, id, milliseconds, once_time, seconds, source_kind, Check, Field, CARD, SELECT,
 };
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
@@ -30,7 +30,7 @@ fn new_setup() -> AutomationSetup {
     AutomationSetup {
         agent:ReactiveAgent{id:agent_id.clone(),name:String::new(),instructions:String::new(),memory:String::new(),model:bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),project_path:String::new(),enabled:true},
         source:EventSource{id:source_id.clone(),name:String::new(),enabled:true,kind:SourceKind::Folder{path:String::new(),pattern:"*.pdf".into(),recursive:true,settle_ms:2_000,poll_ms:5_000}},
-        subscription:Subscription{id:id(),agent_id,source_id,instructions:"Follow the automation's purpose for this event. Prepare a draft and flag uncertainty. Never perform writes or payments.".into(),enabled:true,auto_run:true,debounce_ms:0,throttle_ms:0,on_busy:BusyPolicy::Queue},
+        subscription:Subscription{id:id(),agent_id,source_id,instructions:"Follow the automation's purpose for this event. Prepare a draft and flag uncertainty. Never perform writes or payments.".into(),enabled:true,auto_run:true,debounce_ms:0,throttle_ms:0, webhook_filters: Vec::new(), webhook_prompt: None, webhook_security: Default::default(), webhook_dedupe: Default::default(), task_title: None, task_conversation: Default::default(), task_checkout: Default::default(), on_busy:BusyPolicy::Queue},
     }
 }
 
@@ -67,6 +67,13 @@ fn with_agent_fields(
     fields: AgentFields,
     agent_locked: bool,
 ) -> Result<AutomationSetup, String> {
+    if setup.subscription.task_title.is_some() {
+        let title = fields.name.trim();
+        if title.is_empty() {
+            return Err("Enter a task name.".into());
+        }
+        setup.subscription.task_title = Some(title.to_owned());
+    }
     if agent_locked {
         return Ok(setup);
     }
@@ -80,7 +87,9 @@ fn with_agent_fields(
     }
     bruhs_models::agent::ModelId::try_from(fields.model.clone())
         .map_err(|error| error.to_string())?;
-    setup.agent.name = fields.name;
+    if setup.subscription.task_title.is_none() {
+        setup.agent.name = fields.name;
+    }
     setup.agent.instructions = fields.purpose;
     setup.agent.project_path = fields.folder;
     setup.agent.model = fields.model;
@@ -111,6 +120,7 @@ fn starts_when_options(apps: bool, current: &str) -> Vec<(&'static str, &'static
         ("http", "A website changes"),
         ("command", "A command reports a change"),
         ("schedule", "On a repeating schedule"),
+        ("once", "Once at a set time"),
         ("calendar", "At set times of day"),
         ("webhook", "A webhook arrives"),
         ("app_event", "A meeting event occurs"),
@@ -241,7 +251,7 @@ pub(crate) fn AutomationSetupPanel(
         recursive.set(true);
         interval.set("5".into());
         settle.set("2".into());
-        name.set(setup.agent.name.clone());
+        name.set(setup.title().to_owned());
         purpose.set(setup.agent.instructions.clone());
         folder.set(setup.agent.project_path.clone());
         model.set(setup.agent.model.clone());
@@ -295,6 +305,10 @@ pub(crate) fn AutomationSetupPanel(
                 cal_times.set(times.join(", "));
                 cal_days.set(weekdays.clone());
                 cal_zone.set(time_zone.clone());
+            }
+            SourceKind::Once { due_at } => {
+                kind.set("once".into());
+                source_value.set(once_time(*due_at));
             }
             SourceKind::Webhook => kind.set("webhook".into()),
             SourceKind::AppEvent { topic } => {
@@ -387,6 +401,12 @@ pub(crate) fn AutomationSetupPanel(
                     &timeout.get_untracked(),
                 )?
             };
+            if !matches!(setup.source.kind,SourceKind::Webhook|SourceKind::Once{..}|SourceKind::Schedule{..}|SourceKind::Calendar{..}) { setup.subscription.task_conversation=Default::default(); setup.subscription.task_checkout=Default::default(); }
+            if setup.source.kind != SourceKind::Webhook {
+                setup.subscription.webhook_filters.clear();
+                setup.subscription.webhook_prompt = None;
+                setup.subscription.webhook_dedupe = Default::default();
+            }
             setup.source.enabled = true;
             setup.subscription.instructions = note.get_untracked();
             setup.subscription.enabled = true;
@@ -411,7 +431,7 @@ pub(crate) fn AutomationSetupPanel(
                     <h3 class="text-label text-rambutan-100">"Set up an automation"</h3>
                     <p class="text-body-sm text-rambutan-400">"Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."</p>
                     <Show when=move ||agent_filter.with_value(Option::is_some)><p class="mt-2 text-label-sm text-rambutan-400">"This routine runs as this bruh. Change its job and model in Settings."</p></Show>
-                    <div class="mt-3 grid gap-3 sm:grid-cols-2"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div></Show>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-2"><Show when=move || agent_filter.with_value(Option::is_none) || base.with(|setup| setup.as_ref().is_some_and(|s| s.subscription.task_title.is_some()))><Field label="Automation name" value=name /></Show><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div></Show>
                         <label class=STARTS_WHEN><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);
                         // Changing a newer Bruhs' source replaces it: ask first.
                         if kind.get_untracked()=="other" && value!="other"{change_kind.set(Some(value));kind.set("other".into());return;}
@@ -423,6 +443,7 @@ pub(crate) fn AutomationSetupPanel(
                             "folder"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /></div>}.into_any(),
                             "http"=>view!{<div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div>}.into_any(),
                             "command"=>view!{<div class="sm:col-span-2"><Field label="Command to run" value=source_value multiline=true /><p class="mt-1 text-label-sm text-rambutan-400">"This command runs on your machine once you enable the automation."</p></div>}.into_any(),
+                            "once"=>view!{<Field label="Run at (date and time)" value=source_value />}.into_any(),
                             "schedule"=>view!{<Field label="Run every, in seconds" value=interval />}.into_any(),
                             "calendar"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div>}.into_any(),
                             "app_event"=>view!{<label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Meeting event"</span><select aria-label="Meeting event" class=SELECT prop:value=move ||source_value.get() on:change=move |event|source_value.set(event_target_value(&event))>{bruhs_models::reactive::APP_EVENT_TOPICS.into_iter().map(|(topic,label)|view!{<option value=topic>{label}</option>}).collect_view()}</select></label>}.into_any(),
@@ -456,7 +477,7 @@ pub(crate) fn AutomationSetupPanel(
                 let source_error=snapshot.with(|s|s.as_ref().and_then(|s|s.source_statuses.iter().find(|status|status.source_id==setup.source.id)).and_then(|status|status.error.clone()));
                 // The agent shows its face, as its bruh, in its live state.
                 let (look,face_status)=snapshot.with(|s|s.as_ref().and_then(|s|s.bruhs.iter().find(|bruh|bruh.agent_id==setup.agent.id)).map_or_else(||(BruhLook::default(),BruhStatus::Asleep),|bruh|(bruh.look.clone(),bruh.status)));
-                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><BruhFace size=f64::from(RAIL_FACE_PX) look=look status=face_status /><h3 class="min-w-0 break-words text-label text-rambutan-100">{setup.agent.name}</h3></div><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind,apps.with(|apps|poll_label(&setup.source.kind,apps.as_ref())).as_deref())}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div>{with_memory.then(||view!{<super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send />})}</article>}
+                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><BruhFace size=f64::from(RAIL_FACE_PX) look=look status=face_status /><h3 class="min-w-0 break-words text-label text-rambutan-100">{setup.title().to_owned()}</h3></div><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind,apps.with(|apps|poll_label(&setup.source.kind,apps.as_ref())).as_deref())}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div>{with_memory.then(||view!{<super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send />})}</article>}
             }).collect_view()}
         </div>
     }
@@ -468,6 +489,7 @@ pub(super) fn source_summary(kind: &SourceKind, account: Option<&str>) -> String
         SourceKind::Folder { path, pattern, .. } => format!("Folder: {path} ({pattern})"),
         SourceKind::Http { url, .. } => format!("Website: {url}"),
         SourceKind::Command { command, .. } => format!("Command: {command}"),
+        SourceKind::Once { due_at } => format!("Once · {}", once_time(*due_at)),
         SourceKind::Schedule { every_ms } => format!("Every {} seconds", seconds(*every_ms)),
         SourceKind::Calendar {
             times,
@@ -500,6 +522,7 @@ fn source_details(kind: &SourceKind, account: Option<&str>) -> String {
         SourceKind::Folder{path,pattern,recursive,settle_ms,poll_ms}=>format!("Folder: {path}\nFiles: {pattern}\nSubfolders: {}\nFile settle time: {} seconds\nCheck interval: {} seconds",if *recursive{"Included"}else{"Excluded"},seconds(*settle_ms),seconds(*poll_ms)),
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
         SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\n{COMMAND_SOURCE_ACCESS}",seconds(*poll_ms),seconds(*timeout_ms)),
+        SourceKind::Once { due_at } => format!("Once · {}", once_time(*due_at)),
         SourceKind::Schedule{every_ms}=>format!("Repeat every {} seconds",seconds(*every_ms)),
         SourceKind::Calendar{times,weekdays,time_zone}=>describe_calendar(times,weekdays,time_zone),
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
@@ -525,7 +548,7 @@ fn review_fields_with(
     account: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     vec![
-        ("Name", setup.agent.name.clone()),
+        ("Name", setup.title().to_owned()),
         ("Purpose", setup.agent.instructions.clone()),
         ("Event source name", setup.source.name.clone()),
         (
@@ -688,6 +711,7 @@ mod tests {
     #[test]
     fn a_routine_saved_from_a_bruh_page_sends_the_bruh_unchanged() {
         let mut bruh = new_setup().agent;
+        bruh.name = "Release assistant".into();
         bruh.enabled = false;
         bruh.model = "gpt-5.1-codex".into();
         bruh.project_path = "/home/bruhs/b1/work".into();
@@ -715,6 +739,14 @@ mod tests {
         };
         assert_eq!(automation.agent, bruh);
         assert_eq!(automation.subscription.agent_id, bruh.id);
+
+        let mut named = (*automation).clone();
+        named.subscription.task_title = Some("Morning review".into());
+        for locked in [true, false] {
+            let saved = with_agent_fields(named.clone(), edited(), locked).unwrap();
+            assert_eq!(saved.title(), "Renamed");
+            assert_eq!(saved.agent.name, bruh.name);
+        }
 
         // The Automations page still edits the agent and enables it.
         let free = with_agent_fields(new_setup(), edited(), false).unwrap();

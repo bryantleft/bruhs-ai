@@ -1,3 +1,6 @@
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
+use gpui::prelude::*;
+use gpui::*;
 use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_ui::resizable::{
     h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
@@ -6,9 +9,6 @@ use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
 use bruhs_ui::{ActiveTheme, Icon, IconName, WindowExt};
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
-use gpui::prelude::*;
-use gpui::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
@@ -28,8 +28,8 @@ use crate::views::native_blur::BlurScrimHandle;
 use crate::views::sidebar_order::{relative_age, sidebar_order, ThreadMeta};
 use crate::views::{
     chat::{
-        ChatView, ChatViewEvent, ComposerPrefs, CyclePermissionMode, DesktopToolCall, Message,
-        MessageRole, PermissionMode, TurnState,
+        ChatView, ChatViewEvent, ChatWidth, ComposerPrefs, CyclePermissionMode, DesktopToolCall, Message,
+        MessageRole, PermissionMode, SendShortcut, TurnState,
     },
     diff_panel::{turn_files_from_messages, DiffPanelEvent, DiffPanelView},
     dropdown::{dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler},
@@ -59,7 +59,7 @@ use bruhs_models::{
     InboxConversation, InboxMessage, InboxParticipant, InboxSource, KnowledgeCitation,
     KnowledgeDocument, KnowledgeLink, KnowledgeLinkKind, LifeContext, PersonProfile,
     RelationshipItemKind, RelationshipProfile, SchedulingLink, SchedulingPreferences, SourceClip,
-    TodaySnapshot, WorkItem, WorkItemPlanning,
+    TodaySnapshot, WorkItem, WorkItemPlanning, WorkItemSource,
 };
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::text_field::TextInput;
@@ -77,7 +77,7 @@ mod capture_ui;
 mod chat_events_tests;
 mod connected_inbox;
 mod crew_ui;
-mod date_picker_ui;
+pub(super) mod date_picker_ui;
 mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
@@ -91,6 +91,7 @@ mod zoom_tests;
 pub(crate) use import_ui::portable_messages;
 mod inbox_ui;
 mod keybindings_ui;
+mod keybinding_file;
 mod knowledge_storage;
 mod knowledge_ui;
 mod library_pages_ui;
@@ -114,6 +115,34 @@ mod panels_ui;
 mod performance_tests;
 mod persisted_enum;
 mod persistence;
+mod archive;
+mod clone_project;
+mod project_defaults;
+mod project_actions;
+mod project_art;
+mod project_order;
+mod delivery_preferences;
+mod source_writer;
+mod environments;
+mod diagnostics;
+mod device_settings;
+mod telemetry;
+mod maintenance;
+mod font_settings;
+mod voice_dictionary;
+mod voice_runtime;
+mod voice_models;
+mod voice_cloud;
+mod voice_cleanup;
+mod voice_shortcut;
+mod microphone_test;
+mod voice_settings;
+mod snapshots;
+mod snooze_options;
+mod quota_settings;
+mod appearance;
+mod browser_settings;
+mod thread_notifications;
 mod person_merge;
 #[cfg(test)]
 mod project_picker_tests;
@@ -141,12 +170,28 @@ mod thread_auth_tests;
 #[cfg(test)]
 mod thread_catalog_tests;
 mod thread_link_ui;
+mod thread_details;
+mod thread_forks;
 mod thread_snapshot;
+mod thread_titles;
+mod welcome;
+mod labs;
+mod pull_settlement;
+mod provider_health;
+mod text_generators;
+mod quit_shortcut;
+mod secret_source_settings;
+mod panel_motion;
+mod environment_mark;
+mod fallback_model;
+mod worktree_naming;
+mod worktree_storage;
 mod threads_ui;
 mod today_ui;
 mod updates_ui;
 mod view_restore;
 mod whiteboard_ui;
+mod work_item_handoff_ui;
 use calendar_ui::*;
 use event_dialog_ui::*;
 use modal_ui::*;
@@ -185,6 +230,7 @@ actions!(
         OpenTasksView,
         OpenCalendarView,
         OpenSettings,
+        CaptureWindow,
         OpenProjectPicker,
         PinThread,
         SettleThread,
@@ -343,7 +389,27 @@ struct DesktopWorkItem {
     priority: DesktopPriority,
     due_date: Option<String>,
     planning: WorkItemPlanning,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<WorkItemSource>,
     updated_at: EpochMs,
+}
+
+impl DesktopWorkItem {
+    fn to_work_item(&self) -> WorkItem {
+        WorkItem {
+            id: self.id.clone(),
+            project_id: self.project_id.clone(),
+            title: self.title.clone(),
+            description: self.description.clone(),
+            status: self.status,
+            priority: self.priority,
+            due_date: self.due_date.clone(),
+            planning: self.planning.clone(),
+            source: self.source.clone(),
+            created_at: 0,
+            updated_at: self.updated_at.as_millis(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -424,6 +490,7 @@ enum TaskCreateMenu {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Overlay {
     Capture,
+    Welcome,
     Settings {
         /// Id of the settings dropdown whose listbox is open, if any.
         open_dropdown: Option<&'static str>,
@@ -453,8 +520,10 @@ enum Overlay {
     },
     /// The sidebar Update pill's "Update N providers?".
     UpdateConfirm,
+    ThemeEditor(appearance::ThemeEditor),
+    RemoveThemeVariants(appearance::VariantRemoval),
     /// "Restart to update" for a downloaded release.
-    RestartConfirm,
+    RestartConfirm { previous: Option<Box<Overlay>> },
     /// The thread menu's "Custom…" snooze (web "Snooze until").
     SnoozeCustom {
         thread_id: String,
@@ -538,6 +607,7 @@ enum PaletteMode {
 #[derive(Clone, Debug)]
 enum PaletteItem {
     Action(&'static CommandAction),
+    Project {path:String,name:String},
     Thread {
         id: String,
         title: String,
@@ -686,8 +756,25 @@ fn today_date() -> NaiveDate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SettingsSection {
     General,
+    Appearance,
+    Chat,
+    Diffs,
+    Projects,
+    SourceControl,
+    Maintenance,
+    Diagnostics,
+    Labs,
+    Worktrees,
+    Browser,
+    ScheduledTasks,
+    Environments,
+    Devices,
+    Access,
+    Voice,
+    SnapShots,
+    Threads,
+    Archived,
     Updates,
-    Beta,
     Vault,
     Apps,
     Backup,
@@ -762,6 +849,7 @@ struct DesktopThread {
     updated_at_ms: EpochMs,
     pinned: bool,
     settled: bool,
+    settled_at_ms: Option<EpochMs>,
     /// Drag order within Pinned. `None` sits above arranged pins.
     pin_rank: Option<i64>,
     /// Drag order within Active. Activity does not clear this.
@@ -795,6 +883,12 @@ struct PersistedWorkspaceState {
     calendar_anchor: Option<String>,
     selected_calendar_event_id: Option<String>,
     threads: Vec<PersistedThread>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    title_requests: BTreeMap<String, thread_titles::PendingTitle>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    archived_threads: Vec<archive::ArchivedRecord>,
     projects: Vec<PersistedProject>,
     work_items: Vec<PersistedWorkItem>,
     calendar_events: Vec<PersistedCalendarEvent>,
@@ -818,6 +912,37 @@ struct PersistedWorkspaceState {
     scheduling_preferences: SchedulingPreferences,
     life_context: LifeContext,
     automation_state: AutomationState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_start_folder: Option<String>,
+    #[serde(skip_serializing_if="skip_false")]
+    clone_host_folders: bool,
+    #[serde(skip_serializing_if="Option::is_none")]
+    idle_settle_days: Option<u16>,
+    pull_preferences: pull_settlement::Preferences,
+    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
+    known_thread_pulls: BTreeMap<String,pull_settlement::Observation>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    maintenance:Option<maintenance::MaintenancePreferences>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    project_defaults: BTreeMap<String, project_defaults::ProjectDefaults>,
+    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    project_actions: BTreeMap<String, Vec<project_actions::ProjectAction>>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    snooze_options: Option<Vec<snooze_options::Choice>>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    quota_prefs:Option<quota_settings::Preferences>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    fallback_model:Option<String>,
+    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    provider_resets:BTreeMap<String,i64>,
+    #[serde(default,skip_serializing_if="project_order::ProjectList::empty")]
+    project_list:project_order::ProjectList,
+    #[serde(skip_serializing_if="Option::is_none")]
+    response_stream:Option<super::chat::response_stream::Mode>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    text_generation_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    browser_preferences: Option<super::browser_preferences::BrowserPreferences>,
     active_project: Option<PersistedProjectLocation>,
     recent_projects: Vec<PersistedProjectLocation>,
     sidebar_settled_open: Option<bool>,
@@ -828,8 +953,18 @@ struct PersistedWorkspaceState {
     crew_rail_open: Option<bool>,
     /// Missing means the Working section is on.
     sidebar_working_section: Option<bool>,
+    labs_sidebar: labs::Folders,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_notifications: Option<thread_notifications::NotificationSettings>,
+    confirm_thread_archive: Option<bool>,
+    confirm_thread_unpin: Option<bool>,
+    confirm_thread_delete: Option<bool>,
+    #[serde(default)]
+    quit_mode:quit_shortcut::Mode,
     /// Missing means update checks are on (web `bruhs.updateChecks`).
     update_checks: Option<bool>,
+    #[serde(default)]
+    update_track: Option<updates_ui::UpdateTrack>,
     title_instructions: Option<String>,
     title_instructions_by_project: BTreeMap<String, String>,
     editor_id: Option<String>,
@@ -853,6 +988,40 @@ struct PersistedWorkspaceState {
     /// `steer`, or absent for queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     follow_up: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    send_shortcut: Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    slash_skills:Option<bool>,
+    tool_visibility: crate::views::chat::tool_visibility::Visibility,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screen_reader: Option<crate::views::chat::screen_reader::ReaderPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_width: Option<ChatWidth>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    appearance: Option<appearance::DeviceAppearance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    custom_themes: Option<Arc<appearance::ThemeLibrary>>,
+    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
+    thread_origins: BTreeMap<String,thread_details::Origin>,
+    #[serde(default, skip_serializing_if="std::collections::BTreeSet::is_empty")]
+    hidden_inline_thread_details: std::collections::BTreeSet<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    fonts:Option<font_settings::DeviceFonts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snapshots: Option<snapshots::Preferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dictation_prefs: Option<crate::voice_capture::DictationPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree_prefs: Option<bruhs_models::logic::run_place::WorktreePreferences>,
+    worktree_retention: worktree_storage::WorktreeRetention,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pending_scratch_cleanups: Vec<worktree_storage::ScratchCleanup>,
+    cleanup_deleted_worktrees:bool,
+    cleanup_keep_when: bruhs_models::coordination::worktree::KeepWhen,
+    health_interval:u32,
+    branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff_preferences: Option<crate::views::diff_panel::DiffPreferences>,
     /// Claude `--autocompact` token count. Absent omits the flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     claude_autocompact: Option<String>,
@@ -881,6 +1050,8 @@ struct PersistedWorkspaceState {
     /// Shortcut rules. Empty means the shipped defaults.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
+    /// Records the addition of the native Settings shortcut once per device.
+    keybinding_schema: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -892,6 +1063,8 @@ struct PersistedThread {
     model_id: String,
     #[serde(default, with = "persisted_enum::required")]
     permission_mode: PermissionMode,
+    #[serde(default,skip_serializing_if="skip_false")]
+    project_permission_override: bool,
     messages: Vec<PersistedMessage>,
     /// Last activity. Builds before 2026-10 also wrote a placeholder
     /// `updated_at: "now"` string, which is ignored on read.
@@ -901,6 +1074,10 @@ struct PersistedThread {
     pinned: bool,
     #[serde(default)]
     settled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settled_at_ms: Option<EpochMs>,
+    #[serde(default, skip_serializing_if = "skip_false")]
+    cleanup_busy: bool,
     #[serde(default)]
     pin_rank: Option<i64>,
     #[serde(default)]
@@ -928,12 +1105,16 @@ struct PersistedThread {
     /// until a session holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     import_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fork: Option<std::sync::Arc<crate::views::chat::ForkContext>>,
     /// Local `/goal` text. Missing on states saved before goals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     goal: Option<bruhs_models::logic::commands::ThreadGoal>,
     /// Worktree this thread runs in, once the first send created or reused one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     worktree_path: Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    project_settings_root: Option<String>,
     /// Effort applied on the last successful send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     effort: Option<String>,
@@ -959,6 +1140,7 @@ struct ShelfSnapshot {
     id: String,
     pinned: bool,
     settled: bool,
+    settled_at_ms: Option<EpochMs>,
     pin_rank: Option<i64>,
     active_rank: Option<i64>,
     snoozed_until_ms: Option<i64>,
@@ -1030,6 +1212,8 @@ struct PersistedWorkItem {
     due_date: Option<String>,
     #[serde(default)]
     planning: WorkItemPlanning,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<WorkItemSource>,
     /// Builds before 2026-10 wrote the placeholder `"now"`, which reads as
     /// the epoch: the time was never recorded.
     #[serde(deserialize_with = "bruhs_models::time::deserialize_legacy")]
@@ -1186,6 +1370,11 @@ pub struct Workspace {
     files_generation: u64,
     pull_panel_visible: bool,
     branch_pull: Option<DesktopBranchPull>,
+    known_thread_pulls: BTreeMap<String,pull_settlement::Observation>,
+    pull_preferences: pull_settlement::Preferences,
+    pull_check_times: BTreeMap<String,std::time::Instant>,
+    pull_lifecycle_task: Option<Task<()>>,
+    linked_pull: Option<(Option<String>, DesktopBranchPull)>,
     opened_pull_key: Option<String>,
     pull_generation: u64,
     last_panel_surface: RightPanelSurface,
@@ -1252,10 +1441,17 @@ pub struct Workspace {
     backup_settings: Entity<backup_settings::BackupSettings>,
     /// Provider CLI and app update checks (Settings → Updates, sidebar button).
     updates: Entity<updates_ui::DesktopUpdates>,
-    /// Scroll position of the stacked settings sections.
+    settings_search: Entity<InputState>,
+    settings_search_results: Vec<SettingsHit>,
+    settings_search_catalog: Vec<SettingsHit>,
+    settings_search_index: usize,
+    settings_search_open: bool,
+    settings_nav_scroll: ScrollHandle,
+    settings_nav_reveal: Rc<std::cell::Cell<bool>>,
+    settings_search_inventory: RefCell<Option<Vec<SettingsHit>>>,
+    settings_search_anchor: Option<SettingsReveal>,
+    /// Scroll position within the selected section.
     settings_scroll: ScrollHandle,
-    /// Section to scroll to once the sections have laid out (web `jump`).
-    settings_scroll_target: Option<SettingsSection>,
     /// Last-frame bounds of each settings slider track, for pointer hit-testing.
     settings_slider_bounds: Vec<Rc<std::cell::Cell<Option<Bounds<Pixels>>>>>,
     settings_slider_drag: Option<settings_ui::SettingsSlider>,
@@ -1279,6 +1475,7 @@ pub struct Workspace {
     day_plan_proposal: Option<bruhs_models::DayPlanProposal>,
     day_plan_undo: Option<DesktopAppliedPlan>,
     day_plan_error: Option<String>,
+    work_item_handoff: work_item_handoff_ui::HandoffUi,
     /// An applied or undone plan waits for the workspace save that carries
     /// it; a failed save says so on Today (web `DayPlanState::busy`).
     day_plan_saving: bool,
@@ -1311,6 +1508,13 @@ pub struct Workspace {
     crew_scroll: ScrollHandle,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
+    labs_sidebar: labs::Folders,
+    thread_notifications: thread_notifications::NotificationSettings,
+    confirm_thread_archive: bool,
+    confirm_thread_unpin: bool,
+    confirm_thread_delete: bool,
+    quit_gesture:quit_shortcut::Gesture,
+    voice_press: Option<voice_shortcut::Press>,
     title_instructions: String,
     title_instructions_by_project: BTreeMap<String, String>,
     title_instructions_input: Entity<TextareaState>,
@@ -1319,6 +1523,13 @@ pub struct Workspace {
     title_project_instructions_input: Entity<TextareaState>,
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
+    keymap_file:keybinding_file::KeymapFile,
+    keybinding_edit_open: bool,
+    keybinding_choosing_command: bool,
+    keybinding_recording: bool,
+    keybinding_new_for: Option<usize>,
+    keybinding_record_focus: FocusHandle,
+    keybinding_filter: Entity<InputState>,
     keybinding_key_input: Entity<InputState>,
     keybinding_when_input: Entity<InputState>,
     /// Shortcuts currently installed, so the next edit can unbind them.
@@ -1336,6 +1547,7 @@ pub struct Workspace {
     sidebar_undo: Option<SidebarUndo>,
     sidebar_undo_generation: u32,
     threads: Vec<DesktopThread>,
+    archived_threads: Vec<archive::ArchivedThread>,
     workflow_window: gpui::AnyWindowHandle,
     automation_pending: bool,
     active_thread_id: Option<String>,
@@ -1347,6 +1559,68 @@ pub struct Workspace {
     claude_effort: Option<String>,
     /// Stored follow-up. Claude can steer a running turn. Codex still queues.
     follow_up_steer: bool,
+    send_shortcut: SendShortcut,
+    slash_skills:bool,
+    tool_visibility: crate::views::chat::tool_visibility::Visibility,
+    screen_reader: crate::views::chat::screen_reader::ReaderPreferences,
+    last_reader_title: Option<String>,
+    chat_width: ChatWidth,
+    appearance: appearance::DeviceAppearance,
+    custom_themes: Arc<appearance::ThemeLibrary>,
+    theme_import_notice: Option<(String, std::time::Instant)>,
+    theme_navigation: appearance::CollectionNavigation,
+    details: thread_details::DetailsUi,
+    thread_origins: BTreeMap<String,thread_details::Origin>,
+    fonts:font_settings::DeviceFonts,
+    available_fonts:Vec<String>,
+    snapshots: snapshots::Preferences,
+    picking_window: bool,
+    capture_binding: snapshots::CaptureBinding,
+    delivery_preferences:delivery_preferences::HostPreferences,
+    environments: environments::Environments,
+    diagnostics: diagnostics::Monitor,
+    local_tools: device_settings::Access,
+    command_launcher: Option<Result<crate::launcher::Status,String>>,
+    command_launcher_busy: bool,
+    telemetry:telemetry::Editor,
+    dictation_prefs: crate::voice_capture::DictationPreferences,
+    voice_dictionary_editor: voice_dictionary::DictionaryEditor,
+    voice_model_input: Entity<InputState>,
+    voice_cleanup_fields: voice_cleanup::Fields,
+    voice_models: voice_models::Browser,
+    voice_cloud: voice_cloud::Editor,
+    voice_devices: Option<Result<Vec<String>, String>>,
+    worktree_prefs: bruhs_models::logic::run_place::WorktreePreferences,
+    worktree_retention: worktree_storage::WorktreeRetention,
+    pending_scratch_cleanups: Vec<worktree_storage::ScratchCleanup>,
+    dispatched_scratch_cleanups: std::collections::BTreeSet<String>,
+    cleanup_deleted_worktrees:bool,
+    cleanup_keep_when: bruhs_models::coordination::worktree::KeepWhen,
+    health_interval:u32,
+    branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
+    health_interval_input:Entity<InputState>,
+    generators: text_generators::GeneratorSettings,
+    health_result:Option<[&'static str;2]>,
+    health_timer:Option<Task<()>>,
+    health_check:Option<Task<()>>,
+    retention_editor: Option<worktree_storage::retention::DaysEditor>,
+    location_input: Entity<InputState>,
+    location_status: Option<String>,
+    worktree_cleanup_status:Option<String>,
+    settings_advanced: std::collections::BTreeSet<&'static str>,
+    location_busy:bool,
+    #[cfg(target_os = "macos")]
+    fast_checkout: labs::FastCheckout,
+    branch_prefix_input: Entity<InputState>,
+    branch_instructions_input: Entity<TextareaState>,
+    branch_editor_scope: String,
+    branch_prefix_edited: bool,
+    branch_instructions_edited: bool,
+    voice_device_generation: u64,
+    voice_testing: bool,
+    microphone_test: microphone_test::MicrophoneTest,
+    voice_runtime: voice_runtime::Runtime,
+    voice_test_result: Option<String>,
     /// Claude `--autocompact`. `None` omits the flag.
     claude_autocompact: Option<String>,
     autocompact_input: Entity<InputState>,
@@ -1400,15 +1674,45 @@ pub struct Workspace {
     timegrid_drag: Option<DesktopTimegridDragState>,
     active_project: Option<DesktopProjectLocation>,
     recent_projects: Vec<DesktopProjectLocation>,
+    project_start_folder_input: Entity<InputState>,
+    clone_host_folders: bool,
+    clone_editor: clone_project::CloneEditor,
+    idle_settle_days: u16,
+    maintenance:maintenance::Maintenance,
+    project_defaults: BTreeMap<String, project_defaults::ProjectDefaults>,
+    settings_project_scope: String,
+    project_actions: BTreeMap<String, Vec<project_actions::ProjectAction>>,
+    action_editor: project_actions::ActionEditor,
+    idle_action_runs: Option<BTreeMap<String, EpochMs>>,
+    snooze_editor:snooze_options::Editor,
+    quota_prefs:quota_settings::Preferences,
+    project_list:project_order::ProjectList,
+    response_stream:super::chat::response_stream::Mode,
+    text_generation_model: Option<String>,
+    title_requests: BTreeMap<String, thread_titles::PendingTitle>,
+    title_request_serial: u64,
+    task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
+    quota_timers:BTreeMap<String,Task<()>>,
+    fallback_model:Option<String>,
+    provider_resets:BTreeMap<String,i64>,
+    capacity_task:Option<Task<()>>,
+    snooze_options:Option<Vec<snooze_options::Choice>>,
+    browser_search_url_input: Entity<InputState>,
+    viewport_fields:[Entity<InputState>;2],
+    #[cfg(target_os = "macos")]
+    browser_profile_editor: browser_settings::ProfileEditor,
     project_picker_current_path: String,
     project_picker_current_name: String,
     project_picker_parent_path: Option<String>,
     project_picker_dirs: Vec<DesktopProjectLocation>,
     project_picker_error: Option<String>,
+    project_picker_start_warning: Option<String>,
     /// Reading a directory or resolving a picked project off the UI thread.
     project_picker_task: Option<Task<()>>,
     project_picker_scroll: ScrollHandle,
     workspace_focus_handle: FocusHandle,
+    #[cfg(target_os = "macos")]
+    last_embedded_shell_focus: Option<FocusHandle>,
     palette_return_focus: Option<(AppView, FocusHandle)>,
     modal_start_focus_handle: FocusHandle,
     modal_end_focus_handle: FocusHandle,
@@ -1540,6 +1844,8 @@ pub struct Workspace {
     terminal_drawer_height: f32,
     /// Right panel width in px, dragged at its left edge (web `RightPanelWidth`).
     right_panel_width: f32,
+    sidebar_motion:panel_motion::Motion,
+    right_panel_motion:panel_motion::Motion,
     right_panel_split_state: Entity<ResizableState>,
     /// Page zoom; see [`crate::zoom`].
     zoom: f32,
@@ -1613,6 +1919,32 @@ impl Workspace {
         let day_plan_loaded = persisted.is_some() || persistence_error.is_none();
         let saved_records_loaded = day_plan_loaded;
         let mut subscriptions = Vec::new();
+        subscriptions.push(cx.observe_window_activation(window, |this, window, cx| {
+            this.cancel_quit_on_blur(window, cx);
+            if !window.is_window_active() {this.release_voice_shortcut(cx);}
+        }));
+        let workspace_for_appearance = cx.weak_entity();
+        subscriptions.push(window.observe_window_appearance(move |window, cx| {
+            let _ = workspace_for_appearance.update(cx, |this, cx| {
+                if this.appearance.scheme == appearance::ColorScheme::System { this.apply_device_appearance(window, cx); }
+            });
+        }));
+        let settings_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
+        subscriptions.push(cx.subscribe_in(&settings_search, window, |this: &mut Self, field, event: &InputEvent, window, cx| {
+            match event {
+                InputEvent::Focus if !this.settings_search_open => {
+                    this.settings_search_open = true;
+                    cx.notify();
+                }
+                InputEvent::Blur if this.settings_search_open && field.read(cx).value().trim().is_empty() => {
+                    this.settings_search_open = false;
+                    cx.notify();
+                }
+                InputEvent::Change => this.refresh_settings_search(cx),
+                InputEvent::PressEnter { .. } => this.open_settings_hit(this.settings_search_index, window, cx),
+                _ => {}
+            }
+        }));
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
         let record_picker = record_picker_ui::RecordPickerUi::new(window, cx, &mut subscriptions);
@@ -1690,6 +2022,36 @@ impl Workspace {
                 cx,
                 &mut subscriptions,
             );
+        let browser_prefs = persisted.as_ref().and_then(|p| p.browser_preferences.clone()).unwrap_or_default();
+        let browser_search_url_input = Self::new_browser_settings(browser_prefs, window, cx, &mut subscriptions);
+        let viewport_fields=Self::new_viewport_fields(window,cx,&mut subscriptions);
+        let health_interval=persisted.as_ref().map(|p|p.health_interval).unwrap_or(300);
+        let health_interval=if health_interval==0{0}else{health_interval.clamp(30,86400)};
+        let health_interval_input=Self::new_health_interval(health_interval,window,cx,&mut subscriptions);
+        let branch_naming=persisted.as_ref().map(|p|p.branch_naming.clone()).unwrap_or_default();
+        let voice_cleanup_fields=voice_cleanup::Fields::new(&persisted.as_ref().and_then(|state|state.dictation_prefs.as_ref()).map(|p|p.cleanup.clone()).unwrap_or_default(),window,cx,&mut subscriptions);
+        let voice_cloud = voice_cloud::Editor::new(window,cx,&mut subscriptions);
+        let voice_models = voice_models::Browser::new(window,cx,&mut subscriptions);
+        let voice_model_input = cx.new(|cx| InputState::new(window,cx).placeholder("Model ID from your server")
+            .default_value(persisted.as_ref().and_then(|state|state.dictation_prefs.as_ref()).map(|p|p.remote_model.clone()).unwrap_or_default()));
+        subscriptions.push(cx.subscribe_in(&voice_model_input,window, |this: &mut Self,field,event:&InputEvent,_,cx|{
+            if matches!(event,InputEvent::Change) {
+                let value=field.read(cx).value().to_string();
+                if this.dictation_prefs.remote_model!=value {this.dictation_prefs.remote_model=value;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);}
+            }
+        }));
+        let location_input=cx.new(|cx|InputState::new(window,cx).placeholder("Default location").default_value(bruhs_core::worktrees::locations::selected_parent().ok().flatten().map(|p|p.to_string_lossy().into_owned()).unwrap_or_default()));
+        let (branch_prefix_input,branch_instructions_input)=Self::new_branch_fields(&branch_naming,window,cx,&mut subscriptions);
+        let project_start_folder_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("~/").default_value(
+                persisted.as_ref().and_then(|p| p.project_start_folder.clone()).unwrap_or_default()
+            )
+        });
+        subscriptions.push(cx.subscribe(&project_start_folder_input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.persist(cx);
+            }
+        }));
         let saved_autocompact = persisted
             .as_ref()
             .and_then(|state| autocompact_flag(state.claude_autocompact.as_deref()))
@@ -1701,7 +2063,10 @@ impl Workspace {
                 .as_ref()
                 .map(|state| state.keybindings.clone())
                 .unwrap_or_default(),
+            persisted.as_ref().map_or(0, |state| state.keybinding_schema),
         );
+        let keybinding_filter = cx.new(|cx| InputState::new(window,cx).placeholder("Search keybindings"));
+        subscriptions.push(redraw_on_edit(&keybinding_filter, window, cx));
         let (keybinding_key_input, keybinding_when_input) =
             keybindings_ui::new_keybinding_inputs(&keybindings, window, cx, &mut subscriptions);
         let (modal_start_focus_handle, modal_end_focus_handle) = Self::new_modal_focus_handles(cx);
@@ -1715,6 +2080,9 @@ impl Workspace {
             right_panel_split_state,
             preview_panel,
         } = Self::new_panels(persisted.as_ref(), window, cx, &mut subscriptions);
+        if let Some(prefs) = persisted.as_ref().and_then(|state| state.diff_preferences) {
+            diff_panel.update(cx, |panel, cx| panel.set_preferences(prefs, cx));
+        }
         let meetings_hub =
             Self::new_meetings_hub(persisted.as_ref(), window, cx, &mut subscriptions);
         let meetings_ui::PeopleInputs {
@@ -1797,7 +2165,10 @@ impl Workspace {
             }
         }
 
-        cx.defer_in(window, |this, _, cx| this.drive_background_automations(cx));
+        cx.defer_in(window, |this, _, cx| {
+            this.dispatch_saved_scratch(this.pending_scratch_cleanups.clone(), cx);
+            this.drive_background_automations(cx);
+        });
         cx.defer_in(window, |this, _, cx| this.refresh_branch_pull(cx));
         let run_choice = persisted
             .as_ref()
@@ -1883,6 +2254,11 @@ impl Workspace {
             files_generation: 0,
             pull_panel_visible: false,
             branch_pull: None,
+            known_thread_pulls: persisted.as_ref().map(|p|p.known_thread_pulls.clone()).unwrap_or_default(),
+            pull_preferences: persisted.as_ref().map(|p|p.pull_preferences).unwrap_or_default(),
+            pull_check_times: Default::default(),
+            pull_lifecycle_task: None,
+            linked_pull: None,
             opened_pull_key: None,
             pull_generation: 0,
             last_panel_surface: RightPanelSurface::Tasks,
@@ -1912,6 +2288,9 @@ impl Workspace {
             automation_state,
             reactive_automations: {
                 let panel = cx.new(crate::views::reactive_automations::ReactiveAutomations::new);
+                subscriptions.push(cx.observe(&panel, |this,_,cx| {
+                    if this.details.open_for_active_thread(this.active_thread_id.as_deref()) || (this.settings_visible() && matches!(this.settings_section, SettingsSection::General | SettingsSection::ScheduledTasks)) { cx.notify(); }
+                }));
                 subscriptions.push(cx.subscribe(
                     &panel,
                     |this,
@@ -1974,6 +2353,14 @@ impl Workspace {
                         this.open_room_dialog(Some(event.room_id.clone()), window, cx)
                     },
                 ));
+                subscriptions.push(cx.subscribe_in(&panel, window, |this, _, event: &crate::views::reactive_automations::TaskThreadLocation, window, cx| {
+                    this.activate_sidebar_view(AppView::Bruh { agent_id: event.agent_id.clone() }, window, cx);
+                    this.task_thread_view = Some(event.clone());
+                    this.persist_and_notify(cx);
+                }));
+                subscriptions.push(cx.subscribe_in(&panel, window, |this, _, event, window, cx| {
+                    this.task_thread_deletion(event,window,cx);
+                }));
                 // A crew change can end a held `message_bruh` call.
                 subscriptions.push(cx.subscribe(
                     &panel,
@@ -2021,9 +2408,20 @@ impl Workspace {
             local_servers: Vec::new(),
             local_servers_loading: false,
             local_servers_generation: 0,
+            thread_origins: persisted.as_ref().map(|p|p.thread_origins.clone()).unwrap_or_default(),
+            details: {
+                let mut details = thread_details::DetailsUi::new(cx);
+                if let Some(state) = &persisted { details.hidden_inline.clone_from(&state.hidden_inline_thread_details); }
+                details
+            },
             settings_section: SettingsSection::General,
-            vault_settings: cx
-                .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx)),
+            vault_settings: {
+                let settings = cx
+                    .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx));
+                let sources = settings.read(cx).secret_sources();
+                cx.observe(&sources, |_, _, cx| cx.notify()).detach();
+                settings
+            },
             apps_settings: cx
                 .new(|cx| apps_settings::AppsSettings::new(meetings_client(), window, cx)),
             backup_settings: cx
@@ -2033,12 +2431,20 @@ impl Workspace {
                     .as_ref()
                     .and_then(|state| state.update_checks)
                     .unwrap_or(true);
-                let updates = cx.new(|cx| updates_ui::DesktopUpdates::new(enabled, cx));
+                let updates = cx.new(|cx| updates_ui::DesktopUpdates::new(enabled, persisted.as_ref().and_then(|s|s.maintenance.as_ref()).is_none_or(|m|m.provider_checks), persisted.as_ref().and_then(|s| s.update_track).unwrap_or_else(|| updates_ui::UpdateTrack::for_installed(env!("BRUHS_RELEASE_VERSION"))), cx));
                 cx.observe(&updates, |_, _, cx| cx.notify()).detach();
                 updates
             },
+            settings_search,
+            settings_search_results: Vec::new(),
+            settings_search_catalog: Vec::new(),
+            settings_search_index: 0,
+            settings_search_open: false,
+            settings_nav_scroll: ScrollHandle::new(),
+            settings_nav_reveal: Default::default(),
+            settings_search_inventory: RefCell::default(),
+            settings_search_anchor: None,
             settings_scroll: ScrollHandle::new(),
-            settings_scroll_target: None,
             settings_slider_bounds: (0..settings_ui::SettingsSlider::COUNT)
                 .map(|_| Rc::new(std::cell::Cell::new(None)))
                 .collect(),
@@ -2066,6 +2472,7 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.day_plan_undo.clone()),
             day_plan_error: None,
+            work_item_handoff: work_item_handoff_ui::HandoffUi::default(),
             day_plan_saving: false,
             day_plan_reading: false,
             day_plan_loaded,
@@ -2095,6 +2502,13 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.crew_rail_open)
                 .unwrap_or(true),
+            thread_notifications: persisted.as_ref().and_then(|state| state.thread_notifications).unwrap_or_default(),
+            confirm_thread_archive: persisted.as_ref().and_then(|state| state.confirm_thread_archive).unwrap_or(false),
+            confirm_thread_unpin: persisted.as_ref().and_then(|p| p.confirm_thread_unpin).unwrap_or(false),
+            voice_press: None,
+            quit_gesture:quit_shortcut::Gesture::new(persisted.as_ref().map(|p|p.quit_mode).unwrap_or_default()),
+            confirm_thread_delete: persisted.as_ref().and_then(|p| p.confirm_thread_delete).unwrap_or(true),
+            labs_sidebar: persisted.as_ref().map(|s|s.labs_sidebar.clone()).unwrap_or_default(),
             sidebar_working_section: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_working_section)
@@ -2112,6 +2526,13 @@ impl Workspace {
             title_project_instructions_input,
             keybindings,
             keybinding_index: 0,
+            keymap_file:keybinding_file::KeymapFile::new(),
+            keybinding_edit_open: false,
+            keybinding_choosing_command: false,
+            keybinding_recording: false,
+            keybinding_new_for: None,
+            keybinding_record_focus: cx.focus_handle().tab_stop(true),
+            keybinding_filter,
             keybinding_key_input,
             keybinding_when_input,
             keybinding_installed: keybindings_ui::startup_bindings(),
@@ -2127,6 +2548,8 @@ impl Workspace {
             booking: booking_ui::BookingUi::new(window, cx),
             sidebar_undo: None,
             sidebar_undo_generation: 0,
+            archived_threads: persisted.as_mut().map(|state| std::mem::take(&mut state.archived_threads))
+                .unwrap_or_default().into_iter().map(archive::ArchivedThread::Stored).collect(),
             threads,
             active_thread_id,
             current_model,
@@ -2134,6 +2557,43 @@ impl Workspace {
             run_choice,
             claude_effort,
             follow_up_steer,
+            dictation_prefs: persisted.as_ref().and_then(|state| state.dictation_prefs.clone()).unwrap_or_default(),
+            voice_dictionary_editor: voice_dictionary::DictionaryEditor::new(window,cx),
+            voice_model_input,
+            voice_cleanup_fields,
+            voice_models,
+            voice_cloud,
+            voice_devices: None,
+            worktree_prefs: persisted.as_ref().and_then(|state| state.worktree_prefs).unwrap_or_default(),
+            voice_device_generation: 0,
+            voice_testing: false,
+            microphone_test: Default::default(),
+            voice_runtime:Default::default(),
+            voice_test_result: None,
+            fonts:persisted.as_ref().and_then(|s|s.fonts.clone()).unwrap_or_default(),
+            available_fonts:Vec::new(),
+            snapshots: persisted.as_ref().and_then(|s| s.snapshots).unwrap_or_default(),
+            picking_window: false,
+            capture_binding: Default::default(),
+            environments:environments::Environments::new(window,cx),
+            diagnostics:Default::default(),
+            local_tools: Default::default(),
+            command_launcher: None,
+            command_launcher_busy: false,
+            telemetry:telemetry::Editor::new(window,cx),
+            delivery_preferences:Default::default(),
+            theme_import_notice: None,
+            theme_navigation: Default::default(),
+            custom_themes: persisted.as_ref().and_then(|state|state.custom_themes.clone()).unwrap_or_default(),
+            appearance: persisted.as_ref().and_then(|state| state.appearance).unwrap_or_default().normalized(),
+            chat_width: persisted.as_ref().and_then(|state| state.chat_width).unwrap_or_default(),
+            last_reader_title: None,
+            screen_reader: persisted.as_ref().and_then(|p|p.screen_reader).unwrap_or_default(),
+            slash_skills:persisted.as_ref().and_then(|p|p.slash_skills).unwrap_or(true),
+            tool_visibility:persisted.as_ref().map(|p|p.tool_visibility).unwrap_or_default(),
+            send_shortcut: persisted.as_ref().and_then(|p| {
+                SendShortcut::OPTIONS.into_iter().find(|(_, id)| Some(*id) == p.send_shortcut.as_deref()).map(|(mode, _)| mode)
+            }).unwrap_or_default(),
             claude_autocompact,
             autocompact_input,
             compact_idle,
@@ -2191,14 +2651,56 @@ impl Workspace {
             timegrid_drag: None,
             active_project,
             recent_projects,
+            browser_search_url_input,
+            viewport_fields,
+            #[cfg(target_os = "macos")]
+            browser_profile_editor: browser_settings::ProfileEditor::new(window,cx),
+            project_start_folder_input,
+            branch_naming, branch_prefix_input, branch_instructions_input, branch_editor_scope: String::new(), branch_prefix_edited: false, branch_instructions_edited: false,
+            generators: text_generators::GeneratorSettings::new(cx),
+            health_interval,health_interval_input,health_result:None,health_timer:None,health_check:None,
+            retention_editor: None,
+            worktree_retention: persisted.as_ref().map(|s| s.worktree_retention).unwrap_or_default(),
+            #[cfg(target_os = "macos")]
+            fast_checkout: labs::FastCheckout::load(),
+            location_input,location_status:None,location_busy:false,worktree_cleanup_status:None,settings_advanced: Default::default(),
+            cleanup_keep_when: persisted.as_ref().map(|state|state.cleanup_keep_when).unwrap_or_default(),
+            pending_scratch_cleanups: persisted.as_mut().map(|s| std::mem::take(&mut s.pending_scratch_cleanups)).unwrap_or_default(),
+            dispatched_scratch_cleanups: Default::default(),
+            cleanup_deleted_worktrees:persisted.as_ref().is_some_and(|s|s.cleanup_deleted_worktrees),
+            maintenance:maintenance::Maintenance::new(persisted.as_ref().map(|state|state.maintenance.clone().unwrap_or_default()).unwrap_or_else(maintenance::MaintenancePreferences::for_new_install),window,cx,&mut subscriptions),
+            idle_settle_days: persisted.as_ref().map_or(3, |state|state.idle_settle_days.unwrap_or(1)).min(365),
+            clone_host_folders: persisted.as_ref().is_some_and(|p|p.clone_host_folders),
+            clone_editor: clone_project::CloneEditor::new(window,cx),
+            snooze_options:persisted.as_ref().and_then(|s|s.snooze_options.clone()),
+            snooze_editor:snooze_options::Editor::new(window,cx),
+            quota_prefs:persisted.as_ref().and_then(|s|s.quota_prefs).unwrap_or_default(),
+            quota_timers:BTreeMap::new(),
+            fallback_model:persisted.as_ref().and_then(|p|p.fallback_model.clone()),
+            provider_resets:persisted.as_ref().map(|p|p.provider_resets.clone()).unwrap_or_default(),
+            capacity_task:None,
+            project_list:persisted.as_ref().map(|s|s.project_list.clone()).unwrap_or_default(),
+            title_requests: persisted.as_mut().map(|p| std::mem::take(&mut p.title_requests)).unwrap_or_default(),
+            title_request_serial:0,
+            task_thread_view: persisted.as_ref().and_then(|p| p.task_thread_view.clone()),
+            text_generation_model:persisted.as_ref().and_then(|s|s.text_generation_model.clone()),
+            response_stream:persisted.as_ref().and_then(|s|s.response_stream).unwrap_or_default(),
+            idle_action_runs: None,
+            action_editor:project_actions::ActionEditor::new(window,cx),
+            project_actions:persisted.as_ref().map(|s|s.project_actions.clone()).unwrap_or_default(),
+            project_defaults: persisted.as_ref().map(|state| state.project_defaults.clone()).unwrap_or_default(),
+            settings_project_scope: String::new(),
             project_picker_current_path: String::new(),
             project_picker_current_name: String::new(),
             project_picker_parent_path: None,
             project_picker_dirs: Vec::new(),
             project_picker_error: None,
+            project_picker_start_warning: None,
             project_picker_task: None,
             project_picker_scroll: ScrollHandle::new(),
             workspace_focus_handle: cx.focus_handle().tab_stop(false),
+            #[cfg(target_os = "macos")]
+            last_embedded_shell_focus: None,
             palette_return_focus: None,
             modal_start_focus_handle,
             blur_scrim: BlurScrimHandle::default(),
@@ -2300,14 +2802,28 @@ impl Workspace {
             whiteboard_panels: std::collections::BTreeMap::new(),
             terminal_drawer_height,
             right_panel_width,
+            sidebar_motion:Default::default(),right_panel_motion:Default::default(),
             right_panel_split_state,
             terminal_split_state,
             zoom: crate::zoom::restore(persisted.as_ref().and_then(|state| state.zoom)),
             _subscriptions: subscriptions,
         };
         workspace.sync_credential_sections(window, cx);
+        workspace.diff_panel.update(cx,|panel,cx|panel.set_default_wrap(workspace.fonts.wrap,cx));
+        workspace.restore_project_list(cx);
+        workspace.schedule_project_refresh(cx);
+        workspace.start_pull_lifecycle(cx);
+        workspace.monitor_provider_capacity(cx);
+        workspace.monitor_power(cx);
+        workspace.schedule_health_checks(cx);
+        workspace.schedule_log_cleanup(cx);
         workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
+        workspace.resume_title_requests(cx);
+        #[cfg(debug_assertions)]
+        if let (Some(prompt),Some(thread))=(crate::views::chat::desktop_smoke_prompt(),workspace.active_thread()){
+            thread.chat.update(cx,|chat,cx|chat.submit_startup_smoke_prompt(prompt,cx));
+        }
         // Return to the view the app closed on, as the web does from its URL.
         if let Some(view) = reopen_view {
             cx.defer_in(window, move |this, window, cx| {
@@ -2315,6 +2831,9 @@ impl Workspace {
             });
         }
         workspace.sync_keybindings(cx);
+        workspace.load_generators(cx);
+        workspace.refresh_keymap_file(cx);
+        workspace.apply_device_appearance(window, cx);
         workspace.apply_zoom(window, cx);
         // With nothing focused, gpui dispatches keys from the window root,
         // past every workspace action: Tab and the shortcuts would do
@@ -2392,6 +2911,7 @@ impl Workspace {
         for chat in chats {
             chat.update(cx, |chat, cx| {
                 chat.permission_mode = permission_mode;
+                chat.project_permission_override = false;
                 cx.notify();
             });
         }
@@ -2772,12 +3292,7 @@ impl Workspace {
             AppView::Knowledge => self.render_knowledge_page(cx),
             AppView::Chat => {
                 let main: AnyElement = if let Some(thread) = self.active_thread() {
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .min_w_0()
-                        .child(thread.chat.clone())
-                        .into_any_element()
+                    self.conversation_with_details(thread, window, cx)
                 } else {
                     div()
                         .flex_1()
@@ -2930,6 +3445,28 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        if self.settings_visible() && self.settings_section == SettingsSection::SourceControl {
+            self.sync_writer_editor(window,cx);
+        }
+        if self.settings_visible() && self.settings_section == SettingsSection::Worktrees &&
+            self.branch_editor_scope != self.settings_project_scope {
+            self.commit_branch_fields(window, cx);
+            self.load_branch_fields(window, cx);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let focused = window.focused(cx);
+            if self.last_embedded_shell_focus != focused {
+                crate::views::preview_panel::focus_native_shell(window);
+                self.last_embedded_shell_focus = focused;
+            }
+        }
+        let title = (self.screen_reader.window_title && self.active_view == AppView::Chat)
+            .then(|| self.active_thread().map(|thread| thread.chat.read(cx).reader_title())).flatten();
+        if self.last_reader_title != title {
+            window.set_window_title(title.as_deref().unwrap_or(crate::DESKTOP_WINDOW_TITLE));
+            self.last_reader_title = title;
+        }
         self.sync_api_client_visibility(window, cx);
         self.sync_mobile_offer();
         // As on the web, a dry run belongs to Agent workflows: once another
@@ -2941,6 +3478,12 @@ impl Render for Workspace {
         if self.active_view != AppView::Calendar || self.calendar_mode == DesktopCalendarMode::Month
         {
             self.calendar_timegrid_autoscroll.set(true);
+        }
+        if !self.settings_visible() || self.settings_section != SettingsSection::Vault {
+            let sources = self.vault_settings.read(cx).secret_sources();
+            if sources.read(cx).needs_reset() {
+                sources.update(cx, |view, _| view.leave_settings());
+            }
         }
         if !self.settings_visible() && self.vault_settings.read(cx).holds_visit(cx) {
             self.vault_settings
@@ -2958,6 +3501,8 @@ impl Render for Workspace {
             let visible = self.active_view == AppView::Chat
                 && self.active_thread_id.as_deref() == Some(thread.id.as_str());
             thread.chat.update(cx, |chat, cx| {
+                let details_open = visible && !self.overlay_open() && self.details.is_open(&thread.id);
+                if chat.details_open != details_open { chat.details_open = details_open; cx.notify(); }
                 chat.set_rich_response_shown(visible && !self.overlay_open(), cx);
                 if !visible {
                     chat.cancel_dictation(cx);
@@ -2974,6 +3519,7 @@ impl Render for Workspace {
         self.sync_room_dialog(cx);
         self.sync_bruh_page(cx);
         self.schedule_modal_first_control(window, cx);
+        self.restore_theme_dialog_focus(window, cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
@@ -3008,11 +3554,8 @@ impl Render for Workspace {
         }
         // Retain filters while the same dialog is open. On close, remove them
         // from the native layers so the Metal-backed workspace stays crisp.
-        if self.top_layer.is_none() && !self.overlay.as_ref().is_some_and(Overlay::blurs_backdrop) {
+        if self.top_layer.is_none() && self.overlay.is_none() {
             self.blur_scrim.hide();
-        }
-        if self.settings_visible() {
-            self.sync_settings_scroll(window);
         }
         let terminal_mode = if self.active_view == AppView::Terminal {
             TerminalPanelMode::Page
@@ -3040,6 +3583,14 @@ impl Render for Workspace {
                 },
             ));
             self.workbench_panel = Some(panel);
+        }
+        if self.active_view == AppView::Workbench {
+            if let (Some(id), Some(panel)) = (
+                self.work_item_handoff.open.take(),
+                self.workbench_panel.as_ref(),
+            ) {
+                panel.update(cx, |panel, cx| panel.open_handoff(&id, window, cx));
+            }
         }
         if let AppView::Whiteboards { board_id } = self.active_view.clone() {
             let project = self.whiteboard_project(cx);
@@ -3074,6 +3625,11 @@ impl Render for Workspace {
         let right_drawer_width = (bruhs_ui::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
+        let now=std::time::Instant::now();
+        let duration=if crate::motion::reduce_motion(cx) {0}else{self.appearance.panel_duration_ms};
+        let sidebar_fraction=self.sidebar_motion.sample(sidebar_docked||sidebar_drawer_open,now,if booking{0}else{duration});
+        let panel_fraction=self.right_panel_motion.sample(chat_panel_open,now,if self.active_view==AppView::Chat{duration}else{0});
+        if self.sidebar_motion.running() || self.right_panel_motion.running(){window.request_animation_frame();}
         let body = div()
             .id("workspace-body")
             .role(Role::Main)
@@ -3085,11 +3641,12 @@ impl Render for Workspace {
             .flex()
             .flex_row()
             // Like web, the booking page is a page of its own.
-            .when(sidebar_docked, |el| {
+            .when(!sidebar_drawer && (sidebar_docked || sidebar_fraction>0.0), |el| {
                 el.child(
                     div()
-                        .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
-                        .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX))
+                        .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX*sidebar_fraction))
+                        .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX*sidebar_fraction))
+                        .overflow_hidden()
                         .h_full()
                         .flex_shrink_0()
                         .child(self.render_sidebar(window, cx)),
@@ -3128,7 +3685,7 @@ impl Render for Workspace {
                             // Notices float over the view (no layout shift).
                             .children(self.render_hub_notice(window, cx)),
                     );
-                if !right_panel_drawer && chat_panel_open {
+                if !right_panel_drawer && (chat_panel_open || panel_fraction>0.0) {
                     // Web: the panel's left edge drags and the width is
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
@@ -3148,7 +3705,7 @@ impl Render for Workspace {
                         if self.right_panel_split_state.read(cx).is_resizing() {
                             docked_right_panel_range(viewport_width, sidebar_width)
                         } else {
-                            (width, width)
+                            (width*panel_fraction,width*panel_fraction)
                         };
                     div()
                         .flex_1()
@@ -3164,7 +3721,7 @@ impl Render for Workspace {
                                 .child(resizable_panel().child(main_column))
                                 .child(
                                     resizable_panel()
-                                        .size(px(width))
+                                        .size(px(width*panel_fraction))
                                         .size_range(px(min_width)..px(max_width))
                                         .child(self.render_right_panel(cx)),
                                 ),
@@ -3176,14 +3733,14 @@ impl Render for Workspace {
             })
             .children(self.render_live_meeting_pill(cx))
             .children(self.render_auto_record_prompt(cx))
-            .when(sidebar_drawer_open, |el| {
+            .when(sidebar_drawer && (sidebar_drawer_open || sidebar_fraction>0.0), |el| {
                 el.child(
                     div()
                         .id("compact-sidebar-backdrop")
                         .debug_selector(|| "desktop-compact-sidebar-backdrop".to_string())
                         .absolute()
                         .size_full()
-                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY))
+                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY*sidebar_fraction))
                         .occlude()
                         .on_click(cx.listener(|this, _event, _window, cx| {
                             cx.stop_propagation();
@@ -3198,7 +3755,7 @@ impl Render for Workspace {
                         .role(Role::Complementary)
                         .aria_label("Threads")
                         .absolute()
-                        .left_0()
+                        .left(px(-WORKSPACE_SIDE_PANEL_WIDTH_PX*(1.0-sidebar_fraction)))
                         .top_0()
                         .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
                         .max_w_full()
@@ -3207,14 +3764,14 @@ impl Render for Workspace {
                         .child(self.render_sidebar(window, cx)),
                 )
             })
-            .when(right_panel_drawer && chat_panel_open, |el| {
+            .when(right_panel_drawer && (chat_panel_open || panel_fraction>0.0), |el| {
                 el.child(
                     div()
                         .id("compact-right-panel-backdrop")
                         .debug_selector(|| "desktop-compact-right-panel-backdrop".to_string())
                         .absolute()
                         .size_full()
-                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY))
+                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY*panel_fraction))
                         .occlude()
                         .on_click(cx.listener(|this, _event, window, cx| {
                             cx.stop_propagation();
@@ -3228,7 +3785,7 @@ impl Render for Workspace {
                         .role(Role::Complementary)
                         .aria_label("Right panel")
                         .absolute()
-                        .right_0()
+                        .right(px(-right_drawer_width*(1.0-panel_fraction)))
                         .top_0()
                         .w(px(right_drawer_width))
                         .h_full()
@@ -3239,38 +3796,68 @@ impl Render for Workspace {
 
         div()
             .key_context("Workspace")
+            .capture_key_down(cx.listener(Self::quit_down))
+            .capture_key_up(cx.listener(|this, event, window, cx| {
+                this.voice_shortcut_key_up(event, cx);
+                this.quit_up(event, window, cx);
+            }))
+            .on_modifiers_changed(cx.listener(|this, event, window, cx| {
+                this.voice_shortcut_modifiers(event, cx);
+                this.quit_modifiers(event, window, cx);
+            }))
             .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
             .track_focus(&self.workspace_focus_handle)
+            .capture_any_mouse_down(|_, window, _| {
+                crate::views::preview_panel::focus_native_shell(window);
+            })
+            .capture_action(|_: &bruhs_ui::input::Undo, window, cx| {
+                #[cfg(target_os = "macos")]
+                if crate::views::preview_panel::edit_native_history(false) {
+                    cx.stop_propagation();
+                    return;
+                }
+                let _ = window;
+                cx.propagate();
+            })
+            .capture_action(|_: &bruhs_ui::input::Redo, window, cx| {
+                #[cfg(target_os = "macos")]
+                if crate::views::preview_panel::edit_native_history(true) {
+                    cx.stop_propagation();
+                    return;
+                }
+                let _ = window;
+                cx.propagate();
+            })
             // Tab in a multi-line field moves focus, as it leaves a web
             // textarea: nothing traps the keyboard. The composer indents its
             // list items and code first (`composer_edit`), and accepts a
             // suggestion, before this runs.
-            .capture_action(
-                cx.listener(|this, _: &bruhs_ui::input::IndentInline, window, cx| {
+            .capture_action(cx.listener(
+                |this, _: &bruhs_ui::input::IndentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
-                        && this.modal_start_focus_handle.contains_focused(window, cx)
+                        && this.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
                     {
                         this.step_modal_focus(false, window, cx);
                     } else {
                         window.focus_next(cx);
                     }
-                }),
-            )
-            .capture_action(
-                cx.listener(|this, _: &bruhs_ui::input::OutdentInline, window, cx| {
+                },
+            ))
+            .capture_action(cx.listener(
+                |this, _: &bruhs_ui::input::OutdentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
-                        && this.modal_start_focus_handle.contains_focused(window, cx)
+                        && this.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
                     {
                         this.step_modal_focus(true, window, cx);
                     } else {
                         window.focus_prev(cx);
                     }
-                }),
-            )
+                },
+            ))
             // Every bruhs type role is `line-height: 1.5`; gpui defaults to φ
             // (1.618), which made every row ~2px taller than the web's.
             .line_height(relative(WORKSPACE_LINE_HEIGHT))
@@ -3301,6 +3888,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::open_tasks_view))
             .on_action(cx.listener(Self::open_calendar_view))
             .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::capture_window))
             .on_action(cx.listener(Self::open_project_picker))
             .on_action(cx.listener(Self::cycle_permission_mode))
             .on_action(cx.listener(Self::pin_thread))
@@ -3326,6 +3914,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::toggle_terminal))
             .on_action(cx.listener(Self::open_terminal_view))
             .on_action(cx.listener(Self::toggle_preview))
+            .on_action(cx.listener(Self::open_web_link))
             .on_action(cx.listener(Self::open_local_servers))
             .on_action(cx.listener(Self::search_threads))
             .on_action(cx.listener(Self::undo_sidebar_action))
@@ -3342,9 +3931,13 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .child(body)
+            .when(matches!(self.overlay, Some(Overlay::ThemeEditor(_) | Overlay::RemoveThemeVariants(_))), |el| {
+                el.child(self.render_settings(window, cx))
+            })
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
                     Overlay::Capture => self.render_capture_dialog(window, cx),
+                    Overlay::Welcome => self.render_welcome(window, cx),
                     Overlay::Settings { .. } => self.render_settings(window, cx),
                     Overlay::TaskCreate { .. } => self.render_task_create_dialog(window, cx),
                     Overlay::EventCreate { .. } => self.render_event_create_dialog(window, cx),
@@ -3362,13 +3955,16 @@ impl Render for Workspace {
                         self.render_record_delete_confirm(target, window, cx)
                     }
                     Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
-                    Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
+                    Overlay::ThemeEditor(editor) => self.render_theme_editor(editor,window,cx),
+                    Overlay::RemoveThemeVariants(removal) => self.render_variant_removal(removal, window, cx),
+                    Overlay::RestartConfirm { .. } => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
                     Overlay::CreateBruh => self.render_create_bruh(window, cx),
                     Overlay::RoomDialog => self.render_room_dialog(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.
+            .when(matches!(self.overlay,Some(Overlay::Settings { .. })), |el| el.children(self.render_theme_import_notice()))
             .when_some(self.top_layer, |el, top_layer| {
                 el.child(match top_layer {
                     TopLayer::CommandBar => self.render_command_bar(window, cx),
@@ -3408,6 +4004,7 @@ impl Render for Workspace {
                         ),
                 )
             })
+            .when_some(self.quit_hint(),|el,hint|el.child(hint))
     }
 }
 

@@ -8,12 +8,34 @@ tree (agent CLIs spawn shells and helpers). Exit status is the command's,
 or 124 on timeout. Elapsed seconds are written to --time-file.
 """
 
+from __future__ import annotations
+
 import argparse
+import math
 import os
 import signal
 import subprocess
 import sys
 import time
+
+
+def stop_process_group(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        proc.wait()
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        # The group can outlive its leader when a helper ignores SIGTERM.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    proc.wait()
 
 
 def main():
@@ -29,6 +51,8 @@ def main():
     cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not cmd:
         parser.error("no command")
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout must be positive and finite")
 
     stdin = open(args.stdin, "rb") if args.stdin else subprocess.DEVNULL
     started = time.monotonic()
@@ -40,19 +64,10 @@ def main():
         try:
             status = proc.wait(timeout=args.timeout)
         except subprocess.TimeoutExpired:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(proc.pid, sig)
-                except ProcessLookupError:
-                    break
-                try:
-                    proc.wait(timeout=5)
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
+            stop_process_group(proc)
             status = 124
         except KeyboardInterrupt:
-            os.killpg(proc.pid, signal.SIGTERM)
+            stop_process_group(proc)
             raise
     elapsed = time.monotonic() - started
     with open(args.time_file, "w", encoding="utf-8") as handle:

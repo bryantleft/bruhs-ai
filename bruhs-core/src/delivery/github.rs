@@ -1,10 +1,10 @@
 use super::{DeliveryError, DeliveryResult, DeliveryService};
-use bruhs_models::delivery::{Check, Issue, Pull, PullComment};
+use bruhs_models::delivery::{ChangedFileCount, Check, Issue, Pull, PullComment};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
 
-const FIELDS: &str = "number,title,body,url,state,isDraft,isCrossRepository,baseRefName,baseRefOid,headRefName,headRefOid,mergeCommit,updatedAt,mergeable,reviewDecision,statusCheckRollup,comments,reviews,files";
+const FIELDS: &str = "number,title,body,url,state,isDraft,isCrossRepository,baseRefName,baseRefOid,headRefName,headRefOid,mergeCommit,updatedAt,mergeable,reviewDecision,statusCheckRollup,comments,reviews,files,changedFiles";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +34,7 @@ struct GitHubPull {
     reviews: Vec<Value>,
     #[serde(default)]
     files: Vec<Value>,
+    changed_files: Option<usize>,
 }
 
 fn text(value: &Value, key: &str) -> String {
@@ -112,6 +113,7 @@ impl From<GitHubPull> for Pull {
                 .collect(),
             comments: pull.comments.iter().map(comment).collect(),
             reviews: pull.reviews.iter().map(comment).collect(),
+            changed_files: pull.changed_files.map(ChangedFileCount::Exact),
             files: pull
                 .files
                 .iter()
@@ -121,29 +123,46 @@ impl From<GitHubPull> for Pull {
     }
 }
 
-pub(super) fn parse_pulls(output: &str) -> DeliveryResult<Vec<Pull>> {
-    let pulls: Vec<GitHubPull> = serde_json::from_str(output).map_err(|error| {
+fn decode_pull_data<T: serde::de::DeserializeOwned>(
+    reader: impl std::io::Read,
+) -> DeliveryResult<T> {
+    serde_json::from_reader(reader).map_err(|error| {
         DeliveryError::Command(format!(
             "GitHub returned invalid pull request data: {error}"
         ))
-    })?;
-    Ok(pulls.into_iter().map(Pull::from).collect())
+    })
+}
+
+pub(super) fn parse_pulls(output: &str) -> DeliveryResult<Vec<Pull>> {
+    let rows: Vec<GitHubPull> = decode_pull_data(output.as_bytes())?;
+    Ok(rows.into_iter().map(Pull::from).collect())
 }
 
 impl DeliveryService {
+    /// A large changed-file list can itself exceed the general command-output
+    /// budget before a reviewer ever reaches the Guide tab.
+    async fn github_pull_data<T: serde::de::DeserializeOwned + Send + 'static>(
+        &self,
+        path: &Path,
+        args: &[&str],
+    ) -> DeliveryResult<T> {
+        let repo = self.github_repository(path).await?;
+        let file = self.spool(path, "gh", args, Some(&repo)).await?;
+        tokio::task::spawn_blocking(move || decode_pull_data(std::io::BufReader::new(file)))
+            .await
+            .map_err(|e| DeliveryError::Storage(e.to_string()))?
+    }
+
     pub(super) async fn github_pulls(&self, path: &Path) -> DeliveryResult<Vec<Pull>> {
-        // A page has the same 50-record bound as reactive history; all larger result sets
-        // are explicit via the host's own CLI rather than silently unbounded allocations.
-        let output = self
-            .read(
+        let rows: Vec<GitHubPull> = self
+            .github_pull_data(
                 path,
-                "gh",
                 &[
                     "pr", "list", "--state", "open", "--limit", "50", "--json", FIELDS,
                 ],
             )
             .await?;
-        parse_pulls(&output)
+        Ok(rows.into_iter().map(Pull::from).collect())
     }
 
     pub(super) async fn github_pull(&self, path: &Path, number: u64) -> DeliveryResult<Pull> {
@@ -152,20 +171,12 @@ impl DeliveryService {
                 "Choose a positive pull request number.".into(),
             ));
         }
-        let output = self
-            .read(
-                path,
-                "gh",
-                &["pr", "view", &number.to_string(), "--json", FIELDS],
-            )
-            .await?;
-        serde_json::from_str::<GitHubPull>(&output)
-            .map(Pull::from)
-            .map_err(|error| {
-                DeliveryError::Command(format!(
-                    "GitHub returned invalid pull request data: {error}"
-                ))
-            })
+        self.github_pull_data::<GitHubPull>(
+            path,
+            &["pr", "view", &number.to_string(), "--json", FIELDS],
+        )
+        .await
+        .map(Pull::from)
     }
 
     pub(super) async fn github_diff(&self, path: &Path, number: u64) -> DeliveryResult<String> {
@@ -174,7 +185,7 @@ impl DeliveryService {
                 "Choose a positive pull request number.".into(),
             ));
         }
-        self.read(path, "gh", &["pr", "diff", &number.to_string(), "--patch"])
+        self.github_read(path, &["pr", "diff", &number.to_string(), "--patch"])
             .await
     }
 
@@ -189,9 +200,8 @@ impl DeliveryService {
             ));
         }
         let output = self
-            .read(
+            .github_read(
                 path,
-                "gh",
                 &[
                     "api",
                     &format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments?per_page=100"),
@@ -213,9 +223,8 @@ impl DeliveryService {
             ));
         }
         let output = self
-            .read(
+            .github_read(
                 path,
-                "gh",
                 &[
                     "issue",
                     "view",

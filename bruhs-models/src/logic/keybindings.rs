@@ -66,6 +66,8 @@ impl KeyContext {
 /// Commands that ship with no key: each waits for the user to pick one in
 /// Settings. Cmd+Shift+C and Cmd+Shift+K stay the thread link and Knowledge.
 pub const UNBOUND_BY_DEFAULT: &[&str] = &[
+    "voice.dictate",
+    "snapshot.capture",
     "pull.copyLink",
     "pull.copyNumber",
     "thread.import",
@@ -117,6 +119,7 @@ pub fn default_keybindings() -> Vec<Keybinding> {
         ("mod+shift+s", "thread.settle", None),
         ("mod+shift+c", "thread.copyLink", None),
         ("mod+/", "settings.open", None),
+        ("mod+,", "settings.open", None),
         ("mod+j", "terminal.toggle", None),
         ("mod+shift+j", "preview.toggle", None),
         ("mod+s", "draft.stash", None),

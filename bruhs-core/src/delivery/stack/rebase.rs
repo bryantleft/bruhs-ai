@@ -382,6 +382,7 @@ impl DeliveryService {
                     Some(transaction),
                 ),
                 cancel,
+                prepared.repository.as_ref(),
             )
             .await?;
         self.stack_log(prepared, Some(plan.layers.len()), &format!("{output}\nEvery reviewed local branch was published atomically. The source checkout and remote branches were left at their existing commits; push these local branches separately after inspecting them.")).await?;

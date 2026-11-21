@@ -162,7 +162,7 @@ impl ChatView {
         }
     }
 
-    pub(super) fn enqueue_named_bytes(
+    pub(crate) fn enqueue_named_bytes(
         &mut self,
         name: String,
         bytes: Vec<u8>,
@@ -422,6 +422,18 @@ fn rejected(id: &str, name: &str, declared: u64, message: &str) -> DesktopFileOf
 mod tests {
     use super::*;
     use bruhs_models::logic::attachments::HEIC_NOT_CONVERTED;
+
+    #[test]
+    fn title_text_omits_rendered_attachment_labels_and_keeps_user_text() {
+        let file = UploadedFile { name: "chart.png".into(), path: "/upload/chart.png".into() };
+        for typed in ["", "Fix this", "Attached: chart.png"] {
+            let content = visible_with_files(typed, &[], std::slice::from_ref(&file));
+            let message = super::super::Message::user_with_files(content, vec![file.clone()]);
+            assert_eq!(message.text_for_title(), typed);
+        }
+        let legacy = super::super::Message::user_with_files("Earlier text", vec![file]);
+        assert_eq!(legacy.text_for_title(), "Earlier text");
+    }
 
     #[test]
     fn uploads_are_named_after_the_goal_and_absent_uploads_leave_it() {

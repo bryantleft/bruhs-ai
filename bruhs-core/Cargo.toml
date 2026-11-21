@@ -15,6 +15,7 @@ workspace = true
 test-support = []
 
 [dependencies]
+semver = "1"
 bruhs-models = { workspace = true }
 bruhs-backup = { workspace = true }
 claude-sdk-rs = { path = "../claude-sdk-rs" }
@@ -86,6 +87,8 @@ tempfile = { workspace = true }
 sha2 = { workspace = true, features = ["asm"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Include trusted roots installed by macOS device management.
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 # Pith's scanner measures what deleting a worktree frees from APFS private
 # sizes and clone counts, which `du` overstates for copy-on-write clones.
 storage-scanner = { git = "https://github.com/bryantleft/bruhs", rev = "739a4bb85a973c40f1c5f9a550f2024ce7528ab4" }

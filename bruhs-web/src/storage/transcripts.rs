@@ -55,6 +55,25 @@ pub async fn load(id: &str) -> Result<Snapshot, SaveError> {
     finish(tx, result).await
 }
 
+/// Read only one meeting's metadata; source links do not need its transcript.
+pub async fn load_meeting(id: &str) -> Result<Option<Meeting>, SaveError> {
+    let db = open_db().await?;
+    let tx = LocalTransaction::new(db.transaction(&[STORE_MEETINGS], TransactionMode::ReadOnly)?);
+    let result = async {
+        let raw = tx
+            .object_store(STORE_MEETINGS)?
+            .get(JsValue::from_str(id))?
+            .await?;
+        let meeting: Option<Meeting> = raw.map(from_js).transpose()?;
+        if meeting.as_ref().is_some_and(|meeting| meeting.id != id) {
+            return Err(SaveError::Corrupt);
+        }
+        Ok(meeting)
+    }
+    .await;
+    finish(tx, result).await
+}
+
 pub async fn cache_meeting(meeting: Meeting) -> Result<Meeting, SaveError> {
     let db = open_db().await?;
     let tx = LocalTransaction::new(db.transaction(&[STORE_MEETINGS], TransactionMode::ReadWrite)?);

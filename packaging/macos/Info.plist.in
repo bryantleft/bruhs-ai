@@ -15,6 +15,8 @@
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
+  <string>@MARKETING_VERSION@</string>
+  <key>BruhsReleaseVersion</key>
   <string>@VERSION@</string>
   <key>CFBundleVersion</key>
   <string>@BUILD@</string>

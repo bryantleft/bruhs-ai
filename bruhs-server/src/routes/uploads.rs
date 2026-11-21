@@ -165,3 +165,37 @@ mod tests {
         ));
     }
 }
+
+async fn capture_store<T: Send + 'static>(
+    operation: impl FnOnce() -> std::io::Result<T> + Send + 'static,
+) -> Result<Json<T>, AppError> {
+    let result = tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(AppError::internal)?;
+    result.map(Json).map_err(|err| match err.kind() {
+        std::io::ErrorKind::InvalidInput => AppError::BadRequest(err.to_string()),
+        _ => AppError::internal_in("browser capture retention", err),
+    })
+}
+pub async fn capture_retention() -> Result<Json<u16>, AppError> {
+    capture_store(bruhs_core::uploads::browser_captures::days).await
+}
+pub async fn set_capture_retention(Json(days): Json<u16>) -> Result<Json<u16>, AppError> {
+    capture_store(move || bruhs_core::uploads::browser_captures::set_days(days)).await
+}
+pub async fn prune_captures() -> Result<Json<usize>, AppError> {
+    capture_store(bruhs_core::uploads::browser_captures::prune).await
+}
+
+pub fn schedule_capture_cleanup() {
+    tokio::spawn(async {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            timer.tick().await;
+            if let Err(error) = prune_captures().await {
+                tracing::warn!(%error, "Browser capture cleanup could not finish");
+            }
+        }
+    });
+}

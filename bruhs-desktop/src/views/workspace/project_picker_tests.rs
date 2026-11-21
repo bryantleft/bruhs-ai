@@ -40,6 +40,31 @@ fn listing_a_directory_does_not_block_the_ui_thread(cx: &mut TestAppContext) {
         );
         assert!(workspace.project_picker_error.is_none());
     });
+
+    let scratch = tempfile::tempdir_in(&home).expect("project folder");
+    let name = scratch.path().file_name().unwrap().to_str().unwrap();
+    let preference = format!("~/{name}");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.project_start_folder_input.update(cx, |input, cx| {
+            input.set_value(preference.clone(), window, cx);
+        });
+        assert_eq!(workspace.snapshot(cx).project_start_folder.as_deref(), Some(preference.as_str()));
+        workspace.open_project_picker(&super::OpenProjectPicker, window, cx);
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.project_picker_current_path, scratch.path().to_string_lossy());
+    });
+    drop(scratch);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_project_picker(&super::OpenProjectPicker, window, cx);
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.project_picker_current_path, home.to_string_lossy());
+        assert!(workspace.project_picker_start_warning.is_some());
+        assert!(workspace.project_picker_error.is_none());
+    });
 }
 
 #[gpui::test]

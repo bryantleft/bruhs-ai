@@ -60,9 +60,8 @@ impl DeliveryService {
         repo: &ForgeRepository,
         suffix: &str,
     ) -> DeliveryResult<String> {
-        self.read(
+        self.github_read(
             path,
-            "gh",
             &[
                 "api",
                 &format!("repos/{}{suffix}", repo.project),
@@ -256,7 +255,12 @@ impl DeliveryService {
                 ),
             };
             let output = match self
-                .run_command(Path::new(&prepared.path), &command, &mut cancelled)
+                .run_command(
+                    Path::new(&prepared.path),
+                    &command,
+                    &mut cancelled,
+                    Some(repo),
+                )
                 .await
             {
                 Ok(output) => output,

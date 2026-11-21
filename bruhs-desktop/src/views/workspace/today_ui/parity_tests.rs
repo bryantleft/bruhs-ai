@@ -5,11 +5,12 @@
 use super::super::performance_tests::fixture;
 use super::super::{AppView, DesktopWorkItem, EpochMs};
 use bruhs_models::{AutomationState, Priority, WorkItemPlanning, WorkItemStatus};
-use bruhs_ui::zoom::px;
 use gpui::{size, Bounds, Pixels, VisualTestContext};
+use bruhs_ui::zoom::px;
 
 fn task(id: &str, priority: Priority, status: WorkItemStatus) -> DesktopWorkItem {
     DesktopWorkItem {
+        source: None,
         id: id.into(),
         project_id: None,
         title: format!("Task {id}"),

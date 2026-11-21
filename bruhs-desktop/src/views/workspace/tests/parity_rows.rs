@@ -176,6 +176,7 @@ async fn today_recovers_a_day_plan_that_was_not_saved(cx: &mut gpui::TestAppCont
             priority: DesktopPriority::High,
             due_date: None,
             planning: WorkItemPlanning::default(),
+            source: None,
             updated_at: EpochMs::UNIX_EPOCH,
         }];
         workspace.persist_and_notify(cx);
@@ -528,6 +529,7 @@ fn task(id: &str, title: &str) -> DesktopWorkItem {
         priority: DesktopPriority::None,
         due_date: None,
         planning: WorkItemPlanning::default(),
+        source: None,
         updated_at: EpochMs::UNIX_EPOCH,
     }
 }

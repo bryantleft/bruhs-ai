@@ -99,6 +99,8 @@ pub struct CaptureState {
     pub data: crate::paths::DataRoot,
     /// Verified model downloads under `data`.
     pub models: crate::models_dir::ModelStore,
+    pub dictation_models: crate::routes::dictation::models::Catalog,
+    pub dictation:crate::routes::dictation::runtime::Engine,
     pub remote_transcription: crate::transcribe::remote::RemoteProvider,
     /// Screen Recording permission, probed off the async workers and cached.
     pub permission: crate::capture::PermissionCache,
@@ -128,6 +130,8 @@ impl CaptureState {
         Self {
             recovery: crate::recovery::RecoveryQueue::new(Some(data.recovery_db_path())),
             models: crate::models_dir::ModelStore::new(data.models_dir()),
+            dictation_models: Default::default(),
+            dictation:crate::routes::dictation::runtime::Engine::new(data.capture_dir().join("dictation-runtime.json")),
             remote_transcription: crate::transcribe::remote::RemoteProvider::from_env(),
             permission: crate::capture::PermissionCache::new(crate::capture::probe_permission),
             #[cfg(target_os = "macos")]

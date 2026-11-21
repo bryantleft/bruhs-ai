@@ -258,14 +258,20 @@ fn start_make(view: &Entity<BackupSettings>, cx: &mut VisualTestContext) {
 }
 
 #[test]
-fn the_section_is_after_apps() {
+fn the_section_is_after_maintenance() {
     use super::super::SettingsSection;
+    let at = |section| SettingsSection::ALL.iter().position(|s| *s == section);
     let section = SettingsSection::Backup;
     assert_eq!(section.id(), "backup");
     assert_eq!(section.label(), BACKUP_TITLE);
     assert_eq!(section.description(), BACKUP_DESCRIPTION);
     assert_eq!(section.icon_path(), assets::ARCHIVE_ICON_PATH);
-    assert_eq!(section.index(), SettingsSection::Apps.index() + 1);
+    // Main's Application group: beside Maintenance, as the web keeps it
+    // after People (its last section before Keybindings).
+    assert_eq!(
+        at(section),
+        at(SettingsSection::Maintenance).map(|at| at + 1)
+    );
     assert_eq!(SettingsSection::from_id("backup"), Some(section));
     assert_eq!(section.selector(), "desktop-settings-nav-backup");
 }

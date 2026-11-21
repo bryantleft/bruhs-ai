@@ -1,3 +1,5 @@
+mod thread_resource_flow;
+mod settings_workflows;
 use super::threads_ui::{
     step_thread_index, thread_link, thread_selection_after_delete, THREAD_TITLE_GENERAL,
 };
@@ -133,7 +135,7 @@ use super::{
     SETTINGS_BODY_TEXT_SIZE_PX, SETTINGS_BODY_X_PADDING_PX, SETTINGS_BODY_Y_PADDING_PX,
     SETTINGS_CLOSE_BUTTON_SIZE_PX, SETTINGS_CLOSE_HOVER_BG_OPACITY, SETTINGS_CLOSE_LABEL,
     SETTINGS_CODE_FONT_FAMILY, SETTINGS_CODE_RADIUS_PX, SETTINGS_CONTROL_RADIUS_PX,
-    SETTINGS_META_TEXT_SIZE_PX, SETTINGS_MODEL_ID_GAP_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
+    SETTINGS_META_TEXT_SIZE_PX, SETTINGS_ROW_TEXT_GAP_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
     SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, SETTINGS_SECTION_GAP_PX, TASKS_ALL_PROJECTS_LABEL,
     TASKS_HEADER_BODY_FONT_FAMILY, TASKS_HEADER_BORDER_OPACITY, TASKS_HEADER_CONTROL_GAP_PX,
     TASKS_HEADER_CONTROL_RADIUS_PX, TASKS_HEADER_CONTROL_X_PADDING_PX,
@@ -188,9 +190,9 @@ use crate::{app_state::DesktopState, assets, theme};
 use bruhs_core::registry::TaskUpdate;
 use bruhs_core::TaskKind;
 use bruhs_models::EpochMs;
-use bruhs_ui::zoom::px;
 use chrono::{NaiveDate, NaiveDateTime};
 use gpui::{AppContext as _, Entity, Focusable};
+use bruhs_ui::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
@@ -265,6 +267,8 @@ fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpu
             .contains_focused(window, cx));
     });
     // The model row is a dropdown now; provider logos head its groups.
+    click_debug_selector(cx, "desktop-settings-nav-threads");
+    cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-row-model");
     click_debug_selector(cx, "desktop-model");
     cx.run_until_parked();
@@ -398,15 +402,12 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     });
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-nav-general");
+    click_debug_selector(cx, "desktop-settings-nav-threads");
+    cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-row-model");
     assert_rendered_bounds(cx, "desktop-settings-row-access-mode");
-    assert_rendered_bounds(cx, "desktop-settings-row-editor");
-    // All eight sections stack on one page, like the web.
-    assert_rendered_bounds(cx, "desktop-settings-section-calendar");
-    assert_rendered_bounds(cx, "desktop-settings-row-auto-record");
-    assert_rendered_bounds(cx, "desktop-settings-row-whisper-model");
-    assert_rendered_bounds(cx, "desktop-settings-slider-max-speakers");
-    assert_rendered_bounds(cx, "desktop-settings-row-observations");
+    assert_no_rendered_bounds(cx, "desktop-settings-row-editor");
+    assert_no_rendered_bounds(cx, "desktop-settings-section-calendar");
 
     // Access mode dropdown → Plan.
     click_debug_selector(cx, "desktop-access-mode");
@@ -420,6 +421,14 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     });
     assert_no_rendered_bounds(cx, "desktop-access-mode-list");
 
+    click_debug_selector(cx, "desktop-settings-nav-general");
+    cx.run_until_parked();
+    // Scroll the editor row and its list into the General viewport.
+    workspace.update_in(cx, |workspace, _, cx| {
+        workspace.settings_scroll.set_offset(gpui::point(px(0.), -workspace.settings_scroll.max_offset().y));
+        cx.notify();
+    });
+    cx.run_until_parked();
     // Editor dropdown → Zed.
     click_debug_selector(cx, "desktop-editor");
     cx.run_until_parked();
@@ -429,6 +438,12 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
         assert_eq!(workspace.editor_id, "zed");
     });
 
+    // A pointer can only select a tab inside the independently scrolling sidebar.
+    workspace.update_in(cx, |workspace, _, cx| {
+        workspace.settings_nav_scroll.set_offset(gpui::point(px(0.), -workspace.settings_nav_scroll.max_offset().y));
+        cx.notify();
+    });
+    cx.run_until_parked();
     click_debug_selector(cx, "desktop-settings-nav-transcription");
     cx.run_until_parked();
     click_debug_selector(cx, "desktop-transcription-provider");
@@ -475,24 +490,20 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
         assert_eq!(prefs.transcription.remote_model, "synthetic-model");
     });
 
-    // Nav jumps scroll the page (web `scroll_into_view`); the spy then
-    // highlights the section under the fold line.
+    workspace.update_in(cx, |workspace, _, cx| {
+        workspace.settings_nav_scroll.set_offset(gpui::point(px(0.), px(0.)));
+        cx.notify();
+    });
+    cx.run_until_parked();
     click_debug_selector(cx, "desktop-settings-nav-keyboard");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-keybinding-row-0");
     workspace.update_in(cx, |workspace, _window, _cx| {
-        assert!(workspace.settings_scroll.offset().y < px(0.0));
-        let tops = workspace
-            .settings_section_tops()
-            .expect("sections laid out");
-        let keyboard = super::SettingsSection::Keyboard.index();
-        assert!(
-            tops[keyboard] <= super::SETTINGS_SCROLL_SPY_FOLD_PX,
-            "keyboard top {}",
-            tops[keyboard]
-        );
+        assert_eq!(workspace.settings_scroll.offset().y, px(0.0));
         assert_eq!(workspace.settings_section, super::SettingsSection::Keyboard);
     });
+    workspace.update_in(cx,|w,_,cx|{w.settings_nav_scroll.set_offset(gpui::point(px(0.),px(-10_000.)));cx.notify();});
+    cx.run_until_parked();
     click_debug_selector(cx, "desktop-settings-nav-about");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-about-version");
@@ -506,27 +517,40 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
 }
 
 #[test]
-fn active_settings_section_is_last_above_fold_like_web() {
-    let tops = [-400.0, -10.0, 300.0];
-    assert_eq!(super::active_settings_section(&tops, 96.0), Some(1));
-    assert_eq!(super::active_settings_section(&[500.0], 96.0), Some(0));
-    assert_eq!(super::active_settings_section(&[], 96.0), None);
+fn settings_section_ids_are_stable() {
     let ids: Vec<&str> = super::SettingsSection::ALL.iter().map(|s| s.id()).collect();
     assert_eq!(
         ids,
         [
             "general",
+            "appearance",
+            "chat",
+            "diffs",
+            "keyboard",
+            "voice",
+            "snap-shot",
             "updates",
-            "beta",
+            "threads",
+            "browser",
+            "devices",
+            "scheduled-tasks",
+            "archived",
+            "projects",
+            "source-control",
+            "worktrees",
+            "connections",
+            "access",
             "vault",
             "apps",
-            "backup",
             "calendar",
             "recording",
             "transcription",
             "speakers",
             "people",
-            "keyboard",
+            "maintenance",
+            "backup",
+            "diagnostics",
+            "labs",
             "about"
         ]
     );
@@ -745,8 +769,8 @@ fn desktop_terminal_drawer_and_view_should_render_like_web(cx: &mut gpui::TestAp
     let tab_selector = leaked_debug_selector(format!("desktop-terminal-tab-{key}"));
     assert_rendered_bounds(cx, tab_selector);
     panel.update(cx, |panel, _| assert_eq!(panel.active_id(), Some("sess-1")));
-    view.update(cx, |view, _| {
-        let (rows, cursor) = view.snapshot();
+    view.update(cx, |view, cx| {
+        let (rows, cursor) = view.snapshot(cx);
         assert_eq!(rows[0].text, "hello green");
         assert_eq!(cursor.map(|c| (c.row, c.col)), Some((0, 11)));
         assert!(view.selection_text().is_none());
@@ -1223,7 +1247,7 @@ fn desktop_code_thread_cards_and_settled_fold_should_match_web_sidebar(
     // Pinning clears the settled flag: the card leaves the fold and shows its pin.
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.select_thread_by_id(&settled_id, cx);
-        workspace.toggle_pin_active(cx);
+        workspace.toggle_pin_active(_window, cx);
         workspace.sidebar_settled_open = false;
         let thread = workspace
             .threads
@@ -1634,6 +1658,7 @@ fn desktop_tasks_header_controls_should_match_web_flow(cx: &mut gpui::TestAppCon
         ];
         workspace.work_items = vec![
             DesktopWorkItem {
+                source: None,
                 id: "task-alpha".to_string(),
                 project_id: Some("project-1".to_string()),
                 title: "Alpha task".to_string(),
@@ -1645,6 +1670,7 @@ fn desktop_tasks_header_controls_should_match_web_flow(cx: &mut gpui::TestAppCon
                 updated_at: EpochMs::UNIX_EPOCH,
             },
             DesktopWorkItem {
+                source: None,
                 id: "task-beta".to_string(),
                 project_id: Some("project-2".to_string()),
                 title: "Beta task".to_string(),
@@ -2153,6 +2179,7 @@ fn desktop_calendar_month_pills_should_match_web_click_flow(cx: &mut gpui::TestA
             ..Default::default()
         }];
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-1".to_string(),
             project_id: None,
             title: "Ship calendar task marker".to_string(),
@@ -2566,6 +2593,17 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     cx.run_until_parked();
     click_debug_selector(cx, thread_delete_debug_selector(&new_general_id));
     cx.run_until_parked();
+    assert!(cx.has_pending_prompt());
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _, _| {
+        assert_eq!(workspace.active_thread_id.as_ref(), Some(&new_general_id));
+        assert_eq!(workspace.threads.len(), 3);
+    });
+    click_debug_selector(cx, thread_delete_debug_selector(&new_general_id));
+    cx.run_until_parked();
+    cx.simulate_prompt_answer("Delete");
+    cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_thread_id, None);
         assert_eq!(workspace.threads.len(), 2);
@@ -2615,7 +2653,7 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
 
 /// A workspace with two sidebar threads ("General chat" active, "Alpha
 /// session"), Escape bound like the app. Returns the two thread ids.
-fn thread_menu_workspace(
+pub(super) fn thread_menu_workspace(
     cx: &mut gpui::TestAppContext,
 ) -> (
     Entity<Workspace>,
@@ -2693,6 +2731,176 @@ fn open_thread_menu_by_pointer(cx: &mut gpui::VisualTestContext, thread_id: &str
     cx.run_until_parked();
     click_debug_selector(cx, thread_actions_debug_selector(thread_id));
     cx.run_until_parked();
+}
+
+#[gpui::test]
+fn settings_restores_an_archived_thread_and_draft_after_restart(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, id, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.confirm_thread_archive = true;
+        let chat = workspace.active_thread().unwrap().chat.clone();
+        chat.update(cx, |chat, cx| chat.set_composer_draft("Unsent thought".into(), window, cx));
+    });
+    open_thread_menu_by_pointer(cx, &id);
+    click_debug_selector(cx, "desktop-thread-menu-archive");
+    cx.run_until_parked();
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _, _| assert!(workspace.archived_threads.is_empty()));
+    open_thread_menu_by_pointer(cx, &id);
+    click_debug_selector(cx, "desktop-thread-menu-archive");
+    cx.run_until_parked();
+    cx.simulate_prompt_answer("Archive");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, window, cx| {
+        let bytes = serde_json::to_vec(&workspace.snapshot(cx)).unwrap();
+        let saved = super::decode_desktop_state(&bytes).unwrap();
+        assert_eq!(saved.confirm_thread_archive, Some(true));
+        assert!(saved.threads.iter().all(|thread| thread.id != id));
+        assert_eq!(saved.archived_threads.len(), 1);
+        workspace.archived_threads = saved.archived_threads.into_iter().map(super::archive::ArchivedThread::Stored).collect();
+        workspace.open_settings(&super::OpenSettings, window, cx);
+        workspace.set_settings_section(super::SettingsSection::Archived, cx);
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, Box::leak(format!("settings-restore-thread-{id}").into_boxed_str()));
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _, cx| {
+        let thread = workspace.threads.iter().find(|thread| thread.id == id).unwrap();
+        assert_eq!(thread.chat.read(cx).input_state.read(cx).value().as_str(), "Unsent thought");
+        assert!(workspace.snapshot(cx).archived_threads.is_empty());
+    });
+}
+
+#[gpui::test]
+fn settings_send_shortcut_controls_newlines_and_sending(cx: &mut gpui::TestAppContext) {
+    let (workspace,cx, id, _) = thread_menu_workspace(cx);
+    let chat = workspace.update_in(cx, |workspace, window, cx| {
+        workspace.select_settings_option("desktop-send-shortcut", "mod-enter-multiline", window, cx);
+        assert_eq!(workspace.snapshot(cx).send_shortcut.as_deref(), Some("mod-enter-multiline"));
+        let chat = workspace.active_thread().unwrap().chat.clone();
+        chat.update(cx, |chat, cx| {
+            chat.set_composer_draft("first\nsecond".into(), window, cx);
+            chat.is_streaming = true;
+            chat.focus_composer(window, cx);
+        });
+        chat
+    });
+    cx.run_until_parked();
+    press_key(cx, "enter");
+    chat.update_in(cx, |chat, _, cx| {
+        assert_eq!(chat.input_state.read(cx).value().as_str(), "first\nsecond\n");
+        assert!(chat.prompt_queue.for_thread(&id).is_empty());
+    });
+    press_key(cx, if cfg!(target_os = "macos") { "cmd-enter" } else { "ctrl-enter" });
+    chat.update_in(cx, |chat, window, cx| {
+        assert_eq!(chat.prompt_queue.for_thread(&id).len(), 1);
+        chat.set_composer_draft("one line".into(), window, cx);
+    });
+    press_key(cx, "enter");
+    chat.update_in(cx, |chat, _, _| assert_eq!(chat.prompt_queue.for_thread(&id).len(), 2));
+}
+
+#[gpui::test]
+fn settings_records_a_dictation_shortcut_and_applies_the_voice_model_to_chats(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_settings(&super::OpenSettings, window, cx);
+        workspace.set_settings_section(super::SettingsSection::Voice, cx);
+        workspace.select_settings_option("settings-voice-model", "large_v3_turbo", window,cx);
+        workspace.select_settings_option("settings-voice-language","fr",window,cx);
+        let saved = workspace.snapshot(cx).dictation_prefs.unwrap();
+        assert_eq!(saved.model,bruhs_models::WhisperModel::LargeV3Turbo);
+        assert_eq!(saved.options().language.as_deref(),Some("fr"));
+        for thread in &workspace.threads { assert_eq!(thread.chat.read(cx).dictation_prefs, saved); }
+        workspace.set_settings_section(super::SettingsSection::Keyboard,cx);
+        let index = workspace.keybindings.iter().position(|rule|rule.command=="voice.dictate").unwrap();
+        workspace.keybinding_filter.update(cx,|input,cx|input.set_value("voice.dictate",window,cx));
+        workspace.select_keybinding(index,window,cx);
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx,"desktop-record-shortcut");
+    cx.run_until_parked();
+    press_key(cx,if cfg!(target_os="macos") { "cmd-alt-v" } else { "ctrl-alt-v" });
+    workspace.update_in(cx, |workspace,_,cx| {
+        let rule = workspace.snapshot(cx).keybindings.into_iter().find(|rule|rule.command=="voice.dictate").unwrap();
+        assert_eq!(rule.key,"mod+alt+v");
+        assert!(workspace.settings_visible());
+    });
+}
+
+#[gpui::test]
+fn settings_add_shortcut_only_changes_the_saved_rules_after_recording(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    let (index, saved) = workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_settings(&super::OpenSettings, window, cx);
+        workspace.set_settings_section(super::SettingsSection::Keyboard, cx);
+        let index = workspace.keybindings.iter().position(|rule| rule.command == "voice.dictate").unwrap();
+        (index, workspace.keybindings.clone())
+    });
+    cx.run_until_parked();
+    let command = Box::leak(format!("desktop-choose-command-{index}").into_boxed_str());
+    for cancel in [true, false] {
+        click_debug_selector(cx, "desktop-keybindings-add");
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.keybinding_filter.update(cx, |input, cx| input.set_value("voice.dictate", window, cx));
+        });
+        cx.run_until_parked();
+        click_debug_selector(cx, command);
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| assert_eq!(workspace.keybindings, saved));
+        if cancel {
+            press_key(cx, "escape");
+            workspace.read_with(cx, |workspace, _| {
+                assert!(workspace.settings_visible());
+                assert!(workspace.keybinding_new_for.is_none());
+                assert_eq!(workspace.keybindings, saved);
+            });
+        } else {
+            press_key(cx, if cfg!(target_os = "macos") { "cmd-alt-v" } else { "ctrl-alt-v" });
+            workspace.read_with(cx, |workspace, cx| {
+                let bindings = workspace.snapshot(cx).keybindings;
+                assert_eq!(bindings.len(), saved.len() + 1);
+                let added = bindings.last().unwrap();
+                assert_eq!((&*added.command, &*added.key), ("voice.dictate", "mod+alt+v"));
+            });
+        }
+    }
+}
+
+#[gpui::test]
+fn desktop_thread_menu_disables_regeneration_only_while_the_title_is_pending(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (workspace, cx, _, id) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, _, cx| {
+        ws.text_generation_model = Some("local".into());
+        ws.sidebar_working_open = true;
+        let thread = ws.threads.iter().find(|t| t.id == id).unwrap();
+        thread.chat.update(cx, |chat, cx| {
+            chat.thread_title = "Previous title".into();
+            chat.messages = vec![crate::views::chat::Message::user("Repair radar imports")];
+            chat.is_streaming = true;
+            cx.notify();
+        });
+        ws.title_requests.insert(id.clone(), super::thread_titles::PendingTitle::new(1, "Previous title".into(), None));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    open_thread_menu_by_pointer(cx, &id);
+    click_debug_selector(cx, "desktop-thread-menu-regenerate");
+    workspace.update_in(cx, |ws, _, cx| {
+        assert_eq!(ws.thread_menu_id.as_ref(), Some(&id));
+        assert!(ws.title_requests.remove(&id).is_some());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-thread-menu-regenerate");
+    workspace.update_in(cx, |ws, _, cx| {
+        assert!(ws.thread_menu_id.is_none());
+        let thread = ws.threads.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(thread.chat.read(cx).thread_title, "Repair radar imports");
+    });
 }
 
 /// The card's "…" menu opens under the button that opened it (web: the
@@ -2810,11 +3018,11 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
     cx.simulate_keystrokes("down");
     assert_eq!(item_focused(&workspace, cx), Some(1));
     cx.simulate_keystrokes("up up");
-    assert_eq!(item_focused(&workspace, cx), Some(7), "Up from Pin wraps");
+    assert_eq!(item_focused(&workspace, cx), Some(10), "Up from Pin reaches Archive");
     cx.simulate_keystrokes("home");
     assert_eq!(item_focused(&workspace, cx), Some(0));
     cx.simulate_keystrokes("end");
-    assert_eq!(item_focused(&workspace, cx), Some(7));
+    assert_eq!(item_focused(&workspace, cx), Some(10));
 
     cx.simulate_keystrokes("escape");
     workspace.update_in(cx, |workspace, _window, _cx| {
@@ -3604,6 +3812,7 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
         workspace.day_plan_test_now = Some(clock);
         workspace.calendar_events.clear();
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "today-task".to_string(),
             project_id: None,
             title: "Protect focus".to_string(),
@@ -3704,6 +3913,7 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
             assert!(workspace.day_plan_undo.is_none());
             if workspace.work_items.is_empty() {
                 workspace.work_items.push(DesktopWorkItem {
+                    source: None,
                     id: "today-task".into(),
                     project_id: None,
                     title: "Protect focus".into(),
@@ -3903,6 +4113,7 @@ fn desktop_compact_layout_should_use_drawers_without_collapsing_main_content(
         }];
         workspace.selected_project_id = Some("project-1".to_string());
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-1".to_string(),
             project_id: Some("project-1".to_string()),
             title: "Compact detail".to_string(),
@@ -3980,6 +4191,8 @@ fn desktop_command_bar_filter_click_should_open_settings_like_web(cx: &mut gpui:
     });
     assert_rendered_bounds(cx, "desktop-settings-dialog");
     // Provider logos head the model dropdown's groups once it is open.
+    click_debug_selector(cx, "desktop-settings-nav-threads");
+    cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-row-model");
     click_debug_selector(cx, "desktop-model");
     cx.run_until_parked();
@@ -4187,6 +4400,7 @@ fn desktop_project_sidebar_create_select_and_delete_should_match_web_flow(
             .clone()
             .expect("new project should be selected");
         workspace.work_items.push(DesktopWorkItem {
+            source: None,
             id: "task-1".to_string(),
             project_id: Some(project_id.clone()),
             title: "Scoped task".to_string(),
@@ -4299,6 +4513,7 @@ fn desktop_task_detail_edit_select_close_and_delete_should_match_web_flow(
             },
         ];
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-1".to_string(),
             project_id: Some("project-1".to_string()),
             title: "Original task".to_string(),
@@ -4485,6 +4700,7 @@ fn desktop_task_board_drop_handler_should_match_web_status_move_flow(
         }];
         workspace.selected_project_id = Some("project-1".to_string());
         workspace.work_items = vec![DesktopWorkItem {
+            source: None,
             id: "task-1".to_string(),
             project_id: Some("project-1".to_string()),
             title: "Drag me".to_string(),
@@ -4751,6 +4967,7 @@ fn set_model_for_visual_test(
 
 fn work_item(id: &str, status: DesktopWorkItemStatus) -> DesktopWorkItem {
     DesktopWorkItem {
+        source: None,
         id: id.to_string(),
         project_id: None,
         title: id.to_string(),
@@ -4771,10 +4988,13 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         project_path: None,
         model_id: model_id.to_string(),
         permission_mode,
+        project_permission_override: false,
         messages: Vec::new(),
         updated_at_ms: EpochMs::UNIX_EPOCH,
         pinned: false,
         settled: false,
+        settled_at_ms: None,
+        cleanup_busy: false,
         pin_rank: None,
         active_rank: None,
         snoozed_until_ms: None,
@@ -4784,8 +5004,10 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         session_id: None,
         session_provider: None,
         import_context: None,
+        fork: None,
         goal: None,
         worktree_path: None,
+        project_settings_root: None,
         effort: None,
         run_locked: false,
         role: None,
@@ -5972,7 +6194,7 @@ fn desktop_dialog_metrics_should_match_web_reference() {
     assert_eq!(SETTINGS_META_TEXT_SIZE_PX, 12.0);
     assert_eq!(SETTINGS_CODE_RADIUS_PX, 4.0);
     assert_eq!(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, 44.0);
-    assert_eq!(SETTINGS_MODEL_ID_GAP_PX, 2.0);
+    assert_eq!(SETTINGS_ROW_TEXT_GAP_PX, 4.0);
     assert_eq!(SETTINGS_MODEL_LABEL_TEXT_SIZE_PX, 13.0);
     assert_eq!(SETTINGS_CLOSE_LABEL, "Close settings");
 }
@@ -6329,6 +6551,7 @@ fn event_form_times_from_inputs_should_match_web_invalid_datetime_fallbacks() {
 #[test]
 fn work_item_due_on_should_match_local_date_string() {
     let item = DesktopWorkItem {
+        source: None,
         id: "task-1".to_string(),
         project_id: None,
         title: "Ship parity".to_string(),
@@ -6722,6 +6945,25 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
             .is_empty());
     });
 
+    // Provider-only and desktop-only updates both expose the desktop status in the modal.
+    for (provider, app, can_update_providers) in [
+        (("0.166.0", "0.167.0"), AppUpdateState::UpToDate, true),
+        (("0.167.0", "0.167.0"), AppUpdateState::Behind, false),
+    ] {
+        seed(cx, update_report(provider, app, vec![]));
+        click_debug_selector(cx, "desktop-sidebar-update");
+        cx.run_until_parked();
+        assert_rendered_bounds(cx,"desktop-settings-row-update-app");
+        if can_update_providers {
+            assert_rendered_bounds(cx,"desktop-update-confirm-run");
+        } else {
+            assert_no_rendered_bounds(cx,"desktop-update-confirm-run");
+        }
+        click_debug_selector(cx, "desktop-update-confirm-cancel");
+        cx.run_until_parked();
+    }
+    seed(cx, update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]));
+
     // Settings rows: Update now and its copy button, the app command.
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.open_settings(&OpenSettings, window, cx);
@@ -6858,6 +7100,7 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
             updates.install = super::updates_ui::AppInstall::Ready {
                 version: "0.2.0".into(),
                 staged: std::path::PathBuf::from("/nonexistent/Bruhs.app"),
+                restart_error: None,
             };
         });
     });
@@ -6868,6 +7111,22 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     click_debug_selector(cx, "desktop-restart-confirm-later");
     cx.run_until_parked();
     assert_no_rendered_bounds(cx, "desktop-restart-confirm");
+    // A staged app and an outdated provider share the sidebar dialog.
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.updates.update(cx, |updates, cx| {
+            let mut report = updates.report.clone().expect("release report");
+            report.providers =
+                update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]).providers;
+            updates.set_report_for_test(report, cx);
+        });
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-sidebar-update");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-update-confirm-run");
+    assert_rendered_bounds(cx, "desktop-settings-restart-update");
+    click_debug_selector(cx, "desktop-update-confirm-cancel");
+    cx.run_until_parked();
     // Still offered from the sidebar and Settings.
     assert_rendered_bounds(cx, "desktop-sidebar-update");
     workspace.update_in(cx, |workspace, window, cx| {
@@ -6878,6 +7137,102 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     assert_rendered_bounds(cx, "desktop-settings-restart-update");
     // The version's changelog entry sits beside Restart.
     assert_rendered_bounds(cx, "desktop-settings-release-notes");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.set_settings_section(super::SettingsSection::About, cx);
+        workspace.select_settings_option("settings-update-track", "nightly", window, cx);
+        assert_eq!(workspace.snapshot(cx).update_track, Some(super::updates_ui::UpdateTrack::Nightly));
+        assert!(matches!(workspace.updates.read(cx).install, super::updates_ui::AppInstall::Idle));
+        assert!(workspace.updates.read(cx).report.is_none());
+    });
+}
+
+#[gpui::test]
+fn desktop_update_retries_on_demand_and_retains_a_staged_restart(cx: &mut gpui::TestAppContext) {
+    use super::updates_ui::AppInstall;
+    use bruhs_core::updates::release::StageProgress;
+    use bruhs_models::updates::{AppUpdateState, ReleaseUpdate};
+    cx.executor().allow_parking();
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = dir.path().join("Unsigned.app");
+    std::fs::create_dir(&bundle).unwrap();
+    let updates = workspace.read_with(cx, |workspace, _| workspace.updates.clone());
+    let release = |state| {
+        let mut report = update_report(("1", "1"), state, vec![]);
+        report.app.command = None;
+        report.app.release = Some(ReleaseUpdate {
+            current_version: "0.1.0".into(),
+            latest_version: Some("0.2.0".into()),
+            release_url: Some("https://example.invalid/releases".into()),
+            download_url: Some("http://127.0.0.1:0/update.zip".into()),
+            sha256: Some("0".repeat(64)),
+        });
+        report
+    };
+    updates.update(cx, |u, cx| {
+        u.bundle = Some(bundle);
+        u.set_report_for_test(release(AppUpdateState::UpToDate), cx);
+    });
+    workspace.update_in(cx, |ws, w, cx| {
+        ws.open_settings(&OpenSettings, w, cx);
+        ws.set_settings_section(super::SettingsSection::About, cx);
+    });
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-about-check-update");
+    updates.update(cx, |u, cx| {
+        u.set_report_for_test(release(AppUpdateState::Behind), cx)
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-settings-stage-update");
+    let failed_at = |cx: &mut gpui::VisualTestContext| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            cx.run_until_parked();
+            match updates.read_with(cx, |u, _| u.install.clone()) {
+                AppInstall::Failed { at, error, .. } if error.contains("Developer ID") => break at,
+                AppInstall::Staging { .. } if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                state => panic!("expected an unsigned-bundle error, got {state:?}"),
+            }
+        }
+    };
+    let first = failed_at(cx);
+    assert_rendered_bounds(cx, "desktop-settings-update-error");
+    click_debug_selector(cx, "desktop-settings-stage-update");
+    assert!(failed_at(cx) > first);
+    updates.update(cx, |u, cx| {
+        u.install = AppInstall::Staging {
+            version: "0.2.0".into(),
+            progress: StageProgress::Downloading(Some(46)),
+        };
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-settings-update-progress");
+    assert_no_rendered_bounds(cx, "desktop-settings-stage-update");
+    updates.update(cx, |u, cx| {
+        u.install = AppInstall::Ready {
+            version: "0.2.0".into(),
+            staged: dir.path().join("Staged.app"),
+            restart_error: None,
+        };
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-settings-restart-update");
+    click_debug_selector(cx, "desktop-restart-confirm-run");
+    updates.read_with(cx, |u, _| assert!(matches!(&u.install, AppInstall::Ready { restart_error: Some(error), .. } if error.contains("Developer ID"))));
+    click_debug_selector(cx, "desktop-restart-confirm-later");
+    assert_rendered_bounds(cx, "desktop-settings-about-version");
+    workspace.update_in(cx, |ws, window, _| {
+        assert!(ws.modal_focus.restart_row.is_focused(window))
+    });
+    keys::press(cx, "enter");
+    assert_rendered_bounds(cx, "desktop-restart-confirm");
+    cx.simulate_keystrokes("escape");
+    assert_rendered_bounds(cx, "desktop-settings-about-version");
+    assert_rendered_bounds(cx, "desktop-sidebar-update");
 }
 
 struct TaskControlGeometryHarness {
@@ -6956,4 +7311,23 @@ fn native_task_tabs_keep_content_still_during_keyboard_focus(cx: &mut gpui::Test
         );
         assert_eq!(cx.debug_bounds(content_selector).unwrap(), children);
     }
+}
+
+#[gpui::test]
+fn saved_snooze_choices_set_the_selected_threads_wake_time(cx: &mut gpui::TestAppContext) {
+    use super::snooze_options::Choice;
+    let (workspace, cx, id, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |this, _, cx| {
+        this.snooze_options = Some(vec![Choice::After { minutes: 135 }]);
+        assert_eq!(this.snapshot(cx).snooze_options, this.snooze_options);
+    });
+    open_thread_menu_by_pointer(cx, &id);
+    let choice = rendered_bounds(cx, "desktop-thread-snooze-0");
+    let before = EpochMs::now().as_millis();
+    cx.simulate_click(choice.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    workspace.update_in(cx, |this, _, _| {
+        let until = this.threads.iter().find(|t| t.id == id).unwrap().snoozed_until_ms.unwrap();
+        assert!((before + 135 * 60_000..=EpochMs::now().as_millis() + 135 * 60_000).contains(&until));
+    });
 }

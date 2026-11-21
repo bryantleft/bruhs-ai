@@ -137,6 +137,22 @@ impl FromStr for Priority {
     }
 }
 
+/// The retained source of a task, independent of its editable description.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkItemSource {
+    /// Open the recording by identity; `title` is a local snapshot for a
+    /// source that was renamed, removed or is temporarily unavailable.
+    Meeting { meeting_id: String, title: String },
+}
+
+impl WorkItemSource {
+    /// Match the retained recording identity, including after its title changes.
+    pub fn is_meeting(&self, id: &str) -> bool {
+        matches!(self, Self::Meeting { meeting_id, .. } if meeting_id == id)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkItem {
     pub id: String,
@@ -150,6 +166,8 @@ pub struct WorkItem {
     pub due_date: Option<String>,
     #[serde(default)]
     pub planning: WorkItemPlanning,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<WorkItemSource>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -180,6 +198,7 @@ impl WorkItem {
             priority: Priority::None,
             due_date: None,
             planning: WorkItemPlanning::default(),
+            source: None,
             created_at: now,
             updated_at: now,
         }
@@ -239,5 +258,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(task.planning, WorkItemPlanning::default());
+        assert!(task.source.is_none());
+        assert!(serde_json::to_value(task).unwrap().get("source").is_none());
+    }
+
+    #[test]
+    fn meeting_source_survives_task_edits_and_serialization_without_using_titles_as_identity() {
+        let source = WorkItemSource::Meeting {
+            meeting_id: "recording-a".into(),
+            title: "Weekly sync".into(),
+        };
+        let same_title = WorkItemSource::Meeting {
+            meeting_id: "recording-b".into(),
+            title: "Weekly sync".into(),
+        };
+        assert!(source.is_meeting("recording-a"));
+        assert!(!same_title.is_meeting("recording-a"));
+        let mut task = WorkItem::new_at("Suggested action", 10);
+        task.source = Some(source.clone());
+        task.title = "User edited action".into();
+        task.description = Some("User replaced all generated prose".into());
+        task.status = WorkItemStatus::Done;
+        let restored: WorkItem =
+            serde_json::from_slice(&serde_json::to_vec(&task).unwrap()).unwrap();
+        assert_eq!(restored.source, Some(source));
+        assert_eq!(restored.title, task.title);
+        assert_eq!(restored.status, WorkItemStatus::Done);
     }
 }

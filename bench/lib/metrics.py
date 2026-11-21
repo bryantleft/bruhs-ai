@@ -55,6 +55,13 @@ def n(value):
     return int(value or 0)
 
 
+def has_usage(usage: object) -> bool:
+    return isinstance(usage, dict) and all(
+        type(usage.get(key)) is int and usage[key] >= 0
+        for key in ("input_tokens", "output_tokens")
+    )
+
+
 def claude_prompt(usage):
     return (
         n(usage.get("input_tokens"))
@@ -96,16 +103,19 @@ def claude_metrics(rows):
     note = ""
     if results:
         result = results[-1]
-        tokens = claude_total(result.get("usage") or {})
+        tokens = claude_total(result["usage"]) if has_usage(result.get("usage")) else "-"
+        if tokens == "-":
+            note = "result missing complete usage"
         # Distinct assistant messages = model requests. `num_turns` counts
         # differently (it ran 2-4 higher) and bruhs has no equivalent.
         turns = len(messages)
         if result.get("is_error"):
             note = f"result error: {result.get('subtype', '')}".strip()
     else:
-        tokens = sum(claude_total(m.get("usage") or {}) for m in messages.values())
+        observed = sum(claude_total(m.get("usage") or {}) for m in messages.values())
+        tokens = "-"
         turns = len(messages)
-        note = "no result event (killed?); tokens summed from assistant messages"
+        note = f"no result event (killed?); observed {observed} tokens (lower bound)"
     return tokens, max(peaks) if peaks else "-", turns, count_tool_uses(messages), note
 
 
@@ -137,7 +147,8 @@ def codex_requests(thread_id):
         last_total = total
         turns += 1
         peak = max(peak, n((info.get("last_token_usage") or {}).get("input_tokens")))
-        spent = codex_usage_spent(info.get("total_token_usage") or {})
+        usage = info.get("total_token_usage")
+        spent = codex_usage_spent(usage) if has_usage(usage) else None
     return (peak or None), (turns or None), spent
 
 
@@ -178,12 +189,11 @@ def codex_metrics(rows):
             if item.get("type") in CODEX_TOOL_ITEMS:
                 tools.add(item.get("id"))
     peak, turns, rollout_spent = codex_requests(thread_id)
-    tokens = codex_usage_spent(usage) if usage is not None else "-"
-    if usage is None:
+    tokens = codex_usage_spent(usage) if has_usage(usage) else "-"
+    if not has_usage(usage):
         note = note or "no turn.completed event (killed?)"
         if rollout_spent is not None:
-            tokens = rollout_spent
-            note += "; tokens from the session rollout"
+            note += f"; observed {rollout_spent} tokens in rollout (lower bound)"
     return tokens, peak or "-", turns or "-", len(tools), note
 
 
@@ -218,7 +228,9 @@ def bruhs_claude_metrics(rows, use_session=True):
         if event.get("type") in ("init", "result") and event.get("session_id"):
             session = event["session_id"]
         if event.get("type") == "result":
-            tokens = claude_total(event.get("usage") or {})
+            tokens = claude_total(event["usage"]) if has_usage(event.get("usage")) else "-"
+            if tokens == "-":
+                note = "result missing complete usage"
             if event.get("is_error"):
                 note = "result error"
         if event.get("type") == "error":
@@ -247,12 +259,11 @@ def bruhs_codex_metrics(rows, use_session=True):
         elif event.get("type") == "error":
             note = "error: " + str(event.get("message"))[:120]
     peak, turns, rollout_spent = codex_requests(session) if use_session else (None, None, None)
-    tokens = bruhs_codex_spent(usage) if usage else "-"
-    if usage is None:
+    tokens = bruhs_codex_spent(usage) if has_usage(usage) else "-"
+    if not has_usage(usage):
         note = note or "stream ended without a usage event"
         if rollout_spent is not None:
-            tokens = rollout_spent
-            note += "; tokens from the session rollout (a lower bound if the turn was cut short)"
+            note += f"; observed {rollout_spent} tokens in rollout (lower bound)"
     return tokens, peak or "-", turns or "-", len(tools), note
 
 
@@ -374,39 +385,6 @@ def codex_rollouts_in(cwd):
     return hits
 
 
-def reviewer_tokens(reviewer, cwd, exclude):
-    """(tokens, how) for the reviewer's own run, read from its session log
-    in `cwd`, ignoring the thread's own sessions `exclude`. None when the
-    reviewer left no log."""
-    if not cwd:
-        return None, "no review request body"
-    if reviewer == "claude":
-        found = [
-            path
-            for path in glob.glob(os.path.join(claude_project_dir(cwd), "*.jsonl"))
-            if os.path.basename(path)[:-6] not in exclude
-        ]
-        if not found:
-            return None, "Claude reviewer left no transcript"
-        total = 0
-        for path in found:
-            messages = claude_transcript_messages(read_jsonl(path))
-            total += sum(claude_total(m.get("usage") or {}) for m in messages.values())
-        return total, "from the reviewer's transcript (output undercounted)"
-    found = [path for path, session in codex_rollouts_in(cwd) if session not in exclude]
-    if not found:
-        return None, "Codex reviewer is ephemeral and left no rollout"
-    total = 0
-    for path in found:
-        spent = None
-        for row in read_jsonl(path):
-            payload = row.get("payload") or {}
-            if payload.get("type") == "token_count" and payload.get("info"):
-                spent = codex_usage_spent(payload["info"].get("total_token_usage") or {})
-        total += spent or 0
-    return total, "from the reviewer's rollout"
-
-
 def review_metrics(fmt, path):
     """Turn 1 + review + turn 2 of a review-mode run. Both turns resume one
     provider session, whose log (transcript or rollout) then covers both, so
@@ -416,10 +394,10 @@ def review_metrics(fmt, path):
     first = read_jsonl(path)
     second_path = sibling(path, ".t2.log")
     second = read_jsonl(second_path) if os.path.exists(second_path) else []
-    runs = [rows for rows in (first, second) if rows]
+    runs = [first, second] if os.path.exists(second_path) else [first]
     parts = [base(rows, use_session=False) for rows in runs]
     known = [p[0] for p in parts if isinstance(p[0], int)]
-    tokens = sum(known) if known else "-"
+    tokens = sum(known) if known and len(known) == len(parts) else "-"
     tools = sum(p[3] for p in parts if isinstance(p[3], int))
     peaks = [p[1] for p in parts if isinstance(p[1], int)]
     turns = [p[2] for p in parts if isinstance(p[2], int)]
@@ -459,23 +437,30 @@ def review_metrics(fmt, path):
         notes.append(f"review error after {review_time}s: {str(review['error'])[:100]}")
     else:
         reviewer = review.get("reviewer") or "?"
-        body = read_json(sibling(path, ".review.body.json")) or {}
         usage = review.get("usage")
-        if usage:
+        if has_usage(usage):
             # Claude-style counts from the server (input excludes cache reads).
             extra = sum(n(usage.get(key)) for key in (
                 "input_tokens", "output_tokens",
                 "cache_read_input_tokens", "cache_creation_input_tokens"))
             how = "(reported by the server)"
         else:
-            extra, how = reviewer_tokens(reviewer, body.get("project_path"), set(sessions))
+            extra = None
+            how = "review usage not reported; transcript estimates are not a complete bill"
         if extra is not None and isinstance(tokens, int):
             tokens += extra
             notes.append(f"review by {reviewer} {review_time}s, {extra:,} tokens {how}")
         else:
-            notes.append(f"review by {reviewer} {review_time}s; tokens = turns only ({how})")
+            if isinstance(tokens, int):
+                notes.append(f"observed {tokens} turn tokens (lower bound)")
+            tokens = "-"
+            notes.append(f"review by {reviewer} {review_time}s; total unknown ({how})")
         if not second:
-            notes.append("no turn 2")
+            notes.append("turn 2 log empty" if os.path.exists(second_path) else "no turn 2")
+    if review is None or review.get("error"):
+        if isinstance(tokens, int):
+            notes.append(f"observed {tokens} turn tokens (lower bound)")
+        tokens = "-"
     return tokens, peak, count, tools, "; ".join(notes)
 
 
@@ -544,13 +529,17 @@ def t3_metrics(provider, path):
             messages.update(claude_transcript_messages(read_jsonl(transcript)))
         if not messages:
             return "-", "-", "-", "-", note or "no Claude transcript in the workdir"
+        if not all(has_usage(message.get("usage")) for message in messages.values()):
+            return "-", "-", len(messages), count_tool_uses(messages), note or "Claude transcript missing complete usage"
         tokens = sum(claude_total(m.get("usage") or {}) for m in messages.values())
         peak = max(claude_prompt(m.get("usage") or {}) for m in messages.values())
         return tokens, peak, len(messages), count_tool_uses(messages), note
     tokens = peak = turns = tools = 0
     rollouts = codex_rollouts_in(cwd)
+    unknown = 0
     for rollout, session in rollouts:
         request_peak, request_turns, spent = codex_requests(session)
+        unknown += spent is None
         tokens += spent or 0
         peak = max(peak, request_peak or 0)
         turns += request_turns or 0
@@ -560,6 +549,9 @@ def t3_metrics(provider, path):
                 tools += 1
     if not rollouts:
         return "-", "-", "-", "-", note or "no Codex rollout in the workdir"
+    if unknown:
+        detail = f"observed {tokens} tokens (lower bound); {unknown} Codex rollouts missing usage"
+        return "-", peak or "-", turns or "-", tools, "; ".join(filter(None, [note, detail]))
     return tokens, peak or "-", turns or "-", tools, note
 
 
