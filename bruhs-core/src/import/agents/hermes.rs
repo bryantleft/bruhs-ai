@@ -129,6 +129,7 @@ pub(crate) fn persona(home: &Path, profile: Option<&str>) -> Option<PersonaCandi
         files,
         clipped: assembled.clipped,
         dropped_identity: assembled.dropped_identity,
+        left_out_logs: 0,
     })
 }
 

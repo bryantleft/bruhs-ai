@@ -80,9 +80,12 @@ const HANG: std::time::Duration = std::time::Duration::from_secs(60);
 /// Runs timed at each size; the fastest counts, so a burst of load on the
 /// machine doesn't.
 const REPEATS: usize = 3;
-/// The smaller size's time is read as at least this, so a run too quick
-/// to time can't make the ratio noise.
-const FLOOR: std::time::Duration = std::time::Duration::from_millis(1);
+/// The smaller size is doubled until its fastest run takes at least this
+/// long, so it times well above the clock's and the caches' noise on any
+/// machine and in any profile.
+const CALIBRATED: std::time::Duration = std::time::Duration::from_millis(20);
+/// Doublings of the smaller size at most (256 times the caller's `n`).
+const MAX_DOUBLINGS: u32 = 8;
 /// Four times the input may take at most this many times as long. Linear
 /// work measures 2 to 4.2 here; quadratic work measures 11.7 to 16, not a
 /// clean 16, because its linear part dilutes it. So the line sits at 8,
@@ -90,10 +93,12 @@ const FLOOR: std::time::Duration = std::time::Duration::from_millis(1);
 const MAX_RATIO: f64 = 8.0;
 
 /// Asserts `run` grows about linearly with its input, whatever the
-/// machine's load: the fastest of [`REPEATS`] runs on `build(4 * n)` takes
-/// under [`MAX_RATIO`] times the fastest on `build(n)`, both timed in this
-/// call. Only `run` is timed, on its own thread, and each run must finish
-/// within 60 s, so a hang fails too.
+/// machine's load. Starting from `n`, the size is doubled until the fastest
+/// run on `build(n)` takes at least [`CALIBRATED`]; then runs on `build(n)`
+/// and `build(4 * n)` alternate, [`REPEATS`] each, and the fastest at the
+/// larger size must take under [`MAX_RATIO`] times the fastest at the
+/// smaller. Only `run` is timed, on its own thread, and each run must
+/// finish within 60 s, so a hang fails too.
 ///
 /// # Panics
 ///
@@ -105,36 +110,91 @@ pub fn assert_scales_linearly<T: Send + Sync + 'static>(
     run: impl Fn(&T) + Send + Sync + 'static,
 ) {
     use std::sync::{mpsc, Arc};
+    use std::time::Duration;
     let run = Arc::new(run);
-    let fastest = |size: usize| {
-        let input = Arc::new(build(size));
-        let mut best = std::time::Duration::MAX;
-        for _ in 0..REPEATS {
-            let (done, timed) = mpsc::channel();
-            let (run, input) = (Arc::clone(&run), Arc::clone(&input));
-            std::thread::spawn(move || {
-                let started = std::time::Instant::now();
-                run(&input);
-                let _ = done.send(started.elapsed());
-            });
-            match timed.recv_timeout(HANG) {
-                Ok(took) => best = best.min(took),
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    panic!("{what} at size {size} didn't finish within {HANG:?}")
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    panic!("{what} at size {size} panicked")
-                }
+    let once = |input: &Arc<T>, size: usize| -> Duration {
+        let (done, timed) = mpsc::channel();
+        let (run, input) = (Arc::clone(&run), Arc::clone(input));
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            run(&input);
+            let _ = done.send(started.elapsed());
+        });
+        match timed.recv_timeout(HANG) {
+            Ok(took) => took,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                panic!("{what} at size {size} didn't finish within {HANG:?}")
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("{what} at size {size} panicked")
             }
         }
-        best
     };
+    let fastest = |input: &Arc<T>, size: usize| {
+        (0..REPEATS)
+            .map(|_| once(input, size))
+            .min()
+            .unwrap_or(Duration::MAX)
+    };
+    let mut n = n.max(1);
+    let mut small_input = Arc::new(build(n));
+    for _ in 0..MAX_DOUBLINGS {
+        if fastest(&small_input, n) >= CALIBRATED {
+            break;
+        }
+        n = n.saturating_mul(2);
+        small_input = Arc::new(build(n));
+    }
     let large_n = n.saturating_mul(4);
-    let small = fastest(n);
-    let large = fastest(large_n);
-    let ratio = large.as_secs_f64() / small.max(FLOOR).as_secs_f64();
+    let large_input = Arc::new(build(large_n));
+    let (mut small, mut large) = (Duration::MAX, Duration::MAX);
+    // Alternated, so a burst of load falls on both sizes.
+    for _ in 0..REPEATS {
+        small = small.min(once(&small_input, n));
+        large = large.min(once(&large_input, large_n));
+    }
+    // Only a run that never reached the calibrated time is read as it.
+    let ratio = large.as_secs_f64() / small.max(CALIBRATED).as_secs_f64();
     assert!(
         ratio < MAX_RATIO,
         "{what} isn't linear: {small:?} at {n}, {large:?} at {large_n} (ratio {ratio:.1})"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assert_scales_linearly;
+
+    fn work(n: usize) -> u64 {
+        (0..n).fold(0_u64, |sum, i| {
+            std::hint::black_box(sum.wrapping_add(u64::try_from(i).unwrap_or(0)))
+        })
+    }
+
+    #[test]
+    fn linear_work_passes() {
+        assert_scales_linearly(
+            "linear work",
+            1_000,
+            |n| n,
+            |n| {
+                std::hint::black_box(work(*n));
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "isn't linear")]
+    fn quadratic_work_fails() {
+        assert_scales_linearly(
+            "quadratic work",
+            100,
+            |n| n,
+            |n| {
+                for _ in 0..*n {
+                    std::hint::black_box(work(*n));
+                }
+            },
+        );
+    }
 }

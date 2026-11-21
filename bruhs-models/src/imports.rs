@@ -191,6 +191,10 @@ pub struct PersonaCandidate {
     /// Labels of identity fields not carried over, such as "Emoji".
     #[serde(default)]
     pub dropped_identity: Vec<String>,
+    /// Older daily logs left out: past `MAX_DAILY_LOGS`, or past a full
+    /// memory.
+    #[serde(default)]
+    pub left_out_logs: u32,
 }
 
 /// One file a scan saw, and what became of it.
@@ -369,6 +373,7 @@ mod tests {
             (OVER_LIMIT_ONE, OVER_LIMIT_MANY),
             (SKIPPED_FILES_ONE, SKIPPED_FILES_MANY),
             (CUT_CHATS_ONE, CUT_CHATS_MANY),
+            (LOGS_LEFT_OUT_ONE, LOGS_LEFT_OUT_MANY),
         ];
         for (one, many) in pairs {
             assert!(one.starts_with("1 ") && !one.contains('{'), "{one}");

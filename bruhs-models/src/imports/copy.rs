@@ -47,6 +47,8 @@ pub const OWNER_ONLY_IMPORT: &str = "Open Bruhs from its own address to import."
 pub const IMPORT_INVALID: &str = "That request isn't one Bruhs understands.";
 pub const IMPORT_FAILED: &str = "Bruhs couldn't read this export.";
 pub const FOLDER_MISSING: &str = "That folder doesn't exist.";
+pub const FOLDER_PRIVATE: &str =
+    "Bruhs doesn't open folders named for secrets, such as credentials.";
 
 // The Move in dialog.
 pub const MOVE_IN_TITLE: &str = "Move in";
@@ -110,6 +112,8 @@ pub const SKIPPED_FILES_ONE: &str = "1 file Bruhs couldn't read was left out.";
 pub const SKIPPED_FILES_MANY: &str = "{n} files Bruhs couldn't read were left out.";
 pub const CUT_CHATS_ONE: &str = "1 chat was too long and came in cut short.";
 pub const CUT_CHATS_MANY: &str = "{n} chats were too long and came in cut short.";
+pub const LOGS_LEFT_OUT_ONE: &str = "1 older daily log was left out.";
+pub const LOGS_LEFT_OUT_MANY: &str = "{n} older daily logs were left out.";
 pub const ROW_DETAIL_TEMPLATE: &str = "{label}, {when}, transcript";
 pub const BEST_EFFORT_SUFFIX: &str = ", best effort";
 pub const IMPORTING_TEMPLATE: &str = "Importing {done} of {total}";
@@ -168,6 +172,7 @@ pub const ALL_COPY: &[&str] = &[
     IMPORT_INVALID,
     IMPORT_FAILED,
     FOLDER_MISSING,
+    FOLDER_PRIVATE,
     MOVE_IN_TITLE,
     MOVE_IN_COMMAND,
     MOVE_IN_COMMAND_HINT,
@@ -215,6 +220,8 @@ pub const ALL_COPY: &[&str] = &[
     SKIPPED_FILES_MANY,
     CUT_CHATS_ONE,
     CUT_CHATS_MANY,
+    LOGS_LEFT_OUT_ONE,
+    LOGS_LEFT_OUT_MANY,
     ROW_DETAIL_TEMPLATE,
     BEST_EFFORT_SUFFIX,
     IMPORTING_TEMPLATE,

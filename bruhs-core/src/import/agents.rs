@@ -5,15 +5,25 @@
 //! Only the persona files are opened, by name (`files`): never a config
 //! file, a secret or anything through a link. Nothing here writes, and
 //! nothing logs a name, a path or a persona's text.
+//!
+//! **Places.** Each place D10 names by path (the picked folder, the three
+//! override variables, each fixed default and the home itself) is resolved
+//! once, links and all, as the owner laid it out. A link whose target is
+//! missing counts as missing. The never-opened names are then checked on
+//! the resolved path, below the resolved home, so a link can't lead into
+//! `credentials/`. The resolved folder opens with `O_NOFOLLOW`, and no
+//! link below it is followed: places found by listing (`workspace-*`,
+//! `~/.openclaw-*`, `profiles/*`) must be real folders, and every file
+//! opens by name through folder handles.
 
 use super::ImportError;
 use bruhs_models::imports::{
-    AgentScan, PersonaCandidate, FOLDER_MISSING, IMPORT_INVALID, MAX_PERSONAS,
+    AgentScan, PersonaCandidate, FOLDER_MISSING, FOLDER_PRIVATE, IMPORT_INVALID, MAX_PERSONAS,
 };
 use bruhs_models::logic::portable::ImportSource;
 use sha2::{Digest as _, Sha256};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 mod files;
 mod hermes;
@@ -21,12 +31,14 @@ mod openclaw;
 #[cfg(test)]
 mod tests;
 
-/// Names a scan reads from one folder; past it the rest are left out.
+/// Names a listing keeps from one folder, the first by name.
 const MAX_LISTED: usize = 10_000;
 
 /// Where the local agents keep their folders.
 #[derive(Debug, Clone)]
 pub struct AgentRoots {
+    /// The home the default places sit in. Empty or relative: none are
+    /// searched.
     pub home: PathBuf,
     /// `OPENCLAW_STATE_DIR`, else `~/.openclaw`.
     pub openclaw_state: Option<PathBuf>,
@@ -39,19 +51,26 @@ pub struct AgentRoots {
 }
 
 impl AgentRoots {
-    /// This account's home and the agents' own override variables, an
-    /// empty one meaning unset.
+    /// This account's home and the agents' own override variables. An
+    /// empty variable is unset, and a relative one is ignored, so nothing
+    /// resolves against the server's working folder.
     pub fn from_env() -> Self {
         let home = directories::BaseDirs::new()
             .map(|dirs| dirs.home_dir().to_path_buf())
+            .filter(|home| home.is_absolute())
             .unwrap_or_default();
         let var = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+        let folder = |name: &str| {
+            var(name)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+        };
         Self {
             home,
-            openclaw_state: var("OPENCLAW_STATE_DIR").map(PathBuf::from),
-            openclaw_workspace: var("OPENCLAW_WORKSPACE_DIR").map(PathBuf::from),
+            openclaw_state: folder("OPENCLAW_STATE_DIR"),
+            openclaw_workspace: folder("OPENCLAW_WORKSPACE_DIR"),
             openclaw_profile: var("OPENCLAW_PROFILE").and_then(|value| value.into_string().ok()),
-            hermes_home: var("HERMES_HOME").map(PathBuf::from),
+            hermes_home: folder("HERMES_HOME"),
         }
     }
 
@@ -59,6 +78,14 @@ impl AgentRoots {
     pub fn under(home: &Path) -> Self {
         Self {
             home: home.to_path_buf(),
+            ..Self::none()
+        }
+    }
+
+    /// No places at all: a scan finds only a picked absolute folder.
+    pub fn none() -> Self {
+        Self {
+            home: PathBuf::new(),
             openclaw_state: None,
             openclaw_workspace: None,
             openclaw_profile: None,
@@ -66,204 +93,324 @@ impl AgentRoots {
         }
     }
 
-    /// `path` as the owner reads it: `~/…` under the home.
-    fn shown(&self, path: &Path) -> String {
-        match path.strip_prefix(&self.home) {
-            Ok(rest) if !self.home.as_os_str().is_empty() => {
-                if rest.as_os_str().is_empty() {
-                    "~".to_string()
-                } else {
-                    format!("~/{}", rest.display())
-                }
-            }
-            _ => path.display().to_string(),
-        }
-    }
-
-    /// A typed or picked folder: `~` and `~/…` read against the home. It
-    /// must be absolute and a real folder, not a link.
-    fn picked(&self, path: &Path) -> Result<PathBuf, ImportError> {
-        let text = path.to_string_lossy();
-        let path = if text == "~" {
-            self.home.clone()
-        } else if let Some(rest) = text.strip_prefix("~/") {
-            self.home.join(rest)
-        } else {
-            path.to_path_buf()
-        };
-        let folder =
-            path.is_absolute() && std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
-        if folder {
-            Ok(path)
-        } else {
-            Err(ImportError::Refused(FOLDER_MISSING))
-        }
+    /// The home, when there is one to search.
+    fn named_home(&self) -> Option<&Path> {
+        Some(self.home.as_path()).filter(|home| home.is_absolute())
     }
 }
 
 /// The personas `source` has: from `picked` when given, else from its
 /// default places in D10's order. Each folder is answered once, and at
-/// most [`MAX_PERSONAS`]. `looked_in` names each place, `~`-relative.
+/// most [`MAX_PERSONAS`]. `looked_in` names each place as the owner would,
+/// `~`-relative.
 ///
 /// # Errors
 ///
-/// [`ImportError::Refused`] with `FOLDER_MISSING` when `picked` isn't an
-/// absolute, existing folder, or with `IMPORT_INVALID` for a source that
-/// isn't a local agent.
+/// [`ImportError::Refused`] with:
+/// - `FOLDER_MISSING` when `picked` isn't an absolute, existing folder;
+/// - `FOLDER_PRIVATE` when `picked`, or an override variable, leads to a
+///   folder named for secrets;
+/// - `IMPORT_INVALID` for a source that isn't a local agent.
 pub fn scan(
     roots: &AgentRoots,
     source: ImportSource,
     picked: Option<&Path>,
 ) -> Result<AgentScan, ImportError> {
-    let mut found = Found {
-        home: roots.home.clone(),
-        ..Found::default()
-    };
+    let mut scan = Scan::new(roots);
     match (source, picked) {
         (ImportSource::OpenClaw, Some(picked)) => {
-            let picked = roots.picked(picked)?;
-            found.looked_in.push(roots.shown(&picked));
-            if !found.openclaw(&picked) {
-                found.openclaw_state(&picked);
+            let (named, folder) = scan.picked(picked)?;
+            scan.looked(&named);
+            if !scan.openclaw(&folder) {
+                scan.openclaw_state(&folder);
             }
         }
-        (ImportSource::OpenClaw, None) => openclaw_defaults(roots, &mut found),
-        (ImportSource::Hermes, picked) => {
-            let home = match picked {
-                Some(picked) => roots.picked(picked)?,
-                None => roots
-                    .hermes_home
-                    .clone()
-                    .unwrap_or_else(|| roots.home.join(".hermes")),
-            };
-            found.looked_in.push(roots.shown(&home));
-            if picked.is_none() {
-                found
-                    .looked_in
-                    .push(format!("{}/*", roots.shown(&home.join("profiles"))));
+        (ImportSource::OpenClaw, None) => scan.openclaw_defaults()?,
+        (ImportSource::Hermes, Some(picked)) => {
+            let (named, folder) = scan.picked(picked)?;
+            scan.looked(&named);
+            scan.hermes(&folder);
+            // A home's own `profiles` folder, picked: its profiles.
+            if folder.file_name().is_some_and(|name| name == "profiles") {
+                if let Some(home) = folder.parent() {
+                    scan.profiles(home);
+                }
             }
-            found.hermes(&home);
+        }
+        (ImportSource::Hermes, None) => {
+            let named = match (&roots.hermes_home, roots.named_home()) {
+                (Some(home), _) => Some((home.clone(), true)),
+                (None, Some(home)) => Some((home.join(".hermes"), false)),
+                (None, None) => None,
+            };
+            if let Some((named, chosen)) = named {
+                scan.looked(&named);
+                scan.looked_glob(&named.join("profiles"), "/*");
+                if let Some(home) = scan.place(&named, chosen)? {
+                    scan.hermes(&home);
+                }
+            }
         }
         _ => return Err(ImportError::Refused(IMPORT_INVALID)),
     }
     Ok(AgentScan {
-        personas: found.personas,
-        looked_in: found.looked_in,
+        personas: scan.personas,
+        looked_in: scan.looked_in,
     })
 }
 
-/// D10's OpenClaw places, in order.
-fn openclaw_defaults(roots: &AgentRoots, found: &mut Found) {
-    let home = &roots.home;
-    if let Some(workspace) = &roots.openclaw_workspace {
-        found.looked_in.push(roots.shown(workspace));
-        found.openclaw(workspace);
-    }
-    let state = roots
-        .openclaw_state
-        .clone()
-        .unwrap_or_else(|| home.join(".openclaw"));
-    found.looked_in.push(roots.shown(&state.join("workspace")));
-    found
-        .looked_in
-        .push(format!("{}-*", roots.shown(&state.join("workspace"))));
-    found.openclaw_state(&state);
-    let profile = roots
-        .openclaw_profile
-        .as_deref()
-        .filter(|profile| !profile.contains(['/', '\\']) && !files::never_open(profile));
-    if let Some(profile) = profile {
-        let workspace = home.join(format!(".openclaw-{profile}")).join("workspace");
-        found.looked_in.push(roots.shown(&workspace));
-        found.openclaw(&workspace);
-    }
-    found.looked_in.push(format!(
-        "{}-*/workspace",
-        roots.shown(&home.join(".openclaw"))
-    ));
-    for name in real_folders(home, |name| name.starts_with(".openclaw-")) {
-        found.openclaw(&home.join(name).join("workspace"));
-    }
-    for legacy in [
-        ".clawdbot/workspace",
-        ".moltbot/workspace",
-        "clawd",
-        "openclaw",
-    ] {
-        let workspace = home.join(legacy);
-        found.looked_in.push(roots.shown(&workspace));
-        found.openclaw(&workspace);
-    }
-}
-
-/// The real folders directly in `dir` whose names `keep` takes, sorted.
-fn real_folders(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<String> {
-    files::list_names(dir, MAX_LISTED)
-        .into_iter()
-        .filter(|(name, folder)| *folder && keep(name))
-        .map(|(name, _)| name)
-        .collect()
-}
-
-/// The personas a scan has found so far.
-#[derive(Default)]
-struct Found {
-    /// Never-opened names are checked below it.
-    home: PathBuf,
+/// One scan's state: the resolved home, and what it has found.
+struct Scan<'a> {
+    roots: &'a AgentRoots,
+    /// The home resolved, which the never-opened names are checked below.
+    home: Option<PathBuf>,
     personas: Vec<PersonaCandidate>,
     looked_in: Vec<String>,
 }
 
-impl Found {
-    /// Adds `persona` unless its folder is already in, or the scan is full.
+/// What a named place resolved to.
+enum Place {
+    /// Missing, a link to nothing, or not a folder.
+    Missing,
+    /// It leads to a folder named for secrets.
+    Private,
+    Folder(PathBuf),
+}
+
+impl<'a> Scan<'a> {
+    fn new(roots: &'a AgentRoots) -> Self {
+        Self {
+            roots,
+            home: roots
+                .named_home()
+                .and_then(|home| std::fs::canonicalize(home).ok()),
+            personas: Vec::new(),
+            looked_in: Vec::new(),
+        }
+    }
+
+    /// Whether the scan holds [`MAX_PERSONAS`]: nothing more is read.
+    fn full(&self) -> bool {
+        self.personas.len() >= MAX_PERSONAS
+    }
+
+    /// `named` resolved to a real folder.
+    fn resolve(&self, named: &Path) -> Place {
+        if !named.is_absolute() {
+            return Place::Missing;
+        }
+        match std::fs::canonicalize(named) {
+            Ok(folder) if std::fs::metadata(&folder).is_ok_and(|meta| meta.is_dir()) => {
+                if self.private(&folder) {
+                    Place::Private
+                } else {
+                    Place::Folder(folder)
+                }
+            }
+            _ => Place::Missing,
+        }
+    }
+
+    /// A named place: its resolved folder, or `None` when it is missing or
+    /// a default that leads somewhere private. One the owner `chose` (an
+    /// override) that leads somewhere private is refused out loud.
+    fn place(&self, named: &Path, chose: bool) -> Result<Option<PathBuf>, ImportError> {
+        match self.resolve(named) {
+            Place::Folder(folder) => Ok(Some(folder)),
+            Place::Private if chose => Err(ImportError::Refused(FOLDER_PRIVATE)),
+            Place::Private | Place::Missing => Ok(None),
+        }
+    }
+
+    /// Whether a part of `folder` below the resolved home, or of all of it
+    /// when it isn't under the home, is never opened (`credentials`, say).
+    fn private(&self, folder: &Path) -> bool {
+        let below = self
+            .home
+            .as_deref()
+            .and_then(|home| folder.strip_prefix(home).ok())
+            .unwrap_or(folder);
+        below.components().any(|part| match part {
+            Component::Normal(name) => files::never_open(&name.to_string_lossy()),
+            _ => false,
+        })
+    }
+
+    /// A typed or picked folder: `~` and `~/…` read against the home. It
+    /// answers the named path and the resolved folder.
+    fn picked(&self, path: &Path) -> Result<(PathBuf, PathBuf), ImportError> {
+        let text = path.to_string_lossy();
+        let home = self.roots.named_home();
+        let named = match (text.as_ref(), text.strip_prefix("~/"), home) {
+            ("~", _, Some(home)) => home.to_path_buf(),
+            (_, Some(rest), Some(home)) => home.join(rest),
+            ("~", _, None) | (_, Some(_), None) => {
+                return Err(ImportError::Refused(FOLDER_MISSING))
+            }
+            _ => path.to_path_buf(),
+        };
+        match self.resolve(&named) {
+            Place::Folder(folder) => Ok((named, folder)),
+            Place::Private => Err(ImportError::Refused(FOLDER_PRIVATE)),
+            Place::Missing => Err(ImportError::Refused(FOLDER_MISSING)),
+        }
+    }
+
+    /// Adds `path` to `looked_in`, as the owner reads it.
+    fn looked(&mut self, path: &Path) {
+        let shown = self.shown(path);
+        self.looked_in.push(shown);
+    }
+
+    /// Adds `path` and `glob` to `looked_in`: `~/.openclaw/workspace-*`.
+    fn looked_glob(&mut self, path: &Path, glob: &str) {
+        let shown = format!("{}{glob}", self.shown(path));
+        self.looked_in.push(shown);
+    }
+
+    /// `path` as `~/…` when it is under the home, as named or resolved.
+    fn shown(&self, path: &Path) -> String {
+        let homes = [self.roots.named_home(), self.home.as_deref()];
+        for home in homes.into_iter().flatten() {
+            if let Ok(rest) = path.strip_prefix(home) {
+                return if rest.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~/{}", rest.display())
+                };
+            }
+        }
+        path.display().to_string()
+    }
+
+    /// Adds `persona` unless its folder is already in.
     fn add(&mut self, persona: Option<PersonaCandidate>) -> bool {
         let Some(persona) = persona else {
             return false;
         };
-        if self.personas.len() < MAX_PERSONAS
-            && !self.personas.iter().any(|known| known.id == persona.id)
-        {
+        if !self.full() && !self.personas.iter().any(|known| known.id == persona.id) {
             self.personas.push(persona);
         }
         true
     }
 
-    /// `dir` as an OpenClaw workspace; whether it is one.
-    fn openclaw(&mut self, dir: &Path) -> bool {
-        !self.never_opened(dir) && self.add(openclaw::persona(dir))
+    /// The resolved `folder` as an OpenClaw workspace; whether it is one.
+    fn openclaw(&mut self, folder: &Path) -> bool {
+        !self.full() && self.add(openclaw::persona(folder))
     }
 
-    /// `state`'s `workspace`, then each `workspace-*`.
+    /// The named place `named` as an OpenClaw workspace.
+    fn openclaw_named(&mut self, named: &Path, chose: bool) -> Result<(), ImportError> {
+        self.looked(named);
+        if let Some(folder) = self.place(named, chose)? {
+            self.openclaw(&folder);
+        }
+        Ok(())
+    }
+
+    /// The resolved `state`'s `workspace`, then each real `workspace-*`.
     fn openclaw_state(&mut self, state: &Path) {
-        self.openclaw(&state.join("workspace"));
+        if let Place::Folder(workspace) = self.resolve(&state.join("workspace")) {
+            self.openclaw(&workspace);
+        }
         for name in real_folders(state, |name| name.starts_with("workspace-")) {
+            if self.full() {
+                return;
+            }
             self.openclaw(&state.join(name));
         }
     }
 
-    /// The Hermes home `home`, then each of its profiles.
-    fn hermes(&mut self, home: &Path) {
-        if self.never_opened(home) {
-            return;
+    /// D10's OpenClaw places, in order.
+    fn openclaw_defaults(&mut self) -> Result<(), ImportError> {
+        let roots = self.roots;
+        if let Some(workspace) = &roots.openclaw_workspace {
+            self.openclaw_named(workspace, true)?;
         }
-        self.add(hermes::persona(home, None));
-        for name in real_folders(&home.join("profiles"), |_| true) {
+        let home = roots.named_home().map(Path::to_path_buf);
+        let state = match (&roots.openclaw_state, &home) {
+            (Some(state), _) => Some((state.clone(), true)),
+            (None, Some(home)) => Some((home.join(".openclaw"), false)),
+            (None, None) => None,
+        };
+        if let Some((state, chose)) = state {
+            self.openclaw_named(&state.join("workspace"), chose)?;
+            self.looked_glob(&state.join("workspace"), "-*");
+            if let Some(state) = self.place(&state, chose)? {
+                for name in real_folders(&state, |name| name.starts_with("workspace-")) {
+                    if self.full() {
+                        break;
+                    }
+                    self.openclaw(&state.join(name));
+                }
+            }
+        }
+        let Some(home) = home else {
+            return Ok(());
+        };
+        let profile = roots
+            .openclaw_profile
+            .as_deref()
+            .filter(|profile| !profile.is_empty() && !profile.contains(['/', '\\']));
+        if let Some(profile) = profile {
+            let named = home.join(format!(".openclaw-{profile}")).join("workspace");
+            self.openclaw_named(&named, false)?;
+        }
+        self.looked_glob(&home.join(".openclaw"), "-*/workspace");
+        if let Some(resolved) = self.home.clone() {
+            for name in real_folders(&resolved, |name| name.starts_with(".openclaw-")) {
+                if self.full() {
+                    break;
+                }
+                let named = resolved.join(name).join("workspace");
+                if let Place::Folder(workspace) = self.resolve(&named) {
+                    self.openclaw(&workspace);
+                }
+            }
+        }
+        for legacy in [
+            ".clawdbot/workspace",
+            ".moltbot/workspace",
+            "clawd",
+            "openclaw",
+        ] {
+            self.openclaw_named(&home.join(legacy), false)?;
+        }
+        Ok(())
+    }
+
+    /// The resolved Hermes home `home`, then each of its profiles.
+    fn hermes(&mut self, home: &Path) {
+        if !self.full() {
+            self.add(hermes::persona(home, None));
+        }
+        self.profiles(home);
+    }
+
+    /// Each real folder in `home`'s `profiles`, as a Hermes profile.
+    fn profiles(&mut self, home: &Path) {
+        let profiles = files::list_names(&home.join("profiles"), MAX_LISTED);
+        for name in profiles
+            .into_iter()
+            .filter(|(_, folder)| *folder)
+            .map(|(name, _)| name)
+        {
+            if self.full() {
+                return;
+            }
             self.add(hermes::persona(home, Some(&name)));
         }
     }
+}
 
-    /// Whether a folder under `dir`'s path below the home is named like a
-    /// secret (a picked `credentials` folder, say), so nothing in it is
-    /// opened.
-    fn never_opened(&self, dir: &Path) -> bool {
-        dir.strip_prefix(&self.home)
-            .unwrap_or(dir)
-            .components()
-            .any(|part| match part {
-                std::path::Component::Normal(name) => files::never_open(&name.to_string_lossy()),
-                _ => false,
-            })
-    }
+/// The real folders directly in `dir` whose names `keep` takes, sorted.
+fn real_folders(dir: &Path, keep: impl Fn(&str) -> bool) -> Vec<String> {
+    files::select(dir, MAX_LISTED, keep, files::Pick::First)
+        .0
+        .into_iter()
+        .filter(|(_, kind)| *kind == files::Kind::Folder)
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// A persona's id: `p-` and 16 hex characters of the SHA-256 of its

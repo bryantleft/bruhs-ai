@@ -413,6 +413,7 @@ mod tests {
             files: Vec::new(),
             clipped: false,
             dropped_identity: Vec::new(),
+            left_out_logs: 0,
         }
     }
 

@@ -7,13 +7,13 @@ use super::{
     ATTACHMENT_TEMPLATE, BATCH_SUMMARY_TEMPLATE, BEST_EFFORT_SUFFIX, CUT_CHATS_MANY, CUT_CHATS_ONE,
     CUT_SHORT_MANY, CUT_SHORT_ONE, DROPPED_BRANCHES_MANY, DROPPED_BRANCHES_ONE, DUPLICATES_MANY,
     DUPLICATES_ONE, IDENTITY_DROPPED_MANY, IDENTITY_DROPPED_ONE, IMPORTED_TEMPLATE,
-    IMPORTING_TEMPLATE, INSTRUCTIONS_FROM_TEMPLATE, LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE,
-    MEMORY_FROM_TEMPLATE, MEMORY_PROPOSED_TEMPLATE, MEMORY_WAITS, NOT_IMPORTED_TEMPLATE,
-    OVER_LIMIT_MANY, OVER_LIMIT_ONE, PERSONA_CLIPPED, READING_ONE_FILE_TEMPLATE, READING_TEMPLATE,
-    ROWS_SHOWN_TEMPLATE, ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE,
-    SKIPPED_FILES_MANY, SKIPPED_FILES_ONE, SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE,
-    SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE,
-    SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
+    IMPORTING_TEMPLATE, INSTRUCTIONS_FROM_TEMPLATE, LOGS_LEFT_OUT_MANY, LOGS_LEFT_OUT_ONE,
+    LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE, MEMORY_FROM_TEMPLATE, MEMORY_PROPOSED_TEMPLATE,
+    MEMORY_WAITS, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE, PERSONA_CLIPPED,
+    READING_ONE_FILE_TEMPLATE, READING_TEMPLATE, ROWS_SHOWN_TEMPLATE, ROW_DETAIL_TEMPLATE,
+    SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE, SKIPPED_FILES_MANY, SKIPPED_FILES_ONE,
+    SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE, SKIPPED_TOO_LARGE_TEMPLATE,
+    SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE, SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
 };
 use crate::logic::portable::{ImportCandidate, ImportSource};
 use crate::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
@@ -246,6 +246,11 @@ pub fn persona_lines(persona: &PersonaCandidate) -> Vec<String> {
         };
         lines.push(fill(template, &[("fields", &and_list(dropped))]));
     }
+    match persona.left_out_logs {
+        0 => {}
+        1 => lines.push(LOGS_LEFT_OUT_ONE.to_string()),
+        n => lines.push(fill(LOGS_LEFT_OUT_MANY, &[("n", &n.to_string())])),
+    }
     if persona.clipped {
         lines.push(PERSONA_CLIPPED.to_string());
     }
@@ -460,6 +465,7 @@ mod tests {
             ],
             clipped: true,
             dropped_identity: vec!["Emoji".into(), "Avatar".into()],
+            left_out_logs: 3,
         };
         assert_eq!(
             persona_lines(&persona),
@@ -473,6 +479,7 @@ mod tests {
                 "Skipped memory/2026-01-27.md: it isn't a file.".to_string(),
                 "Skipped memory/2026-01-28.md: Bruhs couldn't read it.".to_string(),
                 "Emoji and Avatar aren't carried over: bruhs use faces.".to_string(),
+                "3 older daily logs were left out.".to_string(),
                 PERSONA_CLIPPED.to_string(),
                 STARTS_READ_ONLY.to_string(),
             ]
@@ -482,6 +489,7 @@ mod tests {
             files: vec![file("SOUL.md", FileUse::Instructions)],
             clipped: false,
             dropped_identity: vec!["Emoji".into()],
+            left_out_logs: 1,
             ..persona
         };
         assert_eq!(
@@ -489,6 +497,7 @@ mod tests {
             vec![
                 "Instructions from SOUL.md.".to_string(),
                 "Emoji isn't carried over: bruhs use faces.".to_string(),
+                LOGS_LEFT_OUT_ONE.to_string(),
                 STARTS_READ_ONLY.to_string(),
             ]
         );

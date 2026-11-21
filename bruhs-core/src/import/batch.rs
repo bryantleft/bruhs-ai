@@ -184,8 +184,8 @@ impl ImportHost {
             record_hook: None,
             state: Arc::default(),
             // No agent folders until `from_env` or `with_agent_roots` names
-            // them: none are kept under `root`.
-            agents: AgentRoots::under(&root),
+            // them.
+            agents: AgentRoots::none(),
             root,
         }
     }

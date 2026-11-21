@@ -57,10 +57,15 @@ pub(crate) enum Kind {
     Other,
 }
 
-/// The names in `dir`, at most `max` of them, sorted, and whether each is
-/// a real folder: a link counts as a link, not a folder. Never-opened
-/// names and names that aren't UTF-8 are left out. A folder that is a
-/// link or can't be read lists nothing.
+/// Entries read from one folder before the rest are ignored. Below it,
+/// which names a listing keeps doesn't depend on the order the folder
+/// returns them in.
+const MAX_SEEN: usize = 1_000_000;
+
+/// The first `max` names in `dir` by name, sorted, and whether each is a
+/// real folder: a link counts as a link, not a folder. Never-opened names
+/// and names that aren't UTF-8 are left out. A folder that is a link or
+/// can't be read lists nothing.
 pub(crate) fn list_names(dir: &Path, max: usize) -> Vec<(String, bool)> {
     entries(dir, max)
         .into_iter()
@@ -70,89 +75,153 @@ pub(crate) fn list_names(dir: &Path, max: usize) -> Vec<(String, bool)> {
 
 /// [`list_names`] with what each name is.
 pub(crate) fn entries(dir: &Path, max: usize) -> Vec<(String, Kind)> {
-    let mut found = listed(dir, max);
-    found.retain(|(name, _)| !never_open(name));
-    found.sort_by(|a, b| a.0.cmp(&b.0));
-    found
+    select(dir, max, |_| true, Pick::First).0
 }
 
+/// Which end of the sorted names [`select`] keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pick {
+    First,
+    Last,
+}
+
+/// The names in `dir` that `keep` takes, sorted, at most `max` of them
+/// from the `pick` end, with what each is; and how many names `keep`
+/// took in all. Every name is seen before any is chosen.
+pub(crate) fn select(
+    dir: &Path,
+    max: usize,
+    keep: impl Fn(&str) -> bool,
+    pick: Pick,
+) -> (Vec<(String, Kind)>, usize) {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let Some(folder) = Folder::open(dir) else {
+        return (Vec::new(), 0);
+    };
+    // A heap of the kept names whose top is the next to drop.
+    let mut first: BinaryHeap<String> = BinaryHeap::new();
+    let mut last: BinaryHeap<Reverse<String>> = BinaryHeap::new();
+    let mut matched = 0;
+    folder.each_name(|name| {
+        if never_open(name) || !keep(name) {
+            return;
+        }
+        matched += 1;
+        match pick {
+            Pick::First => {
+                first.push(name.to_string());
+                if first.len() > max {
+                    first.pop();
+                }
+            }
+            Pick::Last => {
+                last.push(Reverse(name.to_string()));
+                if last.len() > max {
+                    last.pop();
+                }
+            }
+        }
+    });
+    let mut names: Vec<String> = first
+        .into_vec()
+        .into_iter()
+        .chain(last.into_vec().into_iter().map(|Reverse(name)| name))
+        .collect();
+    names.sort();
+    let found = names
+        .into_iter()
+        .filter_map(|name| folder.kind(&name).map(|kind| (name, kind)))
+        .collect();
+    (found, matched)
+}
+
+/// A folder opened for listing, never through a link.
 #[cfg(unix)]
-fn listed(dir: &Path, max: usize) -> Vec<(String, Kind)> {
-    use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
-    let Ok(folder) = rustix::fs::open(
-        dir,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) else {
-        return Vec::new();
-    };
-    let Ok(entries) = Dir::read_from(&folder) else {
-        return Vec::new();
-    };
-    let mut found = Vec::new();
-    let mut seen = 0;
-    for entry in entries {
-        let Ok(entry) = entry else { break };
-        let bytes = entry.file_name().to_bytes();
-        if bytes == b"." || bytes == b".." {
-            continue;
-        }
-        seen += 1;
-        if seen > max {
-            break;
-        }
-        let Ok(name) = std::str::from_utf8(bytes) else {
-            continue;
+struct Folder(std::os::fd::OwnedFd);
+
+#[cfg(unix)]
+impl Folder {
+    fn open(dir: &Path) -> Option<Self> {
+        use rustix::fs::{Mode, OFlags};
+        rustix::fs::open(
+            dir,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .ok()
+        .map(Self)
+    }
+
+    /// Calls `each` with every UTF-8 name, up to [`MAX_SEEN`] entries.
+    fn each_name(&self, mut each: impl FnMut(&str)) {
+        let Ok(entries) = rustix::fs::Dir::read_from(&self.0) else {
+            return;
         };
-        let Ok(stat) = rustix::fs::statat(&folder, entry.file_name(), AtFlags::SYMLINK_NOFOLLOW)
-        else {
-            continue;
-        };
-        let kind = match FileType::from_raw_mode(stat.st_mode) {
+        for entry in entries.take(MAX_SEEN) {
+            let Ok(entry) = entry else { break };
+            let bytes = entry.file_name().to_bytes();
+            if bytes == b"." || bytes == b".." {
+                continue;
+            }
+            if let Ok(name) = std::str::from_utf8(bytes) {
+                each(name);
+            }
+        }
+    }
+
+    /// What `name` is, without following it.
+    fn kind(&self, name: &str) -> Option<Kind> {
+        use rustix::fs::{AtFlags, FileType};
+        let stat = rustix::fs::statat(&self.0, name, AtFlags::SYMLINK_NOFOLLOW).ok()?;
+        Some(match FileType::from_raw_mode(stat.st_mode) {
             FileType::Directory => Kind::Folder,
             FileType::RegularFile => Kind::File {
                 bytes: u64::try_from(stat.st_size).unwrap_or(0),
             },
             FileType::Symlink => Kind::Link,
             _ => Kind::Other,
-        };
-        found.push((name.to_string(), kind));
+        })
     }
-    found
 }
 
+/// A folder listed by path, checked not to be a link first.
 #[cfg(not(unix))]
-fn listed(dir: &Path, max: usize) -> Vec<(String, Kind)> {
-    if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir()) {
-        return Vec::new();
+struct Folder(std::path::PathBuf);
+
+#[cfg(not(unix))]
+impl Folder {
+    fn open(dir: &Path) -> Option<Self> {
+        let meta = std::fs::symlink_metadata(dir).ok()?;
+        (meta.is_dir() && !meta.file_type().is_symlink()).then(|| Self(dir.to_path_buf()))
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut found = Vec::new();
-    for entry in entries.take(max) {
-        let Ok(entry) = entry else { break };
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
+
+    fn each_name(&self, mut each: impl FnMut(&str)) {
+        let Ok(entries) = std::fs::read_dir(&self.0) else {
+            return;
         };
-        // Neither follows a link.
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        let kind = if kind.is_symlink() {
+        for entry in entries.take(MAX_SEEN) {
+            let Ok(entry) = entry else { break };
+            if let Ok(name) = entry.file_name().into_string() {
+                each(&name);
+            }
+        }
+    }
+
+    fn kind(&self, name: &str) -> Option<Kind> {
+        // `symlink_metadata` doesn't follow a link.
+        let meta = std::fs::symlink_metadata(self.0.join(name)).ok()?;
+        let kind = meta.file_type();
+        Some(if kind.is_symlink() {
             Kind::Link
         } else if kind.is_dir() {
             Kind::Folder
         } else if kind.is_file() {
-            Kind::File {
-                bytes: entry.metadata().map_or(0, |meta| meta.len()),
-            }
+            Kind::File { bytes: meta.len() }
         } else {
             Kind::Other
-        };
-        found.push((name, kind));
+        })
     }
-    found
 }
 
 /// The text of `name` under `dir`. `name` may hold folders, split on `/`;

@@ -3,7 +3,7 @@
 //! `USER.md`, `MEMORY.md` and the daily logs for memory. The retired and
 //! internal files are listed by name only.
 
-use super::files::{entries, planned, read_text, FileRead, Kind};
+use super::files::{entries, planned, read_text, select, FileRead, Kind, Pick};
 use super::{persona_id, MAX_LISTED};
 use crate::import::text::{shown_name, NAME_MAX_CHARS};
 use bruhs_models::imports::{
@@ -28,7 +28,7 @@ const NOT_IMPORTED_FOLDERS: [&str; 2] = ["skills", "canvas"];
 /// The workspace at `dir` read as a persona, or `None` when it holds none
 /// of the persona files.
 pub(crate) fn persona(dir: &Path) -> Option<PersonaCandidate> {
-    let planned = inventory(dir);
+    let (planned, past_cap) = plan(dir);
     // Only the persona files, read or skipped, make a folder a workspace.
     if planned.iter().all(|file| file.use_ == not_imported()) {
         return None;
@@ -43,8 +43,9 @@ pub(crate) fn persona(dir: &Path) -> Option<PersonaCandidate> {
     };
     let mut files = Vec::with_capacity(planned.len());
     let mut memory_chars = 0;
-    // Daily logs past a full memory would be cut anyway: they aren't opened.
-    let mut unread = false;
+    // Daily logs past a full memory would be cut anyway: they aren't
+    // opened, and are counted with those past `MAX_DAILY_LOGS`.
+    let mut left_out = past_cap;
     for file in planned {
         if !matches!(
             file.use_,
@@ -54,7 +55,7 @@ pub(crate) fn persona(dir: &Path) -> Option<PersonaCandidate> {
             continue;
         }
         if file.use_ == FileUse::Memory && memory_chars > MAX_TEXT_CHARS {
-            unread = true;
+            left_out = left_out.saturating_add(1);
             continue;
         }
         match read_text(dir, &file.name) {
@@ -86,8 +87,9 @@ pub(crate) fn persona(dir: &Path) -> Option<PersonaCandidate> {
         instructions: assembled.instructions,
         memory: assembled.memory,
         files,
-        clipped: assembled.clipped || unread,
+        clipped: assembled.clipped || left_out > 0,
         dropped_identity: assembled.dropped_identity,
+        left_out_logs: left_out,
     })
 }
 
@@ -118,8 +120,16 @@ pub(crate) fn identity_labels(dir: &Path) -> Vec<String> {
 }
 
 /// The workspace's files by name and use, in reading order, opening no
-/// file: the persona files, then those listed as not imported.
+/// file: the persona files, then those listed as not imported. Only the
+/// names-only live check calls it on its own.
+#[cfg(test)]
 pub(crate) fn inventory(dir: &Path) -> Vec<PersonaFile> {
+    plan(dir).0
+}
+
+/// [`inventory`], and how many daily logs past `MAX_DAILY_LOGS` it left
+/// out (the oldest).
+fn plan(dir: &Path) -> (Vec<PersonaFile>, u32) {
     let listed = entries(dir, MAX_LISTED);
     let kind_of = |name: &str| {
         listed
@@ -128,6 +138,7 @@ pub(crate) fn inventory(dir: &Path) -> Vec<PersonaFile> {
             .map(|(_, kind)| *kind)
     };
     let mut files = Vec::new();
+    let mut past_cap = 0;
     let persona_files = std::iter::once((IDENTITY, FileUse::Identity))
         .chain(INSTRUCTIONS.map(|name| (name, FileUse::Instructions)))
         .chain(MEMORY.map(|name| (name, FileUse::Memory)));
@@ -139,11 +150,11 @@ pub(crate) fn inventory(dir: &Path) -> Vec<PersonaFile> {
     let mut other_logs = Vec::new();
     match kind_of(DAILY) {
         Some(Kind::Folder) => {
-            let (mut logs, rest): (Vec<_>, Vec<_>) = entries(&dir.join(DAILY), MAX_LISTED)
-                .into_iter()
-                .partition(|(name, _)| is_daily_log(name));
+            let daily = dir.join(DAILY);
+            let (mut logs, matched) = select(&daily, MAX_DAILY_LOGS, is_daily_log, Pick::Last);
+            past_cap = u32::try_from(matched.saturating_sub(logs.len())).unwrap_or(u32::MAX);
             logs.reverse();
-            logs.truncate(MAX_DAILY_LOGS);
+            let (rest, _) = select(&daily, MAX_LISTED, |name| !is_daily_log(name), Pick::First);
             for (name, kind) in logs {
                 files.push(file(
                     format!("{DAILY}/{name}"),
@@ -185,7 +196,7 @@ pub(crate) fn inventory(dir: &Path) -> Vec<PersonaFile> {
         }
     }
     files.extend(other_logs);
-    files
+    (files, past_cap)
 }
 
 fn file(name: String, use_: FileUse) -> PersonaFile {
