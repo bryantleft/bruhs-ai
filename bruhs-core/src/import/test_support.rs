@@ -57,6 +57,10 @@ const FIXTURES: &[(&str, &[u8])] = &[
         "claude-manifest.json",
         include_bytes!("fixtures/claude-manifest.json"),
     ),
+    (
+        "grok-prod-grok-backend.json",
+        include_bytes!("fixtures/grok-prod-grok-backend.json"),
+    ),
 ];
 
 /// The fixture file `name`, from `src/import/fixtures/`.

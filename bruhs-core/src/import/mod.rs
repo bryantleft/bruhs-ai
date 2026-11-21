@@ -21,6 +21,8 @@ mod cursor;
 mod cursor_agent;
 mod export;
 #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod grok;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod json_stream;
 mod t3;
 #[cfg(any(test, feature = "test-support"))]
@@ -427,5 +429,7 @@ mod archive_tests;
 mod chatgpt_tests;
 #[cfg(test)]
 mod claude_ai_tests;
+#[cfg(test)]
+mod grok_tests;
 #[cfg(test)]
 mod tests;

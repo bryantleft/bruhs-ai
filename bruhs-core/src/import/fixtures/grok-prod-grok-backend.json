@@ -1,0 +1,285 @@
+{
+  "conversations": [
+    {
+      "conversation": {
+        "id": "grok-trip-0001",
+        "user_id": "user-0001",
+        "title": "Weekend in Lisbon",
+        "summary": "A two day plan.",
+        "create_time": "2026-05-01T09:00:00.000000Z",
+        "modify_time": "2026-05-01T09:00:05.000000Z",
+        "starred": false,
+        "temporary": false
+      },
+      "responses": [
+        {
+          "response": {
+            "_id": "resp-k02",
+            "conversation_id": "grok-trip-0001",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "Lisbon in May is mild. <grok:render card_id=\"c1\" card_type=\"citation_card\" type=\"render_inline_citation\"><argument name=\"citation_id\">1</argument></grok:render>Pack a light jacket.",
+            "thinking_trace": "The owner wants a short trip plan.",
+            "create_time": { "$date": { "$numberLong": "1777626001000" } },
+            "file_attachments": [],
+            "card_attachments_json": ["{\"id\":\"c1\",\"cardType\":\"citation_card\",\"url\":\"https://example.com/lisbon\"}"],
+            "generated_image_urls": [],
+            "steps": [{ "text": "searching the web" }],
+            "web_search_results": [{ "url": "https://example.com/lisbon", "title": "Lisbon" }]
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k01",
+            "conversation_id": "grok-trip-0001",
+            "sender": "human",
+            "model": "grok-3",
+            "message": "Plan two days in Lisbon.",
+            "create_time": { "$date": { "$numberLong": "1777626001000" } },
+            "file_attachments": []
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k04",
+            "conversation_id": "grok-trip-0001",
+            "sender": "human",
+            "model": "grok-3",
+            "message": "Make it a table.",
+            "create_time": { "$date": { "$numberLong": "1777626005000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k03",
+            "conversation_id": "grok-trip-0001",
+            "sender": "human",
+            "model": "grok-3",
+            "message": "Also add food.",
+            "create_time": { "$date": { "$numberLong": "1777626005000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k05",
+            "conversation_id": "grok-trip-0001",
+            "sender": "ASSISTANT",
+            "model": "grok-3",
+            "message": "<xaiArtifact artifact_id=\"a1\" title=\"plan.md\" contentType=\"text/markdown\">| Day | Plan |\n|---|---|\n| 1 | Alfama and pastel de nata |</xaiArtifact>",
+            "create_time": { "$date": { "$numberLong": "1777626006000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k06",
+            "conversation_id": "grok-trip-0001",
+            "sender": "system",
+            "message": "A system note the owner never saw.",
+            "create_time": { "$date": { "$numberLong": "1777626007000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-k07",
+            "conversation_id": "grok-trip-0001",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "",
+            "create_time": { "$date": { "$numberLong": "1777626008000" } },
+            "file_attachments": []
+          }
+        }
+      ]
+    },
+    {
+      "conversation": {
+        "id": "grok-chain-0002",
+        "title": "Bread starter",
+        "create_time": "2026-05-02T18:30:00Z",
+        "modify_time": "2026-05-02T18:30:05Z",
+        "leaf_response_id": "resp-l05"
+      },
+      "responses": [
+        {
+          "response": {
+            "_id": "resp-l01",
+            "sender": "human",
+            "message": "How do I feed a starter?",
+            "parent_response_id": null,
+            "create_time": { "$date": { "$numberLong": "1777746600000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-l02",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "Feed it once a day.",
+            "parent_response_id": "resp-l01",
+            "create_time": { "$date": { "$numberLong": "1777746601000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-l03",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "Feed it twice a day at room temperature.",
+            "parent_response_id": "resp-l01",
+            "create_time": { "$date": { "$numberLong": "1777746602000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-l04",
+            "sender": "human",
+            "message": "And in the fridge?",
+            "parent_response_id": "resp-l03",
+            "create_time": { "$date": { "$numberLong": "1777746603000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-l05",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "Once a week.",
+            "parent_response_id": "resp-l04",
+            "create_time": { "$date": { "$numberLong": "1777746604000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-l06",
+            "sender": "human",
+            "message": "A newer question on the older answer.",
+            "parent_response_id": "resp-l02",
+            "create_time": { "$date": { "$numberLong": "1777746605000" } }
+          }
+        }
+      ]
+    },
+    {
+      "conversation": {
+        "id": "grok-loop-0003",
+        "title": "Looping parents",
+        "create_time": "2026-05-03T07:15:00Z",
+        "modify_time": "2026-05-03T07:15:01Z",
+        "leaf_response_id": "resp-m02"
+      },
+      "responses": [
+        {
+          "response": {
+            "_id": "resp-m02",
+            "sender": "assistant",
+            "message": "Second in time.",
+            "parent_response_id": "resp-m01",
+            "create_time": { "$date": "2026-05-03T07:15:01Z" }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-m01",
+            "sender": "human",
+            "message": "First in time.",
+            "parent_response_id": "resp-m02",
+            "create_time": { "$date": { "$numberLong": "1777792500000" } }
+          }
+        }
+      ]
+    },
+    {
+      "conversation": {
+        "id": "grok-files-0004",
+        "title": "",
+        "create_time": "2026-05-04T12:00:00Z",
+        "modify_time": "2026-05-04T12:00:01Z"
+      },
+      "responses": [
+        {
+          "response": {
+            "_id": "resp-n01",
+            "sender": "human",
+            "message": "Read this file please.",
+            "file_attachments": ["asset-0001"],
+            "create_time": { "$date": { "$numberLong": "1777896000000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-n02",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "",
+            "file_attachments": [],
+            "create_time": { "$date": { "$numberLong": "1777896001000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-n03",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "It lists three tasks.",
+            "thinking_trace": "Reading the attached list.",
+            "create_time": { "$date": { "$numberLong": "1777896002000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-n04",
+            "sender": "human",
+            "message": "",
+            "file_attachments": ["asset-0002"],
+            "create_time": { "$date": { "$numberLong": "1777896003000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-n05",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "Here is a picture of the list.",
+            "generated_image_urls": ["https://example.com/generated/1.png"],
+            "create_time": { "$date": { "$numberLong": "1777896004000" } }
+          }
+        },
+        {
+          "response": {
+            "_id": "resp-n06",
+            "sender": "assistant",
+            "model": "grok-3",
+            "message": "",
+            "thinking_trace": "Thinking that never became an answer.",
+            "create_time": { "$date": { "$numberLong": "1777896005000" } }
+          }
+        }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "_id": "proj-0001",
+      "name": "Travel",
+      "instructions": "Keep plans short.",
+      "create_time": { "$date": { "$numberLong": "1776672000000" } }
+    }
+  ],
+  "tasks": [
+    {
+      "_id": "task-0001",
+      "name": "Morning news",
+      "prompt": "Summarize the news.",
+      "create_time": { "$date": { "$numberLong": "1776672000000" } }
+    }
+  ],
+  "media_posts": [
+    {
+      "id": "media-0001",
+      "original_prompt": "A lighthouse at dusk",
+      "media_type": "MEDIA_POST_TYPE_IMAGE",
+      "create_time": { "$date": { "$numberLong": "1776672000000" } },
+      "link": "https://example.com/media/1"
+    }
+  ]
+}
