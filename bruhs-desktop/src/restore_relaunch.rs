@@ -11,7 +11,10 @@ use gpui::App;
 /// Starts a new instance of this app, detached from this one, then quits:
 /// a packaged app through `open -n <bundle>`, a source build by running
 /// its own executable in a process group of its own.
-#[expect(dead_code, reason = "used from Task 15")]
+#[cfg_attr(
+    test,
+    expect(dead_code, reason = "tests hand Settings, Backup a stand-in")
+)]
 pub fn relaunch_and_quit(cx: &mut App) {
     let bundle = bruhs_core::updates::release::current_app_bundle();
     let exe = std::env::current_exe().ok();

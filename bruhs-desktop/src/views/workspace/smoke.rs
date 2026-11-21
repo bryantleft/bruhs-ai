@@ -591,6 +591,13 @@ impl Workspace {
                     .set_offset(point(at.x, at.y - px(down)));
                 cx.notify();
             }
+            "settings-backup-job" | "settings-backup-preview" => {
+                self.open_settings(&OpenSettings, window, cx);
+                self.set_settings_section(SettingsSection::Backup, cx);
+                let preview = scene == "settings-backup-preview";
+                self.backup_settings
+                    .update(cx, |backup, cx| backup.smoke_fixture(preview, cx));
+            }
             scene if scene.starts_with("settings-") => {
                 let Some(section) = scene
                     .strip_prefix("settings-")

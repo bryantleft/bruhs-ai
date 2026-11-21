@@ -520,6 +520,7 @@ fn active_settings_section_is_last_above_fold_like_web() {
             "beta",
             "vault",
             "apps",
+            "backup",
             "calendar",
             "recording",
             "transcription",

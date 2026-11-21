@@ -12,6 +12,8 @@
 mod api_client;
 #[path = "server_client/apps.rs"]
 pub(crate) mod apps;
+#[path = "server_client/backup.rs"]
+pub(crate) mod backup;
 #[path = "server_client/computer.rs"]
 mod computer;
 #[path = "server_client/database.rs"]

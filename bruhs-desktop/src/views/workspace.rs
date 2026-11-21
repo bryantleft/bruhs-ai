@@ -67,6 +67,7 @@ use bruhs_ui::text_field::TextInput;
 mod app_links;
 mod apps_settings;
 mod automations_ui;
+mod backup_settings;
 mod booking_ui;
 #[cfg(test)]
 mod breakpoint_tests;
@@ -689,6 +690,7 @@ enum SettingsSection {
     Beta,
     Vault,
     Apps,
+    Backup,
     Calendar,
     Recording,
     Transcription,
@@ -1247,6 +1249,7 @@ pub struct Workspace {
     settings_section: SettingsSection,
     vault_settings: Entity<vault_settings::VaultSettings>,
     apps_settings: Entity<apps_settings::AppsSettings>,
+    backup_settings: Entity<backup_settings::BackupSettings>,
     /// Provider CLI and app update checks (Settings → Updates, sidebar button).
     updates: Entity<updates_ui::DesktopUpdates>,
     /// Scroll position of the stacked settings sections.
@@ -2023,6 +2026,8 @@ impl Workspace {
                 .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx)),
             apps_settings: cx
                 .new(|cx| apps_settings::AppsSettings::new(meetings_client(), window, cx)),
+            backup_settings: cx
+                .new(|cx| backup_settings::BackupSettings::new(meetings_client(), window, cx)),
             updates: {
                 let enabled = persisted
                     .as_ref()
@@ -2944,6 +2949,10 @@ impl Render for Workspace {
         if !self.settings_visible() && self.apps_settings.read(cx).has_editor() {
             self.apps_settings
                 .update(cx, |view, cx| view.clear_editor(window, cx));
+        }
+        if !self.settings_visible() && self.backup_settings.read(cx).holds_text(cx) {
+            self.backup_settings
+                .update(cx, |view, cx| view.clear_fields(window, cx));
         }
         for thread in &self.threads {
             let visible = self.active_view == AppView::Chat
