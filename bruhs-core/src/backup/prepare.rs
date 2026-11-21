@@ -14,7 +14,7 @@
 //! on, an untrusted schema and its triggers off (F17), and only through
 //! SQLite, never as raw bytes.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions, Permissions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -22,7 +22,8 @@ use std::path::Path;
 
 use bruhs_models::backup::{
     collect_outside, collect_outside_in, folded_entry_key, path_field, rewritable, rewrite_json,
-    rewrite_path, rewrite_rules, PathRewrite, RootsInfo, DAMAGED,
+    rewrite_path, rewrite_rules, PathRewrite, RootsInfo, BACKUP_STOPPED, DAMAGED,
+    KEYCHAIN_SET_UNREADABLE, RESTORE_CANT_MAP,
 };
 use bruhs_models::weekly_reports::managed_preset_id;
 use rusqlite::config::DbConfig;
@@ -30,11 +31,14 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 use serde_json::Value;
 
+use super::create::CancelFlag;
 use super::host::random_id;
 use super::open::{meta_folder, staging_dir, staging_roots, sync_folder, write_new, Staged, META};
 use super::{BackupError, RootKey, Roots};
-use crate::reactive::pause_all_for_restore;
-use crate::secrets::{check_items, rekey_catalogs, AccountMap, KeychainItem};
+use crate::reactive::{pause_all_for_restore, ReactiveError};
+use crate::secrets::{
+    check_items, rekey_catalogs, AccountMap, KeychainItem, RekeyError, SecretError,
+};
 
 /// The staged folder of the credential catalogs, re-keyed on their own.
 const CREDENTIALS: &str = "credentials";
@@ -48,6 +52,9 @@ const ACCOUNTS_FILE: &str = "accounts.json";
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 /// A rewritten file's temporary name starts with this, beside the file.
 const REWRITE_PREFIX: &str = ".bruhs-rewrite-";
+/// The per-column map of old cell text to new, in each staged database's
+/// own temporary schema.
+const MAP_TABLE: &str = "temp.bruhs_rewrite_map";
 
 /// What preparing a staged restore did, for its preview.
 pub(crate) struct Prepared {
@@ -64,10 +71,16 @@ pub(crate) struct Prepared {
 /// Prepares `staged` for `roots`, this computer's (D10 to D12, D14):
 /// rewrites paths in the staged data, re-keys the staged catalogs and
 /// renames `staged.items` to match, stores the account map in `meta`, and
-/// pauses the staged crew. Any error leaves the staging half-written: the
-/// caller discards all of it and never prepares it again (B Task 4 note).
-pub(crate) async fn prepare(roots: &Roots, staged: &mut Staged) -> Result<Prepared, BackupError> {
+/// pauses the staged crew. Stops between files and between tables once
+/// `cancel` is set. Any error leaves the staging half-written: the caller
+/// discards all of it and never prepares it again (B Task 4 note).
+pub(crate) async fn prepare(
+    roots: &Roots,
+    staged: &mut Staged,
+    cancel: &CancelFlag,
+) -> Result<Prepared, BackupError> {
     let roots = roots.clone();
+    let cancel = cancel.clone();
     let id = staged.id.clone();
     let from = RootsInfo {
         home: staged.manifest.home.clone(),
@@ -76,7 +89,7 @@ pub(crate) async fn prepare(roots: &Roots, staged: &mut Staged) -> Result<Prepar
     };
     let mut items = std::mem::take(&mut staged.items);
     let (prepared, items) = tokio::task::spawn_blocking(move || {
-        let prepared = prepare_staged(&roots, &id, &from, &mut items);
+        let prepared = prepare_staged(&roots, &id, &from, &mut items, &cancel);
         (prepared, items)
     })
     .await
@@ -90,6 +103,7 @@ fn prepare_staged(
     id: &str,
     from: &RootsInfo,
     items: &mut [KeychainItem],
+    cancel: &CancelFlag,
 ) -> Result<Prepared, BackupError> {
     let rules = rewrite_rules(from, &roots.info());
     let core = staging_dir(roots, RootKey::Core, id);
@@ -100,29 +114,50 @@ fn prepare_staged(
     // backup holds it.
     if !rules.is_empty() {
         for root in staging_roots(roots) {
-            rewrite_tree(&staging_dir(roots, *root, id), &rules, &mut outside)?;
+            rewrite_tree(&staging_dir(roots, *root, id), &rules, &mut outside, cancel)?;
         }
         note_catalogs(&credentials, &rules, &mut outside)?;
         // Writes `catalog.json`, then `vault.json`: a failure between them
         // fails the open, which discards the whole staging.
-        map = rekey_catalogs(&credentials, &rules).map_err(|_| damaged())?;
+        map = rekey_catalogs(&credentials, &rules).map_err(|error| match error {
+            RekeyError::Unreadable => damaged(),
+            RekeyError::Clash => cant_map(),
+            RekeyError::Write => {
+                BackupError::Io(io::Error::other("the moved catalogs couldn't be written"))
+            }
+        })?;
         map.apply(items);
-        // A renamed item that lands on another's account is damage.
-        check_items(items).map_err(|_| damaged())?;
+        // A renamed item that lands on another's account can't be placed.
+        check_items(items).map_err(|error| match error {
+            SecretError::Invalid(KEYCHAIN_SET_UNREADABLE) => cant_map(),
+            _ => damaged(),
+        })?;
     }
     let accounts = serde_json::to_vec(&map.0).map_err(io::Error::other)?;
     write_new(&meta_folder(&core)?.join(ACCOUNTS_FILE), &accounts)?;
+    if cancel.cancelled() {
+        return Err(stopped());
+    }
     let bruhs = pause_crew(&core.join(REACTIVE_DB))?;
     Ok(Prepared {
         rewrites: rules,
         outside_home: outside.into_iter().collect(),
         bruhs,
-        vault_entries: vault_entries(&credentials),
+        vault_entries: vault_entries(&credentials)?,
     })
 }
 
 fn damaged() -> BackupError {
     BackupError::Format(DAMAGED)
+}
+
+/// The backup is sound but its paths collide once moved here (B Task 9 M6).
+fn cant_map() -> BackupError {
+    BackupError::Refused(RESTORE_CANT_MAP)
+}
+
+fn stopped() -> BackupError {
+    BackupError::Refused(BACKUP_STOPPED)
 }
 
 /// Rewrites every JSON file and SQLite database under `folder`, a staging
@@ -133,11 +168,15 @@ fn rewrite_tree(
     folder: &Path,
     rules: &[PathRewrite],
     outside: &mut BTreeSet<String>,
+    cancel: &CancelFlag,
 ) -> Result<usize, BackupError> {
     let mut changed = 0;
     let mut folders = vec![(folder.to_path_buf(), String::new())];
     while let Some((at, rel)) = folders.pop() {
         for entry in std::fs::read_dir(&at)? {
+            if cancel.cancelled() {
+                return Err(stopped());
+            }
             let entry = entry?;
             // Every staged name is UTF-8 (the open refused any other).
             let Ok(name) = entry.file_name().into_string() else {
@@ -162,7 +201,7 @@ fn rewrite_tree(
                 if json_name(&name) {
                     changed += rewrite_json_file(&path, rules, outside)?;
                 } else if is_sqlite(&path)? {
-                    changed += rewrite_sqlite(&path, rules, outside)?;
+                    changed += rewrite_sqlite(&path, rules, outside, cancel)?;
                 }
             }
         }
@@ -261,23 +300,40 @@ fn replace_file(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
 /// old prefix, walked as JSON when it parses as an object or array and
 /// otherwise rewritten as a whole string. Adds the paths no rule moves,
 /// from path columns and the path fields of JSON cells, to `outside`, and
-/// answers how many cells changed. A database that fails `quick_check`,
-/// or any statement, is `DAMAGED` (F17).
+/// answers how many cells changed. Each column is one pass: every distinct
+/// cell's new text is worked out once from all the rules, then one
+/// `UPDATE` moves each cell from its old text, so a moved cell never moves
+/// twice. Stops between tables once `cancel` is set. A database that fails
+/// `quick_check`, or any statement, is `DAMAGED` (F17); a rewrite that two
+/// rows can't both take (a `UNIQUE` clash) is `RESTORE_CANT_MAP`.
 pub fn rewrite_sqlite(
     path: &Path,
     rules: &[PathRewrite],
     outside: &mut BTreeSet<String>,
+    cancel: &CancelFlag,
 ) -> Result<usize, BackupError> {
     let mut connection = open_staged_database(path)?;
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_failed)?;
+    transaction
+        .execute(
+            &format!("CREATE TABLE {MAP_TABLE}(old TEXT PRIMARY KEY, new TEXT NOT NULL)"),
+            [],
+        )
+        .map_err(sqlite_failed)?;
     let mut changed = 0;
     for table in plain_tables(&transaction)? {
+        if cancel.cancelled() {
+            return Err(stopped());
+        }
         for column in columns(&transaction, &table)? {
             changed += rewrite_column(&transaction, &table, &column, rules, outside)?;
         }
     }
+    transaction
+        .execute(&format!("DROP TABLE {MAP_TABLE}"), [])
+        .map_err(sqlite_failed)?;
     transaction.commit().map_err(sqlite_failed)?;
     connection
         .close()
@@ -401,8 +457,9 @@ fn quoted(name: &str) -> String {
 }
 
 /// Rewrites one column's text cells and answers how many changed. Reads
-/// the cells that hold a rule's old prefix, and those the outside scan
-/// needs: every path in a path column, and JSON cells with a `/`.
+/// each distinct text that holds a rule's old prefix, or that the outside
+/// scan needs (every path in a path column, and JSON cells with a `/`),
+/// streamed, and keeps only the texts that change, in the map table.
 fn rewrite_column(
     connection: &Connection,
     table: &str,
@@ -420,11 +477,17 @@ fn rewrite_column(
         format!("(substr(ltrim({cell}),1,1) IN ('{{','[') AND instr({cell},'/')>0)")
     });
     let select = format!(
-        "SELECT {cell} FROM {table} WHERE typeof({cell})='text' AND ({})",
+        "SELECT DISTINCT {cell} COLLATE BINARY FROM {table} WHERE typeof({cell})='text' AND ({})",
         wanted.join(" OR ")
     );
-    let mut updates = BTreeMap::new();
+    connection
+        .execute(&format!("DELETE FROM {MAP_TABLE}"), [])
+        .map_err(sqlite_failed)?;
+    let mut mapped = false;
     {
+        let mut insert = connection
+            .prepare(&format!("INSERT INTO {MAP_TABLE}(old, new) VALUES(?1, ?2)"))
+            .map_err(sqlite_failed)?;
         let mut statement = connection.prepare(&select).map_err(sqlite_failed)?;
         let mut rows = statement
             .query(rusqlite::params_from_iter(
@@ -439,24 +502,34 @@ fn rewrite_column(
             let Ok(text) = std::str::from_utf8(bytes) else {
                 continue;
             };
-            if updates.contains_key(text) {
-                continue;
-            }
             if let Some(new) = rewritten_cell(column, text, rules, outside) {
-                updates.insert(text.to_owned(), new);
+                insert
+                    .execute([text, new.as_str()])
+                    .map_err(sqlite_failed)?;
+                mapped = true;
             }
         }
     }
-    let update = format!(
-        "UPDATE {table} SET {cell}=?1 WHERE typeof({cell})='text' AND {cell}=?2 COLLATE BINARY"
-    );
-    let mut changed = 0;
-    for (old, new) in &updates {
-        changed += connection
-            .execute(&update, [new, old])
-            .map_err(sqlite_failed)?;
+    if !mapped {
+        return Ok(0);
     }
-    Ok(changed)
+    // The cell's own collation never widens the match: only the exact old
+    // text moves.
+    let update = format!(
+        "UPDATE {table} SET {cell}=(SELECT m.new FROM {MAP_TABLE} AS m WHERE m.old={table}.{cell}) \
+         WHERE typeof({cell})='text' \
+         AND {cell} COLLATE BINARY IN (SELECT m.old FROM {MAP_TABLE} AS m)"
+    );
+    connection
+        .execute(&update, [])
+        .map_err(|error| match &error {
+            rusqlite::Error::SqliteFailure(failure, _)
+                if failure.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                cant_map()
+            }
+            _ => sqlite_failed(error),
+        })
 }
 
 /// A cell's new text, or `None` when no rule moves it.
@@ -537,7 +610,13 @@ fn pause_crew(path: &Path) -> Result<u32, BackupError> {
         return Ok(0);
     }
     let mut connection = open_staged_database(path)?;
-    pause_all_for_restore(&mut connection).map_err(|_| damaged())?;
+    pause_all_for_restore(&mut connection).map_err(|error| {
+        if reactive_io(&error) {
+            BackupError::Io(io::Error::other("the staged crew couldn't be written"))
+        } else {
+            damaged()
+        }
+    })?;
     let agents = connection
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='reactive_agents'",
@@ -566,20 +645,39 @@ fn pause_crew(path: &Path) -> Result<u32, BackupError> {
     Ok(u32::try_from(bruhs).unwrap_or(u32::MAX))
 }
 
-/// How many vault entries and legacy saved values the staged catalogs
-/// hold, counted as a backup counts them.
-fn vault_entries(credentials: &Path) -> u32 {
-    CATALOGS
-        .iter()
-        .filter_map(|name| {
-            let mut text = Vec::new();
-            open_staged_file(&credentials.join(name))
-                .and_then(|mut file| file.read_to_end(&mut text))
-                .ok()?;
-            Some(text)
+/// Whether a reactive store error is SQLite's full disk or io error (B
+/// Task 9 M1), compared with what the store makes of those codes.
+pub(super) fn reactive_io(error: &ReactiveError) -> bool {
+    let text = error.to_string();
+    [rusqlite::ffi::SQLITE_FULL, rusqlite::ffi::SQLITE_IOERR]
+        .into_iter()
+        .any(|code| {
+            ReactiveError::from(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+            .to_string()
+                == text
         })
-        .filter_map(|text| serde_json::from_slice::<Value>(&text).ok())
-        .filter_map(|catalog| catalog.get("entries")?.as_object().map(|map| map.len()))
-        .map(|count| u32::try_from(count).unwrap_or(u32::MAX))
-        .fold(0, u32::saturating_add)
+}
+
+/// How many vault entries and legacy saved values the staged catalogs
+/// hold, counted as a backup counts them. A catalog that can't be read
+/// stops the open; one that isn't JSON counts none.
+fn vault_entries(credentials: &Path) -> Result<u32, BackupError> {
+    let mut count = 0_u32;
+    for name in CATALOGS {
+        let mut text = Vec::new();
+        match open_staged_file(&credentials.join(name)) {
+            Ok(mut file) => file.read_to_end(&mut text)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let entries = serde_json::from_slice::<Value>(&text)
+            .ok()
+            .and_then(|catalog| Some(catalog.get("entries")?.as_object()?.len()))
+            .unwrap_or(0);
+        count = count.saturating_add(u32::try_from(entries).unwrap_or(u32::MAX));
+    }
+    Ok(count)
 }

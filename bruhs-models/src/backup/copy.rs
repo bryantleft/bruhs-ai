@@ -155,6 +155,7 @@ pub const BACKUP_BUSY: &str = "A backup or restore is already running.";
 pub const RESTORE_PENDING: &str = "A restore is waiting to finish. Start Bruhs again to finish it.";
 pub const RESTORE_CANT_MOVE: &str =
     "Bruhs can't move some of its data. Check the folder's permissions, then restore again.";
+pub const RESTORE_CANT_MAP: &str = "Bruhs couldn't fit this backup to this computer's folders.";
 pub const NOTHING_TO_PUT_BACK: &str =
     "This set only holds files Bruhs kept aside during a restore that didn't finish. There is nothing to put back.";
 pub const PARKED_STAYED: &str =
@@ -284,6 +285,7 @@ pub const ALL_COPY: &[&str] = &[
     BACKUP_BUSY,
     RESTORE_PENDING,
     RESTORE_CANT_MOVE,
+    RESTORE_CANT_MAP,
     RESTORE_ROLLED_BACK,
     NOTHING_TO_PUT_BACK,
     PARKED_STAYED,

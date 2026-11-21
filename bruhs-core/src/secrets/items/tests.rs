@@ -563,7 +563,7 @@ fn rekeying_refuses_two_entries_landing_on_one_id() {
 
     assert!(matches!(
         rekey_catalogs(&fixture.credentials, &rules),
-        Err(SecretError::Catalog)
+        Err(RekeyError::Clash)
     ));
     assert_eq!(fs::read(&catalog).unwrap(), before);
 }

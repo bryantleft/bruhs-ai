@@ -2,7 +2,7 @@
 //!
 //! `catalog.json` keeps project keys in the format older binaries read;
 //! every other vault entry lives in `vault.json` beside it (see [`vault`]).
-use super::{items::check_item, storage_key, SecretError, SECRETS_SERVICE};
+use super::{items::check_item, storage_key, RekeyError, SecretError, SECRETS_SERVICE};
 use bruhs_models::{
     backup::{rewrite_path, PathRewrite},
     secrets::{SavedCredential, SavedCredentialState},
@@ -653,10 +653,13 @@ pub(super) fn keychain_accounts(directory: &Path) -> Result<Vec<String>, SecretE
 pub(super) fn rekey(
     directory: &Path,
     rules: &[PathRewrite],
-) -> Result<BTreeMap<String, String>, SecretError> {
+) -> Result<BTreeMap<String, String>, RekeyError> {
     let mut moved = BTreeMap::new();
     let mut catalog = Catalog::default();
-    for (id, mut entry) in read_catalog(directory)?.entries {
+    for (id, mut entry) in read_catalog(directory)
+        .map_err(|_| RekeyError::Unreadable)?
+        .entries
+    {
         if let Some(path) = rewrite_path(&entry.project_path, rules) {
             entry.id = storage_key(Path::new(&path), &entry.name);
             entry.project_path = path;
@@ -665,16 +668,16 @@ pub(super) fn rekey(
             moved.insert(id, entry.id.clone());
         }
         if catalog.entries.insert(entry.id.clone(), entry).is_some() {
-            return Err(SecretError::Catalog);
+            return Err(RekeyError::Clash);
         }
     }
     let legacy_moved = !moved.is_empty();
-    let vault = vault::rekeyed(directory, rules, &mut moved)?;
+    let vault = vault::rekeyed(directory, rules, &mut moved).map_err(|_| RekeyError::Unreadable)?;
     if legacy_moved {
-        write_atomically(directory, CATALOG_FILE, &catalog)?;
+        write_atomically(directory, CATALOG_FILE, &catalog).map_err(|_| RekeyError::Write)?;
     }
     if let Some(vault) = vault {
-        vault::write_vault(directory, &vault)?;
+        vault::write_vault(directory, &vault).map_err(|_| RekeyError::Write)?;
     }
     Ok(moved)
 }

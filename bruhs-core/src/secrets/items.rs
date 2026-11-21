@@ -10,8 +10,8 @@ use base64::Engine as _;
 use bruhs_backup::Key;
 use bruhs_models::{
     backup::{
-        valid_id, valid_stamp, PathRewrite, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
-        KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE,
+        valid_id, valid_stamp, PathRewrite, DAMAGED, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
+        KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE, RESTORE_CANT_MAP,
     },
     connections::ServiceProvider,
 };
@@ -331,11 +331,23 @@ impl AccountMap {
 /// name)`, map key and `id` together, and `vault.json` Project scopes move.
 /// Paths are rewritten as text, never canonicalized. Answers the moved
 /// accounts.
-pub fn rekey_catalogs(
-    credentials: &Path,
-    rules: &[PathRewrite],
-) -> Result<AccountMap, SecretError> {
+pub fn rekey_catalogs(credentials: &Path, rules: &[PathRewrite]) -> Result<AccountMap, RekeyError> {
     storage::rekey(credentials, rules).map(AccountMap)
+}
+
+/// Why [`rekey_catalogs`] stopped. A failure after the first write leaves
+/// the catalogs half moved: the caller discards them (B Task 4 note).
+#[derive(Debug, thiserror::Error)]
+pub enum RekeyError {
+    /// A catalog doesn't read, or breaks its own rules.
+    #[error("{}", DAMAGED)]
+    Unreadable,
+    /// Two entries land on one id once their paths move.
+    #[error("{}", RESTORE_CANT_MAP)]
+    Clash,
+    /// A moved catalog couldn't be written.
+    #[error("Bruhs couldn't write the moved catalogs.")]
+    Write,
 }
 
 #[derive(Serialize)]

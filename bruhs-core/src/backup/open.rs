@@ -411,7 +411,7 @@ async fn open(
         step: JobStep::Preparing,
     });
     let mut staged = staged;
-    let prepared = prepare(&roots, &mut staged).await?;
+    let prepared = prepare(&roots, &mut staged, cancel).await?;
     let preview = tokio::task::spawn_blocking(move || seal(&config, &staged, &prepared))
         .await
         .map_err(|_| worker_stopped())??;

@@ -6,6 +6,7 @@
 #![cfg(unix)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,10 +23,10 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use super::open::{extract, staging_dir};
-use super::prepare::{prepare, rewrite_sqlite};
+use super::prepare::{prepare, reactive_io, rewrite_sqlite};
 use super::*;
-use crate::reactive::ReactiveRuntime;
-use crate::secrets::{SecretManager, SecretStore, SECRETS_SERVICE};
+use crate::reactive::{ReactiveError, ReactiveRuntime};
+use crate::secrets::{read_seal_key, SecretError, SecretManager, SecretStore, SECRETS_SERVICE};
 
 const PASSWORD: &str = "correct horse 1";
 const BRUH: &str = "bruh-1";
@@ -415,6 +416,14 @@ async fn bruh_folders_and_projects_point_here() {
         )
         .as_bytes(),
     );
+    // The desktop's backup copy of its state moves too (M4).
+    write(
+        &core.join("desktop-state.json.bak"),
+        format!("{{\"projects\":[{{\"projectPath\":\"{home_a}/src/old\"}}]}}").as_bytes(),
+    );
+    // A `.json` file that isn't JSON stays byte for byte (M4).
+    let not_json = format!("{home_a}/src/app is not JSON");
+    write(&core.join("server/notes.json"), not_json.as_bytes());
     let doc = format!("A note about {home_a}/src/app");
     write(
         &core.join("knowledge-attachments/k1/doc.txt"),
@@ -466,6 +475,14 @@ async fn bruh_folders_and_projects_point_here() {
     assert_eq!(
         state["attachments"][0],
         format!("{desktop_b}/knowledge-attachments/k1/doc.txt")
+    );
+    assert_eq!(
+        json(&staged_desktop.join("desktop-state.json.bak"))["projects"][0]["projectPath"],
+        format!("{home_b}/src/old")
+    );
+    assert_eq!(
+        std::fs::read(staged_core.join("server/notes.json")).unwrap(),
+        not_json.as_bytes()
     );
     assert!(!staged_core.join("desktop-state.json").exists());
     assert!(!staged_core.join("knowledge-attachments").exists());
@@ -680,7 +697,10 @@ fn sqlite_rewrites_skip_virtual_tables() {
     drop(db);
 
     let mut outside = BTreeSet::new();
-    assert_eq!(rewrite_sqlite(&path, &rules, &mut outside).unwrap(), 3);
+    assert_eq!(
+        rewrite_sqlite(&path, &rules, &mut outside, &CancelFlag::default()).unwrap(),
+        3
+    );
     assert_eq!(outside, BTreeSet::from(["/Volumes/Work".to_owned()]));
     let db = Connection::open(&path).unwrap();
     let rows: Vec<(String, Option<String>)> = db
@@ -705,10 +725,20 @@ fn sqlite_rewrites_skip_virtual_tables() {
         ]
     );
     assert_eq!(virtual_rows(&db), before);
+    // Triggers are off for the rewrite's connection only: the schema keeps
+    // them (M4).
+    let triggers: i64 = db
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name='refuse'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(triggers, 1);
     drop(db);
 
     // One transaction: a later table that can't take its rewrite undoes
-    // the earlier one.
+    // the earlier one, and the clash is a fit problem, not damage (M6).
     let path = base.join("clash.sqlite3");
     Connection::open(&path)
         .unwrap()
@@ -717,8 +747,9 @@ fn sqlite_rewrites_skip_virtual_tables() {
              CREATE TABLE second(p TEXT UNIQUE); INSERT INTO second VALUES ('/a/home/q'), ('/b/home/q');",
         )
         .unwrap();
-    let error = rewrite_sqlite(&path, &rules, &mut BTreeSet::new()).unwrap_err();
-    assert_eq!(error.message(), DAMAGED);
+    let error =
+        rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &CancelFlag::default()).unwrap_err();
+    assert_eq!(error.message(), RESTORE_CANT_MAP);
     let first: String = Connection::open(&path)
         .unwrap()
         .query_row("SELECT p FROM first", [], |row| row.get(0))
@@ -730,9 +761,220 @@ fn sqlite_rewrites_skip_virtual_tables() {
     let mut bytes = b"SQLite format 3\0".to_vec();
     bytes.extend_from_slice(&[0xa5; 4080]);
     std::fs::write(&path, &bytes).unwrap();
-    let error = rewrite_sqlite(&path, &rules, &mut BTreeSet::new()).unwrap_err();
+    let error =
+        rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &CancelFlag::default()).unwrap_err();
     assert_eq!(error.message(), DAMAGED);
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+fn column(path: &Path, sql: &str) -> Vec<Option<String>> {
+    Connection::open(path)
+        .unwrap()
+        .prepare(sql)
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// B Task 9 I1: each cell moves once, by its old text and all the rules,
+/// even when one rule's target sits under another rule's source; a
+/// column's own collation never widens the match. A table without row
+/// ids moves by value too. (A UNIQUE column whose chained moves only fit
+/// in a different order answers `RESTORE_CANT_MAP`: SQLite checks each
+/// row as it goes.)
+#[test]
+fn nested_rules_move_each_cell_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("nested.sqlite3");
+    // Longest first, as `rewrite_rules` sorts them: `/h/b/core` lies
+    // under the second rule's `/h/b`.
+    let rules = vec![
+        PathRewrite {
+            from: "/h/a/core".into(),
+            to: "/h/b/core".into(),
+        },
+        PathRewrite {
+            from: "/h/b".into(),
+            to: "/h/c".into(),
+        },
+    ];
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE t(id INTEGER PRIMARY KEY, p TEXT COLLATE NOCASE);
+             INSERT INTO t(p) VALUES ('/h/a/core/x'), ('/h/b/core/x'), ('/H/B/CORE/X'),
+               ('{\"cwd\":\"/h/a/core/x\"}'), ('{\"cwd\":\"/h/b/core/x\"}');
+             CREATE TABLE w(p TEXT PRIMARY KEY) WITHOUT ROWID;
+             INSERT INTO w VALUES ('/h/a/core/w'), ('/h/c/w');",
+        )
+        .unwrap();
+    let changed =
+        rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &CancelFlag::default()).unwrap();
+    assert_eq!(changed, 5);
+    assert_eq!(
+        column(&path, "SELECT p FROM t ORDER BY id"),
+        [
+            "/h/b/core/x",
+            "/h/c/core/x",
+            "/H/B/CORE/X",
+            "{\"cwd\":\"/h/b/core/x\"}",
+            "{\"cwd\":\"/h/c/core/x\"}",
+        ]
+        .map(|text| Some(text.to_owned()))
+    );
+    assert_eq!(
+        column(&path, "SELECT p FROM w ORDER BY p"),
+        ["/h/b/core/w", "/h/c/w"].map(|text| Some(text.to_owned()))
+    );
+}
+
+/// B Task 9 I1: a large column is one pass, not one scan per value.
+#[test]
+fn a_large_table_rewrites_in_one_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("large.sqlite3");
+    let mut db = Connection::open(&path).unwrap();
+    db.execute("CREATE TABLE runs(payload TEXT)", []).unwrap();
+    let transaction = db.transaction().unwrap();
+    for at in 0..20_000 {
+        transaction
+            .execute(
+                "INSERT INTO runs VALUES (?1)",
+                [format!("{{\"cwd\":\"/a/home/p{at}\"}}")],
+            )
+            .unwrap();
+    }
+    transaction.commit().unwrap();
+    drop(db);
+    let rules = vec![PathRewrite {
+        from: "/a/home".into(),
+        to: "/b/home".into(),
+    }];
+    let started = std::time::Instant::now();
+    let changed =
+        rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &CancelFlag::default()).unwrap();
+    assert_eq!(changed, 20_000);
+    // Loose: one scan per value took minutes at this size.
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
+    let moved: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM runs WHERE payload LIKE '{\"cwd\":\"/b/home/p%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(moved, 20_000);
+}
+
+/// A cancelled job stops before the next table, and nothing is written.
+#[test]
+fn a_cancelled_rewrite_stops_between_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("cancel.sqlite3");
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE t(p TEXT); INSERT INTO t VALUES ('/a/home/x');")
+        .unwrap();
+    let cancel = CancelFlag::default();
+    cancel.cancel();
+    let rules = vec![PathRewrite {
+        from: "/a/home".into(),
+        to: "/b/home".into(),
+    }];
+    let error = rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &cancel).unwrap_err();
+    assert_eq!(error.message(), BACKUP_STOPPED);
+    assert_eq!(
+        column(&path, "SELECT p FROM t"),
+        [Some("/a/home/x".to_owned())]
+    );
+}
+
+/// B Task 9 M3, M6: a backup whose paths clash once moved fails its open
+/// with `RESTORE_CANT_MAP`, and leaves no staging and no seal key.
+#[tokio::test]
+async fn a_failed_prepare_removes_the_staging_and_its_key() {
+    let homes = homes();
+    let (home_a, home_b) = (text(&homes.a.home), text(&homes.b.home));
+    let db = Connection::open(homes.a.core.join("clash.sqlite3")).unwrap();
+    db.execute("CREATE TABLE seen(p TEXT UNIQUE)", []).unwrap();
+    for path in [format!("{home_a}/src/x"), format!("{home_b}/src/x")] {
+        db.execute("INSERT INTO seen VALUES (?1)", [path]).unwrap();
+    }
+    drop(db);
+    let backup = make_backup(&homes, &homes.a, &homes.store_a, "clash").await;
+    let host = host(&homes.b, &homes.store_b);
+    let job = host
+        .start_open(backup, Zeroizing::new(PASSWORD.into()), false)
+        .unwrap();
+    match finished(&host, &job.id).await {
+        JobState::Failed { message } => assert_eq!(message, RESTORE_CANT_MAP),
+        other => panic!("{other:?}"),
+    }
+    for root in [RootKey::Core, RootKey::Desktop] {
+        let staging = homes.b.backups(root).join("staging");
+        let left: Vec<_> = std::fs::read_dir(&staging)
+            .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "{left:?}");
+    }
+    assert!(matches!(
+        read_seal_key(&homes.store_b, &format!("staged:{}", job.id)),
+        Err(SecretError::NotSaved)
+    ));
+}
+
+/// B Task 9 M1: a catalog that can't be written answers the io copy, and
+/// a store error is io only for SQLite's full disk and io codes.
+#[tokio::test]
+async fn io_failures_answer_the_io_copy() {
+    let homes = homes();
+    let project = format!("{}/src/app", text(&homes.a.home));
+    homes
+        .store_a
+        .save(&project, "API_KEY", Zeroizing::new("moving value".into()))
+        .await
+        .unwrap();
+    let backup = make_backup(&homes, &homes.a, &homes.store_a, "io").await;
+    let id = host(&homes.b, &homes.store_b).random_id();
+    let mut staged = extract(
+        &homes.b,
+        &id,
+        &backup,
+        PASSWORD,
+        &CancelFlag::default(),
+        &|_, _| {},
+    )
+    .unwrap();
+    let credentials = staging_dir(&homes.b, RootKey::Core, &id).join("credentials");
+    std::fs::set_permissions(&credentials, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let error = prepare(&homes.b, &mut staged, &CancelFlag::default())
+        .await
+        .err()
+        .unwrap();
+    std::fs::set_permissions(&credentials, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(matches!(error, BackupError::Io(_)), "{error:?}");
+
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE t(v TEXT UNIQUE); INSERT INTO t VALUES ('x');")
+        .unwrap();
+    let clash = db.execute("INSERT INTO t VALUES ('x')", []).unwrap_err();
+    assert!(!reactive_io(&ReactiveError::from(clash)));
+    let full =
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL), None);
+    assert!(reactive_io(&ReactiveError::from(full)));
 }
 
 /// The same computer gets no rules, and preparing changes no staged byte
@@ -787,7 +1029,9 @@ async fn the_same_home_rewrites_nothing() {
     let desktop = staging_dir(roots, RootKey::Desktop, &id);
     let before = [files_under(&core), files_under(&desktop)];
 
-    let prepared = prepare(roots, &mut staged).await.unwrap();
+    let prepared = prepare(roots, &mut staged, &CancelFlag::default())
+        .await
+        .unwrap();
     assert_eq!(prepared.rewrites, Vec::<PathRewrite>::new());
     assert_eq!(prepared.outside_home, Vec::<String>::new());
     assert_eq!(prepared.bruhs, 1);
