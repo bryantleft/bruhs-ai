@@ -1901,4 +1901,12 @@ fn the_restore_log_is_private_and_never_a_link() {
     std::os::unix::fs::symlink(&elsewhere, &log).unwrap();
     assert!(open_restore_log(core).is_err());
     assert!(!elsewhere.exists());
+    // A linked logs folder is refused too, and nothing lands where it
+    // points (B Task 10 N3).
+    std::fs::remove_dir_all(core.join("logs")).unwrap();
+    let outside = fixture.base.join("outside-logs");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, core.join("logs")).unwrap();
+    assert!(open_restore_log(core).is_err());
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
 }

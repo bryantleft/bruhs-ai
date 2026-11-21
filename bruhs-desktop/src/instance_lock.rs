@@ -87,10 +87,14 @@ pub fn apply_restore_at_start() -> Option<File> {
     let bundled_server = bruhs_core::updates::release::current_app_bundle()
         .map(|bundle| bundle.join("Contents/MacOS/bruhs-server"))
         .filter(|server| server.is_file());
-    let apply = |lock: &File, wait: Duration| match (&roots, &bundled_server) {
-        (Some(roots), Some(server)) => apply_bundled(roots, server, lock, wait),
-        (Some(roots), None) => apply_here(roots, &SecretChoice::from_env().store(), lock, wait),
-        (None, _) => Try::Done,
+    // One store for every try (B Task 10 N1); only a source build uses it.
+    let store = bundled_server
+        .is_none()
+        .then(|| SecretChoice::from_env().store());
+    let apply = |lock: &File, wait: Duration| match (&roots, &bundled_server, &store) {
+        (Some(roots), Some(server), _) => apply_bundled(roots, server, lock, wait),
+        (Some(roots), None, Some(store)) => apply_here(roots, store, lock, wait),
+        _ => Try::Done,
     };
     match start_at(
         &instance_lock_path(&root),
@@ -222,8 +226,11 @@ fn apply_here(roots: &Roots, store: &SecretStore, lock: &File, wait: Duration) -
 
 /// Applies the waiting restore through the bundle's `bruhs-server
 /// restore-apply --once` (ruling F23), handing it the instance lock as
-/// standard input. Waits at most `wait`; a server still trying then is
-/// stopped and waited for, so no try outlives the start (B Task 10 I1).
+/// standard input. Waits at most `wait`. A server still trying then is
+/// stopped and waited for while nothing has moved yet (no journal), so no
+/// try outlives the start (B Task 10 I1); once its apply has begun it is
+/// left to finish under the lock, and the answer is [`Try::Running`]
+/// (N2).
 fn apply_bundled(roots: &Roots, server: &Path, lock: &File, wait: Duration) -> Try {
     let stdin = match lock.try_clone() {
         Ok(lock) => lock,
@@ -264,6 +271,10 @@ fn apply_bundled(roots: &Roots, server: &Path, lock: &File, wait: Duration) -> T
             }
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) if applying(roots) => {
+                tracing::warn!("the restore is being applied; it finishes on its own");
+                return Try::Running;
             }
             Ok(None) => {
                 tracing::warn!("the restore took too long; stopping its try");
@@ -481,6 +492,40 @@ mod tests {
                 .success();
             assert!(!alive, "the stuck try still runs");
         }
+        // Once its apply has begun (a journal), the try is left to finish
+        // under the lock and the start doesn't go on (B Task 10 N2).
+        let backups = fixture.roots.core.join("backups");
+        let journal_pid = dir.path().join("journal-pid");
+        let applying_server = server(
+            "applying.sh",
+            &format!(
+                "mkdir -p '{}'\n: > '{}'\necho $$ > '{}'\nexec sleep 30",
+                backups.display(),
+                backups.join("apply.json").display(),
+                journal_pid.display()
+            ),
+        );
+        assert_eq!(
+            apply_bundled(
+                &fixture.roots,
+                &applying_server,
+                &lock,
+                Duration::from_secs(3)
+            ),
+            Try::Running
+        );
+        let pid = std::fs::read_to_string(&journal_pid).unwrap();
+        let signal = |signal: &str| {
+            std::process::Command::new("kill")
+                .args([signal, pid.trim()])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(signal("-0"), "the applying try was stopped");
+        assert!(signal("-KILL"));
+        std::fs::remove_file(backups.join("apply.json")).unwrap();
         // Its answers map as `--once` gives them.
         for (code, answer) in [(0, Try::Done), (1, Try::Failed), (75, Try::Waiting)] {
             let quick = server(&format!("exit-{code}.sh"), &format!("exit {code}"));

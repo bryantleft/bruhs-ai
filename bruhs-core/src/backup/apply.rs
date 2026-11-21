@@ -368,18 +368,32 @@ pub fn applying(roots: &Roots) -> bool {
 /// Never through a link or onto anything but a plain file, and 0600 even
 /// when it was there before (B Task 10 I6).
 pub fn open_restore_log(core: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags};
     use std::os::unix::fs::PermissionsExt;
     let logs = core.join("logs");
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&logs)?;
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(logs.join(RESTORE_LOG))?;
+    DirBuilder::new().recursive(true).mode(0o700).create(core)?;
+    match DirBuilder::new().mode(0o700).create(&logs) {
+        Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
+        _ => {}
+    }
+    // The folder itself never through a link (B Task 10 N3), and the file
+    // made inside the folder that was opened.
+    let folder = rustix::fs::open(
+        &logs,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let file = File::from(rustix::fs::openat(
+        &folder,
+        RESTORE_LOG,
+        OFlags::WRONLY
+            | OFlags::APPEND
+            | OFlags::CREATE
+            | OFlags::NOFOLLOW
+            | OFlags::NONBLOCK
+            | OFlags::CLOEXEC,
+        Mode::from_raw_mode(0o600),
+    )?);
     if !file.metadata()?.is_file() {
         return Err(io::Error::other("the restore log isn't a plain file"));
     }
