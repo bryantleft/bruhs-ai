@@ -109,11 +109,11 @@ pub const RESTORED: &str = "Restored. Your bruhs are paused: resume them on thei
 pub const BRUHS_PAUSED: &str = RESTORED;
 pub const WEB_PART_WAITING: &str =
     "This backup has data for this browser. Restoring it replaces what this browser holds now.";
-pub const WEB_PART_DONE: &str = "This browser's data is restored. Reload other Bruhs tabs.";
+pub const WEB_PART_DONE: &str = "This browser's data is restored. This page reloads to show it.";
 /// The browser's data was put back but the server's copy didn't go, and
 /// this tab's own writes stay stopped (B Task 14 N3).
 pub const WEB_FINISH_RETRY: &str =
-    "This browser's data is back, but Bruhs couldn't finish. Try again, or reload this page.";
+    "This browser's data is back, but Bruhs couldn't finish. Try again.";
 pub const NO_WEB_PART: &str = "This backup has no browser data, so this browser keeps its own.";
 
 // Kept sets and the last backup.
@@ -222,6 +222,20 @@ pub const SERVICE_NOT_STOPPED: &str =
 /// M2): it stays scheduled.
 pub const RESTORE_AT_NEXT_START: &str =
     "Bruhs couldn't finish the restore now. It finishes the next time Bruhs starts.";
+
+// Final review, UI
+/// A restore the desktop applied whose browser part waits (final review
+/// D-I3): the desktop can't restore it, so it points at the web app.
+pub const WEB_PART_ON_DESKTOP: &str =
+    "This backup has data for your browser. Restore it in the web app: Settings, Backup.";
+/// Under the browser card's password: a Put back's part is locked with the
+/// password of the restore that kept it.
+pub const WEB_PART_PASSWORD_HINT: &str =
+    "Use the password of the backup you restored. After a Put back, use the one from the restore that kept that data.";
+/// Browser stores a newer Bruhs wrote that this build left out. `{list}`
+/// names them.
+pub const WEB_STORES_SKIPPED: &str =
+    "Some browser data comes from a newer Bruhs, so it was left out: {list}.";
 
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
@@ -361,6 +375,10 @@ pub const ALL_COPY: &[&str] = &[
     RESTORE_NOT_STARTED,
     SERVICE_NOT_STOPPED,
     RESTORE_AT_NEXT_START,
+    // Final review, UI
+    WEB_PART_ON_DESKTOP,
+    WEB_PART_PASSWORD_HINT,
+    WEB_STORES_SKIPPED,
 ];
 
 #[cfg(test)]
