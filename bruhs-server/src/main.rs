@@ -141,6 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     reactive.attach_computers(Arc::clone(&tools))?;
     let backup =
         routes::backup::start(secret_store(), Arc::clone(&tools), reactive.clone()).await?;
+    let imports = routes::import::start();
     // Before the worker starts, so the first run's preamble and gate see
     // the vault.
     reactive.attach_vault(state.secrets().clone())?;
@@ -202,6 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .layer(axum::Extension(apps))
     .layer(axum::Extension(gmail))
     .layer(axum::Extension(outlook));
+    let app = routes::import::with_host(app, imports);
     let coordination = bruhs_core::coordination::CoordinationRuntime::open(
         bruhs_core::coordination::CoordinationRuntime::default_path()?,
         state.clone(),
@@ -727,6 +729,7 @@ fn router_with_capture_daemon(
         .route("/api/import/sessions", get(routes::import::get_sessions))
         .route("/api/import/thread", get(routes::import::get_thread))
         .route("/api/export/t3", post(routes::import::post_export_t3))
+        .merge(routes::import::router())
         .route("/api/agent/files", post(routes::files::post_files))
         .route(
             "/api/agent/files/children",

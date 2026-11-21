@@ -76,7 +76,7 @@ mod restore;
 #[cfg(test)]
 mod restore_tests;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// Every backup route (D20), each with its body limit: this side's and
 /// the restore side's.

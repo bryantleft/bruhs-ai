@@ -36,7 +36,7 @@ static CAPTURING: AtomicBool = AtomicBool::new(false);
 /// returned guard lives. A thread-local capture misses the server's events
 /// when another test thread registers their callsites first, so this one
 /// is global; outside the guard it records nothing.
-fn capture_process_logs() -> (&'static Logs, Capturing) {
+pub(crate) fn capture_process_logs() -> (&'static Logs, Capturing) {
     static LOGS: OnceLock<Logs> = OnceLock::new();
     let logs = LOGS.get_or_init(|| {
         let logs = Logs::default();
@@ -60,7 +60,7 @@ fn capture_process_logs() -> (&'static Logs, Capturing) {
 }
 
 /// Stops the process-wide capture when dropped.
-struct Capturing;
+pub(crate) struct Capturing;
 
 impl Drop for Capturing {
     fn drop(&mut self) {
