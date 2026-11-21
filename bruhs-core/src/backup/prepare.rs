@@ -34,7 +34,7 @@ use serde_json::Value;
 use super::create::CancelFlag;
 use super::host::random_id;
 use super::open::{meta_folder, staging_dir, staging_roots, sync_folder, write_new, Staged, META};
-use super::{BackupError, RootKey, Roots};
+use super::{BackupError, RootKey, Roots, GENERATORS_DB};
 use crate::reactive::{pause_all_for_restore, ReactiveError};
 use crate::secrets::{
     check_items, keychain_inventory, rekey_catalogs, AccountMap, KeychainItem, RekeyError,
@@ -147,10 +147,13 @@ fn prepare_staged(
     // The catalogs an apply reads at its plan, read here first on every
     // computer, so a backup whose catalogs don't read fails to open
     // instead of at the apply (final review B-I2).
+    // Desktop entries sit in the desktop root's staging by now (D11), the
+    // core root's on one root.
     keychain_inventory(
         &credentials,
         &core.join(CONNECTIONS),
         &core.join(GOOGLE_CALENDAR),
+        &staging_dir(roots, RootKey::Desktop, id).join(GENERATORS_DB),
     )
     .map_err(|_| damaged())?;
     let accounts = serde_json::to_vec(&map.0).map_err(io::Error::other)?;

@@ -23,7 +23,9 @@ use super::apply::{apply_pending_with, Point};
 use super::journal::Step;
 use super::open::staging_dir;
 use super::*;
-use crate::secrets::{read_seal_key, unseal_items, SecretError, SecretStore, SECRETS_SERVICE};
+use crate::secrets::{
+    read_seal_key, unseal_items, SecretError, SecretStore, GENERATORS_SERVICE, SECRETS_SERVICE,
+};
 
 const PASSWORD: &str = "correct horse 1";
 /// The Value both A and B hold.
@@ -32,7 +34,14 @@ const VALUE: &str = "v1-11111111111111111111111111111111";
 const EXTRA: &str = "v1-22222222222222222222222222222222";
 /// Top-level entries an apply never moves: a backup always leaves them
 /// out, `Worktrees` included, since a volume may fold it into `worktrees`.
-const NEVER: [&str; 5] = ["backups", "capture", "models", "logs", "Worktrees"];
+const NEVER: [&str; 6] = [
+    "backups",
+    "capture",
+    "models",
+    "logs",
+    "Worktrees",
+    "scratch",
+];
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -85,6 +94,35 @@ const SECRET_SOURCES: &str = "secret-sources.json";
 /// never values.
 const SOURCES_B: &[u8] = br#"{"sources":{"s1":{"name":"B","account":""}},"bindings":[{"target":"codex","variable":"B_KEY","source":"s1","reference":"op://v/b/f"}]}"#;
 const SOURCES_A: &[u8] = br#"{"sources":{"s1":{"name":"A","account":""}},"bindings":[]}"#;
+
+/// Data B's and data A's text generator key ids.
+const GEN_B: &str = "b0000000-0000-4000-8000-00000000000b";
+const GEN_A: &str = "a0000000-0000-4000-8000-00000000000a";
+
+/// The text generators' database in the desktop root, with one generator
+/// whose API key is the keychain item `key`.
+fn generators(roots: &Roots, key: &str) {
+    let path = roots.desktop.join("text-generators.sqlite3");
+    let db = Connection::open(path).unwrap();
+    let record = serde_json::json!({"id": "c0000000-0000-4000-8000-00000000000c", "key": key});
+    db.execute_batch(
+        "CREATE TABLE generators (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, \
+         record TEXT NOT NULL);",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO generators VALUES ('c0000000-0000-4000-8000-00000000000c', 1, ?1)",
+        [record.to_string()],
+    )
+    .unwrap();
+}
+
+fn generator_key(store: &SecretStore, key: &str) -> Option<String> {
+    store
+        .read_item(GENERATORS_SERVICE, key)
+        .unwrap()
+        .map(|value| value.to_string())
+}
 
 fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -176,8 +214,16 @@ fn write_b(fixture: &Fixture) {
     write(&script, b"#!/bin/sh\necho b\n");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     write(&roots.core.join("attachments/plain.txt"), b"B plain");
+    // Post-merge ruling 1: a projectless chat's folder never goes in.
+    write(&roots.core.join("scratch/chat-b/notes.md"), b"B scratch");
     write(&roots.desktop.join("desktop-state.json"), b"{\"b\":true}");
     write(&roots.config.join(SECRET_SOURCES), SOURCES_B);
+    generators(roots, GEN_B);
+    let store = &fixture.store;
+    store
+        .write_item(GENERATORS_SERVICE, GEN_B, "b generator key")
+        .unwrap();
+    store.remove_item(GENERATORS_SERVICE, GEN_A).unwrap();
     if roots.config != roots.core {
         write(
             &roots.config.join("calendar/google/state.json"),
@@ -214,12 +260,19 @@ fn write_a(fixture: &Fixture, extra: bool) {
     write(&roots.core.join("models/model.bin"), b"model");
     write(&roots.core.join("logs/server.log"), b"log");
     write(&roots.core.join("Worktrees/checkout.txt"), b"worktree");
+    write(&roots.core.join("scratch/chat-a/notes.md"), b"A scratch");
     write(&roots.desktop.join("desktop-state.json"), b"{\"a\":true}");
     write(&roots.desktop.join("a-desktop.json"), b"{\"a\":2}");
     if !roots.same() {
         write(&roots.desktop.join("logs/desktop.log"), b"desktop log");
     }
     write(&roots.config.join(SECRET_SOURCES), SOURCES_A);
+    generators(roots, GEN_A);
+    store
+        .write_item(GENERATORS_SERVICE, GEN_A, "a generator key")
+        .unwrap();
+    // Gone from today's keychain, so only the backup can bring it back.
+    store.remove_item(GENERATORS_SERVICE, GEN_B).unwrap();
     if roots.config != roots.core {
         write(
             &roots.config.join("calendar/google/state.json"),
@@ -457,6 +510,7 @@ fn assert_applied(fixture: &Fixture, before: &Before) -> String {
         );
     }
     assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
+    assert_generator_keys(fixture);
     // F32: the owner's execute bit carries over as 0700, else 0600.
     assert_eq!(mode(&roots.core.join("attachments/run.sh")), 0o700);
     assert_eq!(mode(&roots.core.join("attachments/plain.txt")), 0o600);
@@ -487,6 +541,9 @@ fn assert_applied(fixture: &Fixture, before: &Before) -> String {
     assert!(items
         .iter()
         .any(|item| item.account == account(VALUE) && *item.value == "old"));
+    assert!(items.iter().any(|item| item.service == GENERATORS_SERVICE
+        && item.account == GEN_A
+        && *item.value == "a generator key"));
 
     let backups = roots.backups(RootKey::Core);
     assert!(!backups.join("pending.json").exists());
@@ -605,6 +662,21 @@ async fn calendar_goes_back_to_the_config_root() {
         std::fs::read(roots.core.join(SECRET_SOURCES)).unwrap(),
         b"core own sources"
     );
+}
+
+/// Post-merge ruling 2: B's text generator key came back from the backup,
+/// beside B's generators' database.
+fn assert_generator_keys(fixture: &Fixture) {
+    let roots = &fixture.roots;
+    assert_eq!(
+        generator_key(&fixture.store, GEN_B).as_deref(),
+        Some("b generator key")
+    );
+    let db = Connection::open(roots.desktop.join("text-generators.sqlite3")).unwrap();
+    let record: String = db
+        .query_row("SELECT record FROM generators", [], |row| row.get(0))
+        .unwrap();
+    assert!(record.contains(GEN_B), "{record}");
 }
 
 /// `secret-sources.json` is B's in `live` after the apply, and A's is
@@ -927,10 +999,15 @@ async fn an_item_that_wont_go_is_counted_not_fatal() {
     let Ok(ApplyOutcome::Applied(applied)) = outcome else {
         panic!("{outcome:?}");
     };
-    assert_eq!(applied.warnings, [items_stayed_line(1).unwrap()]);
+    // EXTRA and A's text generator key, both only today's.
+    assert_eq!(applied.warnings, [items_stayed_line(2).unwrap()]);
     assert_eq!(result(roots).unwrap().warnings, applied.warnings);
     assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
     assert_eq!(item(&fixture.store, EXTRA).as_deref(), Some("extra"));
+    assert_eq!(
+        generator_key(&fixture.store, GEN_A).as_deref(),
+        Some("a generator key")
+    );
     assert!(!applying(roots));
     assert_eq!(pre_restores(roots).len(), 1);
 }
@@ -1735,6 +1812,7 @@ async fn calendar_goes_back_to_the_config_root_on_one_root() {
         std::fs::read(roots.core.join("calendar/own.txt")).unwrap(),
         b"core own"
     );
+    assert_generator_keys(&fixture);
     assert_secret_sources_restored(roots, &stamp, &roots.config);
     assert_eq!(
         std::fs::read(roots.core.join(SECRET_SOURCES)).unwrap(),

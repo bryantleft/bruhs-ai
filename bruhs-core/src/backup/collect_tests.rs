@@ -205,6 +205,21 @@ fn calendar_state_comes_from_the_config_root() {
     );
 }
 
+/// Post-merge ruling 1: main's projectless chat folders never go in, so a
+/// name there a restore would refuse can't refuse the backup either.
+#[test]
+fn scratch_chats_are_left_out() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("scratch/c1/Makefile"), b"a");
+    write(&roots.core.join("scratch/c1/makefile"), b"b");
+    write(&roots.core.join("scratch/.leases/c1"), b"");
+    write(&roots.core.join("server/mail.sqlite3"), b"x");
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert_eq!(listed(&taken), [(RootKey::Core, "server/mail.sqlite3")]);
+}
+
 /// Secret provider references (`secret-sources.json`) sit in the config
 /// root too: on Linux they go in as the core root's file, from the config
 /// root, and the core root's own copy stays out (main merge follow-up).

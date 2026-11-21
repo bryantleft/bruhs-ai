@@ -24,7 +24,7 @@ use super::host::{Hook, Limits};
 use super::*;
 use crate::local_tools::{BruhComputer, LocalToolsHost};
 use crate::reactive::ReactiveRuntime;
-use crate::secrets::{SecretStore, CONNECTIONS_SERVICE, SECRETS_SERVICE};
+use crate::secrets::{SecretStore, CONNECTIONS_SERVICE, GENERATORS_SERVICE, SECRETS_SERVICE};
 
 const PASSWORD: &str = "correct horse 1";
 const GLOBAL_VALUE: &str = "v1-11111111111111111111111111111111";
@@ -992,6 +992,52 @@ async fn transfers_expire_after_30_minutes_while_the_server_runs() {
         "swept while running"
     );
     assert!(download(&fresh).exists(), "a fresh download stays");
+}
+
+/// Post-merge ruling 2: a text generator's API key counts on the keychain
+/// switch and goes into `keychain.json`, found through its row in the
+/// desktop root's generators database; with the switch off it stays out.
+#[tokio::test]
+async fn text_generator_keys_ride_the_keychain_switch() {
+    const KEY: &str = "0b9a7a43-3f0e-4c63-9a55-5a8f2a1c7d10";
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let before = host.overview().await.keychain_items;
+    std::fs::create_dir_all(&fixture.roots.desktop).unwrap();
+    let db = Connection::open(fixture.roots.desktop.join("text-generators.sqlite3")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE generators (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, \
+         record TEXT NOT NULL);",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO generators VALUES ('g1', 1, ?1)",
+        [serde_json::json!({"id": "g1", "key": KEY}).to_string()],
+    )
+    .unwrap();
+    drop(db);
+    fixture
+        .store
+        .write_item(GENERATORS_SERVICE, KEY, "generator secret")
+        .unwrap();
+    assert_eq!(host.overview().await.keychain_items, before + 1);
+
+    let file = created(&host, request(Output::Outgoing, BackupOptions::default())).await;
+    let entries = open_backup(&backup_path(&host, &file));
+    assert_eq!(manifest_of(&entries).keychain_items, before + 1);
+    assert!(keychain_values(&entries).contains(&(KEY.to_owned(), "generator secret".to_owned())));
+    assert!(entry(&entries, "desktop/text-generators.sqlite3").is_some());
+
+    let off = BackupOptions {
+        keychain: false,
+        ..BackupOptions::default()
+    };
+    let file = created(&host, request(Output::Outgoing, off)).await;
+    let entries = open_backup(&backup_path(&host, &file));
+    assert!(entry(&entries, "keychain.json").is_none());
+    assert!(!entries
+        .iter()
+        .any(|entry| entry.bytes.windows(16).any(|w| w == b"generator secret")));
 }
 
 #[tokio::test]

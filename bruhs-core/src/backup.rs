@@ -72,6 +72,11 @@ const APP: &str = "bruhs-ai";
 /// The folder inside each root that holds backups, staging and pre-restore
 /// sets. A backup never holds it.
 const BACKUPS: &str = "backups";
+/// The text generators' database, in the desktop root (`BaseDirs`' data
+/// folder's `bruhs-ai`, as main keeps it). Its rows name the generators'
+/// keychain items.
+#[cfg(unix)]
+const GENERATORS_DB: &str = "text-generators.sqlite3";
 
 /// The `BRUHS_*` path overrides that can move data out of the roots (D23,
 /// ruling F10 b), in the order the overview names them.
@@ -181,6 +186,21 @@ impl Roots {
                 text(&self.desktop)
             },
         }
+    }
+
+    /// Every keychain item today's catalogs name (D5): the core root's
+    /// `credentials` and `connections`, the config root's calendar state
+    /// and the desktop root's text generators.
+    #[cfg(unix)]
+    pub(crate) fn keychain_refs(
+        &self,
+    ) -> Result<Vec<crate::secrets::ItemRef>, crate::secrets::SecretError> {
+        crate::secrets::keychain_inventory(
+            &self.core.join("credentials"),
+            &self.core.join("connections"),
+            &self.config.join("calendar").join("google"),
+            &self.desktop.join(GENERATORS_DB),
+        )
     }
 
     /// The folder `root` is.

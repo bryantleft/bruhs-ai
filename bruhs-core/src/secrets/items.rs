@@ -32,24 +32,32 @@ pub const CONNECTIONS_SERVICE: &str = "bruhs-ai-connections";
 /// Google Calendar's tokens, under [`CALENDAR_ACCOUNT`] only.
 pub const CALENDAR_SERVICE: &str = "bruhs-ai";
 pub const CALENDAR_ACCOUNT: &str = "google-calendar";
+/// Text generators' API keys, one account per key id (a UUID the
+/// generator's row names). Never keyed by a path.
+pub const GENERATORS_SERVICE: &str = "bruhs-ai-text-generators";
 /// Keys of sealed sets: `staged:<id>` and `pre-restore:<stamp>`. Never
 /// part of a backup or a sealed set.
 pub const BACKUP_SERVICE: &str = "bruhs-ai-backup";
 /// Every service the item API reaches.
-pub const ITEM_SERVICES: [&str; 4] = [
+pub const ITEM_SERVICES: [&str; 5] = [
     SECRETS_SERVICE,
     CONNECTIONS_SERVICE,
     CALENDAR_SERVICE,
+    GENERATORS_SERVICE,
     BACKUP_SERVICE,
 ];
+/// How long reading the generators' database waits for a writer that holds
+/// its lock mid-commit.
+const GENERATORS_WAIT: Duration = Duration::from_secs(5);
 
 /// The longest account Bruhs writes is a vault account with a long bruh id.
 const MAX_ACCOUNT_BYTES: usize = 512;
 
 /// Refuse an item outside Bruhs' own services: an unknown service, a
 /// secrets account of neither known shape, a calendar account other than
-/// [`CALENDAR_ACCOUNT`], a provider Bruhs doesn't know, or a seal key that
-/// isn't `staged:<id>` or `pre-restore:<stamp>`.
+/// [`CALENDAR_ACCOUNT`], a provider Bruhs doesn't know, a generator
+/// account that isn't a UUID as Bruhs writes it, or a seal key that isn't
+/// `staged:<id>` or `pre-restore:<stamp>`.
 pub(super) fn check_item(service: &str, account: &str) -> Result<(), SecretError> {
     let allowed = !account.is_empty()
         && account.len() <= MAX_ACCOUNT_BYTES
@@ -60,6 +68,7 @@ pub(super) fn check_item(service: &str, account: &str) -> Result<(), SecretError
                 .iter()
                 .any(|provider| provider.id() == account),
             CALENDAR_SERVICE => account == CALENDAR_ACCOUNT,
+            GENERATORS_SERVICE => generator_account(account),
             BACKUP_SERVICE => seal_account(account),
             _ => false,
         };
@@ -122,6 +131,12 @@ fn secrets_account(account: &str) -> bool {
             || scope
                 .strip_prefix("bruh:")
                 .is_some_and(|agent| !agent.is_empty()))
+}
+
+/// A text generator's key id: a UUID in the lowercase hyphenated form
+/// `Uuid::to_string` writes.
+fn generator_account(account: &str) -> bool {
+    uuid::Uuid::parse_str(account).is_ok_and(|id| id.to_string() == account)
 }
 
 fn seal_account(account: &str) -> bool {
@@ -219,13 +234,17 @@ pub enum ItemsError {
 /// Every keychain item Bruhs' catalogs name (D5), sorted: `bruhs-ai-secrets`
 /// for each legacy id and each `vault.json` row with an item (a newer
 /// Bruhs' rows included), `bruhs-ai-connections` for each provider with a
-/// `connections/<id>.json`, and the calendar item only when `calendar`
-/// (the `calendar/google` state folder) holds something (ruling F11).
-/// Reads the catalogs without the lock. Never names a seal key.
+/// `connections/<id>.json`, the calendar item only when `calendar` (the
+/// `calendar/google` state folder) holds something (ruling F11), and
+/// `bruhs-ai-text-generators` for each key id a row of the `generators`
+/// database names (post-merge ruling 2). Reads the catalogs without the
+/// lock and never lists the keychain or reads a value. Never names a seal
+/// key.
 pub fn keychain_inventory(
     credentials: &Path,
     connections: &Path,
     calendar: &Path,
+    generators: &Path,
 ) -> Result<Vec<ItemRef>, SecretError> {
     let item = |service: &str, account: String| ItemRef {
         service: service.to_owned(),
@@ -250,6 +269,9 @@ pub fn keychain_inventory(
     if calendar_state(calendar)? {
         items.push(item(CALENDAR_SERVICE, CALENDAR_ACCOUNT.to_owned()));
     }
+    for account in generator_keys(generators)? {
+        items.push(item(GENERATORS_SERVICE, account));
+    }
     items.sort();
     items.dedup();
     Ok(items)
@@ -272,6 +294,57 @@ fn calendar_state(calendar: &Path) -> Result<bool, SecretError> {
         }
     }
     Ok(false)
+}
+
+/// The key ids the text generators' database names: each row's `key`
+/// (main's `Generator::key`), never a row that reads its key from a secret
+/// provider. A missing file, a link or folder in its place, or a database
+/// without the table names none; one that doesn't read, or a key that
+/// isn't a UUID, is a damaged catalog.
+fn generator_keys(database: &Path) -> Result<Vec<String>, SecretError> {
+    use rusqlite::{Connection, OpenFlags};
+    match fs::symlink_metadata(database) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => return Err(SecretError::Catalog),
+    }
+    let catalog = |_| SecretError::Catalog;
+    // Through SQLite, read only: a plain descriptor's close would drop
+    // this process's locks on the file (see `backup::collect`). The last
+    // name was checked above; a link higher up (macOS's `/var`) is fine.
+    let db = Connection::open_with_flags(
+        database,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(catalog)?;
+    db.busy_timeout(GENERATORS_WAIT).map_err(catalog)?;
+    let table: bool = db
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'generators')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(catalog)?;
+    if !table {
+        return Ok(Vec::new());
+    }
+    let mut query = db
+        .prepare(
+            "SELECT json_extract(record, '$.key') FROM generators \
+             WHERE json_extract(record, '$.key') IS NOT NULL",
+        )
+        .map_err(catalog)?;
+    let keys = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(catalog)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(catalog)?;
+    if keys.iter().all(|key| generator_account(key)) {
+        Ok(keys)
+    } else {
+        Err(SecretError::Catalog)
+    }
 }
 
 /// Read each item in its own blocking task, bounded by `wait`. A missing

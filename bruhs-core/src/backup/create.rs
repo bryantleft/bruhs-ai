@@ -42,7 +42,7 @@ use super::{
     free_bytes, inventory, open_source, snapshot_sqlite, BackupError, RootId, RootKey, Roots,
     SourceFile, FREE_MARGIN,
 };
-use crate::secrets::{keychain_inventory, read_items, ItemsError, KeychainItem};
+use crate::secrets::{read_items, ItemsError, KeychainItem};
 
 /// A backup to make. Holds the password: deliberately no `Debug` or
 /// `Clone`.
@@ -609,12 +609,9 @@ async fn read_keychain(
     config: &Config,
     roots: &Roots,
 ) -> Result<(Zeroizing<Vec<u8>>, u32, u32), BackupError> {
-    let refs = keychain_inventory(
-        &roots.core.join("credentials"),
-        &roots.core.join("connections"),
-        &roots.config.join("calendar").join("google"),
-    )
-    .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))?;
+    let refs = roots
+        .keychain_refs()
+        .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))?;
     let (items, missing) = read_items(&config.store, &refs, config.keychain_wait)
         .await
         .map_err(|error| {

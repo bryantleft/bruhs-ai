@@ -53,7 +53,8 @@ pub(super) fn get(id: Uuid) -> Result<Option<Generator>, String> {
 const LOCKED: &str =
     "Could not access the text generator API key. Unlock the system credential store and retry.";
 fn entry(id: Uuid) -> Result<keyring::Entry, String> {
-    keyring::Entry::new("bruhs-ai-text-generators", &id.to_string()).map_err(|_| LOCKED.into())
+    keyring::Entry::new(crate::secrets::GENERATORS_SERVICE, &id.to_string())
+        .map_err(|_| LOCKED.into())
 }
 pub(super) async fn read_key(id: Option<Uuid>) -> Result<Option<Zeroizing<String>>, String> {
     let Some(id) = id else { return Ok(None) };

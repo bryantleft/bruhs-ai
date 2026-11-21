@@ -55,7 +55,7 @@ use super::journal::{
     JOURNAL,
 };
 use super::open::staging_dir;
-use super::{BackupError, RootKey, Roots};
+use super::{BackupError, RootKey, Roots, GENERATORS_DB};
 use crate::secrets::{
     keychain_inventory, read_seal_key, seal_items, store_seal_key, unseal_items, ItemRef,
     KeychainItem, SecretError, SecretStore, BACKUP_SERVICE,
@@ -648,10 +648,14 @@ fn plan(
     // review B-I2): catalogs that don't read never get past the plan.
     let restored = if set.keychain {
         let source = source_dir(roots, &pending.source, RootKey::Core)?;
+        // The desktop root's folder of the source: the core root's on one
+        // root, where everything sits in one folder.
+        let desktop = source_dir(roots, &pending.source, RootKey::Desktop)?;
         match inventory_at(
             &source.join(CREDENTIALS),
             &source.join(CONNECTIONS),
             &source.join(CALENDAR),
+            &desktop.join(GENERATORS_DB),
         ) {
             // Catalogs naming more than a backup's keychain could hold
             // would make a journal too large to read back (final
@@ -1395,11 +1399,9 @@ fn open_items(
 /// Today's items, as today's catalogs name them (D5). A missing item is
 /// skipped. Blocks on the keychain.
 fn current_items(roots: &Roots, store: &SecretStore) -> Result<Vec<KeychainItem>, BackupError> {
-    let refs = inventory_at(
-        &roots.core.join(CREDENTIALS),
-        &roots.core.join(CONNECTIONS),
-        &roots.config.join(CALENDAR),
-    )?;
+    let refs = roots
+        .keychain_refs()
+        .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))?;
     let mut items = Vec::with_capacity(refs.len());
     for item in refs {
         match store.read_item(&item.service, &item.account) {
@@ -1415,14 +1417,16 @@ fn current_items(roots: &Roots, store: &SecretStore) -> Result<Vec<KeychainItem>
     Ok(items)
 }
 
-/// The items the catalogs in `credentials` and `connections`, and the
-/// calendar state under `calendar`, name.
+/// The items the catalogs in `credentials` and `connections`, the
+/// calendar state under `calendar` and the text generators' database
+/// `generators` name.
 fn inventory_at(
     credentials: &Path,
     connections: &Path,
     calendar: &Path,
+    generators: &Path,
 ) -> Result<Vec<ItemRef>, BackupError> {
-    keychain_inventory(credentials, connections, &calendar.join(GOOGLE))
+    keychain_inventory(credentials, connections, &calendar.join(GOOGLE), generators)
         .map_err(|_| BackupError::Keychain(KEYCHAIN_READ_FAILED))
 }
 

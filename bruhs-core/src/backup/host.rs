@@ -30,7 +30,7 @@ use super::create::{self, CancelFlag, CreateRequest};
 use super::{free_bytes, inventory, BackupError, RootKey, Roots, FREE_MARGIN};
 use crate::local_tools::LocalToolsHost;
 use crate::reactive::ReactiveRuntime;
-use crate::secrets::{keychain_inventory, SecretStore, VAULT_READ_WAIT};
+use crate::secrets::{SecretStore, VAULT_READ_WAIT};
 
 /// Folders inside `<core>/backups`.
 const OUTGOING: &str = "outgoing";
@@ -661,12 +661,7 @@ impl BackupHost {
                     browser_bytes: taken.browser_bytes,
                 })
                 .unwrap_or_default();
-            let items = keychain_inventory(
-                &roots.core.join("credentials"),
-                &roots.core.join("connections"),
-                &roots.config.join("calendar").join("google"),
-            )
-            .map_or(0, |items| items.len());
+            let items = roots.keychain_refs().map_or(0, |items| items.len());
             let restore = Restore {
                 pending: super::pending(&roots),
                 pre_restores: super::pre_restores(&roots),

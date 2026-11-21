@@ -60,6 +60,8 @@ struct Fixture {
     credentials: PathBuf,
     connections: PathBuf,
     calendar: PathBuf,
+    /// The text generators' database; not there unless a test makes it.
+    generators: PathBuf,
 }
 
 fn entry(digit: char, name: &str, scope: CredentialScope, kind: VaultKind) -> serde_json::Value {
@@ -176,6 +178,7 @@ fn fixture() -> Fixture {
     fs::write(connections.join("notes.json"), b"{}").unwrap();
     Fixture {
         calendar: root.path().join("calendar").join("google"),
+        generators: root.path().join("text-generators.sqlite3"),
         _root: root,
         credentials,
         connections,
@@ -205,6 +208,7 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
         &fixture.credentials,
         &fixture.connections,
         &fixture.calendar,
+        &fixture.generators,
     )
     .unwrap();
     assert_eq!(inventory, expected);
@@ -213,6 +217,7 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
         &fixture.credentials,
         &fixture.connections,
         &fixture.calendar,
+        &fixture.generators,
     )
     .unwrap();
     assert_eq!(
@@ -225,13 +230,20 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
         &fixture.credentials,
         &fixture.connections,
         &fixture.calendar,
+        &fixture.generators,
     )
     .unwrap();
     assert_eq!(inventory, expected, "a hidden entry is not calendar state");
     let file = fixture.calendar.join("calendars.json");
     fs::write(&file, b"[]").unwrap();
     assert_eq!(
-        keychain_inventory(&fixture.credentials, &fixture.connections, &file).unwrap(),
+        keychain_inventory(
+            &fixture.credentials,
+            &fixture.connections,
+            &file,
+            &fixture.generators
+        )
+        .unwrap(),
         expected,
         "a file in the folder's place holds no state"
     );
@@ -239,6 +251,7 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
         &fixture.credentials,
         &fixture.connections,
         &fixture.calendar,
+        &fixture.generators,
     )
     .unwrap();
     expected.push(item_ref(CALENDAR_SERVICE, CALENDAR_ACCOUNT));
@@ -253,14 +266,19 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
     let empty = tempfile::tempdir().unwrap();
     let nowhere = empty.path().join("missing");
     assert_eq!(
-        keychain_inventory(&nowhere, &nowhere, &nowhere).unwrap(),
+        keychain_inventory(&nowhere, &nowhere, &nowhere, &nowhere).unwrap(),
         Vec::new()
     );
     // A connections path that can't be read fails, never drops a token.
     let not_a_folder = empty.path().join("connections");
     fs::write(&not_a_folder, b"").unwrap();
     assert!(matches!(
-        keychain_inventory(&fixture.credentials, &not_a_folder, &fixture.calendar),
+        keychain_inventory(
+            &fixture.credentials,
+            &not_a_folder,
+            &fixture.calendar,
+            &fixture.generators
+        ),
         Err(SecretError::Catalog)
     ));
     fs::write(fixture.credentials.join("vault.json"), b"{").unwrap();
@@ -268,10 +286,135 @@ fn the_inventory_names_every_bruhs_item_and_nothing_else() {
         keychain_inventory(
             &fixture.credentials,
             &fixture.connections,
-            &fixture.calendar
+            &fixture.calendar,
+            &fixture.generators,
         ),
         Err(SecretError::Catalog)
     ));
+}
+
+/// Main's text generators' table, with one row per `(id, record)`.
+fn generators_db(path: &Path, records: &[serde_json::Value]) {
+    let db = rusqlite::Connection::open(path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS generators (id TEXT PRIMARY KEY, revision INTEGER NOT NULL, \
+         record TEXT NOT NULL); CREATE TABLE IF NOT EXISTS retired_keys (id TEXT PRIMARY KEY);",
+    )
+    .unwrap();
+    for record in records {
+        db.execute(
+            "INSERT INTO generators VALUES (?1, 1, ?2)",
+            rusqlite::params![record["id"].as_str().unwrap(), record.to_string()],
+        )
+        .unwrap();
+    }
+}
+
+fn generator(id: &str, key: Option<&str>, reference: bool) -> serde_json::Value {
+    let mut record = serde_json::json!({"id": id, "revision": 1, "preset": "openai",
+        "label": "Local", "url": "http://127.0.0.1:1", "enabled": true, "models": [],
+        "key": key});
+    if reference {
+        record["reference"] = serde_json::json!({"source": "s1", "reference": "op://v/i/f"});
+    }
+    record
+}
+
+const GENERATOR_KEY: &str = "0b9a7a43-3f0e-4c63-9a55-5a8f2a1c7d10";
+const RETIRED_KEY: &str = "7c1d2e3f-4a5b-4c6d-8e7f-901a2b3c4d5e";
+
+/// Post-merge ruling 2: each generator row's own key id is an item, read
+/// from the database, never from the keychain. A row that reads its key
+/// from a secret provider, or has none, names nothing; nor does a key
+/// queued for deletion.
+#[test]
+fn generator_keys_come_from_the_generators_database() {
+    let fixture = fixture();
+    let catalogs = |generators: &Path| {
+        keychain_inventory(
+            &fixture.credentials,
+            &fixture.connections,
+            &fixture.calendar,
+            generators,
+        )
+    };
+    let without = catalogs(&fixture.generators).unwrap();
+    assert!(!without
+        .iter()
+        .any(|item| item.service == GENERATORS_SERVICE));
+
+    generators_db(
+        &fixture.generators,
+        &[
+            generator(
+                "a1f0c1de-0000-4000-8000-000000000001",
+                Some(GENERATOR_KEY),
+                false,
+            ),
+            generator("a1f0c1de-0000-4000-8000-000000000002", None, false),
+            generator("a1f0c1de-0000-4000-8000-000000000003", None, true),
+        ],
+    );
+    rusqlite::Connection::open(&fixture.generators)
+        .unwrap()
+        .execute("INSERT INTO retired_keys VALUES (?1)", [RETIRED_KEY])
+        .unwrap();
+    let mut expected = without.clone();
+    expected.push(item_ref(GENERATORS_SERVICE, GENERATOR_KEY));
+    expected.sort();
+    assert_eq!(catalogs(&fixture.generators).unwrap(), expected);
+
+    // A database without the table names none.
+    let empty = tempfile::tempdir().unwrap();
+    let bare = empty.path().join("bare.sqlite3");
+    rusqlite::Connection::open(&bare)
+        .unwrap()
+        .execute_batch("CREATE TABLE other (x);")
+        .unwrap();
+    assert_eq!(catalogs(&bare).unwrap(), without);
+    // A link in its place is never followed: the walk leaves it out too.
+    let link = empty.path().join("link.sqlite3");
+    std::os::unix::fs::symlink(&fixture.generators, &link).unwrap();
+    assert_eq!(catalogs(&link).unwrap(), without);
+    // A file that isn't a database, or a key that isn't a UUID, is a
+    // damaged catalog, never a dropped key.
+    let junk = empty.path().join("junk.sqlite3");
+    fs::write(&junk, b"not a database, just some bytes in its place").unwrap();
+    assert!(matches!(catalogs(&junk), Err(SecretError::Catalog)));
+    let odd = empty.path().join("odd.sqlite3");
+    generators_db(
+        &odd,
+        &[generator(
+            "a1f0c1de-0000-4000-8000-000000000004",
+            Some("not-a-uuid"),
+            false,
+        )],
+    );
+    assert!(matches!(catalogs(&odd), Err(SecretError::Catalog)));
+}
+
+/// The generators' service takes its key ids only, as Bruhs writes them.
+#[test]
+fn generator_items_are_uuids() {
+    let store = SecretStore::in_memory();
+    store
+        .write_item(GENERATORS_SERVICE, GENERATOR_KEY, "v")
+        .unwrap();
+    for account in [
+        GENERATOR_KEY.to_uppercase(),
+        GENERATOR_KEY.replace('-', ""),
+        format!("{{{GENERATOR_KEY}}}"),
+        "github".to_owned(),
+    ] {
+        assert!(
+            matches!(
+                store.write_item(GENERATORS_SERVICE, &account, "v"),
+                Err(SecretError::Invalid(_))
+            ),
+            "{account}"
+        );
+    }
+    assert!(check_items(&[item(GENERATORS_SERVICE, GENERATOR_KEY, "v")]).is_ok());
 }
 
 #[tokio::test]
@@ -286,6 +429,7 @@ async fn the_inventory_reads_back_what_the_store_holds() {
         &fixture.credentials,
         &fixture.connections,
         &fixture.calendar,
+        &fixture.generators,
     )
     .unwrap();
     let values: Vec<String> = inventory.iter().map(|_| canary("value")).collect();

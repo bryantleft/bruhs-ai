@@ -42,14 +42,16 @@ const MAX_COMPONENT_BYTES: usize = 255;
 pub const MAX_ENTRY_DEPTH: usize = 64;
 
 /// Top-level entries of either root that never go in: machine-local state,
-/// caches and the backups themselves.
-pub const EXCLUDED_TOP: [&str; 9] = [
+/// caches, agents' working folders (`worktrees`, and `scratch`, main's
+/// projectless chats: post-merge ruling 1) and the backups themselves.
+pub const EXCLUDED_TOP: [&str; 10] = [
     "backups",
     "capture",
     "codex-lean-sessions",
     "codex-lean-sessions.lock",
     "logs",
     "models",
+    "scratch",
     "service",
     "updates",
     "worktrees",
@@ -679,6 +681,8 @@ mod tests {
             "core/Credentials/vault.json",
             "core/Backups",
             "core/codex-lean-sessions.lock",
+            "core/scratch/c1/notes.md",
+            "core/Scratch",
             "desktop/logs/x.log",
             "core/Server/reactive.sqlite3",
             "desktop/Delivery/journal.json",
@@ -897,7 +901,11 @@ mod tests {
         );
         assert_eq!(excluded("a-future-folder/x", false), Excluded::No);
         assert_eq!(excluded("worktrees", true), Excluded::Always);
-        assert_eq!(EXCLUDED_TOP.len(), 9);
+        // Post-merge ruling 1: main's projectless chat folders, like
+        // worktrees.
+        assert_eq!(excluded("scratch", true), Excluded::Always);
+        assert_eq!(excluded("scratch/c1/Cargo.toml", false), Excluded::Always);
+        assert_eq!(EXCLUDED_TOP.len(), 10);
         assert!(!rewritable("audio/m1.jsonl"));
         assert!(!rewritable("knowledge-attachments/k.json"));
         assert!(!rewritable("server/bruhs/a1/browser/Default/Preferences"));
