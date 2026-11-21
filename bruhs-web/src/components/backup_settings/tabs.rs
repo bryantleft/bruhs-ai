@@ -5,10 +5,11 @@
 //! `bruhs-backup` BroadcastChannel. Each tab that hears it leaves: its
 //! navigation guard stops asking, its IndexedDB connection closes and no
 //! new operation opens one, then it answers `gone` and reloads. The
-//! restoring tab writes once the answers stop (at most a second). A tab
-//! that starts while the lock is held waits for it before it mounts, so it
-//! reads the restored data, and a second `reload` after the write catches
-//! one that slipped past. Without Web Locks the handshake still runs.
+//! restoring tab writes once the answers stop, after at least one second
+//! and at most two. A tab that starts while the lock is held waits for it
+//! before it mounts, so it reads the restored data, and a second `reload`
+//! after the write catches one that slipped past. Without Web Locks the
+//! handshake still runs.
 //!
 //! No tab holds a lock while it simply runs: a held Web Lock keeps a page
 //! out of the back and forward cache. A frozen background tab answers only

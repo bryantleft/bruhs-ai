@@ -28,6 +28,7 @@ use bruhs_models::backup::{
     KEYCHAIN_SET_UNREADABLE, LOCKING_WEB, MAKE_BACKUP, MAKE_GROUP, NOTHING_TO_PUT_BACK, PASSWORD,
     PASSWORD_AGAIN, PASSWORD_HINT, PUT_BACK, UNSUPPORTED_PLATFORM, WEB_INCLUDED,
 };
+use bruhs_models::crew::ServiceNotice;
 use leptos::{html, prelude::*};
 use wasm_bindgen::JsCast;
 use zeroize::{Zeroize, Zeroizing};
@@ -55,11 +56,13 @@ const JOB_POLL_MS: u32 = 500;
 /// derivation holds the thread (D7).
 const PAINT_MS: u32 = 16;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 enum Load {
     Loading,
     Ready,
     Failed(String),
+    /// An older server: no `/api/backup` (the desktop's notice).
+    ServingOld,
 }
 
 /// What the two Make a backup fields say, without either password: the
@@ -168,6 +171,9 @@ struct Page {
     notes: RwSignal<BTreeMap<String, KeptNote>>,
     /// Aborted when Settings closes, which drops every call and poll.
     abort: StoredValue<Option<web_sys::AbortController>, LocalStorage>,
+    /// The section, which holds focus when the control that had it goes
+    /// (the desktop's page focus).
+    section: NodeRef<html::Div>,
 }
 
 impl Page {
@@ -187,6 +193,7 @@ impl Page {
             asking: RwSignal::new(None),
             notes: RwSignal::new(BTreeMap::new()),
             abort: StoredValue::new_local(None),
+            section: NodeRef::new(),
         }
     }
 
@@ -207,8 +214,11 @@ impl Page {
             match api::overview(&signal).await {
                 Ok(overview) => self.loaded(overview),
                 Err(ApiError::Aborted) => {}
+                Err(error) if error.is_status(404) => {
+                    self.load.try_set(Load::ServingOld);
+                }
                 Err(error) => {
-                    self.load.try_set(Load::Failed(error.to_string()));
+                    self.load.try_set(Load::Failed(message(error)));
                 }
             }
         });
@@ -414,6 +424,8 @@ impl Page {
                         notes.remove(&stamp);
                     });
                     self.busy.try_set(false);
+                    // The row goes with its confirm: the section keeps focus.
+                    focus_in_page(self.section);
                     self.refresh();
                 }
                 Err(error) => {
@@ -431,19 +443,26 @@ impl Page {
         restore::apply(
             self,
             RestoreSource::PreRestore { stamp },
-            move |error: ApiError| {
-                let refused = |copy: &str| matches!(&error, ApiError::Http { detail: Some(detail), .. } if detail == copy);
-                let nothing = refused(NOTHING_TO_PUT_BACK);
-                let unreadable = refused(KEYCHAIN_SET_UNREADABLE);
-                self.asking.try_set(None);
-                self.note(&key, |note| {
-                    note.nothing_to_put_back |= nothing;
-                    note.unreadable |= unreadable;
-                    note.error = Some(message(error));
-                });
-                refocus();
-            },
+            move |error: ApiError| self.put_back_refused(&key, error, refocus),
         );
+    }
+
+    /// A Put back the server refused. One cut short because Settings
+    /// closed says nothing: the page is gone (final review D-I1).
+    fn put_back_refused(self, stamp: &str, error: ApiError, refocus: impl Fn()) {
+        if error == ApiError::Aborted {
+            return;
+        }
+        let refused = |copy: &str| matches!(&error, ApiError::Http { detail: Some(detail), .. } if detail == copy);
+        let nothing = refused(NOTHING_TO_PUT_BACK);
+        let unreadable = refused(KEYCHAIN_SET_UNREADABLE);
+        self.asking.try_set(None);
+        self.note(stamp, |note| {
+            note.nothing_to_put_back |= nothing;
+            note.unreadable |= unreadable;
+            note.error = Some(message(error));
+        });
+        refocus();
     }
 
     fn clear_fields(self) {
@@ -453,9 +472,46 @@ impl Page {
     }
 }
 
-/// The server's copy for a failed call, as it answered.
+/// What a failed call says, worded as on the desktop.
 fn message(error: ApiError) -> String {
-    error.to_string()
+    api::backup_message(&error)
+}
+
+/// Focuses `target` once it is drawn, when focus is on this section or
+/// nowhere: the control that held it went with the view it was in, or was
+/// disabled while it worked (final review D-I2). Focus the owner moved
+/// elsewhere stays there.
+fn focus_in_page<E>(target: NodeRef<E>)
+where
+    E: leptos::tachys::html::element::ElementType,
+    E::Output: JsCast + Clone + 'static,
+{
+    // A native test build has no page to focus.
+    if cfg!(not(target_arch = "wasm32")) {
+        return;
+    }
+    request_animation_frame(move || {
+        let Some(Some(element)) = target.try_get_untracked() else {
+            return;
+        };
+        let Ok(element) = element.dyn_into::<web_sys::HtmlElement>() else {
+            return;
+        };
+        let free = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_none_or(|active| {
+                active.tag_name() == "BODY"
+                    || active
+                        .closest("[data-backup-settings]")
+                        .ok()
+                        .flatten()
+                        .is_some()
+            });
+        if free {
+            let _ = element.focus();
+        }
+    });
 }
 
 /// The full download URL of a finished web backup, from its
@@ -548,14 +604,28 @@ pub fn BackupSettings() -> impl IntoView {
     page_view(page)
 }
 
+/// What the section draws. A refresh sets the same state again; the memo
+/// keeps that from drawing the groups again, so focus and typed passwords
+/// stay. The parts that follow the overview update themselves.
+fn shown(page: Page) -> Memo<(Load, bool)> {
+    Memo::new(move |_| {
+        (
+            page.load.get(),
+            page.overview.with(|overview| overview.supported),
+        )
+    })
+}
+
 fn page_view(page: Page) -> AnyView {
+    let shown = shown(page);
     view! {
-        <div data-backup-settings="" class="divide-y divide-longan-800/70 text-body-sm text-rambutan-200">
-            {move || match page.load.get() {
-                Load::Loading => view! { <p role="status" class="px-4 py-3 text-label-sm text-rambutan-400">{BACKUP_LOADING}</p> }.into_any(),
-                Load::Failed(message) => view! { <p role="alert" class="px-4 py-3 text-label-sm text-lychee-300">{message}</p> }.into_any(),
-                Load::Ready if !page.overview.with_untracked(|overview| overview.supported) => view! { <p role="status" class="px-4 py-3 text-label-sm text-durian-300">{UNSUPPORTED_PLATFORM}</p> }.into_any(),
-                Load::Ready => ready_view(page),
+        <div node_ref=page.section data-backup-settings="" tabindex="-1" class="divide-y divide-longan-800/70 text-body-sm text-rambutan-200 focus:outline-none">
+            {move || match shown.get() {
+                (Load::Loading, _) => view! { <p role="status" class="px-4 py-3 text-label-sm text-rambutan-400">{BACKUP_LOADING}</p> }.into_any(),
+                (Load::Failed(message), _) => view! { <p role="alert" class="px-4 py-3 text-label-sm text-lychee-300">{message}</p> }.into_any(),
+                (Load::ServingOld, _) => view! { <p role="status" class="px-4 py-3 text-label-sm text-durian-300">{ServiceNotice::ServingOld.message()}</p> }.into_any(),
+                (Load::Ready, false) => view! { <p role="status" class="px-4 py-3 text-label-sm text-durian-300">{UNSUPPORTED_PLATFORM}</p> }.into_any(),
+                (Load::Ready, true) => ready_view(page),
             }}
         </div>
     }
@@ -563,19 +633,24 @@ fn page_view(page: Page) -> AnyView {
 }
 
 fn ready_view(page: Page) -> AnyView {
-    let last = page
-        .overview
-        .with_untracked(|overview| overview.last.as_ref().map(last_backup_line));
-    let outside = page
-        .overview
-        .with_untracked(|overview| outside_roots_line(&overview.outside_roots));
+    let lines = Memo::new(move |_| {
+        page.overview.with(|overview| {
+            (
+                overview.last.as_ref().map(last_backup_line),
+                outside_roots_line(&overview.outside_roots),
+            )
+        })
+    });
     view! {
-        {(last.is_some() || outside.is_some()).then(|| view! {
-            <div class="px-4 py-2.5">
-                {last.map(|line| view! { <p data-backup-last="" class="text-label-sm text-rambutan-400">{line}</p> })}
-                {outside.map(|line| view! { <p data-backup-outside="" class=WARN>{line}</p> })}
-            </div>
-        })}
+        {move || {
+            let (last, outside) = lines.get();
+            (last.is_some() || outside.is_some()).then(|| view! {
+                <div class="px-4 py-2.5">
+                    {last.map(|line| view! { <p data-backup-last="" class="text-label-sm text-rambutan-400">{line}</p> })}
+                    {outside.map(|line| view! { <p data-backup-outside="" class=WARN>{line}</p> })}
+                </div>
+            })
+        }}
         {restore::browser_card(page)}
         {make_group(page)}
         {restore::restore_group(page)}
@@ -604,23 +679,31 @@ fn option_is_on(mut options: BackupOptions, kind: OptionKind) -> bool {
     *option_on(&mut options, kind)
 }
 
+/// One switch. Its row is drawn again only when its label's amount
+/// changes, not on every refresh.
 fn option_row(page: Page, kind: OptionKind, hint: Option<&'static str>) -> AnyView {
-    let label = page
-        .overview
-        .with_untracked(|overview| option_label(kind, option_amount(overview, kind)));
+    let label = Memo::new(move |_| {
+        page.overview
+            .with(|overview| option_label(kind, option_amount(overview, kind)))
+    });
     let checked = Signal::derive(move || option_is_on(page.options.get(), kind));
     let on_change = Callback::new(move |on: bool| {
         page.options
             .update(|options| *option_on(options, kind) = on);
     });
     view! {
-        <div data-backup-option="" class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-                <p class="text-label text-rambutan-200">{label.clone()}</p>
-                {hint.map(|hint| view! { <p class=HINT>{hint}</p> })}
-            </div>
-            <Switch checked=checked on_change=on_change disabled=page.busy label=label />
-        </div>
+        {move || {
+            let label = label.get();
+            view! {
+                <div data-backup-option="" class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-label text-rambutan-200">{label.clone()}</p>
+                        {hint.map(|hint| view! { <p class=HINT>{hint}</p> })}
+                    </div>
+                    <Switch checked=checked on_change=on_change disabled=page.busy label=label />
+                </div>
+            }
+        }}
     }
     .into_any()
 }
@@ -742,6 +825,11 @@ fn kept_group(page: Page) -> AnyView {
     .into_any()
 }
 
+/// Whether a refusal left a kept set only Delete, while its row is there.
+fn only_delete(note: Signal<KeptNote>) -> Option<bool> {
+    note.try_with_untracked(|note| note.nothing_to_put_back || note.unreadable)
+}
+
 fn kept_row(page: Page, info: PreRestoreInfo) -> AnyView {
     let stamp = StoredValue::new(info.stamp.clone());
     let line = pre_restore_line(&info);
@@ -780,7 +868,10 @@ fn kept_row(page: Page, info: PreRestoreInfo) -> AnyView {
     // After a refused Put back: Put back again, or Delete when the refusal
     // took Put back away.
     let refocus = move || {
-        let only_delete = note.with_untracked(|note| note.nothing_to_put_back || note.unreadable);
+        // The row may be gone by now (D-I1).
+        let Some(only_delete) = only_delete(note) else {
+            return;
+        };
         focus_after_render(if only_delete {
             delete_ref
         } else {
@@ -1186,6 +1277,102 @@ mod tests {
             for field in password_tags(&restore) {
                 assert!(!field.contains("aria-describedby"), "{field}");
             }
+        });
+    }
+
+    #[test]
+    fn a_put_back_cut_short_by_closing_settings_says_nothing() {
+        let owner = Owner::new();
+        let (page, note) = owner.with(|| {
+            let page = loaded_page();
+            let note = Signal::derive(move || {
+                page.notes
+                    .with(|notes| notes.get(STAMP).cloned().unwrap_or_default())
+            });
+            (page, note)
+        });
+        assert_eq!(owner.with(|| only_delete(note)), Some(false));
+        owner.cleanup();
+        assert!(page.notes.is_disposed(), "the page's signals are gone");
+        // The row is gone: no target, no panic (a wasm trap).
+        assert_eq!(only_delete(note), None);
+        let refocused = std::cell::Cell::new(false);
+        page.put_back_refused(STAMP, ApiError::Aborted, || refocused.set(true));
+        assert!(!refocused.get(), "an abort says and focuses nothing");
+        page.put_back_refused(
+            STAMP,
+            ApiError::Http {
+                status: 409,
+                detail: Some(NOTHING_TO_PUT_BACK.into()),
+            },
+            || {},
+        );
+    }
+
+    #[test]
+    fn a_refused_put_back_notes_why_on_its_row() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.asking.set(Some((STAMP.into(), Ask::PutBack)));
+            let refocused = std::cell::Cell::new(false);
+            page.put_back_refused(
+                STAMP,
+                ApiError::Http {
+                    status: 409,
+                    detail: Some(NOTHING_TO_PUT_BACK.into()),
+                },
+                || refocused.set(true),
+            );
+            assert!(refocused.get());
+            assert_eq!(page.asking.get_untracked(), None);
+            let note = page.notes.with_untracked(|notes| notes[STAMP].clone());
+            assert!(note.nothing_to_put_back && !note.unreadable);
+            assert_eq!(note.error.as_deref(), Some(NOTHING_TO_PUT_BACK));
+        });
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_groups_it_drew() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        Owner::new().with(|| {
+            let page = loaded_page();
+            let shown = shown(page);
+            let builds = Arc::new(AtomicUsize::new(0));
+            let count = Arc::clone(&builds);
+            let drawn = Memo::new(move |_| {
+                count.fetch_add(1, Ordering::Relaxed);
+                shown.get()
+            });
+            assert_eq!(drawn.get_untracked(), (Load::Ready, true));
+            // What a refresh after a Delete does: the same state again, with
+            // one kept set fewer.
+            page.overview
+                .update(|overview| overview.pre_restores.clear());
+            page.load.set(Load::Ready);
+            assert_eq!(drawn.get_untracked(), (Load::Ready, true));
+            assert_eq!(builds.load(Ordering::Relaxed), 1, "not drawn again");
+            // The lines under the title still follow the overview.
+            page.overview.update(|overview| {
+                overview.outside_roots = vec!["/srv/reactive.sqlite3".into()];
+            });
+            let html = render(|| page_view(page));
+            assert!(html.contains("/srv/reactive.sqlite3"), "{html}");
+            assert!(!html.contains("data-backup-kept"), "{html}");
+        });
+    }
+
+    #[test]
+    fn an_older_server_reads_as_on_the_desktop() {
+        Owner::new().with(|| {
+            let page = Page::new();
+            page.load.set(Load::ServingOld);
+            let html = render(|| page_view(page));
+            assert!(
+                html.contains(&escaped(ServiceNotice::ServingOld.message())),
+                "{html}"
+            );
+            assert!(!html.contains("role=\"alert\""), "{html}");
         });
     }
 

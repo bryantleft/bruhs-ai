@@ -6,9 +6,10 @@
 //! password is built in a `Zeroizing` buffer and never logged.
 
 use bruhs_models::backup::{
-    valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview, CreateBackup,
-    OpenBackup, RestoreStatus, UploadId, GONE, WEB_UPLOAD_MAX,
+    server_answered, valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview,
+    CreateBackup, OpenBackup, RestoreStatus, UploadId, ALL_COPY, GONE, WEB_UPLOAD_MAX,
 };
+use bruhs_models::vault::VAULT_UNREACHABLE;
 use gloo_net::http::{Method, Request, RequestBuilder, Response};
 use serde::Serialize;
 use std::io::{self, Write};
@@ -29,6 +30,26 @@ const WEB_PART_PATH: &str = "/api/backup/restore/web-part";
 const PREVIOUS_WEB_PART_PATH: &str = "/api/backup/restore/web-part/previous";
 const HEALTH_PATH: &str = "/api/health";
 const RAW_BYTES: &str = "application/octet-stream";
+
+/// What the Backup page shows for a failed call, by the desktop's rule
+/// (`ServerError::backup_message`): no answer is [`VAULT_UNREACHABLE`],
+/// and the server's sentence shows for a 4xx or 503, or a 500 whose
+/// sentence is the backup's own copy; anything else is the generic
+/// [`server_answered`].
+pub fn backup_message(error: &ApiError) -> String {
+    match error {
+        ApiError::Network(_) | ApiError::Timeout { .. } => VAULT_UNREACHABLE.to_owned(),
+        ApiError::Http {
+            status,
+            detail: Some(detail),
+        } if !detail_shown(*status, detail) => server_answered(*status),
+        other => other.to_string(),
+    }
+}
+
+fn detail_shown(status: u16, detail: &str) -> bool {
+    (400..500).contains(&status) || status == 503 || (status == 500 && ALL_COPY.contains(&detail))
+}
 
 fn id_path(prefix: &str, id: &str) -> Option<String> {
     valid_id(id).then(|| format!("{prefix}/{id}"))
@@ -267,6 +288,40 @@ mod tests {
     use bruhs_models::backup::OpenSource;
 
     const ID: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn failures_read_as_on_the_desktop() {
+        use bruhs_models::backup::{BACKUP_BUSY, DAMAGED, UNREADABLE_REPLY};
+        let http = |status, detail: Option<&str>| ApiError::Http {
+            status,
+            detail: detail.map(str::to_owned),
+        };
+        assert_eq!(
+            backup_message(&ApiError::Network("TypeError: Failed to fetch".into())),
+            VAULT_UNREACHABLE
+        );
+        assert_eq!(
+            backup_message(&ApiError::Timeout { after_ms: 30_000 }),
+            VAULT_UNREACHABLE
+        );
+        assert_eq!(backup_message(&http(409, Some(BACKUP_BUSY))), BACKUP_BUSY);
+        assert_eq!(backup_message(&http(503, Some("Busy."))), "Busy.");
+        assert_eq!(backup_message(&http(500, Some(DAMAGED))), DAMAGED);
+        // A 500's own text, or any other status's, isn't copy.
+        assert_eq!(
+            backup_message(&http(500, Some("thread panicked at src/x.rs"))),
+            server_answered(500)
+        );
+        assert_eq!(
+            backup_message(&http(502, Some("Bad gateway"))),
+            server_answered(502)
+        );
+        assert_eq!(backup_message(&http(404, None)), server_answered(404));
+        assert_eq!(
+            backup_message(&ApiError::Decode("x".into())),
+            UNREADABLE_REPLY
+        );
+    }
 
     #[test]
     fn paths_are_api_shaped() {
