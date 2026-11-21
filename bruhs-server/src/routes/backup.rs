@@ -31,7 +31,7 @@ use axum::{
         Path, Request, State,
     },
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse as _, Response},
     routing::{get, post},
     Extension, Json, Router,
 };
@@ -42,7 +42,7 @@ use bruhs_core::secrets::SecretStore;
 use bruhs_models::backup::{
     valid_id, BackupJob, BackupOverview, CreateBackup, UploadId, BACKUP_BUSY, DESTINATION_EXISTS,
     GONE, INVALID_REQUEST, OWNER_ONLY_BACKUP, RECORDING_FIRST, RESTORE_PENDING, SOURCE_MISSING,
-    UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    UNSUPPORTED_PLATFORM, WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::StreamExt as _;
 use tokio::io::AsyncReadExt as _;
@@ -61,6 +61,10 @@ pub const MAX_BODY_BYTES: usize = 64 << 10;
 const FALLBACK_NAME: &str = "bruhs-backup.bruhsbak";
 /// A web part is written to disk in pieces of about this many bytes.
 const WRITE_BYTES: usize = 1 << 20;
+/// A download is read from disk in pieces of this many bytes.
+const READ_BYTES: usize = 256 << 10;
+/// The one content type a web part arrives as (D20).
+const WEB_PART_CONTENT_TYPE: &str = "application/octet-stream";
 
 // Split so clippy's allow-unwrap-in-tests sees `cfg(test)`.
 #[cfg(test)]
@@ -94,17 +98,24 @@ pub async fn start(
         .with_computers(tools)
         .with_reactive(reactive)
         .with_app_version(app_version().to_owned());
-    sweep_at_start(host).await
+    Ok(sweep_at_start(host, BackupHost::sweep).await)
 }
 
-/// Runs the host's sweep off the async runtime (it may wait on the
-/// keychain) and answers the host once it is done.
-async fn sweep_at_start(host: BackupHost) -> io::Result<BackupHost> {
+/// Runs `sweep` off the async runtime (it may wait on the keychain) and
+/// answers the host once it is done. A sweep that panics is logged and
+/// the server serves anyway: the next start sweeps again.
+async fn sweep_at_start(
+    host: BackupHost,
+    sweep: impl FnOnce(&BackupHost) + Send + 'static,
+) -> BackupHost {
     let sweeper = host.clone();
-    tokio::task::spawn_blocking(move || sweeper.sweep())
+    if tokio::task::spawn_blocking(move || sweep(&sweeper))
         .await
-        .map_err(io::Error::other)?;
-    Ok(host)
+        .is_err()
+    {
+        tracing::error!("The backup sweep stopped early; it runs again at the next start");
+    }
+    host
 }
 
 /// The release this server reports at `/api/health`: its release
@@ -181,7 +192,8 @@ pub async fn overview(
     Ok(Json(host(backup)?.overview().await))
 }
 
-/// `POST /api/backup/web-parts`: the browser's encrypted part. Refused
+/// `POST /api/backup/web-parts`: the browser's encrypted part, sent as
+/// `application/octet-stream` (else 415 with [`WEB_PART_TYPE`]). Refused
 /// when it doesn't start with a web part's header (`NOT_A_BACKUP`) and
 /// when it is, or says it is, over `WEB_UPLOAD_MAX` (`WEB_TOO_LARGE`); a
 /// refused or cut-off upload leaves nothing behind.
@@ -189,9 +201,23 @@ pub async fn upload_web_part(
     State(config): State<Arc<Config>>,
     backup: Option<Extension<BackupHost>>,
     request: Request,
-) -> Result<Json<UploadId>, AppError> {
+) -> Result<Response, AppError> {
     owner_only_backup(&config.access, request.headers())?;
     let backup = host(backup)?;
+    let raw_bytes = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(WEB_PART_CONTENT_TYPE));
+    if !raw_bytes {
+        // `AppError` has no 415 (ruling F26): the same body, by hand.
+        return Ok((
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Json(serde_json::json!({ "error": WEB_PART_TYPE })),
+        )
+            .into_response());
+    }
     let declared = request
         .headers()
         .get(header::CONTENT_LENGTH)
@@ -219,7 +245,7 @@ pub async fn upload_web_part(
         }
     }
     let id = blocking(move || upload.finish()).await?;
-    Ok(Json(UploadId { id }))
+    Ok(Json(UploadId { id }).into_response())
 }
 
 /// Runs a host step that touches the disk off the async runtime.
@@ -345,7 +371,8 @@ pub async fn download(
 
     let stream = async_stream::stream! {
         let mut sent = Sent { backup, id, bytes, sent: 0 };
-        let mut chunks = ReaderStream::new(tokio::fs::File::from_std(file).take(bytes));
+        let mut chunks =
+            ReaderStream::with_capacity(tokio::fs::File::from_std(file).take(bytes), READ_BYTES);
         while let Some(chunk) = chunks.next().await {
             match chunk {
                 Ok(chunk) => {

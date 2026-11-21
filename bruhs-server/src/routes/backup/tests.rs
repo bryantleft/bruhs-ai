@@ -6,7 +6,8 @@
 use std::ffi::OsString;
 use std::io::{Cursor, Read as _};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use axum::http::StatusCode;
@@ -18,32 +19,52 @@ use bruhs_core::AppState;
 use bruhs_models::backup::{
     normalize_password, valid_id, BackupJob, BackupOverview, JobState, UploadId,
     DESTINATION_INSIDE, GONE, INVALID_REQUEST, NOT_A_BACKUP, OWNER_ONLY_BACKUP, PASSWORD_SHORT,
-    WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use reqwest::Method;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tracing_subscriber::layer::{Layer as _, SubscriberExt as _};
 
 use crate::routes::apps::tests::Logs;
 
-/// Everything the process logs from the first call on, from every thread.
-/// A thread-local capture misses the server's events when another test
-/// thread registers their callsites first.
-fn process_logs() -> &'static Logs {
-    static LOGS: std::sync::OnceLock<Logs> = std::sync::OnceLock::new();
-    LOGS.get_or_init(|| {
+/// Whether the process-wide capture records now.
+static CAPTURING: AtomicBool = AtomicBool::new(false);
+
+/// What the process logs, from every thread and at every level, while the
+/// returned guard lives. A thread-local capture misses the server's events
+/// when another test thread registers their callsites first, so this one
+/// is global; outside the guard it records nothing.
+fn capture_process_logs() -> (&'static Logs, Capturing) {
+    static LOGS: OnceLock<Logs> = OnceLock::new();
+    let logs = LOGS.get_or_init(|| {
         let logs = Logs::default();
         let writer = logs.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
+        let layer = tracing_subscriber::fmt::layer()
             .with_ansi(false)
             .with_writer(move || writer.clone())
-            .finish();
-        tracing::subscriber::set_global_default(subscriber)
+            .with_filter(tracing_subscriber::filter::filter_fn(|_| {
+                CAPTURING.load(Ordering::SeqCst)
+            }));
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
             .expect("no other test sets a global subscriber");
-        Logs::refresh();
         logs
-    })
+    });
+    assert!(
+        !CAPTURING.swap(true, Ordering::SeqCst),
+        "one capture at a time"
+    );
+    Logs::refresh();
+    (logs, Capturing)
+}
+
+/// Stops the process-wide capture when dropped.
+struct Capturing;
+
+impl Drop for Capturing {
+    fn drop(&mut self) {
+        CAPTURING.store(false, Ordering::SeqCst);
+    }
 }
 
 /// A loopback page the shared guard lets through but that isn't the app.
@@ -363,7 +384,7 @@ async fn a_download_cut_short_stays_for_another_try() {
 
 #[tokio::test]
 async fn bodies_never_echo() {
-    let logs = process_logs();
+    let (logs, _capturing) = capture_process_logs();
     let fixture = Fixture::new().await;
     let secret = canary();
 
@@ -431,6 +452,36 @@ async fn bodies_never_echo() {
         logs.text().contains(&marker),
         "the capture missed the requests"
     );
+
+    // A backup made with the canary as its password: nothing it answers
+    // holds it.
+    let mut answers = Vec::new();
+    let (status, text) = fixture
+        .create(&json!({ "password": secret, "app": "web" }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let job: BackupJob = serde_json::from_str(&text).unwrap();
+    answers.push(text);
+    loop {
+        let (status, text) =
+            Fixture::send(fixture.request("GET", &format!("/api/backup/jobs/{}", job.id))).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        let state: BackupJob = serde_json::from_str(&text).unwrap();
+        answers.push(text);
+        if !matches!(state.state, JobState::Running { .. }) {
+            assert!(matches!(state.state, JobState::Created { .. }), "{state:?}");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    answers.push(Fixture::send(fixture.request("GET", "/api/backup")).await.1);
+    for answer in &answers {
+        assert!(
+            !answer.contains(&secret),
+            "an answer holds the password: {answer}"
+        );
+    }
+
     assert!(
         !logs.text().contains(&secret),
         "the log holds the password: {}",
@@ -553,6 +604,23 @@ async fn web_parts_are_checked_and_capped() {
         "refused parts leave nothing behind"
     );
 
+    // Only raw bytes are taken.
+    for kind in [Some("text/plain"), Some("application/json"), None] {
+        let mut request = fixture
+            .request("POST", "/api/backup/web-parts")
+            .body(container(Kind::WebPart, b"{}"));
+        if let Some(kind) = kind {
+            request = request.header("content-type", kind);
+        }
+        let (status, text) = Fixture::send(request).await;
+        assert_eq!(
+            (status, text),
+            (StatusCode::UNSUPPORTED_MEDIA_TYPE, error(WEB_PART_TYPE)),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(std::fs::read_dir(&incoming).unwrap().count(), 0);
+
     let id = fixture.upload(container(Kind::WebPart, b"{}")).await;
     assert!(fixture.host.uploaded(UploadKind::WebPart, &id).is_some());
 
@@ -613,10 +681,37 @@ async fn start_sweeps_before_it_answers() {
         desktop: directory.path().join("desktop"),
         config: directory.path().join("core"),
     };
-    let host = super::sweep_at_start(BackupHost::new(roots, SecretStore::in_memory()))
-        .await
-        .unwrap();
+    let host = BackupHost::new(roots, SecretStore::in_memory());
+    let host = super::sweep_at_start(host, BackupHost::sweep).await;
     assert!(!tmp.join("left.sqlite3").exists());
-    assert!(host.job("").is_none());
-    drop(directory);
+
+    // A sweep that panics doesn't stop the server's start.
+    write(&tmp.join("again.sqlite3"), b"snapshot");
+    let host = super::sweep_at_start(host, |_| panic!("the sweep broke")).await;
+    assert!(tmp.join("again.sqlite3").exists());
+    assert_eq!(host.roots().core, directory.path().join("core"));
+}
+
+#[tokio::test]
+async fn a_streamed_web_part_is_capped() {
+    let fixture = Fixture::new().await;
+    // One write past the cap, with no declared length.
+    let mut part = container(Kind::WebPart, b"{}");
+    part.resize(usize::try_from(WEB_UPLOAD_MAX + 1).unwrap(), 0);
+    let body = reqwest::Body::wrap_stream(futures_util::stream::once(async move {
+        Ok::<_, std::io::Error>(part)
+    }));
+    let (status, text) = Fixture::send(
+        fixture
+            .request("POST", "/api/backup/web-parts")
+            .header("content-type", "application/octet-stream")
+            .body(body),
+    )
+    .await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::BAD_REQUEST, error(WEB_TOO_LARGE))
+    );
+    let incoming = fixture.roots.core.join("backups/incoming");
+    assert_eq!(std::fs::read_dir(&incoming).unwrap().count(), 0);
 }

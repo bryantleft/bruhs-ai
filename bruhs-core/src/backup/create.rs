@@ -34,8 +34,8 @@ use tokio::sync::watch;
 use zeroize::Zeroizing;
 
 use super::host::{
-    marker_text, new_private_file, random_bytes, random_id, web_part_header, BackupHost, Config,
-    Limits, PARTIAL_MARKER,
+    download_url, marker_text, new_private_file, random_bytes, random_id, web_part_header,
+    BackupHost, Config, Limits, PARTIAL_MARKER,
 };
 use super::{
     free_bytes, inventory, open_source, snapshot_sqlite, BackupError, RootId, RootKey, Roots,
@@ -413,11 +413,7 @@ pub(crate) async fn create(
         tracing::warn!("Bruhs couldn't record the last backup");
     }
     let (name, path, download) = match download {
-        Some(id) => (
-            backup_file_name(made_at),
-            None,
-            Some(format!("/api/backup/files/{id}")),
-        ),
+        Some(id) => (backup_file_name(made_at), None, Some(download_url(&id))),
         None => (
             target
                 .file_name()

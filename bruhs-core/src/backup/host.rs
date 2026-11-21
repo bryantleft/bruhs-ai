@@ -426,7 +426,7 @@ impl BackupHost {
     /// The name a finished download goes by: the file name its job
     /// answered, while that job is still the last one.
     pub fn download_name(&self, id: &str) -> Option<String> {
-        let url = format!("/api/backup/files/{id}");
+        let url = download_url(id);
         let state = self.lock_job().as_ref()?.state.borrow().clone();
         match state {
             JobState::Created { file } if file.download.as_deref() == Some(url.as_str()) => {
@@ -744,6 +744,11 @@ pub(super) fn new_private_file(path: &Path) -> io::Result<File> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(path)
+}
+
+/// Where the web downloads the finished backup `id`.
+pub(super) fn download_url(id: &str) -> String {
+    format!("/api/backup/files/{id}")
 }
 
 /// 16 fresh OS-random bytes as 32 lowercase hex characters.

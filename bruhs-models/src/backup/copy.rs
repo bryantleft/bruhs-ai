@@ -181,6 +181,8 @@ pub const OWNER_ONLY_BACKUP: &str = "Open Bruhs from its own address to make or 
 pub const UNSUPPORTED_PLATFORM: &str = "Backup runs on macOS and Linux.";
 pub const INVALID_REQUEST: &str = "That request isn't one Bruhs understands.";
 pub const GONE: &str = "That backup isn't here anymore.";
+/// A web part upload sent as anything but raw bytes.
+pub const WEB_PART_TYPE: &str = "Send the browser's part as raw bytes.";
 
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
@@ -304,6 +306,7 @@ pub const ALL_COPY: &[&str] = &[
     UNSUPPORTED_PLATFORM,
     INVALID_REQUEST,
     GONE,
+    WEB_PART_TYPE,
 ];
 
 #[cfg(test)]
