@@ -38,9 +38,6 @@ use super::{open_db, DB_VERSION};
 /// The most containers one record may nest, counting the maps tags add.
 /// The dump wraps each record in three more, and the reader takes 127.
 const MAX_DEPTH: usize = 120;
-/// Blob bytes past this can't fit in [`WEB_PLAIN_MAX`] once in base64, so
-/// the dump stops before reading them into memory.
-const BLOB_BYTES_MAX: u64 = WEB_PLAIN_MAX / 4 * 3;
 /// AES-GCM tag bytes after every chunk.
 const TAG_BYTES: usize = 16;
 /// Plaintext is read and written through buffers this size.
@@ -70,22 +67,33 @@ pub async fn dump_web() -> Result<WebDump, String> {
     let names = db.store_names();
     let raw = read_stores(&db, &names).await.map_err(read_failed)?;
     let mut stores = BTreeMap::new();
-    let mut blob_bytes = 0_u64;
+    // One estimate for the whole dump, seeded with localStorage (I1).
+    let mut estimate = Estimate::default();
+    for (key, text) in &local_storage {
+        let len = key.len().saturating_add(text.len());
+        estimate
+            .add(u64::try_from(len).unwrap_or(u64::MAX))
+            .map_err(|stop| stop_copy(stop, "localStorage"))?;
+    }
     for (name, values) in names.into_iter().zip(raw) {
+        let stop = |stop| stop_copy(stop, &name);
         let mut records = Vec::with_capacity(values.len());
         for value in values {
             let mut found = Vec::new();
             find_blobs(&value, 0, &mut found).map_err(|()| unsupported(&name))?;
             for blob in &found {
-                blob_bytes = blob_bytes.saturating_add(blob.size().to_u64_saturating());
-            }
-            if blob_bytes > BLOB_BYTES_MAX {
-                return Err(WEB_TOO_LARGE.to_owned());
+                estimate
+                    .add_binary(blob.size().to_u64_saturating())
+                    .map_err(stop)?;
             }
             let mut read = read_blobs(found)
                 .await
                 .map_err(|()| WEB_READ_FAILED.to_owned())?;
-            records.push(convert(&value, 0, &mut read).map_err(|()| unsupported(&name))?);
+            records.push(convert(&value, 0, &mut read, &mut estimate).map_err(stop)?);
+            // Every blob read was placed (B Task 13 M1).
+            if !read.is_empty() {
+                return Err(unsupported(&name));
+            }
         }
         stores.insert(name, records);
     }
@@ -123,8 +131,14 @@ async fn read_stores(db: &Database, names: &[String]) -> Result<Vec<Vec<JsValue>
 pub async fn js_to_json(value: &JsValue) -> Result<Value, ()> {
     let mut found = Vec::new();
     find_blobs(value, 0, &mut found)?;
+    let mut estimate = Estimate::default();
+    for blob in &found {
+        estimate
+            .add_binary(blob.size().to_u64_saturating())
+            .map_err(|_| ())?;
+    }
     let mut read = read_blobs(found).await?;
-    let json = convert(value, 0, &mut read)?;
+    let json = convert(value, 0, &mut read, &mut estimate).map_err(|_| ())?;
     if read.is_empty() {
         Ok(json)
     } else {
@@ -167,12 +181,60 @@ async fn read_blobs(blobs: Vec<web_sys::Blob>) -> Result<VecDeque<(web_sys::Blob
     Ok(read)
 }
 
-/// [`js_to_json`] with the blobs' bytes already read, in walk order.
+/// Why a value didn't make it into the dump.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    /// A value JSON can't carry: `WEB_UNSUPPORTED`.
+    Unsupported,
+    /// The dump's running estimate passed [`WEB_PLAIN_MAX`]: `WEB_TOO_LARGE`.
+    TooLarge,
+}
+
+fn stop_copy(stop: Stop, store: &str) -> String {
+    match stop {
+        Stop::Unsupported => unsupported(store),
+        Stop::TooLarge => WEB_TOO_LARGE.to_owned(),
+    }
+}
+
+/// A running estimate of the dump's JSON, one across every store (B Task 13
+/// I1). Each string and each byte copy is added before it is copied into
+/// wasm memory, bytes as their base64 (4 for every 3), so a profile far
+/// over the cap stops before it fills the tab's memory. `lock_dump`
+/// measures the exact size later.
+#[derive(Debug, Default)]
+struct Estimate {
+    bytes: u64,
+}
+
+impl Estimate {
+    fn add(&mut self, bytes: u64) -> Result<(), Stop> {
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.bytes > WEB_PLAIN_MAX {
+            Err(Stop::TooLarge)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn add_binary(&mut self, bytes: u64) -> Result<(), Stop> {
+        self.add(bytes.div_ceil(3).saturating_mul(4))
+    }
+
+    /// A JS string's length in UTF-16 units, read without copying it.
+    fn add_text(&mut self, text: &JsValue) -> Result<(), Stop> {
+        self.add(u64::from(text.unchecked_ref::<js_sys::JsString>().length()))
+    }
+}
+
+/// [`js_to_json`] with the blobs' bytes already read, in walk order. Blob
+/// bytes were added to `estimate` before they were read.
 fn convert(
     value: &JsValue,
     depth: usize,
     blobs: &mut VecDeque<(web_sys::Blob, Vec<u8>)>,
-) -> Result<Value, ()> {
+    estimate: &mut Estimate,
+) -> Result<Value, Stop> {
     if value.is_null() {
         return Ok(Value::Null);
     }
@@ -180,43 +242,53 @@ fn convert(
         return Ok(Value::Bool(flag));
     }
     if let Some(number) = value.as_f64() {
-        return number_value(number).ok_or(());
+        return match number_value(number) {
+            Some(json) => Ok(json),
+            // NaN and the infinities need a tag map.
+            None if depth < MAX_DEPTH => Ok(tag_value(&WebTag::Number(number))),
+            None => Err(Stop::Unsupported),
+        };
     }
-    if let Some(text) = value.as_string() {
-        return Ok(Value::String(text));
+    if value.is_string() {
+        estimate.add_text(value)?;
+        return value
+            .as_string()
+            .map(Value::String)
+            .ok_or(Stop::Unsupported);
     }
     // Every other answer is a container: a tag map or the value's own.
     if depth >= MAX_DEPTH {
-        return Err(());
+        return Err(Stop::Unsupported);
     }
     if value.is_undefined() {
         return Ok(tag_value(&WebTag::Undefined));
     }
     // A BigInt, a symbol or a function.
     if !value.is_object() || value.is_function() {
-        return Err(());
+        return Err(Stop::Unsupported);
     }
     if Array::is_array(value) {
         return value
             .unchecked_ref::<Array>()
             .iter()
-            .map(|item| convert(&item, depth + 1, blobs))
+            .map(|item| convert(&item, depth + 1, blobs, estimate))
             .collect::<Result<_, _>>()
             .map(Value::Array);
     }
     if let Some(date) = value.dyn_ref::<js_sys::Date>() {
         return Ok(tag_value(&WebTag::Date(date.get_time())));
     }
-    if value.is_instance_of::<ArrayBuffer>() {
+    if let Some(buffer) = value.dyn_ref::<ArrayBuffer>() {
+        estimate.add_binary(u64::from(buffer.byte_length()))?;
         return Ok(tag_value(&WebTag::Bytes(Uint8Array::new(value).to_vec())));
     }
     if ArrayBuffer::is_view(value) {
-        return view_bytes(value).map(|bytes| tag_value(&WebTag::Bytes(bytes)));
+        return view_bytes(value, estimate).map(|bytes| tag_value(&WebTag::Bytes(bytes)));
     }
     if let Some(blob) = value.dyn_ref::<web_sys::Blob>() {
-        let (found, bytes) = blobs.pop_front().ok_or(())?;
+        let (found, bytes) = blobs.pop_front().ok_or(Stop::Unsupported)?;
         if !Object::is(found.as_ref(), value) {
-            return Err(());
+            return Err(Stop::Unsupported);
         }
         return Ok(tag_value(&WebTag::Blob {
             mime: blob.type_(),
@@ -224,7 +296,7 @@ fn convert(
         }));
     }
     if !is_plain_object(value) {
-        return Err(());
+        return Err(Stop::Unsupported);
     }
     let keys = Object::keys(value.unchecked_ref::<Object>());
     let escaped = keys
@@ -233,13 +305,14 @@ fn convert(
     // An escaped object's fields sit inside its tag map's `value` map.
     let inner = if escaped { depth + 2 } else { depth + 1 };
     if escaped && depth + 1 >= MAX_DEPTH {
-        return Err(());
+        return Err(Stop::Unsupported);
     }
     let mut map = Map::new();
     for key in keys.iter() {
-        let name = key.as_string().ok_or(())?;
-        let item = Reflect::get(value, &key).map_err(|_| ())?;
-        map.insert(name, convert(&item, inner, blobs)?);
+        estimate.add_text(&key)?;
+        let name = key.as_string().ok_or(Stop::Unsupported)?;
+        let item = Reflect::get(value, &key).map_err(|_| Stop::Unsupported)?;
+        map.insert(name, convert(&item, inner, blobs, estimate)?);
     }
     Ok(if escaped {
         tag_value(&WebTag::Object(map))
@@ -248,12 +321,20 @@ fn convert(
     })
 }
 
-/// The bytes a typed array or `DataView` covers, not its whole buffer.
-fn view_bytes(value: &JsValue) -> Result<Vec<u8>, ()> {
-    let field = |name: &str| Reflect::get(value, &JsValue::from_str(name)).map_err(|_| ());
-    let buffer = field("buffer")?;
-    let offset = field("byteOffset")?.as_f64().ok_or(())?;
-    let length = field("byteLength")?.as_f64().ok_or(())?;
+/// The bytes a typed array or `DataView` covers, not its whole buffer,
+/// added to `estimate` before they are copied.
+fn view_bytes(value: &JsValue, estimate: &mut Estimate) -> Result<Vec<u8>, Stop> {
+    let field = |name: &str| {
+        Reflect::get(value, &JsValue::from_str(name))
+            .ok()
+            .and_then(|field| field.as_f64())
+            .ok_or(Stop::Unsupported)
+    };
+    let offset = field("byteOffset")?;
+    let length = field("byteLength")?;
+    estimate.add_binary(length.to_u64_saturating())?;
+    let buffer =
+        Reflect::get(value, &JsValue::from_str("buffer")).map_err(|_| Stop::Unsupported)?;
     let view = Uint8Array::new_with_byte_offset_and_length(
         &buffer,
         offset.to_u32_saturating(),
@@ -274,7 +355,7 @@ fn is_plain_object(value: &JsValue) -> bool {
 
 /// A JS number as JSON: whole numbers JS holds exactly as integers, so they
 /// read back as the integers they were written as; `None` for NaN and the
-/// infinities, which JSON has no form for.
+/// infinities, which JSON has no number for (they are tagged instead).
 fn number_value(number: f64) -> Option<Value> {
     let whole = number.fract() == 0.0 && number.abs() <= MAX_SAFE_INTEGER;
     // -0 is whole but has no integer form.
@@ -453,9 +534,14 @@ fn opening(error: FormatError) -> &'static str {
     }
 }
 
-/// Whether this build can put `dump` back: not from a newer format or
-/// database (`current`), and not from before the newest of `migrations`.
+/// Whether this build can put `dump` back: not version 0 of either
+/// (`DAMAGED`), not from a newer format or database (`current`), and not
+/// from before the newest of `migrations`.
 fn check_versions(dump: &WebDump, current: u32, migrations: &[u32]) -> Result<(), &'static str> {
+    // No build writes version 0 of either.
+    if dump.version == 0 || dump.db_version == 0 {
+        return Err(DAMAGED);
+    }
     if dump.version > WEB_DUMP_VERSION || dump.db_version > current {
         return Err(NEWER_WEB_DATA);
     }
@@ -606,6 +692,7 @@ fn tag_to_js(tag: WebTag) -> Result<JsValue, ()> {
         }
         WebTag::Date(ms) => js_sys::Date::new(&JsValue::from_f64(ms)).into(),
         WebTag::Undefined => JsValue::UNDEFINED,
+        WebTag::Number(number) => JsValue::from_f64(number),
         WebTag::Object(map) => plain_object(&map)?,
     })
 }
@@ -673,6 +760,8 @@ mod tests {
                 "when": tag_value(&WebTag::Date(1.5e12)),
                 "never": tag_value(&WebTag::Date(f64::NAN)),
                 "gone": tag_value(&WebTag::Undefined),
+                "nan": tag_value(&WebTag::Number(f64::NAN)),
+                "far": [tag_value(&WebTag::Number(f64::INFINITY)), tag_value(&WebTag::Number(f64::NEG_INFINITY))],
                 "own": tag_value(&WebTag::Object(Map::from_iter([
                     ("$bruhs".to_string(), json!("theirs")),
                 ]))),
@@ -742,6 +831,12 @@ mod tests {
         assert_eq!(check_versions(&dump, 13, &[]), Err(NEWER_WEB_DATA));
         dump.version = WEB_DUMP_VERSION + 1;
         assert_eq!(check_versions(&dump, 14, &[]), Err(NEWER_WEB_DATA));
+        // No build writes version 0 of either.
+        dump.version = 0;
+        assert_eq!(check_versions(&dump, 14, &[]), Err(DAMAGED));
+        dump.version = WEB_DUMP_VERSION;
+        dump.db_version = 0;
+        assert_eq!(check_versions(&dump, 14, &[]), Err(DAMAGED));
     }
 
     #[test]
@@ -766,10 +861,37 @@ mod tests {
         for _ in 0..MAX_DEPTH + 8 {
             deep = json!([deep]);
         }
-        let mut dump = WebDump::default();
+        let mut dump = WebDump {
+            version: WEB_DUMP_VERSION,
+            db_version: DB_VERSION,
+            ..WebDump::default()
+        };
         dump.stores.insert("threads".into(), vec![deep]);
         let blob = lock_with(&dump, PASSWORD, fixed).unwrap();
         assert_eq!(unlock_dump(&blob, PASSWORD), Err(DAMAGED));
+    }
+
+    #[test]
+    fn the_size_estimate_stops_the_dump_past_the_cap() {
+        let mut estimate = Estimate::default();
+        assert_eq!(estimate.add(WEB_PLAIN_MAX - 12), Ok(()));
+        // Bytes count as their base64: 3 bytes are 4, 4 bytes are 8.
+        assert_eq!(estimate.add_binary(3), Ok(()));
+        assert_eq!(estimate.add_binary(4), Ok(()));
+        assert_eq!(estimate.bytes, WEB_PLAIN_MAX);
+        // The running total carries on: one byte more stops it.
+        assert_eq!(estimate.add(1), Err(Stop::TooLarge));
+
+        let mut estimate = Estimate::default();
+        assert_eq!(estimate.add_binary(WEB_PLAIN_MAX / 4 * 3), Ok(()));
+        assert_eq!(estimate.add_binary(1), Err(Stop::TooLarge));
+        let mut estimate = Estimate::default();
+        assert_eq!(estimate.add(u64::MAX), Err(Stop::TooLarge));
+        assert_eq!(stop_copy(Stop::TooLarge, "threads"), WEB_TOO_LARGE);
+        assert_eq!(
+            stop_copy(Stop::Unsupported, "threads"),
+            unsupported("threads")
+        );
     }
 
     #[test]

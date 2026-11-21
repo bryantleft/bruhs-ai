@@ -34,6 +34,7 @@ const BYTES: &str = "bytes";
 const BLOB: &str = "blob";
 const DATE: &str = "date";
 const UNDEFINED: &str = "undefined";
+const NUMBER: &str = "number";
 const OBJECT: &str = "object";
 
 /// Everything the browser keeps, as the web part's plaintext.
@@ -63,6 +64,9 @@ pub enum WebTag {
     /// A `Date`, in milliseconds. An invalid date is NaN.
     Date(f64),
     Undefined,
+    /// NaN or an infinity, which JSON has no number for. A finite number
+    /// needs no tag: [`tag_value`] writes it as a plain JSON number.
+    Number(f64),
     /// A plain object that has a [`WEB_TAG`] key of its own, escaped.
     Object(Map<String, Value>),
 }
@@ -78,6 +82,12 @@ pub fn tag_value(tag: &WebTag) -> Value {
         WebTag::Date(ms) if ms.is_finite() => json!({ WEB_TAG: DATE, "ms": ms }),
         WebTag::Date(_) => json!({ WEB_TAG: DATE, "ms": null }),
         WebTag::Undefined => json!({ WEB_TAG: UNDEFINED }),
+        WebTag::Number(number) if number.is_nan() => json!({ WEB_TAG: NUMBER, "value": "NaN" }),
+        WebTag::Number(number) if number.is_infinite() => {
+            let sign = if number.is_sign_negative() { "-" } else { "" };
+            json!({ WEB_TAG: NUMBER, "value": format!("{sign}Infinity") })
+        }
+        WebTag::Number(number) => json!(number),
         WebTag::Object(map) => json!({ WEB_TAG: OBJECT, "value": map }),
     }
 }
@@ -107,6 +117,12 @@ fn parse_tag(kind: &Value, map: &Map<String, Value>) -> Option<WebTag> {
             ms => ms.as_f64().map(WebTag::Date),
         },
         UNDEFINED if only(&[]) => Some(WebTag::Undefined),
+        NUMBER if only(&["value"]) => match map.get("value")?.as_str()? {
+            "NaN" => Some(WebTag::Number(f64::NAN)),
+            "Infinity" => Some(WebTag::Number(f64::INFINITY)),
+            "-Infinity" => Some(WebTag::Number(f64::NEG_INFINITY)),
+            _ => None,
+        },
         OBJECT if only(&["value"]) => map.get("value")?.as_object().cloned().map(WebTag::Object),
         _ => None,
     }
@@ -224,6 +240,31 @@ mod tests {
             dump.local_storage["bruhs.recentProjects"],
             r#"["/Users/ada/src"]"#
         );
+    }
+
+    #[test]
+    fn non_finite_numbers_round_trip_as_tags() {
+        for number in [f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                read_tag(&tag_value(&WebTag::Number(number))),
+                Some(Ok(WebTag::Number(number)))
+            );
+        }
+        assert_eq!(
+            tag_value(&WebTag::Number(f64::NAN)),
+            json!({"$bruhs": "number", "value": "NaN"})
+        );
+        match read_tag(&tag_value(&WebTag::Number(f64::NAN))) {
+            Some(Ok(WebTag::Number(number))) => assert!(number.is_nan()),
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            json!({"$bruhs": "number", "value": "nan"}),
+            json!({"$bruhs": "number", "value": 1}),
+            json!({"$bruhs": "number"}),
+        ] {
+            assert_eq!(read_tag(&bad), Some(Err(DAMAGED)), "{bad}");
+        }
     }
 
     #[test]

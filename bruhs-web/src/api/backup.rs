@@ -11,10 +11,11 @@
 
 use bruhs_models::backup::{
     valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview, CreateBackup,
-    OpenBackup, RestoreStatus, UploadId, GONE,
+    OpenBackup, RestoreStatus, UploadId, GONE, WEB_UPLOAD_MAX,
 };
 use gloo_net::http::{Method, Request, RequestBuilder, Response};
 use serde::Serialize;
+use std::io::{self, Write};
 use wasm_bindgen::JsValue;
 use web_sys::AbortSignal;
 use zeroize::Zeroizing;
@@ -32,9 +33,6 @@ const WEB_PART_PATH: &str = "/api/backup/restore/web-part";
 const PREVIOUS_WEB_PART_PATH: &str = "/api/backup/restore/web-part/previous";
 const HEALTH_PATH: &str = "/api/health";
 const RAW_BYTES: &str = "application/octet-stream";
-/// Room for a body with a password, so serializing it never regrows the
-/// buffer and leaves a copy behind.
-const SECRET_BODY_BYTES: usize = 16 * 1024;
 
 fn id_path(prefix: &str, id: &str) -> Option<String> {
     valid_id(id).then(|| format!("{prefix}/{id}"))
@@ -71,11 +69,39 @@ fn builder(method: Method, route: &str, signal: &AbortSignal) -> RequestBuilder 
         .abort_signal(Some(signal))
 }
 
-/// `body` as JSON in a buffer that is wiped when dropped.
+/// Counts the bytes written to it and keeps none.
+struct Measure(usize);
+
+impl Write for Measure {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 = self.0.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// `body` as JSON in a buffer that is wiped when dropped. It is measured
+/// first and allocated once at that size, so it never regrows and leaves an
+/// unwiped copy of the password behind (B Task 13 M3).
 fn secret_json<B: Serialize>(body: &B) -> Result<Zeroizing<Vec<u8>>, ApiError> {
-    let mut json = Zeroizing::new(Vec::with_capacity(SECRET_BODY_BYTES));
-    serde_json::to_writer(&mut *json, body).map_err(|error| ApiError::Decode(error.to_string()))?;
+    let failed = |error: serde_json::Error| ApiError::Decode(error.to_string());
+    let mut measure = Measure(0);
+    serde_json::to_writer(&mut measure, body).map_err(failed)?;
+    let mut json = Zeroizing::new(Vec::with_capacity(measure.0));
+    serde_json::to_writer(&mut *json, body).map_err(failed)?;
     Ok(json)
+}
+
+/// Whether a web part reply's `Content-Length` is there and within
+/// `WEB_UPLOAD_MAX`, so the page never reads a larger body (B Task 13 M2).
+/// The server always sends it.
+fn web_part_fits(content_length: Option<&str>) -> bool {
+    content_length
+        .and_then(|length| length.trim().parse::<u64>().ok())
+        .is_some_and(|length| length <= WEB_UPLOAD_MAX)
 }
 
 /// A JSON request whose body holds a password. The browser's own copy of
@@ -192,8 +218,18 @@ pub async fn status(signal: &AbortSignal) -> Result<RestoreStatus, ApiError> {
 }
 
 /// `GET /api/backup/restore/web-part`: the waiting web part's ciphertext.
+/// A reply that doesn't say it is within `WEB_UPLOAD_MAX` isn't read.
 pub async fn web_part(signal: &AbortSignal) -> Result<Vec<u8>, ApiError> {
-    Ok(get(WEB_PART_PATH, signal).await?.binary().await?)
+    let too_large = || ApiError::Decode("the web part is over its cap".into());
+    let response = get(WEB_PART_PATH, signal).await?;
+    if !web_part_fits(response.headers().get("content-length").as_deref()) {
+        return Err(too_large());
+    }
+    let bytes = response.binary().await?;
+    if u64::try_from(bytes.len()).map_or(true, |len| len > WEB_UPLOAD_MAX) {
+        return Err(too_large());
+    }
+    Ok(bytes)
 }
 
 /// `DELETE /api/backup/restore/web-part`: the browser has restored it.
@@ -280,6 +316,36 @@ mod tests {
                 detail: Some(GONE.into())
             })
         );
+    }
+
+    #[test]
+    fn a_web_part_reply_must_say_it_fits() {
+        assert!(web_part_fits(Some("0")));
+        assert!(web_part_fits(Some(&WEB_UPLOAD_MAX.to_string())));
+        for over in [
+            None,
+            Some((WEB_UPLOAD_MAX + 1).to_string()),
+            Some("-1".to_string()),
+            Some("lots".to_string()),
+        ] {
+            assert!(!web_part_fits(over.as_deref()), "{over:?}");
+        }
+    }
+
+    #[test]
+    fn a_long_secret_body_never_regrows_its_buffer() {
+        let create = CreateBackup {
+            password: "correct horse battery".into(),
+            options: Default::default(),
+            app: bruhs_models::backup::BackupApp::Web,
+            web_part: None,
+            web_db_version: None,
+            destination: Some(format!("/{}", "d".repeat(40 * 1024))),
+            overwrite: false,
+        };
+        let body = secret_json(&create).unwrap();
+        assert_eq!(*body, serde_json::to_vec(&create).unwrap());
+        assert_eq!(body.capacity(), body.len());
     }
 
     #[test]
