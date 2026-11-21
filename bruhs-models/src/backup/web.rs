@@ -16,6 +16,12 @@ use crate::EpochMs;
 pub const WEB_TAG: &str = "$bruhs";
 /// The newest [`WebDump`] format this build writes and reads.
 pub const WEB_DUMP_VERSION: u32 = 1;
+/// The IndexedDB versions whose upgrade moved data instead of only adding
+/// stores (ruling F27). A restore writes records in their old shape straight
+/// into today's database, so a dump made before the newest of these is
+/// refused (`OLDER_WEB_DATA`). Empty here: v12's envelope format is still
+/// read as is.
+pub const WEB_DATA_MIGRATIONS: &[u32] = &[];
 /// A browser's dump is at most this many bytes of JSON (ruling F28).
 pub const WEB_PLAIN_MAX: u64 = 256 * 1024 * 1024;
 /// An uploaded web part is at most this many bytes: the plaintext cap plus

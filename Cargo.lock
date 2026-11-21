@@ -1413,6 +1413,7 @@ name = "bruhs-web"
 version = "0.1.0"
 dependencies = [
  "any_spawner",
+ "bruhs-backup",
  "bruhs-models",
  "console_error_panic_hook",
  "console_log",
@@ -1433,6 +1434,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]

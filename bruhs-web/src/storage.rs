@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::JsValue;
 
+pub mod backup_dump;
 pub mod day_plans;
 pub(crate) mod mail_compose;
 pub mod meeting_generations;
@@ -41,7 +42,7 @@ use crate::state::{
 const DB_NAME: &str = "bruhs";
 // v12 also gates the conversation envelope format. Older tabs must close
 // before a writer can replace a structured record with a JSON envelope.
-const DB_VERSION: u32 = 13;
+pub(crate) const DB_VERSION: u32 = 13;
 const STORE_BOARDS: &str = "whiteboards";
 const STORE_BOARD_INDEX: &str = "whiteboard_index";
 const STORE_BOARD_ASSETS: &str = "whiteboard_assets";

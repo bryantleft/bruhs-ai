@@ -13,6 +13,7 @@ pub use bruhs_models::api::{
 mod agent_stream;
 mod apps;
 pub use apps::*;
+pub mod backup;
 mod database;
 pub use database::*;
 mod api_client;

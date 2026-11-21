@@ -177,6 +177,14 @@ pub const SOURCE_MISSING: &str = "That backup file isn't there anymore.";
 pub const WEB_TOO_LARGE: &str =
     "This browser's data is over 256 MB. Make the backup from the desktop app.";
 pub const WEB_UNSUPPORTED: &str = "This browser holds data Bruhs can't put in a backup: {store}.";
+/// A web part from before an IndexedDB upgrade that moved data (ruling F27).
+pub const OLDER_WEB_DATA: &str = "This browser data comes from an older Bruhs that stored it differently. Restore it with that version first.";
+/// The browser couldn't give random bytes or run the key derivation.
+pub const WEB_LOCK_FAILED: &str = "Bruhs couldn't lock this browser's data. Try again.";
+pub const WEB_READ_FAILED: &str = "Bruhs couldn't read this browser's data. Try again.";
+/// The browser's restore failed. IndexedDB is replaced in one transaction
+/// but localStorage after it, so this copy doesn't promise nothing changed.
+pub const WEB_WRITE_FAILED: &str = "Bruhs couldn't write all of this browser's data. Try again.";
 pub const OWNER_ONLY_BACKUP: &str = "Open Bruhs from its own address to make or restore a backup.";
 pub const UNSUPPORTED_PLATFORM: &str = "Backup runs on macOS and Linux.";
 pub const INVALID_REQUEST: &str = "That request isn't one Bruhs understands.";
@@ -315,6 +323,10 @@ pub const ALL_COPY: &[&str] = &[
     SOURCE_MISSING,
     WEB_TOO_LARGE,
     WEB_UNSUPPORTED,
+    OLDER_WEB_DATA,
+    WEB_LOCK_FAILED,
+    WEB_READ_FAILED,
+    WEB_WRITE_FAILED,
     OWNER_ONLY_BACKUP,
     UNSUPPORTED_PLATFORM,
     INVALID_REQUEST,
