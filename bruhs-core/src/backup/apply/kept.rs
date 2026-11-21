@@ -284,7 +284,7 @@ fn write_set_info(
             Vec::new()
         };
         for name in &names {
-            bytes = bytes.saturating_add(tree_bytes(&folder.join(name))?);
+            bytes = bytes.saturating_add(tree_bytes(&folder.join(name)));
         }
         listed.push(KeptRoot { root: *root, names });
     }

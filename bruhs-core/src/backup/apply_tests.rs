@@ -1734,6 +1734,41 @@ async fn a_seal_that_fails_for_good_drops_the_apply() {
     assert!(staging_dir(roots, RootKey::Core, &before.staged).exists());
 }
 
+/// Final review B-I1: a folder in today's data that can't be read (a
+/// bind mount another user owns) never stops the apply past the keychain
+/// writes: the set's size counts what can be read and the set is listed.
+#[tokio::test]
+async fn an_unreadable_folder_in_todays_data_never_stops_the_apply() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    let locked = roots.core.join("server/bruhs/a-bruh/work/pgdata");
+    write(&locked.join("PG_VERSION"), b"16");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&locked).is_ok() {
+        // Running as root: nothing is unreadable here.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let outcome = apply_pending(roots, &fixture.store, None);
+    let kept = pre_restores(roots);
+    let stamp = kept.first().map(|set| set.stamp.clone());
+    if let Some(stamp) = &stamp {
+        let moved = kept_dir(roots, RootKey::Core, stamp).join("server/bruhs/a-bruh/work/pgdata");
+        let _ = std::fs::set_permissions(&moved, std::fs::Permissions::from_mode(0o700));
+    }
+    let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700));
+    assert!(
+        matches!(outcome, Ok(ApplyOutcome::Applied(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].bytes > 0);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
+    assert!(!applying(roots));
+}
+
 /// The sweep removes kept folders without a manifest, but never while an
 /// apply could be making one (N6), and forgets the keys a removal failed
 /// for once their set is gone.

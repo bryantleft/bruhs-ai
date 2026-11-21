@@ -1326,19 +1326,27 @@ fn top_names(folder: &Path) -> Result<Vec<String>, BackupError> {
 }
 
 /// The bytes of the files at and under `path`, never following a link.
-fn tree_bytes(path: &Path) -> Result<u64, BackupError> {
+/// Best effort (final review B-I1): what can't be read counts nothing, so
+/// a size never fails an apply or a rollback.
+fn tree_bytes(path: &Path) -> u64 {
     let mut bytes = 0_u64;
     let mut folders = Vec::new();
-    let metadata = std::fs::symlink_metadata(path)?;
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
     if metadata.is_dir() {
         folders.push(path.to_path_buf());
     } else if metadata.is_file() {
         bytes = metadata.len();
     }
     while let Some(folder) = folders.pop() {
-        for entry in std::fs::read_dir(&folder)? {
-            let entry = entry?;
-            let metadata = entry.metadata()?;
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
             if metadata.is_dir() {
                 folders.push(entry.path());
             } else if metadata.is_file() {
@@ -1346,7 +1354,7 @@ fn tree_bytes(path: &Path) -> Result<u64, BackupError> {
             }
         }
     }
-    Ok(bytes)
+    bytes
 }
 
 /// Renames `from` to `to`, then syncs the folder it went into and the one
