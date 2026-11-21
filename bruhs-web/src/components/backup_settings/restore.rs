@@ -19,7 +19,7 @@ use bruhs_models::backup::{
     OpenBackup, OpenSource, RestorePreview, RestoreSource, RestoreStatus, CANCEL, CHOOSE_FILE,
     GONE, NO_WEB_PART, OPEN_BACKUP, PASSWORD, REPLACE, REPLACE_WARNING, RESTORED, RESTORE_BROWSER,
     RESTORE_GROUP, RESTORE_PENDING, RESTORE_ROLLED_BACK, RESTORING_WEB, START_AGAIN, STOPPING,
-    UPLOADING_BACKUP, WEB_PART_DONE, WEB_PART_WAITING, WRONG_PASSWORD,
+    UPLOADING_BACKUP, WEB_FINISH_RETRY, WEB_PART_DONE, WEB_PART_WAITING, WRONG_PASSWORD,
 };
 use leptos::{html, prelude::*};
 use zeroize::{Zeroize, Zeroizing};
@@ -385,16 +385,23 @@ fn restore_browser(page: Page) {
     if page.busy.get_untracked() {
         return;
     }
-    let typed = (!restore.holds_password.get_untracked())
-        .then(|| Zeroizing::new(take_value(restore.card_password)));
-    // A backup password follows the rule, so one that doesn't can't open
-    // the part: say so before a key derivation (M1).
-    if let Some(Err(error)) = typed.as_ref().map(|typed| validate_password(typed)) {
-        restore.browser_error.set(Some(error.to_owned()));
-        return;
-    }
-    let Some(password) = typed.or_else(|| restore.held_copy()) else {
-        return;
+    // Once this browser's data is back only the last step is left, which
+    // needs no password (N3).
+    let password = if restore.browser_restored.get_untracked() {
+        Zeroizing::new(String::new())
+    } else {
+        let typed = (!restore.holds_password.get_untracked())
+            .then(|| Zeroizing::new(take_value(restore.card_password)));
+        // A backup password follows the rule, so one that doesn't can't
+        // open the part: say so before a key derivation (M1).
+        if let Some(Err(error)) = typed.as_ref().map(|typed| validate_password(typed)) {
+            restore.browser_error.set(Some(error.to_owned()));
+            return;
+        }
+        let Some(password) = typed.or_else(|| restore.held_copy()) else {
+            return;
+        };
+        password
     };
     let Some(signal) = page.signal() else {
         return;
@@ -417,16 +424,33 @@ fn restore_browser(page: Page) {
                 if message == WRONG_PASSWORD {
                     restore.forget_password();
                 }
+                let restored = restore.browser_restored.get_untracked();
                 restore.browser.try_set(Browser::Idle);
-                restore.browser_error.try_set(Some(message));
+                restore
+                    .browser_error
+                    .try_set(Some(browser_failure(restored, message)));
                 page.busy.try_set(false);
             }
         }
     });
 }
 
+/// What a failed run says. Once this browser's data is back, a failure can
+/// only be the server's copy not going, and this tab's own writes stay
+/// stopped: it says so in fixed words, with a retry of that step (N3).
+fn browser_failure(restored: bool, message: String) -> String {
+    if restored {
+        WEB_FINISH_RETRY.to_owned()
+    } else {
+        message
+    }
+}
+
 /// D19's steps. The ciphertext goes before anything is written, and the
-/// server's copy goes only once this browser's data is back.
+/// server's copy goes only once this browser's data is back. This tab's
+/// own writes stop before the other tabs are asked to leave, and the
+/// restore reads and writes through its own connection (N2); a run that
+/// stops before it writes lets them go on.
 async fn put_back_browser(
     restore: Restore,
     password: &str,
@@ -441,24 +465,38 @@ async fn put_back_browser(
     let blob = api::web_part(signal).await.map_err(message)?;
     let mut dump = unlock_dump(&blob, password)?;
     drop(blob);
-    super::tabs::with_other_tabs_reloaded(async {
-        let current = dump_web().await?;
-        let locked = lock_dump(&current, password)?;
-        drop(current);
-        api::web_part_previous(&locked, signal)
-            .await
-            .map_err(message)?;
-        drop(locked);
-        rewrite_dump(&mut dump, &rules);
-        restore_web(dump).await?;
+    super::tabs::leave();
+    let written = super::tabs::with_other_tabs_reloaded(async {
+        let kept = async {
+            let current = dump_web().await?;
+            let locked = lock_dump(&current, password)?;
+            drop(current);
+            api::web_part_previous(&locked, signal)
+                .await
+                .map_err(message)?;
+            drop(locked);
+            rewrite_dump(&mut dump, &rules);
+            Ok::<(), String>(())
+        }
+        .await;
+        // Nothing was written yet.
+        kept.map_err(|message| (message, false))?;
+        // A failed restore may have written part of it (localStorage goes
+        // after the IndexedDB commit), so the fence stays.
+        restore_web(dump).await.map_err(|message| (message, true))?;
         restore.browser_restored.try_set(true);
-        // This tab reloads next: its own stale state must not write over
-        // what was just put back, and its reload must not ask (I1).
-        super::tabs::leave();
-        Ok::<(), String>(())
+        Ok::<(), (String, bool)>(())
     })
-    .await?;
-    web_part_done(signal).await
+    .await;
+    match written {
+        Ok(()) => web_part_done(signal).await,
+        Err((message, wrote)) => {
+            if !wrote {
+                super::tabs::stay();
+            }
+            Err(message)
+        }
+    }
 }
 
 /// Drops the server's copy of the browser part, trying again on a miss.
@@ -483,7 +521,7 @@ pub(super) fn browser_card(page: Page) -> AnyView {
             <div data-backup-browser="" class=GROUP>
                 <p class="text-body-sm text-rambutan-200">{WEB_PART_WAITING}</p>
                 <form class=ACTIONS on:submit=move |event| { event.prevent_default(); restore_browser(page); }>
-                    <Show when=move || !restore.holds_password.get() && restore.browser.get() != Browser::Done>
+                    <Show when=move || !restore.holds_password.get() && !restore.browser_restored.get() && restore.browser.get() != Browser::Done>
                         <div class="w-full sm:w-60">
                             {password_input(restore.card_password, PASSWORD, "current-password", FieldHooks::plain())}
                         </div>
@@ -863,6 +901,40 @@ mod tests {
             );
             assert!(!page.busy.get_untracked());
             assert_eq!(page.restore.browser.get_untracked(), Browser::Idle);
+        });
+    }
+
+    #[test]
+    fn a_failed_finish_retries_only_the_last_step() {
+        assert_eq!(
+            browser_failure(true, "The server answered HTTP 502.".into()),
+            WEB_FINISH_RETRY
+        );
+        assert_eq!(
+            browser_failure(false, WRONG_PASSWORD.into()),
+            WRONG_PASSWORD
+        );
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.restore.web_waiting_for_tests();
+            page.restore.browser_restored.set(true);
+            page.restore
+                .browser_error
+                .set(Some(WEB_FINISH_RETRY.into()));
+            let html = render(|| browser_card(page));
+            assert!(html.contains(&escaped(WEB_FINISH_RETRY)), "{html}");
+            assert!(
+                !html.contains("type=\"password\""),
+                "no password needed: {html}"
+            );
+            assert!(
+                !is_disabled(tag(&html, "data-backup-restore-browser")),
+                "{html}"
+            );
+            // The retry asks for nothing: no password refusal.
+            page.restore.browser_error.set(None);
+            restore_browser(page);
+            assert_eq!(page.restore.browser_error.get_untracked(), None);
         });
     }
 

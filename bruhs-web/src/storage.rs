@@ -126,6 +126,13 @@ impl std::ops::Deref for Connection {
 /// transactions finish, as `close` waits for them).
 pub struct OpenDatabase(Database);
 
+impl std::ops::Deref for OpenDatabase {
+    type Target = Database;
+    fn deref(&self) -> &Database {
+        &self.0
+    }
+}
+
 impl Drop for OpenDatabase {
     fn drop(&mut self) {
         self.0.close();
@@ -137,16 +144,19 @@ thread_local! {
     /// close handler not to evict a newer one.
     static SHARED_DB: RefCell<Option<(u64, Rc<OpenDatabase>)>> = const { RefCell::new(None) };
     static DB_GENERATION: Cell<u64> = const { Cell::new(0) };
-    /// Set once this tab is about to reload onto restored data (B Task 14
-    /// I1): no new operation reaches the database.
+    /// Set while the browser's data is being restored (B Task 14 I1, N2):
+    /// no operation of this tab's own reaches the database.
     static FENCED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Stops this tab's IndexedDB work for good, because another tab restores
-/// the browser's data and this one reloads next: the shared connection
-/// closes (its running transactions finish first, as `close` waits for
-/// them, and a new one on it fails) and every later [`open_db`] waits
-/// forever instead of opening one.
+/// How often a parked operation looks whether the fence lifted.
+const FENCE_POLL_MS: u32 = 100;
+
+/// Stops this tab's own IndexedDB work while the browser's data is
+/// restored: the shared connection closes (its running transactions finish
+/// first, as `close` waits for them, and a new one on it fails) and every
+/// later [`open_db`] waits until [`unfence_writes`], which a tab that
+/// reloads never reaches. The restore itself uses [`open_private`].
 pub(crate) fn fence_writes() {
     FENCED.with(|fenced| fenced.set(true));
     if let Some((_, db)) = SHARED_DB.with(|shared| shared.borrow_mut().take()) {
@@ -154,11 +164,24 @@ pub(crate) fn fence_writes() {
     }
 }
 
-/// Parks a caller once [`fence_writes`] ran; the page reloads first.
+/// Lets parked operations go on, for a restore that stopped before it
+/// wrote anything.
+pub(crate) fn unfence_writes() {
+    FENCED.with(|fenced| fenced.set(false));
+}
+
+/// Parks a caller while [`fence_writes`] holds.
 async fn wait_if_fenced() {
-    if FENCED.with(Cell::get) {
-        std::future::pending::<()>().await;
+    while FENCED.with(Cell::get) {
+        gloo_timers::future::TimeoutFuture::new(FENCE_POLL_MS).await;
     }
+}
+
+/// A connection of the caller's own, outside the shared cache and the
+/// fence, closed when dropped: the browser data restore reads and writes
+/// through it while this tab's other work is fenced (N2).
+pub(crate) async fn open_private() -> Result<OpenDatabase, idb::Error> {
+    Ok(OpenDatabase(open_fresh().await?))
 }
 
 /// Forget connection `generation` if it is still the cached one. The drop is
@@ -179,19 +202,22 @@ fn evict_db(generation: u64) {
 
 /// The shared connection, opening (and upgrading) the database on first use.
 pub async fn open_db() -> Result<Connection, idb::Error> {
-    wait_if_fenced().await;
-    if let Some((_, db)) = SHARED_DB.with(|shared| shared.borrow().clone()) {
-        return Ok(Connection(db));
-    }
-    let generation = DB_GENERATION.with(|g| {
-        g.set(g.get() + 1);
-        g.get()
-    });
-    let mut db = open_fresh().await?;
-    if FENCED.with(Cell::get) {
-        db.close();
+    let (generation, mut db) = loop {
         wait_if_fenced().await;
-    }
+        if let Some((_, db)) = SHARED_DB.with(|shared| shared.borrow().clone()) {
+            return Ok(Connection(db));
+        }
+        let generation = DB_GENERATION.with(|g| {
+            g.set(g.get() + 1);
+            g.get()
+        });
+        let db = open_fresh().await?;
+        // Fenced while it opened: close it and wait like any other caller.
+        if !FENCED.with(Cell::get) {
+            break (generation, db);
+        }
+        db.close();
+    };
     // Another tab wants a newer schema: let it, instead of blocking it.
     db.on_version_change(move |_| evict_db(generation));
     db.on_close(move |_| evict_db(generation));

@@ -110,6 +110,10 @@ pub const BRUHS_PAUSED: &str = RESTORED;
 pub const WEB_PART_WAITING: &str =
     "This backup has data for this browser. Restoring it replaces what this browser holds now.";
 pub const WEB_PART_DONE: &str = "This browser's data is restored. Reload other Bruhs tabs.";
+/// The browser's data was put back but the server's copy didn't go, and
+/// this tab's own writes stay stopped (B Task 14 N3).
+pub const WEB_FINISH_RETRY: &str =
+    "This browser's data is back, but Bruhs couldn't finish. Try again, or reload this page.";
 pub const NO_WEB_PART: &str = "This backup has no browser data, so this browser keeps its own.";
 
 // Kept sets and the last backup.
@@ -290,6 +294,7 @@ pub const ALL_COPY: &[&str] = &[
     BRUHS_PAUSED,
     WEB_PART_WAITING,
     WEB_PART_DONE,
+    WEB_FINISH_RETRY,
     NO_WEB_PART,
     PRE_RESTORE_LINE,
     DELETE_PRE_RESTORE_CONFIRM,

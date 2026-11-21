@@ -29,7 +29,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use zeroize::Zeroizing;
 
 use super::metadata::{self, LocalTransaction, SaveError};
-use super::{open_db, DB_VERSION};
+use super::{open_private, DB_VERSION};
 
 /// The most containers one record may nest, counting the maps tags add.
 /// The dump wraps each record in three more, and the reader takes 127.
@@ -59,7 +59,10 @@ pub struct WebRestoreReport {
 pub async fn dump_web() -> Result<WebDump, String> {
     let read_failed = |_| WEB_READ_FAILED.to_owned();
     let local_storage = read_local_storage().ok_or(WEB_READ_FAILED)?;
-    let db = open_db().await.map_err(|_| WEB_READ_FAILED.to_owned())?;
+    // Its own connection, so a fenced tab can still read (B Task 14 N2).
+    let db = open_private()
+        .await
+        .map_err(|_| WEB_READ_FAILED.to_owned())?;
     let names = db.store_names();
     let raw = read_stores(&db, &names).await.map_err(read_failed)?;
     let mut stores = BTreeMap::new();
@@ -540,7 +543,11 @@ fn check_versions(dump: &WebDump, current: u32, migrations: &[u32]) -> Result<()
 /// named. Every record is turned back into a JS value first, so a damaged
 /// dump changes nothing. Run [`unlock_dump`] (and the path rewrite) first.
 pub async fn restore_web(dump: WebDump) -> Result<WebRestoreReport, String> {
-    let db = open_db().await.map_err(|_| WEB_WRITE_FAILED.to_owned())?;
+    // Its own connection, so the restoring tab writes while its other
+    // work is fenced (B Task 14 N2).
+    let db = open_private()
+        .await
+        .map_err(|_| WEB_WRITE_FAILED.to_owned())?;
     let known = db.store_names();
     let skipped_stores = skipped_stores(&known, &dump);
     let WebDump {

@@ -424,7 +424,9 @@ impl Page {
         });
     }
 
-    fn put_back(self, stamp: String) {
+    /// Put back, confirmed. A refusal closes the confirm, notes why on the
+    /// row and calls `refocus` (N4).
+    fn put_back(self, stamp: String, refocus: impl Fn() + 'static) {
         let key = stamp.clone();
         restore::apply(
             self,
@@ -439,6 +441,7 @@ impl Page {
                     note.unreadable |= unreadable;
                     note.error = Some(message(error));
                 });
+                refocus();
             },
         );
     }
@@ -774,6 +777,16 @@ fn kept_row(page: Page, info: PreRestoreInfo) -> AnyView {
             None => {}
         }
     };
+    // After a refused Put back: Put back again, or Delete when the refusal
+    // took Put back away.
+    let refocus = move || {
+        let only_delete = note.with_untracked(|note| note.nothing_to_put_back || note.unreadable);
+        focus_after_render(if only_delete {
+            delete_ref
+        } else {
+            put_back_ref
+        });
+    };
     let delete_question = delete_pre_restore_confirm(&info);
     let put_back_question = put_back_confirm(&info);
     view! {
@@ -798,7 +811,7 @@ fn kept_row(page: Page, info: PreRestoreInfo) -> AnyView {
                         <div class="flex flex-wrap items-center gap-2">
                             <button type="button" data-backup-confirm="" class=confirm_class disabled=move || page.busy.get() on:click=move |_| match ask {
                                 Ask::Delete => page.delete_kept(stamp.get_value()),
-                                Ask::PutBack => page.put_back(stamp.get_value()),
+                                Ask::PutBack => page.put_back(stamp.get_value(), refocus),
                             }>{confirm}</button>
                             <button type="button" node_ref=decline_ref data-backup-decline="" class=BUTTON disabled=move || page.busy.get() on:click=move |_| keep()>{decline}</button>
                         </div>

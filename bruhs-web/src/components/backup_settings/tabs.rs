@@ -29,8 +29,11 @@ const RELOAD: &str = "reload";
 const GONE: &str = "gone";
 /// The answers have stopped once none came for this long.
 const QUIET_MS: u32 = 250;
+/// The restoring tab always waits this long, so a busy tab that reads the
+/// message late is still fenced before the write (N1).
+const ANSWER_FLOOR_MS: u32 = 1_000;
 /// The longest the restoring tab waits for answers.
-const ANSWER_CAP_MS: u32 = 1_000;
+const ANSWER_CAP_MS: u32 = 2_000;
 const POLL_MS: u32 = 50;
 
 thread_local! {
@@ -54,6 +57,13 @@ pub(crate) fn leaving() -> bool {
 pub(crate) fn leave() {
     LEAVING.with(|leaving| leaving.set(true));
     crate::storage::fence_writes();
+}
+
+/// Undoes [`leave`] for a restore that stopped before it wrote anything:
+/// parked writes go on and the navigation guard asks again.
+pub(crate) fn stay() {
+    LEAVING.with(|leaving| leaving.set(false));
+    crate::storage::unfence_writes();
 }
 
 /// Opens this tab's channel: when another tab restores its browser data,
@@ -115,16 +125,23 @@ pub(crate) async fn with_other_tabs_reloaded<T>(write: impl Future<Output = T>) 
     out
 }
 
-/// Waits until no `gone` came for [`QUIET_MS`], at most [`ANSWER_CAP_MS`].
+/// Waits at least [`ANSWER_FLOOR_MS`], then until no `gone` came for
+/// [`QUIET_MS`], and at most [`ANSWER_CAP_MS`].
 async fn wait_for_answers() {
     let (mut waited, mut quiet, mut heard) = (0, 0, 0);
-    while waited < ANSWER_CAP_MS && quiet < QUIET_MS {
+    while !answers_done(waited, quiet) {
         gloo_timers::future::TimeoutFuture::new(POLL_MS).await;
         waited += POLL_MS;
         let now = ANSWERS.with(Cell::get);
         quiet = if now == heard { quiet + POLL_MS } else { 0 };
         heard = now;
     }
+}
+
+/// Whether the wait is over after `waited` ms, the last `quiet` ms of
+/// them with no new answer.
+fn answers_done(waited: u32, quiet: u32) -> bool {
+    waited >= ANSWER_CAP_MS || (waited >= ANSWER_FLOOR_MS && quiet >= QUIET_MS)
 }
 
 fn post(message: &str) {
@@ -187,4 +204,22 @@ async fn hold_lock() -> Option<(Function, Promise)> {
         .as_bool()
         .unwrap_or(false)
         .then_some((release, request))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_wait_has_a_floor_and_a_cap() {
+        // No answers at all: still the full floor.
+        assert!(!answers_done(250, 250));
+        assert!(!answers_done(950, 950));
+        assert!(answers_done(1_000, 1_000));
+        // Answers still coming after the floor: wait for them to stop.
+        assert!(!answers_done(1_200, 100));
+        assert!(answers_done(1_350, 250));
+        // A tab that keeps answering can't hold the restore past the cap.
+        assert!(answers_done(2_000, 0));
+    }
 }
