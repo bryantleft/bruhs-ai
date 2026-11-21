@@ -4,8 +4,8 @@
 
 use super::lines::fill;
 use super::{
-    persona_lines, PersonaCandidate, CUT_MARK, EXPORT_MEMORY_FROM_TEMPLATE, IDENTITY_FROM,
-    MOVE_IN_EMPTY, MOVE_IN_TOO_LONG, PASTED_ANSWER_TEMPLATE,
+    is_hidden_char, persona_lines, PersonaCandidate, CUT_MARK, EXPORT_MEMORY_FROM_TEMPLATE,
+    IDENTITY_FROM, MOVE_IN_EMPTY, MOVE_IN_TOO_LONG, PASTED_ANSWER_TEMPLATE,
 };
 use crate::agent::DEFAULT_AGENT_MODEL;
 use crate::crew::BruhDraft;
@@ -235,20 +235,10 @@ fn take_chars(text: &str, n: usize) -> &str {
         .map_or(text, |(at, _)| &text[..at])
 }
 
-/// Characters a name or pasted text loses: controls (`Cc`) and the format
-/// characters (`Cf`) that hide or reorder text.
-fn is_hidden(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{feff}'
-        )
-}
-
 /// `raw` without hidden characters, trimmed and cut to
 /// [`MAX_PERSONA_NAME_CHARS`], when anything is left.
 fn clean_name(raw: Option<&str>) -> Option<String> {
-    let kept: String = raw?.chars().filter(|c| !is_hidden(*c)).collect();
+    let kept: String = raw?.chars().filter(|c| !is_hidden_char(*c)).collect();
     let name = take_chars(kept.trim(), MAX_PERSONA_NAME_CHARS).trim_end();
     (!name.is_empty()).then(|| name.to_string())
 }
@@ -319,9 +309,17 @@ pub struct MoveInStart {
 /// trimmed. Nothing to add is [`MOVE_IN_EMPTY`]; a result over
 /// [`MAX_TEXT_CHARS`] characters is [`MOVE_IN_TOO_LONG`].
 pub fn moved_in_memory(current: &str, pasted: &str, from: &str) -> Result<String, &'static str> {
+    // A line or paragraph separator keeps its break as a newline.
     let kept: String = pasted
         .chars()
-        .filter(|c| matches!(c, '\n' | '\t') || !is_hidden(*c))
+        .map(|c| {
+            if matches!(c, '\u{2028}' | '\u{2029}') {
+                '\n'
+            } else {
+                c
+            }
+        })
+        .filter(|c| matches!(c, '\n' | '\t') || !is_hidden_char(*c))
         .collect();
     let text = kept.trim();
     if text.is_empty() {
@@ -485,6 +483,12 @@ mod tests {
         assert_eq!(persona_name(None, "Hermes Agent"), "Hermes Agent");
         assert_eq!(persona_name(Some(&"n".repeat(60)), "x").chars().count(), 40);
         assert_eq!(persona_name(Some(" \u{200b}\u{7} "), "work"), "work");
+        // Bidi isolates and the Arabic letter mark reorder text: dropped.
+        assert_eq!(
+            persona_name(Some("\u{2066}Sc\u{2067}out\u{2068}\u{2069}\u{61c}"), "x"),
+            "Scout"
+        );
+        assert_eq!(persona_name(Some("\u{2069}\u{61c}"), "work"), "work");
     }
 
     #[test]
@@ -604,6 +608,12 @@ mod tests {
         assert_eq!(
             moved_in_memory("", "a\tb\r\nc\u{200b}\u{feff}d", "X").unwrap(),
             "## X\n\na\tb\ncd"
+        );
+        // Isolates and the letter mark go; line and paragraph separators
+        // keep their break as a newline.
+        assert_eq!(
+            moved_in_memory("", "a\u{2066}b\u{2069}\u{61c}\u{2028}c\u{2029}d\te", "X").unwrap(),
+            "## X\n\nab\nc\nd\te"
         );
         assert_eq!(moved_in_memory("Old", "  ", "X"), Err(MOVE_IN_EMPTY));
         assert_eq!(

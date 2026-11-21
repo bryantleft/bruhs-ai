@@ -2,7 +2,7 @@
 //! services write, stripping the markup their text carries, and cutting a
 //! part that is too long.
 
-use bruhs_models::imports::cut_short_line;
+use bruhs_models::imports::{cut_short_line, is_hidden_char};
 use bruhs_models::EpochMs;
 use serde_json::Value;
 
@@ -267,27 +267,6 @@ pub(crate) const TITLE_MAX_CHARS: usize = 120;
 /// Characters of an attachment's name a placeholder line shows.
 pub(crate) const NAME_MAX_CHARS: usize = 120;
 
-/// Whether `c` is a control (`Cc`) or one of the format characters
-/// (`Cf`) that hide or reorder text: soft hyphen, zero-width and joiner
-/// characters, bidi marks, embeddings, overrides and isolates, the byte
-/// order mark, interlinear annotations and tags.
-fn hidden(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{00ad}'
-                | '\u{061c}'
-                | '\u{180e}'
-                | '\u{200b}'..='\u{200f}'
-                | '\u{2028}'..='\u{202e}'
-                | '\u{2060}'..='\u{206f}'
-                | '\u{feff}'
-                | '\u{fff9}'..='\u{fffb}'
-                | '\u{e0001}'
-                | '\u{e0020}'..='\u{e007f}'
-        )
-}
-
 /// A provider's title or file name as one line a row can show: hidden
 /// characters dropped, whitespace runs as one space, cut to `max_chars`
 /// at a character boundary with `…`. Empty when nothing is left.
@@ -295,7 +274,7 @@ pub(crate) fn shown_name(text: &str, max_chars: usize) -> String {
     let kept: String = text
         .chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .filter(|c| !hidden(*c))
+        .filter(|c| !is_hidden_char(*c))
         .collect();
     let line = kept.split_whitespace().collect::<Vec<_>>().join(" ");
     match line.char_indices().nth(max_chars) {

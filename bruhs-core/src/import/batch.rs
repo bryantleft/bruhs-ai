@@ -27,6 +27,7 @@ use super::archive::{never_opened, walk_with, EntryKind, ExportInput, Hooks, Lim
 use super::json_stream::for_each_record;
 use super::text::{clip_part, shown_name, TITLE_MAX_CHARS};
 use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
+use bruhs_models::agent::Role;
 use bruhs_models::imports::{
     import_key, valid_batch_id, BatchCounts, ImportBatch, ImportJob, ImportJobState,
     MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT, EXPORT_TOO_LARGE,
@@ -34,7 +35,7 @@ use bruhs_models::imports::{
     MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
-    title_from_prompt, ImportCandidate, ImportSource, ImportedThread,
+    title_from_prompt, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
 };
 use bruhs_models::EpochMs;
 use rand::TryRngCore as _;
@@ -97,8 +98,8 @@ pub struct ImportHost {
 struct State {
     jobs: Mutex<HashMap<String, JobEntry>>,
     /// The id of the one read that runs, from its upload's start to its
-    /// end.
-    slot: Mutex<Option<String>>,
+    /// end, and whether it was discarded while it uploaded.
+    slot: Mutex<Option<(String, Arc<AtomicBool>)>>,
 }
 
 /// A read the job table still answers for. A ready batch is answered from
@@ -146,6 +147,8 @@ struct Index {
 /// Holds the read slot; dropping it frees the slot.
 struct Slot {
     state: Arc<State>,
+    /// Set when the upload holding the slot is discarded.
+    discarded: Arc<AtomicBool>,
 }
 
 impl Drop for Slot {
@@ -344,7 +347,10 @@ impl ImportHost {
         if !valid_batch_id(id) {
             return Err(ImportError::Gone);
         }
+        let dir = self.root.join(id);
         {
+            // Held while deciding, so an upload's finish can't start its
+            // read in between (it checks the flag under this lock).
             let mut jobs = lock(&self.state.jobs);
             match jobs.remove(id) {
                 // The read deletes its own folder once it sees this.
@@ -355,12 +361,21 @@ impl ImportHost {
                 Some(JobEntry::Failed { .. }) => return Ok(()),
                 None => {}
             }
+            // A ready batch goes even while its read still holds the slot
+            // on the way out (M5); that read touches it no more.
+            let ready = std::fs::symlink_metadata(dir.join(BATCH)).is_ok_and(|meta| meta.is_file());
+            let upload = lock(&self.state.slot)
+                .as_ref()
+                .filter(|(held, _)| !ready && held == id)
+                .map(|(_, discarded)| Arc::clone(discarded));
+            if let Some(discarded) = upload {
+                // An upload still being written stops, and its drop
+                // deletes its folder.
+                discarded.store(true, Ordering::SeqCst);
+                return Ok(());
+            }
+            drop(jobs);
         }
-        // An upload still being written deletes its own folder.
-        if lock(&self.state.slot).as_deref() == Some(id) {
-            return Err(ImportError::Gone);
-        }
-        let dir = self.root.join(id);
         if std::fs::symlink_metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
             std::fs::remove_dir_all(&dir).map_err(|error| ImportError::io(&dir, error))
         } else {
@@ -412,7 +427,7 @@ impl ImportHost {
             prune_failed(&mut jobs, now);
             jobs.keys().cloned().collect()
         };
-        busy.extend(lock(&self.state.slot).clone());
+        busy.extend(lock(&self.state.slot).as_ref().map(|(id, _)| id.clone()));
         for (id, dir) in self.batch_dirs() {
             if busy.contains(&id) {
                 continue;
@@ -464,10 +479,12 @@ impl ImportHost {
         if slot.is_some() {
             return Err(ImportError::Busy);
         }
-        *slot = Some(id.to_string());
+        let discarded = Arc::new(AtomicBool::new(false));
+        *slot = Some((id.to_string(), Arc::clone(&discarded)));
         drop(slot);
         Ok(Slot {
             state: Arc::clone(&self.state),
+            discarded,
         })
     }
 
@@ -511,15 +528,23 @@ impl ImportHost {
     ) -> Result<ImportJob, ImportError> {
         let cancel = Arc::new(AtomicBool::new(false));
         let files = to_u32(inputs.len());
-        lock(&self.state.jobs).insert(
-            id.clone(),
-            JobEntry::Reading {
-                cancel: Arc::clone(&cancel),
-                files_done: 0,
-                files,
-                conversations: 0,
-            },
-        );
+        {
+            let mut jobs = lock(&self.state.jobs);
+            if slot.discarded.load(Ordering::SeqCst) {
+                drop(jobs);
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(ImportError::Gone);
+            }
+            jobs.insert(
+                id.clone(),
+                JobEntry::Reading {
+                    cancel: Arc::clone(&cancel),
+                    files_done: 0,
+                    files,
+                    conversations: 0,
+                },
+            );
+        }
         let host = self.clone();
         let (job_id, job_dir) = (id.clone(), dir.clone());
         let spawned = std::thread::Builder::new()
@@ -550,9 +575,14 @@ impl ImportHost {
         for leftover in [INCOMING, SCRATCH] {
             let _ = std::fs::remove_dir_all(dir.join(leftover));
         }
-        // Older batches go before this one is answered as ready.
-        if result.is_ok() && !cancel.load(Ordering::SeqCst) {
+        // Older batches go before this one is answered as ready, and a
+        // failed or discarded read's folder goes before the job table is
+        // locked (M3).
+        let kept = result.is_ok() && !cancel.load(Ordering::SeqCst);
+        if kept {
             self.keep_newest(id);
+        } else {
+            let _ = std::fs::remove_dir_all(dir);
         }
         let mut jobs = lock(&self.state.jobs);
         let cancelled = cancel.load(Ordering::SeqCst);
@@ -567,24 +597,36 @@ impl ImportHost {
                 );
             }
             outcome => {
-                // Discarded while it read: `discard` took its entry.
-                let _ = std::fs::remove_dir_all(dir);
                 if cancelled {
+                    // `discard` already took its entry.
                     jobs.remove(id);
+                    drop(jobs);
+                    if kept {
+                        // Discarded after the folder was kept.
+                        let _ = std::fs::remove_dir_all(dir);
+                    }
                     tracing::info!("An export read was discarded");
                 } else if let Err(error) = outcome {
                     let message = failed_copy(&error);
-                    tracing::warn!(error = %message, "An export read failed");
                     jobs.insert(
                         id.to_string(),
                         JobEntry::Failed {
-                            message,
+                            message: message.clone(),
                             at: self.now(),
                         },
                     );
+                    drop(jobs);
+                    tracing::warn!(error = %message, "An export read failed");
                 }
             }
         }
+    }
+
+    /// Holds the read slot for `id`, as a read on its way out does
+    /// (tests).
+    #[cfg(test)]
+    pub(crate) fn hold_slot_for_test(&self, id: &str) -> impl Drop {
+        self.take_slot(id).expect("the slot is free")
     }
 
     fn read_into(
@@ -749,6 +791,7 @@ impl ImportUpload {
     /// `Refused(TOO_MANY_FILES)` past `upload_files`, else when the file
     /// can't be made.
     pub fn next_file(&mut self) -> Result<(), ImportError> {
+        self.check_discarded()?;
         if self.parts >= self.host.limits.upload_files {
             return Err(ImportError::Refused(TOO_MANY_FILES));
         }
@@ -769,6 +812,7 @@ impl ImportUpload {
     /// [`ImportError::Space`] once less than `FREE_MARGIN` would be left
     /// (checked every 64 MiB), else when the write fails.
     pub fn write(&mut self, chunk: &[u8]) -> Result<(), ImportError> {
+        self.check_discarded()?;
         if self.file.is_none() {
             self.next_file()?;
         }
@@ -792,6 +836,7 @@ impl ImportUpload {
     /// `Refused(NOT_AN_EXPORT)` when nothing was uploaded, else when the
     /// last file can't be closed or the read can't start.
     pub fn finish(mut self) -> Result<ImportJob, ImportError> {
+        self.check_discarded()?;
         self.close_part()?;
         if self.parts == 0 {
             return Err(ImportError::Refused(NOT_AN_EXPORT));
@@ -803,6 +848,19 @@ impl ImportUpload {
         self.started = true;
         self.host
             .start_read(self.id.clone(), self.dir.clone(), inputs, slot)
+    }
+
+    /// [`ImportError::Gone`] once the upload was discarded.
+    fn check_discarded(&self) -> Result<(), ImportError> {
+        let discarded = self
+            .slot
+            .as_ref()
+            .is_some_and(|slot| slot.discarded.load(Ordering::SeqCst));
+        if discarded {
+            Err(ImportError::Gone)
+        } else {
+            Ok(())
+        }
     }
 
     fn close_part(&mut self) -> Result<(), ImportError> {
@@ -936,8 +994,11 @@ impl BatchReader<'_> {
             self.conversation(v, grok::conversation(v))?;
         } else if claude_ai::is_memory(v) {
             // Memory keys with no text offer nothing.
+            // The same file in two parts of a split export comes once.
             if let Some(MemorySuggestion { text, .. }) = claude_ai::memory(v) {
-                self.memory.push(text);
+                if !self.memory.contains(&text) {
+                    self.memory.push(text);
+                }
             }
         } else if claude_ai::is_manifest(v) {
             self.claude_manifest = true;
@@ -974,7 +1035,7 @@ impl BatchReader<'_> {
             return Ok(());
         }
         let cut = nodes(candidate.source, raw) > MAX_NODES || parsed.messages.len() >= MAX_MESSAGES;
-        candidate.title = row_title(&candidate.title);
+        candidate.title = row_title(&candidate.title, &parsed.messages);
         let thread = ImportedThread::new(candidate.clone(), parsed.messages);
         let bytes = serde_json::to_vec(&thread).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
         let size = to_u64(bytes.len());
@@ -1043,8 +1104,9 @@ impl BatchReader<'_> {
             threads: std::mem::take(&mut self.index),
         };
         let index = serde_json::to_vec(&index).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
+        readable_back(&index)?;
         self.space.add(to_u64(index.len()))?;
-        write_private(&dir.join(INDEX), &index)?;
+        write_synced(&dir.join(INDEX), &index)?;
         let batch = ImportBatch {
             id: self.id.to_string(),
             candidates,
@@ -1055,9 +1117,12 @@ impl BatchReader<'_> {
             expires_at_ms,
         };
         let bytes = serde_json::to_vec(&batch).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
+        readable_back(&bytes)?;
         self.space.add(to_u64(bytes.len()))?;
+        // On disk before the rename, so a crash never leaves an empty
+        // `batch.json` in place (M4).
         let tmp = dir.join(BATCH_TMP);
-        write_private(&tmp, &bytes)?;
+        write_synced(&tmp, &bytes)?;
         let path = dir.join(BATCH);
         std::fs::rename(&tmp, &path).map_err(|error| ImportError::io(&path, error))?;
         Ok(self.counts)
@@ -1081,14 +1146,19 @@ fn nodes(source: ImportSource, raw: &Value) -> usize {
 }
 
 /// A provider's title as a row shows it: one clean line of at most
-/// [`TITLE_MAX_CHARS`].
-fn row_title(title: &str) -> String {
+/// [`TITLE_MAX_CHARS`]. A title with nothing left once cleaned names the
+/// chat by its first prompt, as a missing title does (M7).
+fn row_title(title: &str, messages: &[PortableMessage]) -> String {
     let shown = shown_name(title, TITLE_MAX_CHARS);
-    if shown.is_empty() {
-        title_from_prompt("")
-    } else {
-        shown
+    if !shown.is_empty() {
+        return shown;
     }
+    let prompt = messages
+        .iter()
+        .find(|message| message.role == Role::User)
+        .map(PortableMessage::text)
+        .unwrap_or_default();
+    title_from_prompt(&shown_name(&prompt, TITLE_MAX_CHARS))
 }
 
 /// 16 fresh OS-random bytes as 32 lowercase hex characters.
@@ -1150,6 +1220,26 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ImportError> {
     new_private_file(path)
         .and_then(|mut file| file.write_all(bytes))
         .map_err(|error| ImportError::io(path, error))
+}
+
+/// [`write_private`], then flushed to disk.
+fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), ImportError> {
+    new_private_file(path)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .map_err(|error| ImportError::io(path, error))
+}
+
+/// Refuses an `index.json` or `batch.json` that [`read_own`] couldn't read
+/// back (M4).
+fn readable_back(bytes: &[u8]) -> Result<(), ImportError> {
+    if to_u64(bytes.len()) > BATCH_JSON_MAX {
+        Err(ImportError::Refused(EXPORT_TOO_LARGE))
+    } else {
+        Ok(())
+    }
 }
 
 /// One of a batch's own files, read without following a link or waiting

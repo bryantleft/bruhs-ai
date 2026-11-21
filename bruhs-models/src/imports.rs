@@ -224,6 +224,30 @@ pub enum SkipReason {
     Unreadable,
 }
 
+/// Whether `c` hides or reorders text, so names and pasted text drop it:
+/// a control (`Cc`), or a format character (`Cf`) or separator that can
+/// disguise text. That is the soft hyphen, the Arabic letter mark, the
+/// Mongolian vowel separator, zero-width and joiner characters, bidi
+/// marks, embeddings, overrides and isolates, the line and paragraph
+/// separators, invisible operators, the byte order mark, interlinear
+/// annotations and tag characters.
+pub fn is_hidden_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00ad}'
+                | '\u{061c}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{e0001}'
+                | '\u{e0020}'..='\u{e007f}'
+        )
+}
+
 /// Whether `id` names a batch (and its job): 32 lowercase hex characters.
 pub fn valid_batch_id(id: &str) -> bool {
     crate::backup::valid_id(id)
@@ -284,6 +308,39 @@ mod tests {
             (plural(1, "chat", "chats"), plural(3, "chat", "chats")),
             ("1 chat".into(), "3 chats".into())
         );
+    }
+
+    #[test]
+    fn hidden_characters_are_controls_and_format_characters() {
+        for c in [
+            '\0',
+            '\u{7}',
+            '\n',
+            '\u{ad}',
+            '\u{61c}',
+            '\u{180e}',
+            '\u{200b}',
+            '\u{200f}',
+            '\u{2028}',
+            '\u{2029}',
+            '\u{202a}',
+            '\u{202e}',
+            '\u{2060}',
+            '\u{2064}',
+            '\u{2066}',
+            '\u{2069}',
+            '\u{206f}',
+            '\u{feff}',
+            '\u{fff9}',
+            '\u{fffb}',
+            '\u{e0001}',
+            '\u{e0041}',
+        ] {
+            assert!(is_hidden_char(c), "{:04x}", u32::from(c));
+        }
+        for c in ['a', ' ', 'é', '\u{5d0}', '🦀', '\u{2030}', '\u{fffc}'] {
+            assert!(!is_hidden_char(c), "{:04x}", u32::from(c));
+        }
     }
 
     #[test]

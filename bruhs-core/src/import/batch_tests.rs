@@ -4,12 +4,13 @@
 use super::archive::Limits;
 use super::batch::{ImportHost, ImportUpload};
 use super::test_support::{fixture, zip_of};
+use super::text::shown_name;
 use super::ImportError;
 use bruhs_models::imports::{
     ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST, EXPORT_TOO_LARGE,
     FOLDER_MISSING, GROK_BEST_EFFORT, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
-use bruhs_models::logic::portable::ImportSource;
+use bruhs_models::logic::portable::{title_from_prompt, ImportSource};
 use bruhs_models::EpochMs;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -77,7 +78,8 @@ fn upload(host: &ImportHost, files: &[&[u8]]) -> ImportJob {
     upload.finish().expect("the read starts")
 }
 
-/// Polls `id` until it isn't reading, for at most 10 s.
+/// Polls `id` until it isn't reading, for at most 60 s (a hang guard,
+/// generous for a loaded debug build).
 fn wait(host: &ImportHost, id: &str) -> ImportJob {
     let start = Instant::now();
     loop {
@@ -85,7 +87,7 @@ fn wait(host: &ImportHost, id: &str) -> ImportJob {
         if !matches!(job.state, ImportJobState::Reading { .. }) {
             return job;
         }
-        assert!(start.elapsed() < Duration::from_secs(10), "the read hangs");
+        assert!(start.elapsed() < Duration::from_secs(60), "the read hangs");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -658,6 +660,135 @@ fn rows_show_clean_titles_and_attachment_names() {
     assert!(text.contains("Attachment not imported: fdp.exe"), "{text}");
     assert!(!text.contains('\u{202e}') && !text.contains('\u{200b}'));
     assert!(!text.contains(&"x".repeat(200)));
+
+    // A title of hidden characters only names the chat by its prompt (M7).
+    let mut hidden = chatgpt_records().swap_remove(3);
+    hidden["title"] = json!("\u{2066}\u{200b}\u{7}\u{2069}");
+    let batch = read(&host, &[&json_bytes(&json!([hidden]))]);
+    let thread = host.thread(&batch.id, ImportSource::ChatGpt, &id).unwrap();
+    let prompt = thread.messages[0].text();
+    assert_eq!(batch.candidates[0].title, title_from_prompt(&prompt));
+    assert_ne!(batch.candidates[0].title, title_from_prompt(""));
+}
+
+/// Claude's attached and listed files and Grok's attachments are named
+/// cleanly too (M8).
+#[test]
+fn claude_and_grok_attachment_names_are_clean() {
+    let place = Place::new();
+    let host = place.host();
+    let hostile = format!("\u{2066}notes\u{202e}.txt\u{61c}{}", "y".repeat(300));
+    let mut claude: Value = serde_json::from_slice(fixture("claude-conversations.json")).unwrap();
+    claude[0]["chat_messages"][1]["attachments"][0]["file_name"] = json!(hostile);
+    claude[0]["chat_messages"][1]["files"][0]["file_name"] = json!(format!("\u{200b}{hostile}"));
+    let mut grok: Value = serde_json::from_slice(fixture("grok-prod-grok-backend.json")).unwrap();
+    grok["conversations"][3]["responses"][0]["response"]["file_attachments"][0] =
+        json!(format!("\u{2067}{hostile}"));
+    let batch = read(&host, &[&json_bytes(&claude), &json_bytes(&grok)]);
+    let text_of = |source, id: &str| -> String {
+        let thread = host.thread(&batch.id, source, id).unwrap();
+        thread.messages.iter().map(|m| m.text()).collect()
+    };
+    let claude_text = text_of(ImportSource::ClaudeAi, "conv-sourdough-g");
+    assert!(
+        claude_text.contains("Attached notes.txtyyy"),
+        "{claude_text}"
+    );
+    assert!(
+        claude_text.contains("Attachment not imported: notes.txtyyy"),
+        "{claude_text}"
+    );
+    let grok_text = text_of(ImportSource::Grok, "grok-files-0004");
+    assert!(
+        grok_text.contains("Attachment not imported: notes.txtyyy"),
+        "{grok_text}"
+    );
+    for text in [&claude_text, &grok_text] {
+        let hidden =
+            |c: char| bruhs_models::imports::is_hidden_char(c) && !matches!(c, '\n' | '\t');
+        assert!(!text.chars().any(hidden), "{text:?}");
+        assert!(!text.contains(&"y".repeat(200)));
+    }
+}
+
+#[test]
+fn shown_names_drop_every_hidden_character() {
+    assert_eq!(
+        shown_name(
+            "\u{2066}a\u{2067}b\u{2068}c\u{2069}d\u{61c}e\u{ad}f\u{e0041}g",
+            120
+        ),
+        "abcdefg"
+    );
+    assert_eq!(
+        shown_name("one\u{2028}two\u{2029}three\n\tfour", 120),
+        "one two three four"
+    );
+    assert_eq!(shown_name("abcdef", 3), "abc…");
+    assert_eq!(shown_name("\u{202e}\u{7}", 10), "");
+}
+
+/// The same memory file in two parts of a split export is offered once
+/// (M6).
+#[test]
+fn repeated_memory_is_offered_once() {
+    let place = Place::new();
+    let host = place.host();
+    let part = |name: &str| {
+        zip_of(
+            &[
+                (name, fixture("chatgpt-conversations.json")),
+                ("memories.json", fixture("claude-memories-account.json")),
+            ],
+            true,
+        )
+    };
+    let batch = read(
+        &host,
+        &[
+            &part("conversations-000.json"),
+            &part("conversations-001.json"),
+        ],
+    );
+    assert_eq!(batch.memory.len(), 1);
+    let text = &batch.memory[0].text;
+    assert_eq!(text.matches("weekend hikes").count(), 1, "{text}");
+    // A different memory file still joins it.
+    let both = zip_of(
+        &[
+            ("memories.json", fixture("claude-memories-account.json")),
+            ("memories/old.json", fixture("claude-memories.json")),
+        ],
+        true,
+    );
+    let batch = read(&host, &[&both]);
+    let text = &batch.memory[0].text;
+    assert!(
+        text.contains("weekend hikes") && text.contains("sourdough on weekends"),
+        "{text}"
+    );
+}
+
+/// A discard that lands while a finished read still holds the slot
+/// removes the batch; one during an upload stops it (M5).
+#[test]
+fn discard_never_misses_a_live_batch() {
+    let place = Place::new();
+    let host = place.host();
+    let batch = read(&host, &[fixture("chatgpt-conversations.json")]);
+    let hold = host.hold_slot_for_test(&batch.id);
+    host.discard(&batch.id).unwrap();
+    assert!(place.batches().is_empty() && host.job(&batch.id).is_none());
+    drop(hold);
+
+    let mut upload = host.begin_upload().unwrap();
+    upload.write(b"[").unwrap();
+    let id = upload.id().to_string();
+    host.discard(&id).unwrap();
+    assert!(matches!(upload.write(b"]"), Err(ImportError::Gone)));
+    assert!(matches!(upload.finish(), Err(ImportError::Gone)));
+    assert!(place.batches().is_empty());
+    assert!(host.begin_upload().is_ok(), "the slot is free");
 }
 
 #[test]
