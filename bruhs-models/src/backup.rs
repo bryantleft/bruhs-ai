@@ -1010,7 +1010,7 @@ mod tests {
             },
             BackupManifest {
                 desktop_root: "/Users/a\u{7}".into(),
-                ..sound.clone()
+                ..sound
             },
         ] {
             assert!(!broken.text_fits(), "{broken:?}");
