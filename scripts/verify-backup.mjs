@@ -131,7 +131,7 @@ async function startServer(server) {
   const child = spawn(serverBin, [], {
     env: {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-      HOME: server.home,
+      HOME: server.homeEnv ?? server.home,
       TMPDIR: path.join(server.home, 'tmp'),
       BRUHS_SERVER_PORT: String(server.port),
       BRUHS_WEB_DIST: server.dist,
@@ -313,6 +313,8 @@ const COPY = {
   ownerOnly: 'Open Bruhs from its own address to make or restore a backup.',
   stopping: "Bruhs is stopping to finish the restore. This page reconnects when it's back.",
   restored: 'Restored. Your bruhs are paused: resume them on their pages.',
+  quitDesktop: 'Quit the Bruhs desktop app first, or restore from the desktop app.',
+  skipped: 'Some browser data comes from a newer Bruhs, so it was left out: whiteboard_assets.',
   webIncludedPreview: 'Browser data: included.',
   locking: "Locking this browser's data",
 };
@@ -639,6 +641,23 @@ try {
     if (!clicked.clicked) throw new Error(`couldn't click ${selector}: ${clicked.reason}`);
   };
   const text = (page, selector) => page.evaluate(`document.querySelector(${js(selector)})?.innerText ?? null`);
+  // Whether focus lands on `selector` (focus moves after the next frame).
+  const focusIs = (page, selector) => page.waitFor(`!!document.activeElement?.matches(${js(selector)})`, 3000);
+  const focusedNow = (page) => page.evaluate(`(() => { const el = document.activeElement; return el ? el.tagName + [...el.attributes].filter((a) => a.name.startsWith('data-backup')).map((a) => '[' + a.name + ']').join('') + ' ' + el.innerText?.trim().slice(0, 30) : null; })()`);
+  const SHIFT = 8;
+  // Holds the desktop's instance lock, as a running desktop app does, so a
+  // page's Replace is refused (QUIT_DESKTOP_FIRST).
+  const holdInstanceLock = async (server) => {
+    fs.mkdirSync(server.desktop, { recursive: true, mode: 0o700 });
+    const file = path.join(server.desktop, 'desktop.instance.lock');
+    const holder = spawn('python3', ['-c', 'import fcntl, os, sys, time\nfd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\nfcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\nprint("held", flush=True)\ntime.sleep(600)', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    children.add(holder);
+    await new Promise((resolve, reject) => {
+      holder.stdout.once('data', resolve);
+      holder.once('exit', () => reject(new Error('the lock holder exited')));
+    });
+    return holder;
+  };
 
   // Seed the web data: A's two threads, a project and the metadata records;
   // B's own earlier data, which a browser restore keeps aside.
@@ -827,7 +846,7 @@ try {
     return { stopping, stoppingText, back: back && applierGone === true, timing, restoredText: await text(page, '[data-backup-restored]') };
   };
   let replaced = null;
-  await check('On B: a wrong password says WRONG_PASSWORD; the right one previews the path rewrite, counts and browser data; Cancel discards it; open again and Replace my data: STOPPING, B exits, restarts and says RESTORED', async () => {
+  await check('On B: a wrong password says WRONG_PASSWORD; the right one previews the path rewrite, counts and browser data, focused on Cancel; Cancel by keyboard discards it and focuses Choose backup file; a refused Replace keeps focus; Replace my data: STOPPING, B exits, restarts and says RESTORED', async () => {
     await openSettings(pageB);
     await openBackup(pageB, backupFile, wrongPassword);
     await pageB.waitFor(`!!document.querySelector('[data-backup-restore-error]')?.innerText.trim()`, 60000);
@@ -839,8 +858,13 @@ try {
     await pageB.evaluate(`document.querySelector('[data-backup-preview]').scrollIntoView({ block: 'center' })`);
     await shoot(pageB, 'b-preview-1280x800');
     const stagedBefore = (await overview(B)).staged?.preview?.id ?? null;
-    await clickOn(pageB, '[data-backup-cancel]');
+    // D-I2: a new preview focuses its Cancel; Cancel by keyboard hands
+    // focus to Choose backup file.
+    const focus = { preview: await focusIs(pageB, '[data-backup-preview] [data-backup-cancel]'), previewAt: await focusedNow(pageB) };
+    await pageB.press('Enter');
     await pageB.waitFor(`!document.querySelector('[data-backup-preview]')`, 15000);
+    focus.choose = await focusIs(pageB, '[data-backup-choose]');
+    focus.chooseAt = await focusedNow(pageB);
     const afterCancel = await until('the staged set goes', async () => ((await overview(B)).staged === null ? true : null), 15000).catch(() => false);
     const stagingLeft = (() => {
       try {
@@ -851,6 +875,19 @@ try {
     })();
     await openBackup(pageB, backupFile, password);
     if (!(await pageB.waitFor(`!!document.querySelector('[data-backup-preview]')`, 120000))) throw new Error('no preview the second time');
+    focus.secondPreview = await focusIs(pageB, '[data-backup-preview] [data-backup-cancel]');
+    // A refused Replace, by keyboard, keeps focus on Replace and the preview.
+    const holder = await holdInstanceLock(B);
+    await pageB.press('Tab', SHIFT);
+    focus.onReplace = await focusIs(pageB, '[data-backup-replace]');
+    await pageB.press('Enter');
+    await pageB.waitFor(`!!document.querySelector('[data-backup-restore-error]')?.innerText.trim()`, 15000);
+    const refused = (await text(pageB, '[data-backup-restore-error]'))?.trim();
+    focus.stayed = await focusIs(pageB, '[data-backup-replace]');
+    focus.stayedAt = await focusedNow(pageB);
+    focus.previewKept = await pageB.evaluate(`!!document.querySelector('[data-backup-preview]')`);
+    await stopChild(holder);
+    measured.restoreFocus = { ...focus, refused };
 
     // Other tabs on B while the restore runs: one with an unsent draft, one
     // that went back and forward (see check 8).
@@ -887,11 +924,12 @@ try {
     replaced.outcome = outcome;
     await shoot(pageB, 'b-restored-1280x800');
     const rewrite = `Paths under ${A.home} become ${B.home}.`;
-    record('On B: a wrong password says WRONG_PASSWORD; the right one previews the path rewrite, counts and browser data; Cancel discards it; open again and Replace my data: STOPPING, B exits, restarts and says RESTORED',
+    record('On B: a wrong password says WRONG_PASSWORD; the right one previews the path rewrite, counts and browser data, focused on Cancel; Cancel by keyboard discards it and focuses Choose backup file; a refused Replace keeps focus; Replace my data: STOPPING, B exits, restarts and says RESTORED',
       wrong === COPY.wrongPassword && lines.includes(rewrite) && lines.some((line) => /^1 bruh, 3 vault entries, 3 keychain items, \d+ files, .+\.$/.test(line)) && lines.includes(COPY.webIncludedPreview)
         && fieldEmpty && !!stagedBefore && afterCancel === true && stagingLeft === 0
+        && focus.preview && focus.choose && focus.secondPreview && focus.onReplace && refused === COPY.quitDesktop && focus.stayed && focus.previewKept
         && outcome.stopping && outcome.stoppingText?.includes(COPY.stopping) && outcome.back && outcome.restoredText?.includes(COPY.restored),
-      `wrong ${js(wrong)}; preview ${js(lines)}; field emptied ${fieldEmpty}; staged ${!!stagedBefore}, after Cancel gone ${afterCancel}, staging entries ${stagingLeft}; stopping ${js(outcome.stoppingText)}; restored ${js(outcome.restoredText)}; timing ${js(outcome.timing)}`);
+      `wrong ${js(wrong)}; preview ${js(lines)}; field emptied ${fieldEmpty}; focus ${js(measured.restoreFocus)}; staged ${!!stagedBefore}, after Cancel gone ${afterCancel}, staging entries ${stagingLeft}; stopping ${js(outcome.stoppingText)}; restored ${js(outcome.restoredText)}; timing ${js(outcome.timing)}`);
   });
 
   // 7. B's server data after the restart.
@@ -999,12 +1037,24 @@ try {
   });
 
   // 10. Put back, then delete.
-  await check("Put back on B restores B's earlier (empty) data and keeps the restored set aside; deleting it removes its folder and seal key", async () => {
+  await check("Put back on B restores B's earlier (empty) data and keeps the restored set aside; deleting it removes its folder and seal key; each confirm takes focus on Keep and Escape hands it back", async () => {
     const before = await overview(B);
     const stamp = before.pre_restores[0]?.stamp;
     await openSettings(pageB);
-    await clickOn(pageB, '[data-backup-put-back]');
-    await pageB.waitFor(`!!document.querySelector('[data-backup-kept-confirm]')`, 5000);
+    // Each confirm takes focus on its own Keep; Escape hands it back.
+    const confirmFocus = async (button) => {
+      await pageB.evaluate(`document.querySelector('${button}').focus()`);
+      await pageB.press('Enter');
+      await pageB.waitFor(`!!document.querySelector('[data-backup-kept-confirm]')`, 5000);
+      const keep = await focusIs(pageB, '[data-backup-kept-confirm] [data-backup-decline]');
+      const keepAt = await focusedNow(pageB);
+      await pageB.press('Escape');
+      const back = await focusIs(pageB, button) && (await pageB.evaluate(`!document.querySelector('[data-backup-kept-confirm]')`));
+      await pageB.press('Enter');
+      await pageB.waitFor(`!!document.querySelector('[data-backup-kept-confirm]')`, 5000);
+      return { keep, keepAt, back };
+    };
+    const putBackFocus = await confirmFocus('[data-backup-put-back]');
     await shoot(pageB, 'b-put-back-confirm-1280x800');
     const outcome = await replaceAndRestart(B, pageB, () => clickOn(pageB, '[data-backup-confirm]'), 'b-put-back');
     const state = await snapshot(B);
@@ -1017,16 +1067,16 @@ try {
     const folders = (setStamp) => [B.core, B.desktop].map((rootDir) => path.join(rootDir, 'backups', `pre-restore-${setStamp}`)).filter((folder) => fs.existsSync(folder));
     const foldersBefore = restoredSet ? folders(restoredSet.stamp).length : 0;
     await openSettings(pageB);
-    await clickOn(pageB, '[data-backup-delete]');
-    await pageB.waitFor(`!!document.querySelector('[data-backup-kept-confirm]')`, 5000);
+    const deleteFocus = await confirmFocus('[data-backup-delete]');
     await clickOn(pageB, '[data-backup-confirm]');
     const gone = await until('the set goes', async () => ((await overview(B)).pre_restores.length === 0 ? true : null), 20000).catch(() => false);
     await shoot(pageB, 'b-after-delete-1280x800');
-    record("Put back on B restores B's earlier (empty) data and keeps the restored set aside; deleting it removes its folder and seal key",
+    record("Put back on B restores B's earlier (empty) data and keeps the restored set aside; deleting it removes its folder and seal key; each confirm takes focus on Keep and Escape hands it back",
       !!stamp && outcome.back && js(state.bruhs.map((bruh) => bruh.agent_id)) === js(bAtStart.bruhs.map((bruh) => bruh.agent_id)) && state.rooms.length === bAtStart.rooms.length && vault.entries.length === bVaultAtStart && mail === '0'
         && after.pre_restores.length === 1 && !!restoredSet && sealBefore >= 1 && foldersBefore >= 1
-        && gone === true && folders(restoredSet.stamp).length === 0 && sealSlots(restoredSet.stamp).length === 0,
-      `put back ${js(outcome.restoredText)}; bruhs ${state.bruhs.length}, rooms ${state.rooms.length}, vault ${vault.entries.length}, mail rows ${mail}; kept after ${after.pre_restores.length}; seal slots before delete ${sealBefore}, folders ${foldersBefore}; deleted ${gone}, folders left ${restoredSet ? folders(restoredSet.stamp).length : '?'}, seal slots left ${restoredSet ? sealSlots(restoredSet.stamp).length : '?'}; backup slots ${js(Object.keys(items(B)).filter((slot) => slot.includes('bruhs-ai-backup')))}; timing ${js(outcome.timing)}`);
+        && gone === true && folders(restoredSet.stamp).length === 0 && sealSlots(restoredSet.stamp).length === 0
+        && putBackFocus.keep && putBackFocus.back && deleteFocus.keep && deleteFocus.back,
+      `confirm focus: Put back ${js(putBackFocus)}, Delete ${js(deleteFocus)}; put back ${js(outcome.restoredText)}; bruhs ${state.bruhs.length}, rooms ${state.rooms.length}, vault ${vault.entries.length}, mail rows ${mail}; kept after ${after.pre_restores.length}; seal slots before delete ${sealBefore}, folders ${foldersBefore}; deleted ${gone}, folders left ${restoredSet ? folders(restoredSet.stamp).length : '?'}, seal slots left ${restoredSet ? sealSlots(restoredSet.stamp).length : '?'}; backup slots ${js(Object.keys(items(B)).filter((slot) => slot.includes('bruhs-ai-backup')))}; timing ${js(outcome.timing)}`);
   });
 
   // 11. A crafted archive.
@@ -1149,6 +1199,129 @@ try {
         `file ${measured.largeFileMiB} MiB; dump ${js(dump)}; restore ${js(restore)}, its reload ${js(measured.largeRestoreReload)}; card said ${js(restoreError?.slice(0, 200))}; same bytes ${back?.large?.sha === largeSha}; exit ${js(outcome.timing)}`);
     });
   }
+
+  // 15. N-I1: a HOME given with a trailing slash.
+  let slashFile = null;
+  await check('A HOME with a trailing slash (home-a/) makes a backup, which opens on the same server with no path rewrite (N-I1)', async () => {
+    await stopChild(A.proc);
+    A.homeEnv = `${A.home}/`;
+    await startServer(A);
+    await openSettings(pageA);
+    // Check 13's 100 MB record goes first, so this backup stays small.
+    await pageA.evaluate(`new Promise((resolve, reject) => {
+      const open = indexedDB.open('bruhs');
+      open.onsuccess = () => {
+        const db = open.result;
+        const tx = db.transaction('metadata', 'readwrite');
+        tx.objectStore('metadata').delete(IDBKeyRange.bound('bruhs.qa.large.', 'bruhs.qa.large.\uffff'));
+        tx.oncomplete = () => { db.close(); resolve(true); };
+        tx.onerror = () => reject(new Error(String(tx.error)));
+      };
+      open.onerror = () => reject(new Error(String(open.error)));
+    })`);
+    const before = new Set(fs.readdirSync(downloads));
+    await typeInto(pageA, '[data-backup-make] input[type=password]', password);
+    await pageA.press('Tab');
+    await pageA.type(password);
+    await sleep(200);
+    await pageA.press('Enter');
+    if (!(await pageA.waitFor(`!!document.querySelector('[data-backup-made]') || !!document.querySelector('[data-backup-make-error]')?.innerText.trim()`, 300000))) throw new Error('the backup never finished');
+    const made = await text(pageA, '[data-backup-make-status]');
+    const error = (await text(pageA, '[data-backup-make-error]'))?.trim();
+    const file = await until('the download', () => fs.readdirSync(downloads).find((name) => !before.has(name) && name.endsWith('.bruhsbak')) ?? null, 120000).catch(() => null);
+    if (file) slashFile = path.join(downloads, file);
+    let lines = [];
+    if (slashFile) {
+      await openSettings(pageA);
+      await openBackup(pageA, slashFile, password);
+      if (await pageA.waitFor(`!!document.querySelector('[data-backup-preview]')`, 300000)) {
+        lines = await pageA.evaluate(`[...document.querySelectorAll('[data-backup-preview-line]')].map((li) => li.innerText.trim())`);
+        await clickOn(pageA, '[data-backup-preview] [data-backup-cancel]');
+        await pageA.waitFor(`!document.querySelector('[data-backup-preview]')`, 15000);
+      }
+    }
+    record('A HOME with a trailing slash (home-a/) makes a backup, which opens on the same server with no path rewrite (N-I1)',
+      !error && /^Backup ready: /.test(made ?? '') && !!slashFile && lines.length > 0 && !lines.some((line) => line.startsWith('Paths under')),
+      `HOME ${js(path.basename(A.homeEnv) + '/')}; result ${js(made)}; error ${js(error)}; file ${!!slashFile}; preview ${js(lines.filter((line) => !line.startsWith('Made')))}`);
+  });
+
+  // 16. The skipped-stores line, across the tab's reload.
+  let pageS = null;
+  await check("A browser restore into a database without one of the dump's stores names it, and the line shows after the tab's reload (WEB_STORES_SKIPPED)", async () => {
+    if (!slashFile) throw new Error('no backup from check 15');
+    await openSettings(pageA);
+    await openBackup(pageA, slashFile, password);
+    if (!(await pageA.waitFor(`!!document.querySelector('[data-backup-preview]')`, 300000))) throw new Error('no preview');
+    const outcome = await replaceAndRestart(A, pageA, () => clickOn(pageA, '[data-backup-replace]'), 'a-skipped');
+    // A fresh browser whose database has every store but whiteboard_assets,
+    // at this build's version, made on a same-origin page that isn't the app.
+    const contextS = await newContext(chrome.browser);
+    pageS = await open(A, contextS);
+    const css = (await (await fetch(`${A.base}/`)).text()).match(/href="\/?([^"]+\.css)"/)?.[1];
+    await pageS.goto(`${A.base}/${css}`);
+    await pageS.waitFor(`document.readyState === 'complete'`, 10000);
+    const version = await pageS.evaluate(`new Promise((resolve, reject) => {
+      const stores = ${js([['whiteboards', 'id'], ['whiteboard_index', 'id'], ['metadata', 'key'], ['threads', 'id'], ['messages', 'thread_id'], ['work_items', 'id'], ['projects', 'id'], ['events', 'id'], ['calendars', 'id'], ['meetings', 'id'], ['meeting_notes', 'id'], ['meeting_generations', 'id'], ['transcript_segments', 'id'], ['people', 'id'], ['captures', 'id'], ['knowledge_documents', 'id'], ['source_clips', 'id'], ['knowledge_attachments', 'id'], ['inbox_conversations', 'id'], ['relationships', 'person_id']])};
+      const open = indexedDB.open('bruhs', 13);
+      open.onupgradeneeded = () => {
+        for (const [name, key] of stores) {
+          const store = open.result.createObjectStore(name, { keyPath: key });
+          if (name === 'transcript_segments') store.createIndex('by_meeting', 'meeting_id');
+        }
+      };
+      open.onsuccess = () => { const db = open.result; const v = db.version; const names = [...db.objectStoreNames]; db.close(); resolve({ v, names: names.length }); };
+      open.onerror = () => reject(new Error(String(open.error)));
+    })`);
+    await openSettings(pageS);
+    if (!(await pageS.waitFor(`!!document.querySelector('[data-backup-browser]')`, 20000))) throw new Error('no browser-data card in the fresh browser');
+    const field = await pageS.evaluate(`!!document.querySelector('[data-backup-browser] input[type=password]')`);
+    await typeInto(pageS, '[data-backup-browser] input[type=password]', password);
+    await pageS.evaluate(`window.__beforeRestore = 1`);
+    await clickOn(pageS, '[data-backup-restore-browser]');
+    const reloaded = await pageS.waitFor(`window.__beforeRestore === undefined && document.readyState === 'complete'`, 120000);
+    await pageS.waitFor(settled, 60000);
+    const shown = await pageS.waitFor(`document.getElementById('backup')?.innerText.includes(${js(COPY.skipped)})`, 10000);
+    await pageS.evaluate(`document.getElementById('backup').scrollIntoView({ block: 'start' })`);
+    await shoot(pageS, 'a-skipped-stores-1280x800');
+    // Shown once: the next visit doesn't repeat it.
+    await openSettings(pageS);
+    await sleep(1500);
+    const again = await pageS.evaluate(`document.getElementById('backup')?.innerText.includes(${js(COPY.skipped)})`);
+    record("A browser restore into a database without one of the dump's stores names it, and the line shows after the tab's reload (WEB_STORES_SKIPPED)",
+      outcome.back && version.v === 13 && version.names === 20 && field && reloaded && shown && !again,
+      `restore ${js(outcome.restoredText)}; fresh database v${version.v} with ${version.names} stores; card asked for the password ${field}; reloaded ${reloaded}; line shown ${shown}; shown again on the next visit ${again}`);
+  });
+
+  // 17. D-I1: leaving Settings while the browser restore runs.
+  await check('Leaving Settings mid browser restore leaves no panic and Settings opens again (D-I1)', async () => {
+    if (!pageS) throw new Error('no page from check 16');
+    // The set check 16's browser restore filled holds this browser's
+    // previous data; putting it back waits on a browser restore again.
+    const kept = (await overview(A)).pre_restores.filter((set) => set.has_web_part).sort((x, y) => y.made_at_ms - x.made_at_ms)[0];
+    if (!kept) throw new Error('no kept set with browser data');
+    const apply = await request(A, 'POST', '/api/backup/restore/apply', { source: { type: 'pre_restore', stamp: kept.stamp }, replace: true });
+    if (apply.status !== 200) throw new Error(`put back: ${apply.status} ${apply.text}`);
+    const exit = await Promise.race([A.exited, sleep(90000).then(() => null)]);
+    if (!exit) throw new Error('A did not exit');
+    await startServer(A);
+    await openSettings(pageS);
+    if (!(await pageS.waitFor(`!!document.querySelector('[data-backup-browser]')`, 20000))) throw new Error('no browser-data card after the put back');
+    const panicsBefore = panics.length;
+    const errorsBefore = pageS.runtimeErrors.length;
+    await typeInto(pageS, '[data-backup-browser] input[type=password]', password);
+    await clickOn(pageS, '[data-backup-restore-browser]');
+    await pageS.evaluate(`location.hash = '#/'`);
+    const leftAt = await pageS.evaluate(`({ hash: location.hash, done: !!document.querySelector('[data-backup-browser-done]') })`);
+    await sleep(8000);
+    await pageS.appReady(60000);
+    const waiting = (await overview(A)).web_part_waiting;
+    await openSettings(pageS);
+    const again = await pageS.evaluate(`!!document.getElementById('backup')`);
+    const newErrors = pageS.runtimeErrors.slice(errorsBefore).filter(Boolean).map((error) => String(error).slice(0, 160));
+    record('Leaving Settings mid browser restore leaves no panic and Settings opens again (D-I1)',
+      panics.length === panicsBefore && again,
+      `left at ${js(leftAt)}; new panics ${panics.length - panicsBefore}; page errors since ${js(newErrors)}; browser part still waiting ${waiting}; Settings again ${again}`);
+  });
 
   const pageErrors = pages.flatMap((page) => page.runtimeErrors.filter(Boolean).map((error) => String(error).slice(0, 200)));
   record('No panics in the page log', panics.length === 0, `${panics.join(' | ')}${pageErrors.length ? `; other page errors: ${pageErrors.slice(0, 5).join(' | ')}` : ''}`);
