@@ -1,5 +1,6 @@
 //! Helpers for import tests in this crate and in the server's tests
-//! (`test-support` feature): export archives built in code.
+//! (`test-support` feature): export archives built in code, and the
+//! synthetic fixtures under `src/import/fixtures/`.
 
 use std::io::{Cursor, Write as _};
 use zip::write::SimpleFileOptions;
@@ -27,4 +28,29 @@ pub fn zip_of(entries: &[(&str, &[u8])], deflate: bool) -> Vec<u8> {
         writer.write_all(bytes).expect("a test entry is written");
     }
     writer.finish().expect("a test ZIP finishes").into_inner()
+}
+
+/// Every fixture under `src/import/fixtures/`, by file name. All are
+/// hand-written and synthetic (`fixtures_are_synthetic`).
+const FIXTURES: &[(&str, &[u8])] = &[
+    (
+        "chatgpt-conversations.json",
+        include_bytes!("fixtures/chatgpt-conversations.json"),
+    ),
+    (
+        "chatgpt-export_manifest.json",
+        include_bytes!("fixtures/chatgpt-export_manifest.json"),
+    ),
+];
+
+/// The fixture file `name`, from `src/import/fixtures/`.
+///
+/// # Panics
+///
+/// When no fixture has that name.
+pub fn fixture(name: &str) -> &'static [u8] {
+    match FIXTURES.iter().find(|(fixture, _)| *fixture == name) {
+        Some((_, bytes)) => bytes,
+        None => panic!("no import fixture named {name}"),
+    }
 }

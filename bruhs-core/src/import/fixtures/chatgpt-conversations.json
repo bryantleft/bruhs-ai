@@ -1,0 +1,383 @@
+[
+  {
+    "title": "Lisbon on a budget",
+    "create_time": 1763000000.0,
+    "update_time": 1763000300.5,
+    "conversation_id": "conv-lisbon-a",
+    "id": "conv-lisbon-a",
+    "current_node": "a2",
+    "default_model_slug": "gpt-5",
+    "gizmo_id": null,
+    "is_archived": false,
+    "mapping": {
+      "root": { "id": "root", "message": null, "parent": null, "children": ["sys"] },
+      "sys": {
+        "id": "sys",
+        "parent": "root",
+        "children": ["uctx"],
+        "message": {
+          "id": "sys",
+          "author": { "role": "system", "name": null, "metadata": {} },
+          "create_time": null,
+          "content": { "content_type": "text", "parts": ["You are a helpful travel planner."] },
+          "metadata": { "is_visually_hidden_from_conversation": true },
+          "recipient": "all"
+        }
+      },
+      "uctx": {
+        "id": "uctx",
+        "parent": "sys",
+        "children": ["mctx"],
+        "message": {
+          "id": "uctx",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1763000001.0,
+          "content": {
+            "content_type": "user_editable_context",
+            "user_profile": "Likes walking tours.",
+            "user_instructions": "Keep answers short."
+          },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "mctx": {
+        "id": "mctx",
+        "parent": "uctx",
+        "children": ["u1", "u2"],
+        "message": {
+          "id": "mctx",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000002.0,
+          "content": {
+            "content_type": "model_editable_context",
+            "model_set_context": "Planning a spring trip to Lisbon."
+          },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "u1": {
+        "id": "u1",
+        "parent": "mctx",
+        "children": ["a1"],
+        "message": {
+          "id": "u1",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1763000010.0,
+          "content": { "content_type": "text", "parts": ["Plan three days in Lisbon."] },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "a1": {
+        "id": "a1",
+        "parent": "u1",
+        "children": [],
+        "message": {
+          "id": "a1",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000020.0,
+          "content": { "content_type": "text", "parts": ["Day one: the castle and Alfama."] },
+          "metadata": { "model_slug": "gpt-5" },
+          "recipient": "all"
+        }
+      },
+      "u2": {
+        "id": "u2",
+        "parent": "mctx",
+        "children": ["t2"],
+        "message": {
+          "id": "u2",
+          "author": { "role": "user", "name": null, "metadata": {} },
+          "create_time": 1763000100.0,
+          "content": { "content_type": "text", "parts": ["Plan three days in Lisbon on a budget."] },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "t2": {
+        "id": "t2",
+        "parent": "u2",
+        "children": ["r2"],
+        "message": {
+          "id": "t2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000110.0,
+          "content": {
+            "content_type": "thoughts",
+            "thoughts": [
+              { "summary": "Budget picks", "content": "Look for free viewpoints." },
+              { "summary": "", "content": "Trams are cheap." }
+            ],
+            "source_analysis_msg_id": "t2-source"
+          },
+          "metadata": { "model_slug": "gpt-5" },
+          "recipient": "all"
+        }
+      },
+      "r2": {
+        "id": "r2",
+        "parent": "t2",
+        "children": ["c2"],
+        "message": {
+          "id": "r2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000111.0,
+          "content": { "content_type": "reasoning_recap", "content": "Thought for 4s" },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "c2": {
+        "id": "c2",
+        "parent": "r2",
+        "children": ["o2"],
+        "message": {
+          "id": "c2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000120.0,
+          "content": { "content_type": "code", "language": "unknown", "text": "print(3 * 20)" },
+          "metadata": {},
+          "recipient": "python"
+        }
+      },
+      "o2": {
+        "id": "o2",
+        "parent": "c2",
+        "children": ["h2"],
+        "message": {
+          "id": "o2",
+          "author": { "role": "tool", "name": "python", "metadata": {} },
+          "create_time": 1763000121.0,
+          "content": { "content_type": "execution_output", "text": "60" },
+          "metadata": {},
+          "recipient": "all"
+        }
+      },
+      "h2": {
+        "id": "h2",
+        "parent": "o2",
+        "children": ["a2"],
+        "message": {
+          "id": "h2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000130.0,
+          "content": { "content_type": "text", "parts": ["A note the owner never saw."] },
+          "metadata": { "is_visually_hidden_from_conversation": true },
+          "recipient": "all"
+        }
+      },
+      "a2": {
+        "id": "a2",
+        "parent": "h2",
+        "children": [],
+        "message": {
+          "id": "a2",
+          "author": { "role": "assistant", "name": null, "metadata": {} },
+          "create_time": 1763000200.0,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Day one: free viewpoints in Alfama.citeturn0search1 Day two: ride tram 28.【11†source】\n:::writing{variant=\"email\" id=\"1\"}\nSubject: Lisbon plan\nSee you at the castle.\n:::\nEnjoy the trip."
+            ]
+          },
+          "metadata": { "model_slug": "gpt-5" },
+          "recipient": "all"
+        }
+      }
+    }
+  },
+  {
+    "title": "Sourdough timing",
+    "create_time": 1763100000.25,
+    "update_time": 1763100400.75,
+    "conversation_id": "conv-sourdough-b",
+    "current_node": "c-asst",
+    "default_model_slug": "gpt-5",
+    "mapping": {
+      "b-asst": {
+        "id": "b-asst",
+        "parent": "m-user",
+        "message": {
+          "id": "b-asst",
+          "author": { "role": "assistant" },
+          "create_time": 1763100100.5,
+          "content": { "content_type": "text", "parts": ["Four to six hours at room temperature."] },
+          "metadata": { "model_slug": "gpt-5" }
+        }
+      },
+      "c-asst": {
+        "id": "c-asst",
+        "parent": "y-user",
+        "message": {
+          "id": "c-asst",
+          "author": { "role": "assistant" },
+          "create_time": 1763100300.5,
+          "content": { "content_type": "text", "parts": ["Twelve to sixteen hours works well."] },
+          "metadata": { "model_slug": "gpt-5" }
+        }
+      },
+      "m-user": {
+        "id": "m-user",
+        "parent": "z-root",
+        "message": {
+          "id": "m-user",
+          "author": { "role": "user" },
+          "create_time": 1763100050.25,
+          "content": { "content_type": "text", "parts": ["How long should sourdough proof?"] },
+          "metadata": {}
+        }
+      },
+      "y-user": {
+        "id": "y-user",
+        "parent": "b-asst",
+        "message": {
+          "id": "y-user",
+          "author": { "role": "user" },
+          "create_time": 1763100200.25,
+          "content": { "content_type": "text", "parts": ["And overnight in the fridge?"] },
+          "metadata": {}
+        }
+      },
+      "z-root": { "id": "z-root", "message": null, "parent": null }
+    }
+  },
+  {
+    "title": "Balcony herbs",
+    "create_time": 1763200000,
+    "update_time": 1763200060,
+    "conversation_id": "conv-herbs-c",
+    "current_node": "gone-node",
+    "mapping": {
+      "root": { "id": "root", "message": null, "parent": null, "children": ["u1"] },
+      "u1": {
+        "id": "u1",
+        "parent": "root",
+        "children": ["a1", "a1b"],
+        "message": {
+          "id": "u1",
+          "author": { "role": "user" },
+          "create_time": 1763200010,
+          "content": { "content_type": "text", "parts": ["Which herbs grow on a balcony?"] },
+          "metadata": {}
+        }
+      },
+      "a1": {
+        "id": "a1",
+        "parent": "u1",
+        "children": [],
+        "message": {
+          "id": "a1",
+          "author": { "role": "assistant" },
+          "create_time": 1763200020,
+          "content": { "content_type": "text", "parts": ["Basil and mint."] },
+          "metadata": {}
+        }
+      },
+      "a1b": {
+        "id": "a1b",
+        "parent": "u1",
+        "children": [],
+        "message": {
+          "id": "a1b",
+          "author": { "role": "assistant" },
+          "create_time": 1763200050,
+          "content": { "content_type": "text", "parts": ["Rosemary and thyme."] },
+          "metadata": {}
+        }
+      }
+    }
+  },
+  {
+    "title": "Kitchen layout",
+    "create_time": 1763300000.0,
+    "update_time": 1763300100.0,
+    "conversation_id": "conv-kitchen-d",
+    "current_node": "u2",
+    "mapping": {
+      "root": { "id": "root", "message": null, "parent": null, "children": ["u1"] },
+      "u1": {
+        "id": "u1",
+        "parent": "root",
+        "children": ["a1"],
+        "message": {
+          "id": "u1",
+          "author": { "role": "user" },
+          "create_time": 1763300010.0,
+          "content": {
+            "content_type": "multimodal_text",
+            "parts": [
+              {
+                "content_type": "image_asset_pointer",
+                "asset_pointer": "sediment://file_000000000000000000000001",
+                "size_bytes": 1024,
+                "width": 640,
+                "height": 480
+              },
+              "Here is the kitchen floor plan."
+            ]
+          },
+          "metadata": {
+            "attachments": [
+              { "id": "file-000000000000000000000002", "name": "plan.pdf", "mime_type": "application/pdf", "size": 2048 }
+            ]
+          }
+        }
+      },
+      "a1": {
+        "id": "a1",
+        "parent": "u1",
+        "children": ["u2"],
+        "message": {
+          "id": "a1",
+          "author": { "role": "assistant" },
+          "create_time": 1763300020.0,
+          "content": { "content_type": "text", "parts": ["The island fits with room to walk."] },
+          "metadata": {}
+        }
+      },
+      "u2": {
+        "id": "u2",
+        "parent": "a1",
+        "children": [],
+        "message": {
+          "id": "u2",
+          "author": { "role": "user" },
+          "create_time": 1763300030.0,
+          "content": {
+            "content_type": "multimodal_text",
+            "parts": [
+              { "content_type": "audio_transcription", "text": "Can we move the sink under the window?", "direction": "in" },
+              { "content_type": "audio_asset_pointer", "asset_pointer": "sediment://file_000000000000000000000003" }
+            ]
+          },
+          "metadata": {}
+        }
+      }
+    }
+  },
+  {
+    "title": "Only setup",
+    "create_time": 1763400000.0,
+    "update_time": 1763400000.0,
+    "conversation_id": "conv-empty-e",
+    "current_node": "sys",
+    "mapping": {
+      "root": { "id": "root", "message": null, "parent": null, "children": ["sys"] },
+      "sys": {
+        "id": "sys",
+        "parent": "root",
+        "children": [],
+        "message": {
+          "id": "sys",
+          "author": { "role": "system" },
+          "create_time": null,
+          "content": { "content_type": "text", "parts": ["You are a helpful assistant."] },
+          "metadata": {}
+        }
+      }
+    }
+  },
+  {}
+]

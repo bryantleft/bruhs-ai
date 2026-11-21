@@ -11,6 +11,8 @@
 
 #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod archive;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod chatgpt;
 mod claude;
 mod codex;
 mod cursor;
@@ -21,6 +23,8 @@ mod json_stream;
 mod t3;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod text;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use archive::Limits;
@@ -128,6 +132,15 @@ impl ImportError {
             error,
         }
     }
+}
+
+/// One conversation read from a chat service's export: the visible
+/// branch's messages, and how many other branches stayed behind.
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+pub(crate) struct ParsedConversation {
+    pub candidate: ImportCandidate,
+    pub messages: Vec<bruhs_models::logic::portable::PortableMessage>,
+    pub dropped_branches: u32,
 }
 
 /// Default and largest number of candidates a listing returns.
@@ -408,5 +421,7 @@ impl Transcript {
 
 #[cfg(test)]
 mod archive_tests;
+#[cfg(test)]
+mod chatgpt_tests;
 #[cfg(test)]
 mod tests;
