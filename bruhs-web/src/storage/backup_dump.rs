@@ -7,10 +7,6 @@
 //! Only ciphertext leaves the page. The password is held in `Zeroizing` for
 //! the call and is never logged; the random bytes come from
 //! `crypto.getRandomValues` and nothing stands in for it.
-#![expect(
-    dead_code,
-    reason = "used from Task 14: Settings, Backup calls the browser's part"
-)]
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -128,6 +124,10 @@ async fn read_stores(db: &Database, names: &[String]) -> Result<Vec<Vec<JsValue>
 /// other value (a `Map`, a `BigInt`, a class instance, a number JSON can't
 /// hold, or nesting past [`MAX_DEPTH`]) is `Err`. It is async because a
 /// `Blob`'s bytes can only be read that way.
+#[expect(
+    dead_code,
+    reason = "the plan's single-value interface; Task 17's browser checks call it"
+)]
 pub async fn js_to_json(value: &JsValue) -> Result<Value, ()> {
     let mut found = Vec::new();
     find_blobs(value, 0, &mut found)?;

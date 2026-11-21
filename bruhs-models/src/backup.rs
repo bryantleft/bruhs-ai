@@ -747,6 +747,25 @@ pub fn option_label(kind: OptionKind, amount: u64) -> String {
     }
 }
 
+/// The line once a backup is made: ready to download on the web, saved on
+/// the desktop.
+pub fn created_line(file: &BackupFile, app: BackupApp) -> String {
+    let template = match app {
+        BackupApp::Web => CREATED_WEB,
+        BackupApp::Desktop | BackupApp::Other => CREATED_DESKTOP,
+    };
+    fill(
+        template,
+        &[("name", &file.name), ("size", &format_bytes(file.bytes))],
+    )
+}
+
+/// The note for data under a path override outside the roots (D23), if
+/// there is any.
+pub fn outside_roots_line(outside: &[String]) -> Option<String> {
+    (!outside.is_empty()).then(|| fill(OUTSIDE_ROOTS, &[("list", &outside.join(", "))]))
+}
+
 /// The filled [`NO_SPACE`]: `needed` more bytes must be freed.
 pub fn no_space(needed: u64) -> String {
     fill(NO_SPACE, &[("size", &format_bytes(needed))])
@@ -1196,6 +1215,30 @@ mod tests {
         assert_eq!(
             no_space(1_500_000_000),
             "There isn't enough free disk space. Free 1.5 GB and try again."
+        );
+    }
+
+    #[test]
+    fn made_and_outside_lines_fill_their_values() {
+        let file = BackupFile {
+            name: "bruhs-backup-2026-11-20-0930.bruhsbak".into(),
+            bytes: 1_500_000_000,
+            path: None,
+            download: None,
+            warnings: Vec::new(),
+        };
+        assert_eq!(
+            created_line(&file, BackupApp::Web),
+            "Backup ready: bruhs-backup-2026-11-20-0930.bruhsbak, 1.5 GB."
+        );
+        assert_eq!(
+            created_line(&file, BackupApp::Desktop),
+            "Saved bruhs-backup-2026-11-20-0930.bruhsbak, 1.5 GB."
+        );
+        assert_eq!(outside_roots_line(&[]), None);
+        assert_eq!(
+            outside_roots_line(&["/data/{x}".into(), "/srv/meetings.db".into()]).as_deref(),
+            Some("Some data lives outside Bruhs' folders and isn't in a backup: /data/{x}, /srv/meetings.db.")
         );
     }
 }

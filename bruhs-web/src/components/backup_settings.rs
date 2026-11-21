@@ -1,0 +1,1046 @@
+//! Settings, Backup (D24): the last backup under the title, the browser
+//! data card while a restored backup's browser part waits (D19), then Make
+//! a backup, Restore and Kept from earlier restores. Every rule and line is
+//! `bruhs_models::backup`'s, so the desktop page matches.
+//!
+//! Passwords never sit in a signal. Their inputs are never filled, are read
+//! and emptied in one step on submit, and are emptied on cancel and
+//! unmount; the page keeps only whether the two typed passwords pass the
+//! rule ([`PairCheck`]). The one password kept past its form is the
+//! restore's, held in `Zeroizing` until the browser part is restored or
+//! Settings closes (D22). Nothing here reaches IndexedDB or browser
+//! storage, and no password is logged.
+//!
+//! Each view ends in `.into_any()`: without it the page's nested view
+//! types make the debug wasm link (`rust-lld`) crash.
+
+mod restore;
+pub(crate) mod tabs;
+
+use std::collections::BTreeMap;
+
+use bruhs_models::backup::{
+    created_line, delete_pre_restore_confirm, job_line, last_backup_line, option_label,
+    outside_roots_line, password_pair_error, pre_restore_line, put_back_confirm, validate_password,
+    BackupApp, BackupFile, BackupJob, BackupOptions, BackupOverview, CreateBackup, JobState,
+    OptionKind, PreRestoreInfo, RestoreSource, BACKUP_LOADING, CANCEL, DELETE, DELETE_AGAIN,
+    DOWNLOAD, KEEP, KEPT_GROUP, KEYCHAIN_OPTION_HINT, KEYCHAIN_SET_UNREADABLE, LOCKING_WEB,
+    MAKE_BACKUP, MAKE_GROUP, NOTHING_TO_PUT_BACK, PASSWORD, PASSWORD_AGAIN, PASSWORD_HINT,
+    PUT_BACK, UNSUPPORTED_PLATFORM, WEB_INCLUDED,
+};
+use leptos::{html, prelude::*};
+use wasm_bindgen::JsCast;
+use zeroize::{Zeroize, Zeroizing};
+
+use super::vault_settings::{unique_id, BUTTON, DANGER_BUTTON, FIELD, HINT, LABEL};
+use crate::api::{backup as api, ApiError};
+use crate::storage::backup_dump::{dump_web, lock_dump};
+use crate::ui::Switch;
+
+const GROUP: &str = "px-4 py-3";
+const GROUP_TITLE: &str = "text-label text-rambutan-100";
+const NOTE: &str = "mt-1 text-label-sm text-rambutan-400";
+const PROGRESS: &str = "mt-2 text-label-sm text-rambutan-300";
+const ERROR: &str = "mt-1 text-label-sm text-lychee-300 empty:hidden";
+const WARN: &str = "mt-1 text-label-sm text-durian-300";
+const DONE: &str = "mt-2 text-label-sm text-pandan-300";
+const ACTIONS: &str = "mt-3 flex flex-wrap items-center gap-2";
+/// How often a running job is read (D6).
+const JOB_POLL_MS: u32 = 500;
+/// One frame, so the page paints its progress line before a key
+/// derivation holds the thread (D7).
+const PAINT_MS: u32 = 16;
+
+#[derive(Clone, PartialEq)]
+enum Load {
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+/// What the two Make a backup fields say, without either password: the
+/// rule's message under each and whether **Make backup** may run.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+struct PairCheck {
+    first: Option<&'static str>,
+    second: Option<&'static str>,
+    ready: bool,
+}
+
+impl PairCheck {
+    /// The first field's message shows once it was left or the second one
+    /// has text; the mismatch shows under the second field.
+    fn of(first: &str, second: &str, first_left: bool) -> Self {
+        let rule = validate_password(first).err();
+        let pair = password_pair_error(first, second);
+        Self {
+            first: rule.filter(|_| !first.is_empty() && (first_left || !second.is_empty())),
+            second: pair.filter(|_| rule.is_none() && !second.is_empty()),
+            ready: pair.is_none(),
+        }
+    }
+}
+
+/// Make a backup's progress.
+#[derive(Clone, PartialEq)]
+enum Making {
+    Idle,
+    /// `LOCKING_WEB`, then the job's line once it runs.
+    Working {
+        line: String,
+        job: Option<String>,
+    },
+    Made {
+        line: String,
+        download: Option<String>,
+        warnings: Vec<String>,
+    },
+}
+
+/// Which confirm a kept set shows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Ask {
+    Delete,
+    PutBack,
+}
+
+/// What a kept set learned from its last answer.
+#[derive(Clone, PartialEq, Default)]
+struct KeptNote {
+    error: Option<String>,
+    /// `NOTHING_TO_PUT_BACK`: only Delete is offered.
+    nothing_to_put_back: bool,
+    /// `KEYCHAIN_SET_UNREADABLE`: a delete was cut short; Delete it again.
+    unreadable: bool,
+}
+
+/// Where a running job's line shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Make,
+    Restore,
+    /// A job this page didn't start (another tab's), found on load.
+    Other,
+}
+
+/// The page's state, shared by every group.
+#[derive(Clone, Copy)]
+struct Page {
+    overview: RwSignal<BackupOverview>,
+    load: RwSignal<Load>,
+    /// A job, apply or browser restore runs: every action waits.
+    busy: RwSignal<bool>,
+    options: RwSignal<BackupOptions>,
+    check: RwSignal<PairCheck>,
+    first_left: RwSignal<bool>,
+    making: RwSignal<Making>,
+    make_error: RwSignal<Option<String>>,
+    other_job: RwSignal<Option<String>>,
+    first: NodeRef<html::Input>,
+    second: NodeRef<html::Input>,
+    restore: restore::Restore,
+    asking: RwSignal<Option<(String, Ask)>>,
+    notes: RwSignal<BTreeMap<String, KeptNote>>,
+    /// Aborted when Settings closes, which drops every call and poll.
+    abort: StoredValue<Option<web_sys::AbortController>, LocalStorage>,
+}
+
+impl Page {
+    fn new() -> Self {
+        Self {
+            overview: RwSignal::new(BackupOverview::default()),
+            load: RwSignal::new(Load::Loading),
+            busy: RwSignal::new(false),
+            options: RwSignal::new(BackupOptions::default()),
+            check: RwSignal::new(PairCheck::default()),
+            first_left: RwSignal::new(false),
+            making: RwSignal::new(Making::Idle),
+            make_error: RwSignal::new(None),
+            other_job: RwSignal::new(None),
+            first: NodeRef::new(),
+            second: NodeRef::new(),
+            restore: restore::Restore::new(),
+            asking: RwSignal::new(None),
+            notes: RwSignal::new(BTreeMap::new()),
+            abort: StoredValue::new_local(None),
+        }
+    }
+
+    /// The page's abort signal, while the page is open in a browser.
+    fn signal(self) -> Option<web_sys::AbortSignal> {
+        self.abort
+            .try_get_value()
+            .flatten()
+            .map(|controller| controller.signal())
+    }
+
+    /// Reads `GET /api/backup` again.
+    fn refresh(self) {
+        let Some(signal) = self.signal() else {
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::overview(&signal).await {
+                Ok(overview) => self.loaded(overview),
+                Err(ApiError::Aborted) => {}
+                Err(error) => {
+                    self.load.try_set(Load::Failed(error.to_string()));
+                }
+            }
+        });
+    }
+
+    fn loaded(self, overview: BackupOverview) {
+        self.restore.loaded(&overview);
+        let job = overview.job.clone();
+        self.overview.try_set(overview);
+        self.load.try_set(Load::Ready);
+        // A job another tab started: follow it until it finishes.
+        if let Some(job) = job.filter(|job| job_line(&job.state).is_some()) {
+            if self.busy.try_get_untracked() == Some(false) {
+                self.busy.set(true);
+                wasm_bindgen_futures::spawn_local(async move {
+                    let finished = self.follow(job, Slot::Other).await;
+                    self.other_job.try_set(None);
+                    match finished {
+                        Ok(JobState::Created { file }) => self.made(&file),
+                        Ok(JobState::Opened { preview }) => self.restore.opened(preview),
+                        Ok(JobState::Failed { message }) | Err(message) => {
+                            self.make_error.try_set(Some(message));
+                        }
+                        Ok(_) => {}
+                    }
+                    self.busy.try_set(false);
+                });
+            }
+        }
+    }
+
+    /// Polls `job` every 500 ms, showing its line in `slot`, and answers
+    /// the state it finished in.
+    async fn follow(self, job: BackupJob, slot: Slot) -> Result<JobState, String> {
+        let signal = self.signal().ok_or_else(|| ApiError::Aborted.to_string())?;
+        let BackupJob { id, mut state } = job;
+        while let Some(line) = job_line(&state) {
+            self.show_line(slot, line, &id);
+            gloo_timers::future::TimeoutFuture::new(JOB_POLL_MS).await;
+            state = api::job(&id, &signal).await.map_err(message)?.state;
+        }
+        Ok(state)
+    }
+
+    fn show_line(self, slot: Slot, line: String, id: &str) {
+        let job = Some(id.to_owned());
+        match slot {
+            Slot::Make => {
+                self.making.try_set(Making::Working { line, job });
+            }
+            Slot::Restore => {
+                self.restore
+                    .step
+                    .try_set(restore::Restoring::Working { line, job });
+            }
+            Slot::Other => {
+                self.other_job.try_set(Some(line));
+            }
+        }
+    }
+
+    /// A finished backup: its line, warnings and Download, which the page
+    /// clicks once.
+    fn made(self, file: &BackupFile) {
+        let download = download_href(file);
+        let click = download.is_some();
+        self.making.try_set(Making::Made {
+            line: created_line(file, BackupApp::Web),
+            download,
+            warnings: file.warnings.clone(),
+        });
+        if click {
+            request_animation_frame(|| {
+                let link = web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| {
+                        document
+                            .query_selector("[data-backup-download]")
+                            .ok()
+                            .flatten()
+                    })
+                    .and_then(|link| link.dyn_into::<web_sys::HtmlElement>().ok());
+                if let Some(link) = link {
+                    link.click();
+                }
+            });
+        }
+    }
+
+    /// Make backup: reads and empties both fields, then locks this
+    /// browser's data, uploads it, starts the job and follows it.
+    fn make(self) {
+        if self.busy.get_untracked() || !self.check.get_untracked().ready {
+            return;
+        }
+        let password = Zeroizing::new(take_value(self.first));
+        let again = Zeroizing::new(take_value(self.second));
+        self.check.set(PairCheck::default());
+        self.first_left.set(false);
+        if let Some(error) = password_pair_error(&password, &again) {
+            self.make_error.set(Some(error.to_owned()));
+            return;
+        }
+        drop(again);
+        let Some(signal) = self.signal() else {
+            return;
+        };
+        let options = self.options.get_untracked();
+        self.busy.set(true);
+        self.make_error.set(None);
+        self.making.set(Making::Working {
+            line: LOCKING_WEB.to_owned(),
+            job: None,
+        });
+        wasm_bindgen_futures::spawn_local(async move {
+            match self.make_backup(password, options, &signal).await {
+                Ok(JobState::Created { file }) => self.made(&file),
+                Ok(JobState::Failed { message }) | Err(message) => {
+                    self.making.try_set(Making::Idle);
+                    self.make_error.try_set(Some(message));
+                }
+                Ok(_) => {
+                    self.making.try_set(Making::Idle);
+                }
+            }
+            self.busy.try_set(false);
+        });
+    }
+
+    async fn make_backup(
+        self,
+        mut password: Zeroizing<String>,
+        options: BackupOptions,
+        signal: &web_sys::AbortSignal,
+    ) -> Result<JobState, String> {
+        gloo_timers::future::TimeoutFuture::new(PAINT_MS).await;
+        let dump = dump_web().await?;
+        let web_db_version = dump.db_version;
+        let locked = lock_dump(&dump, &password)?;
+        drop(dump);
+        let web_part = api::upload_web_part(&locked, signal)
+            .await
+            .map_err(message)?;
+        drop(locked);
+        let mut body = CreateBackup {
+            password: std::mem::take(&mut *password),
+            options,
+            app: BackupApp::Web,
+            web_part: Some(web_part),
+            web_db_version: Some(web_db_version),
+            destination: None,
+            overwrite: false,
+        };
+        let job = api::create(&body, signal).await;
+        body.password.zeroize();
+        self.follow(job.map_err(message)?, Slot::Make).await
+    }
+
+    /// Stops the running make job; its poll then answers the stop.
+    fn cancel_job(self, id: String) {
+        let Some(signal) = self.signal() else {
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(error) = api::cancel_job(&id, &signal).await {
+                self.make_error.try_set(Some(message(error)));
+            }
+        });
+    }
+
+    fn note(self, stamp: &str, change: impl FnOnce(&mut KeptNote)) {
+        self.notes
+            .try_update(|notes| change(notes.entry(stamp.to_owned()).or_default()));
+    }
+
+    fn delete_kept(self, stamp: String) {
+        if self.busy.get_untracked() {
+            return;
+        }
+        let Some(signal) = self.signal() else {
+            return;
+        };
+        self.busy.set(true);
+        self.note(&stamp, |note| note.error = None);
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::delete_kept(&stamp, &signal).await {
+                Ok(()) => {
+                    self.asking.try_set(None);
+                    self.notes.try_update(|notes| {
+                        notes.remove(&stamp);
+                    });
+                    self.busy.try_set(false);
+                    self.refresh();
+                }
+                Err(error) => {
+                    self.note(&stamp, |note| note.error = Some(message(error)));
+                    self.busy.try_set(false);
+                }
+            }
+        });
+    }
+
+    fn put_back(self, stamp: String) {
+        let key = stamp.clone();
+        restore::apply(
+            self,
+            RestoreSource::PreRestore { stamp },
+            move |error: ApiError| {
+                let refused = |copy: &str| matches!(&error, ApiError::Http { detail: Some(detail), .. } if detail == copy);
+                let nothing = refused(NOTHING_TO_PUT_BACK);
+                let unreadable = refused(KEYCHAIN_SET_UNREADABLE);
+                self.asking.try_set(None);
+                self.note(&key, |note| {
+                    note.nothing_to_put_back |= nothing;
+                    note.unreadable |= unreadable;
+                    note.error = Some(message(error));
+                });
+            },
+        );
+    }
+
+    fn clear_fields(self) {
+        clear_value(self.first);
+        clear_value(self.second);
+        self.restore.clear_fields();
+    }
+}
+
+/// The server's copy for a failed call, as it answered.
+fn message(error: ApiError) -> String {
+    error.to_string()
+}
+
+/// The full download URL of a finished web backup, from its
+/// `/api/backup/files/{id}` path; `None` for anything else.
+fn download_href(file: &BackupFile) -> Option<String> {
+    let id = file
+        .download
+        .as_deref()?
+        .strip_prefix("/api/backup/files/")?;
+    api::download_url(id)
+}
+
+/// An input's value, emptied in the same step.
+fn take_value(node: NodeRef<html::Input>) -> String {
+    node.try_get_untracked()
+        .flatten()
+        .map(|input| {
+            let value = input.value();
+            input.set_value("");
+            value
+        })
+        .unwrap_or_default()
+}
+
+fn clear_value(node: NodeRef<html::Input>) {
+    if let Some(Some(input)) = node.try_get_untracked() {
+        input.set_value("");
+    }
+}
+
+/// A password input: never filled, emptied when it leaves the page, and
+/// its keys kept from the app's shortcuts.
+fn password_input(
+    node: NodeRef<html::Input>,
+    label: &'static str,
+    autocomplete: &'static str,
+    described_by: String,
+    on_input: impl Fn() + 'static,
+    on_change: impl Fn() + 'static,
+) -> AnyView {
+    on_cleanup(move || clear_value(node));
+    view! {
+        <label class=LABEL>{label}
+            <input node_ref=node type="password" autocomplete=autocomplete autocapitalize="none" spellcheck="false" aria-describedby=described_by class=FIELD on:input=move |_| on_input() on:change=move |_| on_change() on:keydown=move |event: web_sys::KeyboardEvent| event.stop_propagation() />
+        </label>
+    }
+    .into_any()
+}
+
+#[component]
+pub fn BackupSettings() -> impl IntoView {
+    let page = Page::new();
+    if let Ok(controller) = web_sys::AbortController::new() {
+        page.abort.set_value(Some(controller));
+    }
+    on_cleanup(move || {
+        page.clear_fields();
+        page.restore.forget_password();
+        if let Some(Some(controller)) = page.abort.try_get_value() {
+            controller.abort();
+        }
+    });
+    Effect::new(move |_| page.refresh());
+    page_view(page)
+}
+
+fn page_view(page: Page) -> AnyView {
+    view! {
+        <div data-backup-settings="" class="divide-y divide-longan-800/70 text-body-sm text-rambutan-200">
+            {move || match page.load.get() {
+                Load::Loading => view! { <p role="status" class="px-4 py-3 text-label-sm text-rambutan-400">{BACKUP_LOADING}</p> }.into_any(),
+                Load::Failed(message) => view! { <p role="alert" class="px-4 py-3 text-label-sm text-lychee-300">{message}</p> }.into_any(),
+                Load::Ready if !page.overview.with_untracked(|overview| overview.supported) => view! { <p role="status" class="px-4 py-3 text-label-sm text-durian-300">{UNSUPPORTED_PLATFORM}</p> }.into_any(),
+                Load::Ready => ready_view(page),
+            }}
+        </div>
+    }
+    .into_any()
+}
+
+fn ready_view(page: Page) -> AnyView {
+    let last = page
+        .overview
+        .with_untracked(|overview| overview.last.as_ref().map(last_backup_line));
+    let outside = page
+        .overview
+        .with_untracked(|overview| outside_roots_line(&overview.outside_roots));
+    view! {
+        {(last.is_some() || outside.is_some()).then(|| view! {
+            <div class="px-4 py-2.5">
+                {last.map(|line| view! { <p data-backup-last="" class="text-label-sm text-rambutan-400">{line}</p> })}
+                {outside.map(|line| view! { <p data-backup-outside="" class=WARN>{line}</p> })}
+            </div>
+        })}
+        {move || page.other_job.get().map(|line| view! { <p role="status" data-backup-other-job="" class="px-4 py-2.5 text-label-sm text-rambutan-300">{line}</p> })}
+        {restore::browser_card(page)}
+        {make_group(page)}
+        {restore::restore_group(page)}
+        {kept_group(page)}
+    }
+    .into_any()
+}
+
+fn option_amount(overview: &BackupOverview, kind: OptionKind) -> u64 {
+    match kind {
+        OptionKind::Keychain => u64::from(overview.keychain_items),
+        OptionKind::Audio => overview.sizes.audio_bytes,
+        OptionKind::Browsers => overview.sizes.browser_bytes,
+    }
+}
+
+fn option_on(options: &mut BackupOptions, kind: OptionKind) -> &mut bool {
+    match kind {
+        OptionKind::Keychain => &mut options.keychain,
+        OptionKind::Audio => &mut options.audio,
+        OptionKind::Browsers => &mut options.browser_profiles,
+    }
+}
+
+fn option_is_on(mut options: BackupOptions, kind: OptionKind) -> bool {
+    *option_on(&mut options, kind)
+}
+
+fn option_row(page: Page, kind: OptionKind, hint: Option<&'static str>) -> AnyView {
+    let label = page
+        .overview
+        .with_untracked(|overview| option_label(kind, option_amount(overview, kind)));
+    let checked = Signal::derive(move || option_is_on(page.options.get(), kind));
+    let on_change = Callback::new(move |on: bool| {
+        page.options
+            .update(|options| *option_on(options, kind) = on);
+    });
+    view! {
+        <div data-backup-option="" class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+                <p class="text-label text-rambutan-200">{label.clone()}</p>
+                {hint.map(|hint| view! { <p class=HINT>{hint}</p> })}
+            </div>
+            <Switch checked=checked on_change=on_change disabled=page.busy label=label />
+        </div>
+    }
+    .into_any()
+}
+
+fn make_group(page: Page) -> AnyView {
+    let prefix = unique_id("backup-make");
+    let hint_id = format!("{prefix}-hint");
+    let first_error_id = format!("{prefix}-first-error");
+    let second_error_id = format!("{prefix}-second-error");
+    let recheck = move || {
+        let first = Zeroizing::new(
+            page.first
+                .try_get_untracked()
+                .flatten()
+                .map(|input| input.value())
+                .unwrap_or_default(),
+        );
+        let second = Zeroizing::new(
+            page.second
+                .try_get_untracked()
+                .flatten()
+                .map(|input| input.value())
+                .unwrap_or_default(),
+        );
+        page.check.set(PairCheck::of(
+            &first,
+            &second,
+            page.first_left.get_untracked(),
+        ));
+    };
+    let first_field = password_input(
+        page.first,
+        PASSWORD,
+        "new-password",
+        format!("{hint_id} {first_error_id}"),
+        recheck,
+        move || {
+            page.first_left.set(true);
+            recheck();
+        },
+    );
+    let second_field = password_input(
+        page.second,
+        PASSWORD_AGAIN,
+        "new-password",
+        second_error_id.clone(),
+        recheck,
+        recheck,
+    );
+    let disabled = move || page.busy.get() || !page.check.get().ready;
+    view! {
+        <div data-backup-make="" class=GROUP>
+            <h3 class=GROUP_TITLE>{MAKE_GROUP}</h3>
+            <div class="mt-3 space-y-3">
+                {option_row(page, OptionKind::Keychain, Some(KEYCHAIN_OPTION_HINT))}
+                {option_row(page, OptionKind::Audio, None)}
+                {option_row(page, OptionKind::Browsers, None)}
+            </div>
+            <p data-backup-web-included="" class=NOTE>{WEB_INCLUDED}</p>
+            <form class="mt-3 grid gap-3 sm:grid-cols-2" on:submit=move |event| { event.prevent_default(); page.make(); }>
+                <div class="min-w-0">
+                    {first_field}
+                    <p id=hint_id class=HINT>{PASSWORD_HINT}</p>
+                    <p id=first_error_id role="alert" class=ERROR>{move || page.check.get().first}</p>
+                </div>
+                <div class="min-w-0">
+                    {second_field}
+                    <p id=second_error_id role="alert" data-backup-second-error="" class=ERROR>{move || page.check.get().second}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 sm:col-span-2">
+                    <button type="submit" data-backup-make-button="" class=BUTTON disabled=disabled>{MAKE_BACKUP}</button>
+                    {move || match page.making.get() {
+                        Making::Working { job: Some(id), .. } => view! { <button type="button" class=BUTTON on:click=move |_| page.cancel_job(id.clone())>{CANCEL}</button> }.into_any(),
+                        _ => ().into_any(),
+                    }}
+                </div>
+            </form>
+            {move || match page.making.get() {
+                Making::Idle => ().into_any(),
+                Making::Working { line, .. } => view! { <p role="status" data-backup-make-progress="" class=PROGRESS>{line}</p> }.into_any(),
+                Making::Made { line, download, warnings } => view! {
+                    <div role="status" data-backup-made="">
+                        <p class=DONE>{line}</p>
+                        {warnings.into_iter().map(|warning| view! { <p class=WARN>{warning}</p> }).collect_view()}
+                        {download.map(|href| view! { <a data-backup-download="" href=href download="" class=format!("{BUTTON} mt-2 inline-flex items-center")>{DOWNLOAD}</a> })}
+                    </div>
+                }.into_any(),
+            }}
+            <p role="alert" data-backup-make-error="" class=ERROR>{move || page.make_error.get()}</p>
+        </div>
+    }
+    .into_any()
+}
+
+fn kept_group(page: Page) -> AnyView {
+    let sets = move || page.overview.with(|overview| overview.pre_restores.clone());
+    view! {
+        <Show when=move || page.overview.with(|overview| !overview.pre_restores.is_empty())>
+            <div data-backup-kept="" class=GROUP>
+                <h3 class=GROUP_TITLE>{KEPT_GROUP}</h3>
+                <div class="divide-y divide-longan-800">
+                    <For each=sets key=|info| info.stamp.clone() children=move |info| kept_row(page, info) />
+                </div>
+            </div>
+        </Show>
+    }
+    .into_any()
+}
+
+fn kept_row(page: Page, info: PreRestoreInfo) -> AnyView {
+    let stamp = StoredValue::new(info.stamp.clone());
+    let line = pre_restore_line(&info);
+    let note = Signal::derive(move || {
+        page.notes
+            .with(|notes| notes.get(&stamp.get_value()).cloned().unwrap_or_default())
+    });
+    let asking = Signal::derive(move || {
+        page.asking.with(|asking| {
+            asking
+                .as_ref()
+                .filter(|(asked, _)| *asked == stamp.get_value())
+                .map(|(_, ask)| *ask)
+        })
+    });
+    let question_id = unique_id("backup-kept-question");
+    let ask = move |ask: Ask| {
+        page.note(&stamp.get_value(), |note| note.error = None);
+        page.asking.set(Some((stamp.get_value(), ask)));
+    };
+    let keep = move || page.asking.set(None);
+    let delete_question = delete_pre_restore_confirm(&info);
+    let put_back_question = put_back_confirm(&info);
+    view! {
+        <article data-backup-kept-row=info.stamp class="min-w-0 py-3">
+            <p class="text-body-sm text-rambutan-200">{line}</p>
+            <Show when=move || asking.get().is_none()>
+                <div class=ACTIONS>
+                    <Show when=move || note.with(|note| !note.nothing_to_put_back && !note.unreadable)>
+                        <button type="button" data-backup-put-back="" class=BUTTON disabled=move || page.busy.get() on:click=move |_| ask(Ask::PutBack)>{PUT_BACK}</button>
+                    </Show>
+                    <button type="button" data-backup-delete="" class=BUTTON disabled=move || page.busy.get() on:click=move |_| ask(Ask::Delete)>{move || if note.with(|note| note.unreadable) { DELETE_AGAIN } else { DELETE }}</button>
+                </div>
+            </Show>
+            {move || asking.get().map(|ask| {
+                let (question, confirm, confirm_class, decline) = match ask {
+                    Ask::Delete => (delete_question.clone(), DELETE, DANGER_BUTTON, KEEP),
+                    Ask::PutBack => (put_back_question.clone(), PUT_BACK, DANGER_BUTTON, CANCEL),
+                };
+                view! {
+                    <div role="group" data-backup-kept-confirm="" aria-labelledby=question_id.clone() class="mt-3 space-y-2 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50" on:keydown=move |event: web_sys::KeyboardEvent| if event.key() == "Escape" { event.prevent_default(); event.stop_propagation(); keep(); }>
+                        <p id=question_id.clone() class="text-body-sm text-rambutan-200">{question}</p>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button" data-backup-confirm="" class=confirm_class disabled=move || page.busy.get() on:click=move |_| match ask {
+                                Ask::Delete => page.delete_kept(stamp.get_value()),
+                                Ask::PutBack => page.put_back(stamp.get_value()),
+                            }>{confirm}</button>
+                            <button type="button" data-backup-decline="" class=BUTTON disabled=move || page.busy.get() on:click=move |_| keep()>{decline}</button>
+                        </div>
+                    </div>
+                }
+            })}
+            <p role="alert" class=ERROR>{move || note.with(|note| note.error.clone())}</p>
+        </article>
+    }
+    .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use bruhs_models::backup::{BackupSizes, BACKUP_TITLE, PASSWORDS_DIFFER, PASSWORD_SHORT};
+    use bruhs_models::EpochMs;
+
+    use crate::components::settings_page::SECTIONS;
+
+    pub(super) const STAMP: &str = "2026-11-20-0930-0a1f";
+
+    pub(super) fn kept_set() -> PreRestoreInfo {
+        PreRestoreInfo {
+            stamp: STAMP.into(),
+            made_at_ms: EpochMs::new(1_763_631_000_000).unwrap(),
+            bytes: 1_200_000,
+            has_web_part: false,
+        }
+    }
+
+    pub(super) fn overview() -> BackupOverview {
+        BackupOverview {
+            supported: true,
+            sizes: BackupSizes {
+                data_bytes: 9_000_000,
+                audio_bytes: 2_500_000,
+                browser_bytes: 700_000,
+            },
+            keychain_items: 7,
+            pre_restores: vec![kept_set()],
+            ..BackupOverview::default()
+        }
+    }
+
+    /// A page holding `overview`, as it is once `GET /api/backup` answered.
+    pub(super) fn loaded_page() -> Page {
+        let page = Page::new();
+        page.overview.set(overview());
+        page.load.set(Load::Ready);
+        page
+    }
+
+    pub(super) fn render(view: impl FnOnce() -> AnyView) -> String {
+        untrack(|| tachys::view::RenderHtml::to_html(view()))
+    }
+
+    /// Text as the renderer escapes it.
+    pub(super) fn escaped(text: &str) -> String {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
+    /// The opening tag of the element carrying `marker`.
+    pub(super) fn tag<'a>(html: &'a str, marker: &str) -> &'a str {
+        let at = html
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} in {html}"));
+        let start = html[..at].rfind('<').unwrap();
+        let end = at + html[at..].find('>').unwrap();
+        &html[start..=end]
+    }
+
+    /// Whether a tag has the `disabled` attribute (not a `disabled:` class).
+    pub(super) fn is_disabled(tag: &str) -> bool {
+        tag.match_indices(" disabled")
+            .any(|(at, word)| !tag[at + word.len()..].starts_with(':'))
+    }
+
+    /// Every `<input>` tag of type password.
+    pub(super) fn password_tags(html: &str) -> Vec<&str> {
+        html.match_indices("<input")
+            .map(|(at, _)| &html[at..=at + html[at..].find('>').unwrap()])
+            .filter(|tag| tag.contains("type=\"password\""))
+            .collect()
+    }
+
+    #[test]
+    fn the_section_sits_after_apps() {
+        assert_eq!(SECTIONS.len(), 13);
+        assert_eq!(SECTIONS[4].0, "apps");
+        assert_eq!(SECTIONS[5], ("backup", "archive", BACKUP_TITLE));
+    }
+
+    #[test]
+    fn make_backup_needs_matching_passwords() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            let html = render(|| make_group(page));
+            for (kind, amount) in [
+                (OptionKind::Keychain, 7),
+                (OptionKind::Audio, 2_500_000),
+                (OptionKind::Browsers, 700_000),
+            ] {
+                let label = escaped(&option_label(kind, amount));
+                assert!(html.contains(&label), "{label} in {html}");
+            }
+            assert!(html.contains("Meeting audio (2.5 MB)"), "{html}");
+            assert!(html.contains(&escaped(WEB_INCLUDED)), "{html}");
+            assert!(html.contains(&escaped(PASSWORD_HINT)), "{html}");
+            assert!(is_disabled(tag(&html, "data-backup-make-button")));
+            assert!(!html.contains(&escaped(PASSWORDS_DIFFER)), "{html}");
+
+            page.check
+                .set(PairCheck::of("correct horse 1", "correct horse 2", false));
+            let html = render(|| make_group(page));
+            assert!(is_disabled(tag(&html, "data-backup-make-button")));
+            let second = tag(&html, "data-backup-second-error");
+            let after = &html[html.find(second).unwrap() + second.len()..];
+            assert!(
+                after.starts_with(&escaped(PASSWORDS_DIFFER)),
+                "the mismatch sits under the second field: {html}"
+            );
+
+            page.check.set(PairCheck::of("short", "", true));
+            let html = render(|| make_group(page));
+            assert!(is_disabled(tag(&html, "data-backup-make-button")));
+            assert!(html.contains(PASSWORD_SHORT), "{html}");
+
+            page.check
+                .set(PairCheck::of("correct horse 1", "correct horse 1", false));
+            let html = render(|| make_group(page));
+            assert!(
+                !is_disabled(tag(&html, "data-backup-make-button")),
+                "{html}"
+            );
+            assert!(!html.contains(&escaped(PASSWORDS_DIFFER)), "{html}");
+
+            page.busy.set(true);
+            let html = render(|| make_group(page));
+            assert!(is_disabled(tag(&html, "data-backup-make-button")));
+        });
+    }
+
+    #[test]
+    fn the_pair_check_waits_for_the_owner() {
+        // Nothing typed, or a first field still being typed: no message yet.
+        assert_eq!(PairCheck::of("", "", false), PairCheck::default());
+        assert_eq!(PairCheck::of("short", "", false).first, None);
+        assert_eq!(PairCheck::of("short", "", true).first, Some(PASSWORD_SHORT));
+        assert_eq!(
+            PairCheck::of("short", "s", false).first,
+            Some(PASSWORD_SHORT)
+        );
+        // The mismatch only once the second field has text and the first is fine.
+        assert_eq!(PairCheck::of("correct horse 1", "", true).second, None);
+        assert_eq!(PairCheck::of("short", "other", true).second, None);
+        let ready = PairCheck::of("correct horse 1", "correct horse 1", true);
+        assert_eq!((ready.first, ready.second, ready.ready), (None, None, true));
+    }
+
+    #[test]
+    fn password_fields_are_private() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.restore.web_waiting_for_tests();
+            let make = render(|| make_group(page));
+            let restore = render(|| restore::restore_group(page));
+            let card = render(|| restore::browser_card(page));
+            let make_fields = password_tags(&make);
+            assert_eq!(make_fields.len(), 2, "{make}");
+            for field in &make_fields {
+                assert!(field.contains("autocomplete=\"new-password\""), "{field}");
+            }
+            let restore_fields: Vec<&str> = password_tags(&restore)
+                .into_iter()
+                .chain(password_tags(&card))
+                .collect();
+            assert_eq!(restore_fields.len(), 2, "{restore}{card}");
+            for field in &restore_fields {
+                assert!(
+                    field.contains("autocomplete=\"current-password\""),
+                    "{field}"
+                );
+            }
+            for field in make_fields.iter().chain(&restore_fields) {
+                assert!(!field.contains("value"), "{field}");
+            }
+        });
+    }
+
+    #[test]
+    fn kept_sets_ask_before_acting() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            let info = kept_set();
+            let html = render(|| kept_group(page));
+            assert!(html.contains(&escaped(&pre_restore_line(&info))), "{html}");
+            assert!(html.contains("data-backup-put-back"), "{html}");
+            assert!(html.contains("data-backup-delete"), "{html}");
+            assert!(!html.contains("data-backup-kept-confirm"), "{html}");
+
+            page.asking.set(Some((STAMP.into(), Ask::Delete)));
+            let html = render(|| kept_group(page));
+            let question = escaped(&delete_pre_restore_confirm(&info));
+            let confirm = &html[html.find("data-backup-kept-confirm").unwrap()..];
+            assert!(confirm.contains(&question), "{html}");
+            let delete = confirm.find(&format!(">{DELETE}</button>")).unwrap();
+            let keep = confirm.find(&format!(">{KEEP}</button>")).unwrap();
+            assert!(delete < keep, "{html}");
+            assert!(!html.contains("data-backup-delete"), "{html}");
+
+            page.asking.set(Some((STAMP.into(), Ask::PutBack)));
+            let html = render(|| kept_group(page));
+            assert!(html.contains(&escaped(&put_back_confirm(&info))), "{html}");
+            assert!(html.contains(&format!(">{CANCEL}</button>")), "{html}");
+        });
+    }
+
+    #[test]
+    fn a_set_with_nothing_or_no_keys_offers_only_delete() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.note(STAMP, |note| {
+                note.nothing_to_put_back = true;
+                note.error = Some(NOTHING_TO_PUT_BACK.into());
+            });
+            let html = render(|| kept_group(page));
+            assert!(!html.contains("data-backup-put-back"), "{html}");
+            assert!(html.contains(&format!(">{DELETE}</button>")), "{html}");
+            assert!(html.contains(&escaped(NOTHING_TO_PUT_BACK)), "{html}");
+
+            page.note(STAMP, |note| {
+                note.nothing_to_put_back = false;
+                note.unreadable = true;
+                note.error = Some(KEYCHAIN_SET_UNREADABLE.into());
+            });
+            let html = render(|| kept_group(page));
+            assert!(!html.contains("data-backup-put-back"), "{html}");
+            assert!(
+                html.contains(&format!(">{DELETE_AGAIN}</button>")),
+                "{html}"
+            );
+        });
+    }
+
+    #[test]
+    fn the_page_shows_where_it_stands() {
+        Owner::new().with(|| {
+            let page = Page::new();
+            let html = render(|| page_view(page));
+            assert!(html.contains(BACKUP_LOADING), "{html}");
+
+            page.load
+                .set(Load::Failed("Backup runs on macOS and Linux.".into()));
+            let html = render(|| page_view(page));
+            assert!(html.contains("Backup runs on macOS and Linux."), "{html}");
+
+            page.load.set(Load::Ready);
+            let html = render(|| page_view(page));
+            assert!(html.contains(UNSUPPORTED_PLATFORM), "{html}");
+            assert!(!html.contains("data-backup-make"), "{html}");
+
+            let mut full = overview();
+            full.last = Some(bruhs_models::backup::LastBackup {
+                made_at_ms: EpochMs::new(1_763_631_000_000).unwrap(),
+                app: BackupApp::Web,
+                bytes: 3_000_000,
+            });
+            full.outside_roots = vec!["/srv/reactive.sqlite3".into()];
+            let last = last_backup_line(full.last.as_ref().unwrap());
+            let outside = outside_roots_line(&full.outside_roots).unwrap();
+            page.overview.set(full);
+            let html = render(|| page_view(page));
+            let last_at = html.find(&escaped(&last)).expect("last line");
+            assert!(html[last_at..].contains(&escaped(&outside)), "{html}");
+            let make_at = html.find("data-backup-make").unwrap();
+            let restore_at = html.find("data-backup-restore").unwrap();
+            let kept_at = html.find("data-backup-kept").unwrap();
+            assert!(last_at < make_at && make_at < restore_at && restore_at < kept_at);
+        });
+    }
+
+    #[test]
+    fn a_made_backup_offers_its_download() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            let file = BackupFile {
+                name: "bruhs-backup-2026-11-20-0930.bruhsbak".into(),
+                bytes: 2_000_000,
+                path: None,
+                download: Some("/api/backup/files/0123456789abcdef0123456789abcdef".into()),
+                warnings: vec!["1 link was left out.".into()],
+            };
+            let href = download_href(&file).unwrap();
+            assert!(href.ends_with("/api/backup/files/0123456789abcdef0123456789abcdef"));
+            page.making.set(Making::Made {
+                line: created_line(&file, BackupApp::Web),
+                download: Some(href.clone()),
+                warnings: file.warnings.clone(),
+            });
+            let html = render(|| make_group(page));
+            assert!(
+                html.contains("Backup ready: bruhs-backup-2026-11-20-0930.bruhsbak, 2.0 MB."),
+                "{html}"
+            );
+            assert!(html.contains("1 link was left out."), "{html}");
+            let link = tag(&html, "data-backup-download");
+            assert!(link.starts_with("<a"), "{link}");
+            assert!(link.contains(&format!("href=\"{href}\"")), "{link}");
+            assert!(link.contains("download"), "{link}");
+
+            for bad in [
+                None,
+                Some("https://elsewhere.example/x"),
+                Some("/api/backup/files/../vault"),
+            ] {
+                let mut other = file.clone();
+                other.download = bad.map(str::to_owned);
+                assert_eq!(download_href(&other), None, "{bad:?}");
+            }
+
+            page.making.set(Making::Working {
+                line: LOCKING_WEB.into(),
+                job: None,
+            });
+            let html = render(|| make_group(page));
+            assert!(html.contains(&escaped(LOCKING_WEB)), "{html}");
+        });
+    }
+}

@@ -4,6 +4,7 @@
 
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
 use bruhs_models::apps::{APPS_DESCRIPTION, APPS_TITLE};
+use bruhs_models::backup::{BACKUP_DESCRIPTION, BACKUP_TITLE};
 use bruhs_models::logic::compact::IdleCompact;
 use bruhs_models::logic::editor::EDITORS;
 use bruhs_models::vault::{VAULT_DESCRIPTION, VAULT_TITLE};
@@ -13,6 +14,7 @@ use wasm_bindgen::JsCast;
 
 use crate::components::apps_settings::AppsSettings;
 use crate::components::auto_record_settings::AutoRecordSettingsPanel;
+use crate::components::backup_settings::BackupSettings;
 use crate::components::diarize_settings::DiarizeSettingsPanel;
 use crate::components::google_calendar_settings::GoogleCalendarSettings;
 use crate::components::personality_settings::PersonalitySettings as PersonalitySettingsPanel;
@@ -29,12 +31,13 @@ use crate::ui::BrailleBruh;
 use crate::ui::{Dropdown, DropdownOption, Icon, Switch};
 
 /// `(id, icon, label)` for the section nav, in page order.
-pub const SECTIONS: [(&str, &str, &str); 12] = [
+pub const SECTIONS: [(&str, &str, &str); 13] = [
     ("general", "settings", "General"),
     ("updates", "download", "Updates"),
     ("beta", "activity", "Beta"),
     ("vault", "shield", "Vault"),
     ("apps", "globe", "Apps"),
+    ("backup", "archive", BACKUP_TITLE),
     ("calendar", "calendar", "Calendar"),
     ("recording", "mic", "Recording"),
     ("transcription", "activity", "Transcription"),
@@ -740,6 +743,9 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="apps" title=APPS_TITLE description=APPS_DESCRIPTION>
                             <AppsSettings />
                         </SettingsSection>
+                        <SettingsSection id="backup" title=BACKUP_TITLE description=BACKUP_DESCRIPTION>
+                            <BackupSettings />
+                        </SettingsSection>
                         <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and automatic meeting recording.">
                             <GoogleCalendarSettings />
                         </SettingsSection>
@@ -788,7 +794,7 @@ mod tests {
 
     #[test]
     fn nav_and_shortcut_tables_are_well_formed() {
-        assert_eq!(SECTIONS.len(), 12);
+        assert_eq!(SECTIONS.len(), 13);
         assert_eq!(SECTIONS[1].0, "updates");
         assert_eq!(
             SECTIONS[3],
@@ -798,7 +804,7 @@ mod tests {
             SECTIONS[4],
             ("apps", "globe", bruhs_models::apps::APPS_TITLE)
         );
-        assert_eq!(SECTIONS[10].2, "Keybindings");
+        assert_eq!(SECTIONS[11].2, "Keybindings");
         let rules = bruhs_models::logic::keybindings::default_keybindings();
         assert!(rules.iter().all(|rule| {
             !rule.command.is_empty()

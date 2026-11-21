@@ -22,6 +22,9 @@ pub const DELETE: &str = "Delete";
 pub const KEEP: &str = "Keep";
 pub const OPEN_WEB_APP: &str = "Open the web app";
 pub const RESTORE_BROWSER: &str = "Restore browser data";
+/// Offered on a kept set whose delete was cut short: its keychain items
+/// are gone, so it can't be put back (B Task 8 R3-M2).
+pub const DELETE_AGAIN: &str = "Delete it again";
 
 // Options. `{n}` is a count of keychain items, `{size}` a byte size.
 pub const KEYCHAIN_OPTION: &str = "Saved logins, keys and app tokens ({n})";
@@ -43,6 +46,12 @@ pub const JOB_PREPARING: &str = "Preparing your data for this computer";
 /// A step this build doesn't know, from a newer server.
 pub const JOB_WORKING: &str = "Working: {done} of {total}";
 pub const LOCKING_WEB: &str = "Locking this browser's data";
+/// While the web Settings page reads `GET /api/backup`.
+pub const BACKUP_LOADING: &str = "Reading what Bruhs keeps";
+/// While the browser sends the chosen backup file to Bruhs.
+pub const UPLOADING_BACKUP: &str = "Sending the backup file to Bruhs";
+/// While the browser opens and puts back its own part (D19).
+pub const RESTORING_WEB: &str = "Restoring this browser's data";
 pub const CREATED_WEB: &str = "Backup ready: {name}, {size}.";
 pub const CREATED_DESKTOP: &str = "Saved {name}, {size}.";
 /// Warnings on a made backup. `{n}` counts owner files and folders left
@@ -226,6 +235,7 @@ pub const ALL_COPY: &[&str] = &[
     KEEP,
     OPEN_WEB_APP,
     RESTORE_BROWSER,
+    DELETE_AGAIN,
     KEYCHAIN_OPTION,
     AUDIO_OPTION,
     BROWSERS_OPTION,
@@ -240,6 +250,9 @@ pub const ALL_COPY: &[&str] = &[
     JOB_PREPARING,
     JOB_WORKING,
     LOCKING_WEB,
+    BACKUP_LOADING,
+    UPLOADING_BACKUP,
+    RESTORING_WEB,
     CREATED_WEB,
     CREATED_DESKTOP,
     SKIPPED_NAME,

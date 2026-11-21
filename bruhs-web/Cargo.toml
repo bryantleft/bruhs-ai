@@ -51,6 +51,7 @@ web-sys = { version = "0.3", features = [
     "Performance",
     "HtmlCanvasElement", "CanvasRenderingContext2d",
     "IntersectionObserver", "IntersectionObserverEntry", "MediaQueryList",
+    "BroadcastChannel",
     "Crypto",
 ] }
 js-sys = "0.3"

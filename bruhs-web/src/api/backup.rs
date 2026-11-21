@@ -4,10 +4,6 @@
 //! `application/octet-stream`: the web part's ciphertext, or the chosen
 //! `File` itself, which the browser streams from disk. A body with a
 //! password is built in a `Zeroizing` buffer and never logged.
-#![expect(
-    dead_code,
-    reason = "used from Task 14: Settings, Backup calls these routes"
-)]
 
 use bruhs_models::backup::{
     valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview, CreateBackup,

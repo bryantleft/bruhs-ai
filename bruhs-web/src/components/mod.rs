@@ -4,6 +4,7 @@ pub mod auth_banner;
 pub mod auto_record_prompt;
 pub mod auto_record_settings;
 pub mod automations_page;
+pub mod backup_settings;
 pub mod banner;
 pub mod booking_page;
 pub mod calendar_page;

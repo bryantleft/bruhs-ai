@@ -50,5 +50,9 @@ fn main() {
         }
         return;
     }
-    leptos::mount::mount_to_body(app::App);
+    components::backup_settings::tabs::listen();
+    wasm_bindgen_futures::spawn_local(async {
+        components::backup_settings::tabs::wait_for_restore().await;
+        leptos::mount::mount_to_body(app::App);
+    });
 }
