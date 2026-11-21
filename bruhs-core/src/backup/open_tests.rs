@@ -677,7 +677,18 @@ async fn hostile_archives_write_nothing_outside_staging() {
             UNSAFE_ENTRY,
         ),
         (vec![(b"core/a", F, a), (b"core/a/b", F, a)], UNSAFE_ENTRY),
-        (vec![(b"core/a/b", F, a), (b"core/a", F, a)], UNSAFE_ENTRY),
+        (
+            vec![
+                (b"core/a", Folder, b""),
+                (b"core/a/b", F, a),
+                (b"core/a", F, a),
+            ],
+            UNSAFE_ENTRY,
+        ),
+        (
+            vec![(b"core/a", Folder, b""), (b"core/a", F, a)],
+            UNSAFE_ENTRY,
+        ),
         // A listed file missing, an unlisted one, a size and a hash off.
         (vec![(b"core/a", F, a), (b"manifest.json", F, &ab)], DAMAGED),
         (
@@ -719,7 +730,13 @@ async fn hostile_archives_write_nothing_outside_staging() {
             NAMES_CLASH,
         ),
         (
-            vec![(b"core/x/A/1", F, a), (b"core/x/a/2", F, a)],
+            vec![
+                (b"core/x", Folder, b""),
+                (b"core/x/A", Folder, b""),
+                (b"core/x/A/1", F, a),
+                (b"core/x/a", Folder, b""),
+                (b"core/x/a/2", F, a),
+            ],
             NAMES_CLASH,
         ),
         (vec![(b"core/\xff", F, a)], UNSAFE_ENTRY),
@@ -1228,6 +1245,89 @@ async fn limits_count_entries_but_not_long_names() {
         &outside,
     )
     .await;
+}
+
+/// Final review A-I1: every folder above a file comes first as an entry of
+/// its own, as the writer puts them, so each folder a restore makes counts
+/// toward the entry limit. A deep file without them is `DAMAGED`, even
+/// with a manifest that lists it.
+#[tokio::test]
+async fn files_without_their_folder_entries_are_refused() {
+    use EntryKind::{File as F, Folder};
+    let fixture = fixture(false);
+    let host = host(&fixture);
+    let a = b"alpha".as_slice();
+    let deep = "core/a/b/c/d";
+    let listing = manifest_of(&[(deep, a)], |_| {});
+    let path = fixture.out.join("folders.bruhsbak");
+    let outside: [PathBuf; 0] = [];
+
+    craft(
+        &path,
+        &[
+            (b"core/a", Folder, b""),
+            (b"core/a/b", Folder, b""),
+            (b"core/a/b/c", Folder, b""),
+            (deep.as_bytes(), F, a),
+            (b"manifest.json", F, &listing),
+        ],
+    );
+    let (id, state) = open_with(&host, &path, PASSWORD).await;
+    preview(state);
+    host.discard_staged(&id).unwrap();
+
+    for entries in [
+        vec![(deep.as_bytes(), F, a)],
+        vec![
+            (b"core/a".as_slice(), Folder, b"".as_slice()),
+            (deep.as_bytes(), F, a),
+        ],
+        vec![
+            (b"core/a".as_slice(), Folder, b"".as_slice()),
+            (b"core/a/b", Folder, b""),
+            (deep.as_bytes(), F, a),
+            (b"core/a/b/c", Folder, b""),
+        ],
+    ] {
+        let mut entries = entries;
+        entries.push((b"manifest.json", F, &listing));
+        craft(&path, &entries);
+        refused(&fixture, &host, &path, DAMAGED, &outside).await;
+    }
+}
+
+/// Final review A-I1: the entry paths together are bounded, the writer's
+/// limit: at it a backup opens, one byte under it is refused. A long name
+/// counts with its full length.
+#[tokio::test]
+async fn entry_paths_are_bounded_together() {
+    use EntryKind::{File as F, Folder};
+    let fixture = fixture(false);
+    let a = b"alpha".as_slice();
+    let long = format!("core/n/{}", "l".repeat(120));
+    let listing = manifest_of(&[(long.as_str(), a)], |_| {});
+    let mut tar = Vec::new();
+    tar_entry(&mut tar, b"core/n", Folder, b"");
+    tar_long_name(&mut tar, long.as_bytes());
+    tar_entry(&mut tar, &long.as_bytes()[..100], F, a);
+    tar_entry(&mut tar, b"manifest.json", F, &listing);
+    tar.extend_from_slice(&[0; 1024]);
+    let path = fixture.out.join("paths.bruhsbak");
+    seal_tar(&path, &tar);
+    let total = u64::try_from("core/n".len() + long.len() + "manifest.json".len()).unwrap();
+
+    let limited = |path_bytes| {
+        host(&fixture).with_limits(Limits {
+            path_bytes,
+            ..Limits::BACKUP
+        })
+    };
+    let at_limit = limited(total);
+    let (id, state) = open_with(&at_limit, &path, PASSWORD).await;
+    preview(state);
+    at_limit.discard_staged(&id).unwrap();
+    let outside: [PathBuf; 0] = [];
+    refused(&fixture, &limited(total - 1), &path, UNSAFE_ENTRY, &outside).await;
 }
 
 /// B Task 7 ruling: `extract` checks every keychain item before anything

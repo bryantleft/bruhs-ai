@@ -17,8 +17,9 @@ use bruhs_backup::{Header, KdfParams, Kind, HEADER_LEN};
 use bruhs_models::backup::{
     no_space, valid_id, validate_password, BackupJob, BackupOptions, BackupOverview, BackupSizes,
     JobState, JobStep, LastBackup, PendingRestore, PreRestoreInfo, StagedRestore, BACKUP_BUSY,
-    INVALID_REQUEST, KEYCHAIN_MAX_BYTES, MANIFEST_MAX_BYTES, MAX_ENTRIES, NOT_A_BACKUP,
-    RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    INVALID_REQUEST, KEYCHAIN_MAX_BYTES, MANIFEST_MAX_BYTES, MAX_ENTRIES, MAX_TOTAL_PATH_BYTES,
+    NOT_A_BACKUP, RECORDING_FIRST, RESTORE_PENDING, UNSUPPORTED_PLATFORM, WEB_TOO_LARGE,
+    WEB_UPLOAD_MAX,
 };
 use futures_util::future::BoxFuture;
 use rand::TryRngCore as _;
@@ -105,6 +106,8 @@ pub(super) struct Limits {
     pub(super) manifest_bytes: u64,
     /// `keychain.json`'s bytes (B Task 7 N1).
     pub(super) keychain_bytes: u64,
+    /// Every entry path's bytes together (final review A-I1).
+    pub(super) path_bytes: u64,
 }
 
 impl Limits {
@@ -112,6 +115,7 @@ impl Limits {
         entries: MAX_ENTRIES,
         manifest_bytes: MANIFEST_MAX_BYTES,
         keychain_bytes: KEYCHAIN_MAX_BYTES,
+        path_bytes: MAX_TOTAL_PATH_BYTES,
     };
 }
 

@@ -426,16 +426,21 @@ pub(crate) async fn create(
     })
 }
 
+/// The manifest's entry path, the archive's last.
+const MANIFEST_ENTRY: &str = "manifest.json";
+
 /// The fewest bytes one listed file takes in the manifest beside its path:
 /// `{"path":"` `","bytes":` one digit `,"sha256":"` 64 hex `"}`.
 const LISTED_FILE_MIN_BYTES: u64 = 97;
 
 /// Refuses, before anything is written, a backup a restore wouldn't take
 /// (B Task 7 I1): more tar entries than `limits.entries` (the files, every
-/// folder above them, the parts `beside` the data and the manifest), or a
+/// folder above them, the parts `beside` the data and the manifest), a
 /// manifest that would be over `limits.manifest_bytes` even at its
-/// smallest. The writer checks the exact count and size again before the
-/// manifest goes in.
+/// smallest, or entry paths over `limits.path_bytes` together (final
+/// review A-I1). The writer checks the exact count and size again before
+/// the manifest goes in; a file gone since the walk only shortens the
+/// paths.
 pub(super) fn fits(
     files: &[SourceFile],
     beside: &[&str],
@@ -443,6 +448,10 @@ pub(super) fn fits(
 ) -> Result<(), BackupError> {
     let mut folders = HashSet::new();
     let mut manifest = 0_u64;
+    let mut paths = 0_u64;
+    let mut entry_path = |bytes: usize| {
+        paths = paths.saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+    };
     let mut listed = |path_bytes: usize| {
         let path_bytes = u64::try_from(path_bytes).unwrap_or(u64::MAX);
         manifest = manifest
@@ -455,18 +464,23 @@ pub(super) fn fits(
             RootKey::Desktop => "desktop/",
         };
         for (end, _) in file.rel.match_indices('/') {
-            folders.insert((file.root, &file.rel[..end]));
+            if folders.insert((file.root, &file.rel[..end])) {
+                entry_path(prefix.len() + end);
+            }
         }
         listed(prefix.len() + file.rel.len());
+        entry_path(prefix.len() + file.rel.len());
     }
     for part in beside {
         listed(part.len());
+        entry_path(part.len());
     }
+    entry_path(MANIFEST_ENTRY.len());
     let entries = [files.len(), folders.len(), beside.len(), 1]
         .into_iter()
         .map(|count| u64::try_from(count).unwrap_or(u64::MAX))
         .fold(0, u64::saturating_add);
-    if entries > limits.entries || manifest > limits.manifest_bytes {
+    if entries > limits.entries || manifest > limits.manifest_bytes || paths > limits.path_bytes {
         Err(BackupError::Refused(BACKUP_TOO_MANY))
     } else {
         Ok(())
@@ -842,7 +856,7 @@ impl Writer {
         {
             return Err(BackupError::Refused(BACKUP_TOO_MANY));
         }
-        archive.plain("manifest.json", &manifest)?;
+        archive.plain(MANIFEST_ENTRY, &manifest)?;
         self.progress.flush();
 
         let sink = archive.tar.into_inner()?;

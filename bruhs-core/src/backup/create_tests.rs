@@ -1257,11 +1257,12 @@ async fn a_rewrite_that_only_moves_the_time_is_counted() {
     assert_eq!(manifest_of(&entries).changed_files, 1);
 }
 
-/// B Task 7 I1 and N1: a backup a restore wouldn't take isn't made. At
-/// the limits a backup is made; one entry, one manifest byte or one
-/// `keychain.json` byte over, the job fails with fixed copy and leaves no
-/// file. The entry count comes from the walk and the keychain is read
-/// before the writer starts, so nothing is written for either; the
+/// B Task 7 I1 and N1, final review A-I1: a backup a restore wouldn't
+/// take isn't made. At the limits a backup is made; one entry, one entry
+/// path byte, one manifest byte or one `keychain.json` byte over, the job
+/// fails with fixed copy and leaves no file. The entry count and paths
+/// come from the walk and the keychain is read before the writer starts,
+/// so nothing is written for them; the
 /// manifest's exact size is known only once it is serialized, just before
 /// it goes in.
 #[tokio::test]
@@ -1281,12 +1282,25 @@ async fn backups_past_the_restore_limits_are_refused() {
     let waiting = || std::fs::read_dir(&outgoing).unwrap().count();
     assert_eq!(waiting(), 1);
 
+    let path_bytes = entries
+        .iter()
+        .map(|entry| u64::try_from(entry.path.len()).unwrap())
+        .sum::<u64>();
     let at = Limits {
         entries: count,
         manifest_bytes,
         keychain_bytes,
+        path_bytes,
     };
     for (limits, refused, written) in [
+        (
+            Limits {
+                path_bytes: path_bytes - 1,
+                ..at
+            },
+            Some(BACKUP_TOO_MANY),
+            false,
+        ),
         (at, None, true),
         (
             Limits {

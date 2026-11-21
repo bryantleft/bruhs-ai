@@ -19,6 +19,12 @@ pub const MAX_ENTRIES: u64 = 1_000_000;
 /// memory; a backup whose manifest would be larger isn't made (B Task 7
 /// I1).
 pub const MANIFEST_MAX_BYTES: u64 = 64 << 20;
+/// All entry paths of one backup together are at most this many bytes:
+/// files, folders and the parts beside the data, each counted once
+/// without its long-name header. A restore holds every path it staged in
+/// memory, so this bounds that work within the entry limit (final review
+/// A-I1); a backup past it isn't made.
+pub const MAX_TOTAL_PATH_BYTES: u64 = 2 * MANIFEST_MAX_BYTES;
 /// `keychain.json` is at most this many bytes. A restore holds it in
 /// memory; a backup whose items would be larger isn't made (B Task 7 N1).
 pub const KEYCHAIN_MAX_BYTES: u64 = 4 << 20;

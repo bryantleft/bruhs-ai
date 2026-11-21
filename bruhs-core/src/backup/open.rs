@@ -766,10 +766,11 @@ struct Extraction<'a> {
     limits: Limits,
     /// Entries so far; a GNU long-name header doesn't count (B Task 7 I1).
     entries: u64,
-    /// Every path in a staging folder, whether it is a folder.
+    /// The entries' path bytes so far (final review A-I1).
+    path_bytes: u64,
+    /// Every path in a staging folder, whether it is a folder. Each one
+    /// came as an entry of its own (final review A-I1).
     placed: HashMap<(RootKey, String), bool>,
-    /// Paths an entry of their own named.
-    given: HashSet<(RootKey, String)>,
     /// Each placed path's folded key and the path holding it.
     folded: HashMap<(RootKey, String), String>,
     /// On one root: the archive root each top-level name came from.
@@ -806,8 +807,8 @@ impl<'a> Extraction<'a> {
             fault: Rc::default(),
             limits,
             entries: 0,
+            path_bytes: 0,
             placed: HashMap::new(),
-            given: HashSet::new(),
             folded: HashMap::new(),
             tops: HashMap::new(),
             made: HashSet::new(),
@@ -873,6 +874,12 @@ impl<'a> Extraction<'a> {
                 let name = long_name
                     .take()
                     .unwrap_or_else(|| entry.path_bytes().into_owned());
+                self.path_bytes = self
+                    .path_bytes
+                    .saturating_add(u64::try_from(name.len()).unwrap_or(u64::MAX));
+                if self.path_bytes > self.limits.path_bytes {
+                    return Err(unsafe_entry());
+                }
                 self.entry(&mut entry, name)?;
             }
             if long_name.is_some() {
@@ -1037,11 +1044,14 @@ impl<'a> Extraction<'a> {
         }
     }
 
-    /// Takes `rel` and every folder above it in `root`'s staging (D9):
-    /// refused when a path comes twice, a file sits under a file or where a
-    /// folder was, two names differ only in case or accents, the core
-    /// staging's `meta` is named, or, on one root, both archive roots name
-    /// one top-level entry (D11, `ROOTS_OVERLAP`).
+    /// Takes `rel` in `root`'s staging (D9): refused when a path comes
+    /// twice, a file sits under a file or where a folder was, two names
+    /// differ only in case or accents, the core staging's `meta` is named,
+    /// or, on one root, both archive roots name one top-level entry (D11,
+    /// `ROOTS_OVERLAP`). Every folder above `rel` came first as an entry
+    /// of its own, as the writer puts them; one that didn't is `DAMAGED`,
+    /// so every folder made counts toward the entry limit (final review
+    /// A-I1).
     fn claim(
         &mut self,
         origin: RootKey,
@@ -1060,28 +1070,21 @@ impl<'a> Extraction<'a> {
             }
         }
         for (end, _) in rel.match_indices('/') {
-            self.place(root, &rel[..end], true, false)?;
+            match self.placed.get(&(root, rel[..end].to_owned())) {
+                Some(true) => {}
+                // A file under a file.
+                Some(false) => return Err(unsafe_entry()),
+                None => return Err(damaged()),
+            }
         }
-        self.place(root, rel, folder, true)
+        self.place(root, rel, folder)
     }
 
-    fn place(
-        &mut self,
-        root: RootKey,
-        path: &str,
-        folder: bool,
-        given: bool,
-    ) -> Result<(), BackupError> {
+    fn place(&mut self, root: RootKey, path: &str, folder: bool) -> Result<(), BackupError> {
         let key = (root, path.to_owned());
-        if given && !self.given.insert(key.clone()) {
+        // The same path again, as a file or a folder.
+        if self.placed.contains_key(&key) {
             return Err(unsafe_entry());
-        }
-        match self.placed.get(&key) {
-            // A file is there: a file under it, or the same path again.
-            Some(false) => return Err(unsafe_entry()),
-            Some(true) if !folder => return Err(unsafe_entry()),
-            Some(true) => return Ok(()),
-            None => {}
         }
         let holder = self
             .folded
