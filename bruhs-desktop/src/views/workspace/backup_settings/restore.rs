@@ -4,9 +4,10 @@
 //! data only after **Replace my data**. The desktop then says Bruhs is
 //! stopping and starts itself again, so the new instance applies the
 //! restore before it opens anything. The page never keeps the restore
-//! password: the desktop holds no browser part to put back, so an outcome
-//! whose browser part waits says to restore it in the web app and offers
-//! **Open the web app** (final review D-I3).
+//! password: the desktop holds no browser part to put back, so while one
+//! waits (an outcome's, or the overview's on any launch) the group says to
+//! restore it in the web app and offers **Open the web app** (final review
+//! D-I3).
 
 use super::super::vault_settings::{button, field, labelled, small};
 use super::super::*;
@@ -604,15 +605,25 @@ impl BackupSettings {
         }
     }
 
-    /// **Open the web app**, beside an outcome whose browser part waits.
+    /// **Open the web app** while a browser part waits: under an outcome
+    /// that already says so, or with its own line when the overview says
+    /// one waits, on any launch.
     fn render_open_web(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
-        let Restoring::Finished {
-            browser_waits: true,
-            ..
-        } = &self.restore.step
-        else {
+        let in_outcome = matches!(
+            &self.restore.step,
+            Restoring::Finished {
+                browser_waits: true,
+                ..
+            }
+        );
+        if !in_outcome && !self.overview.web_part_waiting {
             return None;
-        };
+        }
+        let waiting = (!in_outcome).then(|| {
+            small(WEB_PART_ON_DESKTOP, theme::rambutan_300())
+                .mt_2()
+                .debug_selector(|| "desktop-backup-web-waiting".into())
+        });
         let open = button(
             "desktop-backup-restore-open-web",
             "desktop-backup-restore-open-web".into(),
@@ -625,10 +636,16 @@ impl BackupSettings {
         .track_focus(&self.restore.web_app_focus);
         Some(
             div()
-                .mt_2()
+                .min_w_0()
                 .flex()
-                .items_center()
-                .child(on_press_view(open, cx, |this, _, cx| this.open_web_app(cx)))
+                .flex_col()
+                .items_start()
+                .children(waiting)
+                .child(
+                    div()
+                        .mt_2()
+                        .child(on_press_view(open, cx, |this, _, cx| this.open_web_app(cx))),
+                )
                 .into_any_element(),
         )
     }
@@ -977,6 +994,47 @@ mod tests {
             Some("http://127.0.0.1:9/#/settings"),
             "Enter opens it too"
         );
+    }
+
+    /// A browser part that waits shows on any launch, not just after this
+    /// launch's own restore, and an outcome that says so isn't repeated.
+    #[gpui::test]
+    fn the_overview_says_a_browser_part_waits(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, true);
+        assert!(!rendered(cx, "desktop-backup-web-waiting"));
+        *server(&view, cx).overview.borrow_mut() = Some(BackupOverview {
+            web_part_waiting: true,
+            ..super::super::fixtures::overview()
+        });
+        view.update(cx, |view, cx| view.reload(cx));
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.restore.step, Restoring::Idle, "no outcome of its own");
+        });
+        let line = bounds(cx, "desktop-backup-web-waiting");
+        let open = bounds(cx, "desktop-backup-restore-open-web");
+        assert!(line.bottom() <= open.top());
+        click(cx, "desktop-backup-restore-open-web");
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("http://127.0.0.1:9/#/settings")
+        );
+        // This launch's outcome already says it: one line, one link.
+        let made_at = view.read_with(cx, |view, _| view.made_at);
+        let status = RestoreStatus {
+            pending: None,
+            result: Some(RestoreResult {
+                applied_at_ms: EpochMs::saturating_from_i64(made_at.as_millis() - 5_000),
+                stamp: "2026-11-20-0930-0a1f".into(),
+                warnings: Vec::new(),
+            }),
+            web_part: Some(WebPartInfo::default()),
+        };
+        view.update(cx, |view, cx| view.status_answered(&status, cx));
+        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-backup-restored"));
+        assert!(!rendered(cx, "desktop-backup-web-waiting"));
+        assert!(rendered(cx, "desktop-backup-restore-open-web"));
     }
 
     #[gpui::test]
