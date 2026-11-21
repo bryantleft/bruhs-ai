@@ -25,8 +25,8 @@ use leptos::{html, prelude::*};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::{
-    message, password_input, take_value, Page, Slot, ACTIONS, ERROR, GROUP, GROUP_TITLE, PAINT_MS,
-    PROGRESS, WARN,
+    error_class, message, password_input, take_value, FieldHooks, Page, Slot, ACTIONS, GROUP,
+    GROUP_TITLE, PAINT_MS, PROGRESS, WARN,
 };
 use crate::api::{backup as api, ApiError};
 use crate::components::vault_settings::{BUTTON, DANGER_BUTTON};
@@ -66,7 +66,7 @@ pub(super) enum Restoring {
 }
 
 /// The browser data card's progress.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Browser {
     Idle,
     Working,
@@ -131,6 +131,16 @@ impl Restore {
 
     pub(super) fn opened(self, preview: Box<RestorePreview>) {
         self.step.try_set(Restoring::Preview(preview));
+    }
+
+    /// An open job that failed: the form comes back with its message.
+    pub(super) fn fail(self, message: String) {
+        self.step.try_set(Restoring::Idle);
+        self.error.try_set(Some(message));
+    }
+
+    pub(super) fn show_error(self, message: String) {
+        self.error.try_set(Some(message));
     }
 
     fn hold(self, password: Zeroizing<String>) {
@@ -217,10 +227,7 @@ fn open_backup(page: Page) {
                 restore.forget_file();
                 restore.opened(preview);
             }
-            Ok(JobState::Failed { message }) | Err(message) => {
-                restore.step.try_set(Restoring::Idle);
-                restore.error.try_set(Some(message));
-            }
+            Ok(JobState::Failed { message }) | Err(message) => restore.fail(message),
             Ok(_) => {
                 restore.step.try_set(Restoring::Idle);
             }
@@ -380,6 +387,12 @@ fn restore_browser(page: Page) {
     }
     let typed = (!restore.holds_password.get_untracked())
         .then(|| Zeroizing::new(take_value(restore.card_password)));
+    // A backup password follows the rule, so one that doesn't can't open
+    // the part: say so before a key derivation (M1).
+    if let Some(Err(error)) = typed.as_ref().map(|typed| validate_password(typed)) {
+        restore.browser_error.set(Some(error.to_owned()));
+        return;
+    }
     let Some(password) = typed.or_else(|| restore.held_copy()) else {
         return;
     };
@@ -439,6 +452,9 @@ async fn put_back_browser(
         rewrite_dump(&mut dump, &rules);
         restore_web(dump).await?;
         restore.browser_restored.try_set(true);
+        // This tab reloads next: its own stale state must not write over
+        // what was just put back, and its reload must not ask (I1).
+        super::tabs::leave();
         Ok::<(), String>(())
     })
     .await?;
@@ -469,30 +485,41 @@ pub(super) fn browser_card(page: Page) -> AnyView {
                 <form class=ACTIONS on:submit=move |event| { event.prevent_default(); restore_browser(page); }>
                     <Show when=move || !restore.holds_password.get() && restore.browser.get() != Browser::Done>
                         <div class="w-full sm:w-60">
-                            {password_input(restore.card_password, PASSWORD, "current-password", String::new(), || {}, || {})}
+                            {password_input(restore.card_password, PASSWORD, "current-password", FieldHooks::plain())}
                         </div>
                     </Show>
                     <button type="submit" data-backup-restore-browser="" class=format!("{BUTTON} self-end") disabled=move || page.busy.get() || restore.browser.get() == Browser::Done>{RESTORE_BROWSER}</button>
                 </form>
-                {move || match restore.browser.get() {
-                    Browser::Idle => ().into_any(),
-                    Browser::Working => view! { <p role="status" class=PROGRESS>{RESTORING_WEB}</p> }.into_any(),
-                    Browser::Done => view! { <p role="status" data-backup-browser-done="" class="mt-2 text-label-sm text-pandan-300">{WEB_PART_DONE}</p> }.into_any(),
-                }}
-                <p role="alert" class=ERROR>{move || restore.browser_error.get()}</p>
+                // One live region for the run, whose text changes (M4).
+                <div role="status" data-backup-browser-status="">
+                    {move || match restore.browser.get() {
+                        Browser::Idle => ().into_any(),
+                        Browser::Working => view! { <p class=PROGRESS>{RESTORING_WEB}</p> }.into_any(),
+                        Browser::Done => view! { <p data-backup-browser-done="" class="mt-2 text-label-sm text-pandan-300">{WEB_PART_DONE}</p> }.into_any(),
+                    }}
+                </div>
+                <p role="alert" class=move || restore.browser_error.with(|error| error_class(error.as_deref().unwrap_or_default()))>{move || restore.browser_error.get()}</p>
             </div>
         </Show>
     }
     .into_any()
 }
 
+/// Whether the open form shows: not while a preview waits for an answer
+/// or Bruhs restarts. After an outcome it comes back (M10).
+fn picking(step: &Restoring) -> bool {
+    !matches!(
+        step,
+        Restoring::Preview(_) | Restoring::Applying | Restoring::Stopping { .. }
+    )
+}
+
 pub(super) fn restore_group(page: Page) -> AnyView {
     let restore = page.restore;
-    let picking = Memo::new(move |_| {
-        matches!(
-            restore.step.get(),
-            Restoring::Idle | Restoring::Working { .. }
-        )
+    let picking = Memo::new(move |_| restore.step.with(picking));
+    let preview = Memo::new(move |_| match restore.step.get() {
+        Restoring::Preview(preview) => Some(preview),
+        _ => None,
     });
     view! {
         <div data-backup-restore="" class=GROUP>
@@ -500,8 +527,12 @@ pub(super) fn restore_group(page: Page) -> AnyView {
             <Show when=move || picking.get()>
                 {open_form(page)}
             </Show>
-            {move || step_view(page, restore.step.get())}
-            <p role="alert" data-backup-restore-error="" class=ERROR>{move || restore.error.get()}</p>
+            {move || preview.get().map(|preview| preview_view(page, *preview))}
+            // One live region for every line the restore says (M4).
+            <div role="status" data-backup-restore-status="">
+                {move || status_view(restore.step.get())}
+            </div>
+            <p role="alert" data-backup-restore-error="" class=move || restore.error.with(|error| error_class(error.as_deref().unwrap_or_default()))>{move || restore.error.get()}</p>
         </div>
     }
     .into_any()
@@ -513,9 +544,7 @@ fn open_form(page: Page) -> AnyView {
         restore.password,
         PASSWORD,
         "current-password",
-        String::new(),
-        || {},
-        || {},
+        FieldHooks::plain(),
     );
     let working_job = move || match restore.step.get() {
         Restoring::Working { job, .. } => Some(job),
@@ -531,23 +560,29 @@ fn open_form(page: Page) -> AnyView {
             <div class="sm:w-80">{field}</div>
             <div class="flex flex-wrap items-center gap-2">
                 <button type="submit" data-backup-open="" class=BUTTON disabled=move || page.busy.get() || restore.chosen.with(Option::is_none)>{OPEN_BACKUP}</button>
-                {move || working_job().flatten().map(|id| view! { <button type="button" class=BUTTON on:click=move |_| page.cancel_job(id.clone())>{CANCEL}</button> })}
+                {move || working_job().flatten().map(|id| view! { <button type="button" class=BUTTON on:click=move |_| page.cancel_job(id.clone(), Slot::Restore)>{CANCEL}</button> })}
             </div>
         </form>
     }
     .into_any()
 }
 
-fn step_view(page: Page, step: Restoring) -> AnyView {
+/// What the restore says in its live region: progress, the wait (from the
+/// moment Replace is pressed, M5), the outcome or a waiting restore.
+fn status_view(step: Restoring) -> AnyView {
     match step {
-        Restoring::Idle | Restoring::Applying => ().into_any(),
+        Restoring::Idle | Restoring::Preview(_) => ().into_any(),
         Restoring::Working { line, .. } => {
-            view! { <p role="status" data-backup-restore-progress="" class=PROGRESS>{line}</p> }
-                .into_any()
+            view! { <p data-backup-restore-progress="" class=PROGRESS>{line}</p> }.into_any()
         }
-        Restoring::Preview(preview) => preview_view(page, *preview),
+        Restoring::Applying => view! {
+            <div data-backup-stopping="">
+                <p class=PROGRESS>{STOPPING}</p>
+            </div>
+        }
+        .into_any(),
         Restoring::Stopping { start_again } => view! {
-            <div role="status" data-backup-stopping="">
+            <div data-backup-stopping="">
                 <p class=PROGRESS>{STOPPING}</p>
                 {start_again.then(|| view! { <p class=WARN>{START_AGAIN}</p> })}
             </div>
@@ -560,15 +595,13 @@ fn step_view(page: Page, step: Restoring) -> AnyView {
                 "mt-2 text-label-sm text-pandan-300"
             };
             view! {
-                <div role="status" data-backup-restored="">
+                <div data-backup-restored="">
                     {lines.into_iter().map(|line| view! { <p class=class>{line}</p> }).collect_view()}
                 </div>
             }
             .into_any()
         }
-        Restoring::Pending => {
-            view! { <p role="status" class=WARN>{RESTORE_PENDING}</p> }.into_any()
-        }
+        Restoring::Pending => view! { <p class=WARN>{RESTORE_PENDING}</p> }.into_any(),
     }
 }
 
@@ -582,7 +615,7 @@ fn preview_view(page: Page, preview: RestorePreview) -> AnyView {
             </ul>
             <p data-backup-replace-warning="" class="mt-3 text-label-sm text-durian-300">{REPLACE_WARNING}</p>
             <div class=ACTIONS>
-                <button type="button" data-backup-replace="" class=DANGER_BUTTON disabled=move || page.busy.get() on:click=move |_| apply(page, RestoreSource::Staged { id: id.get_value() }, move |error| { page.restore.error.try_set(Some(message(error))); })>{REPLACE}</button>
+                <button type="button" data-backup-replace="" class=DANGER_BUTTON disabled=move || page.busy.get() on:click=move |_| apply(page, RestoreSource::Staged { id: id.get_value() }, move |error| page.restore.show_error(message(error)))>{REPLACE}</button>
                 <button type="button" data-backup-cancel="" class=BUTTON disabled=move || page.busy.get() on:click=move |_| discard(page, id.get_value())>{CANCEL}</button>
             </div>
         </div>
@@ -791,6 +824,45 @@ mod tests {
                 },
             );
             assert_eq!(restore.step.get_untracked(), Restoring::Pending);
+        });
+    }
+
+    #[test]
+    fn the_wait_shows_from_the_click_and_the_form_comes_back() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.restore.step.set(Restoring::Applying);
+            let html = render(|| restore_group(page));
+            assert!(html.contains(&escaped(STOPPING)), "{html}");
+            assert!(!html.contains("data-backup-choose"), "{html}");
+            page.restore.step.set(Restoring::Finished {
+                lines: vec![RESTORED.into()],
+                rolled_back: false,
+            });
+            let html = render(|| restore_group(page));
+            assert!(html.contains(&escaped(RESTORED)), "{html}");
+            assert!(
+                html.contains("data-backup-choose"),
+                "the form comes back: {html}"
+            );
+            let status = &html[html.find("data-backup-restore-status").unwrap()..];
+            assert!(status.contains(&escaped(RESTORED)), "{html}");
+            assert_eq!(html.matches("role=\"status\"").count(), 1, "{html}");
+        });
+    }
+
+    #[test]
+    fn the_card_refuses_an_empty_password_before_deriving() {
+        Owner::new().with(|| {
+            let page = loaded_page();
+            page.restore.web_waiting_for_tests();
+            restore_browser(page);
+            assert_eq!(
+                page.restore.browser_error.get_untracked().as_deref(),
+                Some(bruhs_models::backup::PASSWORD_SHORT)
+            );
+            assert!(!page.busy.get_untracked());
+            assert_eq!(page.restore.browser.get_untracked(), Browser::Idle);
         });
     }
 

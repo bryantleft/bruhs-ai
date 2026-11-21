@@ -165,8 +165,10 @@ pub fn delete_pre_restore(
 }
 
 /// Moves a finished upload of the browser's data from before its own
-/// restore into the newest kept set's `meta/web-part.bin` (D18, D19),
-/// replacing one kept before. `BACKUP_BUSY` while an apply holds
+/// restore into the newest kept set's `meta/web-part.bin` (D18, D19).
+/// The first upload stays: a later one is dropped, since a browser restore
+/// retried after its write would send the restored data, not the data from
+/// before (B Task 14 I2). `BACKUP_BUSY` while an apply holds
 /// `restore.lock`.
 pub fn keep_previous_web_part(roots: &Roots, upload: &Path) -> Result<(), BackupError> {
     let gone = || BackupError::Refused(GONE);
@@ -182,7 +184,11 @@ pub fn keep_previous_web_part(roots: &Roots, upload: &Path) -> Result<(), Backup
     if !real_dir(&meta) {
         return Err(gone());
     }
-    rename_synced(upload, &meta.join(WEB_PART))
+    let kept = meta.join(WEB_PART);
+    if exists(&kept)? {
+        return remove_if_there(upload);
+    }
+    rename_synced(upload, &kept)
 }
 
 pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>, BackupError> {

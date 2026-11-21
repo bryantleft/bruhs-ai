@@ -40,6 +40,11 @@ pub(crate) fn install() {
                 // A commit can finish before the effect detaches this listener.
                 // Never warn for already-saved data or use raw callback context.
                 // An untracked Memo read still refreshes dirty dependencies.
+                // A reload onto restored browser data never asks: this
+                // tab's writes are already stopped (B Task 14 I1).
+                if crate::components::backup_settings::tabs::leaving() {
+                    return;
+                }
                 if at_risk.try_get_untracked().unwrap_or(false) {
                     event.prevent_default();
                     event.set_return_value("");

@@ -887,6 +887,16 @@ async fn the_web_part_waits_for_the_browser() {
         std::fs::read(kept_dir(roots, RootKey::Core, &stamp).join("meta/web-part.bin")).unwrap(),
         previous
     );
+    // A second upload (a browser restore retried after its write) never
+    // replaces the first: that one holds the data from before (B Task 14 I2).
+    let (id, _) = web_part_upload(&host, UploadKind::PreviousWebPart, b"{\"restored\":1}");
+    let upload = host.uploaded(UploadKind::PreviousWebPart, &id).unwrap();
+    keep_previous_web_part(roots, &upload).unwrap();
+    assert!(!upload.exists());
+    assert_eq!(
+        std::fs::read(kept_dir(roots, RootKey::Core, &stamp).join("meta/web-part.bin")).unwrap(),
+        previous
+    );
     assert!(host.overview().await.web_part_waiting);
 }
 

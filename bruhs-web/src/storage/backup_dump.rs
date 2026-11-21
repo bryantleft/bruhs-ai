@@ -119,33 +119,6 @@ async fn read_stores(db: &Database, names: &[String]) -> Result<Vec<Vec<JsValue>
     metadata::finish(tx, result).await
 }
 
-/// One IndexedDB value as JSON, with bytes, blobs, dates, `undefined` and
-/// plain objects that have a `$bruhs` key of their own tagged (D7). Any
-/// other value (a `Map`, a `BigInt`, a class instance, a number JSON can't
-/// hold, or nesting past [`MAX_DEPTH`]) is `Err`. It is async because a
-/// `Blob`'s bytes can only be read that way.
-#[expect(
-    dead_code,
-    reason = "the plan's single-value interface; Task 17's browser checks call it"
-)]
-pub async fn js_to_json(value: &JsValue) -> Result<Value, ()> {
-    let mut found = Vec::new();
-    find_blobs(value, 0, &mut found)?;
-    let mut estimate = Estimate::default();
-    for blob in &found {
-        estimate
-            .add_binary(blob.size().to_u64_saturating())
-            .map_err(|_| ())?;
-    }
-    let mut read = read_blobs(found).await?;
-    let json = convert(value, 0, &mut read, &mut estimate).map_err(|_| ())?;
-    if read.is_empty() {
-        Ok(json)
-    } else {
-        Err(())
-    }
-}
-
 /// Every `Blob` in `value`, in the order [`convert`] meets them.
 fn find_blobs(value: &JsValue, depth: usize, found: &mut Vec<web_sys::Blob>) -> Result<(), ()> {
     if !value.is_object() {
@@ -227,8 +200,12 @@ impl Estimate {
     }
 }
 
-/// [`js_to_json`] with the blobs' bytes already read, in walk order. Blob
-/// bytes were added to `estimate` before they were read.
+/// One IndexedDB value as JSON, with bytes, blobs, dates, `undefined` and
+/// plain objects that have a `$bruhs` key of their own tagged (D7). Any
+/// other value (a `Map`, a `BigInt`, a class instance, a number JSON can't
+/// hold, or nesting past [`MAX_DEPTH`]) is refused. The blobs' bytes were
+/// read first by [`dump_web`], in walk order (a `Blob` can only be read
+/// asynchronously), and added to `estimate` before they were read.
 fn convert(
     value: &JsValue,
     depth: usize,
@@ -655,7 +632,7 @@ fn local_plan<'a>(
     (remove, set)
 }
 
-/// JSON back as the IndexedDB value [`js_to_json`] read: tags become a
+/// JSON back as the IndexedDB value [`convert`] read: tags become a
 /// `Uint8Array`, a `Blob` with its type, a `Date`, `undefined` or the plain
 /// object they escaped. A damaged tag is `Err`.
 pub fn json_to_js(value: &Value) -> Result<JsValue, ()> {

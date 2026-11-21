@@ -460,7 +460,8 @@ pub async fn web_part_done(
 /// `POST /api/backup/restore/web-part/previous`: the browser's data from
 /// before its own restore, encrypted in the browser, sent as
 /// `application/octet-stream` (else 415 with [`WEB_PART_TYPE`]). It goes
-/// into the newest pre-restore set, replacing one kept before.
+/// into the newest pre-restore set. The first one kept stays: a later
+/// upload is dropped and still answers 204 (B Task 14 I2).
 pub async fn web_part_previous(
     State(config): State<Arc<Config>>,
     backup: Option<Extension<BackupHost>>,

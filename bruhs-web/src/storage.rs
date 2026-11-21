@@ -137,6 +137,28 @@ thread_local! {
     /// close handler not to evict a newer one.
     static SHARED_DB: RefCell<Option<(u64, Rc<OpenDatabase>)>> = const { RefCell::new(None) };
     static DB_GENERATION: Cell<u64> = const { Cell::new(0) };
+    /// Set once this tab is about to reload onto restored data (B Task 14
+    /// I1): no new operation reaches the database.
+    static FENCED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Stops this tab's IndexedDB work for good, because another tab restores
+/// the browser's data and this one reloads next: the shared connection
+/// closes (its running transactions finish first, as `close` waits for
+/// them, and a new one on it fails) and every later [`open_db`] waits
+/// forever instead of opening one.
+pub(crate) fn fence_writes() {
+    FENCED.with(|fenced| fenced.set(true));
+    if let Some((_, db)) = SHARED_DB.with(|shared| shared.borrow_mut().take()) {
+        db.0.close();
+    }
+}
+
+/// Parks a caller once [`fence_writes`] ran; the page reloads first.
+async fn wait_if_fenced() {
+    if FENCED.with(Cell::get) {
+        std::future::pending::<()>().await;
+    }
 }
 
 /// Forget connection `generation` if it is still the cached one. The drop is
@@ -157,6 +179,7 @@ fn evict_db(generation: u64) {
 
 /// The shared connection, opening (and upgrading) the database on first use.
 pub async fn open_db() -> Result<Connection, idb::Error> {
+    wait_if_fenced().await;
     if let Some((_, db)) = SHARED_DB.with(|shared| shared.borrow().clone()) {
         return Ok(Connection(db));
     }
@@ -165,6 +188,10 @@ pub async fn open_db() -> Result<Connection, idb::Error> {
         g.get()
     });
     let mut db = open_fresh().await?;
+    if FENCED.with(Cell::get) {
+        db.close();
+        wait_if_fenced().await;
+    }
     // Another tab wants a newer schema: let it, instead of blocking it.
     db.on_version_change(move |_| evict_db(generation));
     db.on_close(move |_| evict_db(generation));
