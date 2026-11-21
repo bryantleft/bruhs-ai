@@ -5,7 +5,14 @@ pub mod api_client;
 pub mod approve;
 pub mod apps;
 pub mod artifacts;
+#[cfg(unix)]
 pub mod backup;
+// Backup runs on macOS and Linux (D27); elsewhere every route answers
+// UNSUPPORTED_PLATFORM.
+#[cfg(any(not(unix), test))]
+pub mod backup_unsupported;
+#[cfg(not(unix))]
+pub use backup_unsupported as backup;
 pub mod bruh_apps;
 pub mod calendar_events_stream;
 pub mod calendar_google;

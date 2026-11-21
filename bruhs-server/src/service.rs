@@ -16,6 +16,7 @@
 //! uninstall removes only owned releases, never logs or other app data.
 
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
+#[cfg(unix)]
 pub(crate) use restore::{start_after_restore, stop_for_restore};
 use std::{
     collections::BTreeMap,
@@ -23,6 +24,7 @@ use std::{
     process::Command,
 };
 
+#[cfg(unix)]
 mod restore;
 
 const LABEL: &str = "dev.bruhs.server";

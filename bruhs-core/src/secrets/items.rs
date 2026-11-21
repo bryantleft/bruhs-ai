@@ -81,7 +81,9 @@ fn check_item_ref(service: &str, account: &str) -> Result<(), SecretError> {
 
 /// Check items read from a backup before anything else sees them (B Task 7
 /// ruling): each one of Bruhs' own and never a seal key, and no service
-/// and account twice. Refused with fixed copy.
+/// and account twice. Refused with fixed copy. Backup runs on macOS and
+/// Linux (D27).
+#[cfg(unix)]
 pub(crate) fn check_items(items: &[KeychainItem]) -> Result<(), SecretError> {
     let mut seen = std::collections::BTreeSet::new();
     for item in items {

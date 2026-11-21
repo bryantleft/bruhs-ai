@@ -553,8 +553,12 @@ impl BackupSettings {
     }
 
     /// Read `GET /api/backup` again. A page already showing keeps showing
-    /// while it reads.
+    /// while it reads. Where backup doesn't run it asks nothing.
     fn reload(&mut self, cx: &mut Context<'_, Self>) {
+        if !cfg!(unix) {
+            self.unsupported(cx);
+            return;
+        }
         if self.load != Load::Ready {
             self.load = Load::Loading;
         }
@@ -567,6 +571,17 @@ impl BackupSettings {
             // The page may be gone by now.
             let _ = this.update(cx, |this, cx| this.loaded(serial, result, cx));
         }));
+    }
+
+    /// Backup runs on macOS and Linux (D27): elsewhere the page shows
+    /// [`UNSUPPORTED_PLATFORM`] and nothing to make or restore.
+    fn unsupported(&mut self, cx: &mut Context<'_, Self>) {
+        self.overview = BackupOverview {
+            supported: false,
+            ..BackupOverview::default()
+        };
+        self.load = Load::Ready;
+        cx.notify();
     }
 
     fn loaded(

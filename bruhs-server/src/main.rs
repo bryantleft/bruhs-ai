@@ -3,6 +3,7 @@ mod error;
 mod local_access;
 mod parent_watch;
 mod reactive_events;
+#[cfg_attr(not(unix), path = "restore_control_unsupported.rs")]
 mod restore_control;
 mod routes;
 mod service;

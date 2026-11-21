@@ -19,7 +19,8 @@ use bruhs_core::AppState;
 use bruhs_models::backup::{
     normalize_password, valid_id, BackupJob, BackupOverview, JobState, UploadId,
     DESTINATION_INSIDE, GONE, INVALID_REQUEST, NOT_A_BACKUP, OWNER_ONLY_BACKUP, PASSWORD_SHORT,
-    SOURCE_MISSING, WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX, WRONG_PASSWORD,
+    SOURCE_MISSING, UNSUPPORTED_PLATFORM, WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    WRONG_PASSWORD,
 };
 use reqwest::Method;
 use serde_json::{json, Value};
@@ -137,36 +138,8 @@ impl Fixture {
         let host = BackupHost::new(roots.clone(), SecretStore::in_memory())
             .for_tests(false)
             .with_env(move |name| env(name));
-        let state = Arc::new(
-            AppState::builder()
-                .secret_store(SecretStore::in_memory())
-                .connections(bruhs_core::connections::Connections::in_memory())
-                .build(),
-        );
-        let config = crate::config::Config::from_settings(crate::config::Settings {
-            port: Some("0"),
-            web_dist: directory.path().join("missing").to_str(),
-            ..Default::default()
-        })
-        .unwrap();
-        let app = crate::router(crate::config::ServerState {
-            app: state,
-            config: Arc::new(config),
-            updates: bruhs_core::updates::UpdateChecker::new(bruhs_core::updates::BuildInfo::new(
-                "", "", "unused",
-            )),
-        })
-        .layer(Extension(host.clone()));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .unwrap();
+        let app = crate::router(server_state(directory.path())).layer(Extension(host.clone()));
+        let (base, server, client) = serve(app).await;
         Self {
             base,
             client,
@@ -221,6 +194,44 @@ impl Fixture {
         }
         panic!("the job never finished");
     }
+}
+
+/// A server's state over an in-memory keychain, serving no web build.
+fn server_state(directory: &Path) -> crate::config::ServerState {
+    let state = Arc::new(
+        AppState::builder()
+            .secret_store(SecretStore::in_memory())
+            .connections(bruhs_core::connections::Connections::in_memory())
+            .build(),
+    );
+    let config = crate::config::Config::from_settings(crate::config::Settings {
+        port: Some("0"),
+        web_dist: directory.join("missing").to_str(),
+        ..Default::default()
+    })
+    .unwrap();
+    crate::config::ServerState {
+        app: state,
+        config: Arc::new(config),
+        updates: bruhs_core::updates::UpdateChecker::new(bruhs_core::updates::BuildInfo::new(
+            "", "", "unused",
+        )),
+    }
+}
+
+/// `app` on a loopback port: its base URL, its task and a client for it.
+async fn serve(app: axum::Router) -> (String, tokio::task::JoinHandle<()>, reqwest::Client) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap();
+    (base, server, client)
 }
 
 pub(super) fn write(path: &Path, bytes: &[u8]) {
@@ -288,6 +299,32 @@ async fn pages_can_not_make_or_restore_backups() {
         .await;
         assert_ne!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
     }
+}
+
+/// Where backup doesn't run (D27), every route still answers, owner
+/// only: 503 with the fixed copy.
+#[tokio::test]
+async fn elsewhere_every_route_answers_unsupported_platform() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = axum::Router::new()
+        .merge(crate::routes::backup_unsupported::router())
+        .with_state(server_state(directory.path()));
+    let (base, server, client) = serve(app).await;
+    for (method, path) in ROUTES {
+        let request = || {
+            client.request(
+                Method::from_bytes(method.as_bytes()).unwrap(),
+                format!("{base}{path}"),
+            )
+        };
+        let (status, text) = Fixture::send(request()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method} {path}");
+        assert_eq!(text, error(UNSUPPORTED_PLATFORM), "{method} {path}");
+        let (status, text) = Fixture::send(request().header("origin", OTHER_PAGE)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
+        assert_eq!(text, error(OWNER_ONLY_BACKUP), "{method} {path}");
+    }
+    server.abort();
 }
 
 #[tokio::test]

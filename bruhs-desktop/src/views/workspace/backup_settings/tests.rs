@@ -850,6 +850,23 @@ fn the_page_shows_where_it_stands(cx: &mut TestAppContext) {
     assert!(make.bottom() <= restore.top() && restore.bottom() <= kept.top());
 }
 
+/// Where backup doesn't run (D27) the page says so, as for an overview
+/// that isn't supported, and offers nothing to make or restore.
+#[gpui::test]
+fn elsewhere_the_page_says_backup_does_not_run(cx: &mut TestAppContext) {
+    let (view, cx) = page(cx, true);
+    assert!(rendered(cx, "desktop-backup-make-group"));
+    view.update(cx, |view, cx| view.unsupported(cx));
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.load, Load::Ready);
+        assert!(!view.overview.supported);
+    });
+    assert!(rendered(cx, "desktop-backup-status"));
+    assert!(!rendered(cx, "desktop-backup-make-group"));
+    assert!(!rendered(cx, "desktop-backup-restore-group"));
+}
+
 #[gpui::test]
 fn a_running_job_found_on_load_is_followed(cx: &mut TestAppContext) {
     let (view, cx) = page(cx, false);

@@ -40,6 +40,10 @@ fn relaunch_command(bundle: Option<&Path>, exe: Option<&Path>) -> Command {
             command
         }
         (None, exe) => {
+            #[cfg_attr(
+                not(unix),
+                expect(unused_mut, reason = "only unix starts it in a group of its own")
+            )]
             let mut command = Command::new(exe.unwrap_or_else(|| Path::new("bruhs-desktop")));
             #[cfg(unix)]
             std::os::unix::process::CommandExt::process_group(&mut command, 0);
