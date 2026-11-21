@@ -250,6 +250,12 @@ pub const ITEMS_STAYED: &str =
 pub const KEEP_ITEMS_TOO_LARGE: &str =
     "Your saved logins and keys are too large to keep aside, so nothing was replaced. Remove some, then restore again.";
 
+// Final review, server
+/// `BRUHS_REACTIVE_DB` is a relative path (final review C-I1): whether a
+/// server still holds that database can't be told, so no restore starts.
+pub const REACTIVE_DB_RELATIVE: &str =
+    "BRUHS_REACTIVE_DB is a relative path, so Bruhs can't restore. Set it to a full path, then restore again. Nothing was replaced.";
+
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
     BACKUP_TITLE,
@@ -396,6 +402,8 @@ pub const ALL_COPY: &[&str] = &[
     ITEM_STAYED,
     ITEMS_STAYED,
     KEEP_ITEMS_TOO_LARGE,
+    // Final review, server
+    REACTIVE_DB_RELATIVE,
 ];
 
 #[cfg(test)]

@@ -41,8 +41,8 @@ use bruhs_models::backup::{
     valid_stamp, BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview,
     RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE,
     INVALID_REQUEST, KEEP_ITEMS_TOO_LARGE, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
-    KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP,
-    RESTORE_CANT_MOVE, RESTORE_PENDING,
+    KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED,
+    REACTIVE_DB_RELATIVE, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -122,8 +122,8 @@ const STAMP_TRIES: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Holder {
     /// A running server (the reactive database's lock, wherever
-    /// `BRUHS_REACTIVE_DB` puts it, or a relative override whose lock
-    /// can't be found).
+    /// `BRUHS_REACTIVE_DB` puts it, or, for an apply a stop cut short, a
+    /// relative override whose lock can't be found).
     Server,
     /// A running desktop app (its instance lock).
     Desktop,
@@ -257,8 +257,9 @@ pub fn schedule(
 /// (D16, ruling F20). `desktop_lock` is the caller's own instance lock
 /// when the caller is the desktop app. A held lock is `Busy` and changes
 /// nothing. With `BRUHS_REACTIVE_DB` set, the server's lock is checked
-/// beside the database it names (final review C-I1); a relative override,
-/// whose lock this can't find, is `Busy` (ruling F10 c). A `backups`
+/// beside the database it names (final review C-I1); with a relative
+/// override, whose lock this can't find, a fresh apply is refused
+/// (`REACTIVE_DB_RELATIVE`) and one a stop cut short is `Busy`. A `backups`
 /// folder that is a link is never acted on.
 ///
 /// A restore that can never be applied (its source isn't there whole, its
@@ -324,8 +325,18 @@ pub(super) fn apply_pending_with(
     };
     // Final review C-I1: the server's lock where its database is, even
     // when `BRUHS_REACTIVE_DB` moved it; the swap never touches that file.
+    // A relative override's lock can't be found: a fresh apply is refused
+    // for good, keeping the service flag, rather than wait forever; one a
+    // stop cut short waits, since today's data may be half placed.
     let Some(server_lock) = reactive_lock_path(roots, env) else {
-        return Ok(ApplyOutcome::Busy(Holder::Server));
+        return match work {
+            Work::Start(pending) => Err(refuse(
+                &backups,
+                BackupError::Refused(REACTIVE_DB_RELATIVE),
+                pending.service_to_restart,
+            )),
+            Work::Resume(_) => Ok(ApplyOutcome::Busy(Holder::Server)),
+        };
     };
     let Lock::Free(_server_lock) = lock_existing(&server_lock)? else {
         return Ok(ApplyOutcome::Busy(Holder::Server));

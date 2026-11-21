@@ -621,8 +621,7 @@ async fn apply_waits_for_every_writer() {
     );
     untouched();
     // Its reactive database moved elsewhere: its lock is beside it there
-    // (final review C-I1), and a relative override's can't be found
-    // (ruling F10 c).
+    // (final review C-I1).
     drop(server);
     let outside = fixture.base.join("elsewhere");
     std::fs::create_dir_all(&outside).unwrap();
@@ -639,13 +638,6 @@ async fn apply_waits_for_every_writer() {
     );
     untouched();
     drop(moved);
-    let relative =
-        |name: &str| (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from("r.sqlite3"));
-    assert_eq!(
-        apply_pending_with(roots, &fixture.store, None, &relative, &never_stop).unwrap(),
-        ApplyOutcome::Busy(Holder::Server)
-    );
-    untouched();
     // Another apply.
     let restore = File::options()
         .read(true)
@@ -710,6 +702,58 @@ async fn a_reactive_database_outside_the_roots_never_blocks_the_apply() {
         apply_pending_with(roots, &fixture.store, None, &elsewhere, &never_stop).unwrap(),
         ApplyOutcome::NothingPending
     );
+}
+
+/// Final review C-I1: a relative `BRUHS_REACTIVE_DB`'s lock can't be
+/// found (ruling F10 c). A fresh apply is refused for good, keeping the
+/// service flag, so no start waits on it forever; one a stop cut short
+/// waits, since today's data may be half placed.
+#[tokio::test]
+async fn a_relative_reactive_database_refuses_a_fresh_apply_for_good() {
+    let relative =
+        |name: &str| (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from("r.sqlite3"));
+    let (fresh, cut) = (fixture(false, false), fixture(false, false));
+    let fixture = fresh;
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), true).unwrap();
+    let today = files_under(&roots.core, &["backups"]);
+    let outcome = apply_pending_with(roots, &fixture.store, None, &relative, &never_stop);
+    assert!(
+        matches!(outcome, Err(BackupError::Refused(REACTIVE_DB_RELATIVE))),
+        "{outcome:?}"
+    );
+    assert!(!restore_waits(roots));
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+    assert!(take_service_restart(roots), "the service flag stays");
+    assert_eq!(
+        apply_pending_with(roots, &fixture.store, None, &relative, &never_stop).unwrap(),
+        ApplyOutcome::NothingPending
+    );
+
+    // Cut short after the second entry was placed: it waits.
+    let fixture = cut;
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let placed = Cell::new(0);
+    let stop = |step: &Step, crash: Point| {
+        if matches!(step, Step::Placed { .. }) && crash == Point::Recorded {
+            placed.set(placed.get() + 1);
+        }
+        placed.get() == 2
+    };
+    assert!(apply_pending_with(roots, &fixture.store, None, &no_env, &stop).is_err());
+    assert_eq!(
+        apply_pending_with(roots, &fixture.store, None, &relative, &never_stop).unwrap(),
+        ApplyOutcome::Busy(Holder::Server)
+    );
+    assert!(applying(roots));
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_applied(&fixture, &before);
 }
 
 #[tokio::test]
