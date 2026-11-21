@@ -334,7 +334,9 @@ impl SecretStore {
     /// in `<directory>/items.json` (0600, rewritten atomically) instead of
     /// the keychain, so an acceptance run's items outlive the server and
     /// reach the restore's own process. `directory` belongs outside the
-    /// data roots.
+    /// data roots. For a scratch `HOME` only: the catalogs stay in this
+    /// account's real credentials folder, so under a real `HOME` they
+    /// would name items the file doesn't hold.
     #[cfg(any(test, debug_assertions))]
     pub fn test_file(directory: PathBuf) -> Self {
         // Without a data folder nothing else runs either; the catalogs

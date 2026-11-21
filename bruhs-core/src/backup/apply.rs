@@ -66,6 +66,8 @@ pub(super) use kept::sweep_restore;
 use kept::{check_kept, forget_key, hold_restore_lock, kept_account, kept_dir, kept_info, park};
 pub use kept::{delete_pre_restore, keep_previous_web_part, pre_restores};
 
+/// `<core>/logs/restore.log` (see [`open_restore_log`]).
+const RESTORE_LOG: &str = "restore.log";
 /// The apply's own lock, inside `<core>/backups`, which no apply moves.
 pub(super) const RESTORE_LOCK: &str = "restore.lock";
 /// The desktop app's instance lock, at the top of the desktop root (D17).
@@ -290,8 +292,11 @@ pub(super) fn apply_pending_with(
             Ok(Some(pending)) => Work::Start(pending),
             Ok(None) => return Ok(ApplyOutcome::NothingPending),
             // Damaged, or a source this build can't read.
+            // Its service flag can't be read either: a service it stopped
+            // stays down until something starts it (a recorded limit).
             Err(error @ (BackupError::Format(_) | BackupError::Refused(_))) => {
-                return Err(refuse(&backups, error))
+                tracing::warn!("a damaged pending restore was removed: {}", error.message());
+                return Err(refuse(&backups, error, false));
             }
             Err(error) => return Err(error),
         },
@@ -358,9 +363,36 @@ pub fn applying(roots: &Roots) -> bool {
         .is_some_and(|backups| std::fs::symlink_metadata(backups.join(JOURNAL)).is_ok())
 }
 
-/// The last restore applied on this computer.
+/// `<core>/logs/restore.log`, opened for appending: where the restore's
+/// applier and the apps' start write outcomes (never paths or values).
+/// Never through a link or onto anything but a plain file, and 0600 even
+/// when it was there before (B Task 10 I6).
+pub fn open_restore_log(core: &Path) -> io::Result<File> {
+    use std::os::unix::fs::PermissionsExt;
+    let logs = core.join("logs");
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&logs)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(logs.join(RESTORE_LOG))?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("the restore log isn't a plain file"));
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+/// The last restore applied on this computer. A record that only keeps a
+/// refused restore's service flag names none.
 pub fn result(roots: &Roots) -> Option<RestoreResult> {
-    read_result(&backups_dir(roots)?).map(|result| result.result())
+    read_result(&backups_dir(roots)?)
+        .filter(|result| result.applied_at_ms != EpochMs::default())
+        .map(|result| result.result())
 }
 
 /// The browser part the last restore brought, while it waits for the
@@ -434,11 +466,12 @@ fn plan(
     backups: &Path,
     pending: PendingFile,
 ) -> Result<Journal, BackupError> {
+    let restart = pending.service_to_restart;
     let set = match check_source(roots, &pending.source) {
         Ok(Some(set)) => set,
-        Ok(None) => return Err(refuse(backups, BackupError::Refused(GONE))),
+        Ok(None) => return Err(refuse(backups, BackupError::Refused(GONE), restart)),
         Err(error @ (BackupError::Format(_) | BackupError::Refused(_))) => {
-            return Err(refuse(backups, error))
+            return Err(refuse(backups, error, restart))
         }
         Err(error) => return Err(error),
     };
@@ -454,7 +487,7 @@ fn plan(
                 })
                 .collect(),
             Err(BackupError::Keychain(message)) if message == KEYCHAIN_SET_UNREADABLE => {
-                return Err(refuse(backups, BackupError::Keychain(message)))
+                return Err(refuse(backups, BackupError::Keychain(message), restart))
             }
             Err(error) => return Err(error),
         }
@@ -472,7 +505,7 @@ fn plan(
         });
     }
     if !renames_can_happen(roots, &pending.source, &passes)? {
-        return Err(refuse(backups, cant_move()));
+        return Err(refuse(backups, cant_move(), restart));
     }
     let web_part = set.web_part.then(|| match &pending.source {
         RestoreSource::Staged { id } => id.clone(),
@@ -1354,12 +1387,35 @@ fn new_dir(folder: &Path) -> Result<(), BackupError> {
 }
 
 /// Removes `pending.json` and answers `error` (B Task 8 I2): a restore
-/// that can never be applied doesn't block backups and restores.
-fn refuse(backups: &Path, error: BackupError) -> BackupError {
-    match remove_if_there(&backups.join(PENDING)).and_then(|()| sync_dir(backups)) {
+/// that can never be applied doesn't block backups and restores. A
+/// service the restore stopped (`service_to_restart`) is first recorded in
+/// `result.json`, where [`take_service_restart`] finds it (B Task 10 I5).
+/// The caller holds `restore.lock`.
+fn refuse(backups: &Path, error: BackupError, service_to_restart: bool) -> BackupError {
+    let kept = if service_to_restart {
+        keep_service_restart(backups)
+    } else {
+        Ok(())
+    };
+    match kept
+        .and_then(|()| remove_if_there(&backups.join(PENDING)))
+        .and_then(|()| sync_dir(backups))
+    {
         Ok(()) => error,
         Err(failed) => failed,
     }
+}
+
+/// Sets `result.json`'s service flag, keeping the rest of the record (the
+/// last restore, a browser part that waits). With no record yet, the new
+/// one holds only the flag, which [`result`] doesn't report.
+fn keep_service_restart(backups: &Path) -> Result<(), BackupError> {
+    let mut result = read_result(backups).unwrap_or_default();
+    if result.service_to_restart {
+        return Ok(());
+    }
+    result.service_to_restart = true;
+    write_atomically(backups, RESULT, &to_json(&result)?)
 }
 
 /// Whether a rename failed for good (B Task 8 I1): a name something else

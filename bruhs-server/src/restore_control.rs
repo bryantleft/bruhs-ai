@@ -17,7 +17,7 @@ use bruhs_core::backup::{
     apply_pending, applying, restore_waits, take_service_restart, ApplyOutcome, BackupError,
     Holder, Roots,
 };
-use bruhs_core::secrets::SecretStore;
+use bruhs_core::secrets::{SecretChoice, SecretStore};
 use bruhs_models::backup::RESTORE_ROLLED_BACK;
 
 use crate::service::{self, Asker};
@@ -32,9 +32,9 @@ const EXIT_WITH_PARENT: &str = "BRUHS_EXIT_WITH_PARENT";
 /// systemd sets it in every process a unit runs.
 const INVOCATION_ID: &str = "INVOCATION_ID";
 
-/// Nothing waits any more: applied, rolled back or never there.
+/// Nothing waits any more: applied, or never there.
 pub(crate) const EXIT_DONE: i32 = 0;
-/// The restore was refused and removed.
+/// The restore was refused and removed, or rolled back.
 pub(crate) const EXIT_FAILED: i32 = 1;
 /// A restore still waits (EX_TEMPFAIL).
 pub(crate) const EXIT_WAITING: i32 = 75;
@@ -111,9 +111,9 @@ impl RestoreControl for RealRestoreControl {
 
     fn spawn_applier(&self) -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
-        let mut command = applier_command(&exe, restore_log(&self.core), &|name| {
-            std::env::var_os(name)
-        });
+        let log = bruhs_core::backup::open_restore_log(&self.core).ok();
+        let env: Vec<_> = std::env::vars_os().collect();
+        let mut command = applier_command(&exe, log, &env);
         if command.get_program() == SYSTEMD_RUN {
             // systemd-run returns once the unit runs.
             let status = command.status()?;
@@ -154,13 +154,10 @@ const SYSTEMD_RUN: &str = "systemd-run";
 /// The applier's command: this executable with `restore-apply`, without
 /// the parent watch, its output appended to `log`, in a process group of
 /// its own, or, under systemd (ruling F22 b), in a transient unit of its
-/// own, since stopping the service's unit stops its whole cgroup.
-fn applier_command(
-    exe: &Path,
-    log: Option<File>,
-    env: &dyn Fn(&str) -> Option<OsString>,
-) -> Command {
-    let mut command = if env(INVOCATION_ID).is_some() {
+/// own, since stopping the service's unit stops its whole cgroup. `env`
+/// is this process's environment.
+fn applier_command(exe: &Path, log: Option<File>, env: &[(OsString, OsString)]) -> Command {
+    let mut command = if env.iter().any(|(key, _)| key == INVOCATION_ID) {
         let mut command = Command::new(SYSTEMD_RUN);
         command.args(["--user", "--collect", "--quiet"]);
         command.arg(format!(
@@ -168,10 +165,14 @@ fn applier_command(
             uuid::Uuid::new_v4().simple()
         ));
         // The unit starts with the user manager's environment; carry this
-        // process's settings (the same ones the service carries).
-        for (key, _) in std::env::vars_os() {
+        // process's settings and the folders the roots resolve from. Only
+        // names: systemd-run copies each value from its own environment.
+        for (key, _) in env {
             let Some(key) = key.to_str() else { continue };
-            if (key.starts_with("BRUHS_") && key != EXIT_WITH_PARENT) || key == "PATH" {
+            let carried = (key.starts_with("BRUHS_") && key != EXIT_WITH_PARENT)
+                || key.starts_with("XDG_")
+                || key == "PATH";
+            if carried {
                 command.arg(format!("--setenv={key}"));
             }
         }
@@ -191,39 +192,23 @@ fn applier_command(
     command
 }
 
-/// `<core>/logs/restore.log`, opened for appending (0600). A link there
-/// is left alone and the output dropped.
-#[expect(dead_code, reason = "used from Task 12")]
-fn restore_log(core: &Path) -> Option<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let logs = core.join("logs");
-    std::fs::create_dir_all(&logs).ok()?;
-    let path = logs.join("restore.log");
-    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.is_file()) {
-        return None;
-    }
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(path)
-        .ok()
-}
-
 type ApplyResult = Result<ApplyOutcome, BackupError>;
 
 /// What one try came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Attempt {
-    /// Nothing waits: applied, rolled back, or never there.
+    /// Nothing waits: applied, or never there.
     Done,
-    /// Refused for good; nothing waits any more.
+    /// Refused for good, or rolled back; nothing waits any more.
     Failed,
     /// A lock is held, or the try ran out of time.
     Busy,
     /// An error left the restore waiting for another try.
     Retry,
 }
+
+/// How often a try that keeps waiting logs it.
+const WAITING_LOG_EVERY: Duration = Duration::from_secs(10);
 
 /// One caller's tries at the waiting restore.
 struct Applier<'a> {
@@ -232,13 +217,40 @@ struct Applier<'a> {
     apply: &'a dyn Fn() -> Option<ApplyResult>,
     /// Starts the background service again.
     start_service: &'a dyn Fn(),
+    /// When a try last logged that it waits.
+    logged: std::cell::Cell<Option<Instant>>,
 }
 
-impl Applier<'_> {
+impl<'a> Applier<'a> {
+    fn new(
+        roots: &'a Roots,
+        apply: &'a dyn Fn() -> Option<ApplyResult>,
+        start_service: &'a dyn Fn(),
+    ) -> Self {
+        Self {
+            roots,
+            apply,
+            start_service,
+            logged: std::cell::Cell::new(None),
+        }
+    }
+
+    /// Logs that the restore waits, at most once every ten seconds.
+    fn waiting(&self, why: &str) {
+        let due = self
+            .logged
+            .get()
+            .is_none_or(|last| last.elapsed() >= WAITING_LOG_EVERY);
+        if due {
+            self.logged.set(Some(Instant::now()));
+            tracing::info!("a restore waits for {why}");
+        }
+    }
+
     fn attempt(&self) -> Attempt {
         let attempt = match (self.apply)() {
             None => {
-                tracing::info!("a restore is still being applied");
+                self.waiting("the apply still running");
                 Attempt::Busy
             }
             Some(Ok(ApplyOutcome::NothingPending)) => Attempt::Done,
@@ -247,7 +259,7 @@ impl Applier<'_> {
                 Attempt::Done
             }
             Some(Ok(ApplyOutcome::Busy(holder))) => {
-                tracing::info!("a restore waits for {}", holder_name(holder));
+                self.waiting(holder_name(holder));
                 Attempt::Busy
             }
             Some(Err(error)) => {
@@ -334,15 +346,10 @@ pub(crate) fn restore_apply_cli() -> Option<i32> {
         tracing::error!("no home folder to restore into");
         return Some(EXIT_FAILED);
     };
-    let store =
-        crate::secret_store_choice(std::env::var("BRUHS_SECRET_STORE").ok().as_deref()).store();
+    let store = SecretChoice::from_env().store();
     let lock = if once { stdin_lock() } else { None };
     let apply = || Some(apply_pending(&roots, &store, lock.as_ref()));
-    let applier = Applier {
-        roots: &roots,
-        apply: &apply,
-        start_service: &start_service,
-    };
+    let applier = Applier::new(&roots, &apply, &start_service);
     Some(if once {
         match applier.attempt() {
             Attempt::Done => EXIT_DONE,
@@ -378,9 +385,10 @@ fn handed_lock(file: File) -> Option<File> {
 /// without opening anything: a restore still waits behind a held lock, or
 /// an apply is half done. Each try's keychain calls get the time left,
 /// and a try that runs out counts as busy.
-pub(crate) async fn apply_at_start(store: SecretStore) -> Option<i32> {
+pub(crate) async fn apply_at_start() -> Option<i32> {
     let roots = Roots::from_env()?;
     let checked = tokio::task::spawn_blocking(move || {
+        let store = SecretChoice::from_env().store();
         check_at_start(&roots, &store, &start_service, START_LIMIT, PAUSE)
     })
     .await;
@@ -411,11 +419,7 @@ fn check_at_start(
             deadline.saturating_duration_since(Instant::now()),
         )
     };
-    let applier = Applier {
-        roots,
-        apply: &apply,
-        start_service,
-    };
+    let applier = Applier::new(roots, &apply, start_service);
     loop {
         let attempt = applier.attempt();
         let late = Instant::now() >= deadline;
@@ -524,12 +528,8 @@ mod tests {
             let started = Cell::new(0);
             let (apply, start) = applier(&fixture, &started);
             let begun = Instant::now();
-            let code = Applier {
-                roots: &fixture.roots,
-                apply: &apply,
-                start_service: &start,
-            }
-            .run(Duration::from_secs(30), Duration::from_secs(1));
+            let code = Applier::new(&fixture.roots, &apply, &start)
+                .run(Duration::from_secs(30), Duration::from_secs(1));
             release.join().unwrap();
             assert_eq!(code, EXIT_DONE);
             assert!(begun.elapsed() >= Duration::from_secs(2));
@@ -546,12 +546,8 @@ mod tests {
         let _server = hold(&fixture.roots.core.join("server/reactive.sqlite3.lock"));
         let started = Cell::new(0);
         let (apply, start) = applier(&fixture, &started);
-        let code = Applier {
-            roots: &fixture.roots,
-            apply: &apply,
-            start_service: &start,
-        }
-        .run(Duration::from_millis(600), Duration::from_millis(100));
+        let code = Applier::new(&fixture.roots, &apply, &start)
+            .run(Duration::from_millis(600), Duration::from_millis(100));
         assert_eq!(code, EXIT_WAITING);
         assert_eq!(note(&fixture.roots).as_deref(), Some(TODAY));
         assert_eq!(started.get(), 0);
@@ -562,14 +558,8 @@ mod tests {
     fn the_applier_leaves_the_parents_lifetime() {
         let dir = tempfile::tempdir().unwrap();
         let base = std::fs::canonicalize(dir.path()).unwrap();
-        let log = base.join("restore.log");
-        let open_log = || {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log)
-                .unwrap()
-        };
+        let log = base.join("logs/restore.log");
+        let open_log = || bruhs_core::backup::open_restore_log(&base).unwrap();
         // Outside systemd: this executable, its own process group, no
         // parent watch, output appended to the log.
         let script = base.join("applier.sh");
@@ -580,7 +570,13 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
-        let command = applier_command(&script, Some(open_log()), &|_| None);
+        let env: Vec<(OsString, OsString)> = vec![
+            ("BRUHS_SECRET_STORE".into(), "file:/keys".into()),
+            (EXIT_WITH_PARENT.into(), "1".into()),
+            ("XDG_DATA_HOME".into(), "/data".into()),
+            ("HOME".into(), "/home".into()),
+        ];
+        let command = applier_command(&script, Some(open_log()), &env);
         assert_eq!(command.get_program(), script.as_os_str());
         assert!(command
             .get_envs()
@@ -594,9 +590,9 @@ mod tests {
         assert!(text.contains(&format!("pgid {pid}")), "{text}");
         // Under systemd the applier gets a unit of its own, so stopping the
         // service's cgroup doesn't stop it.
-        let command = applier_command(&script, Some(open_log()), &|name| {
-            (name == "INVOCATION_ID").then(|| "abc".into())
-        });
+        let mut under_systemd = env;
+        under_systemd.push((INVOCATION_ID.into(), "abc".into()));
+        let command = applier_command(&script, Some(open_log()), &under_systemd);
         assert_eq!(command.get_program(), "systemd-run");
         let args: Vec<_> = command
             .get_args()
@@ -607,6 +603,13 @@ mod tests {
             .iter()
             .any(|arg| arg.starts_with("--unit=bruhs-restore-")));
         assert!(!args.iter().any(|arg| arg.contains(EXIT_WITH_PARENT)));
+        // Names only, never values: the settings and the roots' folders.
+        for carried in ["--setenv=BRUHS_SECRET_STORE", "--setenv=XDG_DATA_HOME"] {
+            assert!(args.iter().any(|arg| arg == carried), "{args:?}");
+        }
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("/keys") || arg.contains("HOME=")));
         assert!(args.ends_with(&[script.display().to_string(), RESTORE_APPLY.into()]));
     }
 
@@ -638,6 +641,27 @@ mod tests {
         assert_eq!(check(Duration::from_secs(30)), None);
         assert_eq!(note(&fixture.roots).as_deref(), Some(RESTORED));
         assert_eq!(started.get(), 1);
+    }
+
+    /// A restore refused at plan time still starts the service it stopped
+    /// (B Task 10 I5).
+    #[test]
+    fn a_refused_restore_still_starts_the_service_again() {
+        let fixture = fixture();
+        stage_restore(&fixture.roots, &fixture.store, true).unwrap();
+        // The staged data went away: the restore is GONE.
+        std::fs::remove_dir_all(fixture.roots.core.join("backups/staging")).unwrap();
+        let started = Cell::new(0);
+        let (apply, start) = applier(&fixture, &started);
+        let code = Applier::new(&fixture.roots, &apply, &start)
+            .run(Duration::from_secs(10), Duration::from_millis(100));
+        assert_eq!(code, EXIT_FAILED);
+        assert_eq!(started.get(), 1);
+        assert!(!restore_waits(&fixture.roots));
+        // The flag is taken once, and the record names no restore.
+        assert!(!take_service_restart(&fixture.roots));
+        assert!(bruhs_core::backup::result(&fixture.roots).is_none());
+        assert_eq!(note(&fixture.roots).as_deref(), Some(TODAY));
     }
 
     #[test]

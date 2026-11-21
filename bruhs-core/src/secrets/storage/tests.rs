@@ -209,6 +209,13 @@ async fn test_file_items_are_shared_and_private() {
             Arc::new(KeyMap::in_file(keys.join(item_file::ITEMS))),
         ))
     };
+    // A folder that was there, open to others, is made private.
+    fs::create_dir_all(&items).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&items, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let writer = store(&items);
     writer
         .save("/project", "Key", Zeroizing::new("private-file".into()))

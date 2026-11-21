@@ -1,6 +1,7 @@
 //! Private credential input and execution. Values never enter provider events.
 
 mod api_client;
+mod choice;
 mod database;
 mod items;
 pub(crate) mod mcp;
@@ -15,6 +16,7 @@ mod trackers;
 #[cfg(unix)]
 mod vault_tests;
 
+pub use choice::{secret_store_choice, SecretChoice, SECRET_STORE_ENV};
 pub use items::*;
 pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use one_password::{OnePassword, OnePasswordError};

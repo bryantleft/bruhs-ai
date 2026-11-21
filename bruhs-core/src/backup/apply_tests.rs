@@ -1882,3 +1882,23 @@ async fn a_lock_a_forked_copy_still_holds_for_a_moment_is_free() {
         ApplyOutcome::Applied(_)
     ));
 }
+
+/// One `restore.log` for the applier and both apps (B Task 10 I6):
+/// appended to, made private when it was there before, never a link.
+#[test]
+fn the_restore_log_is_private_and_never_a_link() {
+    let fixture = fixture(false, false);
+    let core = &fixture.roots.core;
+    let log = core.join("logs/restore.log");
+    write(&log, b"old ");
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    open_restore_log(core).unwrap().write_all(b"new").unwrap();
+    assert_eq!(std::fs::read(&log).unwrap(), b"old new");
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    std::fs::remove_file(&log).unwrap();
+    let elsewhere = fixture.base.join("elsewhere.log");
+    std::os::unix::fs::symlink(&elsewhere, &log).unwrap();
+    assert!(open_restore_log(core).is_err());
+    assert!(!elsewhere.exists());
+}
