@@ -8,8 +8,8 @@
 
 use super::super::vault_settings::{button, field, labelled, small};
 use super::super::*;
-use super::{group, group_title, line, BackupSettings, Slot};
-use crate::app_state::spawn_tokio;
+use super::{danger, group, group_title, line, BackupSettings, Slot};
+use crate::server_client::backup::Wiped;
 use crate::server_client::ServerError;
 use bruhs_models::backup::{
     preview_lines, validate_password, ApplyAccepted, ApplyRestore, BackupOverview, OpenBackup,
@@ -73,10 +73,6 @@ pub(super) struct Restore {
     replace_focus: FocusHandle,
     prompt_task: Option<Task<()>>,
     relaunch_task: Option<Task<()>>,
-    #[cfg(test)]
-    pub(super) last_apply: Option<ApplyRestore>,
-    #[cfg(test)]
-    pub(super) last_open: Option<String>,
 }
 
 impl Restore {
@@ -95,10 +91,6 @@ impl Restore {
             replace_focus: cx.focus_handle().tab_stop(true),
             prompt_task: None,
             relaunch_task: None,
-            #[cfg(test)]
-            last_apply: None,
-            #[cfg(test)]
-            last_open: None,
         }
     }
 
@@ -223,27 +215,13 @@ impl BackupSettings {
             job: None,
         };
         self.hold_focus_on_page(window, cx);
-        self.record(format!("POST {}", crate::server_client::backup::OPEN_PATH));
-        #[cfg(test)]
-        {
-            self.restore.last_open = Some(path.clone());
-        }
-        let mut body = OpenBackup {
+        let body = Wiped(OpenBackup {
             source: OpenSource::Path { path },
             password: std::mem::take(&mut *password),
-        };
+        });
         drop(password);
         cx.notify();
-        if cfg!(test) {
-            zeroize::Zeroize::zeroize(&mut body.password);
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move {
-            let result = client.open_backup(&body).await;
-            zeroize::Zeroize::zeroize(&mut body.password);
-            result
-        });
+        let operation = self.calls.open(body, cx);
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             let _ = this.update(cx, |this, cx| match result {
@@ -262,18 +240,10 @@ impl BackupSettings {
             return;
         };
         let id = preview.id.clone();
-        let Some(path) = crate::server_client::backup::staged_path(&id) else {
-            return;
-        };
         self.busy = true;
         self.hold_focus_on_page(window, cx);
-        self.record(format!("DELETE {path}"));
         cx.notify();
-        if cfg!(test) {
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move { client.discard_staged(&id).await });
+        let operation = self.calls.discard(id, cx);
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| this.discarded(result, window, cx));
@@ -319,22 +289,13 @@ impl BackupSettings {
         ));
         self.restore.applying = Some(source.clone());
         self.hold_focus_on_page(window, cx);
-        self.record(format!("POST {}", crate::server_client::backup::APPLY_PATH));
         let body = ApplyRestore {
             source,
             replace: true,
             from_desktop: true,
         };
         cx.notify();
-        if cfg!(test) {
-            #[cfg(test)]
-            {
-                self.restore.last_apply = Some(body);
-            }
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move { client.apply_restore(&body).await });
+        let operation = self.calls.apply(body, cx);
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| this.applied(result, window, cx));
@@ -386,12 +347,7 @@ impl BackupSettings {
 
     /// Read the last restore's outcome once per launch.
     pub(super) fn read_status(&mut self, cx: &mut Context<'_, Self>) {
-        self.record(format!("GET {}", crate::server_client::backup::STATUS_PATH));
-        if cfg!(test) {
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move { client.restore_status().await });
+        let operation = self.calls.status(cx);
         cx.spawn(async move |this, cx| {
             if let Ok(status) = operation.await {
                 let _ = this.update(cx, |this, cx| this.status_answered(&status, cx));
@@ -514,13 +470,13 @@ impl BackupSettings {
     }
 
     fn render_preview(&self, preview: &RestorePreview, cx: &Context<'_, Self>) -> AnyElement {
-        let mut replace = button(
+        let mut replace = danger(button(
             "desktop-backup-replace",
             "desktop-backup-replace".into(),
             REPLACE,
-            WebButtonVariant::Destructive,
+            WebButtonVariant::Outline,
             self.busy,
-        );
+        ));
         let mut cancel = button(
             "desktop-backup-cancel",
             "desktop-backup-cancel".into(),
@@ -658,29 +614,35 @@ impl BackupSettings {
 mod tests {
     use super::super::fixtures::{preview, ID};
     use super::super::tests::{
-        bounds, click, focused, page, rendered, requests, type_into, value, GOOD,
+        bounds, click, focused, page, rendered, requests, server, type_into, value, wait, GOOD,
     };
     use super::{outcome, Restoring};
+    use crate::server_client::ServerError;
     use bruhs_models::backup::{
-        preview_lines, ApplyAccepted, PendingRestore, RestoreResult, RestoreSource, RestoreStatus,
-        PARKED_STAYED, PASSWORD_SHORT, RESTORED, RESTORE_ROLLED_BACK,
+        preview_lines, ApplyAccepted, BackupOverview, JobState, PendingRestore, RestoreResult,
+        RestoreSource, RestoreStatus, StagedRestore, PARKED_STAYED, PASSWORD_SHORT,
+        RECORDING_FIRST, RESTORED, RESTORE_ROLLED_BACK,
     };
     use bruhs_models::EpochMs;
     use gpui::TestAppContext;
     use std::cell::Cell;
     use std::rc::Rc;
-    use std::time::Duration;
+
+    /// The fixture overview with an opened backup waiting on its preview.
+    fn staged() -> BackupOverview {
+        BackupOverview {
+            staged: Some(StagedRestore { preview: preview() }),
+            ..super::super::fixtures::overview()
+        }
+    }
 
     #[gpui::test]
     fn the_preview_uses_the_shared_lines(cx: &mut TestAppContext) {
         let (view, cx) = page(cx, true);
-        let fixture = preview();
-        view.update(cx, |view, cx| {
-            view.restore.opened(Box::new(fixture.clone()));
-            cx.notify();
-        });
+        *server(&view, cx).overview.borrow_mut() = Some(staged());
+        view.update(cx, |view, cx| view.reload(cx));
         cx.run_until_parked();
-        let lines = preview_lines(&fixture);
+        let lines = preview_lines(&preview());
         assert!(lines.len() >= 6, "{lines:?}");
         let mut last = None;
         for index in 0..lines.len() {
@@ -701,65 +663,62 @@ mod tests {
         // The form steps aside while the preview waits for an answer.
         assert!(!rendered(cx, "desktop-backup-choose"));
         // Cancel drops the opened backup and the form comes back.
+        *server(&view, cx).overview.borrow_mut() = Some(super::super::fixtures::overview());
         click(cx, "desktop-backup-cancel");
-        assert_eq!(
-            requests(&view, cx).last().cloned(),
-            Some(format!("DELETE /api/backup/restore/{ID}"))
-        );
-        cx.update(|window, cx| view.update(cx, |view, cx| view.discarded(Ok(()), window, cx)));
-        cx.run_until_parked();
+        assert!(requests(&view, cx).contains(&format!("DELETE /api/backup/restore/{ID}")));
         assert!(rendered(cx, "desktop-backup-choose"));
+        assert!(!rendered(cx, "desktop-backup-preview"));
     }
 
+    /// The brief's test: a server answering `ApplyAccepted` makes the app
+    /// say it is stopping and start itself again, once.
     #[gpui::test]
     fn replace_asks_then_relaunches(cx: &mut TestAppContext) {
         let (view, cx) = page(cx, true);
+        let fake = server(&view, cx);
+        *fake.overview.borrow_mut() = Some(staged());
         let relaunched = Rc::new(Cell::new(0));
         let count = relaunched.clone();
         view.update(cx, |view, cx| {
             view.relaunch = Rc::new(move |_| count.set(count.get() + 1));
-            view.restore.opened(Box::new(preview()));
-            cx.notify();
+            view.reload(cx);
         });
         cx.run_until_parked();
-        // The preview asks: its warning, Replace my data and Cancel, with
-        // focus on nothing destructive.
+        // The preview asks: its warning, then Replace my data and Cancel.
         assert!(rendered(cx, "desktop-backup-replace-warning"));
+        // No answer yet: STOPPING shows from the press, nothing restarts.
         click(cx, "desktop-backup-replace");
         assert_eq!(
             requests(&view, cx).last().map(String::as_str),
             Some("POST /api/backup/restore/apply")
         );
-        view.read_with(cx, |view, _| {
-            let apply = view.restore.last_apply.clone().unwrap();
-            assert_eq!(apply.source, RestoreSource::Staged { id: ID.into() });
-            assert!(apply.replace && apply.from_desktop);
-            assert_eq!(view.restore.step, Restoring::Applying);
-        });
+        let apply = fake.last_apply.borrow().clone().unwrap();
+        assert_eq!(apply.source, RestoreSource::Staged { id: ID.into() });
+        assert!(apply.replace && apply.from_desktop);
         assert!(
             rendered(cx, "desktop-backup-stopping"),
             "STOPPING from the press"
         );
+        wait(cx, 2_000);
         assert_eq!(relaunched.get(), 0, "nothing restarts before the answer");
-        // The server accepts: Bruhs says it is stopping and starts again once.
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.applied(
-                    Ok(ApplyAccepted {
-                        service_stopped: true,
-                    }),
-                    window,
-                    cx,
-                );
-            });
+        // A second page state where the server answers at once.
+        view.update(cx, |view, cx| {
+            view.busy = false;
+            view.restore.step = Restoring::Preview(Box::new(preview()));
+            cx.notify();
         });
+        fake.applies.borrow_mut().push_back(Ok(ApplyAccepted {
+            service_stopped: true,
+        }));
         cx.run_until_parked();
+        click(cx, "desktop-backup-replace");
         assert!(rendered(cx, "desktop-backup-stopping"));
-        cx.executor().advance_clock(Duration::from_secs(1));
-        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.restore.step, Restoring::Stopping);
+        });
+        wait(cx, 1_000);
         assert_eq!(relaunched.get(), 1);
-        cx.executor().advance_clock(Duration::from_secs(5));
-        cx.run_until_parked();
+        wait(cx, 5_000);
         assert_eq!(relaunched.get(), 1, "once");
         assert!(
             view.read_with(cx, |view, _| view.busy),
@@ -770,30 +729,27 @@ mod tests {
     #[gpui::test]
     fn a_refused_replace_goes_back_to_the_preview(cx: &mut TestAppContext) {
         let (view, cx) = page(cx, true);
+        let fake = server(&view, cx);
+        *fake.overview.borrow_mut() = Some(staged());
+        fake.applies
+            .borrow_mut()
+            .push_back(Err(ServerError::Status {
+                request: "POST /api/backup/restore/apply".into(),
+                code: reqwest::StatusCode::CONFLICT,
+                body: serde_json::json!({ "error": RECORDING_FIRST }).to_string(),
+            }));
         view.update(cx, |view, cx| {
             view.relaunch = Rc::new(|_| panic!("a refused restore never restarts"));
-            view.restore.opened(Box::new(preview()));
-            cx.notify();
+            view.reload(cx);
         });
         cx.run_until_parked();
         click(cx, "desktop-backup-replace");
-        let refused = crate::server_client::ServerError::Status {
-            request: "POST /api/backup/restore/apply".into(),
-            code: reqwest::StatusCode::CONFLICT,
-            body: serde_json::json!({ "error": bruhs_models::backup::RECORDING_FIRST }).to_string(),
-        };
-        cx.update(|window, cx| view.update(cx, |view, cx| view.applied(Err(refused), window, cx)));
-        cx.run_until_parked();
-        cx.executor().advance_clock(Duration::from_secs(1));
-        cx.run_until_parked();
+        wait(cx, 1_000);
         assert!(rendered(cx, "desktop-backup-preview"));
         assert!(rendered(cx, "desktop-backup-restore-error"));
         view.read_with(cx, |view, _| {
             assert!(!view.busy);
-            assert_eq!(
-                view.restore.error.as_deref(),
-                Some(bruhs_models::backup::RECORDING_FIRST)
-            );
+            assert_eq!(view.restore.error.as_deref(), Some(RECORDING_FIRST));
         });
         assert_eq!(
             requests(&view, cx).last().map(String::as_str),
@@ -805,6 +761,7 @@ mod tests {
     #[gpui::test]
     fn a_chosen_file_opens_with_its_password(cx: &mut TestAppContext) {
         let (view, cx) = page(cx, true);
+        let fake = server(&view, cx);
         assert!(rendered(cx, "desktop-backup-open"));
         // Nothing chosen: Open backup does nothing.
         click(cx, "desktop-backup-open");
@@ -832,6 +789,17 @@ mod tests {
                 .as_deref(),
             Some(PASSWORD_SHORT)
         );
+        // The server checks it, then the opened backup's preview comes.
+        fake.jobs.borrow_mut().extend([
+            JobState::Running {
+                done_bytes: 1,
+                total_bytes: 9,
+                step: bruhs_models::backup::JobStep::Checking,
+            },
+            JobState::Opened {
+                preview: Box::new(preview()),
+            },
+        ]);
         type_into(cx, &password, GOOD);
         click(cx, "desktop-backup-open");
         assert!(
@@ -839,33 +807,15 @@ mod tests {
             "read and emptied on submit"
         );
         assert_eq!(
-            requests(&view, cx).last().map(String::as_str),
-            Some("POST /api/backup/restore")
+            fake.last_open.borrow().as_deref(),
+            Some("/Users/me/bruhs-backup-2026-11-20-0930.bruhsbak")
         );
-        view.read_with(cx, |view, _| {
-            assert_eq!(
-                view.restore.last_open.as_deref(),
-                Some("/Users/me/bruhs-backup-2026-11-20-0930.bruhsbak")
-            );
-        });
         assert!(!requests(&view, cx).concat().contains(GOOD));
-        // The job opens it: the preview shows and focus goes to its Cancel.
-        let page_focus = view.read_with(cx, |view, _| view.page_focus.clone());
-        cx.update(|window, cx| page_focus.focus(window, cx));
-        view.update(cx, |view, cx| {
-            view.job_answered(
-                super::Slot::Restore,
-                ID.into(),
-                Ok(bruhs_models::backup::JobState::Opened {
-                    preview: Box::new(preview()),
-                }),
-                cx,
-            );
-        });
-        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-backup-restore-progress"));
+        wait(cx, 500);
         assert!(rendered(cx, "desktop-backup-preview"));
         let cancel = view.read_with(cx, |view, _| view.restore.cancel_focus.clone());
-        assert_eq!(focused(cx), Some(cancel));
+        assert_eq!(focused(cx), Some(cancel), "the preview's safe choice");
     }
 
     #[test]

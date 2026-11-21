@@ -481,6 +481,25 @@ fn plural(n: u64, one: &str, other: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { other })
 }
 
+/// The extension every backup file has.
+pub const BACKUP_EXTENSION: &str = "bruhsbak";
+
+/// The file name a backup is written under: `name` as it is when its
+/// extension is already [`BACKUP_EXTENSION`], else `name` with it appended
+/// (`notes` becomes `notes.bruhsbak`, `x.zip` becomes `x.zip.bruhsbak`). A
+/// leading dot doesn't start an extension, as `Path::extension` reads it.
+pub fn with_backup_extension(name: &str) -> String {
+    match name.rfind('.') {
+        Some(dot) if dot > 0 && name[dot + 1..] == *BACKUP_EXTENSION => name.to_owned(),
+        _ => format!("{name}.{BACKUP_EXTENSION}"),
+    }
+}
+
+/// The filled [`SERVER_ANSWERED`].
+pub fn server_answered(status: u16) -> String {
+    fill(SERVER_ANSWERED, &[("status", &status.to_string())])
+}
+
 /// `bruhs-backup-YYYY-MM-DD-HHMM.bruhsbak`, in UTC.
 pub fn backup_file_name(made_at_ms: EpochMs) -> String {
     let (year, month, day, hour, minute) = utc_parts(made_at_ms);
@@ -1003,6 +1022,26 @@ mod tests {
             ..manifest
         };
         assert_eq!(newer_format.readable(), Err(NEWER_BACKUP));
+    }
+
+    #[test]
+    fn the_final_name_has_the_extension_once() {
+        for (name, final_name) in [
+            ("notes", "notes.bruhsbak"),
+            ("notes.bruhsbak", "notes.bruhsbak"),
+            ("x.zip", "x.zip.bruhsbak"),
+            (".bruhsbak", ".bruhsbak.bruhsbak"),
+            ("notes.BRUHSBAK", "notes.BRUHSBAK.bruhsbak"),
+            ("notes.", "notes..bruhsbak"),
+        ] {
+            assert_eq!(with_backup_extension(name), final_name, "{name}");
+            // The same rule `Path::extension` reads.
+            let has = std::path::Path::new(name)
+                .extension()
+                .is_some_and(|extension| extension == BACKUP_EXTENSION);
+            assert_eq!(has, with_backup_extension(name) == name, "{name}");
+        }
+        assert_eq!(server_answered(502), "The server answered HTTP 502.");
     }
 
     #[test]

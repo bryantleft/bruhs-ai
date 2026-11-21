@@ -217,6 +217,11 @@ pub fn lychee_600() -> Hsla {
     rgb(0xbf2a23).into()
 }
 
+/// lychee-700 — Outlined danger button ring
+pub fn lychee_700() -> Hsla {
+    rgb(0x9a221c).into()
+}
+
 // =====================================================================
 // durian — yellow (warnings, attention)
 // =====================================================================

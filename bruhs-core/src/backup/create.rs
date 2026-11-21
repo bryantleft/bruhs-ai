@@ -21,11 +21,11 @@ use bruhs_backup::{Encryptor, Kdf, Key, Kind};
 use bruhs_models::backup::{
     backup_file_name, browser_busy_line, changed_files_line, missing_items_line, no_space,
     normalize_password, skipped_names_line, validate_password, BackupApp, BackupCounts, BackupFile,
-    BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_STOPPED,
-    BACKUP_TOO_MANY, BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING,
-    DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED,
-    KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_TOO_LARGE, MANIFEST_FORMAT, NOT_A_BACKUP,
-    ROOT_NAME_REFUSED, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_EXTENSION,
+    BACKUP_STOPPED, BACKUP_TOO_MANY, BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE,
+    DESTINATION_MISSING, DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST,
+    KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_TOO_LARGE,
+    MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use bruhs_models::crew::CREW_PROTOCOL;
 use bruhs_models::EpochMs;
@@ -90,8 +90,6 @@ impl CancelFlag {
     }
 }
 
-/// The file extension every backup has.
-const EXTENSION: &str = "bruhsbak";
 /// The longest file name the volumes Bruhs runs on take, in bytes.
 const NAME_MAX: usize = 255;
 /// What a partial file adds to its final name: `.`, `.partial-` and 32
@@ -117,14 +115,7 @@ pub fn check_destination(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(missing)?;
-    let name = if Path::new(name)
-        .extension()
-        .is_some_and(|extension| extension == EXTENSION)
-    {
-        name.to_owned()
-    } else {
-        format!("{name}.{EXTENSION}")
-    };
+    let name = bruhs_models::backup::with_backup_extension(name);
     // `.<name>.partial-<32 hex>` must fit a 255-byte file name.
     if name.len().saturating_add(PARTIAL_EXTRA) > NAME_MAX {
         return Err(BackupError::Refused(DESTINATION_NAME_LONG));
@@ -260,7 +251,11 @@ pub(crate) async fn create(
             let folder = host.outgoing_dir();
             private_dir(&folder)?;
             let id = random_id();
-            (folder.join(format!("{id}.{EXTENSION}")), false, Some(id))
+            (
+                folder.join(format!("{id}.{BACKUP_EXTENSION}")),
+                false,
+                Some(id),
+            )
         }
     };
 

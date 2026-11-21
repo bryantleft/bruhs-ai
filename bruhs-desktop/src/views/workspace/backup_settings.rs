@@ -12,21 +12,25 @@
 //! Passwords never sit on the page. The masked fields are never filled,
 //! are read and emptied in one step on submit, and are emptied on cancel
 //! and when Settings closes. A password taken from a field lives in
-//! `Zeroizing` until its request is built, and the request's own copy is
-//! wiped once it was sent. Nothing logs one.
+//! `Zeroizing` until its request is built, and the request body wipes it
+//! when it drops, sent or not. Nothing logs one.
 
 mod restore;
+#[cfg(test)]
+mod tests;
 
 use super::vault_settings::{button, field, labelled, panel, small};
 use super::*;
 use crate::app_state::spawn_tokio;
+use crate::server_client::backup::Wiped;
 use crate::server_client::ServerError;
 use bruhs_models::backup::{
     backup_file_name, created_line, delete_pre_restore_confirm, job_line, last_backup_line,
     option_label, outside_roots_line, password_pair_error, pre_restore_line, put_back_confirm,
-    validate_password, BackupApp, BackupFile, BackupJob, BackupOptions, BackupOverview,
-    CreateBackup, JobState, JobStep, OptionKind, PreRestoreInfo, RestoreSource, BACKUP_LOADING,
-    BACKUP_STOPPED, CANCEL, DELETE, DELETE_AGAIN, DESKTOP_NO_WEB, INVALID_REQUEST, KEEP,
+    validate_password, with_backup_extension, ApplyAccepted, ApplyRestore, BackupApp, BackupFile,
+    BackupJob, BackupOptions, BackupOverview, CreateBackup, JobState, JobStep, OpenBackup,
+    OptionKind, PreRestoreInfo, RestoreSource, RestoreStatus, BACKUP_LOADING, BACKUP_STOPPED,
+    CANCEL, DELETE, DELETE_AGAIN, DESKTOP_NO_WEB, DESTINATION_EXISTS, INVALID_REQUEST, KEEP,
     KEPT_GROUP, KEYCHAIN_OPTION_HINT, KEYCHAIN_SET_UNREADABLE, MAKE_BACKUP, MAKE_GROUP,
     NOTHING_TO_PUT_BACK, OPEN_WEB_APP, PASSWORD, PASSWORD_AGAIN, PASSWORD_HINT, PUT_BACK,
     UNSUPPORTED_PLATFORM,
@@ -41,12 +45,136 @@ use zeroize::Zeroizing;
 
 /// How often a running job is read (D6).
 const JOB_POLL: Duration = Duration::from_millis(500);
-/// Web `rounded-grape` and the confirm's `bg-longan-950/60`.
+/// The three switches, in page order.
 const OPTIONS: [OptionKind; 3] = [
     OptionKind::Keychain,
     OptionKind::Audio,
     OptionKind::Browsers,
 ];
+/// Web `sm`: below this window width the password fields stack.
+const NARROW_PX: f32 = 640.0;
+
+/// Where the page's calls go: the server, or a test's stand-in. Each call
+/// runs off the UI thread and answers on it.
+#[derive(Clone)]
+enum BackupCalls {
+    Server(ServerClient),
+    #[cfg(test)]
+    Fake(Rc<tests::FakeServer>),
+}
+
+/// A test stand-in's answer, or one that never comes.
+#[cfg(test)]
+fn answer<T: Send + 'static>(
+    cx: &App,
+    reply: Option<Result<T, ServerError>>,
+) -> Task<Result<T, ServerError>> {
+    match reply {
+        Some(reply) => Task::ready(reply),
+        None => cx.background_spawn(std::future::pending()),
+    }
+}
+
+impl BackupCalls {
+    fn overview(&self, cx: &App) -> Task<Result<BackupOverview, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.backup_overview().await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, fake.overview()),
+        }
+    }
+
+    fn create(&self, body: Wiped<CreateBackup>, cx: &App) -> Task<Result<BackupJob, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.create_backup(&body).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, fake.create(body)),
+        }
+    }
+
+    fn job(&self, id: String, cx: &App) -> Task<Result<BackupJob, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.backup_job(&id).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, fake.job(&id)),
+        }
+    }
+
+    fn cancel_job(&self, id: String, cx: &App) -> Task<Result<(), ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.cancel_backup_job(&id).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, Some(fake.cancel_job(&id))),
+        }
+    }
+
+    fn open(&self, body: Wiped<OpenBackup>, cx: &App) -> Task<Result<BackupJob, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.open_backup(&body).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, fake.open(body)),
+        }
+    }
+
+    fn discard(&self, id: String, cx: &App) -> Task<Result<(), ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.discard_staged(&id).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, Some(fake.discard(&id))),
+        }
+    }
+
+    fn apply(&self, body: ApplyRestore, cx: &App) -> Task<Result<ApplyAccepted, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.apply_restore(&body).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, fake.apply(body)),
+        }
+    }
+
+    fn status(&self, cx: &App) -> Task<Result<RestoreStatus, ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.restore_status().await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, Some(fake.status())),
+        }
+    }
+
+    fn delete_kept(&self, stamp: String, cx: &App) -> Task<Result<(), ServerError>> {
+        match self {
+            Self::Server(client) => {
+                let client = client.clone();
+                spawn_tokio(cx, async move { client.delete_kept(&stamp).await })
+            }
+            #[cfg(test)]
+            Self::Fake(fake) => answer(cx, Some(fake.delete_kept(&stamp))),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 enum Load {
@@ -154,18 +282,50 @@ fn error_color(message: &str) -> Hsla {
     }
 }
 
+/// The web's `DANGER_BUTTON`: an outlined button with lychee text and a
+/// lychee ring, no fill (B Task 15 ruling).
+fn danger(button: Stateful<Div>) -> Stateful<Div> {
+    button
+        .text_color(theme::lychee_200())
+        .border_color(theme::lychee_700())
+}
+
 /// Where **Open the web app** goes: the web app's Settings, which holds
-/// Backup (D25). The web routes by hash.
+/// Backup (D25, amended). The web routes by hash.
 fn web_settings_url(base: &str) -> String {
     format!("{}/#/settings", base.trim_end_matches('/'))
 }
 
-/// Where the save dialog opens: Downloads, else home.
+/// Where the save dialog opens: Downloads when it is there, else home,
+/// else the temporary folder.
 fn downloads_dir() -> PathBuf {
     directories::UserDirs::new()
         .and_then(|dirs| dirs.download_dir().map(Path::to_path_buf))
+        .filter(|downloads| downloads.is_dir())
         .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("/"))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Where a backup chosen as `chosen` is written: the server appends
+/// `.bruhsbak` to a name without it (D6). `None` for a name that isn't
+/// text.
+fn final_path(chosen: &Path) -> Option<PathBuf> {
+    let name = chosen.file_name()?.to_str()?;
+    Some(chosen.with_file_name(with_backup_extension(name)))
+}
+
+/// The destination and `overwrite` to send for the file the save dialog
+/// chose, or why not. Only the file the dialog asked about may be
+/// replaced: when the server would write to another name that exists, it
+/// is refused here, before anything is sent.
+fn destination(chosen: &Path) -> Result<(String, bool), &'static str> {
+    let target = final_path(chosen).ok_or(INVALID_REQUEST)?;
+    let exists = target.symlink_metadata().is_ok();
+    if exists && target != chosen {
+        return Err(DESTINATION_EXISTS);
+    }
+    let text = target.to_str().ok_or(INVALID_REQUEST)?.to_owned();
+    Ok((text, exists))
 }
 
 fn option_amount(overview: &BackupOverview, kind: OptionKind) -> u64 {
@@ -211,17 +371,10 @@ pub(super) struct KeptFocus {
     pub(super) decline: FocusHandle,
 }
 
-/// A create body the tests can read; the password is never kept.
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct SentCreate {
-    destination: Option<String>,
-    overwrite: bool,
-    options: BackupOptions,
-}
-
 pub(super) struct BackupSettings {
-    client: ServerClient,
+    calls: BackupCalls,
+    /// The server's address, for **Open the web app**.
+    base_url: String,
     overview: BackupOverview,
     load: Load,
     /// Which overview read an answer is for; a smoke fixture moves it on.
@@ -255,11 +408,6 @@ pub(super) struct BackupSettings {
     job_task: Option<Task<()>>,
     prompt_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
-    /// Every request, as `METHOD path`; tests never reach a server.
-    #[cfg(test)]
-    requests: Vec<String>,
-    #[cfg(test)]
-    last_create: Option<SentCreate>,
 }
 
 impl BackupSettings {
@@ -304,6 +452,15 @@ impl BackupSettings {
                 }
             },
         ));
+        let base_url = client.base_url().to_owned();
+        let calls = BackupCalls::Server(client);
+        // Tests never reach a server: every page starts on a stand-in that
+        // never answers until a test gives it answers.
+        #[cfg(test)]
+        let calls = {
+            drop(calls);
+            BackupCalls::Fake(Rc::default())
+        };
         #[cfg(not(test))]
         let relaunch: Rc<dyn Fn(&mut App)> = Rc::new(crate::restore_relaunch::relaunch_and_quit);
         // A test that reaches the relaunch sets its own; nothing else may
@@ -311,7 +468,8 @@ impl BackupSettings {
         #[cfg(test)]
         let relaunch: Rc<dyn Fn(&mut App)> = Rc::new(|_| panic!("a test relaunched the app"));
         Self {
-            client,
+            calls,
+            base_url,
             overview: BackupOverview::default(),
             load: Load::Idle,
             load_serial: 0,
@@ -342,18 +500,7 @@ impl BackupSettings {
             job_task: None,
             prompt_task: None,
             _subscriptions: subscriptions,
-            #[cfg(test)]
-            requests: Vec::new(),
-            #[cfg(test)]
-            last_create: None,
         }
-    }
-
-    fn record(&mut self, request: String) {
-        #[cfg(test)]
-        self.requests.push(request);
-        #[cfg(not(test))]
-        drop(request);
     }
 
     /// Whether any password field holds text, so Settings closing must
@@ -413,13 +560,8 @@ impl BackupSettings {
         }
         self.load_serial = self.load_serial.wrapping_add(1);
         let serial = self.load_serial;
-        self.record(format!("GET {}", crate::server_client::backup::BACKUP_PATH));
         cx.notify();
-        if cfg!(test) {
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move { client.backup_overview().await });
+        let operation = self.calls.overview(cx);
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             // The page may be gone by now.
@@ -521,22 +663,12 @@ impl BackupSettings {
         self.poll(slot, id, cx);
     }
 
+    /// Read the job again in 500 ms. The poll stops when the page goes.
     fn poll(&mut self, slot: Slot, id: String, cx: &mut Context<'_, Self>) {
-        let Some(path) = crate::server_client::backup::job_path(&id) else {
-            self.fail(slot, bruhs_models::backup::GONE.to_owned(), cx);
-            return;
-        };
-        self.record(format!("GET {path}"));
-        if cfg!(test) {
-            return;
-        }
         self.job_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(JOB_POLL).await;
             let target = id.clone();
-            let Ok(operation) = this.update(cx, |this, cx| {
-                let client = this.client.clone();
-                spawn_tokio(cx, async move { client.backup_job(&target).await })
-            }) else {
+            let Ok(operation) = this.update(cx, |this, cx| this.calls.job(target, cx)) else {
                 return;
             };
             let result = operation.await.map(|job| job.state);
@@ -579,15 +711,7 @@ impl BackupSettings {
 
     /// Stop a running job; its poll then answers the stop.
     fn cancel_job(&mut self, slot: Slot, id: String, cx: &mut Context<'_, Self>) {
-        let Some(path) = crate::server_client::backup::job_path(&id) else {
-            return;
-        };
-        self.record(format!("DELETE {path}"));
-        if cfg!(test) {
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move { client.cancel_backup_job(&id).await });
+        let operation = self.calls.cancel_job(id, cx);
         cx.spawn(async move |this, cx| {
             if let Err(error) = operation.await {
                 let _ = this.update(cx, |this, cx| {
@@ -638,8 +762,9 @@ impl BackupSettings {
     }
 
     /// The save dialog answered. A cancel drops the password; a file starts
-    /// the job, replacing a file that is there only because the dialog
-    /// already asked about it.
+    /// the job at the path the server writes to (`.bruhsbak` appended when
+    /// missing), replacing a file only when it is the one the dialog asked
+    /// about (I1).
     fn chose_destination(
         &mut self,
         path: Option<PathBuf>,
@@ -654,29 +779,20 @@ impl BackupSettings {
             cx.notify();
             return;
         };
-        let Some(destination) = path.to_str().map(str::to_owned) else {
-            self.fail(Slot::Make, INVALID_REQUEST.to_owned(), cx);
-            return;
+        let (destination, overwrite) = match destination(&path) {
+            Ok(found) => found,
+            Err(refusal) => {
+                drop(password);
+                self.fail(Slot::Make, refusal.to_owned(), cx);
+                return;
+            }
         };
-        let overwrite = path.symlink_metadata().is_ok();
         self.making = Making::Working {
             line: None,
             job: None,
         };
         self.hold_focus_on_page(window, cx);
-        self.record(format!(
-            "POST {}",
-            crate::server_client::backup::BACKUP_PATH
-        ));
-        #[cfg(test)]
-        {
-            self.last_create = Some(SentCreate {
-                destination: Some(destination.clone()),
-                overwrite,
-                options: self.options,
-            });
-        }
-        let mut body = CreateBackup {
+        let body = Wiped(CreateBackup {
             password: std::mem::take(&mut *password),
             options: self.options,
             app: BackupApp::Desktop,
@@ -684,19 +800,10 @@ impl BackupSettings {
             web_db_version: None,
             destination: Some(destination),
             overwrite,
-        };
+        });
         drop(password);
         cx.notify();
-        if cfg!(test) {
-            zeroize::Zeroize::zeroize(&mut body.password);
-            return;
-        }
-        let client = self.client.clone();
-        let operation = spawn_tokio(cx, async move {
-            let result = client.create_backup(&body).await;
-            zeroize::Zeroize::zeroize(&mut body.password);
-            result
-        });
+        let operation = self.calls.create(body, cx);
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             let _ = this.update(cx, |this, cx| match result {
@@ -716,7 +823,7 @@ impl BackupSettings {
     }
 
     fn open_web_app(&mut self, cx: &mut Context<'_, Self>) {
-        cx.open_url(&web_settings_url(self.client.base_url()));
+        cx.open_url(&web_settings_url(&self.base_url));
     }
 
     // ── Kept from earlier restores ──────────────────────────────────────
@@ -777,20 +884,11 @@ impl BackupSettings {
     }
 
     fn delete_kept(&mut self, stamp: String, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(path) = crate::server_client::backup::kept_path(&stamp) else {
-            return;
-        };
         self.busy = true;
         self.note(&stamp).error = None;
         self.hold_focus_on_page(window, cx);
-        self.record(format!("DELETE {path}"));
         cx.notify();
-        if cfg!(test) {
-            return;
-        }
-        let client = self.client.clone();
-        let target = stamp.clone();
-        let operation = spawn_tokio(cx, async move { client.delete_kept(&target).await });
+        let operation = self.calls.delete_kept(stamp.clone(), cx);
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = operation.await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -885,11 +983,6 @@ impl BackupSettings {
         }
         cx.notify();
     }
-
-    #[cfg(test)]
-    fn requests_for_test(&self) -> Vec<String> {
-        self.requests.clone()
-    }
 }
 
 /// The data the smoke scenes and the tests show.
@@ -903,11 +996,13 @@ mod fixtures {
 
     pub(super) const ID: &str = "0123456789abcdef0123456789abcdef";
     pub(super) const STAMP: &str = "2026-11-20-0930-0a1f";
+    /// 2026-11-20 09:30 UTC, the stamp's own time.
+    const MADE_AT_MS: i64 = 1_795_167_000_000;
 
     pub(super) fn kept_set() -> PreRestoreInfo {
         PreRestoreInfo {
             stamp: STAMP.into(),
-            made_at_ms: EpochMs::saturating_from_i64(1_763_631_000_000),
+            made_at_ms: EpochMs::saturating_from_i64(MADE_AT_MS),
             bytes: 1_200_000,
             has_web_part: false,
         }
@@ -930,7 +1025,7 @@ mod fixtures {
     pub(super) fn preview() -> RestorePreview {
         RestorePreview {
             id: ID.into(),
-            made_at_ms: EpochMs::saturating_from_i64(1_763_631_000_000),
+            made_at_ms: EpochMs::saturating_from_i64(MADE_AT_MS),
             made_on: BackupApp::Web,
             app_version: "0.1.1".into(),
             source_home: "/Users/old".into(),
@@ -1032,7 +1127,73 @@ impl BackupSettings {
             .into_any_element()
     }
 
-    fn render_make(&self, cx: &Context<'_, Self>) -> AnyElement {
+    /// Password and Password again: side by side from 640 px, stacked
+    /// below it (web `grid gap-3 sm:grid-cols-2`).
+    fn render_passwords(&self, narrow: bool) -> AnyElement {
+        let first_error = self.check.first.map(|text| {
+            line(
+                "desktop-backup-first-error".into(),
+                text,
+                theme::lychee_300(),
+                Role::Alert,
+            )
+            .mt_1()
+        });
+        let second_error = self.check.second.map(|text| {
+            line(
+                "desktop-backup-second-error".into(),
+                text,
+                theme::lychee_300(),
+                Role::Alert,
+            )
+            .mt_1()
+        });
+        let column = || {
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .when(!narrow, |el| el.flex_1())
+        };
+        div()
+            .mt_3()
+            .min_w_0()
+            .flex()
+            .when(narrow, |el| el.flex_col())
+            .gap_3()
+            .child(
+                column()
+                    .debug_selector(|| "desktop-backup-first-field".into())
+                    .child(labelled(
+                        PASSWORD,
+                        field(
+                            &self.first,
+                            PASSWORD,
+                            false,
+                            Some(InputContentType::NewPassword),
+                        ),
+                    ))
+                    .child(small(PASSWORD_HINT, theme::rambutan_500()).mt_1())
+                    .children(first_error),
+            )
+            .child(
+                column()
+                    .debug_selector(|| "desktop-backup-second-field".into())
+                    .child(labelled(
+                        PASSWORD_AGAIN,
+                        field(
+                            &self.second,
+                            PASSWORD_AGAIN,
+                            false,
+                            Some(InputContentType::NewPassword),
+                        ),
+                    ))
+                    .children(second_error),
+            )
+            .into_any_element()
+    }
+
+    fn render_make(&self, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
         let disabled = self.busy || !self.check.ready;
         let mut make = button(
             "desktop-backup-make",
@@ -1103,24 +1264,6 @@ impl BackupSettings {
                     .into_any_element(),
             ),
         };
-        let first_error = self.check.first.map(|text| {
-            line(
-                "desktop-backup-first-error".into(),
-                text,
-                theme::lychee_300(),
-                Role::Alert,
-            )
-            .mt_1()
-        });
-        let second_error = self.check.second.map(|text| {
-            line(
-                "desktop-backup-second-error".into(),
-                text,
-                theme::lychee_300(),
-                Role::Alert,
-            )
-            .mt_1()
-        });
         group("desktop-backup-make-group", true)
             .aria_label(MAKE_GROUP)
             .child(group_title(MAKE_GROUP))
@@ -1149,49 +1292,7 @@ impl BackupSettings {
                         .map(|(index, kind)| self.render_option(index, *kind, cx)),
                 ),
             )
-            .child(
-                div()
-                    .mt_3()
-                    .min_w_0()
-                    .flex()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(labelled(
-                                PASSWORD,
-                                field(
-                                    &self.first,
-                                    PASSWORD,
-                                    false,
-                                    Some(InputContentType::NewPassword),
-                                ),
-                            ))
-                            .child(small(PASSWORD_HINT, theme::rambutan_500()).mt_1())
-                            .children(first_error),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .debug_selector(|| "desktop-backup-second-field".into())
-                            .child(labelled(
-                                PASSWORD_AGAIN,
-                                field(
-                                    &self.second,
-                                    PASSWORD_AGAIN,
-                                    false,
-                                    Some(InputContentType::NewPassword),
-                                ),
-                            ))
-                            .children(second_error),
-                    ),
-            )
+            .child(self.render_passwords(narrow))
             .child(
                 div()
                     .mt_3()
@@ -1319,13 +1420,13 @@ impl BackupSettings {
                         .items_center()
                         .gap_2()
                         .child(on_press_view(
-                            button(
+                            danger(button(
                                 SharedString::from(selector("confirm-button")),
                                 selector("confirm-button"),
                                 confirm,
-                                WebButtonVariant::Destructive,
+                                WebButtonVariant::Outline,
                                 self.busy,
-                            ),
+                            )),
                             cx,
                             |this, window, cx| this.confirm(window, cx),
                         ))
@@ -1383,7 +1484,7 @@ impl BackupSettings {
         )
     }
 
-    fn render_ready(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+    fn render_ready(&self, narrow: bool, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         let last = self.overview.last.as_ref().map(last_backup_line);
         let outside = outside_roots_line(&self.overview.outside_roots);
         let mut parts = Vec::new();
@@ -1405,7 +1506,7 @@ impl BackupSettings {
                     .into_any_element(),
             );
         }
-        parts.push(self.render_make(cx));
+        parts.push(self.render_make(narrow, cx));
         parts.push(self.render_restore(cx));
         parts.extend(self.render_kept(cx));
         parts
@@ -1428,6 +1529,8 @@ impl Render for BackupSettings {
         for stamp in &stamps {
             self.kept_focus(stamp, cx);
         }
+        // A breakpoint is a design number: compare in CSS pixels.
+        let narrow = bruhs_ui::zoom::css_px(window.viewport_size().width) < NARROW_PX;
         let body: Vec<AnyElement> = match &self.load {
             Load::Idle | Load::Loading => vec![line(
                 "desktop-backup-status".into(),
@@ -1457,7 +1560,7 @@ impl Render for BackupSettings {
                 Role::Status,
             )
             .into_any_element()],
-            Load::Ready => self.render_ready(cx),
+            Load::Ready => self.render_ready(narrow, cx),
         };
         div()
             .id("desktop-backup")
@@ -1471,625 +1574,5 @@ impl Render for BackupSettings {
             .flex()
             .flex_col()
             .children(body)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::fixtures::{overview, ID, STAMP};
-    use super::{
-        error_color, web_settings_url, BackupSettings, KeptNote, Load, Making, PairCheck, Slot,
-    };
-    use crate::server_client::{ServerClient, ServerError};
-    use crate::{app_state::DesktopState, assets, theme};
-    use bruhs_models::backup::{
-        created_line, option_label, BackupApp, BackupFile, BackupOptions, JobState, JobStep,
-        OptionKind, BACKUP_DESCRIPTION, BACKUP_STOPPED, BACKUP_TITLE, DESKTOP_NO_WEB,
-        KEYCHAIN_SET_UNREADABLE, NOTHING_TO_PUT_BACK, PASSWORDS_DIFFER, PASSWORD_SHORT,
-        WEB_INCLUDED,
-    };
-    use gpui::{
-        AppContext as _, Entity, FocusHandle, Focusable as _, Modifiers, TestAppContext,
-        VisualTestContext,
-    };
-    use std::{cell::RefCell, rc::Rc};
-
-    pub(super) const GOOD: &str = "correct horse 1";
-
-    /// The page alone in a window, its overview as `overview` (or none yet).
-    pub(super) fn page(
-        cx: &mut TestAppContext,
-        loaded: bool,
-    ) -> (Entity<BackupSettings>, &mut VisualTestContext) {
-        cx.update(|cx| {
-            bruhs_ui::init(cx);
-            theme::apply_bruhs_theme(cx);
-            cx.set_global(DesktopState::new().unwrap());
-        });
-        let capture = Rc::new(RefCell::new(None));
-        let output = capture.clone();
-        let (_, cx) = cx.add_window_view(|window, cx| {
-            let client = ServerClient::new("http://127.0.0.1:9", "http://127.0.0.1:9").unwrap();
-            let view = cx.new(|cx| BackupSettings::new(client, window, cx));
-            *output.borrow_mut() = Some(view.clone());
-            bruhs_ui::Root::new(view, window, cx)
-        });
-        let view = capture.borrow().clone().unwrap();
-        cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2000.0)));
-        cx.run_until_parked();
-        if loaded {
-            view.update(cx, |view, cx| {
-                let serial = view.load_serial;
-                view.loaded(serial, Ok(overview()), cx);
-            });
-            cx.run_until_parked();
-        }
-        (view, cx)
-    }
-
-    pub(super) fn requests(
-        view: &Entity<BackupSettings>,
-        cx: &mut VisualTestContext,
-    ) -> Vec<String> {
-        view.read_with(cx, |view, _| view.requests_for_test())
-    }
-
-    fn leak(selector: &str) -> &'static str {
-        Box::leak(selector.to_owned().into_boxed_str())
-    }
-
-    pub(super) fn rendered(cx: &mut VisualTestContext, selector: &str) -> bool {
-        cx.debug_bounds(leak(selector)).is_some()
-    }
-
-    pub(super) fn bounds(cx: &mut VisualTestContext, selector: &str) -> gpui::Bounds<gpui::Pixels> {
-        cx.debug_bounds(leak(selector))
-            .unwrap_or_else(|| panic!("{selector} is not drawn"))
-    }
-
-    pub(super) fn click(cx: &mut VisualTestContext, selector: &str) {
-        let at = bounds(cx, selector).center();
-        cx.simulate_click(at, Modifiers::default());
-        cx.run_until_parked();
-    }
-
-    /// A key press as the app gets it: gpui clicks a focused button on key up.
-    pub(super) fn press(cx: &mut VisualTestContext, key: &'static str) {
-        let keystroke = gpui::Keystroke::parse(key).unwrap();
-        cx.simulate_event(gpui::KeyDownEvent {
-            keystroke: keystroke.clone(),
-            is_held: false,
-            prefer_character_input: false,
-        });
-        cx.simulate_event(gpui::KeyUpEvent { keystroke });
-        cx.run_until_parked();
-    }
-
-    pub(super) fn focused(cx: &mut VisualTestContext) -> Option<FocusHandle> {
-        cx.update(|window, cx| window.focused(cx))
-    }
-
-    pub(super) fn type_into(
-        cx: &mut VisualTestContext,
-        input: &Entity<bruhs_ui::input::InputState>,
-        text: &str,
-    ) {
-        let handle = cx.update(|_, cx| input.focus_handle(cx));
-        cx.update(|window, cx| window.focus(&handle, cx));
-        cx.simulate_input(text);
-    }
-
-    pub(super) fn value(
-        cx: &mut VisualTestContext,
-        input: &Entity<bruhs_ui::input::InputState>,
-    ) -> String {
-        cx.update(|_, cx| input.read(cx).value().to_string())
-    }
-
-    fn fields(
-        view: &Entity<BackupSettings>,
-        cx: &mut VisualTestContext,
-    ) -> [Entity<bruhs_ui::input::InputState>; 3] {
-        view.read_with(cx, |view, _| {
-            [
-                view.first.clone(),
-                view.second.clone(),
-                view.restore.password.clone(),
-            ]
-        })
-    }
-
-    #[test]
-    fn the_section_is_after_apps() {
-        use super::super::SettingsSection;
-        let section = SettingsSection::Backup;
-        assert_eq!(section.id(), "backup");
-        assert_eq!(section.label(), BACKUP_TITLE);
-        assert_eq!(section.description(), BACKUP_DESCRIPTION);
-        assert_eq!(section.icon_path(), assets::ARCHIVE_ICON_PATH);
-        assert_eq!(section.index(), SettingsSection::Apps.index() + 1);
-        assert_eq!(SettingsSection::from_id("backup"), Some(section));
-        assert_eq!(section.selector(), "desktop-settings-nav-backup");
-    }
-
-    #[test]
-    fn the_pair_check_waits_for_the_owner() {
-        assert_eq!(PairCheck::of("", "", false), PairCheck::default());
-        assert_eq!(PairCheck::of("short", "", false).first, None);
-        assert_eq!(PairCheck::of("short", "", true).first, Some(PASSWORD_SHORT));
-        assert_eq!(PairCheck::of(GOOD, "", true).second, None);
-        let ready = PairCheck::of(GOOD, GOOD, true);
-        assert_eq!((ready.first, ready.second, ready.ready), (None, None, true));
-    }
-
-    #[gpui::test]
-    fn make_needs_matching_passwords(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        assert_eq!(
-            requests(&view, cx),
-            ["GET /api/backup", "GET /api/backup/restore/status"]
-        );
-        // The three switches with their sizes and the rule's hint.
-        for kind in [
-            OptionKind::Keychain,
-            OptionKind::Audio,
-            OptionKind::Browsers,
-        ] {
-            assert!(rendered(cx, super::option_selector(kind)), "{kind:?}");
-        }
-        view.read_with(cx, |view, _| {
-            let amount = |kind| super::option_amount(&view.overview, kind);
-            assert_eq!(amount(OptionKind::Keychain), 7);
-            assert_eq!(
-                option_label(OptionKind::Audio, amount(OptionKind::Audio)),
-                "Meeting audio (2.5 MB)"
-            );
-            assert_eq!(
-                option_label(OptionKind::Browsers, amount(OptionKind::Browsers)),
-                "Bruh browser sign-ins (700 KB)"
-            );
-        });
-        let [first, second, _] = fields(&view, cx);
-        // Nothing typed: Make backup does nothing.
-        click(cx, "desktop-backup-make");
-        assert!(!cx.did_prompt_for_new_path());
-        // Different passwords: the mismatch shows under the second field.
-        type_into(cx, &first, GOOD);
-        type_into(cx, &second, "correct horse 2");
-        assert!(rendered(cx, "desktop-backup-second-error"));
-        assert_eq!(
-            view.read_with(cx, |view, _| view.check.second),
-            Some(PASSWORDS_DIFFER)
-        );
-        let field = bounds(cx, "desktop-backup-second-field");
-        let error = bounds(cx, "desktop-backup-second-error");
-        assert!(error.top() >= field.top() && error.bottom() <= field.bottom());
-        click(cx, "desktop-backup-make");
-        assert!(!cx.did_prompt_for_new_path(), "a mismatch can't make one");
-        // Too short: the rule's message under the first field once it's left.
-        cx.update(|window, cx| view.update(cx, |view, cx| view.clear_fields(window, cx)));
-        type_into(cx, &first, "short");
-        type_into(cx, &second, "s");
-        assert!(rendered(cx, "desktop-backup-first-error"));
-        assert!(!rendered(cx, "desktop-backup-second-error"));
-        // Matching: Make backup asks where the file goes.
-        cx.update(|window, cx| view.update(cx, |view, cx| view.clear_fields(window, cx)));
-        type_into(cx, &first, GOOD);
-        type_into(cx, &second, GOOD);
-        assert!(!rendered(cx, "desktop-backup-second-error"));
-        click(cx, "desktop-backup-make");
-        assert!(cx.did_prompt_for_new_path());
-    }
-
-    #[gpui::test]
-    fn the_desktop_says_web_data_is_not_in(cx: &mut TestAppContext) {
-        let (_view, cx) = page(cx, true);
-        assert!(rendered(cx, "desktop-backup-no-web"));
-        assert!(DESKTOP_NO_WEB != WEB_INCLUDED);
-        // The note opens the group, above the switches (web M7's order).
-        let note = bounds(cx, "desktop-backup-no-web");
-        let keychain = bounds(cx, super::option_selector(OptionKind::Keychain));
-        assert!(note.bottom() <= keychain.top());
-        click(cx, "desktop-backup-open-web");
-        assert_eq!(
-            cx.opened_url().as_deref(),
-            Some("http://127.0.0.1:9/#/settings")
-        );
-        assert_eq!(
-            web_settings_url("http://127.0.0.1:3001/"),
-            "http://127.0.0.1:3001/#/settings"
-        );
-    }
-
-    #[gpui::test]
-    fn masked_fields_clear_on_cancel(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        let [first, second, restore] = fields(&view, cx);
-        for input in [&first, &second, &restore] {
-            assert!(cx.update(|_, cx| input.read(cx).is_masked()));
-        }
-        let canary = format!("canary {}", uuid::Uuid::new_v4());
-        type_into(cx, &first, &canary);
-        type_into(cx, &second, &canary);
-        click(cx, "desktop-backup-make");
-        // Read and emptied on submit, before the dialog answers.
-        assert!(value(cx, &first).is_empty() && value(cx, &second).is_empty());
-        // Cancelling the save dialog sends nothing and the page is free.
-        cx.simulate_new_path_selection(|_| None);
-        cx.run_until_parked();
-        assert_eq!(
-            requests(&view, cx),
-            ["GET /api/backup", "GET /api/backup/restore/status"]
-        );
-        view.read_with(cx, |view, _| {
-            assert!(!view.busy);
-            assert_eq!(view.making, Making::Idle);
-            assert!(view.last_create.is_none());
-        });
-        // Settings closing empties every field.
-        type_into(cx, &first, &canary);
-        type_into(cx, &restore, &canary);
-        assert!(view.read_with(cx, |view, cx| view.holds_text(cx)));
-        cx.update(|window, cx| view.update(cx, |view, cx| view.clear_fields(window, cx)));
-        cx.run_until_parked();
-        for input in [&first, &second, &restore] {
-            assert!(value(cx, input).is_empty());
-        }
-        assert!(!view.read_with(cx, |view, cx| view.holds_text(cx)));
-        assert!(!requests(&view, cx).concat().contains(&canary));
-    }
-
-    /// Tab walks the Make a backup group in page order (the web's DOM
-    /// order) on to Choose backup file, and Enter on Make backup opens the
-    /// save dialog.
-    #[gpui::test]
-    fn the_keyboard_reaches_every_control_in_order(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        let [first, second, _] = fields(&view, cx);
-        type_into(cx, &first, GOOD);
-        type_into(cx, &second, GOOD);
-        let (web, switches, make, choose, first_focus, second_focus) =
-            view.read_with(cx, |view, cx| {
-                (
-                    view.web_app_focus.clone(),
-                    view.switch_focus.clone(),
-                    view.make_focus.clone(),
-                    view.restore.choose_focus.clone(),
-                    view.first.focus_handle(cx),
-                    view.second.focus_handle(cx),
-                )
-            });
-        let page_focus = view.read_with(cx, |view, _| view.page_focus.clone());
-        cx.update(|window, cx| page_focus.focus(window, cx));
-        let mut order = vec![web];
-        order.extend(switches);
-        order.extend([first_focus, second_focus, make, choose]);
-        for (step, expected) in order.iter().enumerate() {
-            press(cx, "tab");
-            assert_eq!(focused(cx).as_ref(), Some(expected), "Tab stop {step}");
-        }
-        // Back on Make backup, Enter opens the save dialog once.
-        press(cx, "shift-tab");
-        assert_eq!(focused(cx).as_ref(), order.get(6));
-        press(cx, "enter");
-        assert!(cx.did_prompt_for_new_path());
-        let downloads = tempfile::tempdir().unwrap();
-        let chosen = downloads.path().join("bruhs-backup.bruhsbak");
-        let target = chosen.clone();
-        cx.simulate_new_path_selection(move |_| Some(target));
-        cx.run_until_parked();
-        assert_eq!(
-            requests(&view, cx).last().map(String::as_str),
-            Some("POST /api/backup")
-        );
-        view.read_with(cx, |view, _| {
-            let sent = view.last_create.clone().unwrap();
-            assert_eq!(sent.destination.as_deref(), chosen.to_str());
-            assert!(!sent.overwrite, "a new file replaces nothing");
-            assert_eq!(sent.options, BackupOptions::default());
-            assert!(view.busy);
-        });
-    }
-
-    /// A file the save dialog already asked about is replaced; the switches
-    /// go with the request.
-    #[gpui::test]
-    fn an_existing_file_is_replaced_only_after_the_dialog_asked(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        click(cx, super::option_selector(OptionKind::Browsers));
-        let [first, second, _] = fields(&view, cx);
-        type_into(cx, &first, GOOD);
-        type_into(cx, &second, GOOD);
-        click(cx, "desktop-backup-make");
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let target = file.path().to_path_buf();
-        cx.simulate_new_path_selection(move |_| Some(target));
-        cx.run_until_parked();
-        view.read_with(cx, |view, _| {
-            let sent = view.last_create.clone().unwrap();
-            assert!(sent.overwrite);
-            assert!(sent.options.browser_profiles);
-        });
-    }
-
-    #[gpui::test]
-    fn a_job_shows_its_line_then_the_saved_file(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        view.update(cx, |view, cx| {
-            view.busy = true;
-            view.job_answered(
-                Slot::Make,
-                ID.into(),
-                Ok(JobState::Running {
-                    done_bytes: 1_000,
-                    total_bytes: 9_000,
-                    step: JobStep::Writing,
-                }),
-                cx,
-            );
-        });
-        cx.run_until_parked();
-        assert!(rendered(cx, "desktop-backup-make-progress"));
-        assert!(rendered(cx, "desktop-backup-make-cancel"));
-        assert_eq!(
-            requests(&view, cx).last().cloned(),
-            Some(format!("GET /api/backup/jobs/{ID}"))
-        );
-        click(cx, "desktop-backup-make-cancel");
-        assert_eq!(
-            requests(&view, cx).last().cloned(),
-            Some(format!("DELETE /api/backup/jobs/{ID}"))
-        );
-        let file = BackupFile {
-            name: "bruhs-backup-2026-11-20-0930.bruhsbak".into(),
-            bytes: 2_000_000,
-            path: Some("/Users/me/Downloads/bruhs-backup-2026-11-20-0930.bruhsbak".into()),
-            download: None,
-            warnings: vec!["1 link was left out.".into()],
-        };
-        view.update(cx, |view, cx| {
-            view.job_answered(
-                Slot::Make,
-                ID.into(),
-                Ok(JobState::Created { file: file.clone() }),
-                cx,
-            );
-        });
-        cx.run_until_parked();
-        assert!(rendered(cx, "desktop-backup-made"));
-        view.read_with(cx, |view, _| {
-            assert!(!view.busy);
-            assert_eq!(
-                view.making,
-                Making::Made {
-                    line: created_line(&file, BackupApp::Desktop),
-                    warnings: file.warnings.clone(),
-                }
-            );
-        });
-        assert_eq!(
-            created_line(&file, BackupApp::Desktop),
-            "Saved bruhs-backup-2026-11-20-0930.bruhsbak, 2.0 MB."
-        );
-    }
-
-    #[gpui::test]
-    fn a_stopped_backup_reads_as_a_note(cx: &mut TestAppContext) {
-        assert_eq!(error_color(BACKUP_STOPPED), theme::rambutan_400());
-        assert_eq!(error_color(PASSWORDS_DIFFER), theme::lychee_300());
-        let (view, cx) = page(cx, true);
-        view.update(cx, |view, cx| {
-            view.busy = true;
-            view.job_answered(
-                Slot::Make,
-                ID.into(),
-                Ok(JobState::Failed {
-                    message: BACKUP_STOPPED.into(),
-                }),
-                cx,
-            );
-        });
-        cx.run_until_parked();
-        assert!(rendered(cx, "desktop-backup-make-error"));
-        assert_eq!(
-            view.read_with(cx, |view, _| view.make_error.clone())
-                .as_deref(),
-            Some(BACKUP_STOPPED)
-        );
-    }
-
-    #[gpui::test]
-    fn kept_sets_ask_before_acting(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        cx.update(|_, cx| {
-            cx.bind_keys([gpui::KeyBinding::new(
-                "escape",
-                super::super::CloseOverlays,
-                None,
-            )]);
-        });
-        let row = |name: &str| format!("desktop-backup-kept-{name}-{STAMP}");
-        assert!(rendered(cx, &row("row")));
-        assert!(rendered(cx, &row("put-back")));
-        click(cx, &row("delete"));
-        assert!(rendered(cx, &row("confirm")));
-        assert!(!rendered(cx, &row("delete")));
-        let focus = view.read_with(cx, |view, _| {
-            let focus = &view.kept_focus[STAMP];
-            (
-                focus.put_back.clone(),
-                focus.delete.clone(),
-                focus.decline.clone(),
-            )
-        });
-        assert_eq!(focused(cx), Some(focus.2.clone()), "Keep, the safe choice");
-        // Keep sends nothing and gives focus back to Delete.
-        click(cx, &row("decline"));
-        assert!(!rendered(cx, &row("confirm")));
-        assert_eq!(focused(cx), Some(focus.1.clone()));
-        let before = requests(&view, cx).len();
-        // Put back asks too; Escape keeps the set.
-        click(cx, &row("put-back"));
-        assert_eq!(focused(cx), Some(focus.2.clone()));
-        press(cx, "escape");
-        assert!(!rendered(cx, &row("confirm")));
-        assert_eq!(focused(cx), Some(focus.0));
-        assert_eq!(requests(&view, cx).len(), before, "nothing was sent");
-        // Delete, confirmed.
-        click(cx, &row("delete"));
-        click(cx, &row("confirm-button"));
-        assert_eq!(
-            requests(&view, cx).last().cloned(),
-            Some(format!("DELETE /api/backup/pre-restore/{STAMP}"))
-        );
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.deleted(STAMP.into(), Ok(()), window, cx)
-            });
-        });
-        cx.run_until_parked();
-        assert_eq!(
-            requests(&view, cx).last().map(String::as_str),
-            Some("GET /api/backup")
-        );
-        view.read_with(cx, |view, _| assert_eq!(view.asking, None));
-    }
-
-    fn refused(copy: &str) -> ServerError {
-        ServerError::Status {
-            request: "POST /api/backup/restore/apply".into(),
-            code: reqwest::StatusCode::CONFLICT,
-            body: serde_json::json!({ "error": copy }).to_string(),
-        }
-    }
-
-    #[gpui::test]
-    fn a_set_with_nothing_or_no_keys_offers_only_delete(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, true);
-        let row = |name: &str| format!("desktop-backup-kept-{name}-{STAMP}");
-        click(cx, &row("put-back"));
-        click(cx, &row("confirm-button"));
-        assert_eq!(
-            requests(&view, cx).last().map(String::as_str),
-            Some("POST /api/backup/restore/apply")
-        );
-        view.read_with(cx, |view, _| {
-            assert_eq!(
-                view.restore
-                    .last_apply
-                    .as_ref()
-                    .map(|apply| (&apply.source, apply.from_desktop)),
-                Some((
-                    &bruhs_models::backup::RestoreSource::PreRestore {
-                        stamp: STAMP.into()
-                    },
-                    true
-                ))
-            );
-        });
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.applied(Err(refused(NOTHING_TO_PUT_BACK)), window, cx);
-            });
-        });
-        cx.run_until_parked();
-        assert!(!rendered(cx, &row("put-back")));
-        assert!(rendered(cx, &row("delete")));
-        assert!(rendered(cx, &row("error")));
-        let delete = view.read_with(cx, |view, _| view.kept_focus[STAMP].delete.clone());
-        assert_eq!(focused(cx), Some(delete), "focus goes to what is left");
-        view.read_with(cx, |view, _| {
-            assert!(view.notes[STAMP].nothing_to_put_back);
-            assert!(!view.busy);
-        });
-        // A set whose keys are gone: Delete it again.
-        view.update(cx, |view, cx| {
-            view.notes.insert(
-                STAMP.into(),
-                KeptNote {
-                    error: Some(KEYCHAIN_SET_UNREADABLE.into()),
-                    nothing_to_put_back: false,
-                    unreadable: true,
-                },
-            );
-            cx.notify();
-        });
-        cx.run_until_parked();
-        assert!(!rendered(cx, &row("put-back")));
-        assert!(rendered(cx, &row("delete")));
-        view.read_with(cx, |view, _| assert!(view.notes[STAMP].only_delete()));
-    }
-
-    #[gpui::test]
-    fn the_page_shows_where_it_stands(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, false);
-        assert!(rendered(cx, "desktop-backup-status"));
-        view.read_with(cx, |view, _| assert_eq!(view.load, Load::Loading));
-        let not_found = ServerError::Status {
-            request: "GET /api/backup".into(),
-            code: reqwest::StatusCode::NOT_FOUND,
-            body: String::new(),
-        };
-        view.update(cx, |view, cx| {
-            let serial = view.load_serial;
-            view.loaded(serial, Err(not_found), cx);
-        });
-        view.read_with(cx, |view, _| assert_eq!(view.load, Load::ServingOld));
-        let mut unsupported = overview();
-        unsupported.supported = false;
-        view.update(cx, |view, cx| {
-            let serial = view.load_serial;
-            view.loaded(serial, Ok(unsupported), cx);
-        });
-        cx.run_until_parked();
-        assert!(rendered(cx, "desktop-backup-status"));
-        assert!(!rendered(cx, "desktop-backup-make-group"));
-        // A stale answer is dropped.
-        view.update(cx, |view, cx| view.loaded(0, Ok(overview()), cx));
-        view.read_with(cx, |view, _| assert!(!view.overview.supported));
-        let mut full = overview();
-        full.last = Some(bruhs_models::backup::LastBackup {
-            made_at_ms: bruhs_models::EpochMs::saturating_from_i64(1_763_631_000_000),
-            app: BackupApp::Web,
-            bytes: 3_000_000,
-        });
-        full.outside_roots = vec!["/srv/reactive.sqlite3".into()];
-        view.update(cx, |view, cx| {
-            let serial = view.load_serial;
-            view.loaded(serial, Ok(full), cx);
-        });
-        cx.run_until_parked();
-        let last = bounds(cx, "desktop-backup-last");
-        let outside = bounds(cx, "desktop-backup-outside");
-        let make = bounds(cx, "desktop-backup-make-group");
-        let restore = bounds(cx, "desktop-backup-restore-group");
-        let kept = bounds(cx, "desktop-backup-kept-group");
-        assert!(last.top() < outside.top() && outside.bottom() <= make.top());
-        assert!(make.bottom() <= restore.top() && restore.bottom() <= kept.top());
-    }
-
-    #[gpui::test]
-    fn a_running_job_found_on_load_is_followed(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx, false);
-        let mut busy = overview();
-        busy.job = Some(bruhs_models::backup::BackupJob {
-            id: ID.into(),
-            state: JobState::Running {
-                done_bytes: 0,
-                total_bytes: 1,
-                step: JobStep::Checking,
-            },
-        });
-        view.update(cx, |view, cx| {
-            let serial = view.load_serial;
-            view.loaded(serial, Ok(busy), cx);
-        });
-        cx.run_until_parked();
-        assert!(rendered(cx, "desktop-backup-restore-progress"));
-        view.read_with(cx, |view, _| {
-            assert!(view.busy);
-            assert_eq!(view.making, Making::Idle);
-        });
-        assert!(requests(&view, cx).contains(&format!("GET /api/backup/jobs/{ID}")));
     }
 }

@@ -11,8 +11,8 @@
 
 use super::{ServerClient, ServerError};
 use bruhs_models::backup::{
-    valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview, CreateBackup,
-    OpenBackup, RestoreStatus, ALL_COPY, GONE,
+    server_answered, valid_id, valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, BackupOverview,
+    CreateBackup, OpenBackup, RestoreStatus, ALL_COPY, GONE, UNREADABLE_REPLY,
 };
 use bruhs_models::vault::VAULT_UNREACHABLE;
 use std::time::Duration;
@@ -73,11 +73,46 @@ impl ServerError {
         }
         match self {
             Self::Transport { .. } => VAULT_UNREACHABLE.to_owned(),
-            Self::Status { code, .. } => format!("The server answered HTTP {}.", code.as_u16()),
-            Self::Decode { .. } => "The server sent a reply this app could not read.".to_owned(),
+            Self::Status { code, .. } => server_answered(code.as_u16()),
+            Self::Decode { .. } => UNREADABLE_REPLY.to_owned(),
             Self::Invalid(message) => (*message).to_owned(),
             Self::Client(_) => VAULT_UNREACHABLE.to_owned(),
         }
+    }
+}
+
+/// A request body that holds a password.
+pub(crate) trait PasswordBody {
+    fn password_mut(&mut self) -> &mut String;
+}
+
+impl PasswordBody for CreateBackup {
+    fn password_mut(&mut self) -> &mut String {
+        &mut self.password
+    }
+}
+
+impl PasswordBody for OpenBackup {
+    fn password_mut(&mut self) -> &mut String {
+        &mut self.password
+    }
+}
+
+/// A password-holding body that wipes its password when it drops, whether
+/// it was sent or its call was dropped before it ran (the app quit).
+pub(crate) struct Wiped<T: PasswordBody>(pub(crate) T);
+
+impl<T: PasswordBody> std::ops::Deref for Wiped<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: PasswordBody> Drop for Wiped<T> {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(self.0.password_mut());
     }
 }
 
@@ -307,6 +342,46 @@ mod tests {
         for request in &requests {
             assert!(!request.to_lowercase().contains("\r\norigin:"), "{request}");
         }
+    }
+
+    /// A body that notes when its password is reached and what it held.
+    struct Probe<'a> {
+        password: String,
+        seen: &'a std::cell::RefCell<Vec<String>>,
+    }
+
+    impl super::PasswordBody for Probe<'_> {
+        fn password_mut(&mut self) -> &mut String {
+            self.seen.borrow_mut().push(self.password.clone());
+            &mut self.password
+        }
+    }
+
+    #[test]
+    fn a_body_is_wiped_even_when_its_call_never_ran() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let body = super::Wiped(Probe {
+            password: "correct horse 1".into(),
+            seen: &seen,
+        });
+        // A call that owns the body and is dropped before it ever runs, as
+        // when the app quits mid-flight.
+        let call = async move {
+            let _body = body;
+        };
+        drop(call);
+        assert_eq!(*seen.borrow(), ["correct horse 1"], "the drop reached it");
+        let mut wiped = super::Wiped(Probe {
+            password: "correct horse 2".into(),
+            seen: &seen,
+        });
+        zeroize::Zeroize::zeroize(super::PasswordBody::password_mut(&mut wiped.0));
+        drop(wiped);
+        assert_eq!(
+            seen.borrow().last().map(String::as_str),
+            Some(""),
+            "zeroized"
+        );
     }
 
     #[test]

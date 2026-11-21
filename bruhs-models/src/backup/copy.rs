@@ -201,6 +201,11 @@ pub const WEB_WRITE_FAILED: &str = "Bruhs couldn't write all of this browser's d
 pub const OWNER_ONLY_BACKUP: &str = "Open Bruhs from its own address to make or restore a backup.";
 pub const UNSUPPORTED_PLATFORM: &str = "Backup runs on macOS and Linux.";
 pub const INVALID_REQUEST: &str = "That request isn't one Bruhs understands.";
+/// A failure status with no sentence of the server's own to show. `{status}`
+/// is the HTTP status (both apps' generic wording).
+pub const SERVER_ANSWERED: &str = "The server answered HTTP {status}.";
+/// A success whose body isn't what was asked for.
+pub const UNREADABLE_REPLY: &str = "The server sent a reply this app could not read.";
 pub const GONE: &str = "That backup isn't here anymore.";
 /// A web part upload sent as anything but raw bytes.
 pub const WEB_PART_TYPE: &str = "Send the browser's part as raw bytes.";
@@ -348,6 +353,8 @@ pub const ALL_COPY: &[&str] = &[
     OWNER_ONLY_BACKUP,
     UNSUPPORTED_PLATFORM,
     INVALID_REQUEST,
+    SERVER_ANSWERED,
+    UNREADABLE_REPLY,
     GONE,
     WEB_PART_TYPE,
     UPLOAD_TYPE,

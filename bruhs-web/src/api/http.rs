@@ -29,7 +29,7 @@ pub enum ApiError {
     Http { status: u16, detail: Option<String> },
     /// The response arrived but its body was not what this client expects.
     /// The reason is for logs only: it can quote the untrusted body.
-    #[error("The server sent a reply this app could not read.")]
+    #[error("{}", bruhs_models::backup::UNREADABLE_REPLY)]
     Decode(String),
     /// The caller cancelled the request.
     #[error("Stopped")]
@@ -45,7 +45,7 @@ fn http_message(status: u16, detail: Option<&str>) -> String {
         // that may make the change (fix wave B item 1).
         Some(detail) if status == 403 => bruhs_models::vault::at_own_address(detail, BASE_URL),
         Some(detail) => detail.to_owned(),
-        None => format!("The server answered HTTP {status}."),
+        None => bruhs_models::backup::server_answered(status),
     }
 }
 
