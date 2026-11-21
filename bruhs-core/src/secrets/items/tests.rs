@@ -581,7 +581,7 @@ async fn sealed_sets_round_trip_and_need_their_key() {
         item(CONNECTIONS_SERVICE, "github", &two),
     ];
     let key = [7; 32];
-    let blob = seal_items(&items, [3; 23], key).unwrap();
+    let blob = seal_items(&items, [3; 23], &key).unwrap();
     assert!(!String::from_utf8_lossy(&blob).contains(&one));
 
     // Values serialize as base64, which never needs a JSON escape.
@@ -594,7 +594,7 @@ async fn sealed_sets_round_trip_and_need_their_key() {
     )
     .is_err());
 
-    let opened = unseal_items(&blob, key).unwrap();
+    let opened = unseal_items(&blob, &key).unwrap();
     let triples = |items: &[KeychainItem]| -> Vec<(String, String, String)> {
         items
             .iter()
@@ -609,7 +609,7 @@ async fn sealed_sets_round_trip_and_need_their_key() {
     };
     assert_eq!(triples(&opened), triples(&items));
     assert!(matches!(
-        unseal_items(&blob, [8; 32]),
+        unseal_items(&blob, &[8; 32]),
         Err(SecretError::Invalid(_))
     ));
     // A sealed set never carries a seal key or an item outside Bruhs'
@@ -619,7 +619,7 @@ async fn sealed_sets_round_trip_and_need_their_key() {
         item("login", "x", "k"),
     ] {
         assert!(matches!(
-            seal_items(&[stray], [3; 23], key),
+            seal_items(&[stray], [3; 23], &key),
             Err(SecretError::Invalid(_))
         ));
     }
@@ -632,7 +632,7 @@ async fn sealed_sets_round_trip_and_need_their_key() {
         [3; 23],
     );
     assert!(matches!(
-        unseal_items(&crafted, key),
+        unseal_items(&crafted, &key),
         Err(SecretError::Invalid(_))
     ));
 

@@ -479,7 +479,7 @@ fn seal(
         random_bytes(&mut *key);
         let mut random = [0_u8; 23];
         random_bytes(&mut random);
-        let blob = seal_items(&staged.items, random, *key).map_err(|_| damaged())?;
+        let blob = seal_items(&staged.items, random, &key).map_err(|_| damaged())?;
         write_new(&meta.join(SEALED_FILE), &blob)?;
         store_seal_key(&config.store, &seal_account(&staged.id), &key)
             .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;

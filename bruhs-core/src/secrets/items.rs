@@ -387,7 +387,7 @@ impl Write for Counter {
 pub fn seal_items(
     items: &[KeychainItem],
     random: [u8; 23],
-    key: [u8; 32],
+    key: &[u8; 32],
 ) -> Result<Vec<u8>, SecretError> {
     for item in items {
         check_item_ref(&item.service, &item.account)?;
@@ -398,15 +398,15 @@ pub fn seal_items(
     // Sized up front: a growing Vec would leave copies of values behind.
     let mut plain = Zeroizing::new(Vec::with_capacity(counter.0));
     serde_json::to_writer(&mut *plain, &set).expect("keychain items always serialize");
-    Ok(bruhs_backup::seal(&plain, &Key::from_bytes(key), random))
+    Ok(bruhs_backup::seal(&plain, &Key::from_bytes(*key), random))
 }
 
 /// Open a set made by [`seal_items`]. A wrong key, another kind, a damaged
 /// blob or an item outside Bruhs' services (a seal key included) is
 /// `Invalid`, with fixed copy.
-pub fn unseal_items(blob: &[u8], key: [u8; 32]) -> Result<Vec<KeychainItem>, SecretError> {
+pub fn unseal_items(blob: &[u8], key: &[u8; 32]) -> Result<Vec<KeychainItem>, SecretError> {
     let unreadable = || SecretError::Invalid(KEYCHAIN_SET_UNREADABLE);
-    let plain = bruhs_backup::unseal(blob, &Key::from_bytes(key)).map_err(|_| unreadable())?;
+    let plain = bruhs_backup::unseal(blob, &Key::from_bytes(*key)).map_err(|_| unreadable())?;
     let set: SealedIn = serde_json::from_slice(&plain).map_err(|_| unreadable())?;
     if set
         .items

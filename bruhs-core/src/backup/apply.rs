@@ -825,7 +825,7 @@ impl Apply<'_> {
         random_bytes(&mut *key);
         let mut random = [0_u8; 23];
         random_bytes(&mut random);
-        let blob = seal_items(&items, random, *key)
+        let blob = seal_items(&items, random, &key)
             .map_err(|_| BackupError::Keychain(KEYCHAIN_ITEM_REFUSED))?;
         // A set whose seal a put back couldn't read is never made (final
         // review B minor): refused before anything moves.
@@ -1363,7 +1363,7 @@ fn open_items(
         SecretError::NotSaved => unreadable(),
         _ => BackupError::Keychain(KEYCHAIN_NEEDS_YOU),
     })?;
-    unseal_items(&blob, *key).map_err(|_| unreadable())
+    unseal_items(&blob, &key).map_err(|_| unreadable())
 }
 
 /// Today's items, as today's catalogs name them (D5). A missing item is

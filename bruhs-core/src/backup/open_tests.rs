@@ -866,7 +866,7 @@ async fn staging_holds_no_keychain_value() {
         std::fs::read(staging_dir(&fixture.roots, RootKey::Core, &id).join("meta/keychain.sealed"))
             .unwrap();
     let key = read_seal_key(&fixture.store, &format!("staged:{id}")).unwrap();
-    let items = unseal_items(&sealed, *key).unwrap();
+    let items = unseal_items(&sealed, &key).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].service, SECRETS_SERVICE);
     assert_eq!(items[0].account, format!("vault:global:{GLOBAL_VALUE}"));

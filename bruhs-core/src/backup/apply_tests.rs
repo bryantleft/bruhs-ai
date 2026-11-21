@@ -472,7 +472,7 @@ fn assert_applied(fixture: &Fixture, before: &Before) -> String {
     let sealed =
         std::fs::read(kept_dir(roots, RootKey::Core, &stamp).join("meta/keychain.sealed")).unwrap();
     let key = read_seal_key(&fixture.store, &format!("pre-restore:{stamp}")).unwrap();
-    let items = unseal_items(&sealed, *key).unwrap();
+    let items = unseal_items(&sealed, &key).unwrap();
     assert!(items
         .iter()
         .any(|item| item.account == account(VALUE) && *item.value == "old"));
@@ -800,7 +800,7 @@ async fn items_not_in_the_backup_go_aside() {
         std::fs::read(kept_dir(&fixture.roots, RootKey::Core, &stamp).join("meta/keychain.sealed"))
             .unwrap();
     let key = read_seal_key(&fixture.store, &format!("pre-restore:{stamp}")).unwrap();
-    let items = unseal_items(&sealed, *key).unwrap();
+    let items = unseal_items(&sealed, &key).unwrap();
     assert!(items
         .iter()
         .any(|item| item.account == account(EXTRA) && *item.value == "extra"));
