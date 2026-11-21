@@ -62,6 +62,7 @@ fn private_directory(directory: &Path) -> Result<(), ReactiveError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(refused()),
     }
+    #[cfg_attr(not(unix), expect(unused_mut, reason = "only unix sets a mode"))]
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     {

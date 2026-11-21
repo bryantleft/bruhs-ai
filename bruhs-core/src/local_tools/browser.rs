@@ -682,6 +682,7 @@ pub(super) fn current_entry_url(history: &Value) -> Option<String> {
 
 /// What a launch on a bruh's profile says when a Chrome Bruhs didn't start
 /// holds it.
+#[cfg(unix)]
 pub(super) const PROFILE_IN_USE: &str =
     "Another Chrome is using this bruh's profile. Quit it and try again.";
 
