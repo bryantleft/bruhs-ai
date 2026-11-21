@@ -785,7 +785,7 @@ mod tests {
             source_type_options("app_poll").last(),
             Some(&("app_poll", "App"))
         );
-        assert_eq!(source_type_options("folder").len(), 8);
+        assert_eq!(source_type_options("folder").len(), 9);
     }
     #[test]
     fn existing_zero_settle_source_round_trips_through_the_editor() {

@@ -345,14 +345,14 @@ fn set_vault_is_its_own_command_and_never_sent_to_an_older_service() {
         vec![set_vault.clone()]
     );
     assert_eq!(
-        settings_commands_for(Some(4), &agent, &state, &granted),
+        settings_commands_for(Some(VAULT_PROTOCOL), &agent, &state, &granted),
         vec![set_vault.clone()]
     );
-    for protocol in [Some(3), None] {
+    for protocol in [Some(COMPUTER_PROTOCOL), Some(PRE_VAULT_PROTOCOL), None] {
         assert!(settings_commands_for(protocol, &agent, &state, &granted).is_empty());
     }
-    // Protocol 3 has Computer, so SetComputer still goes there; SetVault
-    // follows it on a current service.
+    // A service before the vault (main's 5) has Computer, so SetComputer
+    // still goes there; SetVault follows it on a current service.
     let both = BruhSettings {
         computer: true,
         ..granted
@@ -362,11 +362,11 @@ fn set_vault_is_its_own_command_and_never_sent_to_an_older_service() {
         on: true,
     };
     assert_eq!(
-        settings_commands_for(Some(3), &agent, &state, &both),
+        settings_commands_for(Some(PRE_VAULT_PROTOCOL), &agent, &state, &both),
         vec![set_computer.clone()]
     );
     assert_eq!(
-        settings_commands_for(Some(4), &agent, &state, &both),
+        settings_commands_for(Some(VAULT_PROTOCOL), &agent, &state, &both),
         vec![set_computer, set_vault]
     );
 }

@@ -563,13 +563,15 @@ async fn bodies_never_echo() {
         Fixture::send(fixture.request("GET", &format!("/api/backup/jobs/{}", opening.id))).await;
     assert!(!text.contains(&secret), "{text}");
 
-    // A request only this test makes, so the capture is known to hold
-    // this test's requests.
+    // The server logs route templates, never a request's own path, so
+    // the capture is known to hold requests when the job route's template
+    // is in it after one more read of an unknown job.
     let marker = format!("/api/backup/jobs/{}", fixture.host.random_id());
     let (status, _) = Fixture::send(fixture.request("GET", &marker)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    let logged = logs.text();
     assert!(
-        logs.text().contains(&marker),
+        logged.contains("/api/backup/jobs/{id}") && !logged.contains(&marker),
         "the capture missed the requests"
     );
 

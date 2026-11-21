@@ -26,6 +26,8 @@ use super::{answer, fits, Budget, RouteError, APP_READ_BUDGET, ROUTE_BUDGET};
 use crate::routes::apps::tests::{canary, github_user, Body, Fixture, Logs, MailSetup, OTHER_PAGE};
 
 const ROUTE: &str = "/api/reactive/agents/a/apps";
+/// What the server logs for [`ROUTE`]: its template, never the path.
+const LOGGED_ROUTE: &str = "/api/reactive/agents/{id}/apps";
 
 /// The issues read every app test sends.
 fn issues() -> Value {
@@ -174,7 +176,7 @@ async fn an_app_call_reaches_the_app_and_its_token_never_comes_back() {
     assert!(snapshot.contains(&run.id), "the run is in the snapshot");
     let logged = logs.text();
     assert!(
-        logged.contains(ROUTE),
+        logged.contains(LOGGED_ROUTE),
         "the server logged nothing: {logged}"
     );
     assert!(!logged.contains(&token), "{logged}");
