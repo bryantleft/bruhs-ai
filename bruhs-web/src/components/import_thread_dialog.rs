@@ -30,7 +30,7 @@ use crate::state::{
 use crate::ui::Dialog;
 
 mod export_tab;
-use export_tab::{ExportState, ExportTab};
+use export_tab::{scroll_into_view_later, ExportState, ExportTab};
 
 /// The dialog's tab: a local tool, or the Export file tab (F24). Only a
 /// local tab searches.
@@ -227,6 +227,16 @@ pub fn ImportThreadDialog() -> impl IntoView {
         })
     });
 
+    // The chosen tab stays in view in the scrolling strip (M5).
+    Effect::new(move |_| {
+        if open.get() {
+            tab.track();
+            scroll_into_view_later(
+                "[role=tablist][aria-label=\"Import from\"] [role=tab][aria-selected=true]",
+            );
+        }
+    });
+
     // Closing the dialog, by any path, discards the export's batch (F23).
     Effect::new(move |was_open: Option<bool>| {
         let is_open = open.get();
@@ -339,14 +349,11 @@ pub fn ImportThreadDialog() -> impl IntoView {
     };
 
     // An export row comes in behind the dialog, which stays open on the
-    // batch (F23). Import all queues every row it takes.
+    // batch (F23); the tab's status line says what came in. Import all
+    // queues every row it takes.
     let import_export = Callback::new(move |row: ImportCandidate| {
         if export.enqueue(row) {
-            spawn_local(async move {
-                if let Some(line) = export.drain(import_one).await {
-                    thread_notice.flash(line);
-                }
-            });
+            spawn_local(export.drain(import_one));
         }
     });
     let busy = Signal::derive(move || importing.get() || export.importing.get());
@@ -378,6 +385,11 @@ pub fn ImportThreadDialog() -> impl IntoView {
         }
     };
 
+    // The arrow hint shows only with a row to choose (M6).
+    let choosable = move || match tab.get() {
+        ImportTab::Local(_) => error.with(Option::is_none) && visible.with(|rows| !rows.is_empty()),
+        ImportTab::Export => export.has_rows(),
+    };
     let local_source = move || match tab.get() {
         ImportTab::Local(source) => source,
         ImportTab::Export => ImportSource::ClaudeCode,
@@ -459,9 +471,9 @@ pub fn ImportThreadDialog() -> impl IntoView {
                                     on:click=move |_| tab.set(each)
                                     class=move || {
                                         if tab.get() == each {
-                                            "shrink-0 whitespace-nowrap rounded-grape bg-blueberry-600/20 px-2.5 py-1 text-label-sm text-blueberry-200 inset-ring inset-ring-blueberry-500/30 cursor-pointer"
+                                            "bruhs-control shrink-0 whitespace-nowrap rounded-grape bg-blueberry-600/20 px-2.5 py-1 text-label-sm text-blueberry-200 inset-ring inset-ring-blueberry-500/30 cursor-pointer"
                                         } else {
-                                            "shrink-0 whitespace-nowrap rounded-grape px-2.5 py-1 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-200 transition-colors cursor-pointer"
+                                            "bruhs-control shrink-0 whitespace-nowrap rounded-grape px-2.5 py-1 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-200 transition-colors cursor-pointer"
                                         }
                                     }
                                 >
@@ -499,8 +511,10 @@ pub fn ImportThreadDialog() -> impl IntoView {
                 <span>
                     {move || if busy.get() {
                         "Importing…"
-                    } else {
+                    } else if choosable() {
                         "↑↓ to choose, enter to import"
+                    } else {
+                        ""
                     }}
                 </span>
                 <button

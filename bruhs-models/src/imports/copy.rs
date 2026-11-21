@@ -18,6 +18,10 @@ pub const GROK_BEST_EFFORT: &str =
 
 // Results.
 pub const ALREADY_HERE: &str = "Every chat in this export is already here.";
+/// The Export file tab's search field: its placeholder and its name.
+pub const EXPORT_SEARCH: &str = "Search titles";
+/// A search that leaves no chat to show while some are left to import.
+pub const NO_MATCHING_CHATS: &str = "No chats match this search.";
 pub const USE_AS_MEMORY: &str = "Use as a bruh's memory";
 pub const CLAUDE_MANIFEST: &str = "This is Claude's list of export files. Download conversations-000.zip from it, then upload that file.";
 
@@ -156,6 +160,8 @@ pub const ALL_COPY: &[&str] = &[
     EXPORT_HELP_GROK,
     GROK_BEST_EFFORT,
     ALREADY_HERE,
+    EXPORT_SEARCH,
+    NO_MATCHING_CHATS,
     USE_AS_MEMORY,
     CLAUDE_MANIFEST,
     IMAGE_NOT_IMPORTED,
@@ -277,6 +283,8 @@ mod tests {
             );
         }
         assert!(ALL_COPY.iter().all(|text| !text.contains("recognise")));
+        assert_eq!(EXPORT_SEARCH, "Search titles");
+        assert_eq!(NO_MATCHING_CHATS, "No chats match this search.");
         assert!(
             MOVE_IN_PROMPT.contains("one fact per line") && MOVE_IN_PROMPT.contains("passwords")
         );

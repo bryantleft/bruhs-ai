@@ -419,13 +419,21 @@ fn clamp_selected_index(index: usize, count: usize) -> usize {
     }
 }
 
-/// A failed Continue in T3 Code as its notice. The server's copy already
-/// names T3 Code; any other failure gets the "T3: " prefix.
-fn t3_failure(error: &str) -> String {
-    if error.contains("T3") {
-        error.to_owned()
-    } else {
-        format!("T3: {error}")
+/// A failed Continue in T3 Code as its notice. The server's own T3 copy
+/// already names T3 Code and shows as it is; any other failure gets the
+/// "T3: " prefix.
+fn t3_failure(error: &crate::api::ApiError) -> String {
+    use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
+    match error {
+        crate::api::ApiError::Http {
+            detail: Some(detail),
+            ..
+        } if [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED]
+            .contains(&detail.as_str()) =>
+        {
+            detail.clone()
+        }
+        other => format!("T3: {other}"),
     }
 }
 
@@ -437,10 +445,16 @@ mod tests {
     fn t3_failures_name_t3_once() {
         use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
         for copy in [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED] {
-            assert_eq!(t3_failure(copy), copy);
+            let refused =
+                crate::api::ApiError::http(500, &serde_json::json!({ "error": copy }).to_string());
+            assert_eq!(t3_failure(&refused), copy);
         }
+        // Any other answer names T3 once, through the prefix, even when it
+        // happens to mention T3.
+        let other = crate::api::ApiError::http(409, r#"{"error":"T3 thread busy"}"#);
+        assert_eq!(t3_failure(&other), "T3: T3 thread busy");
         assert_eq!(
-            t3_failure("Could not reach the server: Failed to fetch"),
+            t3_failure(&crate::api::ApiError::Network("Failed to fetch".into())),
             "T3: Could not reach the server: Failed to fetch"
         );
     }
@@ -682,7 +696,7 @@ fn export_thread(
             leptos::task::spawn_local(async move {
                 match crate::api::export_to_t3(&request).await {
                     Ok(_) => notice.flash("Started a T3 thread"),
-                    Err(error) => notice.flash(t3_failure(&error.to_string())),
+                    Err(error) => notice.flash(t3_failure(&error)),
                 }
             });
         }

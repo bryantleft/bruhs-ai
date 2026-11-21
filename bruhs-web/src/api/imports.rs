@@ -4,7 +4,7 @@
 //! body with one `file` field per chosen `File`, which the browser streams
 //! from disk; the server never reads the file names (F33).
 
-use bruhs_models::imports::{valid_batch_id, AgentScan, ImportJob, IMPORT_GONE};
+use bruhs_models::imports::{valid_batch_id, AgentScan, ImportJob, IMPORT_FAILED, IMPORT_GONE};
 use bruhs_models::logic::portable::{ImportSource, ImportedThread};
 use gloo_net::http::{Method, RequestBuilder, Response};
 use web_sys::AbortSignal;
@@ -59,8 +59,17 @@ async fn get(route: &str, signal: &AbortSignal) -> Result<Response, ApiError> {
     send_request(builder(Method::GET, route, signal).build()?).await
 }
 
-fn browser_error(error: wasm_bindgen::JsValue) -> ApiError {
-    ApiError::Network(error.as_string().unwrap_or_else(|| "FormData".into()))
+/// The browser couldn't build the upload: shown as the import's own
+/// failure copy, never the browser's text (M9).
+fn browser_error(_: wasm_bindgen::JsValue) -> ApiError {
+    upload_not_built()
+}
+
+fn upload_not_built() -> ApiError {
+    ApiError::Http {
+        status: 400,
+        detail: Some(IMPORT_FAILED.into()),
+    }
 }
 
 /// `POST /api/import/uploads`: the chosen export files as one `file` field
@@ -151,6 +160,11 @@ mod tests {
             assert_eq!(thread_path(ImportSource::ChatGpt, bad, "x"), None, "{bad}");
             assert_eq!(job_path(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn an_upload_the_browser_cannot_build_says_so_plainly() {
+        assert_eq!(upload_not_built().to_string(), IMPORT_FAILED);
     }
 
     #[test]

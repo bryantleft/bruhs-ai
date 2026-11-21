@@ -10,9 +10,9 @@ use std::collections::{HashSet, VecDeque};
 use bruhs_models::imports::{
     batch_lines, export_row_detail, import_key, imported_line, importing_line, reading_line,
     rows_shown_line, ImportBatch, ImportJob, ImportJobState, ALREADY_HERE, CHOOSE_ANOTHER,
-    CHOOSE_EXPORT, EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, EXPORT_TOO_LARGE,
-    GROK_BEST_EFFORT, IMPORT_ALL, IMPORT_ALL_MAX, IMPORT_FAILED, MAX_ROWS_SHOWN, MAX_UPLOAD_BYTES,
-    MAX_UPLOAD_FILES, TOO_MANY_FILES,
+    CHOOSE_EXPORT, EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, EXPORT_SEARCH,
+    EXPORT_TAB, EXPORT_TOO_LARGE, GROK_BEST_EFFORT, IMPORT_ALL, IMPORT_ALL_MAX, IMPORT_FAILED,
+    MAX_ROWS_SHOWN, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, NO_MATCHING_CHATS, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{ImportCandidate, ImportSource, ImportedThread};
 use bruhs_models::num::ToFloatLossy as _;
@@ -25,12 +25,15 @@ use crate::api::{imports as api, ApiError};
 pub(super) const ACCEPT: &str = ".zip,.json,application/zip,application/json";
 /// How often a read is asked how it stands (D3).
 const POLL_MS: u32 = 500;
-const BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-longan-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON: &str = "bruhs-control min-h-control shrink-0 cursor-pointer rounded-seed px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-longan-700 transition-colors duration-150 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 const HELP: &str = "text-label-sm text-rambutan-300";
 const LINE: &str = "text-label-sm text-rambutan-200";
 const WARN: &str = "text-label-sm text-durian-300";
-const STATUS: &str = "text-label-sm text-rambutan-300 empty:hidden";
-const ERROR: &str = "text-label-sm text-lychee-300 empty:hidden";
+// Live regions stay in the accessibility tree while empty, so the first
+// line put in them is announced (I2).
+const STATUS: &str = "text-label-sm text-rambutan-300 empty:sr-only";
+const ERROR: &str = "text-label-sm text-lychee-300 empty:sr-only";
+const ROW: &str = "flex w-full flex-col items-start gap-0.5 px-4 py-2 text-left cursor-pointer";
 
 /// The control that takes focus after the tab changes under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +57,9 @@ pub(super) struct ExportState {
     pub query: RwSignal<String>,
     pub picked: RwSignal<usize>,
     pub error: RwSignal<Option<String>>,
-    /// `importing_line` while rows come in, then `imported_line`.
+    /// The polite status line: `reading_line` while a read runs (changed
+    /// only as files finish), `importing_line` while rows come in, then
+    /// `imported_line`.
     pub status: RwSignal<Option<String>>,
     /// Rows are being imported.
     pub importing: RwSignal<bool>,
@@ -112,6 +117,26 @@ impl ExportState {
         })
     }
 
+    /// Whether the tab shows a row to choose (tracked), for the dialog's
+    /// arrow hint (M6).
+    pub(super) fn has_rows(self) -> bool {
+        self.job.with(|job| match job {
+            Some(ImportJob {
+                state: ImportJobState::Ready { batch },
+                ..
+            }) => self.known.with(|known| {
+                self.query.with(|query| {
+                    let query = query.trim().to_lowercase();
+                    batch.candidates.iter().any(|row| {
+                        !known.contains(&import_key(row.source, &row.id))
+                            && (query.is_empty() || row.title.to_lowercase().contains(&query))
+                    })
+                })
+            }),
+            _ => false,
+        })
+    }
+
     fn signal(self) -> Option<web_sys::AbortSignal> {
         self.abort
             .try_with_value(|abort| abort.as_ref().map(web_sys::AbortController::signal))
@@ -126,10 +151,13 @@ impl ExportState {
         let bytes: f64 = files.iter().map(|file| file.size()).sum();
         if let Some(refusal) = upload_refusal(files.len(), bytes) {
             self.error.set(Some(refusal.to_owned()));
-            self.focus.set(Some(ExportFocus::Choose));
+            self.focus.set(Some(self.choose_focus()));
             return;
         }
         self.discard();
+        // **Choose another file** goes with the batch; the start view's
+        // **Choose export file** holds focus while the read runs.
+        self.focus.set(Some(ExportFocus::Choose));
         let Ok(controller) = web_sys::AbortController::new() else {
             return;
         };
@@ -137,11 +165,13 @@ impl ExportState {
         self.abort.set_value(Some(controller));
         let count = u32::try_from(files.len()).unwrap_or(u32::MAX);
         self.sending.set(Some(count));
+        self.status.set(Some(reading_line(0, count, 0)));
         wasm_bindgen_futures::spawn_local(async move {
-            match self.read(files, &signal).await {
+            match self.read(files, count, &signal).await {
                 Ok(()) => {}
                 // The dialog closed or another file was chosen: this read's
                 // state is gone, and the next one's isn't this one's to touch.
+                Err(_) if signal.aborted() => {}
                 Err(ApiError::Aborted) => {}
                 Err(error) => self.failed(error.to_string()),
             }
@@ -152,8 +182,10 @@ impl ExportState {
     async fn read(
         self,
         files: Vec<web_sys::File>,
+        count: u32,
         signal: &web_sys::AbortSignal,
     ) -> Result<(), ApiError> {
+        let mut shown = Some((0, count));
         let still_here = || {
             if signal.aborted() {
                 Err(ApiError::Aborted)
@@ -165,7 +197,17 @@ impl ExportState {
         still_here()?;
         loop {
             match job.state {
-                ImportJobState::Reading { .. } => {}
+                ImportJobState::Reading {
+                    files_done,
+                    files,
+                    conversations,
+                } => {
+                    if let Some(line) =
+                        reading_progress(&mut shown, files_done, files, conversations)
+                    {
+                        self.status.try_set(Some(line));
+                    }
+                }
                 ImportJobState::Ready { .. } => break,
                 ImportJobState::Failed { message } => {
                     let message = if message.is_empty() {
@@ -185,6 +227,7 @@ impl ExportState {
             still_here()?;
         }
         self.sending.try_set(None);
+        self.status.try_set(None);
         self.job.try_set(Some(job));
         self.after_change();
         Ok(())
@@ -220,6 +263,15 @@ impl ExportState {
             ExportFocus::Another
         };
         self.focus.try_set(Some(target));
+    }
+
+    /// Where focus goes after a refused choice: the button that is drawn.
+    fn choose_focus(self) -> ExportFocus {
+        if self.batch_id().is_some() {
+            ExportFocus::Another
+        } else {
+            ExportFocus::Choose
+        }
     }
 
     /// Drops the read: aborts its calls, forgets its rows and sends
@@ -270,13 +322,14 @@ impl ExportState {
     }
 
     /// Imports the queued rows one at a time through `import_one`, which
-    /// persists each as the local tabs do, and answers the line to flash.
-    /// A failure stops the run and shows under the tab.
-    pub(super) async fn drain(self, import_one: Callback<ImportedThread>) -> Option<String> {
+    /// persists each as the local tabs do, then puts the imported lines in
+    /// the tab's status line, its one announcement (M10). A failure stops
+    /// the run and shows under the tab; a close stops it quietly.
+    pub(super) async fn drain(self, import_one: Callback<ImportedThread>) {
         let (Some(batch), Some(signal)) = (self.batch_id(), self.signal()) else {
             self.queue.try_update_value(VecDeque::clear);
             self.importing.try_set(false);
-            return None;
+            return;
         };
         let mut done: Vec<ImportSource> = Vec::new();
         while let Some(row) = self.queue.try_update_value(VecDeque::pop_front).flatten() {
@@ -287,12 +340,16 @@ impl ExportState {
             }
             match api::import_export_thread(row.source, &batch, &row.id, &signal).await {
                 Ok(imported) => {
-                    // The dialog is gone.
-                    import_one.try_run(imported)?;
+                    if import_one.try_run(imported).is_none() {
+                        // The dialog is gone.
+                        return;
+                    }
                     done.push(row.source);
                 }
-                // The dialog closed: its state may be gone.
-                Err(ApiError::Aborted) => return None,
+                // The dialog closed or the batch went: its state may be gone,
+                // and a stale line must not show on the next read (M2).
+                Err(_) if signal.aborted() => return,
+                Err(ApiError::Aborted) => return,
                 Err(error) => {
                     self.queue.try_update_value(VecDeque::clear);
                     self.error.try_set(Some(error.to_string()));
@@ -300,11 +357,12 @@ impl ExportState {
                 }
             }
         }
+        if signal.aborted() {
+            return;
+        }
         self.importing.try_set(false);
-        let line = done_line(&done);
-        self.status.try_set(line.clone());
+        self.status.try_set(done_line(&done));
         self.after_change();
-        line
     }
 }
 
@@ -327,6 +385,41 @@ fn done_line(done: &[ImportSource]) -> Option<String> {
         })
         .collect();
     (!lines.is_empty()).then(|| lines.join(" "))
+}
+
+/// The reading line, only when the files done (or the file count) moved
+/// since `shown`, so the polite region doesn't speak on every poll (I2).
+fn reading_progress(
+    shown: &mut Option<(u32, u32)>,
+    files_done: u32,
+    files: u32,
+    chats: u32,
+) -> Option<String> {
+    if *shown == Some((files_done, files)) {
+        return None;
+    }
+    *shown = Some((files_done, files));
+    Some(reading_line(files_done, files, chats))
+}
+
+/// Scrolls the element `selector` finds into view inside its scroller,
+/// once drawn. A native test build has no page.
+pub(super) fn scroll_into_view_later(selector: &'static str) {
+    if cfg!(not(target_arch = "wasm32")) {
+        return;
+    }
+    request_animation_frame(move || {
+        let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.query_selector(selector).ok().flatten())
+        else {
+            return;
+        };
+        let options = web_sys::ScrollIntoViewOptions::new();
+        options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+        options.set_inline(web_sys::ScrollLogicalPosition::Nearest);
+        element.scroll_into_view_with_scroll_into_view_options(&options);
+    });
 }
 
 /// Refuses a choice the server would refuse, before sending any of it.
@@ -416,7 +509,18 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
         input.set_value("");
         state.choose(files);
     };
-    let reading = move || state.sending.with(Option::is_some) || reading_job(state).is_some();
+    let reading = move || {
+        state.sending.with(Option::is_some)
+            || state.job.with(|job| {
+                matches!(
+                    job,
+                    Some(ImportJob {
+                        state: ImportJobState::Reading { .. },
+                        ..
+                    })
+                )
+            })
+    };
     let import_row = move |row: ImportCandidate| {
         if !busy.get_untracked() {
             on_import.run(row);
@@ -441,6 +545,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                     &event.key(),
                 ) {
                     state.picked.set(next);
+                    scroll_into_view_later("[data-export-tab] [role=option][aria-selected=true]");
                 }
             }
             "Enter" => {
@@ -462,7 +567,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                 .collect_view()}
             <p data-export-grok="" class=WARN>{GROK_BEST_EFFORT}</p>
             <div>
-                <button type="button" node_ref=choose_ref data-export-choose="" data-autofocus="" class=BUTTON disabled=reading on:click=move |_| pick()>{CHOOSE_EXPORT}</button>
+                <button type="button" node_ref=choose_ref data-export-choose="" data-autofocus="" class=BUTTON aria-disabled=move || reading().then_some("true") on:click=move |_| if !untrack(reading) { pick() }>{CHOOSE_EXPORT}</button>
             </div>
         }
         .into_any()
@@ -479,51 +584,90 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
             _ => false,
         })
     });
+    // The picked row, as its key: each row compares itself with it, so a
+    // hover or an arrow key restyles two rows, not the list (M7).
+    let picked_key = Memo::new(move |_| {
+        rows.with(|rows| {
+            let at = state.picked.get().min(rows.len().saturating_sub(1));
+            rows.get(at).map(|row| import_key(row.source, &row.id))
+        })
+    });
     let rows_view = move || {
         let now = (state.now)();
-        let shown = move || {
-            let rows = rows.get();
-            let total = rows.len();
-            let selected = state.picked.get().min(total.saturating_sub(1));
-            let items = rows
-                .into_iter()
-                .take(MAX_ROWS_SHOWN)
-                .enumerate()
-                .map(|(index, row)| {
-                    let detail = export_row_detail(&row, now);
-                    let title = bruhs_models::logic::text::plain_title(&row.title).into_owned();
-                    let chosen = index == selected;
-                    view! {
-                        <button
-                            type="button"
-                            role="option"
-                            aria-selected=chosen.to_string()
-                            on:mouseenter=move |_| state.picked.set(index)
-                            on:click=move |_| import_row(row.clone())
-                            class=if chosen {
-                                "flex w-full flex-col items-start gap-0.5 bg-longan-700/70 px-4 py-2 text-left cursor-pointer"
-                            } else {
-                                "flex w-full flex-col items-start gap-0.5 px-4 py-2 text-left hover:bg-longan-700/40 cursor-pointer"
-                            }
-                        >
-                            <span data-export-title="" class="w-full truncate text-label-sm text-rambutan-200">{title}</span>
-                            <span data-export-detail="" class="w-full truncate text-label-sm text-rambutan-400">{detail}</span>
-                        </button>
-                    }
+        let row_view = move |row: ImportCandidate| {
+            let key = import_key(row.source, &row.id);
+            let chosen = {
+                let key = key.clone();
+                Memo::new(move |_| {
+                    picked_key.with(|picked| picked.as_deref() == Some(key.as_str()))
                 })
-                .collect_view();
-            let more = (total > MAX_ROWS_SHOWN).then(|| {
-                view! { <p data-export-more="" class="px-4 py-2 text-label-sm text-rambutan-400">{rows_shown_line(MAX_ROWS_SHOWN, total)}</p> }
-            });
-            view! { {items} {more} }
+            };
+            let detail = export_row_detail(&row, now);
+            let title = bruhs_models::logic::text::plain_title(&row.title).into_owned();
+            let hover = move |_| {
+                let at = rows.with_untracked(|rows| {
+                    rows.iter()
+                        .position(|each| import_key(each.source, &each.id) == key)
+                });
+                if let Some(at) = at {
+                    state.picked.set(at);
+                }
+            };
+            view! {
+                <button
+                    type="button"
+                    role="option"
+                    aria-selected=move || chosen.get().to_string()
+                    on:mouseenter=hover
+                    on:click=move |_| import_row(row.clone())
+                    class=move || {
+                        // Blueberry marks the selection (design rule).
+                        if chosen.get() {
+                            format!("{ROW} bg-blueberry-600/20 inset-ring inset-ring-blueberry-500/30")
+                        } else {
+                            format!("{ROW} hover:bg-longan-700/40")
+                        }
+                    }
+                >
+                    <span data-export-title="" class="w-full truncate text-label-sm text-rambutan-200">{title}</span>
+                    <span data-export-detail="" class="w-full truncate text-label-sm text-rambutan-400">{detail}</span>
+                </button>
+            }
         };
+        let matches = move || {
+            if rows.with(Vec::is_empty) {
+                return view! { <p data-export-none="" class="py-2 text-label-sm text-rambutan-300">{NO_MATCHING_CHATS}</p> }
+                    .into_any();
+            }
+            let more = move || {
+                let total = rows.with(Vec::len);
+                (total > MAX_ROWS_SHOWN).then(|| {
+                    view! { <p data-export-more="" class="px-4 py-2 text-label-sm text-rambutan-400">{rows_shown_line(MAX_ROWS_SHOWN, total)}</p> }
+                })
+            };
+            view! {
+                <div class="-mx-4 max-h-64 overflow-y-auto">
+                    <div role="listbox" aria-label=EXPORT_TAB>
+                        <For
+                            each=move || rows.with(|rows| rows.iter().take(MAX_ROWS_SHOWN).cloned().collect::<Vec<_>>())
+                            key=|row| import_key(row.source, &row.id)
+                            children=row_view
+                        />
+                    </div>
+                    {more}
+                </div>
+            }
+            .into_any()
+        };
+        // Redrawn only when the search starts or stops matching.
+        let empty = Memo::new(move |_| rows.with(Vec::is_empty));
         view! {
             <input
                 node_ref=search_ref
                 data-export-search=""
                 type="text"
-                placeholder="Search titles and folders"
-                aria-label="Search threads"
+                placeholder=EXPORT_SEARCH
+                aria-label=EXPORT_SEARCH
                 prop:value=move || state.query.get()
                 on:input=move |event| {
                     state.query.set(event_target_value(&event));
@@ -532,9 +676,10 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                 on:keydown=on_keydown
                 class="w-full rounded-grape bg-longan-900 px-2.5 py-1.5 text-label-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-longan-700 focus:outline-none focus:inset-ring-persimmon-500/60"
             />
-            <div class="-mx-4 max-h-64 overflow-y-auto" role="listbox" aria-label="Threads">
-                {shown}
-            </div>
+            {move || {
+                empty.track();
+                untrack(matches)
+            }}
         }
         .into_any()
     };
@@ -567,7 +712,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
             .collect_view();
         let all = move || {
             rows.with(|rows| !rows.is_empty()).then(|| {
-                view! { <button type="button" data-export-all="" class=BUTTON disabled=move || busy.get() on:click=move |_| import_all()>{IMPORT_ALL}</button> }
+                view! { <button type="button" data-export-all="" class=BUTTON aria-disabled=move || busy.get().then_some("true") on:click=move |_| import_all()>{IMPORT_ALL}</button> }
             })
         };
         view! {
@@ -576,7 +721,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
             {list(batch)}
             <div class="flex flex-wrap items-center gap-2">
                 {all}
-                <button type="button" node_ref=another_ref data-export-another="" class=BUTTON disabled=move || busy.get() on:click=move |_| pick()>{CHOOSE_ANOTHER}</button>
+                <button type="button" node_ref=another_ref data-export-another="" class=BUTTON aria-disabled=move || busy.get().then_some("true") on:click=move |_| if !busy.get_untracked() { pick() }>{CHOOSE_ANOTHER}</button>
             </div>
         }
         .into_any()
@@ -606,15 +751,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
             })
             .unwrap_or_else(start),
     };
-    let status = move || {
-        if let Some(files) = state.sending.get() {
-            return Some(reading_line(0, files, 0));
-        }
-        if let Some((done, files, chats)) = reading_job(state) {
-            return Some(reading_line(done, files, chats));
-        }
-        state.status.get()
-    };
+    let status = move || state.status.get();
 
     view! {
         <div data-export-tab="" class="flex flex-col gap-2 px-4 py-3">
@@ -624,22 +761,6 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
             <p role="alert" data-export-error="" class=ERROR>{move || state.error.get()}</p>
         </div>
     }
-}
-
-/// A read in progress: files done, files and chats so far (tracked).
-fn reading_job(state: ExportState) -> Option<(u32, u32, u32)> {
-    state.job.with(|job| match job {
-        Some(ImportJob {
-            state:
-                ImportJobState::Reading {
-                    files_done,
-                    files,
-                    conversations,
-                },
-            ..
-        }) => Some((*files_done, *files, *conversations)),
-        _ => None,
-    })
 }
 
 #[cfg(test)]
@@ -721,13 +842,23 @@ mod tests {
     }
 
     fn tab(state: ExportState) -> String {
+        tab_busy(state, false)
+    }
+
+    fn tab_busy(state: ExportState, busy: bool) -> String {
         // The tab's focus effect needs an executor to be created.
         let _ = any_spawner::Executor::init_futures_executor();
         render(move || {
             provide_context(state);
-            view! { <ExportTab on_import=Callback::new(|_| {}) busy=Signal::stored(false) /> }
+            view! { <ExportTab on_import=Callback::new(|_| {}) busy=Signal::stored(busy) /> }
                 .into_any()
         })
+    }
+
+    /// Whether a tag has the `disabled` attribute (not a `disabled:` class).
+    fn is_disabled(tag: &str) -> bool {
+        tag.match_indices(" disabled")
+            .any(|(at, word)| !tag[at + word.len()..].starts_with(':'))
     }
 
     fn ready(state: ExportState, batch: ImportBatch) {
@@ -818,6 +949,110 @@ mod tests {
             ids(visible_export_rows(&batch, &chatgpt_g1, "rocket")),
             ["g1"]
         );
+    }
+
+    #[test]
+    fn busy_buttons_keep_focus_and_say_they_wait() {
+        Owner::new().with(|| {
+            // A disabled control that holds focus drops it to the page
+            // behind the dialog, so busy buttons stay enabled (I1).
+            let state = state(&[]);
+            state.sending.set(Some(1));
+            let html = tab(state);
+            let choose = tag(&html, "data-export-choose");
+            assert!(!is_disabled(choose), "{choose}");
+            assert!(choose.contains("aria-disabled=\"true\""), "{choose}");
+            state.sending.set(None);
+            let html = tab(state);
+            assert!(
+                !tag(&html, "data-export-choose").contains("aria-disabled=\""),
+                "{html}"
+            );
+
+            ready(state, batch());
+            for busy in [true, false] {
+                let html = tab_busy(state, busy);
+                for marker in ["data-export-all", "data-export-another"] {
+                    let button = tag(&html, marker);
+                    assert!(!is_disabled(button), "{button}");
+                    assert_eq!(button.contains("aria-disabled=\"true\""), busy, "{button}");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn live_regions_stay_in_the_tree() {
+        Owner::new().with(|| {
+            let html = tab(state(&[]));
+            for marker in ["data-export-status", "data-export-error"] {
+                let line = tag(&html, marker);
+                assert!(line.contains("empty:sr-only"), "{line}");
+                assert!(!line.contains("empty:hidden"), "{line}");
+            }
+        });
+    }
+
+    #[test]
+    fn the_reading_line_changes_with_the_files_done() {
+        let mut last = None;
+        assert_eq!(
+            reading_progress(&mut last, 0, 2, 0),
+            Some(reading_line(0, 2, 0))
+        );
+        // More chats on the same file: the polite region stays still.
+        assert_eq!(reading_progress(&mut last, 0, 2, 40), None);
+        assert_eq!(
+            reading_progress(&mut last, 1, 2, 80),
+            Some(reading_line(1, 2, 80))
+        );
+        assert_eq!(reading_progress(&mut last, 1, 2, 120), None);
+    }
+
+    #[test]
+    fn a_refusal_focuses_a_control_that_is_there() {
+        Owner::new().with(|| {
+            let state = state(&[]);
+            assert_eq!(state.choose_focus(), ExportFocus::Choose);
+            ready(state, batch());
+            assert_eq!(state.choose_focus(), ExportFocus::Another);
+        });
+    }
+
+    #[test]
+    fn the_search_uses_shared_copy_and_says_when_nothing_matches() {
+        Owner::new().with(|| {
+            let state = state(&[]);
+            ready(state, batch());
+            let html = tab(state);
+            let search = tag(&html, "data-export-search");
+            assert!(
+                search.contains(&format!("placeholder=\"{EXPORT_SEARCH}\"")),
+                "{search}"
+            );
+            assert!(
+                search.contains(&format!("aria-label=\"{EXPORT_SEARCH}\"")),
+                "{search}"
+            );
+            assert!(!html.contains("Search titles and folders"), "{html}");
+            assert!(!html.contains(NO_MATCHING_CHATS), "{html}");
+            // The selected row wears the selection tone (blueberry).
+            assert!(
+                tag(&html, "aria-selected=\"true\"").contains("bg-blueberry"),
+                "{html}"
+            );
+
+            state.query.set("no such chat".into());
+            let html = tab(state);
+            assert_eq!(
+                texts(&html, "data-export-none"),
+                [NO_MATCHING_CHATS],
+                "{html}"
+            );
+            assert!(tag(&html, "data-export-none").contains("text-rambutan-300"));
+            assert!(!html.contains(ALREADY_HERE), "{html}");
+            assert!(!html.contains(IMPORT_ALL), "{html}");
+        });
     }
 
     #[test]
