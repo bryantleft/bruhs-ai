@@ -5,7 +5,7 @@
 //!
 //! Nothing here logs a path, a name from inside a backup or a value.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bruhs_models::backup::{
     valid_id, RestoreSource, WebPartInfo, BACKUP_BUSY, GONE, RESTORE_PENDING,
@@ -14,7 +14,7 @@ use bruhs_models::backup::{
 use super::{
     backups_dir, check_source, delete_pre_restore, exists, hold_restore_lock, instance_lock_path,
     lock_existing, open_items, read_result, real_dir, remove_if_there, to_json, waiting_web_part,
-    write_atomically, Lock, RESTORE_LOCK_WAIT, RESULT, WEB_PARTS,
+    write_atomically, Lock, ResultFile, RESTORE_LOCK_WAIT, RESULT, WEB_PARTS,
 };
 use crate::backup::host::{BackupHost, PENDING};
 use crate::backup::journal::{sync_dir, JOURNAL};
@@ -86,14 +86,28 @@ pub fn finish_web_part(roots: &Roots) -> Result<(), BackupError> {
     let backups = backups_dir(roots).ok_or(BackupError::Refused(GONE))?;
     let _restore_lock =
         hold_restore_lock(&backups, RESTORE_LOCK_WAIT).ok_or(BackupError::Busy(BACKUP_BUSY))?;
-    let mut result = read_result(&backups).ok_or(BackupError::Refused(GONE))?;
-    let part = result.web_part.take().ok_or(BackupError::Refused(GONE))?;
+    let result = read_result(&backups).ok_or(BackupError::Refused(GONE))?;
+    if drop_web_part(&backups, result)? {
+        Ok(())
+    } else {
+        Err(BackupError::Refused(GONE))
+    }
+}
+
+/// Removes the browser part `result` records, for a caller that holds
+/// `restore.lock`: its file, then its place in `result.json`. Answers
+/// whether one was recorded.
+pub(super) fn drop_web_part(backups: &Path, mut result: ResultFile) -> Result<bool, BackupError> {
+    let Some(part) = result.web_part.take() else {
+        return Ok(false);
+    };
     let folder = backups.join(WEB_PARTS);
     if valid_id(&part.id) && real_dir(&folder) {
         remove_if_there(&folder.join(format!("{}.bin", part.id)))?;
         sync_dir(&folder)?;
     }
-    write_atomically(&backups, RESULT, &to_json(&result)?)
+    write_atomically(backups, RESULT, &to_json(&result)?)?;
+    Ok(true)
 }
 
 impl BackupHost {

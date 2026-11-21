@@ -113,7 +113,9 @@ pub fn pre_restores(roots: &Roots) -> Vec<PreRestoreInfo> {
     kept
 }
 
-/// Deletes a kept set: its seal key, then both roots' folders. An invalid
+/// Deletes a kept set: its seal key, the browser part waiting for the
+/// browser when the restore that made the set brought it, then both
+/// roots' folders. An invalid
 /// or unknown stamp is `GONE`; a set a waiting or running restore uses is
 /// `RESTORE_PENDING`; one an apply holds `restore.lock` over,
 /// `BACKUP_BUSY`. Blocks on the keychain.
@@ -151,6 +153,14 @@ pub fn delete_pre_restore(
     // the sweep removes without judging any set (R2-I1).
     forget_seal_key(store, &kept_account(stamp))
         .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
+    // The browser part the restore that made this set brought goes with
+    // it: the browser's data from before that restore had nowhere left to
+    // go, so its restore could never finish (final re-review m1).
+    if let Some(result) = super::read_result(&backups)
+        .filter(|result| result.web_part_stamp.as_deref() == Some(stamp))
+    {
+        super::confirm::drop_web_part(&backups, result)?;
+    }
     for root in pass_roots(roots) {
         let folder = kept_dir(roots, *root, stamp);
         if !real_dir(&folder) {

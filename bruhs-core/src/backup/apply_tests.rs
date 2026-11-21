@@ -1722,6 +1722,54 @@ async fn the_previous_web_part_joins_the_set_its_restore_made() {
     assert!(!part(&newest).exists());
 }
 
+/// Final re-review m1: deleting the kept set a restore made also drops
+/// the browser part that restore brought, since the browser's data from
+/// before it has nowhere left to go. Deleting any other set leaves the
+/// part waiting.
+#[tokio::test]
+async fn deleting_the_set_a_restore_made_drops_its_waiting_web_part() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), true, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let first = pre_restores(roots)[0].stamp.clone();
+    let waiting = waiting_web_part(roots).unwrap();
+    let file = roots
+        .backups(RootKey::Core)
+        .join("web-part")
+        .join(format!("{}.bin", waiting.id));
+    assert!(file.exists());
+
+    // A rollback writes a newer set; deleting that one keeps the part.
+    std::fs::remove_file(fixture.out.join("b.bruhsbak")).unwrap();
+    let again = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(roots, &staged_source(&again), false).unwrap();
+    let intruder = roots.core.join("server/intruder.txt");
+    let planted = Cell::new(false);
+    let plant = |step: &Step, point: Point| {
+        if matches!(step, Step::Placed { .. }) && point == Point::Recorded && !planted.get() {
+            planted.set(true);
+            write(&intruder, b"made mid-apply");
+        }
+        false
+    };
+    apply_rolling_back(&fixture, &plant);
+    let newest = pre_restores(roots)[0].stamp.clone();
+    assert_ne!(newest, first);
+    delete_pre_restore(roots, &fixture.store, &newest).unwrap();
+    assert_eq!(waiting_web_part(roots), Some(waiting));
+
+    delete_pre_restore(roots, &fixture.store, &first).unwrap();
+    assert_eq!(waiting_web_part(roots), None);
+    assert!(!file.exists());
+    assert!(pre_restores(roots).is_empty());
+    assert!(!host(&fixture).overview().await.web_part_waiting);
+}
+
 #[tokio::test]
 async fn a_rollback_parks_what_was_made_mid_apply_under_free_names() {
     let fixture = fixture(false, false);
