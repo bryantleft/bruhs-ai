@@ -41,6 +41,22 @@ const FIXTURES: &[(&str, &[u8])] = &[
         "chatgpt-export_manifest.json",
         include_bytes!("fixtures/chatgpt-export_manifest.json"),
     ),
+    (
+        "claude-conversations.json",
+        include_bytes!("fixtures/claude-conversations.json"),
+    ),
+    (
+        "claude-memories.json",
+        include_bytes!("fixtures/claude-memories.json"),
+    ),
+    (
+        "claude-memories-account.json",
+        include_bytes!("fixtures/claude-memories-account.json"),
+    ),
+    (
+        "claude-manifest.json",
+        include_bytes!("fixtures/claude-manifest.json"),
+    ),
 ];
 
 /// The fixture file `name`, from `src/import/fixtures/`.

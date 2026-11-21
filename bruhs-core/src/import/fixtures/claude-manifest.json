@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "instructions": "Download each file below. Links expire 24 hours after they are created.",
+  "created_at": "2026-09-01T12:00:00Z",
+  "total_files": 3,
+  "data_files": [
+    {
+      "batch_index": 0,
+      "export_url": "https://example.com/export/conversations-000.zip?token=t0",
+      "category": "conversations",
+      "part": 0,
+      "filename": "conversations-000.zip"
+    },
+    {
+      "batch_index": 0,
+      "export_url": "https://example.com/export/memories-000.zip?token=t1",
+      "category": "memories",
+      "part": 0,
+      "filename": "memories-000.zip"
+    },
+    {
+      "batch_index": 0,
+      "export_url": "https://example.com/export/light_metadata-000.zip?token=t2",
+      "category": "light_metadata",
+      "part": 0,
+      "filename": "light_metadata-000.zip"
+    }
+  ]
+}

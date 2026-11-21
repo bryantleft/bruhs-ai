@@ -1,0 +1,15 @@
+{
+  "conversations_memory": "The owner likes short answers and weekend hikes.",
+  "memory_files": [
+    {
+      "path": "/memories/hiking.md",
+      "content": "Prefers trails under 15 km.",
+      "updated_at": "2026-09-10T12:00:00Z"
+    },
+    {
+      "path": "/memories/kitchen.md",
+      "content": "Bakes bread every Sunday.",
+      "updated_at": "2026-09-12T12:00:00Z"
+    }
+  ]
+}

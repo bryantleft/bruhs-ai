@@ -14,6 +14,8 @@ mod archive;
 #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod chatgpt;
 mod claude;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod claude_ai;
 mod codex;
 mod cursor;
 mod cursor_agent;
@@ -423,5 +425,7 @@ impl Transcript {
 mod archive_tests;
 #[cfg(test)]
 mod chatgpt_tests;
+#[cfg(test)]
+mod claude_ai_tests;
 #[cfg(test)]
 mod tests;

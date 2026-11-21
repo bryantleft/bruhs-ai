@@ -1,0 +1,10 @@
+[
+  {
+    "conversations_memory": "The owner bakes sourdough on weekends and keeps a small garden.",
+    "project_memories": {
+      "proj-0000-0001": "Garden project: tomatoes and peppers on a sunny balcony.",
+      "proj-0000-0002": "Bread project: prefers metric units."
+    },
+    "account_uuid": "acct-0000-0001"
+  }
+]
