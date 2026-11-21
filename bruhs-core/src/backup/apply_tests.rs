@@ -538,6 +538,33 @@ async fn applying_onto_one_root_moves_each_entry_once() {
     assert!(!kept.contains_key(Path::new("attachments/run.sh")));
 }
 
+/// Final review A minor: a desktop root that is a link to the core root
+/// is one root everywhere, as the backup's walk sees it: the manifest says
+/// so, and the apply plans a single pass.
+#[tokio::test]
+async fn a_linked_desktop_root_is_one_root() {
+    let mut fixture = fixture(true, false);
+    let link = fixture.roots.home.join("desktop");
+    std::os::unix::fs::symlink(&fixture.roots.core, &link).unwrap();
+    fixture.roots.desktop = link;
+    assert!(fixture.roots.same());
+    assert_eq!(fixture.roots.info().desktop, fixture.roots.info().core);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    let stop = |step: &Step, crash: Point| *step == Step::Sealed && crash == Point::Recorded;
+    assert!(apply_pending_with(&fixture.roots, &fixture.store, None, &no_env, &stop).is_err());
+    let journal: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(fixture.roots.backups(RootKey::Core).join("apply.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(journal["passes"].as_array().unwrap().len(), 1);
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_applied(&fixture, &before);
+}
+
 #[tokio::test]
 async fn calendar_goes_back_to_the_config_root() {
     let fixture = fixture(false, true);

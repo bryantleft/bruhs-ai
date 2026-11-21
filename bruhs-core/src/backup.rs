@@ -124,19 +124,44 @@ impl Roots {
         })
     }
 
-    /// Whether the core and desktop roots are one folder (Linux).
+    /// Whether the core and desktop roots are one folder (Linux): one path,
+    /// or two paths that resolve to one folder, as the backup's walk tells
+    /// them apart (final review A minor). Every step that splits the work
+    /// by root asks this, so none of them passes over one folder twice.
     pub fn same(&self) -> bool {
-        self.core == self.desktop
+        if self.core == self.desktop {
+            return true;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            match (
+                std::fs::metadata(&self.core),
+                std::fs::metadata(&self.desktop),
+            ) {
+                (Ok(core), Ok(desktop)) => {
+                    core.dev() == desktop.dev() && core.ino() == desktop.ino()
+                }
+                _ => false,
+            }
+        }
+        #[cfg(not(unix))]
+        false
     }
 
     /// The home and roots as a backup's manifest names them. A path that
-    /// isn't UTF-8 is named lossily.
+    /// isn't UTF-8 is named lossily. One folder is named once, by the core
+    /// root's path, as a one-root manifest says.
     pub fn info(&self) -> RootsInfo {
         let text = |path: &Path| path.to_string_lossy().into_owned();
         RootsInfo {
             home: text(&self.home),
             core: text(&self.core),
-            desktop: text(&self.desktop),
+            desktop: if self.same() {
+                text(&self.core)
+            } else {
+                text(&self.desktop)
+            },
         }
     }
 
