@@ -368,6 +368,12 @@ impl BackupHost {
         self.lock_job().as_ref().is_some_and(JobSlot::running)
     }
 
+    /// Whether the capture daemon records a meeting now (ruling F24); one
+    /// that can't be reached isn't recording.
+    pub async fn recording(&self) -> bool {
+        (self.config.recording)().await
+    }
+
     /// The running job's id.
     pub(super) fn running_id(&self) -> Option<String> {
         self.lock_job()

@@ -10,6 +10,7 @@
 //!   it.
 //! - `GET /api/backup/files/{id}`: a finished web backup, streamed as an
 //!   attachment once and then deleted.
+//! - The restore side lives in [`restore`].
 //!
 //! Every route sits behind the shared loopback guard and checks
 //! [`Policy::owner_request`] before anything else: other loopback pages may
@@ -41,8 +42,9 @@ use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::secrets::SecretStore;
 use bruhs_models::backup::{
     valid_id, BackupJob, BackupOverview, CreateBackup, UploadId, BACKUP_BUSY, DESTINATION_EXISTS,
-    GONE, INVALID_REQUEST, OWNER_ONLY_BACKUP, RECORDING_FIRST, RESTORE_PENDING, SOURCE_MISSING,
-    UNSUPPORTED_PLATFORM, WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    GONE, INVALID_REQUEST, KEYCHAIN_SET_UNREADABLE, NOTHING_TO_PUT_BACK, OWNER_ONLY_BACKUP,
+    RECORDING_FIRST, RESTORE_PENDING, SOURCE_MISSING, UNSUPPORTED_PLATFORM, WEB_PART_TYPE,
+    WEB_TOO_LARGE, WEB_UPLOAD_MAX,
 };
 use futures_util::StreamExt as _;
 use tokio::io::AsyncReadExt as _;
@@ -66,11 +68,15 @@ const READ_BYTES: usize = 256 << 10;
 /// The one content type a web part arrives as (D20).
 const WEB_PART_CONTENT_TYPE: &str = "application/octet-stream";
 
+mod restore;
 // Split so clippy's allow-unwrap-in-tests sees `cfg(test)`.
+#[cfg(test)]
+mod restore_tests;
 #[cfg(test)]
 mod tests;
 
-/// This side's routes (D20), each with its body limit.
+/// Every backup route (D20), each with its body limit: this side's and
+/// the restore side's.
 pub fn router() -> Router<ServerState> {
     Router::new()
         .route(
@@ -84,6 +90,7 @@ pub fn router() -> Router<ServerState> {
         .route("/api/backup/web-parts", post(upload_web_part))
         .route("/api/backup/jobs/{id}", get(job).delete(cancel_job))
         .route("/api/backup/files/{id}", get(download))
+        .merge(restore::router())
 }
 
 /// The one backup host this server runs, after its sweep (ruling B Task 10
@@ -147,7 +154,8 @@ pub fn backup_error(error: BackupError) -> AppError {
             AppError::Unavailable(UNSUPPORTED_PLATFORM.into())
         }
         BackupError::Refused(
-            message @ (RESTORE_PENDING | RECORDING_FIRST | DESTINATION_EXISTS | BACKUP_BUSY),
+            message @ (RESTORE_PENDING | RECORDING_FIRST | DESTINATION_EXISTS | BACKUP_BUSY
+            | NOTHING_TO_PUT_BACK),
         ) => AppError::Conflict(message.into()),
         BackupError::Refused(message @ (GONE | SOURCE_MISSING)) => {
             AppError::NotFound(message.into())
@@ -157,6 +165,11 @@ pub fn backup_error(error: BackupError) -> AppError {
         }
         BackupError::Busy(message) => AppError::Conflict(message.into()),
         BackupError::Space(message) => AppError::Unavailable(message),
+        // Never passes on a retry: the set can only be deleted (B Task 8
+        // R3-M2).
+        BackupError::Keychain(KEYCHAIN_SET_UNREADABLE) => {
+            AppError::Conflict(KEYCHAIN_SET_UNREADABLE.into())
+        }
         BackupError::Keychain(message) => AppError::Unavailable(message.into()),
         error @ BackupError::Io(_) => AppError::internal_msg(error.message()),
     }
@@ -204,29 +217,51 @@ pub async fn upload_web_part(
 ) -> Result<Response, AppError> {
     owner_only_backup(&config.access, request.headers())?;
     let backup = host(backup)?;
-    let raw_bytes = request
-        .headers()
+    if let Some(refusal) = not_raw_bytes(request.headers(), WEB_PART_TYPE) {
+        return Ok(refusal);
+    }
+    let id = receive(&backup, UploadKind::WebPart, request).await?;
+    Ok(Json(UploadId { id }).into_response())
+}
+
+/// 415 with `copy` unless the body is sent as `application/octet-stream`.
+/// `AppError` has no 415 (ruling F26): the same body, by hand.
+fn not_raw_bytes(headers: &HeaderMap, copy: &'static str) -> Option<Response> {
+    let raw_bytes = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
         .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(WEB_PART_CONTENT_TYPE));
-    if !raw_bytes {
-        // `AppError` has no 415 (ruling F26): the same body, by hand.
-        return Ok((
+    (!raw_bytes).then(|| {
+        (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            Json(serde_json::json!({ "error": WEB_PART_TYPE })),
+            Json(serde_json::json!({ "error": copy })),
         )
-            .into_response());
-    }
+            .into_response()
+    })
+}
+
+/// Streams `request`'s body into a new upload of `kind` and answers its
+/// id. A browser part declared over `WEB_UPLOAD_MAX` is refused before it
+/// is read; the upload itself refuses one that grows past it, and a
+/// restore upload that would leave too little free space. A refused or
+/// cut-off upload leaves nothing behind.
+async fn receive(
+    backup: &BackupHost,
+    kind: UploadKind,
+    request: Request,
+) -> Result<String, AppError> {
     let declared = request
         .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
-    if declared.is_some_and(|bytes| bytes > WEB_UPLOAD_MAX) {
+    let web = matches!(kind, UploadKind::WebPart | UploadKind::PreviousWebPart);
+    if web && declared.is_some_and(|bytes| bytes > WEB_UPLOAD_MAX) {
         return Err(AppError::BadRequest(WEB_TOO_LARGE.into()));
     }
-    let mut upload = blocking(move || backup.begin_upload(UploadKind::WebPart)).await?;
+    let backup = backup.clone();
+    let mut upload = blocking(move || backup.begin_upload(kind)).await?;
     let mut frames = request.into_body().into_data_stream();
     let mut pending = Vec::with_capacity(WRITE_BYTES);
     loop {
@@ -244,8 +279,7 @@ pub async fn upload_web_part(
             break;
         }
     }
-    let id = blocking(move || upload.finish()).await?;
-    Ok(Json(UploadId { id }).into_response())
+    blocking(move || upload.finish()).await
 }
 
 /// Runs a host step that touches the disk off the async runtime.

@@ -36,9 +36,10 @@ pub mod test_support;
 
 #[cfg(unix)]
 pub use apply::{
-    apply_pending, applying, delete_pre_restore, instance_lock_path, keep_previous_web_part,
-    open_restore_log, pending, pre_restores, restore_waits, result, schedule, take_instance_lock,
-    take_service_restart, waiting_web_part, ApplyOutcome, Holder,
+    apply_pending, applying, check_restore, delete_pre_restore, desktop_running, finish_web_part,
+    instance_lock_path, keep_previous_web_part, open_restore_log, pending, pre_restores,
+    restore_waits, result, schedule, take_instance_lock, take_service_restart, unschedule,
+    waiting_web_part, waiting_web_part_file, ApplyOutcome, Holder,
 };
 #[cfg(all(test, unix))]
 use collect::snapshot_sqlite_with;
@@ -61,6 +62,8 @@ mod create_tests;
 mod open_tests;
 #[cfg(test)]
 mod prepare_tests;
+#[cfg(test)]
+mod reach_tests;
 
 /// The app and organisation names `directories` resolves the roots from.
 const QUALIFIER: &str = "dev";

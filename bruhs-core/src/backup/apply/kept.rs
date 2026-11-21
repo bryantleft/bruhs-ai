@@ -236,6 +236,7 @@ pub(super) fn check_kept(roots: &Roots, stamp: &str) -> Result<Option<SourceSet>
         keychain,
         web_part: is_file(&meta.join(WEB_PART)),
         rewrites: Vec::new(),
+        protocol: None,
     }))
 }
 

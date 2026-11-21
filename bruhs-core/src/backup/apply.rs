@@ -59,9 +59,13 @@ use crate::secrets::{
     KeychainItem, SecretError, SecretStore, BACKUP_SERVICE,
 };
 
+mod confirm;
 mod kept;
 mod rollback;
 
+pub use confirm::{
+    check_restore, desktop_running, finish_web_part, unschedule, waiting_web_part_file,
+};
 pub(super) use kept::sweep_restore;
 use kept::{check_kept, forget_key, hold_restore_lock, kept_account, kept_dir, kept_info, park};
 pub use kept::{delete_pre_restore, keep_previous_web_part, pre_restores};
@@ -186,6 +190,9 @@ struct SourceSet {
     keychain: bool,
     web_part: bool,
     rewrites: Vec<PathRewrite>,
+    /// The crew protocol of a backup's data; `None` for a kept set, which
+    /// is this computer's own.
+    protocol: Option<u32>,
 }
 
 /// `<desktop root>/desktop.instance.lock` (D17, ruling F21 b): the same
@@ -988,6 +995,7 @@ fn check_staged(roots: &Roots, id: &str) -> Result<Option<SourceSet>, BackupErro
         keychain,
         web_part,
         rewrites: preview.rewrites,
+        protocol: Some(manifest.reactive_protocol),
     }))
 }
 

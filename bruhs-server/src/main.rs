@@ -194,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     })
     .layer(axum::Extension(reactive))
+    .layer(axum::Extension(restore_control::real(backup.roots())))
     .layer(axum::Extension(backup))
     .layer(axum::Extension(apps))
     .layer(axum::Extension(gmail))

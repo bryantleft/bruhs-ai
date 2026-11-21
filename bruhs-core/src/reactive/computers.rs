@@ -337,6 +337,7 @@ struct WeakRuntime {
     vault: Weak<OnceLock<crate::secrets::SecretManager>>,
     apps: Weak<OnceLock<crate::apps::AppsHost>>,
     vault_wait: std::time::Duration,
+    worker: Weak<super::halt::WorkerSlot>,
 }
 
 impl WeakRuntime {
@@ -356,6 +357,7 @@ impl WeakRuntime {
             vault: Arc::downgrade(&runtime.vault),
             apps: Arc::downgrade(&runtime.apps),
             vault_wait: runtime.vault_wait,
+            worker: Arc::downgrade(&runtime.worker),
         }
     }
 
@@ -375,6 +377,7 @@ impl WeakRuntime {
             vault: self.vault.upgrade()?,
             apps: self.apps.upgrade()?,
             vault_wait: self.vault_wait,
+            worker: self.worker.upgrade()?,
         })
     }
 }

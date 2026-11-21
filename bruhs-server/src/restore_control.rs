@@ -50,11 +50,13 @@ const EXIT_DELAY: Duration = Duration::from_millis(750);
 
 /// What a restore asks of this process and the background service (D15,
 /// ruling F22). A fake in the route tests.
-#[expect(dead_code, reason = "used from Task 12")]
 pub(crate) trait RestoreControl: Send + Sync {
     /// The reactive protocol of the installed service's release, when one
     /// is installed and its release names it.
     fn service_installed_protocol(&self) -> Option<u32>;
+    /// Whether the service is installed and loaded, so the applier starts
+    /// it again after the restore (ruling F22 a).
+    fn service_loaded(&self) -> bool;
     /// Whether this process is the background service.
     fn is_service_process(&self) -> bool;
     /// Stops the background service if it is loaded: `Ok(true)` when it
@@ -67,21 +69,26 @@ pub(crate) trait RestoreControl: Send + Sync {
     fn exit_soon(&self);
 }
 
+/// The control the restore routes take as an `Extension`.
+pub(crate) type Control = std::sync::Arc<dyn RestoreControl>;
+
+/// The real control, for the server's routes over `roots`.
+pub(crate) fn real(roots: &Roots) -> Control {
+    std::sync::Arc::new(RealRestoreControl::new(roots.core.clone()))
+}
+
 /// The real control: this process, launchd or systemd.
 pub(crate) struct RealRestoreControl {
     /// The core data root, whose `logs/restore.log` takes the applier's
     /// output.
-    #[expect(dead_code, reason = "used from Task 12")]
     core: PathBuf,
 }
 
 impl RealRestoreControl {
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 12"))]
     pub(crate) fn new(core: PathBuf) -> Self {
         Self { core }
     }
 
-    #[expect(dead_code, reason = "used from Task 12")]
     fn status() -> bruhs_models::api::BackgroundService {
         service::status(Asker::Server {
             pid: std::process::id(),
@@ -96,6 +103,11 @@ impl RestoreControl for RealRestoreControl {
             .installed
             .then_some(status.reactive_protocol)
             .flatten()
+    }
+
+    fn service_loaded(&self) -> bool {
+        let status = Self::status();
+        status.installed && status.loaded
     }
 
     fn is_service_process(&self) -> bool {

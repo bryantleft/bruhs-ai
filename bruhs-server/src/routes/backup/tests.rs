@@ -19,7 +19,7 @@ use bruhs_core::AppState;
 use bruhs_models::backup::{
     normalize_password, valid_id, BackupJob, BackupOverview, JobState, UploadId,
     DESTINATION_INSIDE, GONE, INVALID_REQUEST, NOT_A_BACKUP, OWNER_ONLY_BACKUP, PASSWORD_SHORT,
-    WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    SOURCE_MISSING, WEB_PART_TYPE, WEB_TOO_LARGE, WEB_UPLOAD_MAX, WRONG_PASSWORD,
 };
 use reqwest::Method;
 use serde_json::{json, Value};
@@ -69,13 +69,12 @@ impl Drop for Capturing {
 
 /// A loopback page the shared guard lets through but that isn't the app.
 const OTHER_PAGE: &str = "http://localhost:5173";
-const PASSWORD: &str = "correct horse battery";
+pub(super) const PASSWORD: &str = "correct horse battery";
 /// The IndexedDB version a test's web part names.
-const WEB_DB_VERSION: u32 = 13;
+pub(super) const WEB_DB_VERSION: u32 = 13;
 
-/// Every route of this side of D20, with an id of the right shape. The
-/// restore routes join this list with them.
-const ROUTES: [(&str, &str); 6] = [
+/// Every route of D20, with an id or stamp of the right shape.
+const ROUTES: [(&str, &str); 15] = [
     ("GET", "/api/backup"),
     ("POST", "/api/backup/web-parts"),
     ("POST", "/api/backup"),
@@ -85,6 +84,18 @@ const ROUTES: [(&str, &str); 6] = [
         "/api/backup/jobs/0123456789abcdef0123456789abcdef",
     ),
     ("GET", "/api/backup/files/0123456789abcdef0123456789abcdef"),
+    ("POST", "/api/backup/restore/uploads"),
+    ("POST", "/api/backup/restore"),
+    (
+        "DELETE",
+        "/api/backup/restore/0123456789abcdef0123456789abcdef",
+    ),
+    ("POST", "/api/backup/restore/apply"),
+    ("GET", "/api/backup/restore/status"),
+    ("GET", "/api/backup/restore/web-part"),
+    ("DELETE", "/api/backup/restore/web-part"),
+    ("POST", "/api/backup/restore/web-part/previous"),
+    ("DELETE", "/api/backup/pre-restore/2026-11-20-1200-ab12"),
 ];
 
 type Env = Arc<dyn Fn(&str) -> Option<OsString> + Send + Sync>;
@@ -212,22 +223,22 @@ impl Fixture {
     }
 }
 
-fn write(path: &Path, bytes: &[u8]) {
+pub(super) fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();
 }
 
-fn error(text: &str) -> String {
+pub(super) fn error(text: &str) -> String {
     json!({ "error": text }).to_string()
 }
 
 /// A random value no response or log line may hold.
-fn canary() -> String {
+pub(super) fn canary() -> String {
     format!("canary-{}", uuid::Uuid::new_v4().simple())
 }
 
 /// `plain` in a container of `kind`, locked with [`PASSWORD`].
-fn container(kind: Kind, plain: &[u8]) -> Vec<u8> {
+pub(super) fn container(kind: Kind, plain: &[u8]) -> Vec<u8> {
     let header = Header::new(kind, Kdf::Argon2id(KdfParams::FLOOR), [7; 23]);
     let key = Key::derive(&normalize_password(PASSWORD), &header).unwrap();
     let mut writer = Encryptor::new(Vec::new(), &header, &key).unwrap();
@@ -442,6 +453,78 @@ async fn bodies_never_echo() {
         }))
         .await;
     assert_eq!((status, text), (StatusCode::NOT_FOUND, error(GONE)));
+
+    // The restore side: opening with the canary, as a body that isn't a
+    // request, and as one whose password opens nothing.
+    for body in [
+        json!({ "source": { "type": "upload", "id": id }, "password": secret, "x": 1 }),
+        json!({ "source": { "type": "elsewhere" }, "password": secret }),
+    ] {
+        let (status, text) =
+            Fixture::send(fixture.request("POST", "/api/backup/restore").json(&body)).await;
+        assert_eq!(
+            (status, text),
+            (StatusCode::BAD_REQUEST, error(INVALID_REQUEST))
+        );
+    }
+    let (status, text) = Fixture::send(
+        fixture
+            .request("POST", "/api/backup/restore")
+            .header("content-type", "application/json")
+            .body(format!("{{\"password\": \"{secret}\", \"source\": ")),
+    )
+    .await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::BAD_REQUEST, error(INVALID_REQUEST))
+    );
+    let (status, text) =
+        Fixture::send(fixture.request("POST", "/api/backup/restore").json(&json!({
+            "source": { "type": "path", "path": format!("/nowhere/{secret}") },
+            "password": secret,
+        })))
+        .await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::NOT_FOUND, error(SOURCE_MISSING))
+    );
+    let (status, text) = Fixture::send(fixture.request("POST", "/api/backup/restore/apply").json(
+        &json!({
+            "source": { "type": "staged", "id": fixture.host.random_id() },
+            "replace": true,
+            "password": secret,
+        }),
+    ))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!text.contains(&secret), "{text}");
+    let upload = Fixture::send(
+        fixture
+            .request("POST", "/api/backup/restore/uploads")
+            .header("content-type", "application/octet-stream")
+            .body(container(Kind::Full, b"not a tar")),
+    )
+    .await;
+    assert_eq!(upload.0, StatusCode::OK, "{}", upload.1);
+    let UploadId { id: upload } = serde_json::from_str(&upload.1).unwrap();
+    let (status, text) = Fixture::send(
+        fixture
+            .request("POST", "/api/backup/restore")
+            .json(&json!({ "source": { "type": "upload", "id": upload }, "password": secret })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(!text.contains(&secret), "{text}");
+    let opening: BackupJob = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        fixture.finished(&opening.id).await,
+        JobState::Failed {
+            message: WRONG_PASSWORD.into()
+        }
+    );
+    let (_, text) =
+        Fixture::send(fixture.request("GET", &format!("/api/backup/jobs/{}", opening.id))).await;
+    assert!(!text.contains(&secret), "{text}");
 
     // A request only this test makes, so the capture is known to hold
     // this test's requests.

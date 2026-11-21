@@ -42,7 +42,6 @@ pub(crate) trait Job {
 /// installed under this `HOME` or isn't loaded. When `asker` is the
 /// service's own process, nothing is signalled: that process stops by
 /// shutting down after it answers (ruling F22 a).
-#[expect(dead_code, reason = "used from Task 12")]
 pub(crate) fn stop_for_restore(asker: Asker) -> Result<bool, ServiceError> {
     let installed = definition_path()?.is_file();
     if !installed {

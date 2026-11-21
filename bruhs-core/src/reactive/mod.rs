@@ -27,6 +27,7 @@ mod computer_tests;
 mod computers;
 #[cfg(test)]
 mod crew_tests;
+mod halt;
 mod notify;
 mod report_sources;
 #[cfg(test)]
@@ -107,6 +108,8 @@ pub struct ReactiveRuntime {
     /// The longest any vault lookup of this runtime waits before it fails
     /// closed.
     vault_wait: Duration,
+    /// The running worker, which a restore stops (`halt`).
+    worker: Arc<halt::WorkerSlot>,
 }
 
 /// The folders that hold the owner's saved logins, in the two forms the
@@ -274,6 +277,7 @@ impl ReactiveRuntime {
             vault: Arc::new(OnceLock::new()),
             apps: Arc::new(OnceLock::new()),
             vault_wait: crate::secrets::VAULT_READ_WAIT,
+            worker: Arc::default(),
         })
     }
 
@@ -665,9 +669,11 @@ impl ReactiveRuntime {
         // Marks older work folders and removes deleted bruhs' leftover trees.
         computers::spawn_sync(self);
         let runtime = self.clone();
-        Ok(tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let _lease = lease;
             worker::run(runtime, app).await;
-        }))
+        });
+        self.worker.keep(&handle);
+        Ok(handle)
     }
 }

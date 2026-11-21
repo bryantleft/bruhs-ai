@@ -6,12 +6,17 @@
 //! unlike `StopAll` it also pauses managed presets, and it keeps every
 //! approval grant and open approval the owner backed up.
 
-use super::{always_on, cancel_runs, crew, rooms, transaction, ReactiveError};
-use bruhs_models::EpochMs;
+use super::{
+    always_on, cancel_runs, crew, rooms, runs_where, save_run, transaction, ReactiveError,
+};
+use bruhs_models::{reactive::RunStatus, EpochMs};
 use rusqlite::{Connection, OptionalExtension};
 
 const RESTORED: &str =
     "Stopped when this data was restored. Review it before starting another run.";
+/// What a run the restore's halt ended says: the words a server stop leaves
+/// (`store::open`), since the server stops for the restore right after.
+const INTERRUPTED: &str = "The server stopped during this run. Review its output before explicitly retrying; work was not replayed.";
 
 /// In one transaction: pause every agent's profile (managed presets
 /// included; an earlier pause keeps its time), cancel its pending and
@@ -44,6 +49,26 @@ pub(crate) fn pause_all_for_restore(connection: &mut Connection) -> Result<(), R
         }
         connection.execute("UPDATE reactive_agents SET session_id=NULL", [])?;
         connection.execute("DELETE FROM reactive_session_stamps", [])?;
+        Ok(())
+    })
+}
+
+/// In one transaction: every running run of the live crew becomes
+/// interrupted, its waiting approvals expired, as the next open after a
+/// server stop would leave it (ruling F19). Nothing is paused or
+/// cancelled, and no grant or other approval changes, so the data a
+/// restore keeps aside puts back as the owner left it.
+pub(in crate::reactive) fn interrupt_running(
+    connection: &mut Connection,
+) -> Result<(), ReactiveError> {
+    transaction(connection, |connection| {
+        for mut run in runs_where(connection, "status='running'", None)? {
+            run.status = RunStatus::Interrupted;
+            run.error = Some(INTERRUPTED.into());
+            run.updated_at = EpochMs::now();
+            save_run(connection, &run)?;
+            crew::expire_run_approvals(connection, &run.id)?;
+        }
         Ok(())
     })
 }

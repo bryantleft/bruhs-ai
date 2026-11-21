@@ -183,6 +183,15 @@ pub const INVALID_REQUEST: &str = "That request isn't one Bruhs understands.";
 pub const GONE: &str = "That backup isn't here anymore.";
 /// A web part upload sent as anything but raw bytes.
 pub const WEB_PART_TYPE: &str = "Send the browser's part as raw bytes.";
+/// A backup file to restore sent as anything but raw bytes.
+pub const UPLOAD_TYPE: &str = "Send the backup file as raw bytes.";
+/// The restore's applier didn't start (ruling F22 a): nothing was stopped.
+pub const RESTORE_NOT_STARTED: &str =
+    "Bruhs couldn't start the restore, so nothing was replaced. Try again.";
+/// The background service didn't stop (ruling F22 a): the restore was
+/// taken back and this server keeps running.
+pub const SERVICE_NOT_STOPPED: &str =
+    "Bruhs couldn't stop the background service, so nothing was replaced. Try again.";
 
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
@@ -307,6 +316,9 @@ pub const ALL_COPY: &[&str] = &[
     INVALID_REQUEST,
     GONE,
     WEB_PART_TYPE,
+    UPLOAD_TYPE,
+    RESTORE_NOT_STARTED,
+    SERVICE_NOT_STOPPED,
 ];
 
 #[cfg(test)]
