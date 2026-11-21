@@ -128,10 +128,11 @@ impl FakeControl {
 
 /// Waits until `gate` opens.
 fn wait_open(gate: &(Mutex<bool>, Condvar)) {
-    let mut open = locked(&gate.0);
-    while !*open {
-        open = gate.1.wait(open).unwrap_or_else(PoisonError::into_inner);
-    }
+    let open = gate
+        .1
+        .wait_while(locked(&gate.0), |open| !*open)
+        .unwrap_or_else(PoisonError::into_inner);
+    drop(open);
 }
 
 impl RestoreControl for FakeControl {
