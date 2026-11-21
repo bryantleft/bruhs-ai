@@ -148,8 +148,12 @@ impl Job for Launchd<'_> {
         )
     }
 
+    /// Signals the job's process. A loaded job with none has nothing to
+    /// stop, and launchd may still start it during the restore (its
+    /// `KeepAlive`, after a throttle): that start meets the start check,
+    /// which waits for the restore before opening anything (ruling F20 b,
+    /// final review C-M5).
     fn stop(&self, pid: Option<u32>) -> Result<(), ServiceError> {
-        // Loaded and waiting to be started again: no process to stop.
         if pid.is_none() {
             return Ok(());
         }
@@ -244,8 +248,9 @@ mod tests {
         let job = FakeJob::new(Ok(Some(Some(42))));
         assert!(stop_job(true, &job, own).unwrap());
         assert_eq!(job.stops.get(), 1);
-        // Loaded and waiting to start again: still stopped, so it doesn't
-        // start mid-restore.
+        // Loaded with no process: still asked to stop, and restarted after.
+        // systemd's stop cancels a restart it queued; launchd has nothing
+        // to signal (see `a_restore_keeps_the_launchd_job_loaded`).
         let job = FakeJob::new(Ok(Some(None)));
         assert!(stop_job(true, &job, own).unwrap());
         assert_eq!(job.stops.get(), 1);
@@ -346,10 +351,16 @@ mod tests {
                 .any(|call| call.contains("bootout") || call.contains("bootstrap")),
             "{calls:?}"
         );
-        // A loaded job with no process has nothing to signal.
-        let quiet = |_: &str, args: &[&str]| match args.first().copied() {
-            Some("kill") => Ok(output(3, "", "No such process")),
-            _ => Ok(output(0, "state = not running\n", "")),
+        // A loaded job with no process has nothing to signal, and nothing
+        // is asked of launchd: a start it makes meanwhile meets the start
+        // check, which waits for the restore (final review C-M5).
+        let asked: &'static Cell<u32> = Box::leak(Box::default());
+        let quiet = |_: &str, args: &[&str]| {
+            asked.set(asked.get() + 1);
+            match args.first().copied() {
+                Some("kill") => Ok(output(3, "", "No such process")),
+                _ => Ok(output(0, "state = not running\n", "")),
+            }
         };
         let job = Launchd {
             domain: "gui/502".into(),
@@ -359,6 +370,7 @@ mod tests {
             settle: STOP_SETTLE,
         };
         job.stop(None).unwrap();
+        assert_eq!(asked.get(), 0);
         // A process that never leaves is an error, not a stop.
         let stuck = |_: &str, args: &[&str]| match args.first().copied() {
             Some("print") => Ok(output(0, "\tpid = 4242\n", "")),
