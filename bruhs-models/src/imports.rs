@@ -7,6 +7,10 @@
 
 mod copy;
 pub use copy::*;
+mod lines;
+pub use lines::*;
+mod persona;
+pub use persona::*;
 
 use crate::logic::portable::{ImportCandidate, ImportSource};
 use crate::time::EpochMs;
