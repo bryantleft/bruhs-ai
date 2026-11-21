@@ -129,6 +129,12 @@ pub struct BatchCounts {
     pub dropped_branches: u32,
     pub over_limit: u32,
     pub files_read: u32,
+    /// Files the read meant to open and couldn't: an unreadable file or
+    /// folder, or a `.zip` that isn't one.
+    pub skipped_files: u32,
+    /// Chats that came in cut short: past `MAX_NODES` nodes or
+    /// `MAX_MESSAGES` messages.
+    pub cut_short: u32,
 }
 
 /// Memory an export holds about the owner, offered as a bruh's memory.
@@ -304,6 +310,8 @@ mod tests {
             (DUPLICATES_ONE, DUPLICATES_MANY),
             (DROPPED_BRANCHES_ONE, DROPPED_BRANCHES_MANY),
             (OVER_LIMIT_ONE, OVER_LIMIT_MANY),
+            (SKIPPED_FILES_ONE, SKIPPED_FILES_MANY),
+            (CUT_CHATS_ONE, CUT_CHATS_MANY),
         ];
         for (one, many) in pairs {
             assert!(one.starts_with("1 ") && !one.contains('{'), "{one}");

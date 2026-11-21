@@ -106,6 +106,10 @@ pub const DROPPED_BRANCHES_MANY: &str =
     "{n} other branches were left out. Each chat comes in as the branch you saw last.";
 pub const OVER_LIMIT_ONE: &str = "1 chat over the 50,000 limit was left out.";
 pub const OVER_LIMIT_MANY: &str = "{n} chats over the 50,000 limit were left out.";
+pub const SKIPPED_FILES_ONE: &str = "1 file Bruhs couldn't read was left out.";
+pub const SKIPPED_FILES_MANY: &str = "{n} files Bruhs couldn't read were left out.";
+pub const CUT_CHATS_ONE: &str = "1 chat was too long and came in cut short.";
+pub const CUT_CHATS_MANY: &str = "{n} chats were too long and came in cut short.";
 pub const ROW_DETAIL_TEMPLATE: &str = "{label}, {when}, transcript";
 pub const BEST_EFFORT_SUFFIX: &str = ", best effort";
 pub const IMPORTING_TEMPLATE: &str = "Importing {done} of {total}";
@@ -207,6 +211,10 @@ pub const ALL_COPY: &[&str] = &[
     DROPPED_BRANCHES_MANY,
     OVER_LIMIT_ONE,
     OVER_LIMIT_MANY,
+    SKIPPED_FILES_ONE,
+    SKIPPED_FILES_MANY,
+    CUT_CHATS_ONE,
+    CUT_CHATS_MANY,
     ROW_DETAIL_TEMPLATE,
     BEST_EFFORT_SUFFIX,
     IMPORTING_TEMPLATE,

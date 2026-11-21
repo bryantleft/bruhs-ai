@@ -9,30 +9,26 @@
 //! Everything here is blocking file I/O: async callers use
 //! `spawn_blocking`.
 
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod archive;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+pub mod batch;
 mod chatgpt;
 mod claude;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod claude_ai;
 mod codex;
 mod cursor;
 mod cursor_agent;
 mod export;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod grok;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod json_stream;
 mod t3;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 mod text;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use archive::Limits;
 
+pub use batch::{ImportHost, ImportUpload};
 pub use export::export_to_t3;
 
 use bruhs_models::logic::portable::{ImportCandidate, ImportSource, ImportedThread};
@@ -140,7 +136,6 @@ impl ImportError {
 
 /// One conversation read from a chat service's export: the visible
 /// branch's messages, and how many other branches stayed behind.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
 pub(crate) struct ParsedConversation {
     pub candidate: ImportCandidate,
     pub messages: Vec<bruhs_models::logic::portable::PortableMessage>,
@@ -425,6 +420,8 @@ impl Transcript {
 
 #[cfg(test)]
 mod archive_tests;
+#[cfg(test)]
+mod batch_tests;
 #[cfg(test)]
 mod chatgpt_tests;
 #[cfg(test)]

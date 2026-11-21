@@ -4,15 +4,16 @@
 
 use super::{
     plural, BatchCounts, FileUse, ImportBatch, PersonaCandidate, SkipReason, ATTACHED_TEMPLATE,
-    ATTACHMENT_TEMPLATE, BATCH_SUMMARY_TEMPLATE, BEST_EFFORT_SUFFIX, CUT_SHORT_MANY, CUT_SHORT_ONE,
-    DROPPED_BRANCHES_MANY, DROPPED_BRANCHES_ONE, DUPLICATES_MANY, DUPLICATES_ONE,
-    IDENTITY_DROPPED_MANY, IDENTITY_DROPPED_ONE, IMPORTED_TEMPLATE, IMPORTING_TEMPLATE,
-    INSTRUCTIONS_FROM_TEMPLATE, LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE, MEMORY_FROM_TEMPLATE,
-    MEMORY_PROPOSED_TEMPLATE, MEMORY_WAITS, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE,
-    PERSONA_CLIPPED, READING_ONE_FILE_TEMPLATE, READING_TEMPLATE, ROWS_SHOWN_TEMPLATE,
-    ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE, SKIPPED_LINK_TEMPLATE,
-    SKIPPED_NOT_A_FILE_TEMPLATE, SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY,
-    SKIPPED_UNKNOWN_ONE, SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
+    ATTACHMENT_TEMPLATE, BATCH_SUMMARY_TEMPLATE, BEST_EFFORT_SUFFIX, CUT_CHATS_MANY, CUT_CHATS_ONE,
+    CUT_SHORT_MANY, CUT_SHORT_ONE, DROPPED_BRANCHES_MANY, DROPPED_BRANCHES_ONE, DUPLICATES_MANY,
+    DUPLICATES_ONE, IDENTITY_DROPPED_MANY, IDENTITY_DROPPED_ONE, IMPORTED_TEMPLATE,
+    IMPORTING_TEMPLATE, INSTRUCTIONS_FROM_TEMPLATE, LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE,
+    MEMORY_FROM_TEMPLATE, MEMORY_PROPOSED_TEMPLATE, MEMORY_WAITS, NOT_IMPORTED_TEMPLATE,
+    OVER_LIMIT_MANY, OVER_LIMIT_ONE, PERSONA_CLIPPED, READING_ONE_FILE_TEMPLATE, READING_TEMPLATE,
+    ROWS_SHOWN_TEMPLATE, ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE,
+    SKIPPED_FILES_MANY, SKIPPED_FILES_ONE, SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE,
+    SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE,
+    SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
 };
 use crate::logic::portable::{ImportCandidate, ImportSource};
 use crate::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
@@ -105,6 +106,8 @@ pub fn batch_lines(batch: &ImportBatch) -> Vec<String> {
         dropped_branches,
         over_limit,
         files_read: _,
+        skipped_files,
+        cut_short,
     } = batch.counts;
     let mut lines = Vec::new();
     let sources: Vec<&str> = ImportSource::EXPORTS
@@ -131,6 +134,8 @@ pub fn batch_lines(batch: &ImportBatch) -> Vec<String> {
             DROPPED_BRANCHES_MANY,
         ),
         (over_limit, OVER_LIMIT_ONE, OVER_LIMIT_MANY),
+        (cut_short, CUT_CHATS_ONE, CUT_CHATS_MANY),
+        (skipped_files, SKIPPED_FILES_ONE, SKIPPED_FILES_MANY),
     ];
     for (n, one, many) in counts {
         if n > 0 {
@@ -397,6 +402,8 @@ mod tests {
                 dropped_branches: 1,
                 over_limit: 7,
                 files_read: 3,
+                skipped_files: 2,
+                cut_short: 1,
             },
             ..Default::default()
         };
@@ -409,6 +416,8 @@ mod tests {
                 "2 chats came twice and were imported once.".to_string(),
                 DROPPED_BRANCHES_ONE.to_string(),
                 "7 chats over the 50,000 limit were left out.".to_string(),
+                CUT_CHATS_ONE.to_string(),
+                "2 files Bruhs couldn't read were left out.".to_string(),
             ]
         );
         assert!(batch_lines(&ImportBatch::default()).is_empty());

@@ -15,10 +15,10 @@
 //! the role, matched without regard to case, and never `model`, which
 //! human responses carry too.
 
-use super::text::{clip_part, export_time, strip_grok_markup};
+use super::text::{attachment_line, clip_part, export_time, strip_grok_markup};
 use super::{ParsedConversation, Transcript};
 use bruhs_models::imports::{
-    attachment_line, conversation_key, IMAGE_NOT_IMPORTED, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
+    conversation_key, IMAGE_NOT_IMPORTED, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortablePart,

@@ -1,7 +1,8 @@
 //! The folders that hold the owner's saved logins, which no bruh run may
 //! read: the vault catalog, the keychains, 1Password's and the Linux
-//! keyring's own folders, and both data roots' `backups` folders (Backup
-//! D21), where backups, staged restores and pre-restore sets sit.
+//! keyring's own folders, both data roots' `backups` folders (Backup
+//! D21), where backups, staged restores and pre-restore sets sit, and
+//! `<core>/imports` (Imports D16), where read exports wait.
 
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -38,21 +39,27 @@ fn home_folders(home: &Path) -> [PathBuf; 5] {
     ]
 }
 
-/// [`private_folders`] for this account, with both data roots' `backups`
-/// folders. A folder that can't be named (no home folder, no data folder)
-/// is left out, and that is logged once.
+/// The data roots' folders no bruh run reaches: both `backups` folders
+/// and `<core>/imports`, the import batches.
+pub(crate) fn private_data_folders(roots: &crate::backup::Roots) -> Vec<PathBuf> {
+    use crate::backup::RootKey;
+    vec![
+        roots.backups(RootKey::Core),
+        roots.backups(RootKey::Desktop),
+        roots.core.join("imports"),
+    ]
+}
+
+/// [`private_folders`] for this account, with [`private_data_folders`].
+/// A folder that can't be named (no home folder, no data folder) is left
+/// out, and that is logged once.
 pub(crate) fn vault_private_folders() -> Vec<PathBuf> {
-    use crate::backup::{RootKey, Roots};
+    use crate::backup::Roots;
     static MISSING: Once = Once::new();
     let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
     let catalog = super::storage::catalog_directory().ok();
     let backups: Vec<PathBuf> = Roots::from_env()
-        .map(|roots| {
-            vec![
-                roots.backups(RootKey::Core),
-                roots.backups(RootKey::Desktop),
-            ]
-        })
+        .map(|roots| private_data_folders(&roots))
         .unwrap_or_default();
     if home.is_none() || catalog.is_none() || backups.is_empty() {
         MISSING.call_once(|| {
@@ -165,6 +172,7 @@ mod tests {
         assert_eq!(once, 1);
         // This account's list names this account's roots.
         if let Some(roots) = crate::backup::Roots::from_env() {
+            assert!(vault_private_folders().contains(&roots.core.join("imports")));
             let live = vault_private_folders();
             for root in [
                 crate::backup::RootKey::Core,
@@ -173,5 +181,34 @@ mod tests {
                 assert!(live.contains(&roots.backups(root)), "{root:?}");
             }
         }
+    }
+
+    /// `<core>/imports` joins both `backups` folders among the folders a
+    /// bruh run never reaches (Imports D16), and its deny rules name it.
+    #[test]
+    fn the_imports_folder_is_private() {
+        let roots = crate::backup::Roots::new(
+            PathBuf::from("/Users/a"),
+            PathBuf::from("/data/core"),
+            PathBuf::from("/data/desktop"),
+            PathBuf::from("/config"),
+        );
+        let data = private_data_folders(&roots);
+        assert_eq!(
+            data,
+            [
+                "/data/core/backups",
+                "/data/desktop/backups",
+                "/data/core/imports"
+            ]
+            .map(PathBuf::from)
+        );
+        let folders = private_folders(
+            Path::new("/Users/a"),
+            Path::new("/data/core/credentials"),
+            &data,
+        );
+        assert!(folders.contains(&PathBuf::from("/data/core/imports")));
+        assert!(deny_rule_may_name(Path::new("/data/core/imports")));
     }
 }

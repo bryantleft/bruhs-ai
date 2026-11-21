@@ -265,6 +265,35 @@ pub(crate) fn entry_kind(name: &str) -> Option<EntryKind> {
 pub(crate) type Visit<'v> =
     dyn FnMut(EntryKind, &mut dyn Read, Option<u64>) -> Result<(), ImportError> + 'v;
 
+/// What a walk tells its caller as it goes (F14).
+pub(crate) struct Hooks<'h> {
+    /// Called before each chunk a nested ZIP's copy writes to scratch,
+    /// with its size: an error (the free space check) ends the walk.
+    pub wrote: &'h dyn Fn(u64) -> Result<(), ImportError>,
+    /// Called once each input is read, with how many are done.
+    pub input_done: &'h dyn Fn(u32),
+}
+
+#[cfg(test)]
+fn wrote_nothing(_: u64) -> Result<(), ImportError> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn no_progress(_: u32) {}
+
+#[cfg(test)]
+impl Hooks<'static> {
+    /// Hooks that check nothing and report nothing.
+    pub(crate) const NONE: Self = Self {
+        wrote: &wrote_nothing,
+        input_done: &no_progress,
+    };
+}
+
+/// Bytes a nested ZIP's copy writes between two [`Hooks::wrote`] calls.
+const COPY_CHUNK: usize = 64 * 1024;
+
 /// Nested ZIPs one read copies out, across every level.
 const MAX_NESTED_ZIPS: u32 = 256;
 /// Bytes of central directory a ZIP may have (F10).
@@ -288,6 +317,7 @@ const SNIFF_BYTES: u64 = 64 * 1024;
 ///   can't be read, and `NOT_AN_EXPORT` when nothing was opened.
 /// - `visit`'s own error, unless a budget refused first.
 /// - [`ImportError::Io`] when an input can't be opened.
+#[cfg(test)]
 pub(crate) fn walk(
     inputs: &[ExportInput],
     scratch: &Path,
@@ -295,10 +325,28 @@ pub(crate) fn walk(
     cancel: &AtomicBool,
     visit: &mut Visit<'_>,
 ) -> Result<WalkReport, ImportError> {
+    walk_with(inputs, scratch, limits, cancel, &Hooks::NONE, visit)
+}
+
+/// [`walk`], telling `hooks` what a nested copy writes and when each input
+/// is done.
+///
+/// # Errors
+///
+/// As [`walk`], and the `wrote` hook's own error.
+pub(crate) fn walk_with(
+    inputs: &[ExportInput],
+    scratch: &Path,
+    limits: &Limits,
+    cancel: &AtomicBool,
+    hooks: &Hooks<'_>,
+    visit: &mut Visit<'_>,
+) -> Result<WalkReport, ImportError> {
     let mut walker = Walker {
         scratch,
         limits,
         cancel,
+        hooks,
         visit,
         refusal: Refusal::default(),
         inflated_left: Rc::new(Cell::new(limits.inflated)),
@@ -308,12 +356,14 @@ pub(crate) fn walk(
         skipped: Cell::new(0),
     };
     sweep_stale_copies(scratch);
-    let result = inputs.iter().try_for_each(|input| {
+    let result = inputs.iter().zip(1_u32..).try_for_each(|(input, done)| {
         walker.check_cancel()?;
         match input {
             ExportInput::File(path) => walker.file(path),
             ExportInput::Folder(path) => walker.folder(path),
-        }
+        }?;
+        (walker.hooks.input_done)(done);
+        Ok(())
     });
     if let Err(error) = result {
         return Err(walker.settle(error));
@@ -336,6 +386,7 @@ struct Walker<'a> {
     scratch: &'a Path,
     limits: &'a Limits,
     cancel: &'a AtomicBool,
+    hooks: &'a Hooks<'a>,
     visit: &'a mut Visit<'a>,
     refusal: Refusal,
     /// Bytes the read may still inflate.
@@ -492,8 +543,19 @@ impl<'a> Walker<'a> {
         ));
         let mut copy = ScratchCopy::create(path)?;
         let file = copy.file.as_mut().ok_or_else(damaged)?;
+        (self.hooks.wrote)(to_u64(got))?;
         io::Write::write_all(file, &head[..got]).map_err(|_| damaged())?;
-        io::copy(&mut reader, file).map_err(|_| damaged())?;
+        let mut chunk = vec![0_u8; COPY_CHUNK];
+        loop {
+            let n = match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(damaged()),
+            };
+            (self.hooks.wrote)(to_u64(n))?;
+            io::Write::write_all(file, &chunk[..n]).map_err(|_| damaged())?;
+        }
         let file = file.try_clone().map_err(|_| damaged())?;
         // `copy` deletes the file once this level is read.
         self.zip(file, child)

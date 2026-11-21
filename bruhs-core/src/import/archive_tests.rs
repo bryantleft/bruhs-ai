@@ -1,7 +1,9 @@
 //! Reading export archives, folders and JSON within fixed budgets
 //! (Task 3). Every hostile archive here is built in code.
 
-use super::archive::{entry_kind, walk, EntryKind, ExportInput, Limits, WalkReport};
+use super::archive::{
+    entry_kind, walk, walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport,
+};
 use super::json_stream::{for_each_record, LoneSurrogates};
 use super::test_support::zip_of;
 use super::ImportError;
@@ -823,6 +825,57 @@ fn several_inputs_are_read_in_order() {
             (EntryKind::Bare, json!({"conversations":[{"n":3}]})),
         ]
     );
+}
+
+/// A nested ZIP's copy tells the `wrote` hook every byte before it is
+/// written, so the caller's free space check covers scratch (F14), and
+/// the hook's error ends the walk. `input_done` counts each input.
+#[test]
+fn walk_hooks_see_scratch_copies_and_each_input() {
+    let inner = zip_of(&[("conversations.json", br#"[{"n":1}]"#)], false);
+    let place = Place::new();
+    let outer = place.file("outer", &zip_of(&[("inner.zip", &inner)], true));
+    let bare = place.file("bare", br#"[{"n":2}]"#);
+    let cancel = AtomicBool::new(false);
+    let wrote = std::cell::Cell::new(0_u64);
+    let done = std::cell::RefCell::new(Vec::new());
+    let count = |bytes: u64| {
+        wrote.set(wrote.get() + bytes);
+        Ok(())
+    };
+    let progress = |n: u32| done.borrow_mut().push(n);
+    let hooks = Hooks {
+        wrote: &count,
+        input_done: &progress,
+    };
+    let report = walk_with(
+        &[outer.clone(), bare],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &hooks,
+        &mut |kind, reader, len| for_each_record(reader, kind, len, &Limits::TEST, &mut |_| Ok(())),
+    )
+    .unwrap();
+    assert_eq!(report.files_read, 2);
+    assert_eq!(wrote.get(), u64::try_from(inner.len()).unwrap());
+    assert_eq!(*done.borrow(), vec![1, 2]);
+
+    let full = |_: u64| Err(ImportError::Space(7));
+    let hooks = Hooks {
+        wrote: &full,
+        input_done: &progress,
+    };
+    let result = walk_with(
+        &[outer],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &hooks,
+        &mut |_, _, _| Ok(()),
+    );
+    assert!(matches!(result, Err(ImportError::Space(7))), "{result:?}");
+    assert!(place.scratch_is_empty());
 }
 
 #[test]

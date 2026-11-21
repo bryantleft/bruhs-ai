@@ -9,11 +9,13 @@
 //! walk keeps a visited set and stops at `MAX_NODES`, so a parent cycle or
 //! a self-parent ends it instead of looping.
 
-use super::text::{clip_part, export_time, strip_citations, strip_writing_directives};
+use super::text::{
+    attachment_line, clip_part, export_time, strip_citations, strip_writing_directives,
+};
 use super::{ParsedConversation, Transcript};
 use bruhs_models::imports::{
-    attachment_line, conversation_key, AUDIO_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_MESSAGES,
-    MAX_NODES, MAX_PART_CHARS,
+    conversation_key, AUDIO_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_MESSAGES, MAX_NODES,
+    MAX_PART_CHARS,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortableMessage, PortablePart,

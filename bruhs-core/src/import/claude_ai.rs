@@ -13,12 +13,12 @@
 //! Every walk keeps a visited set and stops at `MAX_NODES`, so a parent
 //! loop ends it instead of looping.
 
-use super::text::{clip_part, clip_strings, export_time};
+use super::text::{attached_line, attachment_line, clip_part, clip_strings, export_time};
 use super::{output_text, ParsedConversation, Transcript};
 use bruhs_models::imports::{
-    attached_line, attachment_line, conversation_key, MemorySuggestion, AUDIO_NOT_IMPORTED,
-    DOCUMENT_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_NODES,
-    MAX_PART_CHARS, PROJECT_MEMORY,
+    conversation_key, MemorySuggestion, AUDIO_NOT_IMPORTED, DOCUMENT_NOT_IMPORTED,
+    IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
+    PROJECT_MEMORY,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortablePart, PortableToolCall,

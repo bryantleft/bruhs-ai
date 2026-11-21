@@ -262,6 +262,60 @@ fn without_tags(text: &str, tag: &str) -> String {
     out
 }
 
+/// Characters of a provider's title a row shows.
+pub(crate) const TITLE_MAX_CHARS: usize = 120;
+/// Characters of an attachment's name a placeholder line shows.
+pub(crate) const NAME_MAX_CHARS: usize = 120;
+
+/// Whether `c` is a control (`Cc`) or one of the format characters
+/// (`Cf`) that hide or reorder text: soft hyphen, zero-width and joiner
+/// characters, bidi marks, embeddings, overrides and isolates, the byte
+/// order mark, interlinear annotations and tags.
+fn hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00ad}'
+                | '\u{061c}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{e0001}'
+                | '\u{e0020}'..='\u{e007f}'
+        )
+}
+
+/// A provider's title or file name as one line a row can show: hidden
+/// characters dropped, whitespace runs as one space, cut to `max_chars`
+/// at a character boundary with `…`. Empty when nothing is left.
+pub(crate) fn shown_name(text: &str, max_chars: usize) -> String {
+    let kept: String = text
+        .chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|c| !hidden(*c))
+        .collect();
+    let line = kept.split_whitespace().collect::<Vec<_>>().join(" ");
+    match line.char_indices().nth(max_chars) {
+        Some((cut, _)) => format!("{}…", line[..cut].trim_end()),
+        None => line,
+    }
+}
+
+/// [`bruhs_models::imports::attachment_line`] for an export's file name,
+/// shown through [`shown_name`].
+pub(crate) fn attachment_line(name: &str) -> String {
+    bruhs_models::imports::attachment_line(&shown_name(name, NAME_MAX_CHARS))
+}
+
+/// [`bruhs_models::imports::attached_line`] for an export's file name,
+/// shown through [`shown_name`].
+pub(crate) fn attached_line(name: &str) -> String {
+    bruhs_models::imports::attached_line(&shown_name(name, NAME_MAX_CHARS))
+}
+
 /// `text` cut to `limit` characters, at a character boundary, ending with
 /// `cut_short_line` for what was left out.
 pub(crate) fn clip_part(text: String, limit: usize) -> String {
