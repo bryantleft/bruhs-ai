@@ -4,7 +4,9 @@
 //! data only after **Replace my data**. The desktop then says Bruhs is
 //! stopping and starts itself again, so the new instance applies the
 //! restore before it opens anything. The page never keeps the restore
-//! password: the desktop holds no browser part to put back.
+//! password: the desktop holds no browser part to put back, so an outcome
+//! whose browser part waits says to restore it in the web app and offers
+//! **Open the web app** (final review D-I3).
 
 use super::super::vault_settings::{button, field, labelled, small};
 use super::super::*;
@@ -14,8 +16,8 @@ use crate::server_client::ServerError;
 use bruhs_models::backup::{
     preview_lines, validate_password, ApplyAccepted, ApplyRestore, BackupOverview, OpenBackup,
     OpenSource, RestorePreview, RestoreSource, RestoreStatus, CANCEL, CHOOSE_FILE, INVALID_REQUEST,
-    OPEN_BACKUP, PASSWORD, REPLACE, REPLACE_WARNING, RESTORED, RESTORE_GROUP, RESTORE_PENDING,
-    RESTORE_ROLLED_BACK, STOPPING,
+    OPEN_BACKUP, OPEN_WEB_APP, PASSWORD, REPLACE, REPLACE_WARNING, RESTORED, RESTORE_GROUP,
+    RESTORE_PENDING, RESTORE_ROLLED_BACK, STOPPING, WEB_PART_ON_DESKTOP,
 };
 use bruhs_ui::input::InputContentType;
 use std::time::Duration;
@@ -48,6 +50,8 @@ pub(super) enum Restoring {
     Finished {
         lines: Vec<String>,
         rolled_back: bool,
+        /// The backup's browser part waits for the web app.
+        browser_waits: bool,
     },
     /// A restore waits for the next start.
     Pending,
@@ -71,6 +75,8 @@ pub(super) struct Restore {
     pub(super) choose_focus: FocusHandle,
     pub(super) cancel_focus: FocusHandle,
     replace_focus: FocusHandle,
+    /// **Open the web app** beside an outcome whose browser part waits.
+    pub(super) web_app_focus: FocusHandle,
     prompt_task: Option<Task<()>>,
     relaunch_task: Option<Task<()>>,
 }
@@ -89,6 +95,7 @@ impl Restore {
             choose_focus: cx.focus_handle().tab_stop(true),
             cancel_focus: cx.focus_handle().tab_stop(true),
             replace_focus: cx.focus_handle().tab_stop(true),
+            web_app_focus: cx.focus_handle().tab_stop(true),
             prompt_task: None,
             relaunch_task: None,
         }
@@ -139,8 +146,9 @@ impl Restore {
     }
 }
 
-/// The last restore's outcome as the group's lines (the web's `settle`,
-/// without the browser's own part, which this app doesn't hold).
+/// The last restore's outcome as the group's lines (the web's `settle`).
+/// This app can't put the browser part back, so one that waits points at
+/// the web app (D-I3).
 fn outcome(status: &RestoreStatus) -> Option<Restoring> {
     if status.pending.is_some() {
         return Some(Restoring::Pending);
@@ -154,7 +162,15 @@ fn outcome(status: &RestoreStatus) -> Option<Restoring> {
         lines.push(RESTORED.to_owned());
     }
     lines.extend(warnings);
-    Some(Restoring::Finished { lines, rolled_back })
+    let browser_waits = !rolled_back && status.web_part.is_some();
+    if browser_waits {
+        lines.push(WEB_PART_ON_DESKTOP.to_owned());
+    }
+    Some(Restoring::Finished {
+        lines,
+        rolled_back,
+        browser_waits,
+    })
 }
 
 impl BackupSettings {
@@ -499,6 +515,8 @@ impl BackupSettings {
             .map(|(index, text)| {
                 let selector = format!("desktop-backup-preview-line-{index}");
                 div()
+                    .id(SharedString::from(selector.clone()))
+                    .role(Role::ListItem)
                     .min_w_0()
                     .text_size(px(theme::APP_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
@@ -508,12 +526,21 @@ impl BackupSettings {
         div()
             .id("desktop-backup-preview")
             .debug_selector(|| "desktop-backup-preview".into())
-            .role(Role::List)
             .mt_3()
             .min_w_0()
             .flex()
             .flex_col()
-            .child(div().min_w_0().flex().flex_col().gap_1().children(lines))
+            // The web's `<ul>`: the lines are its items.
+            .child(
+                div()
+                    .id("desktop-backup-preview-lines")
+                    .role(Role::List)
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(lines),
+            )
             .child(
                 small(REPLACE_WARNING, theme::durian_300())
                     .mt_3()
@@ -550,7 +577,9 @@ impl BackupSettings {
                     .debug_selector(|| "desktop-backup-stopping".into())
                     .into_any_element(),
             ),
-            Restoring::Finished { lines, rolled_back } => {
+            Restoring::Finished {
+                lines, rolled_back, ..
+            } => {
                 let color = if *rolled_back {
                     theme::lychee_300()
                 } else {
@@ -575,6 +604,35 @@ impl BackupSettings {
         }
     }
 
+    /// **Open the web app**, beside an outcome whose browser part waits.
+    fn render_open_web(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let Restoring::Finished {
+            browser_waits: true,
+            ..
+        } = &self.restore.step
+        else {
+            return None;
+        };
+        let open = button(
+            "desktop-backup-restore-open-web",
+            "desktop-backup-restore-open-web".into(),
+            OPEN_WEB_APP,
+            WebButtonVariant::Outline,
+            false,
+        )
+        .role(Role::Link)
+        .text_color(theme::blueberry_300())
+        .track_focus(&self.restore.web_app_focus);
+        Some(
+            div()
+                .mt_2()
+                .flex()
+                .items_center()
+                .child(on_press_view(open, cx, |this, _, cx| this.open_web_app(cx)))
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn render_restore(&self, cx: &Context<'_, Self>) -> AnyElement {
         let preview = match &self.restore.step {
             Restoring::Preview(preview) => Some(self.render_preview(preview, cx)),
@@ -594,6 +652,7 @@ impl BackupSettings {
                     .role(Role::Status)
                     .children(self.render_restore_status()),
             )
+            .children(self.render_open_web(cx))
             .when_some(self.restore.error.clone(), |el, message| {
                 let color = super::error_color(&message);
                 el.child(
@@ -614,14 +673,15 @@ impl BackupSettings {
 mod tests {
     use super::super::fixtures::{preview, ID};
     use super::super::tests::{
-        bounds, click, focused, page, rendered, requests, server, type_into, value, wait, GOOD,
+        bounds, click, focused, page, press, rendered, requests, server, type_into, value, wait,
+        GOOD,
     };
     use super::{outcome, Restoring};
     use crate::server_client::ServerError;
     use bruhs_models::backup::{
         preview_lines, ApplyAccepted, BackupOverview, JobState, PendingRestore, RestoreResult,
-        RestoreSource, RestoreStatus, StagedRestore, PARKED_STAYED, PASSWORD_SHORT,
-        RECORDING_FIRST, RESTORED, RESTORE_ROLLED_BACK,
+        RestoreSource, RestoreStatus, StagedRestore, WebPartInfo, PARKED_STAYED, PASSWORD_SHORT,
+        RECORDING_FIRST, RESTORED, RESTORE_ROLLED_BACK, WEB_PART_ON_DESKTOP,
     };
     use bruhs_models::EpochMs;
     use gpui::TestAppContext;
@@ -835,6 +895,7 @@ mod tests {
             Some(Restoring::Finished {
                 lines: vec![RESTORED.into(), PARKED_STAYED.into()],
                 rolled_back: false,
+                browser_waits: false,
             })
         );
         assert_eq!(
@@ -845,6 +906,7 @@ mod tests {
             Some(Restoring::Finished {
                 lines: vec![RESTORE_ROLLED_BACK.into()],
                 rolled_back: true,
+                browser_waits: false,
             })
         );
         assert_eq!(
@@ -852,6 +914,88 @@ mod tests {
             Some(Restoring::Pending)
         );
         assert_eq!(outcome(&status(None, None)), None);
+        // A browser part waits: the web app restores it (D-I3).
+        let waiting = |warnings| RestoreStatus {
+            web_part: Some(WebPartInfo::default()),
+            ..status(None, Some(result(warnings)))
+        };
+        assert_eq!(
+            outcome(&waiting(Vec::new())),
+            Some(Restoring::Finished {
+                lines: vec![RESTORED.into(), WEB_PART_ON_DESKTOP.into()],
+                rolled_back: false,
+                browser_waits: true,
+            })
+        );
+        assert_eq!(
+            outcome(&waiting(vec![RESTORE_ROLLED_BACK.into()])),
+            Some(Restoring::Finished {
+                lines: vec![RESTORE_ROLLED_BACK.into()],
+                rolled_back: true,
+                browser_waits: false,
+            })
+        );
+    }
+
+    /// A restore applied here from a web-made backup: the outcome says the
+    /// browser data waits and **Open the web app** goes there, by keyboard
+    /// too (D-I3).
+    #[gpui::test]
+    fn a_waiting_browser_part_points_at_the_web_app(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, true);
+        let made_at = view.read_with(cx, |view, _| view.made_at);
+        let status = RestoreStatus {
+            pending: None,
+            result: Some(RestoreResult {
+                applied_at_ms: EpochMs::saturating_from_i64(made_at.as_millis() - 5_000),
+                stamp: "2026-11-20-0930-0a1f".into(),
+                warnings: Vec::new(),
+            }),
+            web_part: Some(WebPartInfo::default()),
+        };
+        view.update(cx, |view, cx| view.status_answered(&status, cx));
+        cx.run_until_parked();
+        let lines = bounds(cx, "desktop-backup-restored");
+        let open = bounds(cx, "desktop-backup-restore-open-web");
+        assert!(lines.bottom() <= open.top(), "under the outcome's lines");
+        view.read_with(cx, |view, _| {
+            let Restoring::Finished { lines, .. } = &view.restore.step else {
+                panic!("an outcome");
+            };
+            assert_eq!(lines.last().map(String::as_str), Some(WEB_PART_ON_DESKTOP));
+        });
+        click(cx, "desktop-backup-restore-open-web");
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("http://127.0.0.1:9/#/settings")
+        );
+        let handle = view.read_with(cx, |view, _| view.restore.web_app_focus.clone());
+        cx.update(|window, cx| handle.focus(window, cx));
+        press(cx, "enter");
+        assert_eq!(
+            cx.opened_url().as_deref(),
+            Some("http://127.0.0.1:9/#/settings"),
+            "Enter opens it too"
+        );
+    }
+
+    #[gpui::test]
+    fn an_outcome_without_browser_data_offers_nothing_more(cx: &mut TestAppContext) {
+        let (view, cx) = page(cx, true);
+        let made_at = view.read_with(cx, |view, _| view.made_at);
+        let status = RestoreStatus {
+            pending: None,
+            result: Some(RestoreResult {
+                applied_at_ms: EpochMs::saturating_from_i64(made_at.as_millis() - 5_000),
+                stamp: "2026-11-20-0930-0a1f".into(),
+                warnings: Vec::new(),
+            }),
+            web_part: None,
+        };
+        view.update(cx, |view, cx| view.status_answered(&status, cx));
+        cx.run_until_parked();
+        assert!(rendered(cx, "desktop-backup-restored"));
+        assert!(!rendered(cx, "desktop-backup-restore-open-web"));
     }
 
     #[gpui::test]
