@@ -12,8 +12,8 @@ use axum::http::StatusCode;
 use axum::Extension;
 use bruhs_backup::{Header, Kdf, KdfParams, Kind};
 use bruhs_core::backup::{
-    apply_pending, pending, pre_restores, ApplyOutcome, BackupHost, CreateRequest, Output, Roots,
-    UploadKind,
+    apply_pending, pending, pre_restores, restore_waits, ApplyOutcome, BackupHost, CreateRequest,
+    JobHold, Output, Roots, UploadKind,
 };
 use bruhs_core::local_tools::{BruhComputer, FakePages, LocalToolsHost};
 use bruhs_core::reactive::ReactiveRuntime;
@@ -22,9 +22,9 @@ use bruhs_core::AppState;
 use bruhs_models::backup::{
     ApplyAccepted, BackupApp, BackupJob, BackupOptions, BackupOverview, JobState, RestorePreview,
     RestoreSource, RestoreStatus, UploadId, BACKUP_BUSY, CONFIRM_REPLACE, GONE, INVALID_REQUEST,
-    KEYCHAIN_SET_UNREADABLE, NOTHING_TO_PUT_BACK, QUIT_DESKTOP_FIRST, RECORDING_FIRST,
-    RESTORE_AT_NEXT_START, RESTORE_NOT_STARTED, RESTORE_PENDING, SERVICE_NOT_STOPPED,
-    SERVICE_TOO_OLD, UPLOAD_TYPE, WRONG_PASSWORD,
+    KEYCHAIN_SET_UNREADABLE, NOTHING_TO_PUT_BACK, QUIT_DESKTOP_FIRST, REACTIVE_DB_RELATIVE,
+    RECORDING_FIRST, RESTORE_AT_NEXT_START, RESTORE_NOT_STARTED, RESTORE_PENDING,
+    SERVICE_NOT_STOPPED, SERVICE_TOO_OLD, UPLOAD_TYPE, WRONG_PASSWORD,
 };
 use bruhs_models::crew::{BruhStatus, CREW_PROTOCOL};
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand};
@@ -73,6 +73,10 @@ struct FakeControl {
     events: Mutex<Vec<&'static str>>,
     /// `stop_service` waits until this opens.
     gate: (Mutex<bool>, Condvar),
+    /// `service_installed_protocol` waits until this opens, after setting
+    /// `asked`: an apply still checking.
+    status_gate: (Mutex<bool>, Condvar),
+    asked: Mutex<bool>,
     roots: Roots,
     pages: FakePages,
     /// Whether `pending.json` was there when the applier spawned.
@@ -82,6 +86,9 @@ struct FakeControl {
     closes_at_stop: Mutex<Option<usize>>,
     /// `restore.lock`, while a failing spawn holds it.
     held: Mutex<Option<std::fs::File>>,
+    /// The job hold the server keeps until it exits; [`Self::reset`]
+    /// drops it, as a restart does.
+    exit_hold: Mutex<Option<JobHold>>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -102,6 +109,11 @@ impl FakeControl {
         self.gate.1.notify_all();
     }
 
+    fn set_status_gate(&self, open: bool) {
+        *locked(&self.status_gate.0) = open;
+        self.status_gate.1.notify_all();
+    }
+
     fn set(&self, change: impl FnOnce(&mut Service)) {
         change(&mut locked(&self.service));
     }
@@ -110,11 +122,22 @@ impl FakeControl {
         locked(&self.events).clear();
         *locked(&self.pending_at_spawn) = None;
         *locked(&self.closes_at_stop) = None;
+        locked(&self.exit_hold).take();
+    }
+}
+
+/// Waits until `gate` opens.
+fn wait_open(gate: &(Mutex<bool>, Condvar)) {
+    let mut open = locked(&gate.0);
+    while !*open {
+        open = gate.1.wait(open).unwrap_or_else(PoisonError::into_inner);
     }
 }
 
 impl RestoreControl for FakeControl {
     fn service_installed_protocol(&self) -> Option<u32> {
+        *locked(&self.asked) = true;
+        wait_open(&self.status_gate);
         locked(&self.service).protocol
     }
 
@@ -127,15 +150,7 @@ impl RestoreControl for FakeControl {
     }
 
     fn stop_service(&self) -> Result<bool, String> {
-        let mut open = locked(&self.gate.0);
-        while !*open {
-            open = self
-                .gate
-                .1
-                .wait(open)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-        drop(open);
+        wait_open(&self.gate);
         *locked(&self.closes_at_stop) = Some(self.pages.closes(BRUH));
         self.record("stop_service");
         let service = *locked(&self.service);
@@ -162,8 +177,9 @@ impl RestoreControl for FakeControl {
         }
     }
 
-    fn exit_soon(&self) {
+    fn exit_soon(&self, hold: JobHold) {
         self.record("exit_soon");
+        *locked(&self.exit_hold) = Some(hold);
     }
 }
 
@@ -189,6 +205,7 @@ struct Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.control.set_gate(true);
+        self.control.set_status_gate(true);
         self.server.abort();
     }
 }
@@ -201,6 +218,15 @@ impl Fixture {
     /// With a capture daemon that records when `recording`, and a service
     /// that answers as `service` says.
     async fn with(recording: bool, service: Service) -> Self {
+        Self::with_host(recording, service, |host| host).await
+    }
+
+    /// [`Self::with`], with the backup host as `host` makes it.
+    async fn with_host(
+        recording: bool,
+        service: Service,
+        host: impl FnOnce(BackupHost) -> BackupHost,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let base_dir = std::fs::canonicalize(directory.path()).unwrap();
         let home = base_dir.join("home");
@@ -215,7 +241,7 @@ impl Fixture {
         }
         write(&roots.core.join(NOTE), b"today");
         let store = SecretStore::in_memory();
-        let host = BackupHost::new(roots.clone(), store.clone()).for_tests(recording);
+        let host = host(BackupHost::new(roots.clone(), store.clone()).for_tests(recording));
 
         let crew = base_dir.join("crew");
         std::fs::create_dir_all(crew.join("work")).unwrap();
@@ -238,11 +264,14 @@ impl Fixture {
             service: Mutex::new(service),
             events: Mutex::default(),
             gate: (Mutex::new(true), Condvar::new()),
+            status_gate: (Mutex::new(true), Condvar::new()),
+            asked: Mutex::default(),
             roots: roots.clone(),
             pages: pages.clone(),
             pending_at_spawn: Mutex::default(),
             closes_at_stop: Mutex::default(),
             held: Mutex::default(),
+            exit_hold: Mutex::default(),
         });
         let state = Arc::new(
             AppState::builder()
@@ -682,6 +711,21 @@ async fn apply_refuses_unsafe_moments() {
         fixture.apply(staged(&preview.id), true, false).await,
         QUIT_DESKTOP_FIRST,
     );
+    // A page that says it is the desktop isn't (final review C-M3).
+    refused(
+        Fixture::send(
+            fixture
+                .request("POST", "/api/backup/restore/apply")
+                .header("origin", &fixture.base)
+                .json(&json!({
+                    "source": staged(&preview.id),
+                    "replace": true,
+                    "from_desktop": true,
+                })),
+        )
+        .await,
+        QUIT_DESKTOP_FIRST,
+    );
     // The service runs an older crew protocol than the backup's data.
     refused(
         fixture.apply(staged(&preview.id), true, true).await,
@@ -696,6 +740,63 @@ async fn apply_refuses_unsafe_moments() {
     assert_eq!(status, StatusCode::OK, "{text}");
     assert!(pending(&fixture.roots).is_some());
     drop(lock);
+}
+
+/// Final review C-I1: a relative `BRUHS_REACTIVE_DB` hides the server's
+/// lock, so the apply is refused before anything is scheduled; no start
+/// then waits on a restore.
+#[tokio::test]
+async fn a_relative_reactive_database_is_refused_up_front() {
+    let fixture = Fixture::with_host(false, Service::default(), |host| {
+        host.with_env(|name| (name == "BRUHS_REACTIVE_DB").then(|| "r.sqlite3".into()))
+    })
+    .await;
+    let preview = fixture.staged().await;
+    assert_eq!(
+        fixture.apply(staged(&preview.id), true, false).await,
+        (StatusCode::CONFLICT, error(REACTIVE_DB_RELATIVE))
+    );
+    assert!(pending(&fixture.roots).is_none());
+    assert!(!restore_waits(&fixture.roots), "a start finds nothing");
+    assert!(fixture.control.events().is_empty());
+    assert_eq!(fixture.pages.closes(BRUH), 0);
+    assert_eq!(fixture.crew().await, (false, 1, "running".to_owned()));
+    // A full path's lock can be checked: the apply goes ahead.
+    let full = fixture.reactive_db.clone();
+    let fixture_full = Fixture::with_host(false, Service::default(), move |host| {
+        host.with_env(move |name| (name == "BRUHS_REACTIVE_DB").then(|| full.clone().into()))
+    })
+    .await;
+    let preview = fixture_full.staged().await;
+    let (status, text) = fixture_full.apply(staged(&preview.id), true, false).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+}
+
+/// Final review C-M2: from the moment an apply starts checking, no job
+/// starts; once the restore is handed over, none starts again before the
+/// server exits.
+#[tokio::test]
+async fn no_job_starts_while_an_apply_checks() {
+    let fixture = Fixture::new().await;
+    let preview = fixture.staged().await;
+    fixture.control.set_status_gate(false);
+    let create = async {
+        while !*locked(&fixture.control.asked) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let answer = fixture
+            .post(
+                "/api/backup",
+                &json!({ "password": PASSWORD, "app": "web" }),
+            )
+            .await;
+        fixture.control.set_status_gate(true);
+        answer
+    };
+    let (applied, created) = tokio::join!(fixture.apply(staged(&preview.id), true, false), create);
+    assert_eq!(created, (StatusCode::CONFLICT, error(BACKUP_BUSY)));
+    assert_eq!(applied.0, StatusCode::OK, "{}", applied.1);
+    assert!(fixture.host.hold_jobs().is_err(), "held until the exit");
 }
 
 #[tokio::test]

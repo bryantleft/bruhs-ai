@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use bruhs_core::backup::{
     apply_pending, applying, restore_waits, take_service_restart, ApplyOutcome, BackupError,
-    Holder, Roots,
+    Holder, JobHold, Roots,
 };
 use bruhs_core::secrets::{SecretChoice, SecretStore};
 use bruhs_models::backup::RESTORE_ROLLED_BACK;
@@ -65,8 +65,9 @@ pub(crate) trait RestoreControl: Send + Sync {
     /// Starts `bruhs-server restore-apply`, outliving this process and its
     /// service.
     fn spawn_applier(&self) -> std::io::Result<()>;
-    /// Shuts this server down gracefully a moment from now.
-    fn exit_soon(&self);
+    /// Shuts this server down gracefully a moment from now, keeping new
+    /// backup jobs out (`hold`) until it exits (final review C-M2).
+    fn exit_soon(&self, hold: JobHold);
 }
 
 /// The control the restore routes take as an `Extension`.
@@ -139,7 +140,8 @@ impl RestoreControl for RealRestoreControl {
         Ok(())
     }
 
-    fn exit_soon(&self) {
+    fn exit_soon(&self, hold: JobHold) {
+        hold.until_exit();
         let spawned = std::thread::Builder::new()
             .name("restore-exit".into())
             .spawn(|| {
@@ -707,9 +709,20 @@ mod tests {
     #[tokio::test]
     async fn exit_soon_stops_the_server_the_usual_way() {
         let dir = tempfile::tempdir().unwrap();
-        RealRestoreControl::new(dir.path().to_path_buf()).exit_soon();
+        let host = bruhs_core::backup::BackupHost::new(
+            Roots {
+                home: dir.path().to_path_buf(),
+                core: dir.path().join("core"),
+                desktop: dir.path().join("desktop"),
+                config: dir.path().join("core"),
+            },
+            SecretStore::in_memory(),
+        );
+        RealRestoreControl::new(dir.path().to_path_buf()).exit_soon(host.hold_jobs().unwrap());
         tokio::time::timeout(Duration::from_secs(5), exit_requested())
             .await
             .unwrap();
+        // No backup job starts before the exit (final review C-M2).
+        assert!(host.hold_jobs().is_err());
     }
 }

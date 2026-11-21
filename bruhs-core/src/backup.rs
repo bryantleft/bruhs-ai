@@ -50,7 +50,7 @@ pub use create::{check_destination, CancelFlag, CreateRequest, Output};
 #[cfg(unix)]
 pub use disk::{free_bytes, FREE_MARGIN};
 #[cfg(unix)]
-pub use host::{BackupHost, Upload, UploadKind};
+pub use host::{BackupHost, JobHold, Upload, UploadKind};
 
 #[cfg(test)]
 mod apply_tests;

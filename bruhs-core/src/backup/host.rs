@@ -10,6 +10,7 @@ use std::future::Future;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
@@ -157,6 +158,28 @@ pub(super) type TestHook = Arc<dyn Fn(Hook, &str) + Send + Sync>;
 struct Shared {
     /// The running job, or the last one until the next starts.
     job: Mutex<Option<JobSlot>>,
+    /// A [`JobHold`] is out: no job starts. Set and read under `job`'s lock.
+    held: AtomicBool,
+}
+
+/// Keeps new jobs out until dropped (final review C-M2, C-M4): a restore
+/// being handed over, or the start's sweep, takes the one job slot
+/// without running a job.
+#[must_use = "jobs start again once the hold drops"]
+pub struct JobHold(Arc<Shared>);
+
+impl JobHold {
+    /// Keeps jobs out for the rest of this process: it exits for a
+    /// restore it handed over.
+    pub fn until_exit(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for JobHold {
+    fn drop(&mut self) {
+        self.0.held.store(false, Ordering::Release);
+    }
 }
 
 struct JobSlot {
@@ -262,6 +285,13 @@ impl BackupHost {
         &self.config.roots
     }
 
+    /// The lock a running server holds beside its reactive database, read
+    /// through this host's environment (final review C-I1). `None` when a
+    /// relative `BRUHS_REACTIVE_DB` hides it: no restore can start then.
+    pub fn reactive_lock(&self) -> Option<PathBuf> {
+        super::apply::reactive_lock_path(self.roots(), &|name| (self.config.env)(name))
+    }
+
     pub(super) fn config(&self) -> &Config {
         &self.config
     }
@@ -334,7 +364,9 @@ impl BackupHost {
         let cancel = CancelFlag::default();
         {
             let mut job = self.lock_job();
-            if job.as_ref().is_some_and(JobSlot::running) {
+            if job.as_ref().is_some_and(JobSlot::running)
+                || self.shared.held.load(Ordering::Acquire)
+            {
                 return Err(BackupError::Busy(BACKUP_BUSY));
             }
             *job = Some(JobSlot {
@@ -378,7 +410,20 @@ impl BackupHost {
         }
     }
 
-    /// Whether a job runs now.
+    /// Takes the job slot without a job (final review C-M2, C-M4): until
+    /// the hold drops, every new job answers `BACKUP_BUSY`. Refused, with
+    /// that copy, while a job runs or another hold is out.
+    pub fn hold_jobs(&self) -> Result<JobHold, BackupError> {
+        let job = self.lock_job();
+        if job.as_ref().is_some_and(JobSlot::running) || self.shared.held.load(Ordering::Acquire) {
+            return Err(BackupError::Busy(BACKUP_BUSY));
+        }
+        self.shared.held.store(true, Ordering::Release);
+        drop(job);
+        Ok(JobHold(Arc::clone(&self.shared)))
+    }
+
+    /// Whether a job runs now. A [`JobHold`] isn't a job.
     pub fn running(&self) -> bool {
         self.lock_job().as_ref().is_some_and(JobSlot::running)
     }

@@ -50,7 +50,7 @@ use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::AppState;
 use bruhs_models::backup::{
     valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, OpenBackup, OpenSource, RestoreStatus,
-    UploadId, BACKUP_BUSY, CONFIRM_REPLACE, GONE, INVALID_REQUEST, QUIT_DESKTOP_FIRST,
+    UploadId, CONFIRM_REPLACE, GONE, INVALID_REQUEST, QUIT_DESKTOP_FIRST, REACTIVE_DB_RELATIVE,
     RECORDING_FIRST, RESTORE_AT_NEXT_START, RESTORE_NOT_STARTED, SERVICE_NOT_STOPPED,
     SERVICE_TOO_OLD, SOURCE_MISSING, UPLOAD_TYPE, WEB_PART_TYPE,
 };
@@ -206,14 +206,16 @@ impl Running {
     /// Undoes [`Self::halt`] after a restore that was called off (B Task
     /// 12 I1): the bruhs' browsers can open again, and the worker runs
     /// again with a sync pass that gives them fresh slots. Runs the halt
-    /// interrupted stay interrupted, as after a restart.
-    fn resume(&self) {
+    /// interrupted stay interrupted, as after a restart. It waits for a
+    /// worker the halt stopped to let go first (final review B minor).
+    async fn resume(&self) {
         if let Some(tools) = &self.tools {
             tools.reopen_after_restore();
         }
         if let Some(reactive) = &self.reactive {
             if reactive
                 .resume_after_restore(Arc::clone(&self.app))
+                .await
                 .is_err()
             {
                 tracing::warn!("Bruhs runs start again at the next start");
@@ -223,15 +225,20 @@ impl Running {
 }
 
 /// `POST /api/backup/restore/apply`: the owner's confirmation (D15, ruling
-/// F22 a). Refused unless `replace` (`CONFIRM_REPLACE`), while a job runs
-/// (`BACKUP_BUSY`), while a meeting records (`RECORDING_FIRST`), while the
-/// desktop runs and this isn't the desktop asking (`QUIT_DESKTOP_FIRST`),
-/// when the installed service is older than the backup's data
-/// (`SERVICE_TOO_OLD`) and when the source can't be applied; a refusal
-/// schedules and stops nothing. Then, in order: schedule the restore,
-/// spawn the applier, stop the bruh runs and browsers, stop the service
-/// unless this is it, answer and shut down. The service's own process
-/// answers first and stops itself last.
+/// F22 a). Refused unless `replace` (`CONFIRM_REPLACE`), when a relative
+/// `BRUHS_REACTIVE_DB` hides the server's lock (`REACTIVE_DB_RELATIVE`,
+/// final review C-I1), while a job runs (`BACKUP_BUSY`), while a meeting
+/// records (`RECORDING_FIRST`), while the desktop runs and this isn't the
+/// desktop asking (`QUIT_DESKTOP_FIRST`; a request with a browser `Origin`
+/// is never the desktop's, final review C-M3), when the installed service
+/// is older than the backup's data (`SERVICE_TOO_OLD`) and when the source
+/// can't be applied; a refusal schedules and stops nothing. The job slot
+/// is held from before the checks wait, so no job starts meanwhile, and
+/// for the rest of the process once the restore is handed over (final
+/// review C-M2). Then, in order: schedule the restore, spawn the applier,
+/// stop the bruh runs and browsers, stop the service unless this is it,
+/// answer and shut down. The service's own process answers first and
+/// stops itself last.
 pub async fn apply(
     State(server): State<ServerState>,
     backup: Option<Extension<BackupHost>>,
@@ -254,14 +261,21 @@ pub async fn apply(
     if !replace {
         return Err(AppError::BadRequest(CONFIRM_REPLACE.into()));
     }
+    // Only the desktop's native client sends no `Origin` (final review
+    // C-M3).
+    let from_desktop = from_desktop && !headers.contains_key(header::ORIGIN);
     let control = control(restore_control)?;
+    // An applier that can't find the server's lock would wait on it for
+    // good (final review C-I1).
+    if backup.reactive_lock().is_none() {
+        return Err(AppError::Conflict(REACTIVE_DB_RELATIVE.into()));
+    }
+    // No job starts from here on (final review C-M2); a refusal drops it.
+    let hold = backup.hold_jobs().map_err(backup_error)?;
     // First, since it may wait on the keychain: the moment checks below
     // then hold right up to the schedule (B Task 12 M1).
     let (checker, checked) = (backup.clone(), source.clone());
     let protocol = blocking(move || checker.check_restore(&checked)).await?;
-    if backup.running() {
-        return Err(AppError::Conflict(BACKUP_BUSY.into()));
-    }
     if backup.recording().await {
         return Err(AppError::Conflict(RECORDING_FIRST.into()));
     }
@@ -312,7 +326,7 @@ pub async fn apply(
                 if control.stop_service().is_err() {
                     tracing::warn!("the background service didn't confirm its stop");
                 }
-                control.exit_soon();
+                control.exit_soon(hold);
             },
         ));
     }
@@ -320,10 +334,10 @@ pub async fn apply(
     let stopped = tokio::task::spawn_blocking(move || stopper.stop_service()).await;
     let Ok(Ok(service_stopped)) = stopped else {
         tracing::warn!("the background service didn't stop for the restore");
-        running.resume();
+        running.resume().await;
         return Err(called_off(backup.roots(), SERVICE_NOT_STOPPED).await);
     };
-    control.exit_soon();
+    control.exit_soon(hold);
     Ok(Json(ApplyAccepted { service_stopped }).into_response())
 }
 

@@ -19,6 +19,13 @@ use super::{store, ReactiveError, ReactiveRuntime};
 const STOP_WAIT: Duration = Duration::from_secs(5);
 #[cfg(unix)]
 const STOP_POLL: Duration = Duration::from_millis(10);
+/// How long a resume waits for a worker the halt stopped to let go of the
+/// runtime (final review B minor): past [`STOP_WAIT`], a lane still
+/// dropping its provider turn holds it.
+#[cfg(unix)]
+const RESUME_WAIT: Duration = Duration::from_secs(30);
+#[cfg(unix)]
+const RESUME_POLL: Duration = Duration::from_millis(50);
 
 /// The running worker, so a restore can stop it.
 #[derive(Debug, Default)]
@@ -60,12 +67,22 @@ impl ReactiveRuntime {
     }
 
     /// Runs the worker again after a restore that was called off, and asks
-    /// the sync loop for a pass so the bruhs' browsers come back.
-    pub fn resume_after_restore(
+    /// the sync loop for a pass so the bruhs' browsers come back. A worker
+    /// the halt stopped may not have let go yet: the start is tried again
+    /// until it has, for up to [`RESUME_WAIT`] (final review B minor).
+    pub async fn resume_after_restore(
         &self,
         app: std::sync::Arc<crate::AppState>,
     ) -> Result<(), ReactiveError> {
-        let started = self.start(app).map(drop);
+        let until = Instant::now() + RESUME_WAIT;
+        let started = loop {
+            match self.start(std::sync::Arc::clone(&app)) {
+                Err(ReactiveError::Conflict(_)) if Instant::now() < until => {
+                    tokio::time::sleep(RESUME_POLL).await;
+                }
+                started => break started.map(drop),
+            }
+        };
         self.changed();
         started
     }
@@ -156,5 +173,38 @@ mod tests {
         // A restore that can't go ahead runs the worker again.
         let again = runtime.start(app).unwrap();
         again.abort();
+    }
+
+    /// Final review B minor: a resume waits for a stopped worker that
+    /// hasn't let go of the runtime yet, then runs it again.
+    #[tokio::test]
+    async fn a_resume_waits_for_the_stopped_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = ReactiveRuntime::open(&directory.path().join("reactive.sqlite3"))
+            .await
+            .unwrap();
+        let app = Arc::new(
+            crate::AppState::builder()
+                .secret_store(crate::secrets::SecretStore::in_memory())
+                .connections(crate::connections::Connections::in_memory())
+                .build(),
+        );
+        // A lane of the stopped worker still drops its turn, past the
+        // halt's wait.
+        runtime
+            .started
+            .store(true, std::sync::atomic::Ordering::Release);
+        let started = Arc::clone(&runtime.started);
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            started.store(false, std::sync::atomic::Ordering::Release);
+        });
+        runtime
+            .resume_after_restore(Arc::clone(&app))
+            .await
+            .unwrap();
+        release.await.unwrap();
+        assert!(runtime.start(app).is_err(), "the worker runs again");
+        runtime.halt_for_restore().await.unwrap();
     }
 }
