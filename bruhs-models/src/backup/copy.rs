@@ -237,6 +237,15 @@ pub const WEB_PART_PASSWORD_HINT: &str =
 pub const WEB_STORES_SKIPPED: &str =
     "Some browser data comes from a newer Bruhs, so it was left out: {list}.";
 
+// Final review, core
+/// `{n}` counts today's keychain items a restore couldn't remove after
+/// swapping the data in (final review B-I2). They do no harm: the data
+/// kept aside holds them too.
+pub const ITEM_STAYED: &str =
+    "{n} keychain item from before the restore stayed in your keychain. The data kept aside holds it too.";
+pub const ITEMS_STAYED: &str =
+    "{n} keychain items from before the restore stayed in your keychain. The data kept aside holds them too.";
+
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
     BACKUP_TITLE,
@@ -379,6 +388,9 @@ pub const ALL_COPY: &[&str] = &[
     WEB_PART_ON_DESKTOP,
     WEB_PART_PASSWORD_HINT,
     WEB_STORES_SKIPPED,
+    // Final review, core
+    ITEM_STAYED,
+    ITEMS_STAYED,
 ];
 
 #[cfg(test)]

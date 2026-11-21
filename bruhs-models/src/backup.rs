@@ -817,6 +817,12 @@ pub fn missing_items_line(missing: u32) -> Option<String> {
     counted(missing, MISSING_ITEM, MISSING_ITEMS)
 }
 
+/// The warning for today's keychain items a restore couldn't remove, if
+/// any (final review B-I2).
+pub fn items_stayed_line(stayed: u32) -> Option<String> {
+    counted(stayed, ITEM_STAYED, ITEMS_STAYED)
+}
+
 /// The warning for a bruh whose browser was still busy, so its profile
 /// stayed out of the backup.
 pub fn browser_busy_line(name: &str) -> String {
