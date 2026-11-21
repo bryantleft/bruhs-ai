@@ -75,7 +75,7 @@ const BACKUPS: &str = "backups";
 
 /// The `BRUHS_*` path overrides that can move data out of the roots (D23,
 /// ruling F10 b), in the order the overview names them.
-const PATH_OVERRIDES: [&str; 9] = [
+const PATH_OVERRIDES: [&str; 10] = [
     "BRUHS_REACTIVE_DB",
     "BRUHS_MEETING_DB",
     "BRUHS_MAIL_DB",
@@ -85,6 +85,7 @@ const PATH_OVERRIDES: [&str; 9] = [
     "BRUHS_WORKBENCH_DIR",
     "BRUHS_DELIVERY_DIR",
     "BRUHS_WORKTREE_METER",
+    "BRUHS_GENERATORS_DB",
 ];
 
 /// Where this computer keeps Bruhs' data (D4, D11, ruling F10 a).
@@ -97,8 +98,11 @@ pub struct Roots {
     /// The desktop app's data: `BaseDirs::data_dir()/bruhs-ai`. The same
     /// folder as `core` on Linux.
     pub desktop: PathBuf,
-    /// `ProjectDirs::config_dir()`, which holds only `calendar/`. The same
-    /// folder as `core` on macOS; `~/.config/bruhs-ai` on Linux.
+    /// `ProjectDirs::config_dir()`, whose [`CONFIG_ENTRIES`] (`calendar/`
+    /// and `secret-sources.json`) a backup takes. The same folder as
+    /// `core` on macOS; `~/.config/bruhs-ai` on Linux.
+    ///
+    /// [`CONFIG_ENTRIES`]: bruhs_models::backup::CONFIG_ENTRIES
     pub config: PathBuf,
 }
 

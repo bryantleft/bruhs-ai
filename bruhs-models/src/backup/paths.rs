@@ -55,15 +55,25 @@ pub const EXCLUDED_TOP: [&str; 9] = [
     "worktrees",
 ];
 
-/// Top-level entries the desktop app owns. On a one-root computer they sit
-/// in the shared root; on two roots, in the desktop root (D11, ruling F8).
-pub const DESKTOP_ENTRIES: [&str; 5] = [
+/// Top-level entries the desktop app owns, and the text generators' store
+/// that Bruhs keeps beside them. On a one-root computer they sit in the
+/// shared root; on two roots, in the desktop root (D11, ruling F8).
+pub const DESKTOP_ENTRIES: [&str; 7] = [
     "desktop-state.json",
     "desktop-state.json.bak",
     "knowledge-attachments",
     "delivery",
     "diff-viewed.json",
+    "keybindings.json",
+    "text-generators.sqlite3",
 ];
+
+/// Top-level entries of the core root that Bruhs keeps in
+/// `ProjectDirs::config_dir()`. Where that is a folder of its own (Linux),
+/// a backup takes them from there as the core root's, a restore puts them
+/// back there, and nothing else of it goes in (ruling F10 a). On macOS it
+/// is the core root.
+pub const CONFIG_ENTRIES: [&str; 2] = ["calendar", "secret-sources.json"];
 
 /// Top-level folders that hold the owner's own files, which a restore
 /// copies byte for byte and never rewrites.
@@ -75,17 +85,19 @@ pub const CONTENT_FOLDERS: [&str; 4] = [
 ];
 
 /// Other top-level names Bruhs keeps in its roots. With [`EXCLUDED_TOP`],
-/// [`CONTENT_FOLDERS`] and [`DESKTOP_ENTRIES`], an entry whose first name
-/// matches one of these only when case is ignored is refused (I1 ruling):
-/// on a case-insensitive volume it would land in, or replace, the real one.
-const KNOWN_TOP: [&str; 7] = [
+/// [`CONTENT_FOLDERS`], [`DESKTOP_ENTRIES`] and [`CONFIG_ENTRIES`], an
+/// entry whose first name matches one of these only when case is ignored
+/// is refused (I1 ruling): on a case-insensitive volume it would land in,
+/// or replace, the real one.
+const KNOWN_TOP: [&str; 8] = [
     "server",
     "credentials",
     "connections",
-    "calendar",
     "workbench",
     "pith-mcp.json",
     "worktree-meter.json",
+    "voice-dictionaries.sqlite3",
+    "fast-worktree-checkout",
 ];
 /// Lock file ending a backup leaves out of Bruhs' own folders. Owner
 /// content keeps it (D4 ruling).
@@ -196,6 +208,7 @@ fn refused_top(first: &str) -> bool {
         || KNOWN_TOP.iter().any(variant)
         || CONTENT_FOLDERS.iter().any(variant)
         || DESKTOP_ENTRIES.iter().any(variant)
+        || CONFIG_ENTRIES.iter().any(variant)
         || folded_entry_key(first) == RESERVED_TOP
 }
 
@@ -670,6 +683,10 @@ mod tests {
             "core/Server/reactive.sqlite3",
             "desktop/Delivery/journal.json",
             "desktop/Desktop-State.json",
+            "core/Secret-Sources.json",
+            "core/Calendar/google/x",
+            "desktop/Keybindings.json",
+            "core/Voice-Dictionaries.sqlite3",
             "core/AUDIO/m1.wav",
             "core/a\u{202E}gpj.exe",
             "core/a\u{200B}",
@@ -686,6 +703,9 @@ mod tests {
             "core/server/reactive.sqlite3",
             "core/credentials/vault.json",
             "desktop/delivery/journal.json",
+            "core/secret-sources.json",
+            "core/calendar/google/x",
+            "desktop/keybindings.json",
             "core/servers/x",
             "core/server/bruhs/a1/work/Service/x",
             "core/C:/x",
@@ -893,6 +913,8 @@ mod tests {
             "knowledge-attachments",
             "delivery",
             "diff-viewed.json",
+            "keybindings.json",
+            "text-generators.sqlite3",
         ] {
             assert!(desktop_entry(name), "{name}");
         }

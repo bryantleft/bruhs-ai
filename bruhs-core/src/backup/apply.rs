@@ -39,8 +39,8 @@ use std::path::{Path, PathBuf};
 use bruhs_models::backup::{
     backup_file_name, desktop_entry, folded_entry_key, included, items_stayed_line, valid_id,
     valid_stamp, BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview,
-    RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE,
-    INVALID_REQUEST, KEEP_ITEMS_TOO_LARGE, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
+    RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, CONFIG_ENTRIES, DAMAGED, EXCLUDED_TOP,
+    GONE, INVALID_REQUEST, KEEP_ITEMS_TOO_LARGE, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
     KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED,
     REACTIVE_DB_RELATIVE, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
 };
@@ -95,7 +95,8 @@ const PREVIEW: &str = "preview.json";
 const MANIFEST: &str = "manifest.json";
 const SEALED: &str = "keychain.sealed";
 const WEB_PART: &str = "web-part.bin";
-/// The top-level folder that, on Linux, lives in the config root.
+/// The calendar folder, one of the [`CONFIG_ENTRIES`] that on Linux live
+/// in the config root.
 const CALENDAR: &str = "calendar";
 const CREDENTIALS: &str = "credentials";
 const CONNECTIONS: &str = "connections";
@@ -1206,8 +1207,9 @@ fn staged_names(folder: &Path) -> Result<Option<Vec<String>>, BackupError> {
 /// Today's top-level names in `root` that the apply moves aside: every
 /// entry D4's rule would take with every option on, never one a backup
 /// always leaves out or `meta`, plus any name the source brings that is
-/// there today. On a computer with its own config root, `calendar` is the
-/// config root's, and the core root's own is left alone (ruling F10 a).
+/// there today. On a computer with its own config root, each of
+/// [`CONFIG_ENTRIES`] is the config root's, and the core root's own is
+/// left alone (ruling F10 a).
 /// Names that fold together on the volume move once.
 fn live_names(roots: &Roots, root: RootKey, places: &[String]) -> Result<Vec<String>, BackupError> {
     let separate = root == RootKey::Core && roots.config != roots.core;
@@ -1219,7 +1221,7 @@ fn live_names(roots: &Roots, root: RootKey, places: &[String]) -> Result<Vec<Str
                 let Ok(name) = entry.file_name().into_string() else {
                     continue;
                 };
-                if !movable(&name) || (separate && name == CALENDAR) {
+                if !movable(&name) || (separate && CONFIG_ENTRIES.contains(&name.as_str())) {
                     continue;
                 }
                 if included(&name, entry.file_type()?.is_dir(), &EVERYTHING) {
@@ -1230,10 +1232,14 @@ fn live_names(roots: &Roots, root: RootKey, places: &[String]) -> Result<Vec<Str
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    if separate && exists(&roots.config.join(CALENDAR))? {
-        names
-            .entry(folded_entry_key(CALENDAR))
-            .or_insert_with(|| CALENDAR.to_owned());
+    if separate {
+        for name in CONFIG_ENTRIES {
+            if exists(&roots.config.join(name))? {
+                names
+                    .entry(folded_entry_key(name))
+                    .or_insert_with(|| name.to_owned());
+            }
+        }
     }
     for name in places {
         if exists(&live(roots, root, name))? {
@@ -1350,13 +1356,13 @@ fn source_dir(
 }
 
 /// Where today's top-level `name` of `root` lives: the root, except the
-/// core root's `calendar` on a computer with its own config root.
+/// core root's [`CONFIG_ENTRIES`] on a computer with its own config root.
 fn live(roots: &Roots, root: RootKey, name: &str) -> PathBuf {
     live_parent(roots, root, name).join(name)
 }
 
 fn live_parent(roots: &Roots, root: RootKey, name: &str) -> PathBuf {
-    if root == RootKey::Core && name == CALENDAR && roots.config != roots.core {
+    if root == RootKey::Core && CONFIG_ENTRIES.contains(&name) && roots.config != roots.core {
         roots.config.clone()
     } else {
         roots.root(root).to_path_buf()

@@ -79,6 +79,13 @@ fn fixture(same: bool, config: bool) -> Fixture {
     }
 }
 
+/// Main's secret provider references, in the config root.
+const SECRET_SOURCES: &str = "secret-sources.json";
+/// Data B's and data A's references: provider names and `op://` fields,
+/// never values.
+const SOURCES_B: &[u8] = br#"{"sources":{"s1":{"name":"B","account":""}},"bindings":[{"target":"codex","variable":"B_KEY","source":"s1","reference":"op://v/b/f"}]}"#;
+const SOURCES_A: &[u8] = br#"{"sources":{"s1":{"name":"A","account":""}},"bindings":[]}"#;
+
 fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();
@@ -96,7 +103,7 @@ fn item(store: &SecretStore, id: &str) -> Option<String> {
 }
 
 /// Removes every top-level entry of the roots but `backups`, and the
-/// config root's calendar.
+/// config root's calendar and secret provider references.
 fn clear(roots: &Roots) {
     for root in [&roots.core, &roots.desktop] {
         for entry in std::fs::read_dir(root).unwrap().flatten() {
@@ -112,6 +119,7 @@ fn clear(roots: &Roots) {
         }
     }
     let _ = std::fs::remove_dir_all(roots.config.join("calendar"));
+    let _ = std::fs::remove_file(roots.config.join(SECRET_SOURCES));
 }
 
 /// `vault.json` with a Global Value for each id.
@@ -169,6 +177,7 @@ fn write_b(fixture: &Fixture) {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     write(&roots.core.join("attachments/plain.txt"), b"B plain");
     write(&roots.desktop.join("desktop-state.json"), b"{\"b\":true}");
+    write(&roots.config.join(SECRET_SOURCES), SOURCES_B);
     if roots.config != roots.core {
         write(
             &roots.config.join("calendar/google/state.json"),
@@ -210,14 +219,16 @@ fn write_a(fixture: &Fixture, extra: bool) {
     if !roots.same() {
         write(&roots.desktop.join("logs/desktop.log"), b"desktop log");
     }
+    write(&roots.config.join(SECRET_SOURCES), SOURCES_A);
     if roots.config != roots.core {
         write(
             &roots.config.join("calendar/google/state.json"),
             b"A calendar",
         );
-        // The core root's own calendar folder isn't the one Bruhs uses
-        // here, so a restore leaves it alone.
+        // The core root's own calendar folder and secret provider file
+        // aren't the ones Bruhs uses here, so a restore leaves them alone.
         write(&roots.core.join("calendar/own.txt"), b"core own");
+        write(&roots.core.join(SECRET_SOURCES), b"core own sources");
     }
 }
 
@@ -589,6 +600,44 @@ async fn calendar_goes_back_to_the_config_root() {
         std::fs::read(roots.core.join("calendar/own.txt")).unwrap(),
         b"core own"
     );
+    assert_secret_sources_restored(roots, &stamp, &roots.config);
+    assert_eq!(
+        std::fs::read(roots.core.join(SECRET_SOURCES)).unwrap(),
+        b"core own sources"
+    );
+}
+
+/// `secret-sources.json` is B's in `live` after the apply, and A's is
+/// in the kept set's core root.
+fn assert_secret_sources_restored(roots: &Roots, stamp: &str, live: &Path) {
+    assert_eq!(std::fs::read(live.join(SECRET_SOURCES)).unwrap(), SOURCES_B);
+    assert_eq!(
+        std::fs::read(kept_dir(roots, RootKey::Core, stamp).join(SECRET_SOURCES)).unwrap(),
+        SOURCES_A
+    );
+}
+
+/// macOS's layout: two data roots, the config root the core root. The
+/// secret provider references go in and come back in the core root.
+#[tokio::test]
+async fn secret_sources_come_back_on_two_roots() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    assert_eq!(
+        before
+            .staged_core
+            .get(Path::new(SECRET_SOURCES))
+            .map(Vec::as_slice),
+        Some(SOURCES_B)
+    );
+    schedule(&fixture.roots, &staged_source(&before), false).unwrap();
+    assert!(matches!(
+        apply_pending(&fixture.roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let roots = &fixture.roots;
+    let stamp = pre_restores(roots)[0].stamp.clone();
+    assert_secret_sources_restored(roots, &stamp, &roots.core);
 }
 
 #[tokio::test]
@@ -1685,6 +1734,11 @@ async fn calendar_goes_back_to_the_config_root_on_one_root() {
     assert_eq!(
         std::fs::read(roots.core.join("calendar/own.txt")).unwrap(),
         b"core own"
+    );
+    assert_secret_sources_restored(roots, &stamp, &roots.config);
+    assert_eq!(
+        std::fs::read(roots.core.join(SECRET_SOURCES)).unwrap(),
+        b"core own sources"
     );
 }
 

@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bruhs_models::backup::{
-    excluded, folded_entry_key, safe_entry_path, BackupOptions, Excluded, CONTENT_FOLDERS,
-    DATA_NAME_REFUSED, EXCLUDED_TOP, MAX_ENTRY_DEPTH,
+    excluded, folded_entry_key, safe_entry_path, BackupOptions, Excluded, CONFIG_ENTRIES,
+    CONTENT_FOLDERS, DATA_NAME_REFUSED, EXCLUDED_TOP, MAX_ENTRY_DEPTH,
 };
 use rusqlite::{Connection, OpenFlags};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags};
@@ -29,8 +29,6 @@ use rustix::io::Errno;
 
 use super::{BackupError, RootKey, Roots};
 
-/// The top-level folder that, on Linux, comes from the config root.
-const CALENDAR: &str = "calendar";
 /// How long a snapshot or a check waits for a writer that holds its lock
 /// mid-commit.
 const SQLITE_WAIT: Duration = Duration::from_secs(5);
@@ -50,7 +48,7 @@ pub struct SourceFile {
     /// in after the walk; open it with [`open_source`], never by path.
     pub path: PathBuf,
     /// The resolved folder `rel` is relative to: the root, or for the core
-    /// root's `calendar/` on Linux, the config root.
+    /// root's [`CONFIG_ENTRIES`] on Linux, the config root.
     pub base: PathBuf,
     /// `base`'s identity when the walk opened it. [`open_source`] refuses
     /// a `base` that is another folder now (B Task 5 N3).
@@ -85,8 +83,9 @@ pub struct Inventory {
 /// Lists what a backup made with `options` takes from `roots` (D4): the
 /// core root, then the desktop root unless it is the same folder. On a
 /// computer whose config root differs from the core root (Linux), the
-/// core root's `calendar/` comes from the config root, where Bruhs keeps
-/// it, and nothing else of the config root goes in (ruling F10 a).
+/// core root's [`CONFIG_ENTRIES`] (`calendar/`, `secret-sources.json`)
+/// come from the config root, where Bruhs keeps them, and nothing else of
+/// the config root goes in (ruling F10 a).
 ///
 /// The walk goes through folder handles (`openat` with `O_NOFOLLOW`,
 /// `fstatat` without following), so a link is never followed, even one
@@ -131,15 +130,22 @@ pub(super) fn inventory_with(
     if let Some(core) = &core {
         let mut top: Vec<(CString, &OpenedRoot)> = names(&core.fd)?
             .into_iter()
-            .filter(|name| config.is_none() || name.as_bytes() != CALENDAR.as_bytes())
+            .filter(|name| {
+                config.is_none()
+                    || !CONFIG_ENTRIES
+                        .iter()
+                        .any(|e| name.as_bytes() == e.as_bytes())
+            })
             .map(|name| (name, core))
             .collect();
         if let Some(config) = &config {
-            let calendar = CString::new(CALENDAR).map_err(io::Error::other)?;
-            match rustix::fs::statat(&config.fd, calendar.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
-                Ok(_) => top.push((calendar, config)),
-                Err(Errno::NOENT) => {}
-                Err(error) => return Err(io::Error::from(error).into()),
+            for entry in CONFIG_ENTRIES {
+                let name = CString::new(entry).map_err(io::Error::other)?;
+                match rustix::fs::statat(&config.fd, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
+                    Ok(_) => top.push((name, config)),
+                    Err(Errno::NOENT) => {}
+                    Err(error) => return Err(io::Error::from(error).into()),
+                }
             }
             top.sort_by(|a, b| a.0.cmp(&b.0));
         }

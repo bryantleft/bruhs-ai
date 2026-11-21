@@ -205,6 +205,49 @@ fn calendar_state_comes_from_the_config_root() {
     );
 }
 
+/// Secret provider references (`secret-sources.json`) sit in the config
+/// root too: on Linux they go in as the core root's file, from the config
+/// root, and the core root's own copy stays out (main merge follow-up).
+#[test]
+fn secret_sources_come_from_the_config_root() {
+    let (_dir, base) = temp();
+    let mut roots = one_root(&base);
+    roots.config = base.join("home").join("config");
+    write(&roots.config.join("secret-sources.json"), b"{\"a\":1}");
+    write(&roots.config.join("secret-sources.lock"), b"");
+    write(&roots.config.join("other.json"), b"{}");
+    write(&roots.core.join("secret-sources.json"), b"stale");
+    write(&roots.core.join("server/mail.sqlite3"), b"x");
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert_eq!(
+        listed(&taken),
+        [
+            (RootKey::Core, "secret-sources.json"),
+            (RootKey::Core, "server/mail.sqlite3"),
+        ]
+    );
+    assert_eq!(
+        taken.files[0].path,
+        roots.config.join("secret-sources.json")
+    );
+    assert_eq!(taken.files[0].bytes, 7);
+}
+
+/// On macOS the config root is the core root, so the file goes in from
+/// there.
+#[test]
+fn secret_sources_go_in_from_the_core_root_on_macos() {
+    let (_dir, base) = temp();
+    let roots = two_roots(&base);
+    write(&roots.core.join("secret-sources.json"), b"{\"a\":1}");
+    write(&roots.core.join("secret-sources.lock"), b"");
+
+    let taken = inventory(&roots, &BackupOptions::default()).unwrap();
+    assert_eq!(listed(&taken), [(RootKey::Core, "secret-sources.json")]);
+    assert_eq!(taken.files[0].path, roots.core.join("secret-sources.json"));
+}
+
 #[test]
 fn links_are_counted_never_followed() {
     let (_dir, base) = temp();
@@ -644,6 +687,7 @@ fn overrides_outside_the_roots_are_named() {
             "BRUHS_WORKBENCH_DIR" => Some(OsString::new()),
             "BRUHS_DELIVERY_DIR" => Some("/h/home/desktop/delivery".into()),
             "BRUHS_WORKTREE_METER" => Some("/h/home/core/worktree-meter.json".into()),
+            "BRUHS_GENERATORS_DB" => Some("/elsewhere/text-generators.sqlite3".into()),
             "HOME" => Some("/elsewhere".into()),
             _ => None,
         }
@@ -655,6 +699,7 @@ fn overrides_outside_the_roots_are_named() {
             "BRUHS_MAIL_DB",
             "BRUHS_ATTACHMENTS_DIR",
             "BRUHS_RICH_RESPONSE_DIR",
+            "BRUHS_GENERATORS_DB",
         ]
     );
     assert!(roots.outside_overrides(|_| None).is_empty());
