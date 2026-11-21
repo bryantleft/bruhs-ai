@@ -1979,13 +1979,14 @@ async fn the_sweep_keeps_unreadable_sets_and_finishes_deletes() {
 }
 
 /// A seal that fails for good, with nothing moved yet, drops the apply:
-/// no journal, nothing waiting, no kept folders (N4).
+/// no journal, nothing waiting, no kept folders (N4). The service the
+/// restore stopped still starts again (final re-review m2).
 #[tokio::test]
 async fn a_seal_that_fails_for_good_drops_the_apply() {
     let fixture = fixture(false, false);
     let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
     let roots = &fixture.roots;
-    schedule(roots, &staged_source(&before), false).unwrap();
+    schedule(roots, &staged_source(&before), true).unwrap();
     std::fs::write(roots.core.join("credentials/catalog.json"), b"{damaged").unwrap();
     let today = files_under(&roots.core, &["backups"]);
     assert!(matches!(
@@ -1997,6 +1998,11 @@ async fn a_seal_that_fails_for_good_drops_the_apply() {
     assert_eq!(kept_folders(roots), Vec::<String>::new());
     assert_eq!(files_under(&roots.core, &["backups"]), today);
     assert!(staging_dir(roots, RootKey::Core, &before.staged).exists());
+    assert!(
+        take_service_restart(roots),
+        "the stopped service starts again"
+    );
+    assert_eq!(result(roots), None, "no restore was applied");
 }
 
 /// Final review B minor: today's items that seal larger than a put back

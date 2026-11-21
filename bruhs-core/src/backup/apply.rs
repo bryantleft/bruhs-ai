@@ -1015,10 +1015,15 @@ impl Apply<'_> {
 
     /// Drops an apply whose seal failed for good (N4). Nothing has moved:
     /// the kept folders, the seal key, `pending.json` and the journal go,
-    /// and the answer is the seal's own error.
+    /// and the answer is the seal's own error. A service the restore
+    /// stopped is first recorded in `result.json`, as [`refuse`] does, so
+    /// it starts again (final re-review m2).
     fn abandon(&self, error: BackupError) -> BackupError {
         tracing::warn!("A restore couldn't keep today's keychain items aside, so it was dropped");
         let dropped = (|| {
+            if self.journal.service_to_restart {
+                keep_service_restart(self.backups)?;
+            }
             for pass in &self.journal.passes {
                 remove_tree(&self.kept(pass.root))?;
             }
