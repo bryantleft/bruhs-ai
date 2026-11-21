@@ -40,9 +40,9 @@ use bruhs_models::backup::{
     backup_file_name, desktop_entry, folded_entry_key, included, items_stayed_line, valid_id,
     valid_stamp, BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview,
     RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE,
-    INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED,
-    KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP, RESTORE_CANT_MOVE,
-    RESTORE_PENDING,
+    INVALID_REQUEST, KEEP_ITEMS_TOO_LARGE, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU,
+    KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP,
+    RESTORE_CANT_MOVE, RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -296,7 +296,13 @@ pub(super) fn apply_pending_with(
     let Lock::Free(_restore_lock) = lock(open_lock_file(&backups.join(RESTORE_LOCK))?)? else {
         return Ok(ApplyOutcome::Busy(Holder::Restore));
     };
-    let work = match Journal::load(roots)? {
+    let mut journal = Journal::load(roots)?;
+    if let Some(unmoved) = journal.take_if(|journal| moved_nothing(roots, journal)) {
+        // Nothing moved yet (final review B minor): today's data is whole,
+        // so the apply starts over from `pending.json` with a fresh plan.
+        drop_unmoved(roots, store, &backups, &unmoved)?;
+    }
+    let work = match journal {
         Some(journal) => Work::Resume(journal),
         None => match read_pending(&backups) {
             Ok(Some(pending)) => Work::Start(pending),
@@ -395,11 +401,84 @@ pub fn restore_waits(roots: &Roots) -> bool {
     })
 }
 
-/// Whether an apply has begun and not ended: its journal is there. Data
-/// in the roots may then be half placed, so nothing opens a store.
+/// Whether an apply has begun moving data and not ended: its journal is
+/// there and something moved, or it can't be told. Data in the roots may
+/// then be half placed, so nothing opens a store. A journal that moved
+/// nothing yet leaves today's data whole (final review B minor): the next
+/// apply plans again.
 pub fn applying(roots: &Roots) -> bool {
-    backups_dir(roots)
-        .is_some_and(|backups| std::fs::symlink_metadata(backups.join(JOURNAL)).is_ok())
+    let Some(backups) = backups_dir(roots) else {
+        return false;
+    };
+    if std::fs::symlink_metadata(backups.join(JOURNAL)).is_err() {
+        return false;
+    }
+    match Journal::load(roots) {
+        Ok(Some(journal)) => !moved_nothing(roots, &journal),
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
+/// Whether `journal`'s apply moved nothing yet: no step past the seal is
+/// recorded, and on disk too, since a stop may fall between a rename and
+/// its record. Every entry the plan moves is still in its root, every one
+/// it places still in the source, and the new set holds nothing but its
+/// `meta`. Anything that can't be read counts as moved.
+fn moved_nothing(roots: &Roots, journal: &Journal) -> bool {
+    if journal.steps.iter().any(|step| *step != Step::Sealed) {
+        return false;
+    }
+    journal.passes.iter().all(|pass| {
+        let there = |path: PathBuf| matches!(exists(&path), Ok(true));
+        let moves_live = pass
+            .moves
+            .iter()
+            .all(|name| there(live(roots, pass.root, name)));
+        let places_waiting = source_dir(roots, &journal.source, pass.root)
+            .is_ok_and(|source| pass.places.iter().all(|name| there(source.join(name))));
+        let kept = kept_dir(roots, pass.root, &journal.stamp);
+        let kept_empty = only_names(&kept, &[META]).is_some_and(|names| {
+            names.is_empty()
+                || (pass.root == RootKey::Core && only_names(&kept.join(META), &[SEALED]).is_some())
+        });
+        moves_live && places_waiting && kept_empty
+    })
+}
+
+/// The names in `folder` when each is one of `allowed` (none when it isn't
+/// there), else `None`, as for anything that can't be read.
+fn only_names(folder: &Path, allowed: &[&str]) -> Option<Vec<std::ffi::OsString>> {
+    match std::fs::read_dir(folder) {
+        Ok(entries) => entries
+            .map(|entry| {
+                let name = entry.ok()?.file_name();
+                allowed
+                    .iter()
+                    .any(|allowed| name == *allowed)
+                    .then_some(name)
+            })
+            .collect(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_) => None,
+    }
+}
+
+/// Drops the journal of an apply that moved nothing: the new set's
+/// folders (only its seal) and key, then the journal. `pending.json`
+/// stays, so the apply plans again.
+fn drop_unmoved(
+    roots: &Roots,
+    store: &SecretStore,
+    backups: &Path,
+    journal: &Journal,
+) -> Result<(), BackupError> {
+    tracing::info!("A restore that moved nothing yet starts over");
+    for pass in &journal.passes {
+        remove_tree(&kept_dir(roots, pass.root, &journal.stamp))?;
+    }
+    forget_key(store, backups, &kept_account(&journal.stamp));
+    Journal::remove(backups)
 }
 
 /// `<core>/logs/restore.log`, opened for appending: where the restore's
@@ -743,6 +822,11 @@ impl Apply<'_> {
         random_bytes(&mut random);
         let blob = seal_items(&items, random, *key)
             .map_err(|_| BackupError::Keychain(KEYCHAIN_ITEM_REFUSED))?;
+        // A set whose seal a put back couldn't read is never made (final
+        // review B minor): refused before anything moves.
+        if u64::try_from(blob.len()).map_or(true, |bytes| bytes > SEALED_MAX) {
+            return Err(BackupError::Keychain(KEEP_ITEMS_TOO_LARGE));
+        }
         let refs = items
             .iter()
             .map(|item| ItemRef {
@@ -939,7 +1023,9 @@ impl Apply<'_> {
 fn seal_permanent(error: &BackupError) -> bool {
     match error {
         BackupError::Keychain(message) => {
-            *message == KEYCHAIN_ITEM_REFUSED || *message == KEYCHAIN_READ_FAILED
+            *message == KEYCHAIN_ITEM_REFUSED
+                || *message == KEYCHAIN_READ_FAILED
+                || *message == KEEP_ITEMS_TOO_LARGE
         }
         other => permanent(other),
     }

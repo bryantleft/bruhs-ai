@@ -245,6 +245,10 @@ pub const ITEM_STAYED: &str =
     "{n} keychain item from before the restore stayed in your keychain. The data kept aside holds it too.";
 pub const ITEMS_STAYED: &str =
     "{n} keychain items from before the restore stayed in your keychain. The data kept aside holds them too.";
+/// Today's items seal larger than a put back can read (final review B
+/// minor): the restore is dropped before anything moves.
+pub const KEEP_ITEMS_TOO_LARGE: &str =
+    "Your saved logins and keys are too large to keep aside, so nothing was replaced. Remove some, then restore again.";
 
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
@@ -391,6 +395,7 @@ pub const ALL_COPY: &[&str] = &[
     // Final review, core
     ITEM_STAYED,
     ITEMS_STAYED,
+    KEEP_ITEMS_TOO_LARGE,
 ];
 
 #[cfg(test)]

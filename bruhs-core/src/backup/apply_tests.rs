@@ -1836,6 +1836,77 @@ async fn a_seal_that_fails_for_good_drops_the_apply() {
     assert!(staging_dir(roots, RootKey::Core, &before.staged).exists());
 }
 
+/// Final review B minor: today's items that seal larger than a put back
+/// can read drop the apply before anything moves.
+#[tokio::test]
+async fn a_seal_too_large_to_read_back_drops_the_apply() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    fixture
+        .store
+        .write_item(SECRETS_SERVICE, &account(VALUE), &"x".repeat(17 << 20))
+        .unwrap();
+    let today = files_under(&roots.core, &["backups"]);
+    let outcome = apply_pending(roots, &fixture.store, None);
+    assert!(
+        matches!(&outcome, Err(BackupError::Keychain(message)) if *message == KEEP_ITEMS_TOO_LARGE),
+        "{outcome:?}"
+    );
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    assert!(pending(roots).is_none());
+    assert_eq!(kept_folders(roots), Vec::<String>::new());
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+}
+
+/// Final review B minor: a journal whose apply moved nothing yet (a seal
+/// that stopped, as a keychain that needs the owner does) leaves today's
+/// data whole, so it isn't half applied, and the next apply plans again
+/// with no trace of the first try.
+#[tokio::test]
+async fn a_journal_that_moved_nothing_plans_again() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let sealed = |step: &Step, point: Point| *step == Step::Sealed && point == Point::Acted;
+    assert!(apply_pending_with(roots, &fixture.store, None, &no_env, &sealed).is_err());
+    let first = journal_stamp(roots).unwrap();
+    assert!(!applying(roots), "nothing moved");
+    assert!(restore_waits(roots));
+    assert_eq!(files_under(&roots.core, &["backups"]), before.core);
+
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let stamp = assert_applied(&fixture, &before);
+    assert_ne!(stamp, first);
+    assert!(no_key(&fixture.store, &format!("pre-restore:{first}")));
+    assert!(!kept_dir(roots, RootKey::Core, &first).exists());
+}
+
+/// A stop between a rename and its record moved data the journal doesn't
+/// name yet: that apply is half applied and resumes, never planned again.
+#[tokio::test]
+async fn a_rename_not_yet_recorded_counts_as_moved() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let first_move =
+        |step: &Step, point: Point| matches!(step, Step::Moved { .. }) && point == Point::Acted;
+    assert!(apply_pending_with(roots, &fixture.store, None, &no_env, &first_move).is_err());
+    let stamp = journal_stamp(roots).unwrap();
+    assert!(applying(roots));
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_eq!(assert_applied(&fixture, &before), stamp);
+}
+
 /// Final review B-I1: a folder in today's data that can't be read (a
 /// bind mount another user owns) never stops the apply past the keychain
 /// writes: the set's size counts what can be read and the set is listed.
