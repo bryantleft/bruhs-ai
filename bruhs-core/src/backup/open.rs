@@ -20,7 +20,7 @@ use std::fs::{DirBuilder, File, OpenOptions, Permissions};
 use std::io::{self, Read, Write};
 use std::os::fd::OwnedFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
@@ -545,6 +545,8 @@ fn preview_of(id: &str, manifest: &BackupManifest, prepared: &Prepared) -> Resto
         has_audio: manifest.options.audio,
         has_browser_profiles: manifest.options.browser_profiles,
         skipped_links: manifest.skipped_links,
+        skipped_names: manifest.skipped_names,
+        changed_files: manifest.changed_files,
     }
 }
 
@@ -1226,15 +1228,9 @@ impl<'a> Extraction<'a> {
         let text = self.manifest.take().ok_or_else(damaged)?;
         let manifest: BackupManifest = serde_json::from_slice(&text).map_err(|_| damaged())?;
         manifest.readable().map_err(BackupError::Format)?;
-        let plain_absolute = |path: &str| {
-            let path = Path::new(path);
-            path.is_absolute()
-                && path
-                    .components()
-                    .all(|part| matches!(part, Component::RootDir | Component::Normal(_)))
-        };
-        let roots = [&manifest.home, &manifest.core_root, &manifest.desktop_root];
-        if !roots.iter().all(|root| plain_absolute(root))
+        // Plain absolute roots and short names, as making a backup checks
+        // (final review A minor): the preview shows them.
+        if !manifest.text_fits()
             || manifest.same_root != (manifest.core_root == manifest.desktop_root)
             || (manifest.same_root && self.desktop_entries)
         {

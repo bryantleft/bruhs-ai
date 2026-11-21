@@ -280,6 +280,49 @@ pub struct RestorePreview {
     pub has_browser_profiles: bool,
     #[serde(default)]
     pub skipped_links: u32,
+    /// Owner files the backup left out by name (final review A minor).
+    #[serde(default)]
+    pub skipped_names: u32,
+    /// Files that changed while the backup read them.
+    #[serde(default)]
+    pub changed_files: u32,
+}
+
+/// A manifest's release name is at most this many bytes, printable ASCII
+/// (final review A minor): it is shown in the restore's confirmation.
+pub const MANIFEST_VERSION_MAX_BYTES: usize = 64;
+/// A manifest's home and roots are at most this many bytes each.
+pub const MANIFEST_PATH_MAX_BYTES: usize = 4096;
+/// A manifest's operating system name is at most this many bytes.
+const MANIFEST_OS_MAX_BYTES: usize = 64;
+
+/// Whether `path` is a plain absolute path: rooted, with no `.`, `..` or
+/// prefix. A backup names only such roots, and a restore takes only them
+/// (final review A minor: one rule for both).
+pub fn clean_absolute(path: &str) -> bool {
+    path == "/"
+        || path.strip_prefix('/').is_some_and(|rest| {
+            rest.split('/')
+                .all(|part| !part.is_empty() && part != "." && part != "..")
+        })
+}
+
+/// Whether a home or root can be named in a manifest: a plain absolute
+/// path ([`clean_absolute`]) of at most [`MANIFEST_PATH_MAX_BYTES`], with
+/// no control or invisible character. Making a backup and opening one ask
+/// the same (final review A minor).
+pub fn root_text_fits(path: &str) -> bool {
+    let visible = |c: char| {
+        !c.is_control()
+            && !matches!(
+                c,
+                '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{FEFF}'
+            )
+    };
+    path.len() <= MANIFEST_PATH_MAX_BYTES && clean_absolute(path) && path.chars().all(visible)
 }
 
 /// `manifest.json`, the last entry of a backup. No `deny_unknown_fields`: a
@@ -318,6 +361,21 @@ pub struct BackupManifest {
 }
 
 impl BackupManifest {
+    /// Whether the text a restore shows or keeps is within bounds (final
+    /// review A minor): the release and system names short printable
+    /// ASCII, the home and roots as [`root_text_fits`] asks. A manifest
+    /// past them is damaged.
+    pub fn text_fits(&self) -> bool {
+        let short = |text: &str, max: usize| {
+            text.len() <= max && text.chars().all(|c| c.is_ascii_graphic())
+        };
+        short(&self.app_version, MANIFEST_VERSION_MAX_BYTES)
+            && short(&self.os, MANIFEST_OS_MAX_BYTES)
+            && [&self.home, &self.core_root, &self.desktop_root]
+                .iter()
+                .all(|root| root_text_fits(root))
+    }
+
     /// Whether this build can restore the backup: neither its format nor its
     /// crew protocol is newer than this build's.
     pub fn readable(&self) -> Result<(), &'static str> {
@@ -690,6 +748,9 @@ pub fn preview_lines(preview: &RestorePreview) -> Vec<String> {
         };
         lines.push(fill(template, &[("n", &preview.skipped_links.to_string())]));
     }
+    // What the backup's maker was warned about (final review A minor).
+    lines.extend(skipped_names_line(preview.skipped_names));
+    lines.extend(changed_files_line(preview.changed_files));
     lines
 }
 
@@ -890,6 +951,86 @@ mod tests {
             bytes: 0,
             skipped_links,
             ..RestorePreview::default()
+        }
+    }
+
+    #[test]
+    fn manifest_text_is_bounded() {
+        let sound = BackupManifest {
+            format: MANIFEST_FORMAT,
+            app_version: "0.2.0-beta.1".into(),
+            made_at_ms: EpochMs::default(),
+            made_on: BackupApp::Desktop,
+            reactive_protocol: CREW_PROTOCOL,
+            web_db_version: None,
+            os: "macos".into(),
+            home: "/Users/ada lovelace".into(),
+            core_root: "/Users/ada lovelace/Library/Application Support/dev.bruhs.bruhs-ai".into(),
+            desktop_root: "/Users/ada lovelace/Library/Application Support/bruhs-ai".into(),
+            same_root: false,
+            options: BackupOptions::default(),
+            files: Vec::new(),
+            keychain_items: 0,
+            skipped_links: 0,
+            skipped_names: 0,
+            changed_files: 0,
+            counts: BackupCounts::default(),
+        };
+        assert!(sound.text_fits());
+        let at_cap = BackupManifest {
+            app_version: "1".repeat(MANIFEST_VERSION_MAX_BYTES),
+            home: format!("/{}", "h".repeat(MANIFEST_PATH_MAX_BYTES - 1)),
+            ..sound.clone()
+        };
+        assert!(at_cap.text_fits());
+        for broken in [
+            BackupManifest {
+                app_version: "1".repeat(MANIFEST_VERSION_MAX_BYTES + 1),
+                ..sound.clone()
+            },
+            BackupManifest {
+                app_version: "0.1\n1".into(),
+                ..sound.clone()
+            },
+            BackupManifest {
+                app_version: "0.1 1".into(),
+                ..sound.clone()
+            },
+            BackupManifest {
+                os: "m".repeat(65),
+                ..sound.clone()
+            },
+            BackupManifest {
+                home: format!("/{}", "h".repeat(MANIFEST_PATH_MAX_BYTES)),
+                ..sound.clone()
+            },
+            BackupManifest {
+                home: "/Users/a\u{202E}b".into(),
+                ..sound.clone()
+            },
+            BackupManifest {
+                desktop_root: "/Users/a\u{7}".into(),
+                ..sound.clone()
+            },
+        ] {
+            assert!(!broken.text_fits(), "{broken:?}");
+        }
+    }
+
+    #[test]
+    fn clean_absolute_paths_only() {
+        assert!(clean_absolute("/Users/a"));
+        assert!(clean_absolute("/"));
+        for path in [
+            "",
+            "Users/a",
+            "/Users/../a",
+            "/Users/./a",
+            "./a",
+            "//a",
+            "/a/",
+        ] {
+            assert!(!clean_absolute(path), "{path}");
         }
     }
 
@@ -1114,6 +1255,8 @@ mod tests {
             has_audio: true,
             has_browser_profiles: false,
             skipped_links: 0,
+            skipped_names: 0,
+            changed_files: 0,
         };
         let lines = preview_lines(&preview);
         assert_eq!(
@@ -1144,6 +1287,8 @@ mod tests {
             has_audio: false,
             has_browser_profiles: true,
             skipped_links: 3,
+            skipped_names: 2,
+            changed_files: 1,
             ..preview
         };
         let lines = preview_lines(&bare);
@@ -1156,6 +1301,8 @@ mod tests {
                 PREVIEW_NO_KEYCHAIN,
                 PREVIEW_NO_AUDIO,
                 "3 links were left out.",
+                "2 files or folders with names a backup can't hold were left out.",
+                "1 file changed while Bruhs read it, so its copy may be incomplete.",
             ]
         );
 

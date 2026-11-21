@@ -907,6 +907,8 @@ mod tests {
             has_audio: false,
             has_browser_profiles: false,
             skipped_links: 1,
+            skipped_names: 0,
+            changed_files: 0,
         }
     }
 

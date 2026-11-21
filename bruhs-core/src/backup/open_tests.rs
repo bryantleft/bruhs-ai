@@ -334,6 +334,8 @@ async fn a_good_backup_stages_and_previews() {
     assert!(preview.has_keychain && preview.has_audio);
     assert!(!preview.has_browser_profiles && !preview.has_web_part);
     assert_eq!(preview.skipped_links, manifest.skipped_links);
+    assert_eq!(preview.skipped_names, manifest.skipped_names);
+    assert_eq!(preview.changed_files, manifest.changed_files);
 
     // Every data file is staged with its listed bytes, in its own root.
     let core = staging_dir(&fixture.roots, RootKey::Core, &id);
@@ -900,6 +902,10 @@ async fn newer_backups_and_overlapping_roots_are_refused() {
             as fn(&mut BackupManifest),
         |manifest| manifest.home = "/Users/a/../b".into(),
         |manifest| manifest.same_root = true,
+        // Final review A minor: the text a preview shows is bounded.
+        |manifest| manifest.app_version = "1".repeat(65),
+        |manifest| manifest.app_version = "0.1\u{202E}1".into(),
+        |manifest| manifest.home = format!("/{}", "h".repeat(4096)),
     ] {
         let manifest = manifest_of(&[("core/a", a)], tweak);
         craft(
@@ -1291,7 +1297,10 @@ async fn files_without_their_folder_entries_are_refused() {
     let host = host(&fixture);
     let a = b"alpha".as_slice();
     let deep = "core/a/b/c/d";
-    let listing = manifest_of(&[(deep, a)], |_| {});
+    let listing = manifest_of(&[(deep, a)], |manifest| {
+        manifest.skipped_names = 2;
+        manifest.changed_files = 1;
+    });
     let path = fixture.out.join("folders.bruhsbak");
     let outside: [PathBuf; 0] = [];
 
@@ -1306,7 +1315,10 @@ async fn files_without_their_folder_entries_are_refused() {
         ],
     );
     let (id, state) = open_with(&host, &path, PASSWORD).await;
-    preview(state);
+    // Final review A minor: what the maker was warned about reaches the
+    // preview.
+    let shown = preview(state);
+    assert_eq!((shown.skipped_names, shown.changed_files), (2, 1));
     host.discard_staged(&id).unwrap();
 
     for entries in [

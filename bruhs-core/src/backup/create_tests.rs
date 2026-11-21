@@ -1193,6 +1193,27 @@ async fn a_file_that_shrinks_while_read_fails_the_backup() {
     assert!(names_in(&fixture.out).is_empty());
 }
 
+/// Final review A minor: a root a restore wouldn't take (not plain
+/// absolute) makes no backup, as one that isn't UTF-8 doesn't.
+#[tokio::test]
+async fn a_root_a_restore_would_refuse_is_refused() {
+    let fixture = fixture().await;
+    let mut roots = fixture.roots.clone();
+    roots.home = roots.home.join("../home");
+    let host = BackupHost::new(roots, fixture.store.clone()).for_tests(false);
+    let job = host
+        .start_create(request(Output::Outgoing, BackupOptions::default()))
+        .await
+        .unwrap();
+    assert_eq!(
+        finished(&host, &job.id).await,
+        JobState::Failed {
+            message: ROOT_NAME_REFUSED.into()
+        }
+    );
+    assert!(names_in(&fixture.out).is_empty());
+}
+
 #[tokio::test]
 async fn a_root_that_is_not_utf8_is_refused() {
     use std::os::unix::ffi::OsStrExt as _;

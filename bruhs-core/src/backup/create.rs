@@ -20,12 +20,13 @@ use std::sync::Arc;
 use bruhs_backup::{Encryptor, Kdf, Key, Kind};
 use bruhs_models::backup::{
     backup_file_name, browser_busy_line, changed_files_line, missing_items_line, no_space,
-    normalize_password, skipped_names_line, validate_password, BackupApp, BackupCounts, BackupFile,
-    BackupManifest, BackupOptions, JobState, JobStep, LastBackup, ManifestFile, BACKUP_EXTENSION,
-    BACKUP_STOPPED, BACKUP_TOO_MANY, BRUHS_UNCOUNTED, DESTINATION_EXISTS, DESTINATION_INSIDE,
-    DESTINATION_MISSING, DESTINATION_NAME_LONG, FILE_CHANGED, INVALID_REQUEST,
-    KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_TOO_LARGE,
-    MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED, WEB_TOO_LARGE, WEB_UPLOAD_MAX,
+    normalize_password, root_text_fits, skipped_names_line, validate_password, BackupApp,
+    BackupCounts, BackupFile, BackupManifest, BackupOptions, JobState, JobStep, LastBackup,
+    ManifestFile, BACKUP_EXTENSION, BACKUP_STOPPED, BACKUP_TOO_MANY, BRUHS_UNCOUNTED,
+    DESTINATION_EXISTS, DESTINATION_INSIDE, DESTINATION_MISSING, DESTINATION_NAME_LONG,
+    FILE_CHANGED, INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED,
+    KEYCHAIN_TOO_LARGE, MANIFEST_FORMAT, NOT_A_BACKUP, ROOT_NAME_REFUSED, WEB_TOO_LARGE,
+    WEB_UPLOAD_MAX,
 };
 use bruhs_models::crew::CREW_PROTOCOL;
 use bruhs_models::EpochMs;
@@ -501,13 +502,15 @@ fn send(progress: &watch::Sender<JobState>, done_bytes: u64, total_bytes: u64, s
 }
 
 /// The home and roots as text. A root that isn't UTF-8 can't be named in
-/// the manifest or rewritten on restore, so no backup is made (B Task 5
-/// ruling).
+/// the manifest or rewritten on restore (B Task 5 ruling), and one a
+/// restore wouldn't take (not plain absolute, too long, or holding a
+/// control or invisible character) would make a backup that never opens
+/// (final review A minor): no backup is made for either.
 fn utf8_roots(roots: &Roots) -> Result<bruhs_models::backup::RootsInfo, BackupError> {
-    let all_text = [&roots.home, &roots.core, &roots.desktop, &roots.config]
+    let all_fit = [&roots.home, &roots.core, &roots.desktop, &roots.config]
         .iter()
-        .all(|path| path.to_str().is_some());
-    if all_text {
+        .all(|path| path.to_str().is_some_and(root_text_fits));
+    if all_fit {
         Ok(roots.info())
     } else {
         Err(BackupError::Refused(ROOT_NAME_REFUSED))
