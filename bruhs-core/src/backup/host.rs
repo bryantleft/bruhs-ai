@@ -40,8 +40,12 @@ pub(super) const PENDING: &str = "pending.json";
 
 /// The last backup made here.
 const LAST: &str = "last.json";
-/// A download or upload left this long is swept.
+/// A download or upload left this long is swept (D6): asked for, it is
+/// gone, and the sweep that runs while the server does removes it.
 const TRANSFER_TTL: Duration = Duration::from_secs(30 * 60);
+/// How often a running server sweeps old downloads and uploads (final
+/// review A-I2).
+const TRANSFER_SWEEP_EVERY: Duration = Duration::from_secs(10 * 60);
 /// A restore upload checks the free space each time this much more
 /// arrived.
 const SPACE_CHECK_BYTES: u64 = 64 << 20;
@@ -294,7 +298,14 @@ impl BackupHost {
         }
 
         let host = self.clone();
+        // The web part's upload goes when the job ends, whatever the end
+        // (final review A-I2); only one in `incoming` is ever removed.
+        let web_part = request
+            .web_part
+            .clone()
+            .filter(|path| path.parent() == Some(self.incoming_dir().as_path()));
         self.launch(JobStep::Collecting, move |_, progress, cancel| async move {
+            let _web_part = RemoveOnDrop(web_part);
             match create::create(&host, request, &progress, &cancel).await {
                 Ok(file) => JobState::Created { file },
                 Err(error) => JobState::Failed {
@@ -420,7 +431,8 @@ impl BackupHost {
             .is_some_and(|backups| std::fs::symlink_metadata(backups.join(PENDING)).is_ok())
     }
 
-    /// A finished web download's file.
+    /// A finished web download's file, unless it is past its 30 minutes
+    /// (D6): then it is removed.
     pub fn outgoing(&self, id: &str) -> Option<PathBuf> {
         if !valid_id(id) {
             return None;
@@ -428,9 +440,7 @@ impl BackupHost {
         let path = self
             .private_folder(Some(OUTGOING))?
             .join(format!("{id}.bruhsbak"));
-        std::fs::symlink_metadata(&path)
-            .is_ok_and(|metadata| metadata.is_file())
-            .then_some(path)
+        fresh_transfer(path)
     }
 
     /// The name a finished download goes by: the file name its job
@@ -487,15 +497,54 @@ impl BackupHost {
         })
     }
 
-    /// A finished upload's file.
+    /// A finished upload's file, unless it is past its 30 minutes (D6):
+    /// then it is removed.
     pub fn uploaded(&self, kind: UploadKind, id: &str) -> Option<PathBuf> {
         if !valid_id(id) {
             return None;
         }
         let path = upload_path(&self.private_folder(Some(INCOMING))?, kind, id);
-        std::fs::symlink_metadata(&path)
-            .is_ok_and(|metadata| metadata.is_file())
-            .then_some(path)
+        fresh_transfer(path)
+    }
+
+    /// Removes downloads and uploads older than 30 minutes (D6). Touches
+    /// no keychain item and takes no lock.
+    pub fn sweep_transfers(&self) {
+        let now = SystemTime::now();
+        for folder in [OUTGOING, INCOMING] {
+            if let Some(folder) = self.private_folder(Some(folder)) {
+                sweep_folder(
+                    &folder,
+                    |modified| expired_transfer(modified, now),
+                    |_| true,
+                );
+            }
+        }
+    }
+
+    /// Sweeps old downloads and uploads every 10 minutes for as long as
+    /// the runtime runs (final review A-I2), each sweep off the async
+    /// workers. The start's [`Self::sweep`] covers the first 10 minutes.
+    pub fn keep_sweeping_transfers(&self) {
+        self.sweep_transfers_every(TRANSFER_SWEEP_EVERY);
+    }
+
+    pub(super) fn sweep_transfers_every(&self, period: Duration) {
+        let host = self.clone();
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticks.tick().await;
+                let sweeper = host.clone();
+                if tokio::task::spawn_blocking(move || sweeper.sweep_transfers())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("A backup transfer sweep stopped early");
+                }
+            }
+        });
     }
 
     /// Removes downloads and uploads older than 30 minutes and, unless a
@@ -508,19 +557,7 @@ impl BackupHost {
     /// items (seal keys whose set is gone), so it can wait on the
     /// keychain: call it off the async runtime.
     pub fn sweep(&self) {
-        let now = SystemTime::now();
-        for folder in [OUTGOING, INCOMING] {
-            if let Some(folder) = self.private_folder(Some(folder)) {
-                sweep_folder(
-                    &folder,
-                    |modified| {
-                        now.duration_since(modified)
-                            .is_ok_and(|age| age > TRANSFER_TTL)
-                    },
-                    |_| true,
-                );
-            }
-        }
+        self.sweep_transfers();
         if self.running() {
             return;
         }
@@ -863,6 +900,42 @@ fn partial_name(name: &std::ffi::OsStr) -> bool {
                 .rsplit_once(".partial-")
                 .is_some_and(|(head, id)| head.len() > 1 && valid_id(id))
     })
+}
+
+/// Whether a download or upload last changed at `modified` is past its 30
+/// minutes at `now` (D6).
+fn expired_transfer(modified: SystemTime, now: SystemTime) -> bool {
+    now.duration_since(modified)
+        .is_ok_and(|age| age > TRANSFER_TTL)
+}
+
+/// `path` when it is a regular file within its 30 minutes. One past them
+/// is removed, so a link that waited too long never answers (final
+/// review A-I2).
+fn fresh_transfer(path: PathBuf) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+    if expired_transfer(modified, SystemTime::now()) {
+        // Best effort: the sweep tries again.
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    Some(path)
+}
+
+/// Removes a file when dropped, for an upload a job used up.
+struct RemoveOnDrop(Option<PathBuf>);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            // Best effort: the transfer sweep removes it later otherwise.
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// Removes the regular files in `folder` whose UTF-8 name `named` and

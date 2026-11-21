@@ -105,7 +105,11 @@ pub async fn start(
         .with_computers(tools)
         .with_reactive(reactive)
         .with_app_version(app_version().to_owned());
-    Ok(sweep_at_start(host, BackupHost::sweep).await)
+    let host = sweep_at_start(host, BackupHost::sweep).await;
+    // Downloads and uploads expire after 30 minutes while it runs too
+    // (final review A-I2).
+    host.keep_sweeping_transfers();
+    Ok(host)
 }
 
 /// Runs `sweep` off the async runtime (it may wait on the keychain) and

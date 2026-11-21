@@ -847,9 +847,12 @@ async fn a_web_part_rides_along() {
 
     let mut asked = request(Output::Outgoing, BackupOptions::default());
     asked.app = BackupApp::Web;
-    asked.web_part = Some(stored);
+    asked.web_part = Some(stored.clone());
     asked.web_db_version = Some(13);
     let file = created(&host, asked).await;
+    // Final review A-I2: the job used the upload up.
+    assert!(host.uploaded(UploadKind::WebPart, &id).is_none());
+    assert!(!stored.exists(), "the web part's upload is gone");
     let entries = open_backup(&backup_path(&host, &file));
     let manifest = manifest_of(&entries);
     let web = entry(&entries, "web/part.bin").unwrap();
@@ -885,6 +888,9 @@ async fn a_web_part_rides_along() {
     assert_eq!(names_in(&incoming), before, "unfinished uploads are gone");
 
     // A web part needs the IndexedDB version it was dumped from.
+    let mut upload = host.begin_upload(UploadKind::WebPart).unwrap();
+    upload.write(&part).unwrap();
+    let id = upload.finish().unwrap();
     let mut unversioned = request(Output::Outgoing, BackupOptions::default());
     unversioned.web_part = host.uploaded(UploadKind::WebPart, &id);
     assert!(unversioned.web_part.is_some());
@@ -896,7 +902,7 @@ async fn a_web_part_rides_along() {
     let wrong = fixture.out.join("part.bin");
     std::fs::write(&wrong, &full).unwrap();
     let mut asked = request(Output::Outgoing, BackupOptions::default());
-    asked.web_part = Some(wrong);
+    asked.web_part = Some(wrong.clone());
     asked.web_db_version = Some(13);
     let job = host.start_create(asked).await.unwrap();
     assert_eq!(
@@ -905,6 +911,87 @@ async fn a_web_part_rides_along() {
             message: NOT_A_BACKUP.into()
         }
     );
+    assert!(wrong.exists(), "a file outside `incoming` is never removed");
+}
+
+/// Final review A-I2: a job that fails removes its web part's upload too.
+#[tokio::test]
+async fn a_failed_job_removes_its_web_part() {
+    let fixture = fixture().await;
+    let host = host(&fixture).with_limits(Limits {
+        entries: 1,
+        ..Limits::BACKUP
+    });
+    let part = container(Kind::WebPart, b"{\"version\":1,\"stores\":{}}");
+    let mut upload = host.begin_upload(UploadKind::WebPart).unwrap();
+    upload.write(&part).unwrap();
+    let id = upload.finish().unwrap();
+    let stored = host.uploaded(UploadKind::WebPart, &id).unwrap();
+    let mut asked = request(Output::Outgoing, BackupOptions::default());
+    asked.app = BackupApp::Web;
+    asked.web_part = Some(stored.clone());
+    asked.web_db_version = Some(13);
+    let job = host.start_create(asked).await.unwrap();
+    assert_eq!(
+        finished(&host, &job.id).await,
+        JobState::Failed {
+            message: BACKUP_TOO_MANY.into()
+        }
+    );
+    assert!(!stored.exists(), "the web part's upload is gone");
+}
+
+/// Final review A-I2 (D6): a download or upload past its 30 minutes is
+/// gone when asked for, and the sweep a running server repeats removes
+/// it without being asked; a fresh one stays.
+#[tokio::test]
+async fn transfers_expire_after_30_minutes_while_the_server_runs() {
+    let fixture = fixture().await;
+    let host = host(&fixture);
+    let backups = fixture.roots.backups(RootKey::Core);
+    let (outgoing, incoming) = (backups.join("outgoing"), backups.join("incoming"));
+    std::fs::create_dir_all(&outgoing).unwrap();
+    std::fs::create_dir_all(&incoming).unwrap();
+    let age = |path: &Path, minutes: u64| {
+        std::fs::write(path, b"waiting").unwrap();
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(minutes * 60))
+            .unwrap();
+    };
+    let (old, fresh) = ("a".repeat(32), "b".repeat(32));
+    let download = |id: &str| outgoing.join(format!("{id}.bruhsbak"));
+    age(&download(&old), 31);
+    age(&download(&fresh), 29);
+    let mut upload = host.begin_upload(UploadKind::Restore).unwrap();
+    upload.write(b"x").unwrap();
+    let old_upload = upload.finish().unwrap();
+    let old_upload_path = host.uploaded(UploadKind::Restore, &old_upload).unwrap();
+    age(&old_upload_path, 31);
+
+    assert!(host.outgoing(&old).is_none());
+    assert!(!download(&old).exists(), "asked for, it is removed");
+    assert_eq!(host.outgoing(&fresh), Some(download(&fresh)));
+    assert!(host.uploaded(UploadKind::Restore, &old_upload).is_none());
+    assert!(!old_upload_path.exists());
+
+    // Without being asked: the repeated sweep.
+    let stale = download(&"c".repeat(32));
+    let stale_upload = incoming.join("d".repeat(32));
+    age(&stale, 45);
+    age(&stale_upload, 45);
+    host.sweep_transfers_every(Duration::from_millis(20));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while (stale.exists() || stale_upload.exists()) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        !stale.exists() && !stale_upload.exists(),
+        "swept while running"
+    );
+    assert!(download(&fresh).exists(), "a fresh download stays");
 }
 
 #[tokio::test]
