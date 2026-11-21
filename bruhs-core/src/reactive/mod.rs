@@ -73,6 +73,8 @@ pub struct SourceEmission {
 
 pub use approval::StepAllowance;
 pub use notify::{system_notifier, Notifier};
+#[cfg(unix)]
+pub(crate) use store::restore::pause_all_for_restore;
 pub use vault::VaultRefusal;
 
 #[derive(Clone)]

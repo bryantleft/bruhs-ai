@@ -10,6 +10,9 @@ pub(in crate::reactive) mod crew;
 #[cfg(all(test, unix))]
 mod ownership_tests;
 pub(super) mod reports;
+// The backup's restore is macOS and Linux only (D27).
+#[cfg(unix)]
+pub(in crate::reactive) mod restore;
 pub(in crate::reactive) mod rooms;
 pub(in crate::reactive) use always_on::{
     notification_settings as snapshot_settings, pending_deliveries, record_delivery, signal,

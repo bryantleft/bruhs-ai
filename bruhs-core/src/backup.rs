@@ -1,8 +1,8 @@
 //! Backup and restore of everything Bruhs keeps on this computer (crew
 //! project 6): the data roots, what a backup takes from them, consistent
 //! SQLite copies, the free space a job needs, opening a backup into
-//! staging folders before a restore, and applying it offline with today's
-//! data kept aside.
+//! staging folders before a restore, preparing the staged data for this
+//! computer, and applying it offline with today's data kept aside.
 //!
 //! The container format lives in `bruhs-backup`, the wire types, rules and
 //! copy in `bruhs_models::backup`. Nothing here is reachable from a bruh:
@@ -29,6 +29,8 @@ mod host;
 mod journal;
 #[cfg(unix)]
 mod open;
+#[cfg(unix)]
+mod prepare;
 
 #[cfg(unix)]
 pub use apply::{
@@ -55,6 +57,8 @@ mod collect_tests;
 mod create_tests;
 #[cfg(test)]
 mod open_tests;
+#[cfg(test)]
+mod prepare_tests;
 
 /// The app and organisation names `directories` resolves the roots from.
 const QUALIFIER: &str = "dev";

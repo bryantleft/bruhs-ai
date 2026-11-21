@@ -2,7 +2,8 @@
 //! and the B Task 3 notes): check the password, every chunk, every entry's
 //! path and type, the tar end, every size and hash and the manifest, while
 //! writing nothing outside a fresh `backups/staging/<id>/` in each root.
-//! Then seal the keychain items and answer what the backup holds.
+//! Then prepare the staged data for this computer (`prepare`), seal the
+//! keychain items and answer what the backup holds.
 //!
 //! The backup file is hostile input: anyone who knows its password can
 //! craft one. No size it names decides an allocation, nothing follows or
@@ -26,8 +27,8 @@ use std::time::{Duration, SystemTime};
 use bruhs_backup::{Decryptor, FormatError, Kind, Secret, HEADER_LEN};
 use bruhs_models::backup::{
     excluded, folded_entry_key, no_space, normalize_password, safe_entry_path, valid_id,
-    validate_password, BackupJob, BackupManifest, EntryPath, Excluded, JobState, JobStep,
-    PendingRestore, RestorePreview, RestoreSource, BACKUP_BUSY, BACKUP_STOPPED, DAMAGED,
+    validate_password, BackupCounts, BackupJob, BackupManifest, EntryPath, Excluded, JobState,
+    JobStep, PendingRestore, RestorePreview, RestoreSource, BACKUP_BUSY, BACKUP_STOPPED, DAMAGED,
     DESKTOP_ENTRIES, GONE, KEYCHAIN_NEEDS_YOU, NAMES_CLASH, NEWER_BACKUP, NOT_A_BACKUP,
     RESERVED_TOP, RESTORE_PENDING, ROOTS_OVERLAP, SOURCE_MISSING, UNSAFE_ENTRY,
     UNSUPPORTED_PLATFORM, WRONG_PASSWORD,
@@ -40,6 +41,7 @@ use super::create::{backups_are_folders, private_dir, CancelFlag};
 use super::host::{
     new_private_file, random_bytes, read_small, web_part_header, BackupHost, Limits, PENDING,
 };
+use super::prepare::{prepare, Prepared};
 use super::{BackupError, RootKey, Roots, FREE_MARGIN};
 use crate::secrets::{check_items, forget_seal_key, seal_items, store_seal_key, KeychainItem};
 
@@ -47,7 +49,7 @@ use crate::secrets::{check_items, forget_seal_key, seal_items, store_seal_key, K
 const STAGING: &str = "staging";
 /// The folder inside the core staging that holds what isn't data. No
 /// backup entry takes its name (`safe_entry_path`, B Task 7 N2).
-const META: &str = RESERVED_TOP;
+pub(super) const META: &str = RESERVED_TOP;
 const PREVIEW_FILE: &str = "preview.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const SEALED_FILE: &str = "keychain.sealed";
@@ -87,7 +89,7 @@ pub(super) fn staging_dir(roots: &Roots, root: RootKey, id: &str) -> PathBuf {
 
 /// The roots that get a staging folder: the core root, and the desktop
 /// root unless both are one folder.
-fn staging_roots(roots: &Roots) -> &'static [RootKey] {
+pub(super) fn staging_roots(roots: &Roots) -> &'static [RootKey] {
     if roots.same() {
         &[RootKey::Core]
     } else {
@@ -400,8 +402,17 @@ async fn open(
         .await
         .map_err(|_| worker_stopped())??
     };
-    // Task 9 prepares the staged data for this computer here.
-    let preview = tokio::task::spawn_blocking(move || seal(&config, &staged))
+    if cancel.cancelled() {
+        return Err(stopped());
+    }
+    progress.send_replace(JobState::Running {
+        done_bytes: bytes,
+        total_bytes: bytes,
+        step: JobStep::Preparing,
+    });
+    let mut staged = staged;
+    let prepared = prepare(&roots, &mut staged).await?;
+    let preview = tokio::task::spawn_blocking(move || seal(&config, &staged, &prepared))
         .await
         .map_err(|_| worker_stopped())??;
     discard.disarm();
@@ -446,15 +457,13 @@ impl Drop for Discard {
 
 /// Seals the staged items (D13) under a fresh key kept at `staged:<id>`,
 /// writes the manifest and, last, the preview, and answers the preview.
-fn seal(config: &super::host::Config, staged: &Staged) -> Result<RestorePreview, BackupError> {
+fn seal(
+    config: &super::host::Config,
+    staged: &Staged,
+    prepared: &Prepared,
+) -> Result<RestorePreview, BackupError> {
     let folder = staging_dir(&config.roots, RootKey::Core, &staged.id);
-    let meta = folder.join(META);
-    // A web part already made it, 0700; otherwise it is made here, 0700
-    // whatever the umask (B Task 7 N3).
-    match std::fs::symlink_metadata(&meta) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => new_folder(&meta)?,
-        _ => private_dir(&meta)?,
-    }
+    let meta = meta_folder(&folder)?;
     if staged.manifest.options.keychain {
         let mut key = Zeroizing::new([0_u8; 32]);
         random_bytes(&mut *key);
@@ -467,7 +476,7 @@ fn seal(config: &super::host::Config, staged: &Staged) -> Result<RestorePreview,
     }
     let manifest = serde_json::to_vec(&staged.manifest).map_err(io::Error::other)?;
     write_new(&meta.join(MANIFEST_FILE), &manifest)?;
-    let preview = preview_of(&staged.id, &staged.manifest);
+    let preview = preview_of(&staged.id, &staged.manifest, prepared);
     let text = serde_json::to_vec(&preview).map_err(io::Error::other)?;
     write_new(&meta.join(PREVIEW_FILE), &text)?;
     // One full sync last (F_FULLFSYNC on macOS): it flushes the drive's
@@ -480,26 +489,42 @@ fn seal(config: &super::host::Config, staged: &Staged) -> Result<RestorePreview,
     Ok(preview)
 }
 
+/// The core staging `folder`'s `meta`, made now if no web part made it:
+/// 0700 whatever the umask (B Task 7 N3).
+pub(super) fn meta_folder(folder: &Path) -> Result<PathBuf, BackupError> {
+    let meta = folder.join(META);
+    match std::fs::symlink_metadata(&meta) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => new_folder(&meta)?,
+        _ => private_dir(&meta)?,
+    }
+    Ok(meta)
+}
+
 /// Writes a new 0600 file and syncs it.
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
+pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), BackupError> {
     let mut file = new_private_file(path)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(())
 }
 
-/// What the manifest says the backup holds. Task 9 adds the rewrites and
-/// the outside folders.
-fn preview_of(id: &str, manifest: &BackupManifest) -> RestorePreview {
+/// What the backup holds and what preparing it for this computer found:
+/// the rewrites, the folders kept outside them, and the bruhs and vault
+/// entries counted in the staged data.
+fn preview_of(id: &str, manifest: &BackupManifest, prepared: &Prepared) -> RestorePreview {
     RestorePreview {
         id: id.to_owned(),
         made_at_ms: manifest.made_at_ms,
         made_on: manifest.made_on,
         app_version: manifest.app_version.clone(),
         source_home: manifest.home.clone(),
-        rewrites: Vec::new(),
-        outside_home: Vec::new(),
-        counts: manifest.counts,
+        rewrites: prepared.rewrites.clone(),
+        outside_home: prepared.outside_home.clone(),
+        counts: BackupCounts {
+            bruhs: prepared.bruhs,
+            vault_entries: prepared.vault_entries,
+            ..manifest.counts
+        },
         bytes: manifest
             .files
             .iter()
@@ -517,7 +542,13 @@ fn preview_of(id: &str, manifest: &BackupManifest) -> RestorePreview {
 /// `id` (D8, D9, D11, ruling F16) and answers it with its keychain items.
 /// `progress` hears the bytes read of the file's size. On any failure the
 /// staging folders are gone and nothing else changed.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 9"))]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the tests' entry point; a job passes its own limits"
+    )
+)]
 pub(crate) fn extract(
     roots: &Roots,
     id: &str,
@@ -579,7 +610,7 @@ fn new_folder(folder: &Path) -> Result<(), BackupError> {
 
 /// fsyncs a folder, so the names made in it last. A volume that can't
 /// sync folders (`EINVAL`) is left as it is.
-fn sync_folder(folder: &Path) -> Result<(), BackupError> {
+pub(super) fn sync_folder(folder: &Path) -> Result<(), BackupError> {
     match rustix::fs::fsync(open_folder(folder)?) {
         Ok(()) | Err(rustix::io::Errno::INVAL) => Ok(()),
         Err(error) => Err(io::Error::from(error).into()),
@@ -1225,8 +1256,8 @@ impl<'a> Extraction<'a> {
             }
             None => Vec::new(),
         };
-        // Every item one of Bruhs' own, none twice, before Task 9 or the
-        // seal sees them (B Task 7 ruling).
+        // Every item one of Bruhs' own, none twice, before the prepare or
+        // the seal sees them (B Task 7 ruling).
         if u32::try_from(items.len()).ok() != Some(manifest.keychain_items)
             || check_items(&items).is_err()
         {

@@ -54,7 +54,7 @@ pub(in crate::reactive) fn profile(
     Ok(payload.map(decode).transpose()?.unwrap_or_default())
 }
 
-fn save(
+pub(super) fn save(
     connection: &Connection,
     agent_id: &str,
     profile: &BruhProfile,
