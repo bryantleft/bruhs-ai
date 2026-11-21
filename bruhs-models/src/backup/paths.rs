@@ -43,12 +43,14 @@ pub const MAX_ENTRY_DEPTH: usize = 64;
 
 /// Top-level entries of either root that never go in: machine-local state,
 /// caches, agents' working folders (`worktrees`, and `scratch`, main's
-/// projectless chats: post-merge ruling 1) and the backups themselves.
-pub const EXCLUDED_TOP: [&str; 10] = [
+/// projectless chats: post-merge ruling 1), short-lived import batches
+/// (Imports D16) and the backups themselves.
+pub const EXCLUDED_TOP: [&str; 11] = [
     "backups",
     "capture",
     "codex-lean-sessions",
     "codex-lean-sessions.lock",
+    "imports",
     "logs",
     "models",
     "scratch",
@@ -905,7 +907,7 @@ mod tests {
         // worktrees.
         assert_eq!(excluded("scratch", true), Excluded::Always);
         assert_eq!(excluded("scratch/c1/Cargo.toml", false), Excluded::Always);
-        assert_eq!(EXCLUDED_TOP.len(), 10);
+        assert_eq!(EXCLUDED_TOP.len(), 11);
         assert!(!rewritable("audio/m1.jsonl"));
         assert!(!rewritable("knowledge-attachments/k.json"));
         assert!(!rewritable("server/bruhs/a1/browser/Default/Preferences"));
@@ -1137,5 +1139,17 @@ mod tests {
         );
         assert!(path_field("cwd") && !path_field("path"));
         assert!(path_field("worktreePath") && path_field("connection_path"));
+    }
+
+    /// Import batches are machine-local and short-lived (Imports D16): a
+    /// backup never takes `<core>/imports`, and a restore refuses it.
+    #[test]
+    fn backup_leaves_out_imports() {
+        assert!(EXCLUDED_TOP.contains(&"imports"));
+        assert_eq!(excluded("imports", true), Excluded::Always);
+        assert_eq!(excluded("imports/a1/batch.json", false), Excluded::Always);
+        for path in ["core/imports/x", "desktop/imports/x", "core/Imports/x"] {
+            assert_eq!(safe_entry_path(path), Err(UNSAFE_ENTRY), "{path}");
+        }
     }
 }
