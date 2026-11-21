@@ -81,6 +81,10 @@ pub struct CreateBackup {
     /// The id of the browser's encrypted part, uploaded first.
     #[serde(default)]
     pub web_part: Option<String>,
+    /// The IndexedDB version the browser dumped its part from. A web part
+    /// without one is refused.
+    #[serde(default)]
+    pub web_db_version: Option<u32>,
     /// The desktop's chosen file; the web downloads instead.
     #[serde(default)]
     pub destination: Option<String>,

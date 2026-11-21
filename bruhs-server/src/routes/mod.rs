@@ -5,6 +5,7 @@ pub mod api_client;
 pub mod approve;
 pub mod apps;
 pub mod artifacts;
+pub mod backup;
 pub mod bruh_apps;
 pub mod calendar_events_stream;
 pub mod calendar_google;

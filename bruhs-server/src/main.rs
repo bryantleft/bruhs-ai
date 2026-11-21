@@ -137,6 +137,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the worker can run one of their steps.
     let tools = bruhs_core::local_tools::LocalToolsHost::new()?;
     reactive.attach_computers(Arc::clone(&tools))?;
+    let backup =
+        routes::backup::start(secret_store(), Arc::clone(&tools), reactive.clone()).await?;
     // Before the worker starts, so the first run's preamble and gate see
     // the vault.
     reactive.attach_vault(state.secrets().clone())?;
@@ -192,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     })
     .layer(axum::Extension(reactive))
+    .layer(axum::Extension(backup))
     .layer(axum::Extension(apps))
     .layer(axum::Extension(gmail))
     .layer(axum::Extension(outlook));
@@ -615,6 +618,7 @@ fn router_with_capture_daemon(
             "/api/agent/thread-reply",
             post(routes::agent::post_thread_reply),
         )
+        .merge(routes::backup::router())
         .route(
             "/api/vault",
             get(routes::vault::list)

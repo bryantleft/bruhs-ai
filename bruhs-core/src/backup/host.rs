@@ -54,6 +54,8 @@ const RECORDING_WAIT: Duration = Duration::from_secs(2);
 
 /// Whether the capture daemon is recording a meeting now (ruling F24).
 type RecordingProbe = Arc<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>;
+/// Reads one process variable, for the overview's `outside_roots`.
+type EnvLookup = Arc<dyn Fn(&str) -> Option<std::ffi::OsString> + Send + Sync>;
 
 /// Makes backups and takes uploads. Clones share one job slot.
 #[derive(Clone)]
@@ -70,6 +72,7 @@ pub(super) struct Config {
     pub(super) tools: Option<Arc<LocalToolsHost>>,
     pub(super) reactive: Option<ReactiveRuntime>,
     recording: RecordingProbe,
+    env: EnvLookup,
     pub(super) kdf: KdfParams,
     pub(super) keychain_wait: Duration,
     pub(super) browser_wait: Duration,
@@ -170,6 +173,7 @@ impl BackupHost {
                 tools: None,
                 reactive: None,
                 recording,
+                env: Arc::new(|name| std::env::var_os(name)),
                 kdf: KdfParams::NATIVE,
                 keychain_wait: VAULT_READ_WAIT,
                 browser_wait: BROWSER_WAIT,
@@ -207,12 +211,23 @@ impl BackupHost {
 
     /// Fast key derivation, short waits and a daemon that answers as told.
     #[cfg(any(test, feature = "test-support"))]
-    pub(super) fn for_tests(mut self, recording: bool) -> Self {
+    pub fn for_tests(mut self, recording: bool) -> Self {
         let config = Arc::make_mut(&mut self.config);
         config.kdf = KdfParams::FLOOR;
         config.keychain_wait = Duration::from_millis(300);
         config.browser_wait = Duration::from_millis(300);
         config.recording = Arc::new(move || Box::pin(async move { recording }));
+        self
+    }
+
+    /// Reads the `BRUHS_*` path overrides through `env` instead of the
+    /// process, so a test never sets a variable (ruling F10 b).
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_env(
+        mut self,
+        env: impl Fn(&str) -> Option<std::ffi::OsString> + Send + Sync + 'static,
+    ) -> Self {
+        Arc::make_mut(&mut self.config).env = Arc::new(env);
         self
     }
 
@@ -408,6 +423,19 @@ impl BackupHost {
             .then_some(path)
     }
 
+    /// The name a finished download goes by: the file name its job
+    /// answered, while that job is still the last one.
+    pub fn download_name(&self, id: &str) -> Option<String> {
+        let url = format!("/api/backup/files/{id}");
+        let state = self.lock_job().as_ref()?.state.borrow().clone();
+        match state {
+            JobState::Created { file } if file.download.as_deref() == Some(url.as_str()) => {
+                Some(file.name)
+            }
+            _ => None,
+        }
+    }
+
     /// Removes a download once it was sent in full.
     pub fn finish_download(&self, id: &str) {
         if let Some(path) = self.outgoing(id) {
@@ -566,7 +594,7 @@ impl BackupHost {
             keychain_items: measured.1,
             outside_roots: self
                 .roots()
-                .outside_overrides(|name| std::env::var_os(name)),
+                .outside_overrides(|name| (self.config.env)(name)),
             last: self.last(),
             job,
             pending: measured.2.pending,
