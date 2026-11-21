@@ -2,7 +2,7 @@
 //! text rules every export reader shares. Every fixture is synthetic.
 
 use super::chatgpt::{conversation, is_conversation, is_manifest};
-use super::test_support::fixture;
+use super::test_support::{assert_scales_linearly, fixture};
 use super::text::{
     clip_part, export_time, strip_citations, strip_grok_markup, strip_writing_directives,
 };
@@ -14,11 +14,6 @@ use bruhs_models::imports::{
 use bruhs_models::logic::portable::{ImportSource, PortablePart};
 use serde_json::{json, Map, Value};
 use std::path::Path;
-use std::time::{Duration, Instant};
-
-/// Generous, so a debug build under gate load doesn't flake; the
-/// superlinear work these bounds guard against takes far longer.
-const SLOW: Duration = Duration::from_secs(5);
 
 /// The six fixture conversations, A to F.
 fn fixtures() -> Vec<Value> {
@@ -197,32 +192,25 @@ fn empty_conversations_are_skipped() {
     assert!(!is_conversation(&manifest));
 }
 
-#[test]
-fn cycles_and_huge_trees_stay_bounded() {
-    let cycle = json!({
-        "conversation_id": "conv-cycle",
-        "current_node": "a",
-        "mapping": {
-            "a": node(Some("b"), "user", "Round and round."),
-            "b": node(Some("a"), "assistant", "And back again."),
-            "s": node(Some("s"), "user", "My own parent."),
-        },
-    });
-    let started = Instant::now();
-    let parsed = conversation(&cycle);
-    assert!(started.elapsed() < SLOW);
-    assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 2));
+/// A mapping of `n` nodes in one parent ring, then `n` nodes that are
+/// their own parent.
+fn looped_mapping(n: usize) -> Value {
+    let mut mapping = Map::new();
+    for i in 0..n {
+        let role = if i % 2 == 0 { "user" } else { "assistant" };
+        let parent = format!("r{}", (i + 1) % n);
+        mapping.insert(
+            format!("r{i}"),
+            node(Some(&parent), role, &format!("ring {i}")),
+        );
+        let own = format!("s{i}");
+        mapping.insert(own.clone(), node(Some(&own), "user", "My own parent."));
+    }
+    json!({ "conversation_id": "conv-loops", "current_node": "r0", "mapping": mapping })
+}
 
-    let alone = json!({
-        "conversation_id": "conv-self",
-        "mapping": { "s": node(Some("s"), "user", "My own parent.") },
-    });
-    let started = Instant::now();
-    let parsed = conversation(&alone);
-    assert!(started.elapsed() < SLOW);
-    assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 1));
-
-    let total = 100_001;
+/// A chain of `total` nodes, each the parent of the next.
+fn chain_of(total: usize) -> Value {
     let mut mapping = Map::new();
     for i in 0..total {
         let parent = (i > 0).then(|| format!("n{:06}", i - 1));
@@ -232,14 +220,44 @@ fn cycles_and_huge_trees_stay_bounded() {
             node(parent.as_deref(), role, &format!("message {i}")),
         );
     }
-    let chain = json!({
+    json!({
         "conversation_id": "conv-chain",
         "current_node": format!("n{:06}", total - 1),
         "mapping": Value::Object(mapping),
+    })
+}
+
+#[test]
+fn cycles_and_huge_trees_stay_bounded() {
+    // Cycles and long chains take time in step with their size, and a
+    // loop that never ends fails the guard.
+    assert_scales_linearly("ChatGPT parent cycles", 5_000, looped_mapping, |v| {
+        let _ = conversation(v);
     });
-    let started = Instant::now();
-    let parsed = conversation(&chain).expect("a long chain imports");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    assert_scales_linearly("a ChatGPT chain", 25_000, chain_of, |v| {
+        let _ = conversation(v);
+    });
+
+    let cycle = json!({
+        "conversation_id": "conv-cycle",
+        "current_node": "a",
+        "mapping": {
+            "a": node(Some("b"), "user", "Round and round."),
+            "b": node(Some("a"), "assistant", "And back again."),
+            "s": node(Some("s"), "user", "My own parent."),
+        },
+    });
+    let parsed = conversation(&cycle);
+    assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 2));
+
+    let alone = json!({
+        "conversation_id": "conv-self",
+        "mapping": { "s": node(Some("s"), "user", "My own parent.") },
+    });
+    let parsed = conversation(&alone);
+    assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 1));
+
+    let parsed = conversation(&chain_of(100_001)).expect("a long chain imports");
     assert_eq!(parsed.messages.len(), MAX_MESSAGES);
     // The walk stops at MAX_NODES nodes, so n099999 is the newest kept,
     // and the oldest messages are the ones dropped.
@@ -382,50 +400,57 @@ fn markup_edges_keep_the_text_around_them() {
     );
 }
 
-/// About 1 MB of each input that made a stripper search the rest of the
-/// text again for every tag.
+/// `unit` repeated to about `bytes` bytes, then `tail`.
+fn repeated(unit: &str, tail: &str, bytes: usize) -> String {
+    let mut text = unit.repeat(bytes / unit.len());
+    text.push_str(tail);
+    text
+}
+
+/// Each input that made a stripper search the rest of the text again for
+/// every tag, at 256 KiB and 1 MiB: the time grows with the size.
 #[test]
 fn hostile_markup_strips_in_linear_time() {
-    const SIZE: usize = 1 << 20;
-    let repeat = |unit: &str, tail: &str| {
-        let mut text = unit.repeat(SIZE / unit.len());
-        text.push_str(tail);
-        text
-    };
-    let cases = [
-        repeat("<grok:render>", ""),
-        repeat("<grok:render", ""),
-        repeat("<grok:render>x", "</grok:render>"),
-        repeat("<grok:render/>", ""),
-        repeat("</grok:render>", ""),
-        repeat("</xaiArtifact>", ""),
-        repeat("<xaiArtifact ", ""),
-        repeat("<xaiArtifact>", ""),
-        repeat("<xaiArtifactX>", "<xaiArtifact>"),
-        repeat("<", ""),
+    const SIZE: usize = 256 << 10;
+    let grok = [
+        ("<grok:render>", ""),
+        ("<grok:render", ""),
+        ("<grok:render>x", "</grok:render>"),
+        ("<grok:render/>", ""),
+        ("</grok:render>", ""),
+        ("</xaiArtifact>", ""),
+        ("<xaiArtifact ", ""),
+        ("<xaiArtifact>", ""),
+        ("<xaiArtifactX>", "<xaiArtifact>"),
+        ("<", ""),
     ];
-    for text in &cases {
-        let started = Instant::now();
-        let _ = strip_grok_markup(text);
-        assert!(
-            started.elapsed() < SLOW,
-            "{:?} took {:?}",
-            &text[..20],
-            started.elapsed()
+    for (unit, tail) in grok {
+        assert_scales_linearly(
+            &format!("strip_grok_markup on {unit:?}"),
+            SIZE,
+            |bytes| repeated(unit, tail, bytes),
+            |text| {
+                let _ = strip_grok_markup(text);
+            },
         );
     }
     let citations = [
-        repeat("\u{e200}", "\u{e201}"),
-        repeat("\u{e201}", ""),
-        repeat("【", "】"),
-        repeat("【†", "】"),
-        repeat("】", ""),
-        repeat(":::writing{\n", ":::"),
+        ("\u{e200}", "\u{e201}"),
+        ("\u{e201}", ""),
+        ("【", "】"),
+        ("【†", "】"),
+        ("】", ""),
+        (":::writing{\n", ":::"),
     ];
-    for text in &citations {
-        let started = Instant::now();
-        let _ = strip_writing_directives(&strip_citations(text));
-        assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    for (unit, tail) in citations {
+        assert_scales_linearly(
+            &format!("the citation strippers on {unit:?}"),
+            SIZE,
+            |bytes| repeated(unit, tail, bytes),
+            |text| {
+                let _ = strip_writing_directives(&strip_citations(text));
+            },
+        );
     }
 }
 

@@ -2,7 +2,7 @@
 //! best effort). Every fixture is synthetic.
 
 use super::grok::{conversation, is_conversation};
-use super::test_support::fixture;
+use super::test_support::{assert_scales_linearly, fixture};
 use super::ParsedConversation;
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
@@ -11,11 +11,6 @@ use bruhs_models::imports::{
 use bruhs_models::logic::portable::{title_from_prompt, ImportSource, PortablePart};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
-
-/// Generous, so a debug build under gate load doesn't flake; the
-/// superlinear work these bounds guard against takes far longer.
-const SLOW: Duration = Duration::from_secs(5);
 
 /// The whole `prod-grok-backend.json` fixture.
 fn backend() -> Value {
@@ -384,30 +379,23 @@ fn empty_responses_are_skipped() {
     assert!(conversation(&empty).is_none());
 }
 
-#[test]
-fn parent_loops_and_long_chains_stay_bounded() {
-    // Every response its own cycle partner, times the owner's.
-    let looped: Vec<Value> = (0..2_000)
+/// `n` responses whose parents form one ring, times the owner's.
+fn looped(n: usize) -> Value {
+    let responses: Vec<Value> = (0..n)
         .map(|i| {
             json!({ "_id": format!("r{i}"), "sender": if i % 2 == 0 { "human" } else { "assistant" },
-                    "message": format!("m{i}"), "parent_response_id": format!("r{}", (i + 1) % 2_000),
-                    "create_time": mongo(i64::from(i)) })
+                    "message": format!("m{i}"), "parent_response_id": format!("r{}", (i + 1) % n),
+                    "create_time": mongo(i64::try_from(i).unwrap_or(0)) })
         })
         .collect();
-    let started = Instant::now();
-    let parsed = conversation(&record(
+    record(
         json!({ "id": "grok-loop", "leaf_response_id": "r5" }),
-        looped,
-    ))
-    .expect("a loop imports in time order");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
-    let seen: Vec<String> = parsed.messages.iter().map(|m| m.text()).collect();
-    let unique: HashSet<&String> = seen.iter().collect();
-    assert_eq!(unique.len(), seen.len());
-    assert_eq!(seen.len(), 2_000);
+        responses,
+    )
+}
 
-    // A chain past MAX_NODES stops there and keeps the newest MAX_MESSAGES.
-    let total = MAX_NODES + 1;
+/// A chain of `total` responses, each the parent of the next.
+fn chain_of(total: usize) -> Value {
     let chain: Vec<Value> = (0..total)
         .map(|i| {
             let parent = if i == 0 {
@@ -420,13 +408,32 @@ fn parent_loops_and_long_chains_stay_bounded() {
                     "create_time": mongo(1_700_000_000_000 + i64::try_from(i).unwrap_or(0)) })
         })
         .collect();
-    let started = Instant::now();
-    let parsed = conversation(&record(
-        json!({ "id": "grok-chain", "leaf_response_id": format!("r{:06}", MAX_NODES - 1) }),
+    let leaf = format!("r{:06}", total.min(MAX_NODES) - 1);
+    record(
+        json!({ "id": "grok-chain", "leaf_response_id": leaf }),
         chain,
-    ))
-    .expect("a long chain imports");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    )
+}
+
+#[test]
+fn parent_loops_and_long_chains_stay_bounded() {
+    // Loops and long chains take time in step with their size, and a
+    // loop that never ends fails the guard.
+    assert_scales_linearly("a Grok parent ring", 5_000, looped, |v| {
+        let _ = conversation(v);
+    });
+    assert_scales_linearly("a Grok chain", 25_000, chain_of, |v| {
+        let _ = conversation(v);
+    });
+
+    let parsed = conversation(&looped(2_000)).expect("a loop imports in time order");
+    let seen: Vec<String> = parsed.messages.iter().map(|m| m.text()).collect();
+    let unique: HashSet<&String> = seen.iter().collect();
+    assert_eq!(unique.len(), seen.len());
+    assert_eq!(seen.len(), 2_000);
+
+    // A chain past MAX_NODES stops there and keeps the newest MAX_MESSAGES.
+    let parsed = conversation(&chain_of(MAX_NODES + 1)).expect("a long chain imports");
     assert_eq!(parsed.messages.len(), MAX_MESSAGES);
     assert_eq!(
         parsed.messages.last().map(|m| m.text()).as_deref(),
@@ -436,28 +443,36 @@ fn parent_loops_and_long_chains_stay_bounded() {
     assert_eq!(parsed.candidate.title, "message 0");
 }
 
-/// About 1 MB of hostile input in every text-bearing field finishes in
-/// linear time.
-#[test]
-fn hostile_sizes_stay_linear() {
-    let files: Vec<Value> = (0..50_000).map(|i| json!(format!("asset-{i}"))).collect();
-    let cards: Vec<Value> = (0..50_000).map(|_| json!("x".repeat(20))).collect();
-    let value = record(
-        json!({ "id": "grok-hostile", "title": "t".repeat(1_000_000) }),
+/// Hostile input in every text-bearing field, `scale` 4 being about 1 MB
+/// of each and 50 000 files and cards.
+fn hostile(scale: usize) -> Value {
+    let files: Vec<Value> = (0..12_500 * scale)
+        .map(|i| json!(format!("asset-{i}")))
+        .collect();
+    let cards: Vec<Value> = (0..12_500 * scale).map(|_| json!("x".repeat(20))).collect();
+    record(
+        json!({ "id": "grok-hostile", "title": "t".repeat(250_000 * scale) }),
         vec![
-            json!({ "_id": "a", "sender": "human", "message": "z".repeat(1_000_000),
+            json!({ "_id": "a", "sender": "human", "message": "z".repeat(250_000 * scale),
                     "file_attachments": files, "create_time": mongo(1) }),
             json!({ "_id": "b", "sender": "assistant", "create_time": mongo(2),
-                    "message": "<grok:render>".repeat(80_000),
-                    "thinking_trace": "<xaiArtifact".repeat(80_000),
+                    "message": "<grok:render>".repeat(20_000 * scale),
+                    "thinking_trace": "<xaiArtifact".repeat(20_000 * scale),
                     "card_attachments_json": cards }),
             json!({ "_id": "c", "sender": "assistant", "create_time": mongo(3),
-                    "message": "<xaiArtifact x>a</xaiArtifact>".repeat(30_000) }),
+                    "message": "<xaiArtifact x>a</xaiArtifact>".repeat(7_500 * scale) }),
         ],
-    );
-    let started = Instant::now();
-    let parsed = conversation(&value).expect("the hostile record imports");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    )
+}
+
+/// Hostile input in every text-bearing field takes time in step with its
+/// size, from about 250 KB to 1 MB of each.
+#[test]
+fn hostile_sizes_stay_linear() {
+    assert_scales_linearly("a hostile Grok record", 1, hostile, |v| {
+        let _ = conversation(v);
+    });
+    let parsed = conversation(&hostile(4)).expect("the hostile record imports");
     assert_eq!(parsed.messages.len(), 2);
     // Each part is cut to MAX_PART_CHARS plus the cut line.
     for part in parsed.messages.iter().flat_map(|m| &m.parts) {

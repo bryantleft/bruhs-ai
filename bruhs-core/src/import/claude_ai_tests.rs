@@ -2,7 +2,7 @@
 //! in both export shapes (Task 5). Every fixture is synthetic.
 
 use super::claude_ai::{conversation, is_conversation, is_manifest, is_memory, memory};
-use super::test_support::fixture;
+use super::test_support::{assert_scales_linearly, fixture};
 use super::text::{clip_part, clip_strings};
 use super::ParsedConversation;
 use bruhs_models::agent::Role;
@@ -13,13 +13,8 @@ use bruhs_models::imports::{
 use bruhs_models::logic::portable::{ImportSource, PortablePart, PortableToolCall};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
 
 const ROOT: &str = "00000000-0000-4000-8000-000000000000";
-
-/// Generous, so a debug build under gate load doesn't flake; the
-/// superlinear work these bounds guard against takes far longer.
-const SLOW: Duration = Duration::from_secs(5);
 
 /// The four fixture conversations, G to J.
 fn fixtures() -> Vec<Value> {
@@ -443,19 +438,23 @@ fn blocks_win_over_text_and_plumbing_stays_out() {
     );
 }
 
-#[test]
-fn parent_loops_stay_bounded() {
-    let started = Instant::now();
-    let i = conversation(&fixtures()[2]);
-    assert!(started.elapsed() < SLOW);
-    let i = i.expect("a loop still imports what it reached");
-    let seen: Vec<String> = i.messages.iter().map(|m| m.text()).collect();
-    let unique: HashSet<&String> = seen.iter().collect();
-    assert_eq!(unique.len(), seen.len(), "{seen:?}");
-    assert!(seen.len() <= 3);
+/// `n` messages whose parents form one ring.
+fn ring_of(n: usize) -> Value {
+    let messages: Vec<Value> = (0..n)
+        .map(|i| {
+            json!({
+                "uuid": format!("r{i}"),
+                "sender": if i % 2 == 0 { "human" } else { "assistant" },
+                "parent_message_uuid": format!("r{}", (i + 1) % n),
+                "text": format!("ring {i}"),
+            })
+        })
+        .collect();
+    json!({ "uuid": "conv-ring", "chat_messages": messages })
+}
 
-    // A chain past MAX_NODES stops there and keeps the newest MAX_MESSAGES.
-    let total = 100_001;
+/// A chain of `total` messages, each the parent of the next.
+fn chain_of(total: usize) -> Value {
     let messages: Vec<Value> = (0..total)
         .map(|i| {
             let parent = if i == 0 {
@@ -467,15 +466,34 @@ fn parent_loops_stay_bounded() {
                 "uuid": format!("m{i:06}"),
                 "sender": if i % 2 == 0 { "human" } else { "assistant" },
                 "parent_message_uuid": parent,
-                "created_at": 1_700_000_000_000_i64 + i64::from(i),
+                "created_at": 1_700_000_000_000_i64 + i64::try_from(i).unwrap_or(0),
                 "text": format!("message {i}"),
             })
         })
         .collect();
-    let chain = json!({ "uuid": "conv-chain", "chat_messages": messages });
-    let started = Instant::now();
-    let parsed = conversation(&chain).expect("a long chain imports");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    json!({ "uuid": "conv-chain", "chat_messages": messages })
+}
+
+#[test]
+fn parent_loops_stay_bounded() {
+    // Loops and long chains take time in step with their size, and a
+    // loop that never ends fails the guard.
+    assert_scales_linearly("a Claude parent ring", 5_000, ring_of, |v| {
+        let _ = conversation(v);
+    });
+    assert_scales_linearly("a Claude chain", 25_000, chain_of, |v| {
+        let _ = conversation(v);
+    });
+
+    let i = conversation(&fixtures()[2]);
+    let i = i.expect("a loop still imports what it reached");
+    let seen: Vec<String> = i.messages.iter().map(|m| m.text()).collect();
+    let unique: HashSet<&String> = seen.iter().collect();
+    assert_eq!(unique.len(), seen.len(), "{seen:?}");
+    assert!(seen.len() <= 3);
+
+    // A chain past MAX_NODES stops there and keeps the newest MAX_MESSAGES.
+    let parsed = conversation(&chain_of(100_001)).expect("a long chain imports");
     assert_eq!(parsed.messages.len(), MAX_MESSAGES);
     assert_eq!(
         parsed.messages.last().map(|m| m.text()).as_deref(),
@@ -486,48 +504,59 @@ fn parent_loops_stay_bounded() {
     assert_eq!(parsed.candidate.title, "message 0");
 }
 
-/// About 1 MB of hostile input in every text-bearing field finishes in
-/// linear time (`SLOW` leaves room for a loaded debug build).
-#[test]
-fn hostile_sizes_stay_linear() {
-    let blocks: Vec<Value> = (0..60_000)
+/// Hostile input in every text-bearing field, `scale` 4 being about 1 MB
+/// of text and 140 000 blocks, attachments and files.
+fn hostile_conversation(scale: usize) -> Value {
+    let blocks: Vec<Value> = (0..15_000 * scale)
         .map(|i| match i % 3 {
             0 => json!({ "type": "text", "text": "word " }),
             1 => json!({ "type": "tool_use", "name": "artifacts", "id": "same", "input": {} }),
             _ => json!({ "type": "tool_result", "tool_use_id": "unknown", "content": "x" }),
         })
         .collect();
-    let attachments: Vec<Value> = (0..40_000)
+    let attachments: Vec<Value> = (0..10_000 * scale)
         .map(|i| json!({ "file_name": format!("f{i}.txt"), "extracted_content": "y" }))
         .collect();
-    let files: Vec<Value> = (0..40_000)
+    let files: Vec<Value> = (0..10_000 * scale)
         .map(|i| json!({ "file_name": format!("f{i}.txt") }))
         .collect();
-    let conversation_value = json!({
+    let text = "z".repeat(250_000 * scale);
+    json!({
         "uuid": "conv-hostile",
         "chat_messages": [
             { "uuid": "a", "sender": "human", "parent_message_uuid": ROOT,
-              "text": "z".repeat(1_000_000),
+              "text": text,
               "attachments": attachments, "files": files,
-              "content": [{ "type": "text", "text": "z".repeat(1_000_000) }] },
+              "content": [{ "type": "text", "text": text }] },
             { "uuid": "b", "sender": "assistant", "parent_message_uuid": "a",
               "content": blocks },
         ],
-    });
-    let started = Instant::now();
-    let parsed = conversation(&conversation_value).expect("the hostile record imports");
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
-    assert_eq!(parsed.messages.len(), 2);
+    })
+}
 
-    let memory_value = json!({
-        "conversations_memory": "m".repeat(1_000_000),
-        "memory_files": (0..50_000)
+/// Claude memory with `scale` × 250 000 characters and 12 500 files.
+fn hostile_memory(scale: usize) -> Value {
+    json!({
+        "conversations_memory": "m".repeat(250_000 * scale),
+        "memory_files": (0..12_500 * scale)
             .map(|i| json!({ "path": format!("/memories/{i}.md"), "content": "c" }))
             .collect::<Vec<_>>(),
+    })
+}
+
+/// Hostile input in every text-bearing field takes time in step with its
+/// size, from about 250 KB to 1 MB.
+#[test]
+fn hostile_sizes_stay_linear() {
+    assert_scales_linearly("a hostile Claude record", 1, hostile_conversation, |v| {
+        let _ = conversation(v);
     });
-    let started = Instant::now();
-    assert!(memory(&memory_value).is_some());
-    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
+    assert_scales_linearly("hostile Claude memory", 1, hostile_memory, |v| {
+        let _ = memory(v);
+    });
+    let parsed = conversation(&hostile_conversation(4)).expect("the hostile record imports");
+    assert_eq!(parsed.messages.len(), 2);
+    assert!(memory(&hostile_memory(4)).is_some());
 }
 
 #[test]
