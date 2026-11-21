@@ -7,14 +7,18 @@
 //! let go, then applies the waiting restore with the lock in hand: a
 //! packaged app through its own `bruhs-server restore-apply --once` (whose
 //! keychain items the server and the background service can then read
-//! without asking), a source build in this process. Only outcomes are
-//! logged, never a path or a name from inside a backup.
+//! without asking), a source build in this process, which then starts the
+//! background service again when the restore stopped it. Only outcomes
+//! are logged, never a path or a name from inside a backup.
 
+use std::ffi::OsString;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use bruhs_core::backup::{applying, instance_lock_path, restore_waits, take_instance_lock, Roots};
+use bruhs_core::backup::{
+    applying, instance_lock_path, restore_waits, take_instance_lock, take_service_restart, Roots,
+};
 use bruhs_core::secrets::{SecretChoice, SecretStore};
 
 /// How long a start waits for the quitting app and for the restore.
@@ -31,6 +35,10 @@ const EXIT_DONE: i32 = 0;
 const EXIT_FAILED: i32 = 1;
 /// How a start ends when a restore is half applied and nothing opens.
 const EXIT_WAITING: i32 = 75;
+/// The background service's launchd label and systemd unit, as
+/// `bruhs-server service install` names them (`service.rs`).
+const SERVICE_LABEL: &str = "dev.bruhs.server";
+const SERVICE_UNIT: &str = "bruhs-server.service";
 
 /// What one try at the waiting restore came to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +101,7 @@ pub fn apply_restore_at_start() -> Option<File> {
         .then(|| SecretChoice::from_env().store());
     let apply = |lock: &File, wait: Duration| match (&roots, &bundled_server, &store) {
         (Some(roots), Some(server), _) => apply_bundled(roots, server, lock, wait),
-        (Some(roots), None, Some(store)) => apply_here(roots, store, lock, wait),
+        (Some(roots), None, Some(store)) => apply_here(roots, store, lock, wait, &start_service),
         _ => Try::Done,
     };
     match start_at(
@@ -181,8 +189,26 @@ fn stop_if_half_applied(roots: &Roots, lock: File) -> Start {
 
 /// Applies the waiting restore in this process, waiting at most `wait`
 /// for the keychain. A try still running then can't be stopped, so it
-/// answers [`Try::Running`] and the app doesn't start.
-fn apply_here(roots: &Roots, store: &SecretStore, lock: &File, wait: Duration) -> Try {
+/// answers [`Try::Running`] and the app doesn't start. Once nothing waits,
+/// `start_service` runs when the restore stopped the background service
+/// (final review C-M1), as the server's applier does.
+fn apply_here(
+    roots: &Roots,
+    store: &SecretStore,
+    lock: &File,
+    wait: Duration,
+    start_service: &dyn Fn(),
+) -> Try {
+    let tried = try_here(roots, store, lock, wait);
+    // A rollback keeps the flag too (B Task 8 N1).
+    if matches!(tried, Try::Done | Try::Failed) && take_service_restart(roots) {
+        start_service();
+    }
+    tried
+}
+
+/// One try of [`apply_here`].
+fn try_here(roots: &Roots, store: &SecretStore, lock: &File, wait: Duration) -> Try {
     let lock = match lock.try_clone() {
         Ok(lock) => lock,
         Err(error) => {
@@ -221,6 +247,64 @@ fn apply_here(roots: &Roots, store: &SecretStore, lock: &File, wait: Duration) -
             }
         }
         Err(_) => Try::Running,
+    }
+}
+
+/// Starts the background service again, logging the outcome. Only one
+/// installed under this `HOME` is asked, and it stays loaded, as
+/// `bruhs-server`'s own restart after a restore does.
+fn start_service() {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    // SAFETY: getuid has no preconditions and can't fail.
+    let uid = unsafe { libc::getuid() };
+    let Some((program, args)) = service_start(home, config, uid) else {
+        return;
+    };
+    let status = std::process::Command::new(program)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match status {
+        Ok(status) if status.success() => tracing::info!("the background service starts again"),
+        _ => tracing::warn!("the background service didn't start again"),
+    }
+}
+
+/// The command that starts the installed background service: `launchctl
+/// kickstart` on macOS, `systemctl --user start` on Linux. `None` when
+/// its definition isn't under `home` (or `config` on Linux).
+fn service_start(
+    home: Option<PathBuf>,
+    config: Option<PathBuf>,
+    uid: u32,
+) -> Option<(&'static str, Vec<OsString>)> {
+    if cfg!(target_os = "macos") {
+        let plist = home?
+            .join("Library/LaunchAgents")
+            .join(format!("{SERVICE_LABEL}.plist"));
+        plist.is_file().then(|| {
+            (
+                "launchctl",
+                vec![
+                    "kickstart".into(),
+                    format!("gui/{uid}/{SERVICE_LABEL}").into(),
+                ],
+            )
+        })
+    } else if cfg!(target_os = "linux") {
+        let config = config.or_else(|| Some(home?.join(".config")))?;
+        let unit = config.join("systemd/user").join(SERVICE_UNIT);
+        unit.is_file().then(|| {
+            (
+                "systemctl",
+                vec!["--user".into(), "start".into(), SERVICE_UNIT.into()],
+            )
+        })
+    } else {
+        None
     }
 }
 
@@ -331,7 +415,67 @@ mod tests {
     }
 
     fn in_process<'a>(fixture: &'a Fixture) -> impl Fn(&File, Duration) -> Try + 'a {
-        move |lock, wait| apply_here(&fixture.roots, &fixture.store, lock, wait)
+        move |lock, wait| apply_here(&fixture.roots, &fixture.store, lock, wait, &|| {})
+    }
+
+    /// Final review C-M1: the in-process apply starts the service the
+    /// restore stopped, once, whether it applied or was refused.
+    #[test]
+    fn the_apply_here_starts_the_service_again() {
+        for (restart, refused) in [(true, false), (true, true), (false, false)] {
+            let fixture = fixture();
+            stage_restore(&fixture.roots, &fixture.store, restart).unwrap();
+            if refused {
+                std::fs::remove_dir_all(fixture.roots.core.join("backups/staging")).unwrap();
+            }
+            let lock = hold_at(&instance_lock_path(&fixture.roots.desktop)).unwrap();
+            let started = std::cell::Cell::new(0);
+            let start = || started.set(started.get() + 1);
+            let tried = apply_here(
+                &fixture.roots,
+                &fixture.store,
+                &lock,
+                Duration::from_secs(20),
+                &start,
+            );
+            let expected = if refused { Try::Failed } else { Try::Done };
+            assert_eq!(tried, expected, "restart {restart} refused {refused}");
+            assert_eq!(started.get(), u32::from(restart), "restart {restart}");
+            assert!(!take_service_restart(&fixture.roots), "taken once");
+        }
+    }
+
+    #[test]
+    fn the_service_starts_only_where_it_is_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        assert!(service_start(Some(home.clone()), None, 501).is_none());
+        assert!(service_start(None, None, 501).is_none());
+        let (definition, program, args) = if cfg!(target_os = "macos") {
+            (
+                home.join("Library/LaunchAgents/dev.bruhs.server.plist"),
+                "launchctl",
+                vec!["kickstart", "gui/501/dev.bruhs.server"],
+            )
+        } else {
+            (
+                home.join(".config/systemd/user/bruhs-server.service"),
+                "systemctl",
+                vec!["--user", "start", "bruhs-server.service"],
+            )
+        };
+        std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
+        std::fs::write(&definition, b"").unwrap();
+        let args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
+        assert_eq!(
+            service_start(Some(home.clone()), None, 501),
+            Some((program, args))
+        );
+        if cfg!(target_os = "linux") {
+            // XDG_CONFIG_HOME names where the unit is.
+            let elsewhere = dir.path().join("elsewhere");
+            assert!(service_start(Some(home), Some(elsewhere), 501).is_none());
+        }
     }
 
     #[test]
@@ -454,7 +598,13 @@ mod tests {
         // Running, and it goes on to finish.
         let lock = hold_at(&path).unwrap();
         assert_eq!(
-            apply_here(&fixture.roots, &fixture.store, &lock, Duration::ZERO),
+            apply_here(
+                &fixture.roots,
+                &fixture.store,
+                &lock,
+                Duration::ZERO,
+                &|| {}
+            ),
             Try::Running
         );
         let begun = Instant::now();
