@@ -14,8 +14,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use bruhs_core::backup::{
-    apply_pending, applying, restore_waits, take_service_restart, ApplyOutcome, BackupError,
-    Holder, JobHold, Roots,
+    apply_pending, applying, restore_waits, take_instance_lock, take_service_restart, ApplyOutcome,
+    BackupError, Holder, JobHold, RootKey, Roots,
 };
 use bruhs_core::secrets::{SecretChoice, SecretStore};
 use bruhs_models::backup::RESTORE_ROLLED_BACK;
@@ -47,6 +47,9 @@ const START_LIMIT: Duration = Duration::from_secs(60);
 const PAUSE: Duration = Duration::from_secs(1);
 /// Between the answer to an apply and the shutdown, so the answer leaves.
 const EXIT_DELAY: Duration = Duration::from_millis(750);
+/// `<core>/backups/applier.lock`: held by the detached applier for its
+/// whole run (final review B minor), which no apply moves.
+const APPLIER_LOCK: &str = "applier.lock";
 
 /// What a restore asks of this process and the background service (D15,
 /// ruling F22). A fake in the route tests.
@@ -365,6 +368,9 @@ pub(crate) fn restore_apply_cli() -> Option<i32> {
     };
     let store = SecretChoice::from_env().store();
     let lock = if once { stdin_lock() } else { None };
+    // A start that gives up on an erroring restore must not open its
+    // stores while this applier may still swap the data in.
+    let _alive = (!once).then(|| hold_applier_lock(&roots)).flatten();
     let apply = || Some(apply_pending(&roots, &store, lock.as_ref()));
     let applier = Applier::new(&roots, &apply, &start_service);
     Some(if once {
@@ -377,6 +383,32 @@ pub(crate) fn restore_apply_cli() -> Option<i32> {
         tracing::info!("applying the waiting restore");
         applier.run(APPLIER_LIMIT, PAUSE)
     })
+}
+
+fn applier_lock_path(roots: &Roots) -> PathBuf {
+    roots.backups(RootKey::Core).join(APPLIER_LOCK)
+}
+
+/// The detached applier's lock, held for as long as the answer lives.
+/// `None`, logged, when another applier holds it or it can't be taken:
+/// this one tries anyway, under `restore.lock` like any other.
+fn hold_applier_lock(roots: &Roots) -> Option<File> {
+    match take_instance_lock(&applier_lock_path(roots)) {
+        Ok(Some(lock)) => Some(lock),
+        Ok(None) => {
+            tracing::info!("another applier is running");
+            None
+        }
+        Err(_) => {
+            tracing::warn!("the applier couldn't take its lock");
+            None
+        }
+    }
+}
+
+/// Whether a detached applier is running now: its lock is held.
+fn applier_alive(roots: &Roots) -> bool {
+    matches!(take_instance_lock(&applier_lock_path(roots)), Ok(None))
 }
 
 /// The caller's instance lock, handed over as standard input: kept only
@@ -399,9 +431,11 @@ fn handed_lock(file: File) -> Option<File> {
 /// The start check every server makes before it opens a store (D16,
 /// ruling F20 b): applies a waiting restore, or waits up to a minute for
 /// the apply that holds it. `Some(code)` when this server must exit
-/// without opening anything: a restore still waits behind a held lock, or
-/// an apply is half done. Each try's keychain calls get the time left,
-/// and a try that runs out counts as busy.
+/// without opening anything: a restore still waits behind a held lock, an
+/// apply is half done, or an erroring restore waits while the detached
+/// applier, which may still apply it, runs (final review B minor). Each
+/// try's keychain calls get the time left, and a try that runs out counts
+/// as busy.
 pub(crate) async fn apply_at_start() -> Option<i32> {
     let roots = Roots::from_env()?;
     let checked = tokio::task::spawn_blocking(move || {
@@ -436,7 +470,18 @@ fn check_at_start(
             deadline.saturating_duration_since(Instant::now()),
         )
     };
-    let applier = Applier::new(roots, &apply, start_service);
+    start_check(roots, &apply, start_service, deadline, pause)
+}
+
+/// [`check_at_start`]'s tries, each one `apply`, until `deadline`.
+fn start_check(
+    roots: &Roots,
+    apply: &dyn Fn() -> Option<ApplyResult>,
+    start_service: &dyn Fn(),
+    deadline: Instant,
+    pause: Duration,
+) -> Option<i32> {
+    let applier = Applier::new(roots, apply, start_service);
     loop {
         let attempt = applier.attempt();
         let late = Instant::now() >= deadline;
@@ -452,8 +497,14 @@ fn check_at_start(
                 );
                 return Some(EXIT_WAITING);
             }
-            // Nothing moved yet: today's data is whole, and the restore
-            // waits for the next start.
+            // The detached applier may still apply it under this start's
+            // stores (final review B minor): stop, as for a held lock.
+            Attempt::Retry if late && applier_alive(roots) => {
+                tracing::warn!("a restore waits; this server stops without opening its data");
+                return Some(EXIT_WAITING);
+            }
+            // Nothing moved yet and no applier runs: today's data is
+            // whole, and the restore waits for the next start.
             Attempt::Retry if late => return None,
             Attempt::Busy | Attempt::Retry => std::thread::sleep(pause),
         }
@@ -662,6 +713,36 @@ mod tests {
         assert_eq!(check(Duration::from_secs(30)), None);
         assert_eq!(note(&fixture.roots).as_deref(), Some(RESTORED));
         assert_eq!(started.get(), 1);
+    }
+
+    /// Final review B minor: a start that gives up on an erroring restore
+    /// opens its stores only once no detached applier, which could still
+    /// swap the data in, runs.
+    #[test]
+    fn a_start_never_opens_beside_a_live_applier() {
+        let fixture = fixture();
+        stage_restore(&fixture.roots, &fixture.store, false).unwrap();
+        let started = Cell::new(0);
+        let start = || started.set(started.get() + 1);
+        let erroring = || Some(Err(BackupError::Io(std::io::Error::other("not yet"))));
+        let check = || {
+            start_check(
+                &fixture.roots,
+                &erroring,
+                &start,
+                Instant::now() + Duration::from_millis(300),
+                Duration::from_millis(100),
+            )
+        };
+        let alive = hold_applier_lock(&fixture.roots).unwrap();
+        assert!(applier_alive(&fixture.roots));
+        assert!(hold_applier_lock(&fixture.roots).is_none(), "one applier");
+        assert_eq!(check(), Some(EXIT_WAITING));
+        drop(alive);
+        assert!(!applier_alive(&fixture.roots));
+        assert_eq!(check(), None);
+        assert!(restore_waits(&fixture.roots), "it waits for the next start");
+        assert_eq!(started.get(), 0);
     }
 
     /// A restore refused at plan time still starts the service it stopped
