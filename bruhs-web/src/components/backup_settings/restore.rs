@@ -40,9 +40,9 @@ const HEALTH_POLL_MS: u32 = 2_000;
 const START_AGAIN_AFTER_MS: u32 = 20_000;
 /// How long `WEB_PART_DONE` shows before the page reloads.
 const RELOAD_AFTER_MS: u32 = 1_000;
-/// How long it shows with the stores a newer Bruhs wrote, so that line
-/// can be read before the reload.
-const RELOAD_AFTER_NOTE_MS: u32 = 5_000;
+/// Where the stores a newer Bruhs wrote wait across the reload, so the
+/// line shows once more after it.
+const SKIPPED_KEY: &str = "bruhs.backup.skipped-stores";
 /// Tries at telling the server the browser part is done.
 const DONE_TRIES: u32 = 3;
 
@@ -111,6 +111,8 @@ pub(super) struct Restore {
     browser_restored: RwSignal<bool>,
     /// The stores a newer Bruhs wrote that the restore left out.
     skipped: RwSignal<Option<String>>,
+    /// That line, from the run before this page's reload.
+    carried: RwSignal<Option<String>>,
     card_password: NodeRef<html::Input>,
     /// Where focus last went when the view that held it changed (D-I2).
     focus: RwSignal<Option<Focus>>,
@@ -135,6 +137,7 @@ impl Restore {
             browser_error: RwSignal::new(None),
             browser_restored: RwSignal::new(false),
             skipped: RwSignal::new(None),
+            carried: RwSignal::new(None),
             card_password: NodeRef::new(),
             focus: RwSignal::new(None),
             choose_button: NodeRef::new(),
@@ -219,6 +222,12 @@ impl Restore {
     #[cfg(test)]
     pub(super) fn web_waiting_for_tests(self) {
         self.web_waiting.set(true);
+    }
+
+    /// The line a run before the reload kept, shown once: it is cleared
+    /// as it is read.
+    pub(super) fn take_carried(self) {
+        self.carried.try_set(take_note());
     }
 
     pub(super) fn clear_fields(self) {
@@ -470,14 +479,12 @@ fn restore_browser(page: Page) {
             Ok(skipped) => {
                 restore.forget_password();
                 let note = skipped_line(&skipped);
-                let wait = if note.is_some() {
-                    RELOAD_AFTER_NOTE_MS
-                } else {
-                    RELOAD_AFTER_MS
-                };
+                if let Some(note) = &note {
+                    keep_note(note);
+                }
                 restore.skipped.try_set(note);
                 restore.browser.try_set(Browser::Done);
-                gloo_timers::future::TimeoutFuture::new(wait).await;
+                gloo_timers::future::TimeoutFuture::new(RELOAD_AFTER_MS).await;
                 reload();
             }
             Err(failure) => match after_failure(signal.aborted(), failure) {
@@ -487,6 +494,26 @@ fn restore_browser(page: Page) {
             },
         }
     });
+}
+
+fn session_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.session_storage().ok().flatten()
+}
+
+/// Keeps the skipped stores line for the page after the reload. Storage
+/// that refuses only costs that second showing.
+fn keep_note(note: &str) {
+    if let Some(storage) = session_storage() {
+        let _ = storage.set_item(SKIPPED_KEY, note);
+    }
+}
+
+/// The kept line, removed as it is read.
+fn take_note() -> Option<String> {
+    let storage = session_storage()?;
+    let note = storage.get_item(SKIPPED_KEY).ok().flatten();
+    let _ = storage.remove_item(SKIPPED_KEY);
+    note.filter(|note| !note.is_empty())
 }
 
 fn reload() {
@@ -673,6 +700,12 @@ pub(super) fn browser_card(page: Page) -> AnyView {
     let restore = page.restore;
     let hint_id = StoredValue::new(unique_id("backup-browser-hint"));
     view! {
+        // The line a restore showed before this page reloaded, once.
+        {move || restore.carried.get().map(|line| view! {
+            <div class=GROUP>
+                <p role="status" data-backup-browser-skipped-after="" class=WARN>{line}</p>
+            </div>
+        })}
         <Show when=move || restore.web_waiting.get()>
             <div data-backup-browser="" class=GROUP>
                 <p class="text-body-sm text-rambutan-200">{WEB_PART_WAITING}</p>
@@ -1294,6 +1327,20 @@ mod tests {
                 done < skipped && skipped < status.find("</div>").unwrap(),
                 "{html}"
             );
+            // After the reload the page shows the kept line once, with no
+            // browser part waiting.
+            let page = loaded_page();
+            assert!(!render(|| browser_card(page)).contains("data-backup-browser-skipped-after"));
+            page.restore
+                .carried
+                .set(skipped_line(&["whiteboards".into()]));
+            let html = render(|| browser_card(page));
+            let after = tag(&html, "data-backup-browser-skipped-after");
+            assert!(after.contains("role=\"status\""), "{after}");
+            assert!(html.contains("whiteboards"), "{html}");
+            assert!(!html.contains(&escaped(WEB_PART_WAITING)), "{html}");
+            // Kept under the app's own prefix, in this tab only.
+            assert!(SKIPPED_KEY.starts_with("bruhs.backup."));
         });
     }
 

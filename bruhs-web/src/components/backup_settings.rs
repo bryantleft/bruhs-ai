@@ -600,6 +600,7 @@ pub fn BackupSettings() -> impl IntoView {
             controller.abort();
         }
     });
+    page.restore.take_carried();
     Effect::new(move |_| page.refresh());
     page_view(page)
 }
