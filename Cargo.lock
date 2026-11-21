@@ -1234,6 +1234,7 @@ dependencies = [
  "cssparser",
  "directories",
  "dom_query",
+ "flate2",
  "futures-core",
  "futures-util",
  "hmac 0.12.1",

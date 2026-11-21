@@ -9,12 +9,21 @@
 //! Everything here is blocking file I/O: async callers use
 //! `spawn_blocking`.
 
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod archive;
 mod claude;
 mod codex;
 mod cursor;
 mod cursor_agent;
 mod export;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 7"))]
+mod json_stream;
 mod t3;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
+#[cfg(any(test, feature = "test-support"))]
+pub use archive::Limits;
 
 pub use export::export_to_t3;
 
@@ -85,6 +94,18 @@ pub enum ImportError {
     /// not from a store on this machine that can be listed.
     #[error("{} threads aren't listed from this machine", .0.label())]
     NotListed(ImportSource),
+    /// Refused with fixed copy from `bruhs_models::imports`.
+    #[error("{0}")]
+    Refused(&'static str),
+    /// Too little free disk space: this many bytes need freeing.
+    #[error("not enough free disk space: {0} bytes to free")]
+    Space(u64),
+    /// Another read holds the one read slot.
+    #[error("{}", bruhs_models::imports::IMPORT_BUSY)]
+    Busy,
+    /// The read was cancelled, or its batch has gone.
+    #[error("{}", bruhs_models::imports::IMPORT_GONE)]
+    Gone,
 }
 
 impl ImportError {
@@ -379,5 +400,7 @@ impl Transcript {
     }
 }
 
+#[cfg(test)]
+mod archive_tests;
 #[cfg(test)]
 mod tests;
