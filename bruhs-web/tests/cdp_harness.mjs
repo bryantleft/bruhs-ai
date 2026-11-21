@@ -7,7 +7,8 @@
 // Nothing leaves the machine and nothing reaches a bruhs-server: every request
 // that is not for the dist is refused. Loopback /api requests fail as a
 // stopped server would, unless the page's fixture `api` answers them;
-// anything else is recorded as unexpected.
+// anything else is recorded as unexpected. A page served by a real
+// bruhs-server is same-origin with its API, so its requests go through.
 //
 // Each page gets inert IndexedDB hooks, switched on per check through
 // `window.__qa` (see `QA_HOOKS`): delay a read-write transaction's
@@ -116,6 +117,7 @@ export async function launchChrome({ port, profile }) {
   return {
     browser,
     version: version.Browser,
+    pid: child.pid,
     async close() {
       try { await browser.send('Browser.close'); } catch {}
       ws.close();
@@ -194,7 +196,8 @@ export class Page {
     this.handlers = new Set();
     browser.listeners.add(message => {
       if (message.sessionId !== sessionId) return;
-      if (message.method === 'Fetch.requestPaused') { this.#route(message.params); return; }
+      // Routed here, and also handed to `handlers`, which may watch requests.
+      if (message.method === 'Fetch.requestPaused') this.#route(message.params);
       if (message.method === 'Runtime.exceptionThrown') this.runtimeErrors.push(message.params.exceptionDetails?.exception?.description ?? message.params.exceptionDetails?.text);
       if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') this.consoleErrors.push(message.params.args.map(arg => arg.value ?? arg.description ?? '').join(' ').slice(0, 500));
       for (const handler of this.handlers) handler(message);
@@ -208,11 +211,20 @@ export class Page {
     try {
       if (url.origin === this.origin) { await this.send('Fetch.continueRequest', { requestId }); return; }
       if (loopback(url.hostname) && url.pathname.startsWith('/api/')) {
-        const answer = this.api && (request.method === 'OPTIONS' ? { status: 204, body: null } : await this.api({ method: request.method, url, body: request.postData ?? null }));
+        const answer = this.api && (request.method === 'OPTIONS' ? { status: 204, body: null } : await this.api({ method: request.method, url, body: request.postData ?? null, entries: request.postDataEntries ?? [] }));
         if (answer === 'stream') {
           await this.send('Fetch.continueRequest', { requestId, url: `${this.origin}/__qa_stream` });
           return;
         }
+        if (answer?.raw) {
+          // Raw bytes (a Buffer) with the fixture's own headers.
+          const responseHeaders = [
+            ['Access-Control-Allow-Origin', this.origin], ['Access-Control-Expose-Headers', 'Content-Length'], ...(answer.headers ?? []),
+          ].map(([name, value]) => ({ name, value }));
+          await this.send('Fetch.fulfillRequest', { requestId, responseCode: answer.status ?? 200, responseHeaders, body: Buffer.from(answer.raw).toString('base64') });
+          return;
+        }
+        if (answer?.abort) { await this.send('Fetch.failRequest', { requestId, errorReason: 'Aborted' }); return; }
         if (answer) {
           const responseHeaders = [
             ['Access-Control-Allow-Origin', this.origin], ['Access-Control-Allow-Headers', '*'],
@@ -234,15 +246,21 @@ export class Page {
 
   /**
    * `api`, if given, answers loopback /api requests: it gets
-   * `{ method, url, body }` and returns `{ status, body }` (JSON), the string
-   * 'stream' for a quiet event stream, or nothing to refuse the request; or
-   * a promise of one, to answer late (or, never settling, not at all).
+   * `{ method, url, body, entries }` (`entries` is the request's
+   * `postDataEntries`, each with base64 `bytes`) and returns `{ status, body }`
+   * (JSON), `{ status, raw, headers }` (a Buffer with `[name, value]`
+   * headers), `{ abort: true }` to drop the request, the string 'stream' for
+   * a quiet event stream, or nothing to refuse the request; or a promise of
+   * one, to answer late (or, never settling, not at all).
+   *
+   * `intercept: false` leaves requests alone (no `Fetch` routing), for a page
+   * served by a real bruhs-server whose uploads shouldn't pass through CDP.
    */
-  async init({ width = 1280, height = 800, touch = false, initScripts = [], timezone = undefined, api = undefined } = {}) {
+  async init({ width = 1280, height = 800, touch = false, initScripts = [], timezone = undefined, api = undefined, intercept = true } = {}) {
     this.api = api;
     await this.send('Page.enable');
     await this.send('Runtime.enable');
-    await this.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+    if (intercept) await this.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
     await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: touch });
     if (timezone) await this.send('Emulation.setTimezoneOverride', { timezoneId: timezone });
     if (touch) await this.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
