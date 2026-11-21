@@ -6,6 +6,7 @@
 
 use super::ImportError;
 use bruhs_models::agent::AgentProvider;
+use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
 use bruhs_models::logic::portable::t3_export_prompt;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -62,19 +63,16 @@ fn run(binary: &Path, args: &[&str], stdin: Option<&str>) -> Result<String, Stri
     }
 }
 
-/// T3's provider instance id for `provider`.
-fn t3_provider(provider: AgentProvider) -> Result<&'static str, String> {
+/// T3's provider instance id for `provider`: T3 runs Claude and Codex.
+fn t3_provider(provider: AgentProvider) -> Option<&'static str> {
     match provider {
-        AgentProvider::Claude => Ok("claudeAgent"),
-        AgentProvider::Codex => Ok("codex"),
+        AgentProvider::Claude => Some("claudeAgent"),
+        AgentProvider::Codex => Some("codex"),
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
         | AgentProvider::OpenCode
-        | AgentProvider::Acp => Err(format!(
-            "T3 export does not yet support the {} runtime. Export the transcript instead.",
-            provider.label()
-        )),
+        | AgentProvider::Acp => None,
     }
 }
 
@@ -85,18 +83,21 @@ fn t3_provider(provider: AgentProvider) -> Result<&'static str, String> {
 ///
 /// # Errors
 ///
-/// When T3 is not installed or its CLI fails (the message says why).
+/// [`ImportError::Refused`] with fixed copy, which both apps show:
+/// `T3_RUNTIME_UNSUPPORTED` for a model T3 doesn't run, `T3_NOT_INSTALLED`
+/// without its CLI, and `T3_EXPORT_FAILED` when the CLI fails or answers
+/// something else. The CLI's own output, which can name paths, is dropped.
 pub fn export_to_t3(
     project: &Path,
     title: &str,
     model: &str,
     markdown: &str,
 ) -> Result<String, ImportError> {
-    let failed = |message: String| ImportError::Database("T3 Code", message);
+    let failed = || ImportError::Refused(T3_EXPORT_FAILED);
     let runtime = AgentProvider::for_model(model);
-    let provider = t3_provider(runtime).map_err(failed)?;
+    let provider = t3_provider(runtime).ok_or(ImportError::Refused(T3_RUNTIME_UNSUPPORTED))?;
     let model = runtime.model_id(model);
-    let binary = t3_binary().ok_or_else(|| failed("the t3 CLI is not installed".into()))?;
+    let binary = t3_binary().ok_or(ImportError::Refused(T3_NOT_INSTALLED))?;
     let project = project.to_string_lossy();
     // A title starting with `-` would read as an option.
     let title = Some(title.trim().trim_start_matches('-').trim_start())
@@ -124,15 +125,15 @@ pub fn export_to_t3(
     };
     let output = match start() {
         Ok(output) => output,
-        Err(first) => {
+        Err(_) => {
             // Most likely a project T3 does not know; adding one it already
-            // has fails harmlessly, and the retry reports the real error.
+            // has fails harmlessly, and then the start is tried once more.
             let _ = run(&binary, &["project", "add", &project], None);
-            start().map_err(|again| failed(if again.is_empty() { first } else { again }))?
+            start().map_err(|_| failed())?
         }
     };
     serde_json::from_str::<serde_json::Value>(output.trim())
         .ok()
         .and_then(|json| json.get("threadId")?.as_str().map(str::to_string))
-        .ok_or_else(|| failed(format!("unexpected reply from t3: {}", output.trim())))
+        .ok_or_else(failed)
 }

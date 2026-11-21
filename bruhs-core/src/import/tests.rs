@@ -350,6 +350,23 @@ fn real_export_to_t3() {
     assert!(!id.is_empty());
 }
 
+/// A model T3 doesn't run is refused with fixed copy before T3's CLI is
+/// looked for (I Task 9 I2).
+#[test]
+fn t3_refuses_a_runtime_it_does_not_run_with_fixed_copy() {
+    let project = tempfile::tempdir().unwrap();
+    let refused = export_to_t3(project.path(), "A chat", "opencode/some-model", "# A chat");
+    assert!(
+        matches!(
+            refused,
+            Err(ImportError::Refused(
+                bruhs_models::imports::T3_RUNTIME_UNSUPPORTED
+            ))
+        ),
+        "{refused:?}"
+    );
+}
+
 /// One line that is not UTF-8 is skipped, not the whole transcript.
 #[test]
 fn a_line_that_is_not_utf8_is_skipped() {

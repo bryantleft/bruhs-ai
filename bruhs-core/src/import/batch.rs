@@ -288,15 +288,17 @@ impl ImportHost {
     }
 
     /// Reads files or folders the desktop's picker chose, in place: they
-    /// are only opened to read, never moved or deleted. A path whose name
-    /// is never opened (D4) is left out.
+    /// are only opened to read, never moved or deleted. `~` and `~/…` are
+    /// read against the home, as a scan reads them. A path whose name is
+    /// never opened (D4) is left out.
     ///
     /// # Errors
     ///
     /// - `Refused(NOT_AN_EXPORT)` for no paths, `TOO_MANY_FILES` past
-    ///   `upload_files`, `FOLDER_MISSING` for a path that isn't a regular
-    ///   file or a folder, `EXPORT_TOO_LARGE` when the files pass
-    ///   `upload_bytes`.
+    ///   `upload_files`, `FOLDER_MISSING` for a path that isn't absolute
+    ///   once expanded (nothing resolves against the working folder) or
+    ///   isn't a regular file or a folder, `EXPORT_TOO_LARGE` when the
+    ///   files pass `upload_bytes`.
     /// - [`ImportError::Busy`] while another read holds the slot.
     pub fn read_paths(&self, paths: Vec<PathBuf>) -> Result<ImportJob, ImportError> {
         if paths.is_empty() {
@@ -309,6 +311,11 @@ impl ImportHost {
         let mut bytes: u64 = 0;
         for path in paths {
             let missing = || ImportError::Refused(FOLDER_MISSING);
+            let path = self
+                .agents
+                .expand(&path)
+                .filter(|path| path.is_absolute())
+                .ok_or_else(missing)?;
             let real = std::fs::canonicalize(&path).map_err(|_| missing())?;
             let meta = std::fs::metadata(&real).map_err(|_| missing())?;
             if !meta.is_dir() && !meta.is_file() {
@@ -881,13 +888,18 @@ impl ImportUpload {
             .start_read(self.id.clone(), self.dir.clone(), inputs, slot)
     }
 
+    /// Whether [`ImportHost::discard`] ended this upload: the caller
+    /// should stop waiting for more bytes and drop it, which frees the
+    /// read slot. A plain flag read, safe on an async worker.
+    pub fn is_discarded(&self) -> bool {
+        self.slot
+            .as_ref()
+            .is_some_and(|slot| slot.discarded.load(Ordering::SeqCst))
+    }
+
     /// [`ImportError::Gone`] once the upload was discarded.
     fn check_discarded(&self) -> Result<(), ImportError> {
-        let discarded = self
-            .slot
-            .as_ref()
-            .is_some_and(|slot| slot.discarded.load(Ordering::SeqCst));
-        if discarded {
+        if self.is_discarded() {
             Err(ImportError::Gone)
         } else {
             Ok(())

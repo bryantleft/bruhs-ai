@@ -97,6 +97,18 @@ impl AgentRoots {
     fn named_home(&self) -> Option<&Path> {
         Some(self.home.as_path()).filter(|home| home.is_absolute())
     }
+
+    /// A typed or picked path with `~` and `~/…` read against the home.
+    /// `None` for one of those with no home to read it against.
+    pub fn expand(&self, path: &Path) -> Option<PathBuf> {
+        let text = path.to_string_lossy();
+        match (text.as_ref(), text.strip_prefix("~/"), self.named_home()) {
+            ("~", _, Some(home)) => Some(home.to_path_buf()),
+            (_, Some(rest), Some(home)) => Some(home.join(rest)),
+            ("~", _, None) | (_, Some(_), None) => None,
+            _ => Some(path.to_path_buf()),
+        }
+    }
 }
 
 /// The personas `source` has: from `picked` when given, else from its
@@ -239,16 +251,10 @@ impl<'a> Scan<'a> {
     /// A typed or picked folder: `~` and `~/…` read against the home. It
     /// answers the named path and the resolved folder.
     fn picked(&self, path: &Path) -> Result<(PathBuf, PathBuf), ImportError> {
-        let text = path.to_string_lossy();
-        let home = self.roots.named_home();
-        let named = match (text.as_ref(), text.strip_prefix("~/"), home) {
-            ("~", _, Some(home)) => home.to_path_buf(),
-            (_, Some(rest), Some(home)) => home.join(rest),
-            ("~", _, None) | (_, Some(_), None) => {
-                return Err(ImportError::Refused(FOLDER_MISSING))
-            }
-            _ => path.to_path_buf(),
-        };
+        let named = self
+            .roots
+            .expand(path)
+            .ok_or(ImportError::Refused(FOLDER_MISSING))?;
         match self.resolve(&named) {
             Place::Folder(folder) => Ok((named, folder)),
             Place::Private => Err(ImportError::Refused(FOLDER_PRIVATE)),

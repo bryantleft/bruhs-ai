@@ -52,10 +52,18 @@ fn mcp_tool_files() -> Vec<(String, String)> {
     files
 }
 
-/// The route prefix `source` names, if any.
+/// The route prefix `source` names, if any: a prefix that ends where a
+/// path segment ends, so `/api/exports` or `api/importer` isn't one (M7).
 fn named_route(source: &str) -> Option<&'static str> {
     let lower = source.to_lowercase();
-    ROUTES.into_iter().find(|route| lower.contains(route))
+    ROUTES.into_iter().find(|route| {
+        lower.match_indices(route).any(|(at, _)| {
+            lower[at + route.len()..]
+                .chars()
+                .next()
+                .is_none_or(|next| !(next.is_alphanumeric() || matches!(next, '_' | '-')))
+        })
+    })
 }
 
 #[test]
@@ -68,6 +76,12 @@ fn the_guard_sees_a_route_however_it_is_written() {
         assert!(named_route(source).is_some(), "{source}");
     }
     assert_eq!(named_route(r#"let path = "/api/backup";"#), None);
+    assert_eq!(named_route(r#"let path = "/api/exports-list";"#), None);
+    assert_eq!(named_route("an api/importer and api/export_all"), None);
+    assert_eq!(
+        named_route(r#"let path = "/api/exports"; let t3 = "/api/export";"#),
+        Some("api/export")
+    );
 }
 
 #[test]

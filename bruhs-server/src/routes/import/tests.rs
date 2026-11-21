@@ -14,8 +14,8 @@ use bruhs_core::import::test_support::{fixture as sample, zip_of};
 use bruhs_core::import::{ImportHost, Limits};
 use bruhs_core::AppState;
 use bruhs_models::imports::{
-    ImportBatch, ImportJob, ImportJobState, EXPORT_TOO_LARGE, FOLDER_MISSING, IMPORT_GONE,
-    IMPORT_INVALID, OWNER_ONLY_IMPORT, TOO_MANY_FILES,
+    ImportBatch, ImportJob, ImportJobState, EXPORT_TOO_LARGE, FOLDER_MISSING, IMPORT_BUSY,
+    IMPORT_GONE, IMPORT_INVALID, OWNER_ONLY_IMPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{ImportSource, ImportedThread};
 use reqwest::multipart::{Form, Part};
@@ -136,6 +136,45 @@ impl Fixture {
         panic!("the read never finished");
     }
 
+    /// The batch folders under the root.
+    fn batches(&self) -> std::collections::BTreeSet<String> {
+        std::fs::read_dir(&self.root)
+            .map(|listing| {
+                listing
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The one batch folder made since `before`, waiting for it.
+    async fn new_batch(&self, before: &std::collections::BTreeSet<String>) -> String {
+        for _ in 0..1000 {
+            let made: Vec<String> = self.batches().difference(before).cloned().collect();
+            if let [id] = made.as_slice() {
+                return id.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("no batch folder was made");
+    }
+
+    /// The batch folders once any made since `before` are gone, waiting a
+    /// little for a drop that runs off the async workers.
+    async fn settled_batches(
+        &self,
+        before: &std::collections::BTreeSet<String>,
+    ) -> std::collections::BTreeSet<String> {
+        for _ in 0..200 {
+            if self.batches().is_subset(before) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        self.batches()
+    }
+
     /// Whether every batch folder is gone, waiting a little for a drop
     /// that runs off the async workers.
     async fn no_batches(&self) -> bool {
@@ -211,7 +250,15 @@ async fn pages_can_not_import() {
                 .header("origin", &fixture.base),
         )
         .await;
-        assert_ne!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
+        if path == "/api/import/files" {
+            // Only the desktop sends picked paths, with no Origin (M5).
+            assert_eq!(
+                (status, text),
+                (StatusCode::FORBIDDEN, error(OWNER_ONLY_IMPORT))
+            );
+        } else {
+            assert_ne!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
+        }
     }
 
     // The owner still sends a transcript to T3 Code as before: a project
@@ -322,6 +369,20 @@ async fn picked_paths_are_read_in_place() {
     assert!(!batch.candidates.is_empty());
     assert_eq!(std::fs::read(&picked).unwrap(), export);
 
+    // `~/` reads against the home, as a scan does (M6).
+    let (status, text) = Fixture::send(
+        fixture
+            .request("POST", "/api/import/files")
+            .json(&json!({ "paths": ["~/Downloads/export.zip"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{text}");
+    let job: ImportJob = serde_json::from_str(&text).unwrap();
+    let ImportJobState::Ready { batch: from_home } = fixture.finished(&job.id).await else {
+        panic!("the read failed");
+    };
+    assert_eq!(from_home.candidates.len(), batch.candidates.len());
+
     // Only absolute paths: nothing resolves against the server's folder.
     let (status, text) = Fixture::send(
         fixture
@@ -333,6 +394,181 @@ async fn picked_paths_are_read_in_place() {
         (status, text),
         (StatusCode::BAD_REQUEST, error(FOLDER_MISSING))
     );
+
+    // A page never sends them, not even the app's own (M5).
+    let before = fixture.batches();
+    for origin in [fixture.base.as_str(), OTHER_PAGE] {
+        let (status, text) = Fixture::send(
+            fixture
+                .request("POST", "/api/import/files")
+                .header("origin", origin)
+                .json(&json!({ "paths": [picked] })),
+        )
+        .await;
+        assert_eq!(
+            (status, text),
+            (StatusCode::FORBIDDEN, error(OWNER_ONLY_IMPORT)),
+            "{origin}"
+        );
+    }
+    assert_eq!(fixture.batches(), before);
+}
+
+/// A multipart body with one `file` field per item, as raw bytes.
+const BOUNDARY: &str = "bruhs-import-test-boundary";
+
+fn field_head(name: &str) -> Vec<u8> {
+    format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"; \
+         filename=\"x.json\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes()
+}
+
+fn body_tail() -> Vec<u8> {
+    format!("\r\n--{BOUNDARY}--\r\n").into_bytes()
+}
+
+/// `chunks` streamed with no `Content-Length` (chunked transfer).
+fn streamed(fixture: &Fixture, chunks: Vec<Vec<u8>>) -> reqwest::RequestBuilder {
+    let stream = futures_util::stream::iter(chunks.into_iter().map(Ok::<_, std::io::Error>));
+    fixture
+        .request("POST", "/api/import/uploads")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(reqwest::Body::wrap_stream(stream))
+}
+
+/// Feeds a streamed request body.
+type BodySender = tokio::sync::mpsc::Sender<Result<Vec<u8>, std::io::Error>>;
+/// A request's status, `Cache-Control` and body, once it ends.
+type Answer = tokio::task::JoinHandle<(StatusCode, Option<String>, String)>;
+
+/// An upload whose client sent one field's start and then waits, holding
+/// its body open until the returned sender drops.
+fn stalled(fixture: &Fixture) -> (BodySender, Answer) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(4);
+    let mut first = field_head("file");
+    first.extend_from_slice(b"[{\"mapping\": {");
+    sender.try_send(Ok(first)).unwrap();
+    let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|item| (item, receiver))
+    });
+    let request = fixture
+        .request("POST", "/api/import/uploads")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(reqwest::Body::wrap_stream(stream));
+    (sender, tokio::spawn(Fixture::send_full(request)))
+}
+
+#[tokio::test]
+async fn chunked_uploads_are_read_and_capped() {
+    let fixture = Fixture::new().await;
+    let json = sample("chatgpt-conversations.json");
+    let mut chunks = vec![field_head("file")];
+    chunks.extend(json.chunks(512).map(<[u8]>::to_vec));
+    chunks.push(body_tail());
+    let (status, text) = Fixture::send(streamed(&fixture, chunks)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{text}");
+    let job: ImportJob = serde_json::from_str(&text).unwrap();
+    assert!(matches!(
+        fixture.finished(&job.id).await,
+        ImportJobState::Ready { .. }
+    ));
+
+    // No `Content-Length` to trust: the bytes received are counted.
+    let limit = usize::try_from(Limits::TEST.upload_bytes).unwrap();
+    let mut chunks = vec![field_head("file")];
+    chunks.extend(std::iter::repeat_n(vec![b' '; 1 << 20], limit >> 20));
+    chunks.push(vec![b' '; 1]);
+    chunks.push(body_tail());
+    let before = fixture.batches();
+    let (status, text) = Fixture::send(streamed(&fixture, chunks)).await;
+    assert_eq!(
+        (status, text),
+        (StatusCode::PAYLOAD_TOO_LARGE, error(EXPORT_TOO_LARGE))
+    );
+    assert_eq!(fixture.settled_batches(&before).await, before);
+}
+
+#[tokio::test]
+async fn deleting_a_stalled_upload_frees_the_read_slot() {
+    let fixture = Fixture::new().await;
+    let (sender, pending) = stalled(&fixture);
+    let id = fixture.new_batch(&std::collections::BTreeSet::new()).await;
+
+    let json = sample("chatgpt-conversations.json");
+    let busy = || Form::new().part("file", file(json.to_vec(), "a.json"));
+    let (status, text) = fixture.upload(busy()).await;
+    assert_eq!((status, text), (StatusCode::CONFLICT, error(IMPORT_BUSY)));
+
+    let (status, cache, text) =
+        Fixture::send_full(fixture.request("DELETE", &format!("/api/import/uploads/{id}"))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+    assert_eq!(cache.as_deref(), Some("no-store"));
+    // The stalled request ends while its client still holds the body open.
+    let (status, _, text) = tokio::time::timeout(Duration::from_secs(30), pending)
+        .await
+        .expect("the stalled upload ends")
+        .unwrap();
+    assert_eq!((status, text), (StatusCode::NOT_FOUND, error(IMPORT_GONE)));
+    assert!(fixture.no_batches().await);
+    let (status, text) = fixture.upload(busy()).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{text}");
+    drop(sender);
+}
+
+#[tokio::test]
+async fn a_client_that_goes_away_leaves_nothing() {
+    let fixture = Fixture::new().await;
+    let (sender, pending) = stalled(&fixture);
+    fixture.new_batch(&std::collections::BTreeSet::new()).await;
+    pending.abort();
+    drop(sender);
+    assert!(fixture.no_batches().await);
+    let json = sample("chatgpt-conversations.json");
+    let mut accepted = false;
+    for _ in 0..200 {
+        let form = Form::new().part("file", file(json.to_vec(), "a.json"));
+        let (status, text) = fixture.upload(form).await;
+        if status == StatusCode::ACCEPTED {
+            accepted = true;
+            break;
+        }
+        assert_eq!((status, text), (StatusCode::CONFLICT, error(IMPORT_BUSY)));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(accepted, "the read slot was never freed");
+}
+
+/// The guard a request's upload lives in hands it to a blocking thread
+/// when the request is dropped mid-wait (M1).
+#[tokio::test]
+async fn a_dropped_request_frees_its_upload_off_the_async_workers() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("imports");
+    let host = ImportHost::new(root.clone()).with_limits(Limits::TEST);
+    #[cfg(unix)]
+    let host = host.with_free_space(Arc::new(|_: &Path| Ok(u64::MAX)));
+    let upload = host.begin_upload().unwrap();
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    drop(super::Receiving(Some(upload)));
+    let mut freed = false;
+    for _ in 0..200 {
+        if let Ok(next) = host.begin_upload() {
+            freed = true;
+            drop(next);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(freed, "the read slot was never freed");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
 }
 
 #[tokio::test]

@@ -50,6 +50,12 @@ pub const FOLDER_MISSING: &str = "That folder doesn't exist.";
 pub const FOLDER_PRIVATE: &str =
     "Bruhs doesn't open folders named for secrets, such as credentials.";
 
+// Continue in T3 Code.
+pub const T3_NOT_INSTALLED: &str = "T3 Code isn't installed. Install it, then try again.";
+pub const T3_RUNTIME_UNSUPPORTED: &str =
+    "T3 Code runs Claude and Codex models only. Export the transcript instead.";
+pub const T3_EXPORT_FAILED: &str = "T3 Code didn't start the thread. Open T3 Code, then try again.";
+
 // The Move in dialog.
 pub const MOVE_IN_TITLE: &str = "Move in";
 pub const MOVE_IN_COMMAND: &str = "Move in...";
@@ -173,6 +179,9 @@ pub const ALL_COPY: &[&str] = &[
     IMPORT_FAILED,
     FOLDER_MISSING,
     FOLDER_PRIVATE,
+    T3_NOT_INSTALLED,
+    T3_RUNTIME_UNSUPPORTED,
+    T3_EXPORT_FAILED,
     MOVE_IN_TITLE,
     MOVE_IN_COMMAND,
     MOVE_IN_COMMAND_HINT,

@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::io::{Cursor, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use axum::http::StatusCode;
@@ -31,6 +31,9 @@ use crate::routes::apps::tests::Logs;
 
 /// Whether the process-wide capture records now.
 static CAPTURING: AtomicBool = AtomicBool::new(false);
+/// Held by the one capture that records; the next waits for it (I Task 9
+/// I1), so tests in other modules can share the capture.
+static ONE_CAPTURE: Mutex<()> = Mutex::new(());
 
 /// What the process logs, from every thread and at every level, while the
 /// returned guard lives. A thread-local capture misses the server's events
@@ -51,16 +54,22 @@ pub(crate) fn capture_process_logs() -> (&'static Logs, Capturing) {
             .expect("no other test sets a global subscriber");
         logs
     });
+    // A test that failed while capturing leaves the lock poisoned; the
+    // capture itself is still sound.
+    let turn = ONE_CAPTURE.lock().unwrap_or_else(PoisonError::into_inner);
     assert!(
         !CAPTURING.swap(true, Ordering::SeqCst),
         "one capture at a time"
     );
     Logs::refresh();
-    (logs, Capturing)
+    (logs, Capturing { _turn: turn })
 }
 
-/// Stops the process-wide capture when dropped.
-pub(crate) struct Capturing;
+/// Stops the process-wide capture when dropped, then lets the next one
+/// start.
+pub(crate) struct Capturing {
+    _turn: MutexGuard<'static, ()>,
+}
 
 impl Drop for Capturing {
     fn drop(&mut self) {

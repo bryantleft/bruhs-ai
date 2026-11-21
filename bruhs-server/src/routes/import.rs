@@ -21,8 +21,10 @@
 //! guard marks each one `Cache-Control: no-store`. No handler logs a body,
 //! a path, a name or an I/O error's text.
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{
@@ -30,7 +32,7 @@ use axum::{
         rejection::{JsonRejection, PathRejection, QueryRejection},
         DefaultBodyLimit, Multipart, Path, Query, State,
     },
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Json, Router,
@@ -38,8 +40,8 @@ use axum::{
 use bruhs_core::import::{self, ImportError, ImportHost, ImportRoots, ImportUpload};
 use bruhs_models::imports::{
     valid_batch_id, AgentScan, AgentScanQuery, ImportJob, ImportPaths, EXPORT_TOO_LARGE,
-    FOLDER_MISSING, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, IMPORT_INVALID, MAX_PATHS_BODY,
-    OWNER_ONLY_IMPORT, TOO_MANY_FILES,
+    IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, IMPORT_INVALID, MAX_PATHS_BODY, OWNER_ONLY_IMPORT,
+    TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     ExportT3Request, ExportT3Response, ImportCandidate, ImportListQuery, ImportSource,
@@ -56,6 +58,8 @@ mod tests;
 
 /// An upload is written to disk in pieces of about this many bytes.
 const WRITE_BYTES: usize = 1 << 20;
+/// How often an upload waiting on its client looks for a `DELETE` (M2).
+const WATCH_EVERY: Duration = Duration::from_millis(200);
 
 /// The read and agent routes; `main` adds the sessions, thread and T3
 /// routes beside them. Only the upload lifts the body limit: the core
@@ -247,7 +251,8 @@ pub async fn get_thread(
 /// `POST /api/import/uploads`: every `file` field, in order, becomes one
 /// uploaded file (its file name is never read, F33); any other field is
 /// `IMPORT_INVALID`. Answers 202 with the read, which then runs on its
-/// own. A refused or cut-off upload leaves nothing behind.
+/// own. A refused, cut-off, abandoned or discarded upload leaves nothing
+/// behind and frees the read slot.
 pub async fn post_upload(
     State(config): State<Arc<Config>>,
     imports: Option<Extension<ImportHost>>,
@@ -257,19 +262,21 @@ pub async fn post_upload(
     owner_only_import(&config.access, &headers)?;
     let host = host(imports)?;
     let mut multipart = multipart.map_err(|_| invalid())?;
-    let mut upload = blocking(move || host.begin_upload()).await?;
+    let mut receiving = Receiving(Some(blocking(move || host.begin_upload()).await?));
     loop {
-        let field = match multipart.next_field().await {
-            Ok(Some(field)) => field,
-            Ok(None) => break,
-            Err(_) => return Err(abandon(upload).await),
+        let field = match receiving.wait(multipart.next_field()).await {
+            None => return Err(receiving.end(gone()).await),
+            Some(Ok(Some(field))) => field,
+            Some(Ok(None)) => break,
+            Some(Err(_)) => return Err(receiving.end(invalid()).await),
         };
         if field.name() != Some("file") {
-            return Err(abandon(upload).await);
+            return Err(receiving.end(invalid()).await);
         }
-        upload = blocking(move || upload.next_file().map(|()| upload)).await?;
-        upload = receive(field, upload).await?;
+        receiving.step(ImportUpload::next_file).await?;
+        receive(field, &mut receiving).await?;
     }
+    let upload = receiving.take()?;
     let job = blocking(move || upload.finish()).await?;
     Ok((StatusCode::ACCEPTED, Json(job)))
 }
@@ -278,13 +285,14 @@ pub async fn post_upload(
 /// workers in pieces of about [`WRITE_BYTES`].
 async fn receive(
     mut field: axum::extract::multipart::Field<'_>,
-    mut upload: ImportUpload,
-) -> Result<ImportUpload, Refusal> {
+    receiving: &mut Receiving,
+) -> Result<(), Refusal> {
     let mut pending = Vec::with_capacity(WRITE_BYTES);
     loop {
-        let chunk = match field.chunk().await {
-            Ok(chunk) => chunk,
-            Err(_) => return Err(abandon(upload).await),
+        let chunk = match receiving.wait(field.chunk()).await {
+            None => return Err(receiving.end(gone()).await),
+            Some(Ok(chunk)) => chunk,
+            Some(Err(_)) => return Err(receiving.end(invalid()).await),
         };
         let end = chunk.is_none();
         if let Some(chunk) = chunk {
@@ -292,24 +300,83 @@ async fn receive(
         }
         if pending.len() >= WRITE_BYTES || (end && !pending.is_empty()) {
             let piece = std::mem::replace(&mut pending, Vec::with_capacity(WRITE_BYTES));
-            upload = blocking(move || upload.write(&piece).map(|()| upload)).await?;
+            receiving.step(move |upload| upload.write(&piece)).await?;
         }
         if end {
-            return Ok(upload);
+            return Ok(());
         }
     }
 }
 
-/// Drops a refused upload off the async workers (its drop deletes its
-/// folder, then frees the read slot) and answers `IMPORT_INVALID`.
-async fn abandon(upload: ImportUpload) -> Refusal {
-    let _ = tokio::task::spawn_blocking(move || drop(upload)).await;
-    Refusal::App(invalid())
+/// The upload a request is writing. Whatever ends the request, the
+/// upload's drop (which deletes its folder, then frees the read slot) runs
+/// off the async workers: a refused step drops it inside its blocking
+/// task, [`Receiving::end`] waits for its drop there, and a request whose
+/// client went away drops this guard, which hands the upload to a
+/// blocking thread (M1).
+struct Receiving(Option<ImportUpload>);
+
+impl Receiving {
+    /// Runs `step` on the upload off the async workers.
+    async fn step(
+        &mut self,
+        step: impl FnOnce(&mut ImportUpload) -> Result<(), ImportError> + Send + 'static,
+    ) -> Result<(), Refusal> {
+        let mut upload = self.take()?;
+        self.0 = Some(blocking(move || step(&mut upload).map(|()| upload)).await?);
+        Ok(())
+    }
+
+    /// The upload, leaving nothing for this guard to drop.
+    fn take(&mut self) -> Result<ImportUpload, Refusal> {
+        self.0.take().ok_or(Refusal::App(failed()))
+    }
+
+    /// `next` from the client, or `None` once the upload was discarded
+    /// (M2): a `DELETE` while the client stalls still frees the slot.
+    /// Borrowed mutably: an upload is `Send` but not `Sync`.
+    async fn wait<T>(&mut self, next: impl Future<Output = T>) -> Option<T> {
+        tokio::pin!(next);
+        let mut ticks = tokio::time::interval(WATCH_EVERY);
+        loop {
+            tokio::select! {
+                out = &mut next => return Some(out),
+                _ = ticks.tick() => {
+                    if self.0.as_ref().is_some_and(ImportUpload::is_discarded) {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ends the upload and answers `refusal` once its folder is gone and
+    /// the read slot is free.
+    async fn end(&mut self, refusal: AppError) -> Refusal {
+        if let Some(upload) = self.0.take() {
+            let _ = tokio::task::spawn_blocking(move || drop(upload)).await;
+        }
+        Refusal::App(refusal)
+    }
+}
+
+impl Drop for Receiving {
+    fn drop(&mut self) {
+        if let Some(upload) = self.0.take() {
+            match tokio::runtime::Handle::try_current() {
+                Ok(runtime) => {
+                    runtime.spawn_blocking(move || drop(upload));
+                }
+                Err(_) => drop(upload),
+            }
+        }
+    }
 }
 
 /// `POST /api/import/files`: files or folders the desktop's picker chose,
-/// read in place. Each must be absolute: nothing resolves against the
-/// server's working folder.
+/// read in place (`~` read against the home, nothing relative). Only the
+/// desktop sends these, and it sends no `Origin`: a page, the app's own
+/// included, is refused (M5).
 pub async fn post_files(
     State(config): State<Arc<Config>>,
     imports: Option<Extension<ImportHost>>,
@@ -317,12 +384,12 @@ pub async fn post_files(
     body: Result<Json<ImportPaths>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ImportJob>), Refusal> {
     owner_only_import(&config.access, &headers)?;
+    if headers.contains_key(header::ORIGIN) {
+        return Err(AppError::Forbidden(OWNER_ONLY_IMPORT.into()).into());
+    }
     let host = host(imports)?;
     let Json(ImportPaths { paths }) = body.map_err(|_| invalid())?;
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    if !paths.iter().all(|path| path.is_absolute()) {
-        return Err(AppError::BadRequest(FOLDER_MISSING.into()).into());
-    }
     let job = blocking(move || host.read_paths(paths)).await?;
     Ok((StatusCode::ACCEPTED, Json(job)))
 }
