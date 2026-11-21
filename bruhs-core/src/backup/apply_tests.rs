@@ -1567,7 +1567,7 @@ async fn calendar_goes_back_to_the_config_root_on_one_root() {
 #[tokio::test]
 async fn the_restore_lock_holds_off_schedule_the_web_part_and_the_sweep() {
     let fixture = fixture(false, false);
-    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let before = stage_b(&fixture, BackupOptions::default(), true, false).await;
     let roots = &fixture.roots;
     schedule(roots, &staged_source(&before), false).unwrap();
     apply_pending(roots, &fixture.store, None).unwrap();
@@ -1634,6 +1634,50 @@ async fn a_rollback_keeps_a_waiting_web_part() {
 /// A park never lands on an earlier one (N2), and a file written inside a
 /// restored folder after it was placed is parked, not sent back to the
 /// staging the sweep removes (N3).
+/// Final review B minor: the browser's data from before its restore joins
+/// the set that restore made, even when a later rollback wrote a newer
+/// set while the browser part still waits.
+#[tokio::test]
+async fn the_previous_web_part_joins_the_set_its_restore_made() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), true, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    let first = pre_restores(roots)[0].stamp.clone();
+    let waiting = waiting_web_part(roots).unwrap();
+
+    // Another restore rolls back, keeping what was in its way in a newer
+    // set.
+    std::fs::remove_file(fixture.out.join("b.bruhsbak")).unwrap();
+    let again = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    schedule(roots, &staged_source(&again), false).unwrap();
+    let intruder = roots.core.join("server/intruder.txt");
+    let planted = Cell::new(false);
+    let plant = |step: &Step, point: Point| {
+        if matches!(step, Step::Placed { .. }) && point == Point::Recorded && !planted.get() {
+            planted.set(true);
+            write(&intruder, b"made mid-apply");
+        }
+        false
+    };
+    apply_rolling_back(&fixture, &plant);
+    let newest = pre_restores(roots)[0].stamp.clone();
+    assert_ne!(newest, first);
+    assert_eq!(waiting_web_part(roots), Some(waiting));
+
+    let host = host(&fixture);
+    let (id, previous) = web_part_upload(&host, UploadKind::PreviousWebPart, b"{\"old\":1}");
+    let upload = host.uploaded(UploadKind::PreviousWebPart, &id).unwrap();
+    keep_previous_web_part(roots, &upload).unwrap();
+    let part = |stamp: &str| kept_dir(roots, RootKey::Core, stamp).join("meta/web-part.bin");
+    assert_eq!(std::fs::read(part(&first)).unwrap(), previous);
+    assert!(!part(&newest).exists());
+}
+
 #[tokio::test]
 async fn a_rollback_parks_what_was_made_mid_apply_under_free_names() {
     let fixture = fixture(false, false);

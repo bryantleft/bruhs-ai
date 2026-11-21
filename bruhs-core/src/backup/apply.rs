@@ -174,6 +174,11 @@ struct ResultFile {
     warnings: Vec<String>,
     service_to_restart: bool,
     web_part: Option<WebPartInfo>,
+    /// The kept set the restore that brought `web_part` made: the
+    /// browser's data from before that restore joins it, whatever sets
+    /// came after (final review B minor).
+    #[serde(default)]
+    web_part_stamp: Option<String>,
 }
 
 impl ResultFile {
@@ -971,6 +976,7 @@ impl Apply<'_> {
             stamp: self.journal.stamp.clone(),
             warnings,
             service_to_restart: self.journal.service_to_restart,
+            web_part_stamp: web_part.as_ref().map(|_| self.journal.stamp.clone()),
             web_part,
         };
         write_atomically(self.backups, RESULT, &to_json(&result)?)?;

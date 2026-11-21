@@ -83,6 +83,9 @@ impl Apply<'_> {
             },
             warnings: vec![RESTORE_ROLLED_BACK.to_owned()],
             service_to_restart: self.journal.service_to_restart,
+            web_part_stamp: previous
+                .as_ref()
+                .and_then(|previous| previous.web_part_stamp.clone()),
             web_part: previous.and_then(|previous| previous.web_part),
         };
         write_atomically(self.backups, RESULT, &to_json(&result)?)?;

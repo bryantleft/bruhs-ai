@@ -165,7 +165,8 @@ pub fn delete_pre_restore(
 }
 
 /// Moves a finished upload of the browser's data from before its own
-/// restore into the newest kept set's `meta/web-part.bin` (D18, D19).
+/// restore into `meta/web-part.bin` of the kept set that restore made
+/// (D18, D19), never a newer one a rollback wrote (final review B minor).
 /// The first upload stays: a later one is dropped, since a browser restore
 /// retried after its write would send the restored data, not the data from
 /// before (B Task 14 I2). `BACKUP_BUSY` while an apply holds
@@ -179,8 +180,11 @@ pub fn keep_previous_web_part(roots: &Roots, upload: &Path) -> Result<(), Backup
     if !is_file(upload) {
         return Err(gone());
     }
-    let newest = pre_restores(roots).into_iter().next().ok_or_else(gone)?;
-    let meta = kept_dir(roots, RootKey::Core, &newest.stamp).join(META);
+    let stamp = super::read_result(&backups)
+        .and_then(|result| result.web_part_stamp)
+        .filter(|stamp| valid_stamp(stamp) && kept_info(roots, stamp).is_some())
+        .ok_or_else(gone)?;
+    let meta = kept_dir(roots, RootKey::Core, &stamp).join(META);
     if !real_dir(&meta) {
         return Err(gone());
     }
