@@ -195,3 +195,73 @@ async fn damaged_catalog_fails_closed_instead_of_reporting_an_empty_vault() {
         "broken"
     );
 }
+
+/// D26: keychain items in a file outlive the store that wrote them and
+/// reach another store (another process) on the same file.
+#[tokio::test]
+async fn test_file_items_are_shared_and_private() {
+    let directory = tempfile::tempdir().unwrap();
+    let catalogs = directory.path().join("credentials");
+    let items = directory.path().join("keys");
+    let store = |keys: &Path| {
+        SecretStore(Backend::FileTest(
+            catalogs.clone(),
+            Arc::new(KeyMap::in_file(keys.join(item_file::ITEMS))),
+        ))
+    };
+    let writer = store(&items);
+    writer
+        .save("/project", "Key", Zeroizing::new("private-file".into()))
+        .await
+        .unwrap();
+    writer
+        .write_item(
+            crate::secrets::CALENDAR_SERVICE,
+            crate::secrets::CALENDAR_ACCOUNT,
+            "token \"quoted\" \\ value",
+        )
+        .unwrap();
+    drop(writer);
+    let reader = store(&items);
+    let id = storage_key(Path::new("/project"), "Key");
+    assert_eq!(
+        reader
+            .get(&id)
+            .await
+            .unwrap()
+            .as_deref()
+            .map(String::as_str),
+        Some("private-file")
+    );
+    assert_eq!(
+        reader
+            .read_item(
+                crate::secrets::CALENDAR_SERVICE,
+                crate::secrets::CALENDAR_ACCOUNT
+            )
+            .unwrap()
+            .as_deref()
+            .map(String::as_str),
+        Some("token \"quoted\" \\ value")
+    );
+    reader.delete_saved(&id).await.unwrap();
+    assert!(store(&items).get(&id).await.unwrap().is_none());
+    // The values live only in the items file, never in the catalogs.
+    let catalog = fs::read_to_string(catalogs.join("catalog.json")).unwrap();
+    assert!(!catalog.contains("private-file"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&items.join(item_file::ITEMS)), 0o600);
+        assert_eq!(mode(&items), 0o700);
+    }
+    // Another folder is another keychain.
+    assert!(store(&directory.path().join("other"))
+        .read_item(
+            crate::secrets::CALENDAR_SERVICE,
+            crate::secrets::CALENDAR_ACCOUNT
+        )
+        .unwrap()
+        .is_none());
+}

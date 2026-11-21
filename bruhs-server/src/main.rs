@@ -3,6 +3,7 @@ mod error;
 mod local_access;
 mod parent_watch;
 mod reactive_events;
+mod restore_control;
 mod routes;
 mod service;
 mod static_assets;
@@ -84,6 +85,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = Config::from_env()?;
         std::process::exit(service::cli(&config.spa_dir).unwrap_or(2));
     }
+    if let Some(code) = restore_control::restore_apply_cli() {
+        std::process::exit(code);
+    }
     tracing_subscriber::registry()
         .with(log_filter())
         .with(tracing_subscriber::fmt::layer())
@@ -91,23 +95,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     parent_watch::exit_with_parent();
 
     let config = Arc::new(Config::from_env()?);
+    let secrets = secret_store_choice(std::env::var("BRUHS_SECRET_STORE").ok().as_deref());
+    let secret_store = || secrets.store();
+    // A restore is applied before any store opens (D16, ruling F20).
+    if let Some(code) = restore_control::apply_at_start(secret_store()).await {
+        std::process::exit(code);
+    }
     let store =
         bruhs_core::SqliteMeetingStore::open(bruhs_core::SqliteMeetingStore::default_path()?)
             .await?;
-    let memory = memory_secrets(std::env::var("BRUHS_SECRET_STORE").ok().as_deref());
-    let secret_store = || {
-        if memory {
-            bruhs_core::secrets::SecretStore::in_memory()
-        } else {
-            bruhs_core::secrets::SecretStore::os()
-        }
-    };
     // The web runs threads side by side, so an agent may wait for another
     // thread's reply inside one tool call.
     let state = AppState::builder()
         .thread_waits(true)
         .meetings(Arc::new(store));
-    let state = if memory {
+    // Memory and file stores keep connection tokens in memory as well
+    // (ruling F13 c).
+    let state = if secrets != SecretChoice::Os {
         state
             .secret_store(secret_store())
             .connections(bruhs_core::connections::Connections::in_memory())
@@ -282,25 +286,64 @@ fn workbench_services(
         ))
 }
 
-/// Whether `BRUHS_SECRET_STORE` (`value`) asks for in-memory keychain and
-/// connection stores, for the acceptance script (D25). Only a debug build
-/// honors it; a release build warns and keeps the OS stores.
-fn memory_secrets(value: Option<&str>) -> bool {
-    match value {
-        None => false,
-        Some("memory") if cfg!(debug_assertions) => {
-            tracing::warn!("BRUHS_SECRET_STORE=memory: secrets live in memory and go on exit");
-            true
-        }
-        Some("memory") => {
-            tracing::warn!("BRUHS_SECRET_STORE is ignored in a release build");
-            false
-        }
-        Some(_) => {
-            tracing::warn!("BRUHS_SECRET_STORE accepts only memory; ignoring it");
-            false
+/// Where keychain items live, from `BRUHS_SECRET_STORE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SecretChoice {
+    /// The OS keychain.
+    Os,
+    /// `memory`: in memory, gone on exit (the acceptance scripts, D25).
+    Memory,
+    /// `file:<dir>`: `<dir>/items.json`, which outlives the process (D26).
+    File(std::path::PathBuf),
+}
+
+impl SecretChoice {
+    /// A store for this choice.
+    fn store(&self) -> bruhs_core::secrets::SecretStore {
+        match self {
+            Self::Os => bruhs_core::secrets::SecretStore::os(),
+            Self::Memory => bruhs_core::secrets::SecretStore::in_memory(),
+            #[cfg(debug_assertions)]
+            Self::File(dir) => bruhs_core::secrets::SecretStore::test_file(dir.clone()),
+            #[cfg(not(debug_assertions))]
+            Self::File(_) => bruhs_core::secrets::SecretStore::os(),
         }
     }
+}
+
+/// What `BRUHS_SECRET_STORE` (`value`) asks for: `memory` or
+/// `file:<absolute dir>`, for the acceptance scripts (D25, D26). Only a
+/// debug build honors it; a release build warns and keeps the OS stores.
+fn secret_store_choice(value: Option<&str>) -> SecretChoice {
+    let Some(value) = value else {
+        return SecretChoice::Os;
+    };
+    let choice = match value.strip_prefix("file:") {
+        Some(dir) if std::path::Path::new(dir).is_absolute() => SecretChoice::File(dir.into()),
+        Some(_) => {
+            tracing::warn!("BRUHS_SECRET_STORE=file: needs an absolute folder; ignoring it");
+            return SecretChoice::Os;
+        }
+        None if value == "memory" => SecretChoice::Memory,
+        None => {
+            tracing::warn!("BRUHS_SECRET_STORE accepts only memory or file:<dir>; ignoring it");
+            return SecretChoice::Os;
+        }
+    };
+    if !cfg!(debug_assertions) {
+        tracing::warn!("BRUHS_SECRET_STORE is ignored in a release build");
+        return SecretChoice::Os;
+    }
+    match &choice {
+        SecretChoice::Memory => {
+            tracing::warn!("BRUHS_SECRET_STORE=memory: secrets live in memory and go on exit");
+        }
+        SecretChoice::File(_) => {
+            tracing::warn!("BRUHS_SECRET_STORE=file: keychain items live in a test file");
+        }
+        SecretChoice::Os => {}
+    }
+    choice
 }
 
 /// `RUST_LOG` as `target=level` directives (e.g. `info,tower_http=debug`),
@@ -335,6 +378,7 @@ async fn serve(listener: tokio::net::TcpListener, app: Router) -> std::io::Resul
     tokio::select! {
         result = &mut server => return result,
         () = shutdown_signal() => {}
+        () = restore_control::exit_requested() => {}
     }
     tracing::info!("shutting down");
     // `stopped` is alive inside the graceful-shutdown future, so this
@@ -972,14 +1016,32 @@ fn router_with_capture_daemon(
 
 #[cfg(test)]
 mod tests {
+    use super::{secret_store_choice, SecretChoice};
+
     #[test]
-    fn only_a_debug_build_keeps_secrets_in_memory() {
-        assert!(!super::memory_secrets(None));
+    fn secret_store_choices() {
+        let debug = |choice: SecretChoice| {
+            if cfg!(debug_assertions) {
+                choice
+            } else {
+                SecretChoice::Os
+            }
+        };
+        assert_eq!(secret_store_choice(None), SecretChoice::Os);
         assert_eq!(
-            super::memory_secrets(Some("memory")),
-            cfg!(debug_assertions)
+            secret_store_choice(Some("memory")),
+            debug(SecretChoice::Memory)
         );
-        assert!(!super::memory_secrets(Some("os")));
-        assert!(!super::memory_secrets(Some("Memory")));
+        assert_eq!(
+            secret_store_choice(Some("file:/x")),
+            debug(SecretChoice::File("/x".into()))
+        );
+        for ignored in ["os", "Memory", "file:", "file:relative/keys", "File:/x"] {
+            assert_eq!(
+                secret_store_choice(Some(ignored)),
+                SecretChoice::Os,
+                "{ignored}"
+            );
+        }
     }
 }

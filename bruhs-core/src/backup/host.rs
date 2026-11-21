@@ -206,7 +206,7 @@ impl BackupHost {
     }
 
     /// Fast key derivation, short waits and a daemon that answers as told.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn for_tests(mut self, recording: bool) -> Self {
         let config = Arc::make_mut(&mut self.config);
         config.kdf = KdfParams::FLOOR;

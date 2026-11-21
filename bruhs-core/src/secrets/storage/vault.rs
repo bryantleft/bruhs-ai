@@ -734,7 +734,7 @@ impl SecretStore {
             }
             #[cfg(test)]
             Backend::Unavailable => Err(SecretError::Storage),
-            #[cfg(test)]
+            #[cfg(any(test, debug_assertions))]
             Backend::FileTest(directory, keys) => Ok(Snapshot {
                 catalog: read_catalog(&directory)?,
                 vault: read_vault_catalog(&directory).ok(),

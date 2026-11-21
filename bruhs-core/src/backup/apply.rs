@@ -339,6 +339,25 @@ pub fn pending(roots: &Roots) -> Option<PendingRestore> {
     })
 }
 
+/// Whether a restore waits to be applied or is being applied: its
+/// `pending.json` or the journal of an apply a stop interrupted. An app's
+/// start that finds one and can't apply it opens no store (ruling F20 b).
+/// A linked `backups` folder holds nothing an apply acts on.
+pub fn restore_waits(roots: &Roots) -> bool {
+    backups_dir(roots).is_some_and(|backups| {
+        [PENDING, JOURNAL]
+            .iter()
+            .any(|name| std::fs::symlink_metadata(backups.join(name)).is_ok())
+    })
+}
+
+/// Whether an apply has begun and not ended: its journal is there. Data
+/// in the roots may then be half placed, so nothing opens a store.
+pub fn applying(roots: &Roots) -> bool {
+    backups_dir(roots)
+        .is_some_and(|backups| std::fs::symlink_metadata(backups.join(JOURNAL)).is_ok())
+}
+
 /// The last restore applied on this computer.
 pub fn result(roots: &Roots) -> Option<RestoreResult> {
     read_result(&backups_dir(roots)?).map(|result| result.result())

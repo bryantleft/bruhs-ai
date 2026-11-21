@@ -3,11 +3,14 @@
 mod app_state;
 mod assets;
 mod helpers;
+#[cfg(unix)]
+mod instance_lock;
 mod logging;
 mod motion;
 #[cfg(feature = "native-performance")]
 mod native_performance;
 mod paths;
+mod restore_relaunch;
 mod server_client;
 #[cfg(target_os = "macos")]
 mod shell_path;
@@ -203,6 +206,8 @@ fn main() {
     if let Some(path) = &log_file {
         tracing::info!("bruhs-desktop starting; logging to {}", path.display());
     }
+    #[cfg(unix)]
+    let _instance = instance_lock::apply_restore_at_start();
     if env::args().any(|arg| arg == "--synthetic-meeting-dock") {
         #[cfg(debug_assertions)]
         synthetic_dock::run();

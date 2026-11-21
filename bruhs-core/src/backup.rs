@@ -31,12 +31,14 @@ mod journal;
 mod open;
 #[cfg(unix)]
 mod prepare;
+#[cfg(all(unix, any(test, feature = "test-support")))]
+pub mod test_support;
 
 #[cfg(unix)]
 pub use apply::{
-    apply_pending, delete_pre_restore, instance_lock_path, keep_previous_web_part, pending,
-    pre_restores, result, schedule, take_instance_lock, take_service_restart, waiting_web_part,
-    ApplyOutcome, Holder,
+    apply_pending, applying, delete_pre_restore, instance_lock_path, keep_previous_web_part,
+    pending, pre_restores, restore_waits, result, schedule, take_instance_lock,
+    take_service_restart, waiting_web_part, ApplyOutcome, Holder,
 };
 #[cfg(all(test, unix))]
 use collect::snapshot_sqlite_with;

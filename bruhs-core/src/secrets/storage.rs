@@ -29,10 +29,15 @@ const CATALOG_FILE: &str = "catalog.json";
 
 type MemoryKeys = Arc<KeyMap>;
 
-/// In-memory keychain items for the memory store and tests.
+/// In-memory keychain items for the memory store and tests, or, for a
+/// debug build's acceptance runs, items kept in one file (D26).
 #[derive(Default)]
 struct KeyMap {
     values: Mutex<HashMap<String, Zeroizing<String>>>,
+    /// `<dir>/items.json`: every read and change goes to the file, so other
+    /// processes on the same file see the same items.
+    #[cfg(any(test, debug_assertions))]
+    file: Option<PathBuf>,
     #[cfg(test)]
     hooks: KeyHooks,
 }
@@ -61,6 +66,15 @@ impl KeyMap {
         }
     }
 
+    /// Items kept in `file` instead of memory (D26).
+    #[cfg(any(test, debug_assertions))]
+    fn in_file(file: PathBuf) -> Self {
+        Self {
+            file: Some(file),
+            ..Self::default()
+        }
+    }
+
     fn lock(&self) -> LockResult<MutexGuard<'_, HashMap<String, Zeroizing<String>>>> {
         self.values.lock()
     }
@@ -80,6 +94,11 @@ impl KeyMap {
             );
             self.hooks.waiting.fetch_sub(1, Ordering::SeqCst);
         }
+        #[cfg(any(test, debug_assertions))]
+        if let Some(file) = &self.file {
+            // An unreadable file reads as no item, as a keychain without it.
+            return item_file::read(file).ok()?.remove(account);
+        }
         self.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(account)
@@ -89,6 +108,12 @@ impl KeyMap {
     fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
         #[cfg(test)]
         self.change()?;
+        #[cfg(any(test, debug_assertions))]
+        if let Some(file) = &self.file {
+            return item_file::change(file, |items| {
+                items.insert(account.to_owned(), Zeroizing::new(value.to_owned()));
+            });
+        }
         self.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(account.to_owned(), Zeroizing::new(value.to_owned()));
@@ -98,6 +123,12 @@ impl KeyMap {
     fn remove(&self, account: &str) -> Result<(), SecretError> {
         #[cfg(test)]
         self.change()?;
+        #[cfg(any(test, debug_assertions))]
+        if let Some(file) = &self.file {
+            return item_file::change(file, |items| {
+                items.remove(account);
+            });
+        }
         self.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(account);
@@ -157,7 +188,9 @@ enum Backend {
     Memory(Arc<Mutex<Vault>>),
     #[cfg(test)]
     Unavailable,
-    #[cfg(test)]
+    /// Catalog files in a folder, keychain items in memory or, for D26's
+    /// [`SecretStore::test_file`], in a file.
+    #[cfg(any(test, debug_assertions))]
     FileTest(PathBuf, MemoryKeys),
 }
 
@@ -297,6 +330,22 @@ impl SecretStore {
         Self(Backend::FileTest(directory, MemoryKeys::default()))
     }
 
+    /// D26, debug builds only: the usual catalog files, with keychain items
+    /// in `<directory>/items.json` (0600, rewritten atomically) instead of
+    /// the keychain, so an acceptance run's items outlive the server and
+    /// reach the restore's own process. `directory` belongs outside the
+    /// data roots.
+    #[cfg(any(test, debug_assertions))]
+    pub fn test_file(directory: PathBuf) -> Self {
+        // Without a data folder nothing else runs either; the catalogs
+        // then sit beside the items.
+        let catalogs = catalog_directory().unwrap_or_else(|_| directory.join("credentials"));
+        Self(Backend::FileTest(
+            catalogs,
+            Arc::new(KeyMap::in_file(directory.join(item_file::ITEMS))),
+        ))
+    }
+
     /// One of Bruhs' own keychain items ([`super::ITEM_SERVICES`]), read
     /// without the catalog lock. It may wait on a keychain prompt, so call
     /// it off the async runtime.
@@ -336,7 +385,7 @@ impl SecretStore {
             }
             #[cfg(test)]
             Backend::Unavailable => Err(SecretError::Storage),
-            #[cfg(test)]
+            #[cfg(any(test, debug_assertions))]
             Backend::FileTest(directory, keys) => {
                 with_catalog(&directory, Keys::Memory(keys), operation)
             }
@@ -363,7 +412,7 @@ impl SecretStore {
                     .values()
                     .cloned()
                     .collect(),
-                #[cfg(test)]
+                #[cfg(any(test, debug_assertions))]
                 Backend::FileTest(directory, _) => {
                     read_catalog(&directory)?.entries.into_values().collect()
                 }
@@ -402,7 +451,7 @@ impl SecretStore {
                 .handle(),
             #[cfg(test)]
             Backend::Unavailable => return Err(SecretError::Storage),
-            #[cfg(test)]
+            #[cfg(any(test, debug_assertions))]
             Backend::FileTest(_, keys) => Keys::Memory(keys.clone()),
         })
     }
@@ -714,6 +763,8 @@ fn read_catalog(directory: &Path) -> Result<Catalog, SecretError> {
     Ok(catalog)
 }
 
+#[cfg(any(test, debug_assertions))]
+mod item_file;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
