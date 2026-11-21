@@ -51,10 +51,23 @@ impl ReactiveRuntime {
                 tokio::time::sleep(STOP_POLL).await;
             }
         }
-        // After the lanes: a write one of them had begun lands first.
+        // Queued behind any call a lane already made: a lane whose write
+        // was in the blocking pool may still end its run in its real
+        // state, which is harmless; every run left running is marked.
         self.call(store::restore::interrupt_running).await?;
         self.changed();
         Ok(())
+    }
+
+    /// Runs the worker again after a restore that was called off, and asks
+    /// the sync loop for a pass so the bruhs' browsers come back.
+    pub fn resume_after_restore(
+        &self,
+        app: std::sync::Arc<crate::AppState>,
+    ) -> Result<(), ReactiveError> {
+        let started = self.start(app).map(drop);
+        self.changed();
+        started
     }
 }
 

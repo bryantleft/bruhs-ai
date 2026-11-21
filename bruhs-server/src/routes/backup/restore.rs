@@ -50,9 +50,9 @@ use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_core::AppState;
 use bruhs_models::backup::{
     valid_stamp, ApplyAccepted, ApplyRestore, BackupJob, OpenBackup, OpenSource, RestoreStatus,
-    UploadId, BACKUP_BUSY, CONFIRM_REPLACE, INVALID_REQUEST, QUIT_DESKTOP_FIRST, RECORDING_FIRST,
-    RESTORE_NOT_STARTED, SERVICE_NOT_STOPPED, SERVICE_TOO_OLD, SOURCE_MISSING, UPLOAD_TYPE,
-    WEB_PART_TYPE,
+    UploadId, BACKUP_BUSY, CONFIRM_REPLACE, GONE, INVALID_REQUEST, QUIT_DESKTOP_FIRST,
+    RECORDING_FIRST, RESTORE_AT_NEXT_START, RESTORE_NOT_STARTED, SERVICE_NOT_STOPPED,
+    SERVICE_TOO_OLD, SOURCE_MISSING, UPLOAD_TYPE, WEB_PART_TYPE,
 };
 use tokio::io::AsyncReadExt as _;
 use tokio_util::io::ReaderStream;
@@ -137,10 +137,14 @@ pub async fn open(
     };
     let password = Zeroizing::new(password);
     let (path, remove_after) = match source {
-        OpenSource::Upload { id } => (
-            backup.uploaded(UploadKind::Restore, &id).ok_or_else(gone)?,
-            true,
-        ),
+        OpenSource::Upload { id } => {
+            let host = backup.clone();
+            let found = blocking(move || {
+                host.uploaded(UploadKind::Restore, &id)
+                    .ok_or(BackupError::Refused(GONE))
+            });
+            (found.await?, true)
+        }
         OpenSource::Path { path } => (blocking(move || regular_file(&path)).await?, false),
     };
     backup
@@ -199,11 +203,19 @@ impl Running {
         }
     }
 
-    /// Runs the worker again after a restore that couldn't go ahead. The
-    /// bruhs' browsers open again after the next start.
+    /// Undoes [`Self::halt`] after a restore that was called off (B Task
+    /// 12 I1): the bruhs' browsers can open again, and the worker runs
+    /// again with a sync pass that gives them fresh slots. Runs the halt
+    /// interrupted stay interrupted, as after a restart.
     fn resume(&self) {
+        if let Some(tools) = &self.tools {
+            tools.reopen_after_restore();
+        }
         if let Some(reactive) = &self.reactive {
-            if reactive.start(Arc::clone(&self.app)).is_err() {
+            if reactive
+                .resume_after_restore(Arc::clone(&self.app))
+                .is_err()
+            {
                 tracing::warn!("Bruhs runs start again at the next start");
             }
         }
@@ -243,6 +255,10 @@ pub async fn apply(
         return Err(AppError::BadRequest(CONFIRM_REPLACE.into()));
     }
     let control = control(restore_control)?;
+    // First, since it may wait on the keychain: the moment checks below
+    // then hold right up to the schedule (B Task 12 M1).
+    let (checker, checked) = (backup.clone(), source.clone());
+    let protocol = blocking(move || checker.check_restore(&checked)).await?;
     if backup.running() {
         return Err(AppError::Conflict(BACKUP_BUSY.into()));
     }
@@ -253,8 +269,6 @@ pub async fn apply(
     if !from_desktop && blocking(move || desktop_running(&roots)).await? {
         return Err(AppError::Conflict(QUIT_DESKTOP_FIRST.into()));
     }
-    let (checker, checked) = (backup.clone(), source.clone());
-    let protocol = blocking(move || checker.check_restore(&checked)).await?;
     let asked = Arc::clone(&control);
     let (service, loaded, own) = tokio::task::spawn_blocking(move || {
         (
@@ -278,8 +292,7 @@ pub async fn apply(
     let spawned = tokio::task::spawn_blocking(move || spawner.spawn_applier()).await;
     if !matches!(spawned, Ok(Ok(()))) {
         tracing::warn!("the restore's applier didn't start");
-        take_back(backup.roots()).await;
-        return Err(AppError::Unavailable(RESTORE_NOT_STARTED.into()));
+        return Err(called_off(backup.roots(), RESTORE_NOT_STARTED).await);
     }
     let running = Running {
         app: server.app,
@@ -307,19 +320,23 @@ pub async fn apply(
     let stopped = tokio::task::spawn_blocking(move || stopper.stop_service()).await;
     let Ok(Ok(service_stopped)) = stopped else {
         tracing::warn!("the background service didn't stop for the restore");
-        take_back(backup.roots()).await;
         running.resume();
-        return Err(AppError::Unavailable(SERVICE_NOT_STOPPED.into()));
+        return Err(called_off(backup.roots(), SERVICE_NOT_STOPPED).await);
     };
     control.exit_soon();
     Ok(Json(ApplyAccepted { service_stopped }).into_response())
 }
 
-/// Removes the restore this server scheduled but couldn't hand over.
-async fn take_back(roots: &Roots) {
+/// Removes the restore this server scheduled but couldn't hand over, and
+/// answers `copy`; when it stays scheduled, the answer says it finishes at
+/// the next start (B Task 12 M2).
+async fn called_off(roots: &Roots, copy: &'static str) -> AppError {
     let roots = roots.clone();
-    if blocking(move || unschedule(&roots)).await.is_err() {
+    if blocking(move || unschedule(&roots)).await.is_ok() {
+        AppError::Unavailable(copy.into())
+    } else {
         tracing::warn!("Bruhs couldn't take back a restore it couldn't start");
+        AppError::Unavailable(RESTORE_AT_NEXT_START.into())
     }
 }
 
@@ -327,18 +344,32 @@ async fn take_back(roots: &Roots) {
 /// answer's body was handed to the connection, or the connection dropped
 /// it.
 fn answer_then(accepted: ApplyAccepted, after: impl FnOnce() + Send + 'static) -> Response {
-    /// Runs its step on a thread of its own when dropped.
+    /// Runs its step on a thread of its own when dropped, or right here
+    /// when no thread starts (B Task 12 M4): in the service's own process
+    /// the step only asks for the shutdown, so it doesn't block.
     struct After<F: FnOnce() + Send + 'static>(Option<F>);
     impl<F: FnOnce() + Send + 'static> Drop for After<F> {
         fn drop(&mut self) {
             let Some(step) = self.0.take() else { return };
+            let shared = Arc::new(std::sync::Mutex::new(Some(step)));
+            let theirs = Arc::clone(&shared);
             let spawned = std::thread::Builder::new()
                 .name("restore-stop".into())
-                .spawn(step);
+                .spawn(move || run_once(&theirs));
             if spawned.is_err() {
-                // The restore still waits, and applies at the next start.
                 tracing::warn!("no thread to stop the service after the answer");
+                run_once(&shared);
             }
+        }
+    }
+    /// Takes the step and runs it, once.
+    fn run_once<F: FnOnce()>(step: &std::sync::Mutex<Option<F>>) {
+        let taken = step
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(step) = taken {
+            step();
         }
     }
     let body = serde_json::to_vec(&accepted).unwrap_or_default();
@@ -388,19 +419,21 @@ pub async fn web_part(
 ) -> Result<Response, AppError> {
     owner_only_backup(&config.access, &headers)?;
     let roots = host(backup)?.roots().clone();
-    let (_, path) = blocking(move || Ok(waiting_web_part_file(&roots)))
-        .await?
-        .ok_or_else(gone)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|_| gone())?;
-    let metadata = file.metadata().map_err(|_| gone())?;
-    if !metadata.is_file() {
-        return Err(gone());
-    }
-    let bytes = metadata.len();
+    let (file, bytes) = blocking(move || {
+        let gone = || BackupError::Refused(GONE);
+        let (_, path) = waiting_web_part_file(&roots).ok_or_else(gone)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|_| gone())?;
+        let metadata = file.metadata().map_err(|_| gone())?;
+        if !metadata.is_file() {
+            return Err(gone());
+        }
+        Ok((file, metadata.len()))
+    })
+    .await?;
     let chunks =
         ReaderStream::with_capacity(tokio::fs::File::from_std(file).take(bytes), READ_BYTES);
     Response::builder()

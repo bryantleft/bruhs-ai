@@ -68,12 +68,14 @@ pub fn unschedule(roots: &Roots) -> Result<(), BackupError> {
 }
 
 /// The browser part that waits for the browser (D19), with its file in
-/// `backups/web-part/`.
+/// `backups/web-part/`, never through a linked folder.
 pub fn waiting_web_part_file(roots: &Roots) -> Option<(WebPartInfo, PathBuf)> {
     let part = waiting_web_part(roots)?;
-    let path = backups_dir(roots)?
-        .join(WEB_PARTS)
-        .join(format!("{}.bin", part.id));
+    let folder = backups_dir(roots)?.join(WEB_PARTS);
+    if !real_dir(&folder) {
+        return None;
+    }
+    let path = folder.join(format!("{}.bin", part.id));
     Some((part, path))
 }
 

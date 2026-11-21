@@ -7,9 +7,10 @@
 use bruhs_models::reactive::{ReactiveChange, ReactiveCommand};
 use bruhs_models::workspace_bridge::BridgeRequest;
 
-/// Every helper Bruhs starts, and the other tool surfaces: the MCP server
-/// and its tool files.
-const SOURCES: [(&str, &str); 14] = [
+/// Every helper Bruhs starts, and the MCP server's tool list. The MCP
+/// server's `tools/` files are read from disk, so a new one is scanned
+/// too ([`mcp_tool_files`]).
+const SOURCES: [(&str, &str); 10] = [
     ("workbench_tools.rs", include_str!("../workbench_tools.rs")),
     ("thread_link.rs", include_str!("../thread_link.rs")),
     (
@@ -29,23 +30,26 @@ const SOURCES: [(&str, &str); 14] = [
         "bruhs-mcp/src/tools.rs",
         include_str!("../../../bruhs-mcp/src/tools.rs"),
     ),
-    (
-        "bruhs-mcp/src/tools/audit.rs",
-        include_str!("../../../bruhs-mcp/src/tools/audit.rs"),
-    ),
-    (
-        "bruhs-mcp/src/tools/life_schema.rs",
-        include_str!("../../../bruhs-mcp/src/tools/life_schema.rs"),
-    ),
-    (
-        "bruhs-mcp/src/tools/workflow_schema.rs",
-        include_str!("../../../bruhs-mcp/src/tools/workflow_schema.rs"),
-    ),
-    (
-        "bruhs-mcp/src/tools/tests.rs",
-        include_str!("../../../bruhs-mcp/src/tools/tests.rs"),
-    ),
 ];
+
+/// Every `bruhs-mcp/src/tools/*.rs` file, by name with its source.
+fn mcp_tool_files() -> Vec<(String, String)> {
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bruhs-mcp/src/tools");
+    let mut files: Vec<(String, String)> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .map(|path| {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            (
+                format!("bruhs-mcp/src/tools/{name}"),
+                std::fs::read_to_string(&path).unwrap(),
+            )
+        })
+        .collect();
+    files.sort();
+    files
+}
 
 /// The words no helper's literal may hold, in any case.
 const WORDS: [&str; 2] = ["backup", "restore"];
@@ -169,7 +173,18 @@ fn the_scanner_reads_literals_and_skips_comments() {
 
 #[test]
 fn no_bruh_tool_or_command_reaches_backup() {
-    for (file, source) in SOURCES {
+    let tools = mcp_tool_files();
+    assert!(
+        tools.len() >= 4,
+        "the MCP server's tool files: {}",
+        tools.len()
+    );
+    let sources = SOURCES.iter().map(|(file, source)| (*file, *source)).chain(
+        tools
+            .iter()
+            .map(|(file, source)| (file.as_str(), source.as_str())),
+    );
+    for (file, source) in sources {
         assert!(!literals(source).is_empty(), "{file} reads as no source");
         for literal in literals(source) {
             let lower = literal.to_lowercase();
@@ -194,12 +209,19 @@ fn no_bruh_tool_or_command_reaches_backup() {
             assert!(serde_json::from_value::<BridgeRequest>(request).is_err());
         }
     }
-    // A request of the right shape does parse, so the checks above refuse
-    // the word and not the shape.
-    assert!(
-        serde_json::from_value::<ReactiveCommand>(serde_json::json!({
-            "action": "stop_all"
-        }))
-        .is_ok()
-    );
+    // Requests of the right shape do parse, so the checks above refuse the
+    // word and not the shape.
+    let change = serde_json::json!({ "type": "delete_agent", "id": "bruh-1" });
+    let shapes = [
+        serde_json::from_value::<ReactiveCommand>(serde_json::json!({ "action": "stop_all" }))
+            .is_ok(),
+        serde_json::from_value::<ReactiveChange>(change.clone()).is_ok(),
+        serde_json::from_value::<ReactiveCommand>(
+            serde_json::json!({ "action": "apply", "change": change }),
+        )
+        .is_ok(),
+        serde_json::from_value::<BridgeRequest>(serde_json::json!({ "kind": "read_finance" }))
+            .is_ok(),
+    ];
+    assert_eq!(shapes, [true; 4]);
 }

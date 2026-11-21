@@ -192,6 +192,10 @@ pub const RESTORE_NOT_STARTED: &str =
 /// taken back and this server keeps running.
 pub const SERVICE_NOT_STOPPED: &str =
     "Bruhs couldn't stop the background service, so nothing was replaced. Try again.";
+/// A restore that was called off but couldn't be taken back (B Task 12
+/// M2): it stays scheduled.
+pub const RESTORE_AT_NEXT_START: &str =
+    "Bruhs couldn't finish the restore now. It finishes the next time Bruhs starts.";
 
 /// Every constant above, for the copy rule test.
 pub const ALL_COPY: &[&str] = &[
@@ -319,6 +323,7 @@ pub const ALL_COPY: &[&str] = &[
     UPLOAD_TYPE,
     RESTORE_NOT_STARTED,
     SERVICE_NOT_STOPPED,
+    RESTORE_AT_NEXT_START,
 ];
 
 #[cfg(test)]

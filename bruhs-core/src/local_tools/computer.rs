@@ -731,6 +731,18 @@ impl LocalToolsHost {
         .await;
     }
 
+    /// After a restore that was called off once [`Self::close_all`] ran
+    /// (B Task 12 I1): drops every slot it revoked, so the next
+    /// [`Self::sync_bruhs`] makes fresh ones and the bruhs' browsers open
+    /// again. Their profiles stay on disk.
+    pub fn reopen_after_restore(&self) {
+        self.computers
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|_, slot| !*slot.grant.revoked.borrow());
+    }
+
     /// The refusals a bruh's browser step meets before it runs, without
     /// running it: Computer off, an action bruhs don't get, an invalid
     /// action, a stopped bruh, or the owner holding the computer. The

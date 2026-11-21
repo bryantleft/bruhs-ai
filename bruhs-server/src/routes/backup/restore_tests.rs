@@ -23,8 +23,8 @@ use bruhs_models::backup::{
     ApplyAccepted, BackupApp, BackupJob, BackupOptions, BackupOverview, JobState, RestorePreview,
     RestoreSource, RestoreStatus, UploadId, BACKUP_BUSY, CONFIRM_REPLACE, GONE, INVALID_REQUEST,
     KEYCHAIN_SET_UNREADABLE, NOTHING_TO_PUT_BACK, QUIT_DESKTOP_FIRST, RECORDING_FIRST,
-    RESTORE_NOT_STARTED, RESTORE_PENDING, SERVICE_NOT_STOPPED, SERVICE_TOO_OLD, UPLOAD_TYPE,
-    WRONG_PASSWORD,
+    RESTORE_AT_NEXT_START, RESTORE_NOT_STARTED, RESTORE_PENDING, SERVICE_NOT_STOPPED,
+    SERVICE_TOO_OLD, UPLOAD_TYPE, WRONG_PASSWORD,
 };
 use bruhs_models::crew::{BruhStatus, CREW_PROTOCOL};
 use bruhs_models::reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand};
@@ -48,6 +48,9 @@ struct Service {
     own: bool,
     fail_spawn: bool,
     fail_stop: bool,
+    /// The failing spawn takes `restore.lock` and keeps it, so the restore
+    /// can't be taken back.
+    hold_lock: bool,
 }
 
 impl Default for Service {
@@ -58,6 +61,7 @@ impl Default for Service {
             own: false,
             fail_spawn: false,
             fail_stop: false,
+            hold_lock: false,
         }
     }
 }
@@ -76,6 +80,8 @@ struct FakeControl {
     /// How many times the bruh's browser had closed when the service
     /// stopped.
     closes_at_stop: Mutex<Option<usize>>,
+    /// `restore.lock`, while a failing spawn holds it.
+    held: Mutex<Option<std::fs::File>>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -143,7 +149,13 @@ impl RestoreControl for FakeControl {
     fn spawn_applier(&self) -> std::io::Result<()> {
         *locked(&self.pending_at_spawn) = Some(pending(&self.roots).is_some());
         self.record("spawn_applier");
-        if locked(&self.service).fail_spawn {
+        let service = *locked(&self.service);
+        if service.hold_lock {
+            let lock = std::fs::File::open(self.roots.core.join("backups/restore.lock")).unwrap();
+            lock.lock().unwrap();
+            *locked(&self.held) = Some(lock);
+        }
+        if service.fail_spawn {
             Err(std::io::Error::other("refused"))
         } else {
             Ok(())
@@ -168,6 +180,8 @@ struct Fixture {
     /// waiting by it.
     reactive_db: PathBuf,
     pages: FakePages,
+    tools: Arc<LocalToolsHost>,
+    app: Arc<AppState>,
     control: Arc<FakeControl>,
     _directory: tempfile::TempDir,
 }
@@ -228,6 +242,7 @@ impl Fixture {
             pages: pages.clone(),
             pending_at_spawn: Mutex::default(),
             closes_at_stop: Mutex::default(),
+            held: Mutex::default(),
         });
         let state = Arc::new(
             AppState::builder()
@@ -243,7 +258,7 @@ impl Fixture {
         .unwrap();
         let as_control: Control = control.clone();
         let app = crate::router(crate::config::ServerState {
-            app: state,
+            app: Arc::clone(&state),
             config: Arc::new(config),
             updates: bruhs_core::updates::UpdateChecker::new(bruhs_core::updates::BuildInfo::new(
                 "", "", "unused",
@@ -251,7 +266,7 @@ impl Fixture {
         })
         .layer(Extension(host.clone()))
         .layer(Extension(reactive.clone()))
-        .layer(Extension(tools))
+        .layer(Extension(Arc::clone(&tools)))
         .layer(Extension(as_control));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -273,6 +288,8 @@ impl Fixture {
             reactive,
             reactive_db,
             pages,
+            tools,
+            app: state,
             control,
             _directory: directory,
         }
@@ -478,6 +495,50 @@ async fn live_crew(runtime: &ReactiveRuntime, db: &Path, work: &Path) {
     .unwrap();
 }
 
+/// Stages a backup of the fixture's own data through a host beside its
+/// own (a recording fixture's host makes no backups): its id.
+async fn stage_beside(fixture: &Fixture) -> String {
+    let host = BackupHost::new(fixture.roots.clone(), fixture.store.clone()).for_tests(false);
+    let path = fixture.roots.home.join("beside.bruhsbak");
+    let job = host
+        .start_create(CreateRequest {
+            password: Zeroizing::new(PASSWORD.into()),
+            options: BackupOptions::default(),
+            app: BackupApp::Desktop,
+            web_part: None,
+            web_db_version: None,
+            output: Output::File {
+                path: path.clone(),
+                overwrite: false,
+            },
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        ended(&host, &job.id).await,
+        JobState::Created { .. }
+    ));
+    let job = host
+        .start_open(path, Zeroizing::new(PASSWORD.into()), false)
+        .unwrap();
+    assert!(matches!(
+        ended(&host, &job.id).await,
+        JobState::Opened { .. }
+    ));
+    job.id
+}
+
+/// A core host's job once it stops running.
+async fn ended(host: &BackupHost, id: &str) -> JobState {
+    loop {
+        let state = host.job(id).unwrap().state;
+        if !matches!(state, JobState::Running { .. }) {
+            return state;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 fn staged(id: &str) -> Value {
     json!({ "type": "staged", "id": id })
 }
@@ -555,9 +616,9 @@ async fn a_restore_opens_previews_and_applies_only_when_confirmed() {
 async fn apply_refuses_unsafe_moments() {
     // A meeting records.
     let recording = Fixture::with(true, Service::default()).await;
-    let any = staged(&recording.host.random_id());
+    let id = stage_beside(&recording).await;
     assert_eq!(
-        recording.apply(any, true, false).await,
+        recording.apply(staged(&id), true, false).await,
         (StatusCode::CONFLICT, error(RECORDING_FIRST))
     );
     assert!(pending(&recording.roots).is_none());
@@ -672,10 +733,52 @@ async fn a_restore_that_cannot_hand_over_is_taken_back() {
     assert!(pending(&fixture.roots).is_none());
     assert_eq!(fixture.control.events(), ["spawn_applier", "stop_service"]);
     assert_eq!(fixture.note(), "today");
+    // B Task 12 I1: the halt is undone. The worker runs again, and the
+    // next sync gives the closed browser a fresh slot that opens.
+    assert_eq!(fixture.pages.closes(BRUH), 1);
+    assert!(
+        fixture.reactive.start(Arc::clone(&fixture.app)).is_err(),
+        "the worker runs again"
+    );
+    fixture
+        .tools
+        .sync_bruhs(vec![BruhComputer {
+            agent_id: BRUH.into(),
+            name: "Bruh".into(),
+            paused: false,
+            profile_dir: fixture.reactive_db.with_file_name("browser"),
+        }])
+        .await;
+    fixture.tools.open_computer(BRUH).await.unwrap();
     assert!(matches!(
         fixture.apply_pending().await,
         ApplyOutcome::NothingPending
     ));
+}
+
+/// B Task 12 M2: a restore that can't be taken back says it finishes at
+/// the next start.
+#[tokio::test]
+async fn a_restore_that_cannot_be_taken_back_says_so() {
+    let fixture = Fixture::with(
+        false,
+        Service {
+            fail_spawn: true,
+            hold_lock: true,
+            ..Service::default()
+        },
+    )
+    .await;
+    let preview = fixture.staged().await;
+    assert_eq!(
+        fixture.apply(staged(&preview.id), true, false).await,
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            error(RESTORE_AT_NEXT_START)
+        )
+    );
+    assert!(pending(&fixture.roots).is_some(), "it stays scheduled");
+    assert_eq!(fixture.pages.closes(BRUH), 0);
 }
 
 #[tokio::test]
