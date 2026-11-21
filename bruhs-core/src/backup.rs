@@ -116,12 +116,26 @@ impl Roots {
     pub fn from_env() -> Option<Self> {
         let project = directories::ProjectDirs::from(QUALIFIER, ORG, APP)?;
         let base = directories::BaseDirs::new()?;
-        Some(Self {
-            home: base.home_dir().to_path_buf(),
-            core: project.data_local_dir().to_path_buf(),
-            desktop: base.data_dir().join(APP),
-            config: project.config_dir().to_path_buf(),
-        })
+        Some(Self::new(
+            base.home_dir().to_path_buf(),
+            project.data_local_dir().to_path_buf(),
+            base.data_dir().join(APP),
+            project.config_dir().to_path_buf(),
+        ))
+    }
+
+    /// Roots named by their path components, so a `HOME` with a trailing
+    /// slash or an `XDG_*` path with `//` or `/./` reads as the plain path
+    /// a manifest can hold (final re-review N-I1). A `..` stays, and a
+    /// backup still refuses it.
+    pub fn new(home: PathBuf, core: PathBuf, desktop: PathBuf, config: PathBuf) -> Self {
+        let plain = |path: PathBuf| path.components().collect::<PathBuf>();
+        Self {
+            home: plain(home),
+            core: plain(core),
+            desktop: plain(desktop),
+            config: plain(config),
+        }
     }
 
     /// Whether the core and desktop roots are one folder (Linux): one path,

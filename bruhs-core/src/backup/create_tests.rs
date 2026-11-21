@@ -1214,6 +1214,59 @@ async fn a_root_a_restore_would_refuse_is_refused() {
     assert!(names_in(&fixture.out).is_empty());
 }
 
+/// Final re-review N-I1: a home with a trailing slash and data folders
+/// whose `XDG_*` paths hold `//` or `/./` are named by their components,
+/// so a backup is made, names plain roots and opens here.
+#[tokio::test]
+async fn roots_with_extra_slashes_still_make_a_backup_that_opens() {
+    let fixture = fixture().await;
+    let text = |path: &Path| path.to_str().unwrap().to_owned();
+    let home = text(&fixture.roots.home);
+    let roots = Roots::new(
+        PathBuf::from(format!("{home}/")),
+        PathBuf::from(format!("{home}//core")),
+        PathBuf::from(format!("{home}/./desktop//")),
+        PathBuf::from(format!("{home}//core/")),
+    );
+    // `Path` equality already ignores the extra slashes; the text doesn't.
+    for (got, want) in [
+        (&roots.home, &fixture.roots.home),
+        (&roots.core, &fixture.roots.core),
+        (&roots.desktop, &fixture.roots.desktop),
+        (&roots.config, &fixture.roots.config),
+    ] {
+        assert_eq!(text(got), text(want));
+    }
+    let host = BackupHost::new(roots, fixture.store.clone())
+        .with_reactive(fixture.runtime.clone())
+        .for_tests(false);
+    let path = fixture.out.join("slashes.bruhsbak");
+    let file = created(
+        &host,
+        request(
+            Output::File {
+                path: path.clone(),
+                overwrite: false,
+            },
+            BackupOptions::default(),
+        ),
+    )
+    .await;
+    assert_eq!(backup_path(&host, &file), path);
+    let manifest = manifest_of(&open_backup(&path));
+    assert_eq!(manifest.home, home);
+    assert_eq!(manifest.core_root, text(&fixture.roots.core));
+    assert_eq!(manifest.desktop_root, text(&fixture.roots.desktop));
+    assert!(manifest.text_fits());
+    let job = host
+        .start_open(path, Zeroizing::new(PASSWORD.into()), false)
+        .unwrap();
+    assert!(matches!(
+        finished(&host, &job.id).await,
+        JobState::Opened { .. }
+    ));
+}
+
 #[tokio::test]
 async fn a_root_that_is_not_utf8_is_refused() {
     use std::os::unix::ffi::OsStrExt as _;
