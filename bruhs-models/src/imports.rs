@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::fmt::Write as _;
 
+// The caps are binary; the copy states them in decimal units, rounded
+// down (4 GiB is "4 GB", 32 MiB is "33 MB", 256 KiB is "262 KB"), so the
+// copy is true of every file a cap refuses.
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
 
@@ -217,10 +220,12 @@ pub fn valid_batch_id(id: &str) -> bool {
 }
 
 /// The candidate id for a provider's conversation id: the id itself when
-/// it is 1 to 128 of `[A-Za-z0-9_.:-]`, else `h-` and 16 hex characters of
-/// its SHA-256.
+/// it is 1 to 128 of `[A-Za-z0-9_.:-]` and not `.` or `..`, else `h-` and
+/// 16 hex characters of its SHA-256.
 pub fn conversation_key(raw: &str) -> String {
     let plain = (1..=128).contains(&raw.len())
+        && raw != "."
+        && raw != ".."
         && raw
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'));
@@ -259,6 +264,10 @@ mod tests {
         let hashed = conversation_key("../etc/passwd");
         assert!(hashed.starts_with("h-") && hashed.len() == 18);
         assert_eq!(conversation_key(&"a".repeat(129)).len(), 18);
+        for dots in [".", ".."] {
+            assert!(conversation_key(dots).starts_with("h-"), "{dots}");
+        }
+        assert_eq!(conversation_key("v1.2"), "v1.2");
         assert_eq!(import_key(ImportSource::ChatGpt, "abc"), "chatgpt:abc");
         assert!(valid_batch_id(&"a1".repeat(16)) && !valid_batch_id("../x"));
         assert_eq!(
@@ -269,16 +278,41 @@ mod tests {
 
     #[test]
     fn copy_states_the_caps() {
+        // The caps are binary; the copy says decimal units, rounded down, so
+        // "over 33 MB" and "up to 4 GB" are true of every refused file.
+        let decimal = |bytes: u64, unit: u64, name: &str| format!("{} {name}", bytes / unit);
         assert_eq!(crate::reactive::MAX_TEXT_CHARS, 16_000);
         assert!(PERSONA_CLIPPED.contains("16,000") && MOVE_IN_TOO_LONG.contains("16,000"));
-        assert_eq!((MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES), (4 << 30, 16));
-        assert!(EXPORT_TOO_LARGE.contains("4 GB") && TOO_MANY_FILES.contains("16 files"));
-        assert_eq!(MAX_RECORD_BYTES, 32 << 20);
-        assert!(CONVERSATION_TOO_LARGE.contains("32 MB"));
+        assert_eq!(MAX_UPLOAD_FILES, 16);
+        assert!(TOO_MANY_FILES.contains("16 files"));
+        assert!(EXPORT_TOO_LARGE.contains(&decimal(MAX_UPLOAD_BYTES, 1_000_000_000, "GB")));
+        assert!(CONVERSATION_TOO_LARGE.contains(&decimal(MAX_RECORD_BYTES, 1_000_000, "MB")));
+        assert!(SKIPPED_TOO_LARGE_TEMPLATE.contains(&decimal(MAX_PERSONA_FILE_BYTES, 1_000, "KB")));
         assert_eq!(MAX_CONVERSATIONS, 50_000);
-        assert!(OVER_LIMIT_TEMPLATE.contains("50,000"));
-        assert_eq!(MAX_PERSONA_FILE_BYTES, 256 << 10);
-        assert!(SKIPPED_TOO_LARGE_TEMPLATE.contains("256 KB"));
+        assert!(OVER_LIMIT_ONE.contains("50,000") && OVER_LIMIT_MANY.contains("50,000"));
+    }
+
+    #[test]
+    fn counted_lines_agree_with_their_number() {
+        let pairs = [
+            (SKIPPED_EMPTY_ONE, SKIPPED_EMPTY_MANY),
+            (SKIPPED_UNKNOWN_ONE, SKIPPED_UNKNOWN_MANY),
+            (DUPLICATES_ONE, DUPLICATES_MANY),
+            (DROPPED_BRANCHES_ONE, DROPPED_BRANCHES_MANY),
+            (OVER_LIMIT_ONE, OVER_LIMIT_MANY),
+        ];
+        for (one, many) in pairs {
+            assert!(one.starts_with("1 ") && !one.contains('{'), "{one}");
+            assert!(one.contains(" was ") && !one.contains(" were "), "{one}");
+            assert!(
+                many.starts_with("{n} ") && many.matches('{').count() == 1,
+                "{many}"
+            );
+            assert!(many.contains(" were ") && !many.contains(" was "), "{many}");
+            for line in [one, many] {
+                assert!(ALL_COPY.contains(&line), "{line}");
+            }
+        }
     }
 
     #[test]

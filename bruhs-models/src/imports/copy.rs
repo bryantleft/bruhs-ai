@@ -35,7 +35,7 @@ pub const TOO_MANY_FILES: &str = "Choose up to 16 files at once.";
 pub const ARCHIVE_REFUSED: &str =
     "This file holds more than Bruhs reads from an export. Nothing was imported.";
 pub const CONVERSATION_TOO_LARGE: &str =
-    "One chat in this export is over 32 MB. Nothing was imported.";
+    "One chat in this export is over 33 MB. Nothing was imported.";
 pub const DAMAGED_EXPORT: &str = "This export is damaged or cut short. Download it again.";
 pub const ENCRYPTED_EXPORT: &str = "This ZIP is password protected. Unzip it first.";
 pub const NO_SPACE_IMPORT: &str = "There isn't enough free disk space. Free {size} and try again.";
@@ -85,15 +85,23 @@ pub const DECLINE: &str = "Decline";
 pub const MEMORY_CHANGED: &str =
     "This bruh's memory changed after this was proposed. Approving replaces those changes.";
 
-// Templates the line functions fill: each `{name}` is replaced whole.
+// Templates the line functions fill: each `{name}` is replaced whole. A
+// `{chats}` slot takes the whole counted phrase, such as "3 chats".
 pub const READING_TEMPLATE: &str = "Reading the export: {done} of {files} files, {chats} so far";
 pub const BATCH_SUMMARY_TEMPLATE: &str = "{chats} from {sources}.";
-pub const SKIPPED_EMPTY_TEMPLATE: &str = "{n} empty {chats} were left out.";
-pub const SKIPPED_UNKNOWN_TEMPLATE: &str = "{n} {records} Bruhs didn't recognise were left out.";
-pub const DUPLICATES_TEMPLATE: &str = "{n} {chats} came twice and were imported once.";
-pub const DROPPED_BRANCHES_TEMPLATE: &str =
-    "{n} other {branches} were left out. Each chat comes in as the branch you saw last.";
-pub const OVER_LIMIT_TEMPLATE: &str = "{n} {chats} over the 50,000 limit were left out.";
+// Counted sentences: `_ONE` when n is 1, else `_MANY` with `{n}` filled.
+pub const SKIPPED_EMPTY_ONE: &str = "1 empty chat was left out.";
+pub const SKIPPED_EMPTY_MANY: &str = "{n} empty chats were left out.";
+pub const SKIPPED_UNKNOWN_ONE: &str = "1 record Bruhs didn't recognize was left out.";
+pub const SKIPPED_UNKNOWN_MANY: &str = "{n} records Bruhs didn't recognize were left out.";
+pub const DUPLICATES_ONE: &str = "1 chat came twice and was imported once.";
+pub const DUPLICATES_MANY: &str = "{n} chats came twice and were imported once.";
+pub const DROPPED_BRANCHES_ONE: &str =
+    "1 other branch was left out. Each chat comes in as the branch you saw last.";
+pub const DROPPED_BRANCHES_MANY: &str =
+    "{n} other branches were left out. Each chat comes in as the branch you saw last.";
+pub const OVER_LIMIT_ONE: &str = "1 chat over the 50,000 limit was left out.";
+pub const OVER_LIMIT_MANY: &str = "{n} chats over the 50,000 limit were left out.";
 pub const ROW_DETAIL_TEMPLATE: &str = "{label}, {when}, transcript";
 pub const BEST_EFFORT_SUFFIX: &str = ", best effort";
 pub const IMPORTING_TEMPLATE: &str = "Importing {done} of {total}";
@@ -104,7 +112,7 @@ pub const INSTRUCTIONS_FROM_TEMPLATE: &str = "Instructions from {files}.";
 pub const MEMORY_FROM_TEMPLATE: &str = "Memory from {files}.";
 pub const NOT_IMPORTED_TEMPLATE: &str = "Not imported: {files}.";
 pub const SKIPPED_LINK_TEMPLATE: &str = "Skipped {name}: it's a link.";
-pub const SKIPPED_TOO_LARGE_TEMPLATE: &str = "Skipped {name}: it's over 256 KB.";
+pub const SKIPPED_TOO_LARGE_TEMPLATE: &str = "Skipped {name}: it's over 262 KB.";
 pub const SKIPPED_NOT_A_FILE_TEMPLATE: &str = "Skipped {name}: it isn't a file.";
 pub const SKIPPED_UNREADABLE_TEMPLATE: &str = "Skipped {name}: Bruhs couldn't read it.";
 pub const IDENTITY_DROPPED_TEMPLATE: &str = "{fields} isn't carried over: bruhs use faces.";
@@ -179,11 +187,16 @@ pub const ALL_COPY: &[&str] = &[
     MEMORY_CHANGED,
     READING_TEMPLATE,
     BATCH_SUMMARY_TEMPLATE,
-    SKIPPED_EMPTY_TEMPLATE,
-    SKIPPED_UNKNOWN_TEMPLATE,
-    DUPLICATES_TEMPLATE,
-    DROPPED_BRANCHES_TEMPLATE,
-    OVER_LIMIT_TEMPLATE,
+    SKIPPED_EMPTY_ONE,
+    SKIPPED_EMPTY_MANY,
+    SKIPPED_UNKNOWN_ONE,
+    SKIPPED_UNKNOWN_MANY,
+    DUPLICATES_ONE,
+    DUPLICATES_MANY,
+    DROPPED_BRANCHES_ONE,
+    DROPPED_BRANCHES_MANY,
+    OVER_LIMIT_ONE,
+    OVER_LIMIT_MANY,
     ROW_DETAIL_TEMPLATE,
     BEST_EFFORT_SUFFIX,
     IMPORTING_TEMPLATE,
@@ -215,7 +228,11 @@ mod tests {
     fn copy_follows_the_ui_standard() {
         for text in ALL_COPY {
             assert!(
-                !text.contains(" - ") && !text.contains('—') && !text.contains('–'),
+                !text.contains(" - ")
+                    && !text.contains("--")
+                    && !text.contains('—')
+                    && !text.contains('–')
+                    && !text.contains('\u{2212}'),
                 "{text}"
             );
             assert!(
@@ -223,6 +240,7 @@ mod tests {
                 "{text}"
             );
         }
+        assert!(ALL_COPY.iter().all(|text| !text.contains("recognise")));
         assert!(
             MOVE_IN_PROMPT.contains("one fact per line") && MOVE_IN_PROMPT.contains("passwords")
         );
