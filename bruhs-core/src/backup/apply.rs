@@ -37,11 +37,12 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use bruhs_models::backup::{
-    backup_file_name, desktop_entry, folded_entry_key, included, valid_id, valid_stamp,
-    BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview, RestoreResult,
-    RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE, INVALID_REQUEST,
-    KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED, KEYCHAIN_SET_UNREADABLE,
-    MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP, RESTORE_CANT_MOVE, RESTORE_PENDING,
+    backup_file_name, desktop_entry, folded_entry_key, included, items_stayed_line, valid_id,
+    valid_stamp, BackupManifest, BackupOptions, PathRewrite, PendingRestore, RestorePreview,
+    RestoreResult, RestoreSource, WebPartInfo, BACKUP_BUSY, DAMAGED, EXCLUDED_TOP, GONE,
+    INVALID_REQUEST, KEYCHAIN_ITEM_REFUSED, KEYCHAIN_NEEDS_YOU, KEYCHAIN_READ_FAILED,
+    KEYCHAIN_SET_UNREADABLE, MANIFEST_MAX_BYTES, PARKED_STAYED, RESERVED_TOP, RESTORE_CANT_MOVE,
+    RESTORE_PENDING,
 };
 use bruhs_models::EpochMs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -546,6 +547,21 @@ fn plan(
     } else {
         Vec::new()
     };
+    // What the restored catalogs name, read before anything moves (final
+    // review B-I2): catalogs that don't read never get past the plan.
+    let restored = if set.keychain {
+        let source = source_dir(roots, &pending.source, RootKey::Core)?;
+        match inventory_at(
+            &source.join(CREDENTIALS),
+            &source.join(CONNECTIONS),
+            &source.join(CALENDAR),
+        ) {
+            Ok(restored) => restored,
+            Err(_) => return Err(refuse(backups, BackupError::Format(DAMAGED), restart)),
+        }
+    } else {
+        Vec::new()
+    };
     let stamp = new_stamp(roots)?;
     let mut passes = Vec::new();
     for (root, places) in set.places {
@@ -571,6 +587,9 @@ fn plan(
         passes,
         keychain: set.keychain,
         written,
+        restored,
+        sealed: Vec::new(),
+        items_stayed: 0,
         web_part,
         rewrites: set.rewrites,
         steps: Vec::new(),
@@ -599,12 +618,15 @@ impl Apply<'_> {
             if kept_info(self.roots, &self.journal.stamp).is_some() {
                 return Err(BackupError::Format(DAMAGED));
             }
-            if let Err(error) = self.seal() {
-                return Err(if seal_permanent(&error) {
-                    self.abandon(error)
-                } else {
-                    error
-                });
+            match self.seal() {
+                Ok(sealed) => self.journal.sealed = sealed,
+                Err(error) => {
+                    return Err(if seal_permanent(&error) {
+                        self.abandon(error)
+                    } else {
+                        error
+                    })
+                }
             }
             self.step(Step::Sealed)?;
         }
@@ -627,7 +649,7 @@ impl Apply<'_> {
             self.step(Step::KeysWritten)?;
         }
         if !self.journal.done(&Step::KeysPruned) {
-            self.prune_keys()?;
+            self.journal.items_stayed = self.prune_keys();
             self.step(Step::KeysPruned)?;
         }
         if !self.journal.done(&Step::WebPart) {
@@ -701,8 +723,9 @@ impl Apply<'_> {
 
     /// Makes the pre-restore folders (0700) and seals today's items into
     /// `meta/keychain.sealed` under a fresh key at `pre-restore:<stamp>`
-    /// (D13). A seal a stop left behind is made again.
-    fn seal(&self) -> Result<(), BackupError> {
+    /// (D13). A seal a stop left behind is made again. Answers the items
+    /// sealed, without values.
+    fn seal(&self) -> Result<Vec<ItemRef>, BackupError> {
         for pass in &self.journal.passes {
             new_dir(&self.roots.backups(pass.root))?;
             new_dir(&self.kept(pass.root))?;
@@ -720,6 +743,13 @@ impl Apply<'_> {
         random_bytes(&mut random);
         let blob = seal_items(&items, random, *key)
             .map_err(|_| BackupError::Keychain(KEYCHAIN_ITEM_REFUSED))?;
+        let refs = items
+            .iter()
+            .map(|item| ItemRef {
+                service: item.service.clone(),
+                account: item.account.clone(),
+            })
+            .collect();
         drop(items);
         let mut file = new_private_file(&sealed)?;
         file.write_all(&blob)?;
@@ -727,7 +757,8 @@ impl Apply<'_> {
         sync_dir(&meta)?;
         sync_dir(&kept)?;
         store_seal_key(self.store, &kept_account(&self.journal.stamp), &key)
-            .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))
+            .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
+        Ok(refs)
     }
 
     /// Renames today's `name` into the pre-restore set. Done already when
@@ -775,36 +806,39 @@ impl Apply<'_> {
         Ok(())
     }
 
-    /// Removes today's items that the restored catalogs don't name and the
-    /// source didn't write; the sealed set keeps them (D16). A source
-    /// without items keeps today's (D5). Never a seal key (ruling F11).
-    fn prune_keys(&self) -> Result<(), BackupError> {
+    /// Removes today's sealed items that the restored catalogs don't name
+    /// and the source didn't write; the sealed set keeps them (D16). A
+    /// source without items keeps today's (D5). Never a seal key (ruling
+    /// F11). Best effort (final review B-I2): an item that won't go stays,
+    /// harmless since the seal holds it, and is counted for the result.
+    /// Reads no catalog: both lists are in the journal.
+    fn prune_keys(&self) -> u32 {
         if !self.journal.keychain {
-            return Ok(());
+            return 0;
         }
-        let kept = self.kept(RootKey::Core);
-        let before = inventory_at(
-            &kept.join(CREDENTIALS),
-            &kept.join(CONNECTIONS),
-            &kept.join(CALENDAR),
-        )?;
-        let mut after: BTreeSet<ItemRef> = inventory_at(
-            &self.roots.core.join(CREDENTIALS),
-            &self.roots.core.join(CONNECTIONS),
-            &self.roots.config.join(CALENDAR),
-        )?
-        .into_iter()
-        .collect();
-        after.extend(self.journal.written.iter().cloned());
-        for item in before {
-            if item.service == BACKUP_SERVICE || after.contains(&item) {
+        let keep: BTreeSet<&ItemRef> = self
+            .journal
+            .restored
+            .iter()
+            .chain(&self.journal.written)
+            .collect();
+        let mut stayed = 0_u32;
+        for item in &self.journal.sealed {
+            if item.service == BACKUP_SERVICE || keep.contains(item) {
                 continue;
             }
-            self.store
+            if self
+                .store
                 .remove_item(&item.service, &item.account)
-                .map_err(|_| BackupError::Keychain(KEYCHAIN_NEEDS_YOU))?;
+                .is_err()
+            {
+                stayed = stayed.saturating_add(1);
+            }
         }
-        Ok(())
+        if stayed > 0 {
+            tracing::warn!("{stayed} keychain items from before the restore stayed");
+        }
+        stayed
     }
 
     /// Moves the source's browser part to `backups/web-part/<id>.bin`.
@@ -837,6 +871,7 @@ impl Apply<'_> {
             );
             warnings.push(PARKED_STAYED.to_owned());
         }
+        warnings.extend(items_stayed_line(self.journal.items_stayed));
         self.write_info(true)?;
         let web_part = self.journal.web_part.as_ref().and_then(|id| {
             let path = self.backups.join(WEB_PARTS).join(format!("{id}.bin"));

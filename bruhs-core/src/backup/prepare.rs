@@ -37,11 +37,15 @@ use super::open::{meta_folder, staging_dir, staging_roots, sync_folder, write_ne
 use super::{BackupError, RootKey, Roots};
 use crate::reactive::{pause_all_for_restore, ReactiveError};
 use crate::secrets::{
-    check_items, rekey_catalogs, AccountMap, KeychainItem, RekeyError, SecretError,
+    check_items, keychain_inventory, rekey_catalogs, AccountMap, KeychainItem, RekeyError,
+    SecretError,
 };
 
 /// The staged folder of the credential catalogs, re-keyed on their own.
 const CREDENTIALS: &str = "credentials";
+/// The staged folders the keychain inventory reads beside `credentials`.
+const CONNECTIONS: &str = "connections";
+const GOOGLE_CALENDAR: &str = "calendar/google";
 /// The catalogs whose project paths the preview checks.
 const CATALOGS: [&str; 2] = ["catalog.json", "vault.json"];
 /// The staged reactive database, relative to the core staging.
@@ -140,6 +144,15 @@ fn prepare_staged(
             _ => damaged(),
         })?;
     }
+    // The catalogs an apply reads at its plan, read here first on every
+    // computer, so a backup whose catalogs don't read fails to open
+    // instead of at the apply (final review B-I2).
+    keychain_inventory(
+        &credentials,
+        &core.join(CONNECTIONS),
+        &core.join(GOOGLE_CALENDAR),
+    )
+    .map_err(|_| damaged())?;
     let accounts = serde_json::to_vec(&map.0).map_err(io::Error::other)?;
     write_new(&meta_folder(&core)?.join(ACCOUNTS_FILE), &accounts)?;
     if cancel.cancelled() {

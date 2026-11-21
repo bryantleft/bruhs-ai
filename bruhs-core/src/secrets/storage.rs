@@ -577,6 +577,12 @@ impl SecretStore {
         self.memory_keys().held_reads()
     }
 
+    /// Let `count` more keychain writes and removals succeed, then refuse
+    /// every later one, as a denied prompt does; `None` lets them through.
+    pub(crate) fn refuse_changes_after(&self, count: Option<usize>) {
+        self.memory_keys().refuse_writes_after(count);
+    }
+
     /// Remove a keychain item behind the catalog's back.
     pub(super) fn drop_item(&self, account: &str) {
         self.memory_keys()

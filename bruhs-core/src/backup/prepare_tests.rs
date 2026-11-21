@@ -1031,6 +1031,33 @@ async fn io_failures_answer_the_io_copy() {
     assert!(reactive_io(&ReactiveError::from(full)));
 }
 
+/// Final review B-I2: the staged catalogs are read on the same computer
+/// too, where nothing is re-keyed, so catalogs an apply couldn't read fail
+/// the open (`DAMAGED`) instead of the apply.
+#[tokio::test]
+async fn staged_catalogs_are_read_on_the_same_home() {
+    let homes = homes();
+    let roots = &homes.b;
+    let backup = make_backup(&homes, roots, &homes.store_b, "catalogs").await;
+    let id = host(roots, &homes.store_b).random_id();
+    let mut staged = extract(
+        roots,
+        &id,
+        &backup,
+        PASSWORD,
+        &CancelFlag::default(),
+        &|_, _| {},
+    )
+    .unwrap();
+    let core = staging_dir(roots, RootKey::Core, &id);
+    let _ = std::fs::remove_dir_all(core.join("connections"));
+    std::fs::write(core.join("connections"), b"not a folder").unwrap();
+    match prepare(roots, &mut staged, &CancelFlag::default()).await {
+        Err(error) => assert_eq!(error.message(), DAMAGED),
+        Ok(_) => panic!("catalogs that don't read were prepared"),
+    }
+}
+
 /// The same computer gets no rules, and preparing changes no staged byte
 /// but the reactive database's sessions and pause.
 #[tokio::test]

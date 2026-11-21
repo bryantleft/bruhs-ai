@@ -786,6 +786,61 @@ async fn items_not_in_the_backup_go_aside() {
     }
 }
 
+/// Final review B-I2: an item of today's that won't leave the keychain
+/// after the swap (a denied prompt) never stops the apply: it stays,
+/// harmless since the seal holds it, and the result counts it.
+#[tokio::test]
+async fn an_item_that_wont_go_is_counted_not_fatal() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let store = fixture.store.clone();
+    let refuse = |step: &Step, point: Point| {
+        if *step == Step::KeysWritten && point == Point::Recorded {
+            store.refuse_changes_after(Some(0));
+        }
+        false
+    };
+    let outcome = apply_pending_with(roots, &fixture.store, None, &no_env, &refuse);
+    fixture.store.refuse_changes_after(None);
+    let Ok(ApplyOutcome::Applied(applied)) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(applied.warnings, [items_stayed_line(1).unwrap()]);
+    assert_eq!(result(roots).unwrap().warnings, applied.warnings);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
+    assert_eq!(item(&fixture.store, EXTRA).as_deref(), Some("extra"));
+    assert!(!applying(roots));
+    assert_eq!(pre_restores(roots).len(), 1);
+}
+
+/// Final review B-I2: the restored catalogs are read when the apply is
+/// planned. Ones that don't read refuse the restore before anything
+/// moves, so the apply never fails at the prune on every start.
+#[tokio::test]
+async fn restored_catalogs_that_dont_read_refuse_before_anything_moves() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    // Damaged since the open, as a crafted or newer catalog would be.
+    let staged = staging_dir(roots, RootKey::Core, &before.staged);
+    std::fs::write(staged.join("credentials/catalog.json"), b"{damaged").unwrap();
+    let today = files_under(&roots.core, &["backups"]);
+    let outcome = apply_pending(roots, &fixture.store, None);
+    assert!(
+        matches!(&outcome, Err(BackupError::Format(message)) if *message == DAMAGED),
+        "{outcome:?}"
+    );
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    assert!(pending(roots).is_none());
+    assert!(!applying(roots));
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+    assert_eq!(item(&fixture.store, EXTRA).as_deref(), Some("extra"));
+}
+
 #[tokio::test]
 async fn a_backup_without_keychain_keeps_todays_items() {
     let fixture = fixture(false, false);

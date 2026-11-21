@@ -48,6 +48,16 @@ pub(super) struct Journal {
     /// The items the source writes, without values, so the pruning never
     /// removes one of them.
     pub written: Vec<ItemRef>,
+    /// The items the source's catalogs name, read when the apply was
+    /// planned (final review B-I2): the pruning keeps them too, and never
+    /// reads a catalog after the swap.
+    pub restored: Vec<ItemRef>,
+    /// Today's items the seal holds, recorded with [`Step::Sealed`]: the
+    /// only items the pruning may remove.
+    pub sealed: Vec<ItemRef>,
+    /// Today's items the pruning couldn't remove, recorded with
+    /// [`Step::KeysPruned`], for the result's warning.
+    pub items_stayed: u32,
     /// The id the source's browser part waits under, when it has one.
     pub web_part: Option<String>,
     /// The path rewrites the browser applies to its part.
