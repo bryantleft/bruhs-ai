@@ -242,6 +242,8 @@ impl BackupHost {
     /// that won't go is listed for the sweep to try again (final review B
     /// minor).
     fn forget_staged(&self, id: &str) {
+        #[cfg(test)]
+        FORGOT_HERE.with(|forgot| forgot.set(forgot.get() + 1));
         self.remove_staged(id);
         let store = &self.config().store;
         let account = seal_account(id);
@@ -391,6 +393,39 @@ async fn open(
         id: id.to_owned(),
         armed: true,
     };
+    let staged = stage(config, id, source, password, bytes, progress, cancel).await;
+    // What's left goes off the async workers (final review A minor): a
+    // staging tree can be gigabytes, and a key's removal waits on the
+    // keychain. A blocking task runs to its end even if this job stops.
+    discard.disarm();
+    let (host, id, opened) = (host.clone(), id.to_owned(), staged.is_ok());
+    let ended = tokio::task::spawn_blocking(move || {
+        if opened {
+            host.discard_others(&id);
+        } else {
+            host.forget_staged(&id);
+        }
+    })
+    .await;
+    if ended.is_err() {
+        tracing::warn!("Bruhs couldn't clear staged restores; the sweep does it later");
+    }
+    staged
+}
+
+/// [`open`]'s staging: checks and stages the backup, prepares and seals
+/// it, and answers its preview. The caller removes the staging on a
+/// failure.
+async fn stage(
+    config: super::host::Config,
+    id: &str,
+    source: PathBuf,
+    password: Zeroizing<String>,
+    bytes: u64,
+    progress: &watch::Sender<JobState>,
+    cancel: &CancelFlag,
+) -> Result<RestorePreview, BackupError> {
+    let roots = config.roots.clone();
     let staged = {
         let (roots, id, cancel, progress, limits) = (
             roots.clone(),
@@ -422,16 +457,20 @@ async fn open(
     });
     let mut staged = staged;
     let prepared = prepare(&roots, &mut staged, cancel).await?;
-    let preview = tokio::task::spawn_blocking(move || seal(&config, &staged, &prepared))
+    tokio::task::spawn_blocking(move || seal(&config, &staged, &prepared))
         .await
-        .map_err(|_| worker_stopped())??;
-    discard.disarm();
-    host.discard_others(id);
-    Ok(preview)
+        .map_err(|_| worker_stopped())?
 }
 
 fn worker_stopped() -> BackupError {
     BackupError::Io(io::Error::other("the open worker stopped"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many staged restores this thread removed, so a test can tell
+    /// the removal ran off the async workers.
+    pub(super) static FORGOT_HERE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 /// Removes an upload once its open ended.
@@ -458,9 +497,18 @@ impl Discard {
 }
 
 impl Drop for Discard {
+    /// Only when the open stopped part way (a panic, or a runtime shutting
+    /// down): off the async workers where there are any; a sweep removes
+    /// what a shutdown leaves.
     fn drop(&mut self) {
-        if self.armed {
-            self.host.forget_staged(&self.id);
+        if !self.armed {
+            return;
+        }
+        let (host, id) = (self.host.clone(), std::mem::take(&mut self.id));
+        let forget = move || host.forget_staged(&id);
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => drop(runtime.spawn_blocking(forget)),
+            Err(_) => forget(),
         }
     }
 }

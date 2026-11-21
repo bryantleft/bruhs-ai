@@ -1002,6 +1002,27 @@ async fn discard_removes_everything() {
     assert_eq!(host.discard_staged("../x").unwrap_err().message(), GONE);
 }
 
+/// Final review A minor: what an open leaves to remove (its own staging
+/// when it fails, the restore staged before it when it works) is removed
+/// off the async workers: here, off the test's own runtime thread.
+#[tokio::test]
+async fn staging_is_removed_off_the_async_workers() {
+    let fixture = fixture(false);
+    let backup = make_backup(&fixture, "good").await;
+    let host = host(&fixture);
+    let (first, state) = open_with(&host, &backup, PASSWORD).await;
+    preview(state);
+    let wrong = open_with(&host, &backup, "not the password at all").await;
+    assert_eq!(failure(wrong.1), WRONG_PASSWORD);
+    let (second, state) = open_with(&host, &backup, PASSWORD).await;
+    preview(state);
+    let ids = staged_ids(&fixture.roots);
+    assert!(!ids.contains(&first) && !ids.contains(&wrong.0), "{ids:?}");
+    assert!(ids.contains(&second));
+    no_seal_key(&fixture.store, &first);
+    assert_eq!(super::open::FORGOT_HERE.with(std::cell::Cell::get), 0);
+}
+
 #[tokio::test]
 async fn one_job_at_a_time_and_none_while_a_restore_waits() {
     let fixture = fixture(false);
