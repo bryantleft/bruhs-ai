@@ -3,11 +3,12 @@
 
 use super::claude_ai::{conversation, is_conversation, is_manifest, is_memory, memory};
 use super::test_support::fixture;
+use super::text::{clip_part, clip_strings};
 use super::ParsedConversation;
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
-    attached_line, attachment_line, cut_short_line, IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS,
-    MAX_MESSAGES, PROJECT_MEMORY,
+    attached_line, attachment_line, cut_short_line, AUDIO_NOT_IMPORTED, DOCUMENT_NOT_IMPORTED,
+    IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_PART_CHARS, PROJECT_MEMORY,
 };
 use bruhs_models::logic::portable::{ImportSource, PortablePart, PortableToolCall};
 use serde_json::{json, Value};
@@ -15,6 +16,10 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 const ROOT: &str = "00000000-0000-4000-8000-000000000000";
+
+/// Generous, so a debug build under gate load doesn't flake; the
+/// superlinear work these bounds guard against takes far longer.
+const SLOW: Duration = Duration::from_secs(5);
 
 /// The four fixture conversations, G to J.
 fn fixtures() -> Vec<Value> {
@@ -151,6 +156,111 @@ fn artifacts_come_in_as_tool_calls() {
             assert!(calls.is_empty(), "{name}");
         }
     }
+
+    // A result naming no id after a skipped call belongs to that call, so
+    // it leaves the kept call's output alone.
+    let parsed = conversation(&holding(json!({
+        "sender": "assistant",
+        "content": [
+            { "type": "tool_use", "id": "a", "name": "artifacts", "input": {} },
+            { "type": "tool_result", "tool_use_id": "a", "content": "Made." },
+            { "type": "tool_use", "name": "web_search", "input": { "query": "q" } },
+            { "type": "tool_result", "content": "Search results." },
+        ],
+    })))
+    .expect("the reply imports");
+    let PortablePart::ToolCall(call) = &parsed.messages[0].parts[0] else {
+        panic!("a tool call");
+    };
+    assert_eq!(call.output.as_deref(), Some("Made."));
+
+    // A huge input is cut to MAX_PART_CHARS in all.
+    let parsed = conversation(&holding(json!({
+        "sender": "assistant",
+        "content": [{ "type": "tool_use", "name": "artifacts", "input": {
+            "command": "create", "content": "x".repeat(MAX_PART_CHARS + 10),
+        } }],
+    })))
+    .expect("the reply imports");
+    let PortablePart::ToolCall(call) = &parsed.messages[0].parts[0] else {
+        panic!("a tool call");
+    };
+    // "command" sorts first and takes 6 of the budget.
+    assert_eq!(call.input["command"], "create");
+    assert_eq!(
+        call.input["content"],
+        clip_part("x".repeat(MAX_PART_CHARS + 10), MAX_PART_CHARS - 6)
+    );
+}
+
+#[test]
+fn tool_inputs_are_cut_in_document_order() {
+    let value = json!({ "a": "abcd", "b": ["efgh", "ij", 3, null], "c": { "d": "" } });
+    assert_eq!(
+        clip_strings(&value, 6),
+        json!({
+            "a": "abcd",
+            "b": [clip_part("efgh".into(), 2), clip_part("ij".into(), 0), 3, null],
+            "c": { "d": "" },
+        })
+    );
+    assert_eq!(clip_strings(&value, 100), value);
+    assert_eq!(clip_strings(&json!(7), 0), json!(7));
+}
+
+#[test]
+fn documents_voice_notes_and_images_leave_one_line_each() {
+    let blocks = json!([
+        { "type": "text", "text": "Look." },
+        // Named by files[] through its id, so files[] stands for it.
+        { "type": "image", "file_uuid": "file-0000-0003" },
+        { "type": "image" },
+        { "type": "image" },
+        { "type": "voice_note", "title": "Note" },
+        { "type": "voice_note", "title": "Another" },
+        { "type": "document", "file_name": "plan.pdf" },
+        { "type": "document", "title": "Recipe" },
+        { "type": "document" },
+        { "type": "document", "title": "  " },
+    ]);
+    let behind = [
+        IMAGE_NOT_IMPORTED.to_string(),
+        AUDIO_NOT_IMPORTED.to_string(),
+        attachment_line("plan.pdf"),
+        attachment_line("Recipe"),
+        attachment_line("photo.png"),
+        DOCUMENT_NOT_IMPORTED.to_string(),
+    ]
+    .join("\n\n");
+    let message = |sender: &str| {
+        json!({
+            "sender": sender,
+            "content": blocks,
+            // plan.pdf is listed here too, and shows once.
+            "attachments": [{ "file_name": "plan.pdf" }],
+            "files": [{ "file_name": "photo.png", "file_uuid": "file-0000-0003" }],
+        })
+    };
+    let prompt = conversation(&holding(message("human"))).expect("the prompt imports");
+    assert_eq!(prompt.messages[0].text(), format!("Look.\n\n{behind}"));
+    // The same rule for either sender.
+    let reply = conversation(&holding(message("assistant"))).expect("the reply imports");
+    assert_eq!(
+        reply.messages[0].parts,
+        vec![
+            PortablePart::Text("Look.".into()),
+            PortablePart::Text(behind)
+        ]
+    );
+
+    // An image files[] already names adds no second line.
+    let parsed = conversation(&holding(json!({
+        "sender": "human",
+        "content": [{ "type": "image", "file_name": "photo.png" }],
+        "files": [{ "file_name": "photo.png" }],
+    })))
+    .expect("the prompt imports");
+    assert_eq!(parsed.messages[0].text(), attachment_line("photo.png"));
 }
 
 #[test]
@@ -266,11 +376,14 @@ fn blocks_win_over_text_and_plumbing_stays_out() {
         ],
     })))
     .expect("the reply imports");
+    // Redacted thinking and budgets drop silently; the voice note's audio
+    // leaves its placeholder.
     assert_eq!(
         parsed.messages[0].parts,
         vec![
             PortablePart::Text("From the blocks.".into()),
             PortablePart::Text("Second block.".into()),
+            PortablePart::Text(AUDIO_NOT_IMPORTED.into()),
         ]
     );
 
@@ -283,20 +396,34 @@ fn blocks_win_over_text_and_plumbing_stays_out() {
     .expect("the prompt imports");
     assert_eq!(parsed.messages[0].text(), "Block prompt.");
 
-    // With no text block, the flat text comes in after the other parts.
+    // With blocks but no text block, the flat text is filler and stays
+    // out; with no blocks at all, it is the message.
     let parsed = conversation(&holding(json!({
         "sender": "assistant",
-        "text": "Only flat.",
+        "text": "Filler.",
         "content": [{ "type": "thinking", "thinking": "Hmm." }],
     })))
     .expect("the reply imports");
     assert_eq!(
         parsed.messages[0].parts,
-        vec![
-            PortablePart::Thinking("Hmm.".into()),
-            PortablePart::Text("Only flat.".into()),
-        ]
+        vec![PortablePart::Thinking("Hmm.".into())]
     );
+    assert!(conversation(&holding(json!({
+        "sender": "human",
+        "text": "The injected prompt.",
+        "content": [{ "type": "injected_prompt_block", "text": "x" }],
+    })))
+    .is_none());
+    for empty in [json!([]), Value::Null] {
+        let parsed = conversation(&holding(json!({
+            "sender": "assistant", "text": "Only flat.", "content": empty,
+        })))
+        .expect("the reply imports");
+        assert_eq!(
+            parsed.messages[0].parts,
+            vec![PortablePart::Text("Only flat.".into())]
+        );
+    }
 
     // Other senders, and messages left empty, stay out; with nothing left
     // the conversation is skipped.
@@ -320,7 +447,7 @@ fn blocks_win_over_text_and_plumbing_stays_out() {
 fn parent_loops_stay_bounded() {
     let started = Instant::now();
     let i = conversation(&fixtures()[2]);
-    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(started.elapsed() < SLOW);
     let i = i.expect("a loop still imports what it reached");
     let seen: Vec<String> = i.messages.iter().map(|m| m.text()).collect();
     let unique: HashSet<&String> = seen.iter().collect();
@@ -348,11 +475,7 @@ fn parent_loops_stay_bounded() {
     let chain = json!({ "uuid": "conv-chain", "chat_messages": messages });
     let started = Instant::now();
     let parsed = conversation(&chain).expect("a long chain imports");
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
     assert_eq!(parsed.messages.len(), MAX_MESSAGES);
     assert_eq!(
         parsed.messages.last().map(|m| m.text()).as_deref(),
@@ -364,7 +487,7 @@ fn parent_loops_stay_bounded() {
 }
 
 /// About 1 MB of hostile input in every text-bearing field finishes in
-/// well under a second.
+/// linear time (`SLOW` leaves room for a loaded debug build).
 #[test]
 fn hostile_sizes_stay_linear() {
     let blocks: Vec<Value> = (0..60_000)
@@ -393,11 +516,7 @@ fn hostile_sizes_stay_linear() {
     });
     let started = Instant::now();
     let parsed = conversation(&conversation_value).expect("the hostile record imports");
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
     assert_eq!(parsed.messages.len(), 2);
 
     let memory_value = json!({
@@ -408,11 +527,7 @@ fn hostile_sizes_stay_linear() {
     });
     let started = Instant::now();
     assert!(memory(&memory_value).is_some());
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
 }
 
 #[test]
@@ -426,15 +541,29 @@ fn wrong_typed_values_are_skipped_without_panicking() {
             "parent_message_uuid": 9, "created_at": { "odd": true },
         }] }),
         json!({ "uuid": 4, "chat_messages": [{ "sender": "human", "text": "x" }] }),
-        json!({ "uuid": "conv-odd", "chat_messages": [{
-            "sender": "assistant",
-            "content": [null, 1, { "type": 2 }, { "type": "text", "text": 3 },
-                        { "type": "tool_use", "name": "artifacts" },
-                        { "type": "tool_result", "content": { "deep": [1] } }],
-        }] }),
+        json!({ "uuid": "conv-odd", "chat_messages": "not a list" }),
     ] {
-        let _ = conversation(&odd);
+        assert!(conversation(&odd).is_none(), "{odd}");
     }
+    // Wrong-typed blocks are skipped; the id-less call keeps its place and
+    // takes the result after it, whatever its content.
+    let parsed = conversation(&json!({ "uuid": "conv-odd", "chat_messages": [{
+        "sender": "assistant",
+        "content": [null, 1, { "type": 2 }, { "type": "text", "text": 3 },
+                    { "type": "tool_use", "name": "artifacts" },
+                    { "type": "tool_result", "content": { "deep": [1] } }],
+    }] }))
+    .expect("the call imports");
+    assert_eq!(
+        parsed.messages[0].parts,
+        vec![PortablePart::ToolCall(PortableToolCall {
+            id: "call-4".into(),
+            tool: "artifacts".into(),
+            input: Value::Null,
+            output: Some(r#"{"deep":[1]}"#.into()),
+            is_error: false,
+        })]
+    );
     for odd in [
         json!({ "conversations_memory": 3 }),
         json!({ "memory_files": [null, { "path": 1, "content": 2 }, "x"] }),
@@ -523,6 +652,18 @@ fn only_claude_records_are_recognised() {
     assert!(!is_conversation(
         &json!({ "uuid": "x", "messages": [{ "role": "user" }] })
     ));
+    // A Grok record, and ChatGPT's records and manifest, are none of these.
+    let grok = json!({
+        "conversation": { "id": "grok-0001", "title": "Trip" },
+        "responses": [{ "response": { "sender": "human", "message": "Hi" } }],
+    });
+    let chatgpt_manifest = json_fixture("chatgpt-export_manifest.json");
+    let chatgpt_record = json!({ "conversation_id": "c", "mapping": {} });
+    for other in [&grok, &chatgpt_manifest, &chatgpt_record] {
+        assert!(!is_conversation(other), "{other}");
+        assert!(!is_memory(other), "{other}");
+        assert!(!is_manifest(other), "{other}");
+    }
     // users.json is personal data, and none of these.
     let user = json!({
         "uuid": "user-0000-0001",

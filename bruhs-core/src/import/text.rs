@@ -275,3 +275,32 @@ pub(crate) fn clip_part(text: String, limit: usize) -> String {
     out.push_str(&cut_short_line(more));
     out
 }
+
+/// `value` with its string leaves cut to `budget` characters in all,
+/// in document order: each is cut like [`clip_part`] once the budget runs
+/// out, so a huge tool input can't pass in whole. Keys stay. Iterative,
+/// so a deep value can't overflow the stack.
+pub(crate) fn clip_strings(value: &Value, budget: usize) -> Value {
+    let mut out = value.clone();
+    let mut left = budget;
+    let mut stack: Vec<&mut Value> = vec![&mut out];
+    while let Some(at) = stack.pop() {
+        match at {
+            Value::String(text) => {
+                let chars = text.chars().count();
+                if chars > left {
+                    *text = clip_part(std::mem::take(text), left);
+                }
+                left = left.saturating_sub(chars);
+            }
+            // Pushed in reverse so they pop in document order.
+            Value::Array(items) => stack.extend(items.iter_mut().rev()),
+            Value::Object(fields) => {
+                let fields: Vec<&mut Value> = fields.values_mut().collect();
+                stack.extend(fields.into_iter().rev());
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+    }
+    out
+}

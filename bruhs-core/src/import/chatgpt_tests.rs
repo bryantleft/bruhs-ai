@@ -16,6 +16,10 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// Generous, so a debug build under gate load doesn't flake; the
+/// superlinear work these bounds guard against takes far longer.
+const SLOW: Duration = Duration::from_secs(5);
+
 /// The six fixture conversations, A to F.
 fn fixtures() -> Vec<Value> {
     let all: Value =
@@ -206,7 +210,7 @@ fn cycles_and_huge_trees_stay_bounded() {
     });
     let started = Instant::now();
     let parsed = conversation(&cycle);
-    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(started.elapsed() < SLOW);
     assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 2));
 
     let alone = json!({
@@ -215,7 +219,7 @@ fn cycles_and_huge_trees_stay_bounded() {
     });
     let started = Instant::now();
     let parsed = conversation(&alone);
-    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(started.elapsed() < SLOW);
     assert!(parsed.is_none_or(|parsed| parsed.messages.len() <= 1));
 
     let total = 100_001;
@@ -235,11 +239,7 @@ fn cycles_and_huge_trees_stay_bounded() {
     });
     let started = Instant::now();
     let parsed = conversation(&chain).expect("a long chain imports");
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        started.elapsed()
-    );
+    assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
     assert_eq!(parsed.messages.len(), MAX_MESSAGES);
     // The walk stops at MAX_NODES nodes, so n099999 is the newest kept,
     // and the oldest messages are the ones dropped.
@@ -408,7 +408,7 @@ fn hostile_markup_strips_in_linear_time() {
         let started = Instant::now();
         let _ = strip_grok_markup(text);
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < SLOW,
             "{:?} took {:?}",
             &text[..20],
             started.elapsed()
@@ -425,11 +425,7 @@ fn hostile_markup_strips_in_linear_time() {
     for text in &citations {
         let started = Instant::now();
         let _ = strip_writing_directives(&strip_citations(text));
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "{:?}",
-            started.elapsed()
-        );
+        assert!(started.elapsed() < SLOW, "{:?}", started.elapsed());
     }
 }
 

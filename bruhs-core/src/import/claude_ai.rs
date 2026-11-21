@@ -13,11 +13,12 @@
 //! Every walk keeps a visited set and stops at `MAX_NODES`, so a parent
 //! loop ends it instead of looping.
 
-use super::text::{clip_part, export_time};
+use super::text::{clip_part, clip_strings, export_time};
 use super::{output_text, ParsedConversation, Transcript};
 use bruhs_models::imports::{
-    attached_line, attachment_line, conversation_key, MemorySuggestion, IMAGE_NOT_IMPORTED,
-    MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, PROJECT_MEMORY,
+    attached_line, attachment_line, conversation_key, MemorySuggestion, AUDIO_NOT_IMPORTED,
+    DOCUMENT_NOT_IMPORTED, IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_NODES,
+    MAX_PART_CHARS, PROJECT_MEMORY,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortablePart, PortableToolCall,
@@ -306,10 +307,7 @@ fn add(message: &Value, transcript: &mut Transcript, model: Option<&str>) -> Opt
             if !typed.is_empty() {
                 sections.push(typed.to_string());
             }
-            if blocks(message).any(|block| block_type(block) == Some("image")) {
-                sections.push(IMAGE_NOT_IMPORTED.to_string());
-            }
-            sections.extend(attachments(message));
+            sections.extend(left_behind(message));
             if sections.is_empty() {
                 return None;
             }
@@ -337,44 +335,49 @@ fn blocks(message: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
+/// Whether `message` has any `content[]` block. Without one, its flat
+/// `text` is all there is (old exports); with one, `text` only repeats
+/// the text blocks, or holds filler the blocks hide.
+fn has_blocks(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| !blocks.is_empty())
+}
+
 fn block_type(block: &Value) -> Option<&str> {
     block.get("type").and_then(Value::as_str)
 }
 
-/// The text of each `text` block with any text in it.
-fn text_blocks(message: &Value) -> impl Iterator<Item = &str> {
-    blocks(message)
-        .filter(|block| block_type(block) == Some("text"))
-        .filter_map(|block| non_empty(block.get("text")))
-}
-
-/// What the sender typed: the `text` blocks, else the flat `text`, which
-/// duplicates them and is all an old export has.
+/// What the sender typed: the `text` blocks, or the flat `text` when
+/// there are no blocks.
 fn typed_text(message: &Value) -> String {
-    let texts: Vec<&str> = text_blocks(message).collect();
-    if texts.is_empty() {
+    if has_blocks(message) {
+        blocks(message)
+            .filter(|block| block_type(block) == Some("text"))
+            .filter_map(|block| non_empty(block.get("text")))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    } else {
         non_empty(message.get("text"))
             .unwrap_or_default()
             .to_string()
-    } else {
-        texts.join("\n\n")
     }
 }
 
 /// A reply's parts in order: text, thinking and the kept tool calls with
-/// their results. With no text block, the flat `text` comes last. Then
-/// one text part for any attachments.
+/// their results; the flat `text` when there are no blocks; then one text
+/// part for what stays behind.
 fn assistant_parts(message: &Value) -> Vec<PortablePart> {
     let mut parts = Vec::new();
-    // Kept calls by id, and the last kept call, for results naming none.
+    // Kept calls by id, and the last call when it was kept, for results
+    // naming no id.
     let mut calls: HashMap<String, usize> = HashMap::new();
     let mut last_call: Option<usize> = None;
-    let mut has_text = false;
     for (position, block) in blocks(message).enumerate() {
         match block_type(block) {
             Some("text") => {
                 if let Some(text) = non_empty(block.get("text")) {
-                    has_text = true;
                     parts.push(PortablePart::Text(clip_part(
                         text.to_string(),
                         MAX_PART_CHARS,
@@ -389,13 +392,14 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
                     )));
                 }
             }
-            Some("image") => parts.push(PortablePart::Text(IMAGE_NOT_IMPORTED.to_string())),
             Some("tool_use") => {
                 let Some(tool) = block
                     .get("name")
                     .and_then(Value::as_str)
                     .filter(|name| KEPT_TOOLS.contains(name))
                 else {
+                    // A result after a skipped call is that call's.
+                    last_call = None;
                     continue;
                 };
                 let id = non_empty(block.get("id"))
@@ -405,7 +409,9 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
                 parts.push(PortablePart::ToolCall(PortableToolCall {
                     id,
                     tool: tool.to_string(),
-                    input: block.get("input").cloned().unwrap_or(Value::Null),
+                    input: block
+                        .get("input")
+                        .map_or(Value::Null, |input| clip_strings(input, MAX_PART_CHARS)),
                     output: None,
                     is_error: false,
                 }));
@@ -432,12 +438,12 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
             }
-            // Injected prompts, redacted thinking, budgets, voice notes and
-            // documents are plumbing or bytes that stay behind.
+            // Injected prompts and budgets are plumbing; redacted thinking
+            // is hidden reasoning. Media and documents are `left_behind`.
             _ => {}
         }
     }
-    if !has_text {
+    if !has_blocks(message) {
         if let Some(text) = non_empty(message.get("text")) {
             parts.push(PortablePart::Text(clip_part(
                 text.to_string(),
@@ -445,32 +451,73 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
             )));
         }
     }
-    let attached = attachments(message);
-    if !attached.is_empty() {
+    let behind = left_behind(message);
+    if !behind.is_empty() {
         parts.push(PortablePart::Text(clip_part(
-            attached.join("\n\n"),
+            behind.join("\n\n"),
             MAX_PART_CHARS,
         )));
     }
     parts
 }
 
-/// A line for each attachment: its extracted text under `attached_line`
-/// (cut to `MAX_ATTACHMENT_TEXT_CHARS`), else `attachment_line`; then
-/// `attachment_line` for each file not already named, whose bytes never
-/// come in.
-fn attachments(message: &Value) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut named: HashSet<&str> = HashSet::new();
-    let listed = |key: &str| {
+/// A placeholder line for each thing in `message` whose bytes stay
+/// behind, the same for either sender (D17):
+/// - `IMAGE_NOT_IMPORTED` once, for image blocks no attachment or file
+///   already names (by `file_name` or `file_uuid`);
+/// - `AUDIO_NOT_IMPORTED` once, for voice notes;
+/// - each attachment's extracted text under `attached_line` (cut to
+///   `MAX_ATTACHMENT_TEXT_CHARS`), else `attachment_line`;
+/// - `attachment_line` for each document block and file not already
+///   named;
+/// - `DOCUMENT_NOT_IMPORTED` once, for documents with no name.
+fn left_behind(message: &Value) -> Vec<String> {
+    let listed = |key: &'static str| {
         message
             .get(key)
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|item| non_empty(item.get("file_name")).map(|name| (name, item)))
     };
-    for (name, attachment) in listed("attachments") {
+    let known: HashSet<&str> = listed("attachments")
+        .chain(listed("files"))
+        .flat_map(|item| ["file_name", "file_uuid"].map(|key| non_empty(item.get(key))))
+        .flatten()
+        .collect();
+    let (mut image, mut audio, mut nameless) = (false, false, false);
+    let mut documents: Vec<&str> = Vec::new();
+    for block in blocks(message) {
+        match block_type(block) {
+            Some("image") => {
+                image |= !["file_name", "file_uuid"]
+                    .iter()
+                    .filter_map(|key| non_empty(block.get(*key)))
+                    .any(|id| known.contains(id));
+            }
+            Some("voice_note") => audio = true,
+            Some("document") => match ["file_name", "title"]
+                .iter()
+                .find_map(|key| non_empty(block.get(*key)))
+            {
+                Some(name) => documents.push(name),
+                None => nameless = true,
+            },
+            _ => {}
+        }
+    }
+
+    let mut lines = Vec::new();
+    if image {
+        lines.push(IMAGE_NOT_IMPORTED.to_string());
+    }
+    if audio {
+        lines.push(AUDIO_NOT_IMPORTED.to_string());
+    }
+    let named_in = |key: &'static str| {
+        listed(key).filter_map(|item| non_empty(item.get("file_name")).map(|name| (name, item)))
+    };
+    let mut named: HashSet<&str> = HashSet::new();
+    for (name, attachment) in named_in("attachments") {
         named.insert(name);
         lines.push(match non_empty(attachment.get("extracted_content")) {
             Some(text) => format!(
@@ -481,10 +528,16 @@ fn attachments(message: &Value) -> Vec<String> {
             None => attachment_line(name),
         });
     }
-    for (name, _) in listed("files") {
+    for name in documents
+        .into_iter()
+        .chain(named_in("files").map(|(name, _)| name))
+    {
         if named.insert(name) {
             lines.push(attachment_line(name));
         }
+    }
+    if nameless {
+        lines.push(DOCUMENT_NOT_IMPORTED.to_string());
     }
     lines
 }
