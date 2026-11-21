@@ -53,8 +53,12 @@ const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 /// A rewritten file's temporary name starts with this, beside the file.
 const REWRITE_PREFIX: &str = ".bruhs-rewrite-";
 /// The per-column map of old cell text to new, in each staged database's
-/// own temporary schema.
+/// own temporary schema. Every name around it is qualified, so a staged
+/// table of the same name is never confused with it (B Task 9 N1).
 const MAP_TABLE: &str = "temp.bruhs_rewrite_map";
+/// The map's alias in the `UPDATE`: a staged table can't take a name that
+/// starts with `sqlite_`, so no staged name shadows it.
+const MAP_ALIAS: &str = "sqlite_bruhs_map";
 
 /// What preparing a staged restore did, for its preview.
 pub(crate) struct Prepared {
@@ -122,6 +126,9 @@ fn prepare_staged(
         map = rekey_catalogs(&credentials, &rules).map_err(|error| match error {
             RekeyError::Unreadable => damaged(),
             RekeyError::Clash => cant_map(),
+            RekeyError::Read => {
+                BackupError::Io(io::Error::other("the staged catalogs couldn't be read"))
+            }
             RekeyError::Write => {
                 BackupError::Io(io::Error::other("the moved catalogs couldn't be written"))
             }
@@ -401,7 +408,7 @@ fn sqlite_failed(error: rusqlite::Error) -> BackupError {
 /// with a virtual table's name and `_` (its shadow tables).
 fn plain_tables(connection: &Connection) -> Result<Vec<String>, BackupError> {
     let mut statement = connection
-        .prepare("SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY rowid")
+        .prepare("SELECT name, sql FROM main.sqlite_master WHERE type='table' ORDER BY rowid")
         .map_err(sqlite_failed)?;
     let tables = statement
         .query_map([], |row| {
@@ -437,11 +444,12 @@ fn plain_tables(connection: &Connection) -> Result<Vec<String>, BackupError> {
         .collect())
 }
 
-/// A table's columns, generated ones aside (`PRAGMA table_info` leaves
-/// them out, and they can't be written).
+/// A staged table's columns, generated ones aside (`PRAGMA table_info`
+/// leaves them out, and they can't be written). Asked of `main` only: the
+/// temporary schema's map would answer for a table of its name.
 fn columns(connection: &Connection, table: &str) -> Result<Vec<String>, BackupError> {
     let mut statement = connection
-        .prepare("SELECT name FROM pragma_table_info(?1)")
+        .prepare("SELECT name FROM pragma_table_info(?1, 'main')")
         .map_err(sqlite_failed)?;
     let names = statement
         .query_map([table], |row| row.get::<_, String>(0))
@@ -467,7 +475,7 @@ fn rewrite_column(
     rules: &[PathRewrite],
     outside: &mut BTreeSet<String>,
 ) -> Result<usize, BackupError> {
-    let (table, cell) = (quoted(table), quoted(column));
+    let (table, cell) = (format!("main.{}", quoted(table)), quoted(column));
     let mut wanted: Vec<String> = (1..=rules.len())
         .map(|at| format!("instr({cell},?{at})>0"))
         .collect();
@@ -516,9 +524,10 @@ fn rewrite_column(
     // The cell's own collation never widens the match: only the exact old
     // text moves.
     let update = format!(
-        "UPDATE {table} SET {cell}=(SELECT m.new FROM {MAP_TABLE} AS m WHERE m.old={table}.{cell}) \
+        "UPDATE {table} SET {cell}=(SELECT {MAP_ALIAS}.new FROM {MAP_TABLE} AS {MAP_ALIAS} \
+         WHERE {MAP_ALIAS}.old={table}.{cell}) \
          WHERE typeof({cell})='text' \
-         AND {cell} COLLATE BINARY IN (SELECT m.old FROM {MAP_TABLE} AS m)"
+         AND {cell} COLLATE BINARY IN (SELECT {MAP_ALIAS}.old FROM {MAP_TABLE} AS {MAP_ALIAS})"
     );
     connection
         .execute(&update, [])

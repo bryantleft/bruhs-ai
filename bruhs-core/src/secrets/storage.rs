@@ -654,6 +654,15 @@ pub(super) fn rekey(
     directory: &Path,
     rules: &[PathRewrite],
 ) -> Result<BTreeMap<String, String>, RekeyError> {
+    // A disk that fails a read is told apart from a catalog that breaks
+    // its rules, which the parse below can't do (B Task 9 N2).
+    for name in [CATALOG_FILE, vault::VAULT_FILE] {
+        match fs::read(directory.join(name)) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(RekeyError::Read),
+        }
+    }
     let mut moved = BTreeMap::new();
     let mut catalog = Catalog::default();
     for (id, mut entry) in read_catalog(directory)

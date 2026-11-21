@@ -339,9 +339,12 @@ pub fn rekey_catalogs(credentials: &Path, rules: &[PathRewrite]) -> Result<Accou
 /// the catalogs half moved: the caller discards them (B Task 4 note).
 #[derive(Debug, thiserror::Error)]
 pub enum RekeyError {
-    /// A catalog doesn't read, or breaks its own rules.
+    /// A catalog doesn't parse, or breaks its own rules.
     #[error("{}", DAMAGED)]
     Unreadable,
+    /// A catalog file couldn't be read from the disk.
+    #[error("Bruhs couldn't read the catalogs.")]
+    Read,
     /// Two entries land on one id once their paths move.
     #[error("{}", RESTORE_CANT_MAP)]
     Clash,

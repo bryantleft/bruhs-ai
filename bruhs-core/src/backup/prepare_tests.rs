@@ -832,6 +832,60 @@ fn nested_rules_move_each_cell_once() {
     );
 }
 
+/// B Task 9 N1: staged tables named like the map, its old alias or its
+/// columns are rewritten as any other, and none is taken for the map.
+#[test]
+fn staged_names_never_meet_the_map() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("names.sqlite3");
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE bruhs_rewrite_map(old TEXT, new TEXT);
+         INSERT INTO bruhs_rewrite_map VALUES ('/a/home/1', '/a/home/2');
+         CREATE TABLE m(old TEXT, new TEXT);
+         INSERT INTO m VALUES ('/a/home/3', 'kept');
+         CREATE TABLE \"we\"\"ird\"(p TEXT);
+         INSERT INTO \"we\"\"ird\" VALUES ('/a/home/4');",
+    )
+    .unwrap();
+    // No staged table can take the alias.
+    assert!(db
+        .execute("CREATE TABLE sqlite_bruhs_map(p TEXT)", [])
+        .is_err());
+    drop(db);
+    let rules = vec![PathRewrite {
+        from: "/a/home".into(),
+        to: "/b/home".into(),
+    }];
+    let changed =
+        rewrite_sqlite(&path, &rules, &mut BTreeSet::new(), &CancelFlag::default()).unwrap();
+    assert_eq!(changed, 4);
+    let rows = |sql: &str| -> Vec<(String, String)> {
+        Connection::open(&path)
+            .unwrap()
+            .prepare(sql)
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    assert_eq!(
+        rows("SELECT old, new FROM bruhs_rewrite_map"),
+        [("/b/home/1".to_owned(), "/b/home/2".to_owned())]
+    );
+    assert_eq!(
+        rows("SELECT old, new FROM m"),
+        [("/b/home/3".to_owned(), "kept".to_owned())]
+    );
+    assert_eq!(
+        column(&path, "SELECT p FROM \"we\"\"ird\""),
+        [Some("/b/home/4".to_owned())]
+    );
+}
+
 /// B Task 9 I1: a large column is one pass, not one scan per value.
 #[test]
 fn a_large_table_rewrites_in_one_pass() {

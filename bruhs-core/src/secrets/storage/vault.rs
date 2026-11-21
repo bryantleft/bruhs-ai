@@ -31,7 +31,7 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-const VAULT_FILE: &str = "vault.json";
+pub(super) const VAULT_FILE: &str = "vault.json";
 const VAULT_VERSION: u32 = 1;
 const ID_PREFIX: &str = "v1-";
 
