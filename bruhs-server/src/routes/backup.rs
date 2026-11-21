@@ -67,6 +67,9 @@ const WRITE_BYTES: usize = 1 << 20;
 const READ_BYTES: usize = 256 << 10;
 /// The one content type a web part arrives as (D20).
 const WEB_PART_CONTENT_TYPE: &str = "application/octet-stream";
+/// How long a start waits for its sweep before it serves anyway (final
+/// review C-M4): a keychain that doesn't answer only holds up backups.
+const SWEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 mod restore;
 // Split so clippy's allow-unwrap-in-tests sees `cfg(test)`.
@@ -105,7 +108,7 @@ pub async fn start(
         .with_computers(tools)
         .with_reactive(reactive)
         .with_app_version(app_version().to_owned());
-    let host = sweep_at_start(host, BackupHost::sweep).await;
+    let host = sweep_at_start(host, BackupHost::sweep, SWEEP_WAIT).await;
     // Downloads and uploads expire after 30 minutes while it runs too
     // (final review A-I2).
     host.keep_sweeping_transfers();
@@ -113,18 +116,38 @@ pub async fn start(
 }
 
 /// Runs `sweep` off the async runtime (it may wait on the keychain) and
-/// answers the host once it is done. A sweep that panics is logged and
-/// the server serves anyway: the next start sweeps again.
+/// answers the host once it is done, or after `wait` (final review C-M4):
+/// a sweep still running then goes on beside serving, holding the job
+/// slot so no backup or restore starts until it ends. A sweep that panics
+/// is logged and the server serves anyway: the next start sweeps again.
 async fn sweep_at_start(
     host: BackupHost,
     sweep: impl FnOnce(&BackupHost) + Send + 'static,
+    wait: std::time::Duration,
 ) -> BackupHost {
+    // A fresh host runs no job, so this only fails if something else
+    // took the slot; the sweep then runs without it.
+    let hold = host.hold_jobs().ok();
     let sweeper = host.clone();
-    if tokio::task::spawn_blocking(move || sweep(&sweeper))
-        .await
-        .is_err()
-    {
+    let mut swept = tokio::task::spawn_blocking(move || {
+        let _hold = hold;
+        sweep(&sweeper);
+    });
+    let stopped = || {
         tracing::error!("The backup sweep stopped early; it runs again at the next start");
+    };
+    match tokio::time::timeout(wait, &mut swept).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => stopped(),
+        Err(_) => {
+            tracing::warn!("The backup sweep is still running; backups wait until it ends");
+            tokio::spawn(async move {
+                match swept.await {
+                    Ok(()) => tracing::info!("The backup sweep ended"),
+                    Err(_) => stopped(),
+                }
+            });
+        }
     }
     host
 }

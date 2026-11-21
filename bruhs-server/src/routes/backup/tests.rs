@@ -802,14 +802,54 @@ async fn start_sweeps_before_it_answers() {
         config: directory.path().join("core"),
     };
     let host = BackupHost::new(roots, SecretStore::in_memory());
-    let host = super::sweep_at_start(host, BackupHost::sweep).await;
+    let host = super::sweep_at_start(host, BackupHost::sweep, super::SWEEP_WAIT).await;
     assert!(!tmp.join("left.sqlite3").exists());
+    assert!(host.hold_jobs().is_ok(), "jobs start once it is done");
 
     // A sweep that panics doesn't stop the server's start.
     write(&tmp.join("again.sqlite3"), b"snapshot");
-    let host = super::sweep_at_start(host, |_| panic!("the sweep broke")).await;
+    let host = super::sweep_at_start(
+        host,
+        |_| panic!("the sweep broke"),
+        std::time::Duration::from_secs(10),
+    )
+    .await;
     assert!(tmp.join("again.sqlite3").exists());
     assert_eq!(host.roots().core, directory.path().join("core"));
+    assert!(host.hold_jobs().is_ok(), "nor holds up jobs");
+}
+
+/// Final review C-M4: a sweep held up on the keychain doesn't hold up
+/// serving; until it ends, no backup or restore starts.
+#[tokio::test]
+async fn a_slow_sweep_never_holds_up_the_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let roots = Roots {
+        home: directory.path().to_path_buf(),
+        core: directory.path().join("core"),
+        desktop: directory.path().join("desktop"),
+        config: directory.path().join("core"),
+    };
+    let host = BackupHost::new(roots, SecretStore::in_memory());
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let sweep = move |_: &BackupHost| {
+        let _ = released.recv_timeout(std::time::Duration::from_secs(20));
+    };
+    let host = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        super::sweep_at_start(host, sweep, std::time::Duration::from_millis(200)),
+    )
+    .await
+    .expect("the start serves while the sweep runs");
+    assert!(host.hold_jobs().is_err(), "jobs wait for the sweep");
+    release.send(()).unwrap();
+    for _ in 0..200 {
+        if host.hold_jobs().is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("jobs never started again after the sweep");
 }
 
 #[tokio::test]
