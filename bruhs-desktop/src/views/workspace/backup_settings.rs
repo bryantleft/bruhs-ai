@@ -1085,13 +1085,15 @@ fn line(selector: String, text: impl Into<SharedString>, color: Hsla, role: Role
         .role(role)
 }
 
-/// One group: web `px-4 py-3`, ruled from the one above.
+/// One group: web `px-4 py-3`, ruled from the one above. It carries its own
+/// side padding, so the rule runs the card's full width as on the web.
 fn group(id: &'static str, first: bool) -> Stateful<Div> {
     div()
         .id(id)
         .debug_selector(move || id.to_owned())
         .role(Role::Group)
         .min_w_0()
+        .px_4()
         .py_3()
         .when(!first, |el| {
             el.border_t_1()
@@ -1506,6 +1508,7 @@ impl BackupSettings {
         if last.is_some() || outside.is_some() {
             parts.push(
                 div()
+                    .px_4()
                     .pb_2()
                     .flex()
                     .flex_col()
@@ -1546,6 +1549,8 @@ impl Render for BackupSettings {
         }
         // A breakpoint is a design number: compare in CSS pixels.
         let narrow = bruhs_ui::zoom::css_px(window.viewport_size().width) < NARROW_PX;
+        // The groups pad themselves; a single status line takes the card's.
+        let groups = self.load == Load::Ready && self.overview.supported;
         let body: Vec<AnyElement> = match &self.load {
             Load::Idle | Load::Loading => vec![line(
                 "desktop-backup-status".into(),
@@ -1580,7 +1585,7 @@ impl Render for BackupSettings {
         div()
             .id("desktop-backup")
             .track_focus(&self.page_focus)
-            .px_4()
+            .when(!groups, |el| el.px_4())
             .py_1()
             .min_w_0()
             .font_family(theme::UI_SMALL_FONT_FAMILY)

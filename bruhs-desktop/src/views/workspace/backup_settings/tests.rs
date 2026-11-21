@@ -890,3 +890,27 @@ fn a_running_job_found_on_load_is_followed(cx: &mut TestAppContext) {
     wait(cx, 500);
     assert!(requests(&view, cx).contains(&format!("GET /api/backup/jobs/{ID}")));
 }
+
+/// Each group carries its own side padding (web `GROUP`, `px-4 py-3`), so
+/// the rule between groups runs the card's full width, as on the web.
+#[gpui::test]
+fn group_rules_span_the_card_like_the_web(cx: &mut TestAppContext) {
+    let (_view, cx) = page(cx, true);
+    let width = cx.update(|window, _| window.viewport_size().width);
+    for group in ["desktop-backup-make-group", "desktop-backup-restore-group"] {
+        let at = bounds(cx, group);
+        assert_eq!(
+            at.left(),
+            gpui::px(0.0),
+            "{group} starts at the card's edge"
+        );
+        assert_eq!(at.right(), width, "{group} ends at the card's edge");
+    }
+    let make = bounds(cx, "desktop-backup-make-group");
+    let note = bounds(cx, "desktop-backup-no-web");
+    assert_eq!(
+        note.left() - make.left(),
+        gpui::px(16.0),
+        "content stays 16 px in"
+    );
+}
