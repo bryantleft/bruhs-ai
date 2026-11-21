@@ -527,8 +527,9 @@ fn crc32(bytes: &[u8]) -> u32 {
 }
 
 /// A stored ZIP written by hand, so names may repeat (the writer refuses
-/// that).
-fn raw_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+/// that) or be any bytes. `utf8` sets the language encoding flag.
+fn raw_zip(entries: &[(&[u8], &[u8])], utf8: bool) -> Vec<u8> {
+    let flags: u16 = if utf8 { 1 << 11 } else { 0 };
     let mut out = Vec::new();
     let mut central = Vec::new();
     for (name, bytes) in entries {
@@ -538,26 +539,28 @@ fn raw_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let crc = crc32(bytes);
         out.extend_from_slice(b"PK\x03\x04");
         out.extend_from_slice(&20u16.to_le_bytes());
-        out.extend_from_slice(&[0; 6]); // flags, method, time
+        out.extend_from_slice(&flags.to_le_bytes());
+        out.extend_from_slice(&[0; 4]); // method, time
         out.extend_from_slice(&0u16.to_le_bytes()); // date
         out.extend_from_slice(&crc.to_le_bytes());
         out.extend_from_slice(&size.to_le_bytes());
         out.extend_from_slice(&size.to_le_bytes());
         out.extend_from_slice(&name_len.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(name);
         out.extend_from_slice(bytes);
         central.extend_from_slice(b"PK\x01\x02");
         central.extend_from_slice(&20u16.to_le_bytes());
         central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&[0; 8]); // flags, method, time, date
+        central.extend_from_slice(&flags.to_le_bytes());
+        central.extend_from_slice(&[0; 6]); // method, time, date
         central.extend_from_slice(&crc.to_le_bytes());
         central.extend_from_slice(&size.to_le_bytes());
         central.extend_from_slice(&size.to_le_bytes());
         central.extend_from_slice(&name_len.to_le_bytes());
         central.extend_from_slice(&[0; 12]); // extra, comment, disk, attrs
         central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name.as_bytes());
+        central.extend_from_slice(name);
     }
     let cd_offset = u32::try_from(out.len()).unwrap();
     let count = u16::try_from(entries.len()).unwrap();
@@ -755,12 +758,15 @@ fn hostile_archives_are_refused_without_writing_outside() {
     );
 
     // Two entries with one name: the central directory is ambiguous.
-    let twice = raw_zip(&[
-        ("conversations.json", br#"[{"first":1}]"#),
-        ("conversations.json", br#"[{"second":1}]"#),
-    ]);
+    let twice = raw_zip(
+        &[
+            (b"conversations.json", br#"[{"first":1}]"#),
+            (b"conversations.json", br#"[{"second":1}]"#),
+        ],
+        false,
+    );
     assert_eq!(refused(hostile("duplicate names", &twice)), DAMAGED_EXPORT);
-    let once = raw_zip(&[("conversations.json", br#"[{"only":1}]"#)]);
+    let once = raw_zip(&[(b"conversations.json", br#"[{"only":1}]"#)], false);
     assert_eq!(
         hostile("raw", &once).unwrap(),
         vec![(conversations(None), vec![json!({"only":1})])]
@@ -950,4 +956,295 @@ fn default_limits_come_from_the_shared_caps() {
     assert_eq!(test.record, 1 << 20);
     assert_eq!(test.entries, 1_000);
     assert_eq!(test.nesting, limits.nesting);
+}
+
+// ── Fix round 1 ────────────────────────────────────────────────────────
+
+/// `[[0,0,…]]` with `n` zeros: tiny per value, large as a `Value`.
+fn dense(n: usize) -> String {
+    format!("[[{}]]", vec!["0"; n].join(","))
+}
+
+#[test]
+fn dense_records_are_refused_by_their_value_count() {
+    // 400 000 values in 800 KB: under the 1 MiB byte budget, over the
+    // value budget.
+    let attack = dense(400_000);
+    assert!(attack.len() < 1 << 20);
+    assert_eq!(
+        refused(records(attack.as_bytes(), conversations(None), None)),
+        CONVERSATION_TOO_LARGE
+    );
+    // Through a ZIP and a walk the copy is the same.
+    let zip = zip_of(&[("conversations.json", attack.as_bytes())], true);
+    assert_eq!(refused(hostile("dense", &zip)), CONVERSATION_TOO_LARGE);
+    // Commas inside strings aren't values.
+    let text = format!("[{{\"t\":\"{}\"}}]", ",".repeat(400_000));
+    assert_eq!(
+        records(text.as_bytes(), conversations(None), None)
+            .unwrap()
+            .len(),
+        1
+    );
+    // Each record has its own count.
+    let many = format!(
+        "[{}]",
+        vec![format!("[{}]", vec!["0"; 150_000].join(",")); 3].join(",")
+    );
+    assert_eq!(
+        records(many.as_bytes(), conversations(None), None)
+            .unwrap()
+            .len(),
+        3
+    );
+    // A file read whole has one count for the whole file.
+    let manifest = format!("{{\"a\":{}}}", dense(400_000));
+    assert_eq!(
+        refused(records(manifest.as_bytes(), EntryKind::Manifest, None)),
+        DAMAGED_EXPORT
+    );
+    assert_eq!(Limits::DEFAULT.values, 4 << 20);
+}
+
+#[test]
+fn a_swallowed_refusal_still_ends_the_walk() {
+    let bomb = zip_of(&[("conversations.json", &vec![b' '; 16 * MIB])], true);
+    let place = Place::new();
+    let input = place.file("export.zip", &bomb);
+    let cancel = AtomicBool::new(false);
+    let result = walk(
+        &[input],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |_, reader, _| {
+            let _ = std::io::copy(reader, &mut std::io::sink());
+            Ok(())
+        },
+    );
+    assert_eq!(refused(result), ARCHIVE_REFUSED);
+}
+
+#[test]
+fn space_says_how_much_to_free() {
+    let copy = ImportError::Space(2_000_000_000).to_string();
+    assert_eq!(
+        copy,
+        bruhs_models::imports::NO_SPACE_IMPORT
+            .replace("{size}", &bruhs_models::backup::format_bytes(2_000_000_000))
+    );
+    assert!(!copy.contains("{size}"));
+}
+
+#[test]
+fn scratch_copies_are_unique_and_stale_ones_are_swept() {
+    let place = Place::new();
+    let scratch = place.scratch();
+    let old = scratch.join("nested-0000000000000000-1.zip");
+    std::fs::write(&old, b"left by a crash").unwrap();
+    let hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(hours_ago)
+        .unwrap();
+    // A copy another read might be using right now, and an unrelated file.
+    let fresh = scratch.join("nested-1111111111111111-1.zip");
+    std::fs::write(&fresh, b"in use").unwrap();
+    let other = scratch.join("keep.txt");
+    std::fs::write(&other, b"not ours").unwrap();
+    let inner = zip_of(&[("conversations.json", br#"[{"n":1}]"#)], true);
+    let input = place.file("export.zip", &zip_of(&[("inner.zip", &inner)], true));
+    let seen = read_all(&[input], &scratch, &Limits::TEST).unwrap();
+    assert_eq!(seen, vec![(conversations(None), vec![json!({"n":1})])]);
+    assert!(!old.exists());
+    assert!(fresh.exists() && other.exists());
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_folders_and_files_are_skipped_and_counted() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let place = Place::new();
+    let export = place.root.path().join("in").join("export");
+    let locked = export.join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("conversations-001.json"), br#"[{"n":1}]"#).unwrap();
+    std::fs::write(export.join("conversations-002.json"), br#"[{"n":2}]"#).unwrap();
+    let shut = export.join("conversations-003.json");
+    std::fs::write(&shut, br#"[{"n":3}]"#).unwrap();
+    std::fs::write(export.join("conversations.json"), br#"[{"n":0}]"#).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let blocked = std::fs::read_dir(&locked).is_err() && std::fs::File::open(&shut).is_err();
+    let cancel = AtomicBool::new(false);
+    let mut seen = Vec::new();
+    let report = walk(
+        &[ExportInput::Folder(export)],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |kind, reader, len| {
+            for_each_record(reader, kind, len, &Limits::TEST, &mut |value| {
+                seen.push(value);
+                Ok(())
+            })
+        },
+    );
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::set_permissions(&shut, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let report = report.unwrap();
+    if blocked {
+        // Running as a user the modes bind (not root).
+        assert_eq!(seen, vec![json!({"n":2}), json!({"n":0})]);
+        assert_eq!(report.skipped, 2);
+    }
+}
+
+#[test]
+fn device_names_and_picked_folders_add_nothing() {
+    for name in [
+        "memories/CON.json",
+        "memories/nul.json",
+        "aux",
+        "PRN.zip",
+        "COM1.json",
+        "lpt9.zip",
+        "x/Con/conversations.json",
+    ] {
+        assert_eq!(entry_kind(name), None, "{name}");
+    }
+    for name in [
+        "memories/console.json",
+        "com0.zip",
+        "lpt10.zip",
+        "comm1.zip",
+    ] {
+        assert!(entry_kind(name).is_some(), "{name}");
+    }
+    // A folder picked as a file is passed over, not an error.
+    let place = Place::new();
+    let folder = place.root.path().join("in").join("a-folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let result = read_all(
+        &[ExportInput::File(folder)],
+        &place.scratch(),
+        &Limits::TEST,
+    );
+    assert_eq!(refused(result), NOT_AN_EXPORT);
+}
+
+#[test]
+fn odd_names_and_case_never_open_what_is_refused() {
+    // Case variants of never-opened names.
+    for name in [
+        "USERS.JSON",
+        "Memories/Auth.JSON",
+        "Login_History.json",
+        ".ENV",
+        "PROD-MC-billing.json",
+        "Credentials/conversations.json",
+        "STATE.DB",
+        "Store.SQLite",
+    ] {
+        assert_eq!(entry_kind(name), None, "{name}");
+    }
+    // Nested ZIPs named after what is never opened (M8).
+    for name in [
+        "credentials.zip",
+        "credentials-2026.zip",
+        "Secrets.zip",
+        "auth.json.zip",
+        ".env.zip",
+        "users.json.zip",
+    ] {
+        assert_eq!(entry_kind(name), None, "{name}");
+    }
+    let canary = br#"[{"canary":"inner-5d1e"}]"#;
+    let inner = zip_of(
+        &[
+            ("users.json", canary),
+            ("Memories/AUTH.json", canary),
+            ("conversations.json", br#"[{"ok":1}]"#),
+        ],
+        true,
+    );
+    let secret = zip_of(&[("conversations.json", canary)], true);
+    let outer = zip_of(&[("inner.zip", &inner), ("credentials.zip", &secret)], true);
+    assert_eq!(
+        hostile("never-opened inside", &outer).unwrap(),
+        vec![(conversations(None), vec![json!({"ok":1})])]
+    );
+
+    // Names that aren't UTF-8 are matched as decoded (CP437 without the
+    // flag) and never fail the read; a bad UTF-8 name is passed over.
+    let raw = raw_zip(
+        &[
+            (b"conversations\xff.json", canary),
+            (b"\xff/users.json", canary),
+            (b"\xfe\xff/conversations.json", br#"[{"cp437":1}]"#),
+        ],
+        false,
+    );
+    assert_eq!(
+        hostile("cp437 names", &raw).unwrap(),
+        vec![(conversations(None), vec![json!({"cp437":1})])]
+    );
+    let flagged = raw_zip(
+        &[
+            (b"conversations\xff.json", canary),
+            (b"conversations-001.json", br#"[{"utf8":1}]"#),
+        ],
+        true,
+    );
+    assert_eq!(
+        hostile("bad utf-8 names", &flagged).unwrap(),
+        vec![(conversations(Some(1)), vec![json!({"utf8":1})])]
+    );
+}
+
+#[test]
+fn a_zip_that_is_not_one_is_skipped_and_counted() {
+    let place = Place::new();
+    let outer = zip_of(
+        &[
+            ("photos.zip", b"not a zip at all"),
+            ("tiny.zip", b"PK"),
+            ("conversations.json", br#"[{"n":1}]"#),
+        ],
+        true,
+    );
+    let input = place.file("export.zip", &outer);
+    let cancel = AtomicBool::new(false);
+    let mut kinds_seen = Vec::new();
+    let report = walk(
+        &[input],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |kind, _, _| {
+            kinds_seen.push(kind);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(kinds_seen, vec![conversations(None)]);
+    assert_eq!(report.skipped, 2);
+    assert!(place.scratch_is_empty());
+
+    let export = place.root.path().join("in").join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    std::fs::write(export.join("bad.zip"), b"<html>").unwrap();
+    std::fs::write(export.join("conversations.json"), br#"[{"n":2}]"#).unwrap();
+    let report = walk(
+        &[ExportInput::Folder(export)],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |_, _, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!((report.files_read, report.skipped), (1, 1));
 }

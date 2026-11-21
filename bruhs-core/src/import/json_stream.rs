@@ -253,64 +253,117 @@ fn hex4(digits: &[u8]) -> Option<u32> {
     })
 }
 
-/// The budget the current record's bytes count against, shared with the
-/// visitor that resets it before each record.
+/// A budget: bytes, and values (counted at each `[`, `{` and `,` outside
+/// strings), refused with fixed copy.
+#[derive(Clone, Copy)]
+struct Budget {
+    bytes: u64,
+    values: u64,
+    copy: &'static str,
+}
+
+/// The budget the current record counts against, shared with the visitor
+/// that resets it before each record.
 #[derive(Clone, Default)]
 struct BudgetHandle {
-    used: Rc<Cell<u64>>,
-    limit: Rc<Cell<Option<(u64, &'static str)>>>,
+    used: Rc<Cell<(u64, u64)>>,
+    limit: Rc<Cell<Option<Budget>>>,
 }
 
 impl BudgetHandle {
-    /// From here, at most `limit` bytes, refused with `copy`.
-    fn set(&self, limit: u64, copy: &'static str) {
-        self.used.set(0);
-        self.limit.set(Some((limit, copy)));
+    /// From here, at most `bytes` bytes and `values` values, refused with
+    /// `copy`.
+    fn set(&self, bytes: u64, values: u64, copy: &'static str) {
+        self.used.set((0, 0));
+        self.limit.set(Some(Budget {
+            bytes,
+            values,
+            copy,
+        }));
     }
 
     /// From here, only the file's total counts.
     fn lift(&self) {
-        self.used.set(0);
+        self.used.set((0, 0));
         self.limit.set(None);
+    }
+
+    /// What is left of the current record's budget.
+    fn left(&self) -> Option<Budget> {
+        let (bytes, values) = self.used.get();
+        self.limit.get().map(|limit| Budget {
+            bytes: limit.bytes.saturating_sub(bytes),
+            values: limit.values.saturating_sub(values),
+            copy: limit.copy,
+        })
     }
 }
 
-/// Counts the bytes serde reads against the current record's budget and
-/// the file's total. It hands out no byte past either.
+/// Counts what serde reads against the current record's budget and the
+/// file's total: bytes, and values, since a dense record (`[0,0,…]`)
+/// builds a `Value` many times its size (I Task 3 I1). It hands out no
+/// byte past either byte budget.
 struct RecordBudget<R> {
     inner: R,
     record: BudgetHandle,
-    total: Option<(u64, &'static str)>,
+    total: Option<Budget>,
     refusal: Refusal,
+    in_string: bool,
+    escaped: bool,
+}
+
+impl<R: Read> RecordBudget<R> {
+    /// Values opened in `bytes`, keeping track of strings across reads.
+    fn values_in(&mut self, bytes: &[u8]) -> u64 {
+        let mut values = 0;
+        for &byte in bytes {
+            if self.escaped {
+                self.escaped = false;
+            } else if self.in_string {
+                match byte {
+                    b'\\' => self.escaped = true,
+                    b'"' => self.in_string = false,
+                    _ => {}
+                }
+            } else {
+                match byte {
+                    b'"' => self.in_string = true,
+                    b'[' | b'{' | b',' => values += 1,
+                    _ => {}
+                }
+            }
+        }
+        values
+    }
 }
 
 impl<R: Read> Read for RecordBudget<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let record = self
-            .record
-            .limit
-            .get()
-            .map(|(limit, copy)| (limit.saturating_sub(self.record.used.get()), copy));
-        let allowed = [record, self.total]
+        let budgets = [self.record.left(), self.total];
+        let allowed = budgets
             .into_iter()
             .flatten()
-            .map(|(left, _)| left)
+            .map(|budget| budget.bytes)
             .min()
             .unwrap_or(u64::MAX);
         let want =
             usize::try_from(allowed.saturating_add(1)).map_or(buf.len(), |cap| cap.min(buf.len()));
         let n = self.inner.read(&mut buf[..want])?;
         let got = u64::try_from(n).map_err(io::Error::other)?;
-        for (left, copy) in [record, self.total].into_iter().flatten() {
-            if got > left {
-                return Err(refuse(&self.refusal, copy));
+        let values = self.values_in(&buf[..n]);
+        for budget in budgets.into_iter().flatten() {
+            if got > budget.bytes || values > budget.values {
+                return Err(refuse(&self.refusal, budget.copy));
             }
         }
-        self.record
-            .used
-            .set(self.record.used.get().saturating_add(got));
-        if let Some((left, _)) = &mut self.total {
-            *left -= got;
+        let (bytes_used, values_used) = self.record.used.get();
+        self.record.used.set((
+            bytes_used.saturating_add(got),
+            values_used.saturating_add(values),
+        ));
+        if let Some(total) = &mut self.total {
+            total.bytes -= got;
+            total.values -= values;
         }
         Ok(n)
     }
@@ -319,13 +372,13 @@ impl<R: Read> Read for RecordBudget<R> {
 /// Calls `f` once per record in one export JSON file.
 ///
 /// - A top-level array gives each element, each within `record` bytes
-///   (`CONVERSATION_TOO_LARGE`).
+///   and `values` values (`CONVERSATION_TOO_LARGE`).
 /// - A top-level object gives its `conversations` array's elements and
 ///   skips every other key unheld. A [`EntryKind::Manifest`] or
 ///   [`EntryKind::Memory`] object, or a [`EntryKind::Bare`] file of at most
 ///   `small_json` bytes (`bare_len`), is instead given once, whole.
 /// - Manifests, memory files and small bare files are read within
-///   `small_json` bytes in all (`DAMAGED_EXPORT`).
+///   `small_json` bytes and `values` values in all (`DAMAGED_EXPORT`).
 ///
 /// `f` checks for cancelling between records: its error ends the stream
 /// and is returned as it is.
@@ -351,8 +404,14 @@ pub(crate) fn for_each_record(
     let budget = RecordBudget {
         inner: BufReader::new(LoneSurrogates::new(reader, refusal.clone())),
         record: record.clone(),
-        total: small.then_some((limits.small_json, DAMAGED_EXPORT)),
+        total: small.then_some(Budget {
+            bytes: limits.small_json,
+            values: limits.values,
+            copy: DAMAGED_EXPORT,
+        }),
         refusal: refusal.clone(),
+        in_string: false,
+        escaped: false,
     };
     let failed = Cell::new(None);
     let top = Top {
@@ -395,7 +454,11 @@ impl Top<'_> {
 
     fn records<'de, A: SeqAccess<'de>>(&mut self, mut seq: A) -> Result<(), A::Error> {
         loop {
-            self.record.set(self.limits.record, CONVERSATION_TOO_LARGE);
+            self.record.set(
+                self.limits.record,
+                self.limits.values,
+                CONVERSATION_TOO_LARGE,
+            );
             let Some(value) = seq.next_element::<Value>()? else {
                 return Ok(());
             };
@@ -427,7 +490,8 @@ impl<'de> Visitor<'de> for Top<'_> {
         }
         loop {
             // A key is held while it is compared, so it has a budget too.
-            self.record.set(self.limits.record, DAMAGED_EXPORT);
+            self.record
+                .set(self.limits.record, self.limits.values, DAMAGED_EXPORT);
             let Some(key) = map.next_key::<String>()? else {
                 return Ok(());
             };

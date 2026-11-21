@@ -59,6 +59,10 @@ pub struct Limits {
     pub small_json: u64,
     /// Bytes of one conversation record.
     pub record: u64,
+    /// Values (counted at each `[`, `{` and `,`) one record may hold, and
+    /// a file read whole: what bounds the memory of the value built from
+    /// it.
+    pub values: u64,
     /// Conversations one read stores.
     pub conversations: usize,
     /// Bytes of normalized threads one batch stores.
@@ -80,6 +84,7 @@ impl Limits {
         inflated: caps::MAX_INFLATED_BYTES,
         small_json: caps::MAX_SMALL_JSON_BYTES,
         record: caps::MAX_RECORD_BYTES,
+        values: MAX_RECORD_VALUES,
         conversations: caps::MAX_CONVERSATIONS,
         stored: caps::MAX_STORED_BYTES,
         folder_depth: caps::MAX_FOLDER_DEPTH,
@@ -92,6 +97,7 @@ impl Limits {
         json_entry: 8 << 20,
         inflated: 32 << 20,
         record: 1 << 20,
+        values: 200_000,
         entries: 1_000,
         upload_bytes: 16 << 20,
         stored: 8 << 20,
@@ -107,6 +113,10 @@ impl Limits {
             .min(self.json_entry)
     }
 }
+
+/// Values one record may hold: about 128 MiB of `serde_json::Value` on
+/// the server (I Task 3 I1).
+const MAX_RECORD_VALUES: u64 = 4 << 20;
 
 /// `n` as a `u8`, in a constant (a cast could truncate).
 const fn levels(n: usize) -> u8 {
@@ -152,6 +162,9 @@ pub(crate) enum EntryKind {
 pub(crate) struct WalkReport {
     /// Entries and files handed to the visitor.
     pub files_read: u32,
+    /// Allowed entries left out: an unreadable folder or file, or a
+    /// `.zip` that isn't a ZIP.
+    pub skipped: u32,
 }
 
 /// Names never opened, in a ZIP, a folder or a picked path (D4, D10),
@@ -171,7 +184,8 @@ const NEVER_OPEN: [&str; 11] = [
 ];
 
 /// Whether one part of a name is never opened: [`NEVER_OPEN`],
-/// `prod-mc-*`, `.env*`, `auth*.json` and `*.sqlite*`.
+/// `prod-mc-*`, `.env*`, `auth*.json`, `*.sqlite*`, and Windows' reserved
+/// device names.
 pub(crate) fn never_opened(part: &str) -> bool {
     let lower = part.to_ascii_lowercase();
     NEVER_OPEN.contains(&lower.as_str())
@@ -179,6 +193,29 @@ pub(crate) fn never_opened(part: &str) -> bool {
         || lower.starts_with(".env")
         || (lower.starts_with("auth") && lower.ends_with(".json"))
         || lower.contains(".sqlite")
+        || is_device_name(&lower)
+}
+
+/// Windows' reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to
+/// `COM9`, `LPT1` to `LPT9`), with or without an extension: opening one
+/// opens the device. `lower` is already lower case.
+fn is_device_name(lower: &str) -> bool {
+    let stem = lower
+        .split('.')
+        .next()
+        .unwrap_or(lower)
+        .trim_end_matches([' ', ':']);
+    match stem.as_bytes() {
+        b"con" | b"prn" | b"aux" | b"nul" => true,
+        [b'c', b'o', b'm', digit] | [b'l', b'p', b't', digit] => (b'1'..=b'9').contains(digit),
+        _ => false,
+    }
+}
+
+/// Whether a nested ZIP is never opened by its own name (M8): its stem
+/// is never opened, or starts with `credentials` or `secrets`.
+fn zip_never_opened(stem: &str) -> bool {
+    never_opened(stem) || stem.starts_with("credentials") || stem.starts_with("secrets")
 }
 
 /// The allow-list (D4): what an entry named `name` inside a ZIP or a
@@ -217,8 +254,8 @@ pub(crate) fn entry_kind(name: &str) -> Option<EntryKind> {
     if base.ends_with(".json") && parent.as_deref() == Some("memories") {
         return Some(EntryKind::Memory);
     }
-    if base.len() > ".zip".len() && base.ends_with(".zip") {
-        return Some(EntryKind::Zip);
+    if let Some(stem) = base.strip_suffix(".zip").filter(|stem| !stem.is_empty()) {
+        return (!zip_never_opened(stem)).then_some(EntryKind::Zip);
     }
     None
 }
@@ -265,9 +302,12 @@ pub(crate) fn walk(
         visit,
         refusal: Refusal::default(),
         inflated_left: Rc::new(Cell::new(limits.inflated)),
+        walk_id: format!("{:016x}", rand::random::<u64>()),
         nested: 0,
         files_read: 0,
+        skipped: Cell::new(0),
     };
+    sweep_stale_copies(scratch);
     let result = inputs.iter().try_for_each(|input| {
         walker.check_cancel()?;
         match input {
@@ -278,11 +318,17 @@ pub(crate) fn walk(
     if let Err(error) = result {
         return Err(walker.settle(error));
     }
+    // A visitor that swallowed a refusal still ends the read (M2).
+    walker.check_cancel()?;
+    if let Some(copy) = walker.refusal.get() {
+        return Err(ImportError::Refused(copy));
+    }
     if walker.files_read == 0 {
         return Err(ImportError::Refused(NOT_AN_EXPORT));
     }
     Ok(WalkReport {
         files_read: walker.files_read,
+        skipped: walker.skipped.get(),
     })
 }
 
@@ -294,8 +340,11 @@ struct Walker<'a> {
     refusal: Refusal,
     /// Bytes the read may still inflate.
     inflated_left: Rc<Cell<u64>>,
+    /// Names this walk's scratch copies apart from any other's (M4).
+    walk_id: String,
     nested: u32,
     files_read: u32,
+    skipped: Cell<u32>,
 }
 
 fn damaged() -> ImportError {
@@ -307,6 +356,11 @@ fn to_u64(n: usize) -> u64 {
 }
 
 impl<'a> Walker<'a> {
+    /// Counts one allowed entry left out.
+    fn skip(&self) {
+        self.skipped.set(self.skipped.get().saturating_add(1));
+    }
+
     fn check_cancel(&self) -> Result<(), ImportError> {
         if self.cancel.load(Ordering::SeqCst) {
             Err(ImportError::Gone)
@@ -417,15 +471,44 @@ impl<'a> Walker<'a> {
         if child > self.limits.nesting || self.nested >= MAX_NESTED_ZIPS {
             return Err(ImportError::Refused(ARCHIVE_REFUSED));
         }
-        self.nested += 1;
-        let path = self.scratch.join(format!("nested-{}.zip", self.nested));
-        let mut copy = ScratchCopy::create(path)?;
         let mut reader = self.capped(entry, budget);
+        let mut head = [0_u8; 4];
+        let mut got = 0;
+        while got < head.len() {
+            match reader.read(&mut head[got..]).map_err(|_| damaged())? {
+                0 => break,
+                n => got += n,
+            }
+        }
+        if !is_zip_magic(&head[..got]) {
+            // Named .zip, but not one (M9).
+            self.skip();
+            return Ok(());
+        }
+        self.nested += 1;
+        let path = self.scratch.join(format!(
+            "{NESTED_PREFIX}{}-{}.zip",
+            self.walk_id, self.nested
+        ));
+        let mut copy = ScratchCopy::create(path)?;
         let file = copy.file.as_mut().ok_or_else(damaged)?;
+        io::Write::write_all(file, &head[..got]).map_err(|_| damaged())?;
         io::copy(&mut reader, file).map_err(|_| damaged())?;
         let file = file.try_clone().map_err(|_| damaged())?;
         // `copy` deletes the file once this level is read.
         self.zip(file, child)
+    }
+
+    /// A ZIP found in a picked folder, read in place as the top level. One
+    /// that isn't a ZIP is left out and counted (M9).
+    fn folder_zip(&mut self, mut file: File) -> Result<(), ImportError> {
+        let mut head = Vec::new();
+        let peeked = Read::by_ref(&mut file).take(4).read_to_end(&mut head);
+        if peeked.is_err() || !is_zip_magic(&head) {
+            self.skip();
+            return Ok(());
+        }
+        self.zip(file, 0)
     }
 
     #[cfg(unix)]
@@ -447,11 +530,17 @@ impl<'a> Walker<'a> {
             })?;
         for (parts, kind) in in_reading_order(found) {
             self.check_cancel()?;
-            let Some(file) = folder_unix::open_under(&root, &parts).map_err(io_error)? else {
-                continue;
+            let file = match folder_unix::open_under(&root, &parts) {
+                Ok(Some(file)) => file,
+                Ok(None) => continue,
+                // Unreadable: left out and counted (M5).
+                Err(_) => {
+                    self.skip();
+                    continue;
+                }
             };
             if kind == EntryKind::Zip {
-                self.zip(file, 0)?;
+                self.folder_zip(file)?;
             } else {
                 self.read_entry(kind, file, self.limits.json_entry, None)?;
             }
@@ -472,7 +561,16 @@ impl<'a> Walker<'a> {
     ) -> Result<(), Listed> {
         use rustix::fs::{AtFlags, FileType, Mode, OFlags};
         use rustix::io::Errno;
-        for name in folder_unix::names(dir, seen, self.limits.entries)? {
+        let names = match folder_unix::names(dir, seen, self.limits.entries) {
+            Ok(names) => names,
+            // An unreadable folder below the picked one is left out (M5).
+            Err(Listed::Io(_)) if depth > 0 => {
+                self.skip();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        for name in names {
             self.check_cancel().map_err(Listed::Stop)?;
             let shown = String::from_utf8_lossy(name.to_bytes()).into_owned();
             if never_opened(&shown) {
@@ -481,7 +579,10 @@ impl<'a> Walker<'a> {
             let stat = match rustix::fs::statat(dir, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
                 Ok(stat) => stat,
                 Err(Errno::NOENT) => continue,
-                Err(error) => return Err(Listed::Io(error.into())),
+                Err(_) => {
+                    self.skip();
+                    continue;
+                }
             };
             match FileType::from_raw_mode(stat.st_mode) {
                 FileType::Directory if depth < self.limits.folder_depth => {
@@ -494,7 +595,10 @@ impl<'a> Walker<'a> {
                         Ok(folder) => folder,
                         // Gone, or a link now.
                         Err(Errno::NOENT | Errno::LOOP | Errno::NOTDIR) => continue,
-                        Err(error) => return Err(Listed::Io(error.into())),
+                        Err(_) => {
+                            self.skip();
+                            continue;
+                        }
                     };
                     rel.push(name);
                     let listed = self.list_folder(&folder, rel, depth + 1, found, seen);
@@ -546,12 +650,16 @@ impl<'a> Walker<'a> {
             if linked || !std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_file()) {
                 continue;
             }
-            let file = File::open(&full).map_err(io_error)?;
+            let Ok(file) = File::open(&full) else {
+                // Unreadable: left out and counted (M5).
+                self.skip();
+                continue;
+            };
             if !file.metadata().is_ok_and(|meta| meta.is_file()) {
                 continue;
             }
             if kind == EntryKind::Zip {
-                self.zip(file, 0)?;
+                self.folder_zip(file)?;
             } else {
                 self.read_entry(kind, file, self.limits.json_entry, None)?;
             }
@@ -569,13 +677,24 @@ impl<'a> Walker<'a> {
         seen: &mut usize,
     ) -> Result<(), Listed> {
         let mut entries = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(Listed::Io)? {
-            let entry = entry.map_err(Listed::Io)?;
+        let listing = match std::fs::read_dir(dir) {
+            Ok(listing) => listing,
+            // An unreadable folder below the picked one is left out (M5).
+            Err(_) if depth > 0 => {
+                self.skip();
+                return Ok(());
+            }
+            Err(error) => return Err(Listed::Io(error)),
+        };
+        for entry in listing {
             *seen += 1;
             if *seen > self.limits.entries {
                 return Err(Listed::Stop(ImportError::Refused(ARCHIVE_REFUSED)));
             }
-            entries.push((entry.file_name(), entry.file_type().map_err(Listed::Io)?));
+            match entry.and_then(|entry| Ok((entry.file_name(), entry.file_type()?))) {
+                Ok(found) => entries.push(found),
+                Err(_) => self.skip(),
+            }
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, kind) in entries {
@@ -718,12 +837,53 @@ fn open_input(path: &Path) -> io::Result<Option<File>> {
     };
     #[cfg(not(unix))]
     let opened = {
-        if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        // A link, a folder, or a reserved device name adds nothing (M6).
+        let device = path
+            .file_name()
+            .is_some_and(|name| is_device_name(&name.to_string_lossy().to_ascii_lowercase()));
+        if device || !std::fs::symlink_metadata(path)?.is_file() {
             return Ok(None);
         }
         File::open(path)?
     };
     Ok(opened.metadata()?.is_file().then_some(opened))
+}
+
+/// A local file header, or the end record of an empty ZIP.
+fn is_zip_magic(head: &[u8]) -> bool {
+    head == b"PK\x03\x04" || head == b"PK\x05\x06"
+}
+
+/// Scratch copies are named `nested-<walk>-<n>.zip`.
+const NESTED_PREFIX: &str = "nested-";
+/// A scratch copy this old was left by a read that never finished.
+const STALE_COPY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Deletes scratch copies a crashed read left behind (M4): regular files
+/// named `nested-*.zip` and older than [`STALE_COPY`]. Best effort.
+fn sweep_stale_copies(scratch: &Path) {
+    let Ok(listing) = std::fs::read_dir(scratch) else {
+        return;
+    };
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(NESTED_PREFIX) && name.ends_with(".zip")) {
+            continue;
+        }
+        let path = entry.path();
+        let stale = std::fs::symlink_metadata(&path).is_ok_and(|meta| {
+            meta.is_file()
+                && meta
+                    .modified()
+                    .ok()
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age > STALE_COPY)
+        });
+        if stale {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 enum Sniffed {

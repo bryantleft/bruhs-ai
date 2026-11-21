@@ -98,7 +98,7 @@ pub enum ImportError {
     #[error("{0}")]
     Refused(&'static str),
     /// Too little free disk space: this many bytes need freeing.
-    #[error("not enough free disk space: {0} bytes to free")]
+    #[error("{}", no_space_copy(*.0))]
     Space(u64),
     /// Another read holds the one read slot.
     #[error("{}", bruhs_models::imports::IMPORT_BUSY)]
@@ -106,6 +106,12 @@ pub enum ImportError {
     /// The read was cancelled, or its batch has gone.
     #[error("{}", bruhs_models::imports::IMPORT_GONE)]
     Gone,
+}
+
+/// `NO_SPACE_IMPORT` with the size to free.
+fn no_space_copy(bytes: u64) -> String {
+    bruhs_models::imports::NO_SPACE_IMPORT
+        .replace("{size}", &bruhs_models::backup::format_bytes(bytes))
 }
 
 impl ImportError {
