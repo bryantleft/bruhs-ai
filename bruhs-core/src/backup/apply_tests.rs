@@ -593,15 +593,32 @@ async fn apply_waits_for_every_writer() {
         ApplyOutcome::Busy(Holder::Server)
     );
     untouched();
-    // Its reactive database moved elsewhere (ruling F10 c).
+    // Its reactive database moved elsewhere: its lock is beside it there
+    // (final review C-I1), and a relative override's can't be found
+    // (ruling F10 c).
     drop(server);
-    let elsewhere = |name: &str| {
-        (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from("/elsewhere/r.sqlite3"))
-    };
+    let outside = fixture.base.join("elsewhere");
+    std::fs::create_dir_all(&outside).unwrap();
+    let moved_lock = outside.join("r.sqlite3.lock");
+    std::fs::write(&moved_lock, b"").unwrap();
+    let moved = File::open(&moved_lock).unwrap();
+    hold(&moved);
+    let db = outside.join("r.sqlite3");
+    let elsewhere =
+        |name: &str| (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from(&db));
     assert_eq!(
         apply_pending_with(roots, &fixture.store, None, &elsewhere, &never_stop).unwrap(),
         ApplyOutcome::Busy(Holder::Server)
     );
+    untouched();
+    drop(moved);
+    let relative =
+        |name: &str| (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from("r.sqlite3"));
+    assert_eq!(
+        apply_pending_with(roots, &fixture.store, None, &relative, &never_stop).unwrap(),
+        ApplyOutcome::Busy(Holder::Server)
+    );
+    untouched();
     // Another apply.
     let restore = File::options()
         .read(true)
@@ -636,6 +653,36 @@ async fn apply_waits_for_every_writer() {
     assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("new"));
     // The lock file stays where the desktop holds it.
     assert!(instance_lock_path(&roots.desktop).exists());
+}
+
+/// Final review C-I1: with `BRUHS_REACTIVE_DB` outside the roots and no
+/// server holding its lock, the apply goes ahead and never touches that
+/// database; a start then finds nothing waiting.
+#[tokio::test]
+async fn a_reactive_database_outside_the_roots_never_blocks_the_apply() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let outside = fixture.base.join("elsewhere");
+    std::fs::create_dir_all(&outside).unwrap();
+    let db = outside.join("reactive.sqlite3");
+    std::fs::write(&db, b"the crew").unwrap();
+    // A server that ran there and stopped left its lock file.
+    std::fs::write(outside.join("reactive.sqlite3.lock"), b"").unwrap();
+    let elsewhere =
+        |name: &str| (name == "BRUHS_REACTIVE_DB").then(|| std::ffi::OsString::from(&db));
+    let outcome = apply_pending_with(roots, &fixture.store, None, &elsewhere, &never_stop);
+    assert!(
+        matches!(outcome, Ok(ApplyOutcome::Applied(_))),
+        "{outcome:?}"
+    );
+    assert_applied(&fixture, &before);
+    assert_eq!(std::fs::read(&db).unwrap(), b"the crew");
+    assert_eq!(
+        apply_pending_with(roots, &fixture.store, None, &elsewhere, &never_stop).unwrap(),
+        ApplyOutcome::NothingPending
+    );
 }
 
 #[tokio::test]

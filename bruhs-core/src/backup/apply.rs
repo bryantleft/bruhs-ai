@@ -120,8 +120,9 @@ const STAMP_TRIES: usize = 64;
 /// Who holds a lock the apply needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Holder {
-    /// A running server (the reactive database's lock, or a reactive
-    /// database moved elsewhere by `BRUHS_REACTIVE_DB`).
+    /// A running server (the reactive database's lock, wherever
+    /// `BRUHS_REACTIVE_DB` puts it, or a relative override whose lock
+    /// can't be found).
     Server,
     /// A running desktop app (its instance lock).
     Desktop,
@@ -249,9 +250,10 @@ pub fn schedule(
 /// Applies the waiting restore, or finishes the one a stop interrupted
 /// (D16, ruling F20). `desktop_lock` is the caller's own instance lock
 /// when the caller is the desktop app. A held lock is `Busy` and changes
-/// nothing; so does a `BRUHS_REACTIVE_DB` that moves the reactive database
-/// out of the core root, whose lock this can't check (ruling F10 c). A
-/// `backups` folder that is a link is never acted on.
+/// nothing. With `BRUHS_REACTIVE_DB` set, the server's lock is checked
+/// beside the database it names (final review C-I1); a relative override,
+/// whose lock this can't find, is `Busy` (ruling F10 c). A `backups`
+/// folder that is a link is never acted on.
 ///
 /// A restore that can never be applied (its source isn't there whole, its
 /// sealed items don't open, a rename can't happen, or `pending.json` is
@@ -308,14 +310,12 @@ pub(super) fn apply_pending_with(
             Err(error) => return Err(error),
         },
     };
-    let moved_db = env(REACTIVE_DB_ENV)
-        .filter(|path| !path.is_empty())
-        .is_some_and(|path| Path::new(&path) != roots.core.join(SERVER).join(REACTIVE_DB));
-    if moved_db {
+    // Final review C-I1: the server's lock where its database is, even
+    // when `BRUHS_REACTIVE_DB` moved it; the swap never touches that file.
+    let Some(server_lock) = reactive_lock_path(roots, env) else {
         return Ok(ApplyOutcome::Busy(Holder::Server));
-    }
-    let Lock::Free(_server_lock) = lock_existing(&roots.core.join(SERVER).join(REACTIVE_LOCK))?
-    else {
+    };
+    let Lock::Free(_server_lock) = lock_existing(&server_lock)? else {
         return Ok(ApplyOutcome::Busy(Holder::Server));
     };
     let desktop = instance_lock_path(&roots.desktop);
@@ -339,6 +339,37 @@ pub(super) fn apply_pending_with(
         stop,
     }
     .run()
+}
+
+/// The lock a running server holds on its reactive database: beside
+/// `<core>/server/reactive.sqlite3`, or beside the database a
+/// `BRUHS_REACTIVE_DB` override names, resolved as the store resolves it
+/// (final review C-I1). `None` for a relative override, whose folder
+/// depends on where the server started: its lock can't be checked here.
+pub fn reactive_lock_path(
+    roots: &Roots,
+    env: &dyn Fn(&str) -> Option<OsString>,
+) -> Option<PathBuf> {
+    let Some(path) = env(REACTIVE_DB_ENV).filter(|path| !path.is_empty()) else {
+        return Some(roots.core.join(SERVER).join(REACTIVE_LOCK));
+    };
+    let path = PathBuf::from(path);
+    if path == roots.core.join(SERVER).join(REACTIVE_DB) {
+        return Some(roots.core.join(SERVER).join(REACTIVE_LOCK));
+    }
+    if !path.is_absolute() {
+        return None;
+    }
+    // As the store does: the file itself when it is there, else its
+    // folder and its name. A folder that isn't there holds no lock.
+    let resolved = std::fs::canonicalize(&path).ok().or_else(|| {
+        let name = path.file_name()?;
+        let folder = std::fs::canonicalize(path.parent()?).ok()?;
+        Some(folder.join(name))
+    });
+    let mut lock = resolved.unwrap_or(path).into_os_string();
+    lock.push(".lock");
+    Some(PathBuf::from(lock))
 }
 
 /// The restore waiting to be applied.

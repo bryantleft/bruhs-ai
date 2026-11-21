@@ -38,8 +38,8 @@ pub mod test_support;
 pub use apply::{
     apply_pending, applying, check_restore, delete_pre_restore, desktop_running, finish_web_part,
     instance_lock_path, keep_previous_web_part, open_restore_log, pending, pre_restores,
-    restore_waits, result, schedule, take_instance_lock, take_service_restart, unschedule,
-    waiting_web_part, waiting_web_part_file, ApplyOutcome, Holder,
+    reactive_lock_path, restore_waits, result, schedule, take_instance_lock, take_service_restart,
+    unschedule, waiting_web_part, waiting_web_part_file, ApplyOutcome, Holder,
 };
 #[cfg(all(test, unix))]
 use collect::snapshot_sqlite_with;
