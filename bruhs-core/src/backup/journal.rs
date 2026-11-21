@@ -15,7 +15,9 @@
 use std::io::{self, Write};
 use std::path::{Component, Path};
 
-use bruhs_models::backup::{valid_id, valid_stamp, PathRewrite, RestoreSource, DAMAGED};
+use bruhs_models::backup::{
+    valid_id, valid_stamp, PathRewrite, RestoreSource, DAMAGED, KEYCHAIN_MAX_BYTES,
+};
 use bruhs_models::EpochMs;
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +30,19 @@ use crate::secrets::ItemRef;
 pub(super) const JOURNAL: &str = "apply.json";
 /// A journal names top-level entries and keychain accounts only.
 const JOURNAL_MAX: u64 = 16 << 20;
+/// The most the items a source's catalogs name may take as JSON: the cap a
+/// backup's `keychain.json` has, so the journal stays far below
+/// [`JOURNAL_MAX`] (final re-review m5). A plan and a journal past it are
+/// both damaged.
+pub(super) const RESTORED_MAX_BYTES: u64 = KEYCHAIN_MAX_BYTES;
+
+/// Whether `restored` fits within [`RESTORED_MAX_BYTES`] as JSON.
+pub(super) fn restored_fits(restored: &[ItemRef]) -> bool {
+    serde_json::to_vec(restored)
+        .ok()
+        .and_then(|text| u64::try_from(text.len()).ok())
+        .is_some_and(|bytes| bytes <= RESTORED_MAX_BYTES)
+}
 
 /// One restore being applied.
 #[derive(Serialize, Deserialize)]
@@ -50,13 +65,21 @@ pub(super) struct Journal {
     pub written: Vec<ItemRef>,
     /// The items the source's catalogs name, read when the apply was
     /// planned (final review B-I2): the pruning keeps them too, and never
-    /// reads a catalog after the swap.
+    /// reads a catalog after the swap. At most [`RESTORED_MAX_BYTES`] as
+    /// JSON ([`restored_fits`]).
+    ///
+    /// This field and the two after it came after the journal did, so a
+    /// journal written without them still reads (final re-review m8): no
+    /// items sealed means the pruning removes none.
+    #[serde(default)]
     pub restored: Vec<ItemRef>,
     /// Today's items the seal holds, recorded with [`Step::Sealed`]: the
     /// only items the pruning may remove.
+    #[serde(default)]
     pub sealed: Vec<ItemRef>,
     /// Today's items the pruning couldn't remove, recorded with
     /// [`Step::KeysPruned`], for the result's warning.
+    #[serde(default)]
     pub items_stayed: u32,
     /// The id the source's browser part waits under, when it has one.
     pub web_part: Option<String>,
@@ -164,6 +187,7 @@ impl Journal {
             && names
             && steps
             && self.web_part.as_deref().is_none_or(valid_id)
+            && restored_fits(&self.restored)
     }
 
     /// Whether `step` is recorded.

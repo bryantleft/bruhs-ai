@@ -51,7 +51,8 @@ use zeroize::Zeroizing;
 use super::create::{backups_are_folders, private_dir};
 use super::host::{new_private_file, random_bytes, random_id, read_small, PENDING};
 use super::journal::{
-    full_sync, single_component, sync_dir, write_atomically, Journal, Pass, Step, JOURNAL,
+    full_sync, restored_fits, single_component, sync_dir, write_atomically, Journal, Pass, Step,
+    JOURNAL,
 };
 use super::open::staging_dir;
 use super::{BackupError, RootKey, Roots};
@@ -651,8 +652,11 @@ fn plan(
             &source.join(CONNECTIONS),
             &source.join(CALENDAR),
         ) {
-            Ok(restored) => restored,
-            Err(_) => return Err(refuse(backups, BackupError::Format(DAMAGED), restart)),
+            // Catalogs naming more than a backup's keychain could hold
+            // would make a journal too large to read back (final
+            // re-review m5).
+            Ok(restored) if restored_fits(&restored) => restored,
+            _ => return Err(refuse(backups, BackupError::Format(DAMAGED), restart)),
         }
     } else {
         Vec::new()

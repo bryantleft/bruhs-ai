@@ -912,6 +912,89 @@ async fn restored_catalogs_that_dont_read_refuse_before_anything_moves() {
     assert_eq!(item(&fixture.store, EXTRA).as_deref(), Some("extra"));
 }
 
+/// Final re-review m5: restored catalogs that name more than a backup's
+/// keychain could hold would make a journal too large to read back, so
+/// the plan refuses them as damaged before anything moves.
+#[tokio::test]
+async fn restored_catalogs_too_large_for_the_journal_refuse_before_anything_moves() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, true).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    // One crafted row whose keychain account alone is past the cap.
+    let staged = staging_dir(roots, RootKey::Core, &before.staged);
+    let entry = VaultEntry {
+        id: VALUE.into(),
+        name: "KEY_HUGE".into(),
+        scope: CredentialScope::Bruh {
+            agent_id: "a".repeat(usize::try_from(KEYCHAIN_MAX_BYTES).unwrap() + 1),
+        },
+        kind: VaultKind::Value,
+        state: SavedCredentialState::Saved,
+        attention: None,
+    };
+    write(
+        &staged.join("credentials/vault.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "entries": { VALUE: entry },
+        }))
+        .unwrap(),
+    );
+    let today = files_under(&roots.core, &["backups"]);
+    let outcome = apply_pending(roots, &fixture.store, None);
+    assert!(
+        matches!(&outcome, Err(BackupError::Format(message)) if *message == DAMAGED),
+        "{outcome:?}"
+    );
+    assert!(!roots.backups(RootKey::Core).join("apply.json").exists());
+    assert!(pending(roots).is_none());
+    assert!(!applying(roots));
+    assert_eq!(files_under(&roots.core, &["backups"]), today);
+    assert_eq!(item(&fixture.store, VALUE).as_deref(), Some("old"));
+}
+
+/// Final re-review m5 and m8: a journal written before `restored`,
+/// `sealed` and `items_stayed` were recorded still resumes, and one whose
+/// `restored` is past the cap is damaged.
+#[tokio::test]
+async fn a_journal_without_the_newer_fields_still_resumes() {
+    let fixture = fixture(false, false);
+    let before = stage_b(&fixture, BackupOptions::default(), false, false).await;
+    let roots = &fixture.roots;
+    schedule(roots, &staged_source(&before), false).unwrap();
+    let placed =
+        |step: &Step, point: Point| matches!(step, Step::Placed { .. }) && point == Point::Recorded;
+    assert!(apply_pending_with(roots, &fixture.store, None, &no_env, &placed).is_err());
+    let journal = roots.backups(RootKey::Core).join("apply.json");
+    let mut text: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&journal).unwrap()).unwrap();
+
+    let mut huge = text.clone();
+    huge["restored"] = serde_json::json!([{
+        "service": SECRETS_SERVICE,
+        "account": "a".repeat(usize::try_from(KEYCHAIN_MAX_BYTES).unwrap() + 1),
+    }]);
+    std::fs::write(&journal, serde_json::to_vec(&huge).unwrap()).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None),
+        Err(BackupError::Format(DAMAGED))
+    ));
+
+    for field in ["restored", "sealed", "items_stayed"] {
+        assert!(
+            text.as_object_mut().unwrap().remove(field).is_some(),
+            "{field}"
+        );
+    }
+    std::fs::write(&journal, serde_json::to_vec(&text).unwrap()).unwrap();
+    assert!(matches!(
+        apply_pending(roots, &fixture.store, None).unwrap(),
+        ApplyOutcome::Applied(_)
+    ));
+    assert_applied(&fixture, &before);
+}
+
 #[tokio::test]
 async fn a_backup_without_keychain_keeps_todays_items() {
     let fixture = fixture(false, false);
