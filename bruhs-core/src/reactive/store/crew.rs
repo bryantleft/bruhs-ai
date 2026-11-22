@@ -312,6 +312,37 @@ pub(in crate::reactive) fn proposal_saves_agent(
     )
 }
 
+/// Whether approving proposal `id` changes a bruh's memory: a `SetMemory`,
+/// or an agent save, alone or in a routine's setup, whose memory isn't the
+/// stored one (final review B I1). False for an id no proposal has.
+pub(in crate::reactive) fn proposal_changes_memory(
+    connection: &Connection,
+    id: &str,
+) -> Result<bool, ReactiveError> {
+    let Some(proposal) = get::<ReactiveProposal>(connection, "reactive_proposals", id)? else {
+        return Ok(false);
+    };
+    let agent = match proposal.change {
+        ReactiveChange::SetMemory { .. } => return Ok(true),
+        ReactiveChange::SaveAgent { agent } => agent,
+        ReactiveChange::SaveAutomation { automation } => automation.agent,
+        _ => return Ok(false),
+    };
+    Ok(stored_memory(connection, &agent.id)? != agent.memory)
+}
+
+/// Bruh `agent_id`'s stored memory; empty for an id no agent has.
+pub(in crate::reactive) fn stored_memory(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<String, ReactiveError> {
+    Ok(
+        get::<ReactiveAgent>(connection, "reactive_agents", agent_id)?
+            .map(|agent| agent.memory)
+            .unwrap_or_default(),
+    )
+}
+
 /// Whether run `id` was started by an app poll source, whose events come
 /// from the owner's own account (final review BC M1). False for an id no
 /// run has.

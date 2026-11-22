@@ -621,7 +621,9 @@ pub struct ReactiveSnapshot {
 
 impl ReactiveSnapshot {
     /// The snapshot as a page that isn't the owner's may see it: see
-    /// [`OutboxItem::without_owner_details`].
+    /// [`OutboxItem::without_owner_details`]. Every bruh's memory is left
+    /// out too, in its agent and in each proposal that carries one, since
+    /// imported memory reaches a bruh through a proposal (final review B I1).
     #[must_use]
     pub fn without_owner_details(mut self) -> Self {
         self.outbox = self
@@ -629,6 +631,17 @@ impl ReactiveSnapshot {
             .into_iter()
             .map(OutboxItem::without_owner_details)
             .collect();
+        for agent in &mut self.agents {
+            agent.memory.clear();
+        }
+        for proposal in &mut self.proposals {
+            match &mut proposal.change {
+                ReactiveChange::SetMemory { memory, .. } => memory.clear(),
+                ReactiveChange::SaveAgent { agent } => agent.memory.clear(),
+                ReactiveChange::SaveAutomation { automation } => automation.agent.memory.clear(),
+                _ => {}
+            }
+        }
         self
     }
 

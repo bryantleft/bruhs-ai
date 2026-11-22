@@ -606,12 +606,13 @@ async fn grants_key_cards_and_deleting_an_agent_are_the_owners() {
             },
             None,
         ),
+        // Imports final review B I1: memory waits for the owner.
         (
             ReactiveCommand::DecideProposal {
                 id: remembers,
                 approve: true,
             },
-            None,
+            Some(bruhs_models::imports::OWNER_ONLY_MEMORY),
         ),
         (
             ReactiveCommand::DecideProposal {
@@ -662,6 +663,113 @@ async fn grants_key_cards_and_deleting_an_agent_are_the_owners() {
         let decide = ReactiveCommand::DecideApproval { id, approve: false };
         assert_eq!(runtime.owner_only_refusal(&decide).await.unwrap(), expected);
     }
+}
+
+/// Imports final review B I1: a bruh's memory changes only from the
+/// owner's own app, through `SetMemory` or a save, applied or approved; a
+/// save from another page, sent the memory blank, keeps the stored one.
+#[tokio::test]
+async fn changing_a_bruhs_memory_is_the_owners() {
+    use bruhs_models::imports::OWNER_ONLY_MEMORY;
+    let (_dir, runtime) = runtime_with(&[full_claude("a")]).await;
+    let set = |memory: &str| ReactiveChange::SetMemory {
+        agent_id: "a".into(),
+        memory: memory.into(),
+    };
+    let snapshot = runtime
+        .command(ReactiveCommand::Apply {
+            change: set("Likes tea."),
+        })
+        .await
+        .unwrap();
+    let stored = snapshot.agents[0].clone();
+    assert_eq!(stored.memory, "Likes tea.");
+    let snapshot = runtime
+        .command(ReactiveCommand::Propose {
+            change: set("Imported notes."),
+        })
+        .await
+        .unwrap();
+    let proposal = snapshot.proposals[0].id.clone();
+    let save = |memory: &str| ReactiveCommand::Apply {
+        change: ReactiveChange::SaveAgent {
+            agent: ReactiveAgent {
+                memory: memory.into(),
+                ..stored.clone()
+            },
+        },
+    };
+    for (command, expected) in [
+        (
+            ReactiveCommand::Apply {
+                change: set("Other."),
+            },
+            Some(OWNER_ONLY_MEMORY),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal.clone(),
+                approve: true,
+            },
+            Some(OWNER_ONLY_MEMORY),
+        ),
+        (
+            ReactiveCommand::DecideProposal {
+                id: proposal,
+                approve: false,
+            },
+            None,
+        ),
+        (
+            ReactiveCommand::Propose {
+                change: set("Other."),
+            },
+            None,
+        ),
+        (save("Other."), Some(OWNER_ONLY_MEMORY)),
+        (save("Likes tea."), None),
+    ] {
+        assert_eq!(
+            runtime.owner_only_refusal(&command).await.unwrap(),
+            expected,
+            "{command:?}"
+        );
+    }
+
+    // A pause from a page sent the memory blank keeps the stored memory,
+    // applied or proposed.
+    let blank = runtime.with_stored_memory(save("")).await.unwrap();
+    assert_eq!(blank, save("Likes tea."));
+    assert_eq!(runtime.owner_only_refusal(&blank).await.unwrap(), None);
+    let proposed = runtime
+        .with_stored_memory(ReactiveCommand::Propose {
+            change: ReactiveChange::SaveAgent {
+                agent: ReactiveAgent {
+                    memory: String::new(),
+                    ..stored.clone()
+                },
+            },
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime.command(proposed).await.unwrap();
+    let pause = snapshot
+        .proposals
+        .iter()
+        .find(|proposal| matches!(proposal.change, ReactiveChange::SaveAgent { .. }))
+        .unwrap()
+        .id
+        .clone();
+    let approve = ReactiveCommand::DecideProposal {
+        id: pause,
+        approve: true,
+    };
+    assert_eq!(runtime.owner_only_refusal(&approve).await.unwrap(), None);
+    let snapshot = runtime.command(approve).await.unwrap();
+    assert_eq!(snapshot.agents[0].memory, "Likes tea.");
+    // A memory it does send is left alone, so the refusal still applies.
+    let sent = runtime.with_stored_memory(save("Other.")).await.unwrap();
+    assert_eq!(sent, save("Other."));
 }
 
 #[tokio::test]

@@ -204,6 +204,78 @@ async fn foreign_pages_cannot_read_or_configure_local_automations() {
     assert!(fixture.runtime.snapshot().await.unwrap().events.is_empty());
 }
 
+/// Imports final review B I1: a page that isn't the owner's never reads a
+/// bruh's memory or a pending memory proposal, and can't approve or apply
+/// one; its pause keeps the memory it was sent blank.
+#[tokio::test]
+async fn other_pages_never_read_or_approve_a_bruhs_memory() {
+    const OTHER_PAGE: &str = "http://localhost:5173";
+    const STORED: &str = "Owner notes canary 41c2.";
+    const IMPORTED: &str = "Imported memory canary 9d7e.";
+    let fixture = Fixture::new().await;
+    fixture.configured().await;
+    let memory = |text: &str| json!({"type":"set_memory","agent_id":"bills","memory":text});
+    fixture
+        .command(json!({"action":"apply","change":memory(STORED)}))
+        .await;
+    let proposed = fixture
+        .command(json!({"action":"propose","change":memory(IMPORTED)}))
+        .await;
+    let proposal = proposed["proposals"][0]["id"].as_str().unwrap().to_owned();
+    let other = |method: reqwest::Method, path: &str| {
+        fixture
+            .client
+            .request(method, format!("{}{path}", fixture.base))
+            .header("origin", OTHER_PAGE)
+    };
+    let stored = || async { fixture.runtime.snapshot().await.unwrap().agents[0].clone() };
+
+    let read = other(reqwest::Method::GET, "/api/reactive")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+    let text = read.text().await.unwrap();
+    assert!(text.contains(&proposal), "{text}");
+    assert!(!text.contains(IMPORTED) && !text.contains(STORED), "{text}");
+
+    for command in [
+        json!({"action":"decide_proposal","id":proposal,"approve":true}),
+        json!({"action":"apply","change":memory("Other.")}),
+    ] {
+        let refused = other(reqwest::Method::POST, "/api/reactive/commands")
+            .json(&command)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN, "{command}");
+        let body: Value = refused.json().await.unwrap();
+        assert_eq!(body["error"], bruhs_models::imports::OWNER_ONLY_MEMORY);
+        assert_eq!(stored().await.memory, STORED);
+    }
+
+    let mut paused = serde_json::to_value(stored().await).unwrap();
+    paused["memory"] = json!("");
+    paused["enabled"] = json!(false);
+    let pause = other(reqwest::Method::POST, "/api/reactive/commands")
+        .json(&json!({"action":"apply","change":{"type":"save_agent","agent":paused}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pause.status(), StatusCode::OK);
+    let text = pause.text().await.unwrap();
+    assert!(!text.contains(IMPORTED) && !text.contains(STORED), "{text}");
+    let agent = stored().await;
+    assert!(!agent.enabled);
+    assert_eq!(agent.memory, STORED);
+
+    // The owner's own app (no Origin, as the desktop sends) approves it.
+    let approved = fixture
+        .command(json!({"action":"decide_proposal","id":proposal,"approve":true}))
+        .await;
+    assert_eq!(approved["agents"][0]["memory"], IMPORTED);
+}
+
 fn bruh(id: &str, name: &str, dir: &std::path::Path) -> Value {
     json!({"action":"create_bruh","agent":{"id":id,"name":name,"instructions":"Help.","model":"sonnet","project_path":dir,"enabled":true}})
 }

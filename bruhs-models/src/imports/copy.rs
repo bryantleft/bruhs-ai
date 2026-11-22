@@ -152,6 +152,13 @@ pub const PASTED_ANSWER_TEMPLATE: &str = "Pasted answer, {date}";
 pub const EXPORT_MEMORY_FROM_TEMPLATE: &str = "{label} export";
 pub const ROWS_SHOWN_TEMPLATE: &str = "Showing {shown} of {total}. Search to find the rest.";
 
+// Final review, server.
+/// A chat a live export batch or a local tool no longer has.
+pub const IMPORT_CHAT_GONE: &str = "That chat isn't here anymore.";
+/// Refusal for applying, or approving, a change to a bruh's memory from a
+/// page that isn't the owner's (final review B I1).
+pub const OWNER_ONLY_MEMORY: &str = "Open Bruhs from its own address to change a bruh's memory.";
+
 /// Every constant above.
 pub const ALL_COPY: &[&str] = &[
     EXPORT_TAB,
@@ -264,6 +271,9 @@ pub const ALL_COPY: &[&str] = &[
     PASTED_ANSWER_TEMPLATE,
     EXPORT_MEMORY_FROM_TEMPLATE,
     ROWS_SHOWN_TEMPLATE,
+    // Final review, server.
+    IMPORT_CHAT_GONE,
+    OWNER_ONLY_MEMORY,
 ];
 
 #[cfg(test)]

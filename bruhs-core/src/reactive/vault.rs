@@ -18,8 +18,9 @@ use bruhs_models::{
         LOGIN_NO_FIELD, LOGIN_WRONG_ORIGIN, ONE_PASSWORD_NEEDS_OWNER, ONE_PASSWORD_UNAVAILABLE,
         OWNER_ONLY_ACCESS, OWNER_ONLY_APPS, PAGE_UNKNOWN, VAULT_READ_FAILED,
     },
+    imports::OWNER_ONLY_MEMORY,
     local_tools::SecretRef,
-    reactive::{ReactiveChange, ReactiveCommand},
+    reactive::{ReactiveAgent, ReactiveChange, ReactiveCommand},
     secrets::review_text,
     vault::{
         same_origin, LoginFields, VaultEntry, VaultKind, OWNER_ONLY, OWNER_ONLY_CARD,
@@ -267,7 +268,11 @@ impl ReactiveRuntime {
     /// raises a bruh: its access, its Computer, or a model change that turns
     /// on its app grants or Computer, applied directly or through a
     /// routine's setup (A2 I1, re-review N1), and creating a bruh at Full or
-    /// with Send as me or Can deliver (M1); lowering stays open.
+    /// with Send as me or Can deliver (M1); lowering stays open. Changing a
+    /// bruh's memory takes the owner too, through `SetMemory` or a save,
+    /// applied or approved, so imported memory waits for the owner's own
+    /// Approve (final review B I1). A save from another page first gets
+    /// the stored memory back through [`Self::with_stored_memory`].
     ///
     /// # Errors
     ///
@@ -282,6 +287,9 @@ impl ReactiveRuntime {
             ReactiveCommand::Apply {
                 change: ReactiveChange::DeleteAgent { .. },
             } => Some(OWNER_ONLY_DELETE_BRUH),
+            ReactiveCommand::Apply {
+                change: ReactiveChange::SetMemory { .. },
+            } => Some(OWNER_ONLY_MEMORY),
             ReactiveCommand::Apply { change } if store::crew::saves_app_poll(change) => {
                 Some(OWNER_ONLY_APPS)
             }
@@ -299,6 +307,8 @@ impl ReactiveRuntime {
                             (Some(OWNER_ONLY_DELETE_BRUH), None)
                         } else if store::crew::proposal_saves_app_poll(connection, &id)? {
                             (Some(OWNER_ONLY_APPS), None)
+                        } else if store::crew::proposal_changes_memory(connection, &id)? {
+                            (Some(OWNER_ONLY_MEMORY), None)
                         } else {
                             (None, store::crew::proposal_saves_agent(connection, &id)?)
                         })
@@ -312,11 +322,11 @@ impl ReactiveRuntime {
             }
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAgent { agent },
-            } => self.save_agent_refusal(agent.clone()).await?,
+            } => self.save_refusal(agent).await?,
             // A routine's setup saves its bruh too (re-review N1).
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { automation },
-            } => self.save_agent_refusal(automation.agent.clone()).await?,
+            } => self.save_refusal(&automation.agent).await?,
             // A new bruh that could send or deliver without a card once the
             // owner grants it something (re-review M1).
             ReactiveCommand::CreateBruh { access, .. } => {
@@ -352,6 +362,53 @@ impl ReactiveRuntime {
             }
             _ => None,
         })
+    }
+
+    /// Why saving `agent` takes the owner's own app: it raises the bruh
+    /// (`Self::save_agent_refusal`) or changes its memory.
+    async fn save_refusal(
+        &self,
+        agent: &ReactiveAgent,
+    ) -> Result<Option<&'static str>, ReactiveError> {
+        if let Some(refusal) = self.save_agent_refusal(agent.clone()).await? {
+            return Ok(Some(refusal));
+        }
+        let id = agent.id.clone();
+        let stored = self
+            .call(move |connection| store::crew::stored_memory(connection, &id))
+            .await?;
+        Ok((stored != agent.memory).then_some(OWNER_ONLY_MEMORY))
+    }
+
+    /// `command` from a page that isn't the owner's, with each agent save
+    /// that has no memory, applied or proposed, given the bruh's stored
+    /// memory: that page is sent every bruh's memory blank
+    /// (`ReactiveSnapshot::without_owner_details`), so its pause, rename
+    /// or edit keeps the memory it couldn't see (final review B I1).
+    ///
+    /// # Errors
+    ///
+    /// A store failure reading the stored agent.
+    pub async fn with_stored_memory(
+        &self,
+        mut command: ReactiveCommand,
+    ) -> Result<ReactiveCommand, ReactiveError> {
+        let agent = match &mut command {
+            ReactiveCommand::Apply { change } | ReactiveCommand::Propose { change } => match change
+            {
+                ReactiveChange::SaveAgent { agent } => agent,
+                ReactiveChange::SaveAutomation { automation } => &mut automation.agent,
+                _ => return Ok(command),
+            },
+            _ => return Ok(command),
+        };
+        if agent.memory.is_empty() {
+            let id = agent.id.clone();
+            agent.memory = self
+                .call(move |connection| store::crew::stored_memory(connection, &id))
+                .await?;
+        }
+        Ok(command)
     }
 
     /// After an entry of bruh `agent_id`'s own was made: whether that bruh

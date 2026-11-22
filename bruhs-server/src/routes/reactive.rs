@@ -40,7 +40,8 @@ impl From<ReactiveError> for AppError {
 
 /// `GET /api/reactive`. A page that isn't the owner's gets vault key, app
 /// and mail cards without their detail: the account, the call's body, an
-/// email's recipients and text (final review BC I1).
+/// email's recipients and text (final review BC I1). It gets every bruh's
+/// memory blank too, in its agent and its proposals (imports B I1).
 pub async fn snapshot(
     value: Option<Extension<ReactiveRuntime>>,
     State(config): State<Arc<Config>>,
@@ -59,7 +60,8 @@ pub async fn snapshot(
 /// `POST /api/reactive/commands`. A bruh's vault grants change, its asks
 /// to use a vault key are answered, and an agent is deleted (with a bruh's
 /// own vault entries) only from the owner's own app, as the vault does
-/// (rulings F26 and BC I2).
+/// (rulings F26 and BC I2). So is a bruh's memory changed: another page's
+/// agent save keeps the stored memory it was sent blank (imports B I1).
 pub async fn command(
     value: Option<Extension<ReactiveRuntime>>,
     State(config): State<Arc<Config>>,
@@ -68,11 +70,15 @@ pub async fn command(
 ) -> Result<Json<ReactiveSnapshot>, AppError> {
     let runtime = runtime(value)?;
     let owner = config.access.owner_request(&headers);
-    if !owner {
+    let command = if owner {
+        command
+    } else {
+        let command = runtime.with_stored_memory(command).await?;
         if let Some(refusal) = runtime.owner_only_refusal(&command).await? {
             return Err(AppError::Forbidden(refusal.into()));
         }
-    }
+        command
+    };
     let snapshot = runtime.command(command).await?;
     // The answer is the snapshot, so it leaves out owner card details the
     // same way `GET /api/reactive` does (re-review N3).
