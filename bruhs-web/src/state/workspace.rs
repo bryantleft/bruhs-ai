@@ -100,6 +100,18 @@ pub struct ImportThreadOpen(pub RwSignal<bool>);
 #[derive(Copy, Clone)]
 pub struct MoveInOpen(pub RwSignal<Option<bruhs_models::imports::MoveInStart>>);
 
+/// Below this window width the sidebar is a drawer over the page.
+pub const PHONE_MAX_WIDTH_PX: f64 = 640.0;
+
+/// Whether the window is phone sized, so the sidebar drawer closes once a
+/// page opens under it.
+pub fn phone_width() -> bool {
+    web_sys::window()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|width| width.as_f64())
+        .is_some_and(|width| width < PHONE_MAX_WIDTH_PX)
+}
+
 /// The Create bruh dialog, mounted once in the shell so the crew rail, Move
 /// in and By prompt all open the same one (F28).
 #[derive(Copy, Clone)]

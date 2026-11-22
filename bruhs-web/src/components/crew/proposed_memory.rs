@@ -40,6 +40,31 @@ fn cards(snapshot: &ReactiveSnapshot, agent_id: &str) -> Vec<Card> {
         .collect()
 }
 
+/// The bruh's cards, following the snapshot.
+fn proposal_cards(
+    agent: StoredValue<String>,
+    snapshot: RwSignal<Option<ReactiveSnapshot>>,
+) -> Memo<Vec<Card>> {
+    Memo::new(move |_| {
+        snapshot.with(|snapshot| {
+            snapshot
+                .as_ref()
+                .map(|snapshot| agent.with_value(|id| cards(snapshot, id)))
+                .unwrap_or_default()
+        })
+    })
+}
+
+/// Whether card `id` is stale now. A card stays drawn while its proposal
+/// waits, so the warning reads the list on each draw, not the card's first
+/// value: memory approved or edited after it showed flags it at once (I1).
+fn card_stale(
+    list: Memo<Vec<Card>>,
+    id: String,
+) -> impl Fn() -> bool + Clone + Send + Sync + 'static {
+    move || list.with(|cards| cards.iter().any(|card| card.id == id && card.stale))
+}
+
 #[component]
 pub fn ProposedMemory(
     agent_id: String,
@@ -50,14 +75,7 @@ pub fn ProposedMemory(
     // The page's queue: a decision waits while another command is on its way.
     let busy = use_context::<CrewData>().map(|data| data.busy);
     let waiting = move || busy.is_some_and(|busy| busy.get());
-    let list = Memo::new(move |_| {
-        snapshot.with(|snapshot| {
-            snapshot
-                .as_ref()
-                .map(|snapshot| agent.with_value(|id| cards(snapshot, id)))
-                .unwrap_or_default()
-        })
-    });
+    let list = proposal_cards(agent, snapshot);
     let root: NodeRef<html::Div> = NodeRef::new();
     // The proposal just decided, until it leaves the list.
     let deciding = RwSignal::new(None::<String>);
@@ -88,22 +106,26 @@ pub fn ProposedMemory(
         send.run(ReactiveCommand::DecideProposal { id, approve });
     };
     let card_view = move |card: Card| {
+        let stale = card_stale(list, card.id.clone());
         let warning_id = format!("proposed-stale-{}", card.id);
         let approve_id = card.id.clone();
         let decline_id = card.id.clone();
         let locked = move || waiting() || deciding.with(Option::is_some);
         view! {
             <article data-proposed-card="" class="min-w-0 space-y-2 rounded-grape bg-longan-900 p-3 inset-ring inset-ring-longan-700/50">
-                {card.stale.then(|| view! {
-                    <p id=warning_id.clone() data-proposed-stale="" class="text-label-sm text-durian-300">{MEMORY_CHANGED}</p>
-                })}
-                <div data-proposed-text="" tabindex="0" aria-label=PROPOSED_MEMORY class="max-h-64 overflow-y-auto whitespace-pre-wrap break-words select-text rounded-seed bg-longan-950/60 p-2 text-body-sm text-rambutan-200 focus-visible:outline-2 focus-visible:outline-persimmon-400">{card.memory}</div>
+                {
+                    let (stale, warning_id) = (stale.clone(), warning_id.clone());
+                    move || stale().then(|| view! {
+                        <p id=warning_id.clone() data-proposed-stale="" class="text-label-sm text-durian-300">{MEMORY_CHANGED}</p>
+                    })
+                }
+                <div data-proposed-text="" role="region" tabindex="0" aria-label=PROPOSED_MEMORY class="max-h-64 overflow-y-auto whitespace-pre-wrap break-words select-text rounded-seed bg-longan-950/60 p-2 text-body-sm text-rambutan-200 focus-visible:outline-2 focus-visible:outline-persimmon-400">{card.memory}</div>
                 <div class="flex flex-wrap gap-2">
                     <button
                         type="button"
                         data-proposed-approve=""
                         class=BUTTON
-                        aria-describedby=card.stale.then_some(warning_id)
+                        aria-describedby=move || stale().then(|| warning_id.clone())
                         aria-disabled=move || locked().then_some("true")
                         on:click=move |_| decide(approve_id.clone(), true)
                     >{APPROVE_MEMORY}</button>
@@ -232,6 +254,7 @@ mod tests {
                 "{html}"
             );
             let block = tag(&html, "data-proposed-text");
+            assert!(block.contains("role=\"region\""), "{block}");
             for class in ["whitespace-pre-wrap", "overflow-y-auto", "max-h-"] {
                 assert!(block.contains(class), "{class} in {block}");
             }
@@ -256,6 +279,35 @@ mod tests {
             decided.proposals[0].status = ProposalStatus::Approved;
             let html = render("a", decided);
             assert!(!html.contains(PROPOSED_MEMORY), "{html}");
+        });
+    }
+
+    #[test]
+    fn a_card_on_screen_warns_once_the_memory_changes() {
+        Owner::new().with(|| {
+            let snapshot = RwSignal::new(Some(ReactiveSnapshot {
+                agents: vec![agent("a", "")],
+                proposals: vec![
+                    proposal("p1", "a", "First text", 10),
+                    proposal("p2", "a", "Second text", 20),
+                ],
+                ..ReactiveSnapshot::default()
+            }));
+            let list = proposal_cards(StoredValue::new("a".to_string()), snapshot);
+            let stale = card_stale(list, "p1".into());
+            assert!(!stale());
+            // The owner approves the other proposal while this card shows:
+            // approving this one now would drop that memory.
+            snapshot.update(|snapshot| {
+                let snapshot = snapshot.as_mut().unwrap();
+                snapshot.agents[0].memory = "Second text".into();
+                snapshot.proposals[1].status = ProposalStatus::Approved;
+            });
+            assert!(stale(), "the card still shows as current");
+            // Back to a prefix of it: the warning goes again.
+            snapshot
+                .update(|snapshot| snapshot.as_mut().unwrap().agents[0].memory = "First".into());
+            assert!(!stale());
         });
     }
 

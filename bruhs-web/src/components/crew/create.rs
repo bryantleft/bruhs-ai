@@ -7,15 +7,19 @@
 use bruhs_models::agent::DEFAULT_AGENT_MODEL;
 use bruhs_models::crew::{create_command, draft_from_role, BruhDraft, BruhLook};
 use bruhs_models::imports::{after_created, ImportPrefill};
+use bruhs_models::reactive::ReactiveCommand;
 use bruhs_models::roles::ResolvedRole;
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
 use super::face_editor::FaceEditor;
+use crate::agent_updates::AgentUpdates;
 use crate::components::banner::{BannerKind, BannerStackSignal};
 use crate::state::{
-    AppView, CreateBruhOpen, CreateBruhPrefill, RolesSignal, SetActiveView, SetSidebarOpen,
+    phone_width, AppView, CreateBruhOpen, CreateBruhPrefill, CrewEdits, RolesSignal, SetActiveView,
+    SetSidebarOpen,
 };
+use crate::ui::dialog::focusable_descendants;
 use crate::ui::{
     button_class, Button, ButtonSize, ButtonVariant, Dialog, Dropdown, DropdownOption, Input,
     Textarea,
@@ -65,6 +69,84 @@ fn role_options(roles: &[ResolvedRole]) -> Vec<DropdownOption> {
         .collect()
 }
 
+/// The memory a bruh made from a persona proposes once it exists. It is
+/// held by the always-mounted dialog, not the form, so closing the form
+/// while the bruh is on its way still sends it (M5).
+#[derive(Clone, Copy)]
+struct FollowUp(StoredValue<Option<(String, ImportPrefill)>>);
+
+impl FollowUp {
+    fn new() -> Self {
+        Self(StoredValue::new(None))
+    }
+
+    /// The bruh `id` is asked for, from `prefill` when it came from one.
+    fn expect(self, id: String, prefill: Option<ImportPrefill>) {
+        self.0.set_value(prefill.map(|prefill| (id, prefill)));
+    }
+
+    /// The bruh waited for, if any.
+    fn waiting(self) -> Option<String> {
+        self.0
+            .with_value(|waiting| waiting.as_ref().map(|(id, _)| id.clone()))
+    }
+
+    /// Once bruh `id` exists: its memory proposal, once.
+    fn take_for(self, id: &str) -> Option<ReactiveCommand> {
+        let (_, prefill) = self
+            .0
+            .try_update_value(|waiting| match waiting {
+                Some((waited, _)) if waited == id => waiting.take(),
+                _ => None,
+            })
+            .flatten()?;
+        after_created(&prefill, id)
+    }
+}
+
+/// After a dialog closes with its opener gone (a Make this bruh button that
+/// unmounted with Move in), focus goes to the top dialog left, or to the
+/// crew rail's New bruh, not to the page body (M7). Runs after the
+/// dialog's own restore. A native test build has no page.
+pub(crate) fn keep_focus_after_close() {
+    if cfg!(not(target_arch = "wasm32")) {
+        return;
+    }
+    request_animation_frame(|| {
+        use wasm_bindgen::JsCast as _;
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let lost = document
+            .active_element()
+            .is_none_or(|element| element.tag_name() == "BODY");
+        if !lost {
+            return;
+        }
+        let top = document
+            .query_selector_all("[role=dialog]")
+            .ok()
+            .and_then(|dialogs| dialogs.item(dialogs.length().checked_sub(1)?))
+            .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok());
+        let target = match top {
+            Some(top) => top
+                .query_selector("[data-autofocus]")
+                .ok()
+                .flatten()
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+                .or_else(|| focusable_descendants(&top).into_iter().next()),
+            None => document
+                .query_selector("[data-crew-new]:not([disabled])")
+                .ok()
+                .flatten()
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok()),
+        };
+        if let Some(target) = target.filter(|target| target.offset_parent().is_some()) {
+            let _ = target.focus();
+        }
+    });
+}
+
 /// The New bruh dialog, mounted once in the shell behind [`CreateBruhOpen`]
 /// (F28), so the crew rail, Move in and By prompt all reach it, whether the
 /// sidebar is open or not.
@@ -72,17 +154,57 @@ fn role_options(roles: &[ResolvedRole]) -> Vec<DropdownOption> {
 pub fn CreateBruhDialog() -> impl IntoView {
     let CreateBruhOpen(open) = expect_context::<CreateBruhOpen>();
     let prefill = use_context::<CreateBruhPrefill>().map(|prefill| prefill.0);
+    let banners = use_context::<BannerStackSignal>();
+    let edits = use_context::<CrewEdits>().map(|edits| edits.0);
+    let follow_up = FollowUp::new();
     // Closing, by any path, forgets the persona: the next opening is blank.
     let close = Callback::new(move |()| {
         open.set(false);
         if let Some(prefill) = prefill {
             prefill.set(None);
         }
+        keep_focus_after_close();
     });
+    // Sends the proposal for bruh `id` once, when one waits. The bruh exists
+    // either way; a refused proposal says why over the page, and By prompt
+    // can send it again. An accepted one refreshes every crew view, so the
+    // bruh's page shows the card.
+    let deliver = Callback::new(move |id: String| {
+        let Some(proposal) = follow_up.take_for(&id) else {
+            return;
+        };
+        wasm_bindgen_futures::spawn_local(async move {
+            match crate::api::reactive_command(&proposal).await {
+                Ok(_) => {
+                    if let Some(edits) = edits {
+                        edits.try_update(|n| *n = n.wrapping_add(1));
+                    }
+                }
+                Err(error) => {
+                    if let Some(banners) = banners {
+                        banners.push(BannerKind::Error, error.to_string(), None);
+                    }
+                }
+            }
+        });
+    });
+    // The live stream names the new bruh even when the form has closed.
+    if let Some(updates) = use_context::<AgentUpdates>() {
+        Effect::new(move |_| {
+            let made = updates.bruhs.with(|bruhs| {
+                follow_up
+                    .waiting()
+                    .filter(|id| bruhs.iter().any(|bruh| bruh.agent_id == *id))
+            });
+            if let Some(id) = made {
+                deliver.run(id);
+            }
+        });
+    }
 
     view! {
         <Dialog open=Signal::derive(move || open.get()) on_close=close max_width="max-w-2xl".to_string() label="New bruh">
-            <CreateBruhForm close=close prefill=prefill />
+            <CreateBruhForm close=close prefill=prefill follow_up=follow_up deliver=deliver />
         </Dialog>
     }
 }
@@ -93,12 +215,13 @@ pub fn CreateBruhDialog() -> impl IntoView {
 fn CreateBruhForm(
     close: Callback<()>,
     prefill: Option<RwSignal<Option<ImportPrefill>>>,
+    follow_up: FollowUp,
+    deliver: Callback<String>,
 ) -> impl IntoView {
     let data = use_crew_snapshot();
     let roles = use_context::<RolesSignal>().map(|roles| roles.0);
     let set_view = use_context::<SetActiveView>().map(|set| set.0);
     let set_sidebar_open = use_context::<SetSidebarOpen>().map(|set| set.0);
-    let banners = use_context::<BannerStackSignal>();
     let resolved = Memo::new(move |_| {
         roles
             .map(|roles| roles.with(|book| book.resolved("")))
@@ -119,8 +242,6 @@ fn CreateBruhForm(
     let invalid = RwSignal::new(None::<String>);
     // The bruh this dialog asked the service to make, until it appears.
     let pending = RwSignal::new(None::<String>);
-    // The bruh made, while its imported memory is on its way as a proposal.
-    let proposing = RwSignal::new(None::<String>);
 
     let choose_role = Callback::new(move |id: String| {
         match resolved.with_untracked(|roles| role_draft(roles, &id)) {
@@ -145,10 +266,7 @@ fn CreateBruhForm(
             set_view.set(AppView::Bruh { agent_id });
         }
         if let Some(set_sidebar_open) = set_sidebar_open {
-            let width = web_sys::window()
-                .and_then(|window| window.inner_width().ok())
-                .and_then(|width| width.as_f64());
-            if width.is_some_and(|width| width < 640.0) {
+            if phone_width() {
                 set_sidebar_open.set(false);
             }
         }
@@ -157,7 +275,7 @@ fn CreateBruhForm(
 
     // Open the new bruh once the service has made it; a failure keeps the
     // dialog open with the service's reason. A bruh made from a persona
-    // gets its memory as a proposal first, never in the bruh itself (D12).
+    // gets its memory as a proposal, never in the bruh itself (D12).
     Effect::new(move |_| {
         let Some(id) = pending.get() else {
             return;
@@ -169,41 +287,15 @@ fn CreateBruhForm(
         });
         if made {
             pending.set(None);
-            match start
-                .with_value(|start| start.as_ref().and_then(|start| after_created(start, &id)))
-            {
-                Some(proposal) => {
-                    proposing.set(Some(id));
-                    data.send.run(proposal);
-                }
-                None => finish(id),
-            }
+            deliver.run(id.clone());
+            finish(id);
         } else if !data.busy.get() && data.error.with(Option::is_some) {
             pending.set(None);
         }
     });
-    // The proposal answered. The bruh exists either way, so its page opens;
-    // a refused proposal says why over it, and By prompt can send it again.
-    Effect::new(move |_| {
-        let Some(id) = proposing.get() else {
-            return;
-        };
-        if data.busy.get() {
-            return;
-        }
-        proposing.set(None);
-        if let (Some(message), Some(banners)) = (data.error.get_untracked(), banners) {
-            banners.push(BannerKind::Error, message, None);
-        }
-        finish(id);
-    });
 
     let create = move || {
-        if pending.get_untracked().is_some()
-            || proposing.get_untracked().is_some()
-            || data.busy.get_untracked()
-            || !data.crew_ready()
-        {
+        if pending.get_untracked().is_some() || data.busy.get_untracked() || !data.crew_ready() {
             return;
         }
         let draft = BruhDraft {
@@ -224,14 +316,12 @@ fn CreateBruhForm(
             look.get_untracked(),
             folder.with_untracked(|folder| folder_choice(folder)),
         );
+        follow_up.expect(id.clone(), start.get_value());
         pending.set(Some(id));
         data.send.run(command);
     };
     let create_disabled = Signal::derive(move || {
-        pending.with(Option::is_some)
-            || proposing.with(Option::is_some)
-            || data.busy.get()
-            || !data.crew_ready()
+        pending.with(Option::is_some) || data.busy.get() || !data.crew_ready()
     });
     let prefill_lines = (!lines.is_empty()).then(|| {
         view! {
@@ -402,6 +492,35 @@ mod tests {
             after_created(&prefill_from_persona(&persona("  ")), "new"),
             None
         );
+    }
+
+    #[test]
+    fn the_memory_follows_the_bruh_it_was_made_for_once() {
+        Owner::new().with(|| {
+            let follow_up = FollowUp::new();
+            let prefill = prefill_from_persona(&persona("Likes tea."));
+            follow_up.expect("b1".into(), Some(prefill));
+            assert_eq!(follow_up.waiting().as_deref(), Some("b1"));
+            // Another bruh appearing sends nothing and keeps the wait.
+            assert_eq!(follow_up.take_for("b2"), None);
+            assert_eq!(
+                follow_up.take_for("b1"),
+                Some(ReactiveCommand::Propose {
+                    change: ReactiveChange::SetMemory {
+                        agent_id: "b1".into(),
+                        memory: "Likes tea.".into(),
+                    },
+                })
+            );
+            // Once only, whether the form or the live stream saw it first.
+            assert_eq!(follow_up.take_for("b1"), None);
+            assert_eq!(follow_up.waiting(), None);
+            // A bruh made without a persona, or with no memory, sends nothing.
+            follow_up.expect("b3".into(), None);
+            assert_eq!(follow_up.take_for("b3"), None);
+            follow_up.expect("b4".into(), Some(prefill_from_persona(&persona(" "))));
+            assert_eq!(follow_up.take_for("b4"), None);
+        });
     }
 
     #[test]

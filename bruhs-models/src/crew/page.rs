@@ -7,14 +7,27 @@ use super::{level_unavailable, AccessLevel, ApprovalState, BruhSettings, BruhSta
 use crate::agent::AgentProvider;
 use crate::reactive::{OutboxItem, ReactiveRun, ReactiveSnapshot, HISTORY_LIMIT};
 
-/// The job line under a bruh's name: the first line of its instructions.
+/// The job line under a bruh's name: the first line of its instructions
+/// with words in it, past Markdown headings and an imported persona's
+/// identity block (the paragraph under `IDENTITY_FROM`). Instructions that
+/// are only headings show their first line.
 #[must_use]
 pub fn job_line(instructions: &str) -> &str {
-    instructions
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
+    let mut first = None;
+    let mut in_identity = false;
+    for line in instructions.lines().map(str::trim) {
+        if line.is_empty() {
+            in_identity = false;
+            continue;
+        }
+        first.get_or_insert(line);
+        if line == crate::imports::IDENTITY_FROM {
+            in_identity = true;
+        } else if !in_identity && !line.starts_with('#') {
+            return line;
+        }
+    }
+    first.unwrap_or_default()
 }
 
 /// Puts a page of runs into those already shown, replacing runs it updates.
@@ -182,6 +195,16 @@ mod tests {
     fn the_job_is_the_first_line_with_words() {
         assert_eq!(job_line("\n  Watch bills.\nPay nothing."), "Watch bills.");
         assert_eq!(job_line(""), "");
+        // A persona's instructions: past the identity block and headings.
+        let persona = "Identity from IDENTITY.md\nName: Pinch\nVibe: calm\n\n## SOUL.md\n\nAnswer in short sentences.\nCheck facts.";
+        assert_eq!(job_line(persona), "Answer in short sentences.");
+        assert_eq!(job_line("# Bills\n\nWatch bills."), "Watch bills.");
+        // Only headings: the first line, as before.
+        assert_eq!(job_line("## SOUL.md\n# Notes"), "## SOUL.md");
+        assert_eq!(
+            job_line("Identity from IDENTITY.md\nName: Pinch"),
+            "Identity from IDENTITY.md"
+        );
     }
 
     #[test]

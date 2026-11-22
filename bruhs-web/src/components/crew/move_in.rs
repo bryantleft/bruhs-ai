@@ -8,17 +8,15 @@
 
 pub mod by_prompt;
 
-use bruhs_models::agent::DEFAULT_AGENT_MODEL;
-use bruhs_models::crew::BruhDraft;
 use bruhs_models::imports::{
-    looked_in_line, moved_in_memory, persona_lines, prefill_from_persona, AgentScan, ImportPrefill,
-    MoveInStart, MoveInTab, PersonaCandidate, AGENTS_PRIVACY, BY_PROMPT_TAB, FOLDER, LOOK_HERE,
-    MAKE_BRUH, MEMORY_WAITS, MOVE_IN_TITLE, NONE_FOUND_HERMES, NONE_FOUND_OPENCLAW,
+    looked_in_line, persona_lines, prefill_from_persona, AgentScan, ImportPrefill, MoveInStart,
+    MoveInTab, PersonaCandidate, AGENTS_PRIVACY, BY_PROMPT_TAB, FOLDER, LOOK_HERE, MAKE_BRUH,
+    MOVE_IN_TITLE, NONE_FOUND_HERMES, NONE_FOUND_OPENCLAW,
 };
 use bruhs_models::logic::portable::ImportSource;
 use leptos::prelude::*;
 
-use self::by_prompt::ByPromptTab;
+use self::by_prompt::{ByPromptState, ByPromptTab};
 use super::data::use_crew_snapshot;
 use crate::api::{imports as api, ApiError};
 use crate::state::{CreateBruhOpen, CreateBruhPrefill, MoveInOpen};
@@ -52,23 +50,6 @@ fn tab_source(tab: MoveInTab) -> Option<ImportSource> {
         MoveInTab::Hermes => Some(ImportSource::Hermes),
         MoveInTab::ByPrompt => None,
     }
-}
-
-/// What **Make a bruh** starts from on By prompt: the text in the area,
-/// when there is any, waiting as the new bruh's memory proposal, so an
-/// export's memory isn't lost for want of a bruh.
-fn prefill_for_answer(answer: &str, from: &str) -> Option<ImportPrefill> {
-    let memory = moved_in_memory("", answer, from).ok()?;
-    Some(ImportPrefill {
-        draft: BruhDraft {
-            name: String::new(),
-            instructions: String::new(),
-            model: DEFAULT_AGENT_MODEL.to_string(),
-            effort: None,
-        },
-        memory,
-        lines: vec![MEMORY_WAITS.to_string()],
-    })
 }
 
 /// One agent tab's scan: what it found, the folder typed, the persona
@@ -276,7 +257,10 @@ pub(crate) fn AgentTab(
 #[component]
 pub fn MoveInDialog() -> impl IntoView {
     let MoveInOpen(start) = expect_context::<MoveInOpen>();
-    let close = Callback::new(move |()| start.set(None));
+    let close = Callback::new(move |()| {
+        start.set(None);
+        super::create::keep_focus_after_close();
+    });
     view! {
         <Dialog open=Signal::derive(move || start.with(Option::is_some)) on_close=close max_width="max-w-lg".to_string() label=MOVE_IN_TITLE anchor_top=true>
             {move || start.get_untracked().map(|start| view! { <MoveInBody start=start close=close /> })}
@@ -293,8 +277,8 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
     let tab = RwSignal::new(start.tab);
     let openclaw = AgentState::new();
     let hermes = AgentState::new();
-    let answer = RwSignal::new(start.text.unwrap_or_default());
-    let from = RwSignal::new(start.from);
+    let by_prompt = ByPromptState::new(start.text, start.from);
+    by_prompt.watch(data);
     let state_for = move |tab: MoveInTab| match tab {
         MoveInTab::OpenClaw => Some(openclaw),
         MoveInTab::Hermes => Some(hermes),
@@ -328,15 +312,7 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
     let on_make = Callback::new(move |persona: PersonaCandidate| {
         open_create(Some(prefill_from_persona(&persona)));
     });
-    let on_make_bruh = Callback::new(move |()| {
-        let next = answer.with_untracked(|answer| {
-            from.with_untracked(|from| {
-                let from = from.clone().unwrap_or_else(by_prompt::pasted_from_today);
-                prefill_for_answer(answer, &from)
-            })
-        });
-        open_create(next);
-    });
+    let on_make_bruh = Callback::new(open_create);
 
     let body = move || match tab.get() {
         MoveInTab::OpenClaw => {
@@ -348,8 +324,7 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
                 .into_any()
         }
         MoveInTab::ByPrompt => {
-            view! { <ByPromptTab data=data answer=answer from=from on_make_bruh=on_make_bruh /> }
-                .into_any()
+            view! { <ByPromptTab data=data state=by_prompt on_make_bruh=on_make_bruh /> }.into_any()
         }
     };
 

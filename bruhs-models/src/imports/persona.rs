@@ -271,11 +271,16 @@ pub struct ImportPrefill {
     pub lines: Vec<String>,
 }
 
-/// The prefill for **Make this bruh**, on [`DEFAULT_AGENT_MODEL`].
+/// The prefill for **Make this bruh**, on [`DEFAULT_AGENT_MODEL`], its
+/// instructions and memory through [`without_hidden_chars`].
 pub fn prefill_from_persona(persona: &PersonaCandidate) -> ImportPrefill {
+    let mut draft = draft_from_persona(persona, DEFAULT_AGENT_MODEL);
+    // What the owner reviews, in the Job field and on the Approve card,
+    // carries no hidden or reordering characters from the persona's files.
+    draft.instructions = without_hidden_chars(&draft.instructions);
     ImportPrefill {
-        draft: draft_from_persona(persona, DEFAULT_AGENT_MODEL),
-        memory: persona.memory.clone(),
+        draft,
+        memory: without_hidden_chars(&persona.memory),
         lines: persona_lines(persona),
     }
 }
@@ -304,14 +309,12 @@ pub struct MoveInStart {
     pub from: Option<String>,
 }
 
-/// `current` memory with `pasted` added under `## <from>`. The pasted text
-/// loses its control and format characters except newline and tab, and is
-/// trimmed. Nothing to add is [`MOVE_IN_EMPTY`]; a result over
-/// [`MAX_TEXT_CHARS`] characters is [`MOVE_IN_TOO_LONG`].
-pub fn moved_in_memory(current: &str, pasted: &str, from: &str) -> Result<String, &'static str> {
-    // A line or paragraph separator keeps its break as a newline.
-    let kept: String = pasted
-        .chars()
+/// `text` without the characters that hide or reorder it (controls, format
+/// characters such as U+202E and U+200B, and the like), keeping newline and
+/// tab; a line or paragraph separator keeps its break as a newline. Text an
+/// import shows the owner for review goes through this first.
+pub fn without_hidden_chars(text: &str) -> String {
+    text.chars()
         .map(|c| {
             if matches!(c, '\u{2028}' | '\u{2029}') {
                 '\n'
@@ -320,7 +323,15 @@ pub fn moved_in_memory(current: &str, pasted: &str, from: &str) -> Result<String
             }
         })
         .filter(|c| matches!(c, '\n' | '\t') || !is_hidden_char(*c))
-        .collect();
+        .collect()
+}
+
+/// `current` memory with `pasted` added under `## <from>`. The pasted text
+/// goes through [`without_hidden_chars`] and is trimmed. Nothing to add is
+/// [`MOVE_IN_EMPTY`]; a result over [`MAX_TEXT_CHARS`] characters is
+/// [`MOVE_IN_TOO_LONG`].
+pub fn moved_in_memory(current: &str, pasted: &str, from: &str) -> Result<String, &'static str> {
+    let kept = without_hidden_chars(pasted);
     let text = kept.trim();
     if text.is_empty() {
         return Err(MOVE_IN_EMPTY);
@@ -649,6 +660,22 @@ mod tests {
             agent_id: agent.into(),
             memory: memory.into(),
         }
+    }
+
+    #[test]
+    fn a_personas_hidden_characters_never_reach_the_owner() {
+        let mut hidden = persona("Likes\u{202E} tea.\u{200B}\nWalks\tdaily.\u{2028}Sleeps early.");
+        hidden.instructions = "Be\u{202E} kind.\u{200B}".into();
+        let prefill = prefill_from_persona(&hidden);
+        assert_eq!(prefill.memory, "Likes tea.\nWalks\tdaily.\nSleeps early.");
+        assert_eq!(prefill.draft.instructions, "Be kind.");
+        match after_created(&prefill, "new") {
+            Some(ReactiveCommand::Propose {
+                change: ReactiveChange::SetMemory { memory, .. },
+            }) => assert!(!memory.contains(['\u{202E}', '\u{200B}']), "{memory:?}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(without_hidden_chars("a\u{0}b\u{2029}c"), "ab\nc");
     }
 
     #[test]

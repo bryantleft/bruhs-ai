@@ -2,14 +2,18 @@
 //! and its answer proposed as a chosen bruh's memory. The answer joins the
 //! bruh's memory only as a proposal the owner approves on its Memory tab.
 
+use bruhs_models::agent::DEFAULT_AGENT_MODEL;
+use bruhs_models::crew::BruhDraft;
 use bruhs_models::imports::{
-    memory_proposed_line, moved_in_from, moved_in_memory, propose_memory, COPIED, COPY_PROMPT,
-    FOR_BRUH, MAKE_A_BRUH, MOVE_IN_HINT, MOVE_IN_PROMPT, NO_BRUHS, PROPOSE_MEMORY, THEIR_ANSWER,
+    memory_proposed_line, moved_in_from, moved_in_memory, propose_memory, ImportPrefill, COPIED,
+    COPY_PROMPT, FOR_BRUH, MAKE_A_BRUH, MEMORY_WAITS, MOVE_IN_EMPTY, MOVE_IN_HINT, MOVE_IN_PROMPT,
+    NO_BRUHS, PROPOSE_MEMORY, THEIR_ANSWER,
 };
 use leptos::prelude::*;
 
 use super::{BUTTON, ERROR, FIELD, HELP, LABEL};
 use crate::components::crew::data::CrewData;
+use crate::state::CrewEdits;
 use crate::ui::ResetTimer;
 
 /// How long **Copy prompt** says it copied.
@@ -17,7 +21,7 @@ const COPIED_MS: u32 = 2_000;
 const STATUS: &str = "text-label-sm text-pandan-300 empty:sr-only";
 
 /// The heading a pasted answer goes under: today's date in the browser's zone.
-pub(super) fn pasted_from_today() -> String {
+fn pasted_from_today() -> String {
     let date = js_sys::Date::new_0();
     moved_in_from(&format!(
         "{:04}-{:02}-{:02}",
@@ -27,14 +31,102 @@ pub(super) fn pasted_from_today() -> String {
     ))
 }
 
+/// What **Make a bruh** starts from: the text in the area, when there is
+/// any, waiting as the new bruh's memory proposal, so an export's memory
+/// isn't lost for want of a bruh. Nothing in the area opens a blank bruh;
+/// text over the cap is refused with its copy and stays (M1).
+fn prefill_for_answer(answer: &str, from: &str) -> Result<Option<ImportPrefill>, &'static str> {
+    match moved_in_memory("", answer, from) {
+        Ok(memory) => Ok(Some(ImportPrefill {
+            draft: BruhDraft {
+                name: String::new(),
+                instructions: String::new(),
+                model: DEFAULT_AGENT_MODEL.to_string(),
+                effort: None,
+            },
+            memory,
+            lines: vec![MEMORY_WAITS.to_string()],
+        })),
+        Err(MOVE_IN_EMPTY) => Ok(None),
+        Err(copy) => Err(copy),
+    }
+}
+
+/// The By prompt tab's text, choice and outcome. Move in owns it, so
+/// switching tabs mid-proposal keeps the answer, the confirmation and the
+/// refresh of the views behind (M2).
+#[derive(Clone, Copy)]
+pub(crate) struct ByPromptState {
+    pub answer: RwSignal<String>,
+    /// The heading the answer goes under, when it came from an export.
+    pub from: RwSignal<Option<String>>,
+    pub chosen: RwSignal<String>,
+    pub status: RwSignal<Option<String>>,
+    pub error: RwSignal<Option<&'static str>>,
+    /// The bruh whose proposal is on its way.
+    pub proposing: RwSignal<Option<String>>,
+    edits: Option<RwSignal<u64>>,
+}
+
+impl ByPromptState {
+    pub(crate) fn new(text: Option<String>, from: Option<String>) -> Self {
+        Self {
+            answer: RwSignal::new(text.unwrap_or_default()),
+            from: RwSignal::new(from),
+            chosen: RwSignal::new(String::new()),
+            status: RwSignal::new(None),
+            error: RwSignal::new(None),
+            proposing: RwSignal::new(None),
+            edits: use_context::<CrewEdits>().map(|edits| edits.0),
+        }
+    }
+
+    /// Settles a proposal once `data`'s queue answers.
+    pub(crate) fn watch(self, data: CrewData) {
+        Effect::new(move |_| {
+            if self.proposing.with(Option::is_none) || data.busy.get() {
+                return;
+            }
+            self.answered(data.error.with_untracked(Option::is_none));
+        });
+    }
+
+    /// The proposal answered. Accepted: every open crew view reads again
+    /// (the bruh page behind shows the card), the line says where to
+    /// approve it, and the area clears. Refused: the text stays for another
+    /// try, with the service's reason in the error line.
+    pub(crate) fn answered(self, accepted: bool) {
+        let Some(name) = self.proposing.try_update(Option::take).flatten() else {
+            return;
+        };
+        if !accepted {
+            return;
+        }
+        if let Some(edits) = self.edits {
+            edits.try_update(|n| *n = n.wrapping_add(1));
+        }
+        self.status.try_set(Some(memory_proposed_line(&name)));
+        self.answer.try_set(String::new());
+        self.from.try_set(None);
+    }
+}
+
 #[component]
 pub(crate) fn ByPromptTab(
     data: CrewData,
-    answer: RwSignal<String>,
-    /// The heading the answer goes under, when it came from an export.
-    from: RwSignal<Option<String>>,
-    on_make_bruh: Callback<()>,
+    state: ByPromptState,
+    /// Opens Create bruh, with the area's text as its memory when it has any.
+    on_make_bruh: Callback<Option<ImportPrefill>>,
 ) -> impl IntoView {
+    let ByPromptState {
+        answer,
+        from,
+        chosen,
+        status,
+        error,
+        proposing,
+        ..
+    } = state;
     // `None` until the crew loads, so "Make a bruh first." never flashes.
     let bruhs = Memo::new(move |_| {
         data.snapshot.with(|snapshot| {
@@ -47,7 +139,6 @@ pub(crate) fn ByPromptTab(
             })
         })
     });
-    let chosen = RwSignal::new(String::new());
     // The chosen bruh while it is still in the crew, else the first.
     let target = Memo::new(move |_| {
         bruhs.with(|bruhs| {
@@ -58,15 +149,20 @@ pub(crate) fn ByPromptTab(
                 .cloned()
         })
     });
-    let edits = use_context::<crate::state::CrewEdits>().map(|edits| edits.0);
     let copied = RwSignal::new(false);
     let reset = ResetTimer::new();
-    let status = RwSignal::new(None::<String>);
-    let error = RwSignal::new(None::<&'static str>);
-    // The bruh whose proposal is on its way.
-    let proposing = RwSignal::new(None::<String>);
     let waiting = move || data.busy.get() || proposing.with(Option::is_some);
     let empty = move || answer.with(|answer| answer.trim().is_empty());
+    let make_bruh = move || {
+        let heading = from.get_untracked().unwrap_or_else(pasted_from_today);
+        match answer.with_untracked(|answer| prefill_for_answer(answer, &heading)) {
+            Err(copy) => error.set(Some(copy)),
+            Ok(prefill) => {
+                error.set(None);
+                on_make_bruh.run(prefill);
+            }
+        }
+    };
 
     let copy = move |_| {
         crate::ui::copy_to_clipboard(MOVE_IN_PROMPT);
@@ -100,26 +196,6 @@ pub(crate) fn ByPromptTab(
             }
         }
     };
-    // The proposal answered: say where to approve it and clear the area, or
-    // leave the text for another try with the service's reason below.
-    Effect::new(move |_| {
-        let Some(name) = proposing.get() else {
-            return;
-        };
-        if data.busy.get() {
-            return;
-        }
-        proposing.set(None);
-        if data.error.with_untracked(Option::is_none) {
-            if let Some(edits) = edits {
-                edits.update(|n| *n = n.wrapping_add(1));
-            }
-            status.set(Some(memory_proposed_line(&name)));
-            answer.set(String::new());
-            from.set(None);
-        }
-    });
-
     let picker = move || {
         let bruhs = bruhs.get()?;
         if bruhs.is_empty() {
@@ -127,7 +203,7 @@ pub(crate) fn ByPromptTab(
                 view! {
                     <div class="flex flex-wrap items-center gap-2">
                         <p data-move-in-no-bruhs="" class="text-label-sm text-rambutan-200">{NO_BRUHS}</p>
-                        <button type="button" data-move-in-make-bruh="" class=BUTTON on:click=move |_| on_make_bruh.run(())>{MAKE_A_BRUH}</button>
+                        <button type="button" data-move-in-make-bruh="" class=BUTTON on:click=move |_| make_bruh()>{MAKE_A_BRUH}</button>
                     </div>
                 }
                 .into_any(),
@@ -222,12 +298,59 @@ mod tests {
 
     fn render(data: CrewData, answer: &str) -> String {
         let _ = any_spawner::Executor::init_futures_executor();
-        let answer = RwSignal::new(answer.to_string());
+        let state = ByPromptState::new(Some(answer.to_string()), None);
         untrack(|| {
             tachys::view::RenderHtml::to_html(view! {
-                <ByPromptTab data=data answer=answer from=RwSignal::new(None) on_make_bruh=Callback::new(|()| {}) />
+                <ByPromptTab data=data state=state on_make_bruh=Callback::new(|_| {}) />
             })
         })
+    }
+
+    #[test]
+    fn make_a_bruh_carries_the_answer_or_refuses_it() {
+        use bruhs_models::imports::MOVE_IN_TOO_LONG;
+        use bruhs_models::reactive::MAX_TEXT_CHARS;
+        let from = "Claude.ai export";
+        let prefill = prefill_for_answer("  Likes tea.  ", from).unwrap().unwrap();
+        assert_eq!(prefill.memory, "## Claude.ai export\n\nLikes tea.");
+        assert_eq!(prefill.draft.name, "");
+        assert_eq!(prefill.draft.model, DEFAULT_AGENT_MODEL);
+        assert_eq!(prefill.lines, [MEMORY_WAITS]);
+        // Nothing in the area: a blank bruh.
+        assert_eq!(prefill_for_answer(" \n", from), Ok(None));
+        // Over the cap: refused with its copy, never a blank bruh (M1).
+        let long = "x".repeat(MAX_TEXT_CHARS);
+        assert_eq!(prefill_for_answer(&long, from), Err(MOVE_IN_TOO_LONG));
+    }
+
+    #[test]
+    fn an_accepted_proposal_refreshes_the_crew_views_and_clears() {
+        Owner::new().with(|| {
+            let edits = RwSignal::new(0u64);
+            provide_context(CrewEdits(edits));
+            let state =
+                ByPromptState::new(Some("Likes tea.".into()), Some("Claude.ai export".into()));
+            // Refused: the text stays, nothing else moves.
+            state.proposing.set(Some("Pinch".into()));
+            state.answered(false);
+            assert_eq!(state.answer.get_untracked(), "Likes tea.");
+            assert_eq!(edits.get_untracked(), 0);
+            assert_eq!(state.status.get_untracked(), None);
+            assert_eq!(state.proposing.get_untracked(), None);
+            // Accepted: every crew view reads again, and the line says where.
+            state.proposing.set(Some("Pinch".into()));
+            state.answered(true);
+            assert_eq!(edits.get_untracked(), 1);
+            assert_eq!(
+                state.status.get_untracked(),
+                Some(memory_proposed_line("Pinch"))
+            );
+            assert_eq!(state.answer.get_untracked(), "");
+            assert_eq!(state.from.get_untracked(), None);
+            // Only a proposal on its way settles.
+            state.answered(true);
+            assert_eq!(edits.get_untracked(), 1);
+        });
     }
 
     fn escaped(text: &str) -> String {

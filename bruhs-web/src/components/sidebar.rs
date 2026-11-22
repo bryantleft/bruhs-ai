@@ -209,10 +209,7 @@ pub fn Sidebar() -> impl IntoView {
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let SetSidebarOpen(set_sidebar_open) = expect_context::<SetSidebarOpen>();
     let dismiss_mobile_navigation = move || {
-        let width = web_sys::window()
-            .and_then(|window| window.inner_width().ok())
-            .and_then(|width| width.as_f64());
-        if width.is_some_and(|width| width < 640.0) {
+        if crate::state::phone_width() {
             set_sidebar_open.set(false);
         }
     };
