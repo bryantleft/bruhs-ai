@@ -219,8 +219,12 @@ fn new_crew_data() -> CrewData {
     // Load now, and again whenever the service reports a change to the crew,
     // its rooms, a run or the outbox (a new card).
     let updates = use_context::<AgentUpdates>();
+    let edits = use_context::<crate::state::CrewEdits>().map(|edits| edits.0);
     if let Some(updates) = updates {
         Effect::new(move |_| {
+            if let Some(edits) = edits {
+                edits.track();
+            }
             updates.bruhs.track();
             updates.rooms.track();
             updates.runs_at.track();
@@ -228,7 +232,12 @@ fn new_crew_data() -> CrewData {
             reload.run(());
         });
     } else {
-        Effect::new(move |_| reload.run(()));
+        Effect::new(move |_| {
+            if let Some(edits) = edits {
+                edits.track();
+            }
+            reload.run(());
+        });
     }
     on_cleanup(move || alive.set(false));
 

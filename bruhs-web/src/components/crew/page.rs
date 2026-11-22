@@ -9,6 +9,7 @@ use super::chat::BruhChat;
 use super::computer::BruhComputer;
 use super::data::use_crew_snapshot;
 use super::face::BruhFace;
+use super::proposed_memory::ProposedMemory;
 use super::settings::BruhSettingsTab;
 use crate::components::reactive_automations::{local_time, AgentMemoryPanel, AutomationSetupPanel};
 use crate::state::{AppView, SetActiveView};
@@ -167,6 +168,7 @@ pub fn BruhPage(agent_id: String) -> impl IntoView {
                             Tab::Memory => view! {
                                 <div class="min-h-0 flex-1 overflow-y-auto">
                                     <div class="mx-auto w-full max-w-3xl min-w-0 p-4 sm:px-6">
+                                        <ProposedMemory agent_id=agent_id.clone() snapshot=data.snapshot send=data.send />
                                         <AgentMemoryPanel agent_id=agent_id snapshot=data.snapshot send=data.send />
                                     </div>
                                 </div>

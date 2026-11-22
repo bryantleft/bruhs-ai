@@ -15,7 +15,6 @@ use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::create::CreateBruhDialog;
 use super::data::use_crew_snapshot;
 use super::face::BruhFace;
 use super::room_dialog::RoomDialog;
@@ -219,7 +218,8 @@ pub fn CrewRail(
     let active_view = use_context::<ActiveView>().map(|view| view.0);
     let set_view = use_context::<SetActiveView>().map(|set| set.0);
     let open = RwSignal::new(rail_open(load_pref(OPEN_PREF).as_deref()));
-    let creating = RwSignal::new(false);
+    // New bruh opens the dialog the shell mounts (F28).
+    let creating = use_context::<crate::state::CreateBruhOpen>().map(|open| open.0);
     let creating_room = RwSignal::new(false);
     let rows = Memo::new(move |_| {
         data.snapshot
@@ -388,7 +388,11 @@ pub fn CrewRail(
                     data-crew-new=""
                     disabled=move || !ready.get()
                     class="bruhs-control inline-flex size-control-sm shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    on:click=move |_| creating.set(true)
+                    on:click=move |_| {
+                        if let Some(creating) = creating {
+                            creating.set(true);
+                        }
+                    }
                 >
                     <Icon name="user-plus" size=16 />
                 </button>
@@ -477,7 +481,6 @@ pub fn CrewRail(
                     </div>
                 </div>
             </Show>
-            <CreateBruhDialog open=creating on_open=on_open.unwrap_or_else(|| Callback::new(|()| {})) />
             <RoomDialog open=creating_room on_open=on_open.unwrap_or_else(|| Callback::new(|()| {})) />
         </section>
     }

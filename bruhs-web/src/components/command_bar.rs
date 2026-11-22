@@ -41,6 +41,7 @@ enum ActionId {
     OpenProject,
     NewThread,
     ImportThread,
+    MoveIn,
     PinThread,
     SettleThread,
     CopyThreadLink,
@@ -192,6 +193,12 @@ const ACTIONS: &[Action] = &[
         group: "Agent",
         label: "Import thread...",
         hint: "Claude Code, Codex, T3, Cursor",
+    },
+    Action {
+        id: ActionId::MoveIn,
+        group: "Agent",
+        label: bruhs_models::imports::MOVE_IN_COMMAND,
+        hint: bruhs_models::imports::MOVE_IN_COMMAND_HINT,
     },
     Action {
         id: ActionId::PinThread,
@@ -489,6 +496,7 @@ mod tests {
                 "Choose project folder",
                 "New thread",
                 "Import thread...",
+                "Move in...",
                 "Pin / unpin thread",
                 "Settle / unsettle thread",
                 "Copy thread link",
@@ -521,6 +529,19 @@ mod tests {
                 "Model",
             ]
         );
+    }
+
+    #[test]
+    fn the_palette_offers_move_in() {
+        let at = ACTIONS
+            .iter()
+            .position(|action| action.label == "Import thread...")
+            .expect("Import thread...");
+        let move_in = &ACTIONS[at + 1];
+        assert_eq!(move_in.id, ActionId::MoveIn);
+        assert_eq!(move_in.group, "Agent");
+        assert_eq!(move_in.label, bruhs_models::imports::MOVE_IN_COMMAND);
+        assert_eq!(move_in.hint, bruhs_models::imports::MOVE_IN_COMMAND_HINT);
     }
 
     #[test]
@@ -780,6 +801,7 @@ pub fn CommandBar() -> impl IntoView {
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let crate::state::ImportThreadOpen(import_open) =
         expect_context::<crate::state::ImportThreadOpen>();
+    let crate::state::MoveInOpen(move_in_open) = expect_context::<crate::state::MoveInOpen>();
     let thread_export = ActiveThreadExport::from_context();
     let SetTaskCreateOpen(set_task_create_open) = expect_context::<SetTaskCreateOpen>();
     let SetModelSelectOpen(set_model_select_open) = expect_context::<SetModelSelectOpen>();
@@ -965,6 +987,11 @@ pub fn CommandBar() -> impl IntoView {
             }
             ActionId::OpenProject => set_project_picker_open.set(true),
             ActionId::ImportThread => import_open.set(true),
+            ActionId::MoveIn => move_in_open.set(Some(bruhs_models::imports::MoveInStart {
+                tab: bruhs_models::imports::MoveInTab::OpenClaw,
+                text: None,
+                from: None,
+            })),
             ActionId::CopyResumeCommand => thread_export.run(ThreadExport::ResumeCommand),
             ActionId::CopyThreadMarkdown => thread_export.run(ThreadExport::Markdown),
             ActionId::ContinueInT3 => thread_export.run(ThreadExport::ContinueInT3),

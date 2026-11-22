@@ -112,7 +112,6 @@ pub async fn import_export_thread(
 
 /// `GET /api/import/agents?source=&path=`: OpenClaw or Hermes Agent
 /// personas, in `path` or the agent's default places.
-#[expect(dead_code, reason = "used from Task 11")]
 pub async fn scan_agents(
     source: ImportSource,
     path: Option<&str>,

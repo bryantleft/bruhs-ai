@@ -8,11 +8,12 @@
 use std::collections::{HashSet, VecDeque};
 
 use bruhs_models::imports::{
-    batch_lines, export_row_detail, import_key, imported_line, importing_line, reading_line,
-    rows_shown_line, ImportBatch, ImportJob, ImportJobState, ALREADY_HERE, CHOOSE_ANOTHER,
-    CHOOSE_EXPORT, EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, EXPORT_SEARCH,
-    EXPORT_TAB, EXPORT_TOO_LARGE, GROK_BEST_EFFORT, IMPORT_ALL, IMPORT_ALL_MAX, IMPORT_FAILED,
-    MAX_ROWS_SHOWN, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, NO_MATCHING_CHATS, TOO_MANY_FILES,
+    batch_lines, export_memory_from, export_row_detail, import_key, imported_line, importing_line,
+    memory_found_line, reading_line, rows_shown_line, ImportBatch, ImportJob, ImportJobState,
+    MoveInStart, MoveInTab, ALREADY_HERE, CHOOSE_ANOTHER, CHOOSE_EXPORT, EXPORT_HELP_CHATGPT,
+    EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, EXPORT_SEARCH, EXPORT_TAB, EXPORT_TOO_LARGE,
+    GROK_BEST_EFFORT, IMPORT_ALL, IMPORT_ALL_MAX, IMPORT_FAILED, MAX_ROWS_SHOWN, MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_FILES, NO_MATCHING_CHATS, TOO_MANY_FILES, USE_AS_MEMORY,
 };
 use bruhs_models::logic::portable::{ImportCandidate, ImportSource, ImportedThread};
 use bruhs_models::num::ToFloatLossy as _;
@@ -20,6 +21,7 @@ use bruhs_models::EpochMs;
 use leptos::{html, prelude::*};
 
 use crate::api::{imports as api, ApiError};
+use crate::state::MoveInOpen;
 
 /// What the file input offers: ZIPs and bare JSON files.
 pub(super) const ACCEPT: &str = ".zip,.json,application/zip,application/json";
@@ -47,7 +49,7 @@ pub(super) enum ExportFocus {
 }
 
 /// The Export file tab's read, rows and imports. The dialog owns it and
-/// provides it as context, so Task 11's memory button reads the same job.
+/// provides it as context.
 #[derive(Clone, Copy)]
 pub(super) struct ExportState {
     /// The read: `Reading` until it lands, then `Ready` with its batch.
@@ -697,6 +699,36 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
         })
         .into_any()
     };
+    // The export's memory of the owner, each offered as a bruh's memory:
+    // it opens Move in at By prompt with the text and where it came from
+    // (D14). The batch can go when this dialog closes; the text travels.
+    let move_in = use_context::<MoveInOpen>().map(|open| open.0);
+    let memory_view = move |batch: &ImportBatch| {
+        batch
+            .memory
+            .iter()
+            .filter(|suggestion| !suggestion.text.trim().is_empty())
+            .map(|suggestion| {
+                let source = suggestion.source;
+                let text = suggestion.text.clone();
+                let use_memory = move |_| {
+                    if let Some(move_in) = move_in {
+                        move_in.set(Some(MoveInStart {
+                            tab: MoveInTab::ByPrompt,
+                            text: Some(text.clone()),
+                            from: Some(export_memory_from(source)),
+                        }));
+                    }
+                };
+                view! {
+                    <div class="flex flex-wrap items-center gap-2">
+                        <p data-export-memory="" class=LINE>{memory_found_line(source)}</p>
+                        <button type="button" data-export-use-memory="" class=BUTTON on:click=use_memory>{USE_AS_MEMORY}</button>
+                    </div>
+                }
+            })
+            .collect_view()
+    };
     let batch_view = move |batch: &ImportBatch| {
         let lines = batch_lines(batch);
         // The read names Grok's note among its warnings; it shows once, in
@@ -715,9 +747,11 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                 view! { <button type="button" data-export-all="" class=BUTTON aria-disabled=move || busy.get().then_some("true") on:click=move |_| import_all()>{IMPORT_ALL}</button> }
             })
         };
+        let memory = memory_view(batch);
         view! {
             {lines}
             {grok}
+            {memory}
             {list(batch)}
             <div class="flex flex-wrap items-center gap-2">
                 {all}
@@ -1052,6 +1086,35 @@ mod tests {
             assert!(tag(&html, "data-export-none").contains("text-rambutan-300"));
             assert!(!html.contains(ALREADY_HERE), "{html}");
             assert!(!html.contains(IMPORT_ALL), "{html}");
+        });
+    }
+
+    #[test]
+    fn an_exports_memory_is_offered_as_a_bruhs_memory() {
+        use bruhs_models::imports::MemorySuggestion;
+        Owner::new().with(|| {
+            let state = state(&[]);
+            let mut with_memory = batch();
+            with_memory.memory = vec![
+                MemorySuggestion {
+                    source: ImportSource::ClaudeAi,
+                    text: "Likes short answers.".into(),
+                },
+                MemorySuggestion {
+                    source: ImportSource::ChatGpt,
+                    text: "  ".into(),
+                },
+            ];
+            ready(state, with_memory);
+            let html = tab(state);
+            assert_eq!(
+                texts(&html, "data-export-memory"),
+                [escaped(&memory_found_line(ImportSource::ClaudeAi))],
+                "{html}"
+            );
+            assert_eq!(texts(&html, "data-export-use-memory"), [USE_AS_MEMORY]);
+            ready(state, batch());
+            assert!(!tab(state).contains(USE_AS_MEMORY));
         });
     }
 

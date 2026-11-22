@@ -857,6 +857,8 @@ pub fn Shell() -> impl IntoView {
             <CommandBar />
             <ProjectPickerDialog />
             <ImportThreadDialog />
+            <crate::components::crew::move_in::MoveInDialog />
+            <crate::components::crew::create::CreateBruhDialog />
             <MeetingLive />
         </div>
     }

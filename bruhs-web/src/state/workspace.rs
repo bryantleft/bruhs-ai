@@ -95,6 +95,27 @@ pub struct WorkbenchTaskHandoff(pub RwSignal<Option<bruhs_models::ids::ThreadId>
 #[derive(Copy, Clone)]
 pub struct ImportThreadOpen(pub RwSignal<bool>);
 
+/// The Move in dialog (⌘K → Move in...): the tab and text it opens with,
+/// or `None` while it is closed.
+#[derive(Copy, Clone)]
+pub struct MoveInOpen(pub RwSignal<Option<bruhs_models::imports::MoveInStart>>);
+
+/// The Create bruh dialog, mounted once in the shell so the crew rail, Move
+/// in and By prompt all open the same one (F28).
+#[derive(Copy, Clone)]
+pub struct CreateBruhOpen(pub RwSignal<bool>);
+
+/// Bumped when a crew view sends a change the live stream doesn't report,
+/// such as a memory proposal from Move in, so every open crew view reads
+/// the crew again (a bruh page behind the dialog shows the new card).
+#[derive(Copy, Clone)]
+pub struct CrewEdits(pub RwSignal<u64>);
+
+/// The persona the next Create bruh dialog starts from (**Make this bruh**).
+/// The dialog clears it once the bruh is made or the dialog closes.
+#[derive(Copy, Clone)]
+pub struct CreateBruhPrefill(pub RwSignal<Option<bruhs_models::imports::ImportPrefill>>);
+
 #[derive(Copy, Clone)]
 pub struct ProjectPickerOpen(pub ReadSignal<bool>);
 #[derive(Copy, Clone)]
@@ -302,6 +323,10 @@ pub(super) fn provide() {
     provide_context(RecentProjectsSignal(recent_projects));
     provide_context(SetRecentProjectsSignal(set_recent_projects));
     provide_context(ImportThreadOpen(RwSignal::new(false)));
+    provide_context(MoveInOpen(RwSignal::new(None)));
+    provide_context(CreateBruhOpen(RwSignal::new(false)));
+    provide_context(CreateBruhPrefill(RwSignal::new(None)));
+    provide_context(CrewEdits(RwSignal::new(0)));
     provide_context(ProjectPickerOpen(project_picker_open));
     provide_context(SetProjectPickerOpen(set_project_picker_open));
     provide_context(ProjectPickerModeSignal(project_picker_mode));
