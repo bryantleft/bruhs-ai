@@ -726,8 +726,11 @@ try {
       `UI error ${js(error)}; parts ${js(parts)}; escape files ${js(escapes)}; batches left ${js(left)}`);
   });
 
-  // 5. Claude.ai memory into By prompt.
-  await check("The Claude ZIP shows memory_found_line; Use as a bruh's memory opens By prompt prefilled", async () => {
+  // 5. Claude.ai memory into By prompt. Import thread closes as Move in
+  // opens, as on the desktop: nothing stacks under Move in, and the batch
+  // goes with Import thread before any Escape (final review C-I1).
+  const importDialog = `document.querySelector('[role=dialog][aria-label="Import thread"]')`;
+  await check("The Claude ZIP shows memory_found_line; Use as a bruh's memory closes Import thread, discards its batch and opens By prompt prefilled", async () => {
     await openExportTab(page);
     await choose(page, [claudeZip]);
     const offered = await page.waitFor(`!!${q('[data-export-use-memory]')}`, 60000);
@@ -735,14 +738,21 @@ try {
     await shoot(page, '5-claude-memory-1280x800');
     await clickOn(page, q('[data-export-use-memory]'));
     const byPrompt = await page.waitFor(`${moveTab('By prompt')}?.getAttribute('aria-selected') === 'true'`, 5000);
+    const importClosed = await page.waitFor(`!${importDialog}`, 3000);
+    const dialogs = await page.evaluate(`[...document.querySelectorAll('[role=dialog]')].map((d) => d.getAttribute('aria-label'))`);
+    const discarded = await until('the batch is discarded with Import thread', () => batches().length === 0, 10000).then(() => true).catch(() => false);
     const prefilled = await page.evaluate(`${q('[data-move-in-answer]')}?.value ?? ''`);
     const focus = await page.waitFor(`document.activeElement?.hasAttribute('data-move-in-answer')`, 3000);
     await shoot(page, '5-by-prompt-prefilled-1280x800');
+    // One Escape closes Move in and leaves no dialog behind it.
+    await page.press('Escape');
+    await sleep(300);
+    const nothingLeft = await page.evaluate(`!document.querySelector('[role=dialog]')`);
+    const landed = await page.evaluate(`(() => { const el = document.activeElement; return !!el && el !== document.body; })()`);
     await closeDialogs(page);
-    const gone = await until('the batch is discarded', () => batches().length === 0, 10000).catch(() => false);
-    record("The Claude ZIP shows memory_found_line; Use as a bruh's memory opens By prompt prefilled",
-      offered && line === COPY.memoryFound && byPrompt && /short answers/.test(prefilled) && /Bakes bread/.test(prefilled) && focus && gone,
-      `offered ${offered}; line ${js(line)}; By prompt ${byPrompt}; prefilled ${js(prefilled.slice(0, 120))}; focus in the answer ${focus}; batch discarded ${gone}`);
+    record("The Claude ZIP shows memory_found_line; Use as a bruh's memory closes Import thread, discards its batch and opens By prompt prefilled",
+      offered && line === COPY.memoryFound && byPrompt && importClosed && js(dialogs) === js(['Move in']) && discarded && /short answers/.test(prefilled) && /Bakes bread/.test(prefilled) && focus && nothingLeft && landed,
+      `offered ${offered}; line ${js(line)}; By prompt ${byPrompt}; Import thread closed ${importClosed}; dialogs ${js(dialogs)}; batch discarded before Escape ${discarded}; prefilled ${js(prefilled.slice(0, 120))}; focus in the answer ${focus}; no dialog after one Escape ${nothingLeft}; focus kept ${landed}`);
   });
 
   // 7 and 8. Move in by keyboard, Make this bruh, the proposal.
@@ -831,7 +841,7 @@ try {
   });
 
   // 10. By prompt for Scout.
-  await check('By prompt: Copy prompt puts MOVE_IN_PROMPT on the clipboard; an answer for Scout shows memory_proposed_line; a direct SetMemory shows MEMORY_CHANGED', async () => {
+  await check('By prompt: Copy prompt puts MOVE_IN_PROMPT on the clipboard; an answer for Scout shows memory_proposed_line; Cmd+Enter proposes; a direct SetMemory shows MEMORY_CHANGED', async () => {
     await palette(page, 'Move in');
     await page.waitFor(`!!(${moveTab('By prompt')})`, 5000);
     await clickOn(page, moveTab('By prompt'));
@@ -847,6 +857,14 @@ try {
     const status = await page.waitFor(`${q('[data-move-in-status]')}?.innerText.trim() === ${js(COPY.proposedScout)}`, 10000);
     const statusText = await page.evaluate(`${q('[data-move-in-status]')}?.innerText.trim()`);
     await shoot(page, '10-by-prompt-proposed-1280x800');
+    // Cmd+Enter in Their answer proposes too, as on the desktop (C-I3).
+    const pendingFor = async () => (await snapshot()).proposals.filter((p) => p.status === 'pending' && p.change.type === 'set_memory' && p.change.agent_id === scoutId).length;
+    const pendingBefore = await pendingFor();
+    await clickOn(page, q('[data-move-in-answer]'));
+    await page.type(`Keeps a garden ${tag}.`);
+    for (const type of ['keyDown', 'keyUp']) await page.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 4 });
+    const shortcut = await until('the Cmd+Enter proposal', async () => ((await pendingFor()) === pendingBefore + 1 ? true : null), 10000).catch(() => false);
+    const cleared = await page.waitFor(`${q('[data-move-in-answer]')}?.value === ''`, 5000);
     await closeDialogs(page);
     await command({ action: 'apply', change: { type: 'set_memory', agent_id: scoutId, memory: `Rewritten by the owner ${tag}.` } });
     // Another client changed it: open Scout from the rail so the page reads the crew afresh.
@@ -861,9 +879,9 @@ try {
     await clickOn(page, `[...document.querySelectorAll('[role=tab]')].find((t) => t.innerText.trim() === 'Memory')`);
     const stale = await page.waitFor(`${q('[data-proposed-stale]')}?.innerText.trim() === ${js(COPY.memoryChanged)}`, 10000);
     await shoot(page, '10-proposed-stale-1280x800');
-    record('By prompt: Copy prompt puts MOVE_IN_PROMPT on the clipboard; an answer for Scout shows memory_proposed_line; a direct SetMemory shows MEMORY_CHANGED',
-      copied && clipboard === COPY.movePrompt && status && stale,
-      `Copied ${copied}; clipboard ${clipboard === COPY.movePrompt ? 'MOVE_IN_PROMPT' : js(String(clipboard).slice(0, 80))}; status ${js(statusText)}; stale warning ${stale}`);
+    record('By prompt: Copy prompt puts MOVE_IN_PROMPT on the clipboard; an answer for Scout shows memory_proposed_line; Cmd+Enter proposes; a direct SetMemory shows MEMORY_CHANGED',
+      copied && clipboard === COPY.movePrompt && status && shortcut && cleared && stale,
+      `Copied ${copied}; clipboard ${clipboard === COPY.movePrompt ? 'MOVE_IN_PROMPT' : js(String(clipboard).slice(0, 80))}; status ${js(statusText)}; Cmd+Enter proposed ${shortcut} (pending before ${pendingBefore}), answer cleared ${cleared}; stale warning ${stale}`);
   });
 
   // 11. Hermes.
@@ -928,7 +946,7 @@ try {
   });
 
   // 12. Phone, reduced motion, panics.
-  await check('390×844 touch: the dialogs\' controls are at least 44px with no horizontal page scroll; reduced motion draws no animation frames', async () => {
+  await check('390×844 touch: the dialogs\' controls (the ready batch\'s included) are at least 44px with no horizontal page scroll; reduced motion draws no animation frames', async () => {
     const phone = await open({ width: 390, height: 844, touch: true });
     await phone.goto(`${base}/#/`);
     await phone.appReady();
@@ -936,7 +954,15 @@ try {
     await openExportTab(phone);
     const exportLayout = await layoutOf(phone, `document.querySelector('[role=dialog]')`);
     await shoot(phone, '12-export-390x844');
+    // The ready batch too: the search, the rows, Use as a bruh's memory,
+    // Import all and Choose another (the Claude chats aren't imported yet).
+    await choose(phone, [claudeZip]);
+    const readyShown = await phone.waitFor(`!!${q('[data-export-search]')} && !!${q('[data-export-all]')}`, 60000);
+    const readyLayout = await layoutOf(phone, `document.querySelector('[role=dialog]')`);
+    const searchHeight = await phone.evaluate(`Math.round(${q('[data-export-search]')}?.getBoundingClientRect().height ?? 0)`);
+    await shoot(phone, '12-export-ready-390x844');
     await closeDialogs(phone);
+    const readyGone = await until('the batch is discarded', () => batches().length === 0, 10000).then(() => true).catch(() => false);
     await palette(phone, 'Move in');
     await phone.waitFor(`!!${q('[data-move-in-make]')}`, 15000);
     const moveLayout = await layoutOf(phone, `document.querySelector('[data-move-in-agents]').closest('[role=dialog]')`);
@@ -966,11 +992,12 @@ try {
     const framesMove = await phone.evaluate('window.__frames');
     await closeDialogs(phone);
     await phone.close();
-    const small = [exportLayout, moveLayout, promptLayout].flatMap((layout) => layout.controls.filter((control) => control.height < 44));
-    measured.touch = { export: exportLayout.controls.length, moveIn: moveLayout.controls.length, byPrompt: promptLayout.controls.length };
-    record('390×844 touch: the dialogs\' controls are at least 44px with no horizontal page scroll; reduced motion draws no animation frames',
-      exportLayout.coarse && small.length === 0 && [exportLayout, moveLayout, promptLayout].every((layout) => layout.sideways <= 0 && layout.controls.length > 0) && framesOpen === 0 && framesTab === 0 && framesMove === 0,
-      `controls ${js(measured.touch)}; under 44px ${js(small)}; sideways ${[exportLayout, moveLayout, promptLayout].map((l) => l.sideways).join('/')}; frames open ${framesOpen}, after a tab ${framesTab}, Move in ${framesMove}`);
+    const layouts = [exportLayout, readyLayout, moveLayout, promptLayout];
+    const small = layouts.flatMap((layout) => layout.controls.filter((control) => control.height < 44));
+    measured.touch = { export: exportLayout.controls.length, ready: readyLayout.controls.length, search: searchHeight, moveIn: moveLayout.controls.length, byPrompt: promptLayout.controls.length };
+    record('390×844 touch: the dialogs\' controls (the ready batch\'s included) are at least 44px with no horizontal page scroll; reduced motion draws no animation frames',
+      exportLayout.coarse && readyShown && readyGone && searchHeight >= 44 && small.length === 0 && layouts.every((layout) => layout.sideways <= 0 && layout.controls.length > 0) && framesOpen === 0 && framesTab === 0 && framesMove === 0,
+      `controls ${js(measured.touch)}; ready ${readyShown}; batch discarded ${readyGone}; under 44px ${js(small)}; sideways ${layouts.map((l) => l.sideways).join('/')}; frames open ${framesOpen}, after a tab ${framesTab}, Move in ${framesMove}`);
   });
 
   const pageErrors = pages.flatMap((each) => each.runtimeErrors.filter(Boolean).map((error) => String(error).slice(0, 200)));
