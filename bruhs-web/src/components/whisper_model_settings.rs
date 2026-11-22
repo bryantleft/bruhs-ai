@@ -46,7 +46,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Transcription provider"
-            description="Applies to the final transcript on your next recording. Whisper keeps audio on this device. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on this device."
+            description="Used for the final transcript. Whisper runs locally."
         >
             <Dropdown
                 options={TranscriptionProvider::ALL.into_iter().map(|provider| DropdownOption::new(provider.key(), provider.label())).collect::<Vec<_>>()}
@@ -64,7 +64,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
         <Show when=move || transcription.get().provider == TranscriptionProvider::OpenAiCompatible>
             <SettingsRow
                 title="Server transcription model"
-                description="Enter a model ID supported by your configured server. It must return timestamped segments in verbose_json format. Configure the server URL, key, and request deadline in the capture daemon environment."
+                description="Model ID returning verbose_json segments."
             >
                 <input
                     type="text"
@@ -84,7 +84,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
         <Show when=move || transcription.get().provider == TranscriptionProvider::LocalWhisper>
         <SettingsRow
             title="Transcription model"
-            description="Downloaded on first use. Applies to your next recording."
+            description="Downloaded on first use."
         >
             <Dropdown
                 options=options()
@@ -98,7 +98,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
         </Show>
         <SettingsRow
             title="Live preview model"
-            description="Used for the live transcript while recording. Smaller is faster; the final pass uses your selected provider and model."
+            description="Local model for live transcripts while recording."
         >
             <Dropdown
                 options=options()

@@ -171,7 +171,7 @@ fn GeneralSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Model"
-            description="Change it per thread in the composer. Enter provider/model in model search to use a configured model."
+            description="Default model for new threads."
         >
             <Dropdown
                 options=model_options
@@ -184,7 +184,7 @@ fn GeneralSettings() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Access mode"
-            description="Choose whether the agent may edit files or run commands. Permission support depends on its runtime."
+            description="Default file and command permissions."
         >
             <Dropdown
                 options=mode_options
@@ -197,7 +197,7 @@ fn GeneralSettings() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Editor"
-            description="Where ⌘O and the diff panel's Open button send the project and files."
+            description="Used by ⌘O and Open buttons."
         >
             <Dropdown
                 options=editor_options
@@ -225,7 +225,7 @@ fn FollowUpBehavior() -> impl IntoView {
     view! {
         <SettingsRow
             title="Follow up behavior"
-            description="Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one."
+            description="Queue or steer when sending mid-turn."
         >
             <Dropdown
                 options=vec![
@@ -255,7 +255,7 @@ fn AutoCompactAfter() -> impl IntoView {
     view! {
         <SettingsRow
             title="Automatically compact after"
-            description="Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no automatic compaction."
+            description="Claude token threshold (100k to 1M)."
         >
             <input
                 type="text"
@@ -293,7 +293,7 @@ fn CompactIdleThreads() -> impl IntoView {
     view! {
         <SettingsRow
             title="Compact idle threads"
-            description="When you return, a Compact chip sits beside send after the prompt cache expires on a Claude thread over 200,000 tokens. Enter summarizes, then sends the draft. Before the cache expires compacts that thread while bruhs is open. Never skips both. Manual /compact still works."
+            description="Compact long Claude threads when idle."
         >
             <Dropdown
                 options=vec![
@@ -324,7 +324,7 @@ fn ThreadMessages() -> impl IntoView {
     view! {
         <SettingsRow
             title="Messages between threads"
-            description="Lets a thread's agent list your other threads, read them, and send one a message or start a new thread. Read only keeps listing and reading. Off removes the tools. Plan turns only read."
+            description="Let agents list, read, or message other threads."
         >
             <Dropdown
                 options=vec![
@@ -343,7 +343,7 @@ fn ThreadMessages() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Agent message limit"
-            description="How many messages agents may send each other in a row before the chain stops and hands back to you. A message you type starts the count again."
+            description="Max consecutive agent-to-agent messages."
         >
             <Dropdown
                 options=hop_options
@@ -381,7 +381,7 @@ fn TextGeneration() -> impl IntoView {
     view! {
         <SettingsRow
             title="Thread title instructions"
-            description="Applied to new titles and Regenerate title. A prefix: line is added in front. max N caps the length. This build does not send the other lines to a model."
+            description="Prefix and length rules for new and regenerated titles."
         >
             <textarea
                 aria-label="Thread title instructions"
@@ -396,7 +396,7 @@ fn TextGeneration() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Project title instructions"
-            description="Optional extra lines for one project. They are applied after the instructions above."
+            description="Extra rules for one project."
         >
             <Dropdown
                 options=Signal::derive(move || {
@@ -450,7 +450,7 @@ fn BetaSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Working section"
-            description="Threads that are working, or waiting on work they will resume, move into a collapsed section under the active list. A dev server left running does not count. An approval comes back to the active list. This device only."
+            description="Group working threads in the sidebar."
         >
             <Switch
                 checked=Signal::derive(move || working_section.get())
@@ -597,11 +597,11 @@ fn AboutSettings() -> impl IntoView {
         </div>
         <SettingsRow
             title="MCP servers"
-            description="Configured through Claude Code settings; connected servers appear in each session's init event."
+            description="Configured via Claude Code."
         >
             <span class="text-label-sm text-rambutan-500">"Managed by Claude Code"</span>
         </SettingsRow>
-        <SettingsRow title="Design system" description="Bruhs: fruit tokens, monospace type, no shadows.">
+        <SettingsRow title="Design system">
             <a
                 href="https://design.bruhs.dev"
                 target="_blank"
@@ -728,13 +728,13 @@ pub fn SettingsPage() -> impl IntoView {
                 </nav>
                 <div node_ref=content_ref class="min-h-0 flex-1 overflow-y-auto" on:scroll=on_scroll>
                     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-5 md:px-6">
-                        <SettingsSection id="general" title="General" description="Defaults for new turns.">
+                        <SettingsSection id="general" title="General">
                             <GeneralSettings />
                         </SettingsSection>
-                        <SettingsSection id="updates" title="Updates" description="Provider CLIs and this build of bruhs.">
+                        <SettingsSection id="updates" title="Updates">
                             <crate::components::updates::UpdatesSettings />
                         </SettingsSection>
-                        <SettingsSection id="beta" title="Beta" description="Features that are still settling.">
+                        <SettingsSection id="beta" title="Beta">
                             <BetaSettings />
                         </SettingsSection>
                         <SettingsSection id="vault" title=VAULT_TITLE description=VAULT_DESCRIPTION>
@@ -743,25 +743,25 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="apps" title=APPS_TITLE description=APPS_DESCRIPTION>
                             <AppsSettings />
                         </SettingsSection>
-                        <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and automatic meeting recording.">
+                        <SettingsSection id="calendar" title="Calendar">
                             <GoogleCalendarSettings />
                         </SettingsSection>
-                        <SettingsSection id="recording" title="Recording" description="When bruhs starts recording meetings on its own.">
+                        <SettingsSection id="recording" title="Recording">
                             <AutoRecordSettingsPanel />
                         </SettingsSection>
-                        <SettingsSection id="transcription" title="Transcription" description="Provider and model for the final transcript, plus a live preview on this device.">
+                        <SettingsSection id="transcription" title="Transcription">
                             <WhisperModelSettings />
                         </SettingsSection>
-                        <SettingsSection id="speakers" title="Speakers" description="Telling voices apart and remembering them across meetings.">
+                        <SettingsSection id="speakers" title="Speakers">
                             <DiarizeSettingsPanel />
                         </SettingsSection>
-                        <SettingsSection id="people" title="People" description="What meeting summaries record about each person.">
+                        <SettingsSection id="people" title="People">
                             <PersonalitySettingsPanel />
                         </SettingsSection>
                         <SettingsSection id="backup" title=BACKUP_TITLE description=BACKUP_DESCRIPTION>
                             <BackupSettings />
                         </SettingsSection>
-                        <SettingsSection id="keyboard" title="Keybindings" description="Customize shortcuts and when they apply. Some keys are reserved by your browser.">
+                        <SettingsSection id="keyboard" title="Keybindings" description="Some keys are reserved by your browser.">
                             <KeyboardSettings />
                         </SettingsSection>
                         <SettingsSection id="about" title="About">

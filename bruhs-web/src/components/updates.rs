@@ -285,7 +285,7 @@ pub fn UpdatesSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Check for updates"
-            description="Check installed provider CLIs for newer versions, and this checkout's origin for new commits. When off, bruhs still reads the installed versions but asks nothing online. This browser only."
+            description="Check for provider CLI and repository updates automatically."
         >
             <Switch
                 checked=Signal::derive(move || enabled.get())

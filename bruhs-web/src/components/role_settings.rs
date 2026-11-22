@@ -152,7 +152,7 @@ pub fn RoleSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Roles"
-            description="Named setups an agent can start a thread with: a model, an effort, an access mode and instructions. An agent picks one by name when it messages a new thread, so one thread can orchestrate while others write or run on the models you chose."
+            description="Named model, effort, access, and instruction presets."
         >
             <Dropdown
                 options=Signal::derive(move || {
@@ -370,7 +370,7 @@ pub fn TaskModelSettings() -> impl IntoView {
             <Switch label="Suggest next prompt" checked=Signal::derive(move || models.with(|models| models.prompt_suggestions))
                 on_change=Callback::new(move |enabled: bool| models.update(|models| models.prompt_suggestions = enabled)) />
         </SettingsRow>
-        <SettingsRow title="Prompt suggestion model" description="Automatic uses Haiku for Claude chats and Luna for Codex chats. Choose a model to override it.">
+        <SettingsRow title="Prompt suggestion model" description="Override the automatic suggestion model.">
             <Dropdown options=suggestion_model_options()
                 value=Signal::derive(move || models.with(|models| models.suggestion_model.clone().unwrap_or_default()))
                 on_change=Callback::new(move |value: String| models.update(|models| models.suggestion_model = some(value)))
@@ -378,7 +378,7 @@ pub fn TaskModelSettings() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Meeting summary model"
-            description="The Claude model that writes meeting summaries. Summaries run on Claude."
+            description="Claude model for meeting summaries."
         >
             <Dropdown
                 options=model_options("Default", Some(AgentProvider::Claude))
@@ -392,7 +392,7 @@ pub fn TaskModelSettings() -> impl IntoView {
         <MeetingSuggestionSettings />
         <SettingsRow
             title="Second opinion by Claude"
-            description="The model that reviews a Codex thread's answer when you run /second-opinion there."
+            description="Reviews Codex answers on /second-opinion."
         >
             <Dropdown
                 options=model_options("Default", Some(AgentProvider::Claude))
@@ -405,7 +405,7 @@ pub fn TaskModelSettings() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Second opinion by Codex"
-            description="The model that reviews a Claude thread's answer when you run /second-opinion there."
+            description="Reviews Claude answers on /second-opinion."
         >
             <Dropdown
                 options=model_options("Your Codex default", Some(AgentProvider::Codex))
@@ -442,7 +442,7 @@ fn MeetingSuggestionSettings() -> impl IntoView {
                 })
                 label="Meeting suggestions" class=ROW_CONTROL align_end=true />
         </SettingsRow>
-        <SettingsRow title="Meeting suggestion model" description="Automatic uses Claude Haiku. Suggestions run on Claude or Codex.">
+        <SettingsRow title="Meeting suggestion model" description="Model for live meeting suggestions.">
             <Dropdown options=suggestion_model_options()
                 value=Signal::derive(move || prefs.with(|prefs| prefs.model.clone().unwrap_or_default()))
                 on_change=Callback::new(move |value: String| prefs.update(|prefs| prefs.model = some(value)))

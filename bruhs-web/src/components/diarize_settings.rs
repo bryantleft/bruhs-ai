@@ -33,7 +33,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
     view! {
         <SettingsRow
             title="Distinguish multiple speakers"
-            description="Clusters voice embeddings on the system audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use."
+            description="Separate remote speakers (~30 MB download)."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().subspeaker_enabled)
@@ -44,7 +44,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
         <Show when=move || settings.get().subspeaker_enabled>
             <SettingsRow
                 title="Max speakers"
-                description="Higher resolves more people on large calls; lower is faster with fewer false splits."
+                description="Higher finds more people on large calls."
             >
                 <span class="text-code-sm tabular-nums text-rambutan-200">
                     {move || settings.get().max_speakers.to_string()}
@@ -66,7 +66,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
         </Show>
         <SettingsRow
             title="Read participant names from video"
-            description="Reads name hints from the screen locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission."
+            description="Read on-screen names locally. Requires Screen Recording."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().video_ocr_enabled)
@@ -76,7 +76,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Link voices across meetings"
-            description="Match new clusters against known speaker profiles by voice similarity. Off makes every cluster a fresh profile you can link by hand."
+            description="Match speakers across meetings by voice."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().cross_meeting_linking_auto)
@@ -87,7 +87,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
         <Show when=move || settings.get().cross_meeting_linking_auto>
             <SettingsRow
                 title="Linking threshold"
-                description="Higher means fewer false matches, lower means better recall. Default 0.75."
+                description="Higher reduces false matches. Default 0.75."
             >
                 <span class="text-code-sm tabular-nums text-rambutan-200">
                     {move || format!("{:.2}", settings.get().cross_meeting_linking_threshold)}

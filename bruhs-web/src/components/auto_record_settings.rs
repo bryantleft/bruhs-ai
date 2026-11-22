@@ -53,7 +53,7 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
     view! {
         <SettingsRow
             title="Auto record calendar meetings"
-            description="Start recording when a Google Calendar event begins. Needs the bruhs-capture daemon running and a calendar connected."
+            description="Start recording when a calendar event begins."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().enabled)
@@ -63,7 +63,6 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Minimum attendees"
-            description="Only events with at least this many attendees are recorded."
             disabled=disabled
         >
             <Stepper
@@ -77,7 +76,7 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Stop after the event ends"
-            description="Grace period before the recording stops."
+            description="Grace period before stopping."
             disabled=disabled
         >
             <Stepper
@@ -93,7 +92,6 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Prompt before starting"
-            description="Off means recordings start silently."
             disabled=disabled
         >
             <Switch
@@ -122,7 +120,7 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
         </SettingsRowBody>
         <SettingsRow
             title="Always skip events"
-            description="Events you told the prompt to never record."
+            description="Events excluded from auto-recording."
         >
             <span class="text-label-sm tabular-nums text-rambutan-500">
                 {move || {
