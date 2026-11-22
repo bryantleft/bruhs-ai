@@ -3,6 +3,10 @@ use bruhs_models::delivery::{
     DeliveryPreferenceChange, DeliveryPreferences, MergeMethod, SetDeliveryPreference, WritingStyle,
 };
 
+fn friendly_delivery_error(error: &impl std::fmt::Display) -> String {
+    settings_ui::friendly_server_error(error)
+}
+
 #[derive(Default)]
 pub(super) struct HostPreferences {
     pub(super) catalog: bruhs_models::delivery::writer_catalog::WriterCatalog,
@@ -84,7 +88,9 @@ impl Workspace {
                 }
                 match result {
                     Ok(value) => this.delivery_preferences.value = Some(value),
-                    Err(error) => this.delivery_preferences.error = Some(error.to_string()),
+                    Err(error) => {
+                        this.delivery_preferences.error = Some(friendly_delivery_error(&error))
+                    }
                 }
                 cx.notify();
             });
@@ -269,10 +275,13 @@ impl Workspace {
                 {
                     match result {
                         Ok(value) => this.delivery_preferences.value = Some(value),
-                        Err(error) => this.delivery_preferences.error = Some(error.to_string()),
+                        Err(error) => {
+                            this.delivery_preferences.error =
+                                Some(friendly_delivery_error(&error))
+                        }
                     }
                 } else if let Err(error) = result {
-                    this.delivery_preferences.error = Some(error.to_string());
+                    this.delivery_preferences.error = Some(friendly_delivery_error(&error));
                 }
                 if !this.delivery_preferences.pending.is_empty() {
                     this.flush_delivery_changes(cx);
@@ -369,11 +378,11 @@ impl Workspace {
             }
         });
         let mut rows = vec![
-            self.settings_row("desktop-settings-row-merge-credits","Remove agent credits when merging","Remove recognized agent footers from merge and squash messages, including auto-merge. Human co-authors are kept. Excludes merge queues and stack merges.",toggle("settings-delivery-credits","Remove agent credits when merging",credits,false)),
+            self.settings_row("desktop-settings-row-merge-credits","Remove agent credits when merging","Strip agent footers from merge and squash messages.",toggle("settings-delivery-credits","Remove agent credits when merging",credits,false)),
             self.settings_row(
                 "desktop-settings-row-merge-method",
                 "Default merge method",
-                "Preselect the method when preparing a merge in delivery.",
+                "",
                 merge,
             ),
         ];
@@ -429,7 +438,7 @@ impl Workspace {
         let template_row = self.settings_row_with_reset(
             "desktop-settings-row-pr-templates",
             "Follow pull request templates",
-            "Start new pull request descriptions with the repository’s committed template.",
+            "Use the repository’s PR template.",
             None,
             false,
             Some(templates),

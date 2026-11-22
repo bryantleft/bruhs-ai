@@ -139,7 +139,7 @@ impl Workspace {
                         state.error = Some(
                             error
                                 .conflict_message()
-                                .unwrap_or_else(|| error.to_string()),
+                                .unwrap_or_else(|| settings_ui::friendly_server_error(&error)),
                         )
                     }
                 }
@@ -216,7 +216,7 @@ impl Workspace {
             "settings-environment-local",
             "Local environment",
             format!(
-                "This machine · {} · {}",
+                "This machine, {}, {}",
                 std::env::consts::OS,
                 std::env::consts::ARCH
             ),
@@ -355,9 +355,9 @@ impl Workspace {
                     ));
                 }
             }
-            let mut detail = format!("{} · {} · local port {}", status, p.host, p.local_port);
+            let mut detail = format!("{}, {}, local port {}", status, p.host, p.local_port);
             if let Some(message) = &h.error {
-                detail.push_str(" · ");
+                detail.push_str(", ");
                 detail.push_str(message);
             }
             rows.push(self.settings_row(
@@ -416,7 +416,7 @@ impl Workspace {
                 ),
             );
         } else {
-            rows.push(self.settings_row("settings-remote-environments","Remote environments","Connect to a remote bruhs task host over SSH. Open the connected host to pair with it.",
+            rows.push(self.settings_row("settings-remote-environments","Remote environments","Connect to a remote bruhs host over SSH.",
                 on_press_view(button("environment-add".into(),"Add environment",state.saving),cx,|this,w,cx|this.edit_environment(None,w,cx)).into_any_element()));
         }
         rows.extend(self.project_environment_rows(cx));

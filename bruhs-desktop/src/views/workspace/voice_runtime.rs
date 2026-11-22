@@ -36,7 +36,12 @@ impl Workspace {
                         state.error = None;
                     }
                     Err(error) => {
-                        state.error = Some(format!("Capture host unavailable. {error}"));
+                        let friendly = settings_ui::friendly_server_error(&error);
+                        state.error = Some(if friendly == "Local server unavailable." {
+                            "Capture host unavailable.".to_owned()
+                        } else {
+                            format!("Capture host unavailable. {friendly}")
+                        });
                         state.status = None;
                     }
                 }
@@ -106,7 +111,7 @@ impl Workspace {
                 self.settings_row_opts(
                     "desktop-settings-row-voice-unload",
                     "Unload model",
-                    "Release the dictation model’s memory after the selected idle time.",
+                    "Unload the dictation model after idle time.",
                     None,
                     true,
                     div()
@@ -161,7 +166,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-voice-hardware",
                 "Transcription hardware",
-                "Choose the processor that runs dictation on this host.",
+                "Processor used for local dictation.",
                 control(dropdown(
                     HARDWARE,
                     "Transcription hardware",
@@ -179,7 +184,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-voice-unload",
                 "Unload model",
-                "Release the dictation model’s memory after the selected idle time.",
+                "Unload the dictation model after idle time.",
                 control(self.choice_control(UNLOAD, "Unload model", policy, &unload, cx)),
             ),
         ]

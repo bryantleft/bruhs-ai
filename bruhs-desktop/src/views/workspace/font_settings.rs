@@ -119,7 +119,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-word-wrap",
                 "Word wrap",
-                "Wrap long lines in code blocks, diffs and file previews by default.",
+                "Wrap long lines in code, diffs, and previews.",
                 settings_ui::control_column(self.choice_control(
                     "settings-word-wrap",
                     "Word wrap",
@@ -135,7 +135,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-composer-context",
                 "Composer context",
-                "Keep branch and worktree controls below the composer after a thread starts.",
+                "Keep branch and worktree controls below the composer.",
                 settings_ui::switch(
                     "settings-composer-context",
                     !self.fonts.hide_context_after_start,
@@ -165,7 +165,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-separate-fonts",
                 "Separate fonts",
-                "Choose individual typefaces for prompts, code and terminal output.",
+                "Pick separate fonts for prompts, code, and terminal.",
                 settings_ui::switch(
                     "settings-separate-fonts",
                     fonts.separate,
@@ -228,7 +228,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-font-smoothing",
             "Font smoothing",
-            "Use grayscale text smoothing in the native interface.",
+            "Use grayscale font smoothing.",
             settings_ui::switch(
                 "settings-font-smoothing",
                 fonts.smoothing,

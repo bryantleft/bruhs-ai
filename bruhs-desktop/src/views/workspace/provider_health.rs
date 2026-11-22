@@ -139,7 +139,7 @@ impl Workspace {
         let mut rows = vec![self.defaults_scope_row(cx), self.settings_row(
             "settings-row-provider-health",
             "Provider status",
-            "Check versions, models and sign-in on this computer.",
+            "Versions, models, and sign-in status.",
             div()
                 .flex()
                 .flex_wrap()
@@ -377,7 +377,7 @@ impl Workspace {
                 ),
             );
         }
-        self.settings_card("Provider health", "", rows)
+        self.settings_card("Providers", "", rows)
     }
 }
 

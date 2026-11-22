@@ -296,7 +296,7 @@ impl Workspace {
             .into_any_element()
         });
         self.settings_row_with_reset("desktop-settings-row-project-grouping","Project grouping",
-            "Combine checkouts of the same repository in the sidebar, project picker and command palette.",
+            "Combine checkouts of the same repository.",
             None,false,Some(toggle),reset)
     }
 
@@ -315,7 +315,7 @@ impl Workspace {
         self.settings_row(
             "settings-project-grouping-override-row",
             "Project grouping",
-            "Choose how this checkout appears alongside other copies of the repository.",
+            "How this checkout groups with other copies.",
             control,
         )
     }

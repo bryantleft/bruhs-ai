@@ -547,7 +547,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "settings-row-text-generators",
             "Model API connections",
-            "Connect a model API for thread titles, source control writing and voice cleanup.",
+            "Connect a model API for titles, commits, and voice cleanup.",
             self.gen_button("generator-add", "Add generator", false, cx, |ws, w, cx| {
                 ws.edit_generator(None, w, cx)
             }),

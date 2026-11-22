@@ -414,7 +414,7 @@ impl Workspace {
         self.settings_row(
             "desktop-settings-row-thread-details",
             "Thread details",
-            "Choose what the thread details card shows. You can also right-click the card.",
+            "Choose what the thread details card shows.",
             controls.into_any_element(),
         )
     }

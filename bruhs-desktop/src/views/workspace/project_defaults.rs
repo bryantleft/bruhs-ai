@@ -128,7 +128,7 @@ impl Workspace {
         let scoped=!self.settings_project_scope.is_empty();
         let current=if scoped {self.project_defaults.get(&self.settings_project_scope).and_then(|p|p.response_stream).map_or("inherit",|m|m.key())}else{self.response_stream.key()};
         const MODES: &[(&str,&str)]=&[("inherit","Environment default"),("live","As text arrives"),("paragraph","Show finished paragraphs"),("turn","Wait for the full response")];
-        self.settings_row("desktop-settings-row-response-stream","Response streaming","Choose when assistant text appears during a turn.",settings_ui::control_column(self.choice_control("settings-response-streaming","Response streaming",current,if scoped {MODES}else{&MODES[1..]},cx)))
+        self.settings_row("desktop-settings-row-response-stream","Response streaming","When assistant text appears during a turn.",settings_ui::control_column(self.choice_control("settings-response-streaming","Response streaming",current,if scoped {MODES}else{&MODES[1..]},cx)))
     }
 
     pub(super) fn render_settlement_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -168,7 +168,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-auto-settle",
             "Auto-settle inactive threads",
-            "Move read, inactive threads to Settled after a period of inactivity.",
+            "Move inactive threads to Settled.",
             controls,
         )];
         if days > 0 {
@@ -205,7 +205,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-settle-days",
                 "Days of inactivity before auto-settle",
-                "New activity returns a thread to the active list.",
+                "New activity makes a thread active again.",
                 controls.into_any_element(),
             ));
         }
@@ -282,9 +282,9 @@ impl Workspace {
         let id = "settings-project-defaults-scope";
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
         let (title, description) = if self.settings_section == SettingsSection::ScheduledTasks {
-            ("Project", "Show tasks from this environment or a project folder.")
+            ("Project", "Filter tasks by environment or project.")
         } else {
-            ("Project defaults and overrides", "Choose the environment or a project folder to edit.")
+            ("Project defaults and overrides", "Edit environment defaults or one project.")
         };
         self.settings_row(
             "desktop-settings-row-defaults-scope",

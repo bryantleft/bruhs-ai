@@ -59,8 +59,7 @@ impl Workspace {
             "settings-worktree-location",
             "Worktree location",
             self.location_status.clone().unwrap_or_else(|| {
-                "Choose a parent folder. New checkouts use its bruhs-worktrees subfolder."
-                    .to_owned()
+                "Parent folder for new bruhs-worktrees checkouts.".to_owned()
             }),
             settings_ui::control_column(
                 div()
@@ -199,7 +198,7 @@ impl Workspace {
         }
         creation.push(self.scoped_switch_row(
             ScopedSwitch::Remote, "settings-worktree-remote", "desktop-settings-row-worktree-remote", "Start from remote",
-            "Create new branches from the latest upstream commit. Use the local base when the remote branch is missing.",
+            "Branch from the latest upstream commit when available.",
             self.worktree_prefs.start_from_remote, cx,
         ));
         creation.push(self.settings_advanced_button(

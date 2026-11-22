@@ -195,7 +195,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-browser-engine",
             "Search engine",
-            "Used when you type a search in the browser address bar.",
+            "Used for searches in the address bar.",
             settings_ui::control_column(self.choice_control(
                 "settings-browser-search-engine",
                 "Search engine",
@@ -208,7 +208,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-browser-search-url", "Custom search URL",
                 if prefs.custom_url_valid() { "Use %s where the search terms go." }
-                else { "Enter an HTTP or HTTPS URL containing %s. Until then, searches use DuckDuckGo." },
+                else { "Enter an HTTP or HTTPS URL containing %s." },
                 settings_ui::control_column(Input::new(&self.browser_search_url_input).aria_label("Custom search URL").into_any_element()),
             ));
         }
@@ -219,7 +219,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-browser-link-target",
                 "Open links in",
-                "Choose where links in chat messages and documents open.",
+                "Where links in chat and documents open.",
                 settings_ui::control_column(self.choice_control(
                     "settings-browser-link-target",
                     "Open links in",
@@ -235,7 +235,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-browser-appearance",
                 "Default browser appearance",
-                "Choose the color scheme websites see in the embedded browser.",
+                "Color scheme for embedded browser pages.",
                 settings_ui::control_column(self.choice_control(
                     "settings-browser-appearance",
                     "Default browser appearance",
@@ -247,7 +247,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-browser-zoom",
                 "Default browser zoom",
-                "Set the page zoom in the embedded browser.",
+                "Default page zoom in the preview.",
                 settings_ui::control_column(self.choice_control(
                     "settings-browser-zoom",
                     "Default browser zoom",
@@ -472,13 +472,13 @@ impl Workspace {
             self.settings_row(
                 "settings-browser-profiles",
                 "Browser profiles",
-                "Keep cookies, sign-ins and local storage separate for each profile.",
+                "Separate cookies and site storage per profile.",
                 settings_ui::control_column(manager.into_any_element()),
             ),
             self.settings_row(
                 "settings-default-browser-profile",
                 "Default browser profile",
-                "Choose the profile used by the preview browser.",
+                "Profile used by the preview browser.",
                 settings_ui::control_column(choices.into_any_element()),
             ),
         ]
@@ -618,6 +618,6 @@ impl Workspace {
                     })),
             );
         }
-        vec![self.settings_row("desktop-settings-row-browser-viewport","Default browser viewport","Choose the page dimensions used in the preview. Responsive accepts a custom width and height in pixels.",settings_ui::control_column(controls.into_any_element()))]
+        vec![self.settings_row("desktop-settings-row-browser-viewport","Default browser viewport","Page size for the preview browser.",settings_ui::control_column(controls.into_any_element()))]
     }
 }

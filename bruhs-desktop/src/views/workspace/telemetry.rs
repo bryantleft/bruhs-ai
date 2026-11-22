@@ -69,7 +69,7 @@ impl Workspace {
                             editor.settings = Some(settings);
                             editor.error = None;
                         }
-                        Err(e) => editor.error = Some(e.to_string()),
+                        Err(e) => editor.error = Some(settings_ui::friendly_server_error(&e)),
                     }
                     cx.notify();
                 })
@@ -141,7 +141,9 @@ impl Workspace {
                             }
                         }
                         Ok(None) => "Receiver accepted the check.".into(),
-                        Err(e) => e.conflict_message().unwrap_or_else(|| e.to_string()),
+                        Err(e) => e
+                            .conflict_message()
+                            .unwrap_or_else(|| settings_ui::friendly_server_error(&e)),
                     };
                     if unchanged {
                         editor.messages[i] = Some(message);
@@ -156,7 +158,7 @@ impl Workspace {
     pub(super) fn render_export_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         let editor = &self.telemetry;
         let mut rows=vec![self.settings_row("settings-diagnostic-export","OpenTelemetry export",
-            "Send host request traces, durations and status logs to OTLP HTTP receivers. Clear a URL to disable that signal.",
+            "Send host traces, metrics, and logs to OTLP HTTP receivers.",
             on_press_view(web_button("diagnostic-export-refresh",WebButtonVariant::Outline,WebButtonSize::Small,ButtonState::disabled_if(editor.loading))
                 .aria_label("Refresh export settings").child("Refresh"),cx,|this,_,cx|this.read_export_settings(cx)).into_any_element())];
         if let Some(error) = &editor.error {

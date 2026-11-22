@@ -102,7 +102,7 @@ impl Workspace {
             ("local", "Local first-message text"),
         ]);
         self.settings_row("desktop-settings-row-text-generation-model","Text generation model",
-            "Choose the model for thread titles and worktree branch names. Automatic uses a lightweight model from the thread’s provider.",
+            "Model for thread titles and branch names.",
             self.text_model_control("settings-text-generation-model","Text generation model",selected,&choices,cx))
     }
 

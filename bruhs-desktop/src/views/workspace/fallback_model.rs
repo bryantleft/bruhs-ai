@@ -68,7 +68,7 @@ impl Workspace {
         self.settings_row(
             "settings-row-fallback-model",
             "Fallback model",
-            "Start new threads with this model when the selected provider is out of usage.",
+            "Used when the selected provider hits a usage limit.",
             div().w(px(self.model_control_width(Some(model)))).max_w_full().min_w_0()
                 .child(self.with_model_options(model, true, picker, cx)).into_any_element(),
         )

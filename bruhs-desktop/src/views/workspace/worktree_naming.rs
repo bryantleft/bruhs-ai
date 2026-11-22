@@ -286,7 +286,7 @@ impl Workspace {
             self.settings_row_with_reset(
                 "worktree-naming-mode",
                 "Worktree branch naming",
-                "Choose how a new thread names its Git branch from the first message.",
+                "How new threads name their Git branch.",
                 (naming.mode == Mode::Semantic)
                     .then(|| "The model chooses a prefix such as feat/, fix/ or refactor/.".into()),
                 false,
@@ -304,7 +304,7 @@ impl Workspace {
                 self.settings_row_with_reset(
                     "worktree-naming-prefix",
                     "Branch prefix",
-                    "For example, bruhs/ produces bruhs/add-search. Leave empty for no prefix.",
+                    "Prefix for new branches. Leave blank for none.",
                     None,
                     false,
                     Some(settings_ui::control_column(
@@ -324,7 +324,7 @@ impl Workspace {
                 let heading = self.settings_row_with_reset(
                     "worktree-naming-instructions",
                     "Branch naming instructions",
-                    "Guide the model’s complete branch name, including its prefix, spelling and case.",
+                    "Custom instructions for generated branch names.",
                     None,
                     false,
                     None,

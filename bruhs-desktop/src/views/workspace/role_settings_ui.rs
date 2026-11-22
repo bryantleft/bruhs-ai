@@ -663,7 +663,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-roles",
             "Roles",
-            "Named setups an agent can start a thread with: a model, an effort, an access mode and instructions. An agent picks one by name when it messages a new thread, so one thread can orchestrate while others write or run on the models you chose.",
+            "Named model, effort, access, and instruction presets.",
             div()
                 .flex()
                 .items_center()
@@ -857,7 +857,7 @@ impl Workspace {
             ),
             self.settings_row(
                 "desktop-settings-row-suggestion-model", "Prompt suggestion model",
-                "Automatic uses Haiku for Claude chats and Luna for Codex chats. Choose a model to override it.",
+                "Override the automatic suggestion model.",
                 settings_ui::control_column(self.role_dropdown(
                     SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID, "Prompt suggestion model",
                     self.task_models.suggestion_model.as_deref().unwrap_or(INHERIT),
@@ -867,7 +867,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-summary-model",
                 "Meeting summary model",
-                "The Claude model that writes meeting summaries. Summaries run on Claude.",
+                "Claude model for meeting summaries.",
                 settings_ui::control_column(self.role_dropdown(
                     SETTINGS_SUMMARY_MODEL_DROPDOWN_ID,
                     "Meeting summary model",
@@ -891,7 +891,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-meeting-suggestion-model",
                 "Meeting suggestion model",
-                "Automatic uses Claude Haiku. Suggestions run on Claude or Codex.",
+                "Model for live meeting suggestions.",
                 settings_ui::control_column(self.role_dropdown(
                     SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID,
                     "Meeting suggestion model",
@@ -903,7 +903,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-review-claude",
                 "Second opinion by Claude",
-                "The model that reviews a Codex thread's answer when you run /second-opinion there.",
+                "Reviews Codex answers on /second-opinion.",
                 settings_ui::control_column(self.role_dropdown(
                     SETTINGS_REVIEW_CLAUDE_DROPDOWN_ID,
                     "Second opinion by Claude",
@@ -915,7 +915,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-review-codex",
                 "Second opinion by Codex",
-                "The model that reviews a Claude thread's answer when you run /second-opinion there.",
+                "Reviews Claude answers on /second-opinion.",
                 settings_ui::control_column(self.role_dropdown(
                     SETTINGS_REVIEW_CODEX_DROPDOWN_ID,
                     "Second opinion by Codex",

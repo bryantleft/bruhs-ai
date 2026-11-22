@@ -72,7 +72,7 @@ impl Workspace {
         let folder = self.settings_row(
             "labs-sidebar-folders",
             "Boring sidebar (group by project)",
-            "Group active threads into project folders. Pinned threads stay above the folders.",
+            "Group active threads into project folders.",
             settings_ui::switch(
                 "labs-enable-folders",
                 self.labs_sidebar.enabled,
@@ -135,7 +135,7 @@ impl Workspace {
             "labs-worktree-fast-checkout",
             "Fast worktree checkout",
             self.fast_checkout.error.clone().unwrap_or_else(||
-                "Clone new worktrees from a cached checkout on this Mac. Git checks out files normally when cloning is unavailable. Turning this off deletes the cache.".to_owned()
+                "Clone new worktrees from a local APFS cache.".to_owned()
             ),
             settings_ui::switch(
                 "labs-toggle-fast-checkout",

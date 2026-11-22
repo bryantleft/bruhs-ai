@@ -319,7 +319,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "settings-diagnostic-resources",
             "Resource timeline",
-            "Desktop and child processes. Samples are collected while this panel is open.",
+            "Samples desktop and child processes while open.",
             controls.into_any_element(),
         )];
         if let Some(s) = &monitor.latest {
@@ -366,7 +366,7 @@ impl Workspace {
             );
             let rates = if s.rates_ready {
                 format!(
-                    "{} CPU · {} read · {} write",
+                    "{} CPU, {} read, {} write",
                     Metric::Cpu.display(s.total),
                     Metric::Read.display(s.total),
                     Metric::Write.display(s.total)
@@ -378,7 +378,7 @@ impl Workspace {
                 "settings-diagnostic-processes",
                 "Live processes",
                 format!(
-                    "{} processes · {} · sampled in {} ms",
+                    "{} processes, {}, sampled in {} ms",
                     s.rows.len(),
                     Metric::Memory.display(s.total),
                     s.overhead.as_millis()
@@ -403,9 +403,9 @@ impl Workspace {
                                 .min_w_0()
                                 .truncate()
                                 .pl(px((p.depth.min(8) * 10) as f32))
-                                .child(format!("{} · {}", p.name, p.pid)),
+                                .child(format!("{}, PID {}", p.name, p.pid)),
                         )
-                        .child(format!("{cpu} · {}", Metric::Memory.display(p.usage)))
+                        .child(format!("{cpu}, {}", Metric::Memory.display(p.usage)))
                         .into_any_element(),
                 );
             }

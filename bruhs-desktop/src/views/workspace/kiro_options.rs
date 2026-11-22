@@ -189,7 +189,7 @@ impl Workspace {
             toggle,
             select,
         )
-        .group_selection(summary.join(" · "), others.to_vec(), defaults);
+        .group_selection(summary.join(", "), others.to_vec(), defaults);
         div()
             .w_full()
             .min_w_0()

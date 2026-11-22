@@ -63,7 +63,9 @@ impl Workspace {
                                 field.set_value(days.to_string(), window, cx)
                             });
                         }
-                        Err(error) => state.message = Some(error.to_string()),
+                        Err(error) => {
+                            state.message = Some(settings_ui::friendly_server_error(&error));
+                        }
                     }
                     cx.notify();
                 })
@@ -96,14 +98,12 @@ impl Workspace {
         let state = &self.maintenance.captures;
         let label = "Delete old browser artifacts";
         let help = state.message.clone().unwrap_or_else(|| match state.days {
-            Some(0) => {
-                "Saved browser captures are kept until you enable automatic deletion.".into()
-            }
+            Some(0) => "Keep captures until automatic deletion is turned on.".into(),
             Some(days) => format!(
-                "Delete browser captures after {days} {}. Older capture links will stop opening.",
+                "Delete captures after {days} {}.",
                 if days == 1 { "day" } else { "days" }
             ),
-            None => "Loading the host’s browser capture policy…".into(),
+            None => "Loading capture policy…".into(),
         });
         let on = state.days.unwrap_or_default() > 0;
         let mut controls = div().min_w_0().flex().flex_col().items_end().gap_2();

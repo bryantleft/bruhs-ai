@@ -455,11 +455,9 @@ impl Workspace {
             ROW,
             "Default model",
             if scoped {
-                "Model for new threads in this project."
-            } else if environment.is_none() {
-                "Default model for new threads, selected automatically. Projects can override it."
+                "Default model for new threads in this project."
             } else {
-                "Default model for new threads. Projects can override it."
+                "Default model for new threads."
             },
             status.map(Into::into),
             false,

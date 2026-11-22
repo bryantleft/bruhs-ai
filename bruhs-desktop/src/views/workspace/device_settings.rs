@@ -66,7 +66,7 @@ impl Workspace {
                         state.snapshot = Some(snapshot);
                     }
                     Err(error) => {
-                        state.error = Some(error.to_string());
+                        state.error = Some(settings_ui::friendly_server_error(&error));
                         state.snapshot = None;
                         state.inventory = None;
                     }
@@ -113,7 +113,7 @@ impl Workspace {
                         Ok(devices) => this.local_tools.inventory = Some((grant, devices)),
                         Err(e) => {
                             this.local_tools.inventory = None;
-                            this.local_tools.error = Some(e.to_string());
+                            this.local_tools.error = Some(settings_ui::friendly_server_error(&e));
                         }
                     }
                 }
@@ -146,7 +146,7 @@ impl Workspace {
             || "Open a thread to manage its access.".into(),
             |t| {
                 format!(
-                    "{} · Permission lasts until revoked or the host restarts.",
+                    "{}. Lasts until revoked or host restart.",
                     t.chat.read(cx).thread_title
                 )
             },
@@ -208,7 +208,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "settings-local-simulators",
             "Local simulators and devices",
-            "Discover Apple simulators and connected Android devices on this host.",
+            "Discover local Apple simulators and Android devices.",
             on_press_view(scan, cx, |this, _, cx| this.scan_devices(None, cx)).into_any_element(),
         ));
         let Some((id, inventory)) = state.inventory.as_ref().filter(|(id, _)| Some(id) == grant)

@@ -329,7 +329,7 @@ impl Workspace {
             "desktop-settings-row-snapshot-window",
             "Capture a window",
             if supported {
-                "Choose a window with the system picker and attach it to your current draft."
+                "Attach a window capture to the current draft."
             } else {
                 "Window capture is available on macOS."
             },
@@ -361,7 +361,7 @@ impl Workspace {
                 self.settings_row(
                     "desktop-settings-row-snapshot-shortcut",
                     "Capture shortcut",
-                    "Choose a key combination for the window picker.",
+                    "Shortcut to open the window picker.",
                     on_press_view(
                         web_button(
                             "snapshot-shortcut",
@@ -391,7 +391,7 @@ impl Workspace {
             "desktop-settings-row-snapshot-global",
             "System-wide shortcut",
             self.capture_binding.error.clone().unwrap_or_else(|| {
-                "Capture the front window from any app with the first unconditional capture shortcut.".into()
+                "Capture the front window from any app.".into()
             }),
             settings_ui::switch(
                 "snapshot-global",
@@ -408,7 +408,7 @@ impl Workspace {
         ));
         rows.push(self.settings_row(
             "desktop-settings-row-snapshot-text", "Include app text",
-            "Attach window labels and controls when macOS grants Accessibility access. The picker uses on-device text recognition.",
+            "Attach visible text using Accessibility or on-device OCR.",
             settings_ui::switch("snapshot-include-text",self.snapshots.include_text,false,"Include app text",cx,|this,_,cx|{
                 this.snapshots.include_text = !this.snapshots.include_text;
                 this.persist_and_notify(cx);
@@ -429,7 +429,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-snapshot-flash",
             "Capture flash",
-            "Briefly outline the captured window when using the system-wide shortcut.",
+            "Outline the captured window on system-wide capture.",
             settings_ui::switch(
                 "snapshot-flash",
                 !self.snapshots.disable_flash,
@@ -443,7 +443,7 @@ impl Workspace {
             ),
         ));
         rows.push(self.settings_row(
-            "desktop-settings-row-snapshot-animations", "Capture animations", "Animate the captured thumbnail into the draft. Follows the macOS Reduce Motion preference.",
+            "desktop-settings-row-snapshot-animations", "Capture animations", "Animate captured thumbnails into the draft.",
             settings_ui::switch("snapshot-animations", !self.snapshots.disable_animations, false, "Capture animations", cx, |this,_,cx|{
                 this.snapshots.disable_animations = !this.snapshots.disable_animations;
                 this.persist_and_notify(cx);

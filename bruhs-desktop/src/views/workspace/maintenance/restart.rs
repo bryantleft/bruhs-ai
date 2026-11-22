@@ -80,7 +80,7 @@ impl Workspace {
             "settings-continue-threads",
             "desktop-settings-row-continue-threads",
             "Continue threads after restarts",
-            "Resume active provider sessions when bruhs reopens after an update, quit, or crash.",
+            "Resume active sessions after restart.",
             self.maintenance.prefs.continue_threads,
             cx,
         )

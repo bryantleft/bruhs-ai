@@ -206,15 +206,9 @@ impl Workspace {
             }
         });
         let description = match mode {
-            WritingStyle::Repository => {
-                "Match commit messages and pull request text to the project’s history."
-            }
-            WritingStyle::Conventional => {
-                "Use Conventional Commit prefixes and keep pull request titles and descriptions short."
-            }
-            WritingStyle::Custom => {
-                "Use your instructions for commit messages and pull request text."
-            }
+            WritingStyle::Repository => "Match repository commit and PR style.",
+            WritingStyle::Conventional => "Use Conventional Commits.",
+            WritingStyle::Custom => "Use custom writing instructions.",
         };
         let row = self.settings_row_with_reset(
             "settings-row-writing-style",
@@ -274,7 +268,7 @@ impl Workspace {
         let guide_row = self.settings_row_with_reset(
             "settings-row-review-guides",
             "Review guides (beta)",
-            "Add a Guide tab to pull requests. An agent explains the changes and points out decisions that need review.",
+            "Add an agent-generated Guide tab to pull requests.",
             None,
             false,
             Some(guide_switch),
@@ -307,7 +301,7 @@ impl Workspace {
             rows.push(self.settings_row_with_reset(
                 "settings-row-guide-model",
                 "Review guide model",
-                "Use a coding agent to read the pull request. Turn this off to follow the source control writer.",
+                "Separate coding agent for PR guides.",
                 None,
                 false,
                 Some(control),
@@ -321,7 +315,7 @@ impl Workspace {
             let label = self.settings_row_with_reset(
                 "settings-row-guide-instructions",
                 "Review guide instructions",
-                "Choose what guides emphasize, how stops are ordered and what to skip.",
+                "What guides should emphasize or skip.",
                 None,
                 false,
                 None,
@@ -381,7 +375,7 @@ impl Workspace {
             rows.push(self.settings_row_with_reset(
                 "settings-row-writer-model",
                 "Source control writer model",
-                "Choose a separate model for commit messages, pull request text and branch names. Turn it off to use the text generation model.",
+                "Separate model for commits, PRs, and branch names.",
                 None,
                 false,
                 Some(control),
@@ -569,7 +563,7 @@ impl Workspace {
                 select,
             )
             .compact()
-            .group_selection(summary.join(" · "), others.to_vec(), defaults)
+            .group_selection(summary.join(", "), others.to_vec(), defaults)
             .into_any_element(),
         )
     }

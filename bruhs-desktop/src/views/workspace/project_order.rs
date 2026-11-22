@@ -195,7 +195,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-project-order",
             "Project order",
-            "Order of folders in the project picker and command palette.",
+            "Sort folders in the picker and palette.",
             settings_ui::control_column(self.choice_control(
                 "settings-project-order",
                 "Project order",
