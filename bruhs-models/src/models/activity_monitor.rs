@@ -23,7 +23,7 @@ pub struct ActivityMonitorStatus {
     pub probe_error: Option<String>,
 }
 
-pub const ACTIVITY_MONITOR_HELP: &str = "Periodically checks microphone volume locally to suggest recording. Does not save audio or identify a meeting. Permission lasts only while this app session stays connected; turn it on again after reopening. Requires microphone access.";
+pub const ACTIVITY_MONITOR_HELP: &str = "Check mic level locally to suggest recording. Session only; requires microphone access.";
 
 /// Why a microphone-activity permission request or status was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

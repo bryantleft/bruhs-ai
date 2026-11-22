@@ -2,7 +2,7 @@
 //! values in braces (`{size}`); [`super::fill`] puts the values in.
 
 pub const BACKUP_TITLE: &str = "Backup";
-pub const BACKUP_DESCRIPTION: &str = "One encrypted file with your threads, bruhs, vault, mail and meetings. Restore it here or on another computer.";
+pub const BACKUP_DESCRIPTION: &str = "Encrypted archive of threads, bruhs, vault, mail, and meetings.";
 pub const MAKE_GROUP: &str = "Make a backup";
 pub const RESTORE_GROUP: &str = "Restore";
 pub const KEPT_GROUP: &str = "Kept from earlier restores";

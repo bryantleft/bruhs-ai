@@ -21,7 +21,7 @@ pub use form::*;
 
 // Page copy.
 pub const APPS_TITLE: &str = "Apps";
-pub const APPS_DESCRIPTION: &str = "Connect apps with a token. A bruh you grant an app calls it through Bruhs, which keeps the token in your OS keychain and never shows it to the bruh.";
+pub const APPS_DESCRIPTION: &str = "Connect apps with tokens stored in your OS keychain.";
 pub const CONNECT: &str = "Connect";
 pub const TEST: &str = "Test";
 pub const REPLACE_TOKEN: &str = "Replace token";

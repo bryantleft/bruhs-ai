@@ -68,7 +68,7 @@ impl Proactivity {
     }
 }
 
-pub const PROACTIVITY_HELP: &str = "Private suggestions in the live meeting dock: action items, open questions, conflicts and related tasks. When I ask runs only when you select Suggest now. Automatic runs after new speech or a pause, at most about twice a minute. Each round uses one extra model request and pauses when usage limits are reported.";
+pub const PROACTIVITY_HELP: &str = "Live meeting suggestions in the dock. Uses an extra model request and pauses at usage limits.";
 
 /// Lowest and highest score a thought needs before it is shown. Scores are
 /// the model's 1 to 5 rating of how strongly it should speak up now.

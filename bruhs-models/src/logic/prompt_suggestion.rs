@@ -9,7 +9,7 @@ use crate::agent::{AgentProvider, Role};
 pub const MAX_SUGGESTION_CHARS: usize = 240;
 pub const MAX_CONTEXT_MESSAGES: usize = 6;
 pub const MAX_MESSAGE_CHARS: usize = 2_000;
-pub const SUGGESTION_HELP: &str = "Predict a next message after a reply finishes. Tab accepts, Escape dismisses. On by default. Uses one extra model request per reply and pauses when usage limits are reported.";
+pub const SUGGESTION_HELP: &str = "Predict the next prompt after a reply (Tab to accept).";
 
 /// Stay on the thread's provider without inheriting its expensive chat model.
 /// An empty id disables suggestions for runtimes without an isolated no-tools request.
