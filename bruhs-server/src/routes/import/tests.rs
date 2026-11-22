@@ -15,7 +15,7 @@ use bruhs_core::import::{ImportHost, Limits};
 use bruhs_core::AppState;
 use bruhs_models::imports::{
     ImportBatch, ImportJob, ImportJobState, EXPORT_TOO_LARGE, FOLDER_MISSING, IMPORT_BUSY,
-    IMPORT_GONE, IMPORT_INVALID, OWNER_ONLY_IMPORT, TOO_MANY_FILES,
+    IMPORT_CHAT_GONE, IMPORT_GONE, IMPORT_INVALID, OWNER_ONLY_IMPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{ImportSource, ImportedThread};
 use reqwest::multipart::{Form, Part};
@@ -330,8 +330,12 @@ async fn an_upload_round_trips() {
         "/api/import/thread?source=chatgpt&id=nope&upload={}",
         job.id
     );
+    // The batch is still here, so the line names the chat (final review B).
     let (status, text) = Fixture::send(fixture.request("GET", &unknown)).await;
-    assert_eq!((status, text), (StatusCode::NOT_FOUND, error(IMPORT_GONE)));
+    assert_eq!(
+        (status, text),
+        (StatusCode::NOT_FOUND, error(IMPORT_CHAT_GONE))
+    );
 
     let job_path = format!("/api/import/uploads/{}", job.id);
     let (status, cache, text) = Fixture::send_full(fixture.request("DELETE", &job_path)).await;
@@ -494,6 +498,49 @@ async fn chunked_uploads_are_read_and_capped() {
         (StatusCode::PAYLOAD_TOO_LARGE, error(EXPORT_TOO_LARGE))
     );
     assert_eq!(fixture.settled_batches(&before).await, before);
+}
+
+/// Final review B: the parser holds at most `MAX_HELD` bytes outside a
+/// field's data. A header block that never ends is refused once that much
+/// arrives, while its client still holds the body open, not buffered for
+/// as long as the client sends.
+#[tokio::test]
+async fn a_field_header_that_never_ends_is_refused() {
+    let fixture = Fixture::new().await;
+    let (sender, receiver): (BodySender, _) = tokio::sync::mpsc::channel(4);
+    let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        receiver.recv().await.map(|item| (item, receiver))
+    });
+    let request = fixture
+        .request("POST", "/api/import/uploads")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(reqwest::Body::wrap_stream(stream));
+    let pending = tokio::spawn(Fixture::send_full(request));
+    let head = format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"\r\nX-Pad: ");
+    sender.send(Ok(head.into_bytes())).await.unwrap();
+    let pieces = usize::try_from(super::MAX_HELD >> 20).unwrap() + 2;
+    let feeder = tokio::spawn(async move {
+        for _ in 0..pieces {
+            if sender.send(Ok(vec![b'a'; 1 << 20])).await.is_err() {
+                return;
+            }
+        }
+        // Held open: the client never ends the body.
+        std::future::pending::<()>().await;
+    });
+    let (status, _, text) = tokio::time::timeout(Duration::from_secs(30), pending)
+        .await
+        .expect("the endless header block is refused")
+        .unwrap();
+    feeder.abort();
+    assert_eq!(
+        (status, text),
+        (StatusCode::BAD_REQUEST, error(IMPORT_INVALID))
+    );
+    assert!(fixture.no_batches().await);
 }
 
 #[tokio::test]

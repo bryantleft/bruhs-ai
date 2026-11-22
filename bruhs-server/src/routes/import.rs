@@ -23,14 +23,16 @@
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
+    body::Body,
     extract::{
         multipart::MultipartRejection,
         rejection::{JsonRejection, PathRejection, QueryRejection},
-        DefaultBodyLimit, Multipart, Path, Query, State,
+        DefaultBodyLimit, FromRequest, Multipart, Path, Query, Request, State,
     },
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -40,13 +42,14 @@ use axum::{
 use bruhs_core::import::{self, ImportError, ImportHost, ImportRoots, ImportUpload};
 use bruhs_models::imports::{
     valid_batch_id, AgentScan, AgentScanQuery, ImportJob, ImportPaths, EXPORT_TOO_LARGE,
-    IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, IMPORT_INVALID, MAX_PATHS_BODY, OWNER_ONLY_IMPORT,
-    TOO_MANY_FILES,
+    IMPORT_BUSY, IMPORT_CHAT_GONE, IMPORT_FAILED, IMPORT_GONE, IMPORT_INVALID, MAX_PATHS_BODY,
+    OWNER_ONLY_IMPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     ExportT3Request, ExportT3Response, ImportCandidate, ImportListQuery, ImportSource,
     ImportThreadQuery, ImportedThread,
 };
+use futures_util::StreamExt as _;
 
 use crate::config::{Config, ServerState};
 use crate::error::AppError;
@@ -60,6 +63,11 @@ mod tests;
 const WRITE_BYTES: usize = 1 << 20;
 /// How often an upload waiting on its client looks for a `DELETE` (M2).
 const WATCH_EVERY: Duration = Duration::from_millis(200);
+/// The most bytes of an upload's body read but not yet handed on as a
+/// field's data: what the multipart parser may hold in a preamble, a
+/// boundary or a field's header block (final review B). Field data passes
+/// through in pieces far smaller.
+const MAX_HELD: u64 = 8 << 20;
 
 /// The read and agent routes; `main` adds the sessions, thread and T3
 /// routes beside them. Only the upload lifts the body limit: the core
@@ -152,7 +160,9 @@ fn import_error(error: ImportError) -> Refusal {
         // `NO_SPACE_IMPORT` with the size to free, as Backup's `NO_SPACE`.
         error @ ImportError::Space(_) => AppError::Unavailable(error.to_string()),
         ImportError::Busy => AppError::Conflict(IMPORT_BUSY.into()),
-        ImportError::Gone | ImportError::NotFound { .. } => gone(),
+        ImportError::Gone => gone(),
+        // The batch or the tool is still here; only the chat isn't.
+        ImportError::NotFound { .. } => AppError::NotFound(IMPORT_CHAT_GONE.into()),
         ImportError::NotListed(_) => invalid(),
         _ => failed(),
     };
@@ -257,11 +267,16 @@ pub async fn post_upload(
     State(config): State<Arc<Config>>,
     imports: Option<Extension<ImportHost>>,
     headers: HeaderMap,
-    multipart: Result<Multipart, MultipartRejection>,
+    request: Request,
 ) -> Result<(StatusCode, Json<ImportJob>), Refusal> {
     owner_only_import(&config.access, &headers)?;
     let host = host(imports)?;
-    let mut multipart = multipart.map_err(|_| invalid())?;
+    let held = Arc::new(Held::default());
+    let (parts, body) = request.into_parts();
+    let request = Request::from_parts(parts, held.body(body));
+    let mut multipart = Multipart::from_request(request, &())
+        .await
+        .map_err(|_: MultipartRejection| invalid())?;
     let mut receiving = Receiving(Some(blocking(move || host.begin_upload()).await?));
     loop {
         let field = match receiving.wait(multipart.next_field()).await {
@@ -274,7 +289,7 @@ pub async fn post_upload(
             return Err(receiving.end(invalid()).await);
         }
         receiving.step(ImportUpload::next_file).await?;
-        receive(field, &mut receiving).await?;
+        receive(field, &mut receiving, &held).await?;
     }
     let upload = receiving.take()?;
     let job = blocking(move || upload.finish()).await?;
@@ -286,6 +301,7 @@ pub async fn post_upload(
 async fn receive(
     mut field: axum::extract::multipart::Field<'_>,
     receiving: &mut Receiving,
+    held: &Held,
 ) -> Result<(), Refusal> {
     let mut pending = Vec::with_capacity(WRITE_BYTES);
     loop {
@@ -296,6 +312,7 @@ async fn receive(
         };
         let end = chunk.is_none();
         if let Some(chunk) = chunk {
+            held.pass(&chunk);
             pending.extend_from_slice(&chunk);
         }
         if pending.len() >= WRITE_BYTES || (end && !pending.is_empty()) {
@@ -306,6 +323,41 @@ async fn receive(
             return Ok(());
         }
     }
+}
+
+/// How much of an upload's body was read and how much was handed on as
+/// field data. The body ends with an error once more than [`MAX_HELD`]
+/// was read and not handed on, which the parser then answers as
+/// `IMPORT_INVALID`: axum's parser has no limit of its own on what it
+/// holds while it looks for a boundary or a header block's end.
+#[derive(Default)]
+struct Held {
+    read: AtomicU64,
+    passed: AtomicU64,
+}
+
+impl Held {
+    /// `body`, counted.
+    fn body(self: &Arc<Self>, body: Body) -> Body {
+        let held = Arc::clone(self);
+        Body::from_stream(body.into_data_stream().map(move |chunk| {
+            let chunk = chunk?;
+            let read = held.read.fetch_add(byte_len(&chunk), Ordering::Relaxed) + byte_len(&chunk);
+            if read.saturating_sub(held.passed.load(Ordering::Relaxed)) > MAX_HELD {
+                return Err(axum::BoxError::from("held too long"));
+            }
+            Ok(chunk)
+        }))
+    }
+
+    /// Counts `chunk` as handed on.
+    fn pass(&self, chunk: &[u8]) {
+        self.passed.fetch_add(byte_len(chunk), Ordering::Relaxed);
+    }
+}
+
+fn byte_len(bytes: &[u8]) -> u64 {
+    u64::try_from(bytes.len()).unwrap_or(u64::MAX)
 }
 
 /// The upload a request is writing. Whatever ends the request, the
