@@ -1090,31 +1090,31 @@ impl Workspace {
                             .child(self.render_import_source_tabs(cx))
                             .when(!on_export, |header| {
                                 header.child(
-                                div()
-                                    .debug_selector(|| "desktop-import-search".to_string())
-                                    .mt_2()
-                                    .w_full()
-                                    .rounded(px(IMPORT_RADIUS_PX))
-                                    .bg(theme::longan_900())
-                                    .border_1()
-                                    .border_color(theme::longan_700())
-                                    // Web `px-2.5`, less the 1px border.
-                                    .px(px(9.0))
-                                    // A small (24px) input in 2px padding and a
-                                    // 1px border: 30px, the web's py-1.5 field.
-                                    .py(px(2.0))
-                                    .child(
-                                        Input::new(&self.import_input)
-                                            .small()
-                                            .aria_label("Search threads")
-                                            .appearance(false)
-                                            .px_0()
-                                            .bordered(false)
-                                            .focus_bordered(false)
-                                            .cleanable(false)
-                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                            .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
-                                    ),
+                                    div()
+                                        .debug_selector(|| "desktop-import-search".to_string())
+                                        .mt_2()
+                                        .w_full()
+                                        .rounded(px(IMPORT_RADIUS_PX))
+                                        .bg(theme::longan_900())
+                                        .border_1()
+                                        .border_color(theme::longan_700())
+                                        // Web `px-2.5`, less the 1px border.
+                                        .px(px(9.0))
+                                        // A small (24px) input in 2px padding and a
+                                        // 1px border: 30px, the web's py-1.5 field.
+                                        .py(px(2.0))
+                                        .child(
+                                            Input::new(&self.import_input)
+                                                .small()
+                                                .aria_label("Search threads")
+                                                .appearance(false)
+                                                .px_0()
+                                                .bordered(false)
+                                                .focus_bordered(false)
+                                                .cleanable(false)
+                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                                .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
+                                        ),
                                 )
                             }),
                     )

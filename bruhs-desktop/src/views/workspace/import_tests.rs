@@ -434,9 +434,19 @@ fn export_batch() -> ImportBatch {
     ImportBatch {
         id: BATCH.into(),
         candidates: vec![
-            export_row(ImportSource::ChatGpt, "a1", "Trip to Lisbon", 1_600_000_000_000),
+            export_row(
+                ImportSource::ChatGpt,
+                "a1",
+                "Trip to Lisbon",
+                1_600_000_000_000,
+            ),
             export_row(ImportSource::Grok, "g1", "Rocket notes", 1_600_000_100_000),
-            export_row(ImportSource::ChatGpt, "a2", "lisbon restaurants", 1_600_000_200_000),
+            export_row(
+                ImportSource::ChatGpt,
+                "a2",
+                "lisbon restaurants",
+                1_600_000_200_000,
+            ),
         ],
         counts: BatchCounts {
             conversations: 3,
@@ -495,7 +505,9 @@ fn fake_calls(fake: &Rc<FakeImports>) -> ExportCalls {
     let discard = Rc::clone(fake);
     ExportCalls {
         read: Rc::new(move |paths: Vec<String>, _cx: &gpui::App| {
-            read.calls.borrow_mut().push(format!("read {}", paths.join(",")));
+            read.calls
+                .borrow_mut()
+                .push(format!("read {}", paths.join(",")));
             let answer = read.reads.borrow_mut().pop_front();
             Task::ready(answer.unwrap_or_else(|| Err(NOT_AN_EXPORT.into())))
         }),
@@ -519,7 +531,9 @@ fn fake_calls(fake: &Rc<FakeImports>) -> ExportCalls {
                     .iter()
                     .find(|row| row.source == source && row.id == id)
                     .cloned();
-                let answer = row.map(|row| exported(&row)).ok_or_else(|| "gone".to_string());
+                let answer = row
+                    .map(|row| exported(&row))
+                    .ok_or_else(|| "gone".to_string());
                 match *thread.slow_threads.borrow() {
                     Some(after) => {
                         let timer = cx.background_executor().timer(after);
@@ -601,12 +615,14 @@ fn read_export(
     cx.run_until_parked();
 }
 
-fn export_handles(
-    workspace: &Entity<Workspace>,
-    cx: &mut VisualTestContext,
-) -> [FocusHandle; 5] {
+fn export_handles(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> [FocusHandle; 5] {
     workspace.read_with(cx, |workspace, cx| {
-        let ui = workspace.import_picker.export.ui.as_ref().expect("export tab");
+        let ui = workspace
+            .import_picker
+            .export
+            .ui
+            .as_ref()
+            .expect("export tab");
         [
             ui.search.focus_handle(cx),
             ui.list.clone(),
@@ -626,7 +642,10 @@ fn export_rows_hide_imported_chats() {
     };
     let visible = visible_candidates(&batch.candidates, &HashSet::new(), &known);
     assert_eq!(
-        visible.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        visible
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
         ["a1", "a2"]
     );
     assert_eq!(ids(export_rows(&batch, &known, "")), ["a1", "a2"]);
@@ -652,7 +671,10 @@ fn the_grok_note_shows_once_among_the_lines() {
     warned.warnings = vec![GROK_BEST_EFFORT.to_string()];
     let lines = export_lines(&warned);
     assert_eq!(
-        lines.iter().filter(|(line, _)| line == GROK_BEST_EFFORT).count(),
+        lines
+            .iter()
+            .filter(|(line, _)| line == GROK_BEST_EFFORT)
+            .count(),
         1
     );
     assert_eq!(lines.last(), Some(&(GROK_BEST_EFFORT.to_string(), true)));
@@ -700,7 +722,10 @@ fn an_export_chat_keeps_its_key_and_time_and_the_dialog(cx: &mut gpui::TestAppCo
             "an export import keeps the dialog open (F23)"
         );
         let thread = workspace.active_thread().expect("the import is open");
-        assert_eq!(thread.updated_at_ms, row.updated_at, "sorts by when it happened");
+        assert_eq!(
+            thread.updated_at_ms, row.updated_at,
+            "sorts by when it happened"
+        );
         assert!(thread.project_name.is_empty());
         let chat = thread.chat.read(cx);
         assert_eq!(chat.import_key.as_deref(), Some("grok:g1"));
@@ -742,11 +767,23 @@ fn the_export_tab_uses_the_shared_lines(cx: &mut gpui::TestAppContext) {
     let fake = Rc::new(FakeImports::default());
     let (workspace, cx) = export_tab(cx, &fake);
     for line in [EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK] {
-        assert!(drawn(cx, format!("desktop-import-export-help:{line}")), "{line}");
+        assert!(
+            drawn(cx, format!("desktop-import-export-help:{line}")),
+            "{line}"
+        );
     }
-    assert!(drawn(cx, format!("desktop-import-export-warn:{GROK_BEST_EFFORT}")));
-    assert!(drawn(cx, format!("desktop-import-export-button:{CHOOSE_EXPORT}")));
-    assert!(!drawn(cx, format!("desktop-import-export-button:{IMPORT_ALL}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-warn:{GROK_BEST_EFFORT}")
+    ));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-button:{CHOOSE_EXPORT}")
+    ));
+    assert!(!drawn(
+        cx,
+        format!("desktop-import-export-button:{IMPORT_ALL}")
+    ));
     // The local search belongs to the local tabs only (F24).
     assert!(!drawn(cx, "desktop-import-search".into()));
 
@@ -755,25 +792,58 @@ fn the_export_tab_uses_the_shared_lines(cx: &mut gpui::TestAppContext) {
     let lines = batch_lines(&batch);
     assert!(!lines.is_empty());
     for line in &lines {
-        assert!(drawn(cx, format!("desktop-import-export-line:{line}")), "{line}");
+        assert!(
+            drawn(cx, format!("desktop-import-export-line:{line}")),
+            "{line}"
+        );
     }
     // Grok's note: once, in durian.
-    assert!(drawn(cx, format!("desktop-import-export-warn:{GROK_BEST_EFFORT}")));
-    assert!(!drawn(cx, format!("desktop-import-export-line:{GROK_BEST_EFFORT}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-warn:{GROK_BEST_EFFORT}")
+    ));
+    assert!(!drawn(
+        cx,
+        format!("desktop-import-export-line:{GROK_BEST_EFFORT}")
+    ));
     let now = EpochMs::now();
     for row in &batch.candidates {
         let detail = export_row_detail(row, now);
-        assert!(drawn(cx, format!("desktop-import-export-detail:{detail}")), "{detail}");
-        assert!(drawn(cx, format!("desktop-import-export-row-{}", import_key(row.source, &row.id))));
+        assert!(
+            drawn(cx, format!("desktop-import-export-detail:{detail}")),
+            "{detail}"
+        );
+        assert!(drawn(
+            cx,
+            format!(
+                "desktop-import-export-row-{}",
+                import_key(row.source, &row.id)
+            )
+        ));
     }
     assert!(export_row_detail(&batch.candidates[1], now).ends_with(", best effort"));
-    assert!(drawn(cx, format!("desktop-import-export-button:{IMPORT_ALL}")));
-    assert!(drawn(cx, format!("desktop-import-export-button:{CHOOSE_ANOTHER}")));
-    assert!(!drawn(cx, format!("desktop-import-export-button:{CHOOSE_EXPORT}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-button:{IMPORT_ALL}")
+    ));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-button:{CHOOSE_ANOTHER}")
+    ));
+    assert!(!drawn(
+        cx,
+        format!("desktop-import-export-button:{CHOOSE_EXPORT}")
+    ));
     for line in [EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK] {
-        assert!(!drawn(cx, format!("desktop-import-export-help:{line}")), "{line}");
+        assert!(
+            !drawn(cx, format!("desktop-import-export-help:{line}")),
+            "{line}"
+        );
     }
-    assert!(!drawn(cx, format!("desktop-import-export-line:{ALREADY_HERE}")));
+    assert!(!drawn(
+        cx,
+        format!("desktop-import-export-line:{ALREADY_HERE}")
+    ));
 }
 
 #[gpui::test]
@@ -796,20 +866,24 @@ fn tab_reaches_choose_export_file(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
-fn a_ready_batch_tabs_from_the_search_to_the_rows_then_the_buttons(
-    cx: &mut gpui::TestAppContext,
-) {
+fn a_ready_batch_tabs_from_the_search_to_the_rows_then_the_buttons(cx: &mut gpui::TestAppContext) {
     let fake = Rc::new(FakeImports::default());
     let (workspace, cx) = export_tab(cx, &fake);
     read_export(&workspace, cx, &fake, ready(export_batch()));
     let [search, list, all, another, _] = export_handles(&workspace, cx);
-    assert!(focused(cx).as_ref() == Some(&search), "a ready batch focuses the search");
+    assert!(
+        focused(cx).as_ref() == Some(&search),
+        "a ready batch focuses the search"
+    );
     cx.simulate_keystrokes("tab");
     assert!(focused(cx).as_ref() == Some(&list), "then the rows");
     cx.simulate_keystrokes("tab");
     assert!(focused(cx).as_ref() == Some(&all), "then Import all");
     cx.simulate_keystrokes("tab");
-    assert!(focused(cx).as_ref() == Some(&another), "then Choose another file");
+    assert!(
+        focused(cx).as_ref() == Some(&another),
+        "then Choose another file"
+    );
 }
 
 #[gpui::test]
@@ -841,10 +915,16 @@ fn down_then_enter_imports_the_second_row(cx: &mut gpui::TestAppContext) {
             .map(|row| row.id.clone())
             .collect();
         assert_eq!(left, ["a1", "a2"], "the row leaves the list");
-        assert_eq!(workspace.import_picker.export.status.as_deref(), Some(status.as_str()));
+        assert_eq!(
+            workspace.import_picker.export.status.as_deref(),
+            Some(status.as_str())
+        );
     });
     assert!(drawn(cx, format!("desktop-import-export-status:{status}")));
-    assert!(focused(cx).as_ref() == Some(&search), "focus stays on the search");
+    assert!(
+        focused(cx).as_ref() == Some(&search),
+        "focus stays on the search"
+    );
 }
 
 #[gpui::test]
@@ -877,15 +957,30 @@ fn import_all_brings_in_the_rows_in_order(cx: &mut gpui::TestAppContext) {
         }
         assert_eq!(workspace.top_layer, Some(TopLayer::ImportThread));
         assert!(!workspace.import_picker.export.importing);
-        assert_eq!(workspace.import_picker.export.status.as_deref(), Some(done.as_str()));
+        assert_eq!(
+            workspace.import_picker.export.status.as_deref(),
+            Some(done.as_str())
+        );
         // The tab's line is the one announcement: no app notice (web M10).
         let notice = workspace.meetings_hub.read(cx).notice.as_ref();
-        assert!(notice.is_none_or(|notice| !notice.message.contains("Imported")), "{notice:?}");
+        assert!(
+            notice.is_none_or(|notice| !notice.message.contains("Imported")),
+            "{notice:?}"
+        );
     });
-    assert!(drawn(cx, format!("desktop-import-export-line:{ALREADY_HERE}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-line:{ALREADY_HERE}")
+    ));
     assert!(drawn(cx, format!("desktop-import-export-status:{done}")));
-    assert!(!drawn(cx, format!("desktop-import-export-button:{IMPORT_ALL}")));
-    assert!(focused(cx).as_ref() == Some(&another), "nothing left: Choose another file");
+    assert!(!drawn(
+        cx,
+        format!("desktop-import-export-button:{IMPORT_ALL}")
+    ));
+    assert!(
+        focused(cx).as_ref() == Some(&another),
+        "nothing left: Choose another file"
+    );
 }
 
 #[gpui::test]
@@ -896,7 +991,9 @@ fn import_all_stops_at_a_failure_and_says_so(cx: &mut gpui::TestAppContext) {
     *fake.failing_thread.borrow_mut() = Some("g1".into());
     let (workspace, cx) = export_tab(cx, &fake);
     read_export(&workspace, cx, &fake, ready(batch));
-    workspace.update_in(cx, |workspace, window, cx| workspace.import_all_exports(window, cx));
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.import_all_exports(window, cx)
+    });
     cx.run_until_parked();
     assert_eq!(fake.calls().len(), 3, "a1, then g1 fails, and a2 waits");
     let done = imported_line(1, ImportSource::ChatGpt);
@@ -906,7 +1003,10 @@ fn import_all_stops_at_a_failure_and_says_so(cx: &mut gpui::TestAppContext) {
         assert_eq!(export.status.as_deref(), Some(done.as_str()));
         assert!(!export.importing);
     });
-    assert!(drawn(cx, format!("desktop-import-export-error:{IMPORT_GONE}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-error:{IMPORT_GONE}")
+    ));
 }
 
 #[gpui::test]
@@ -936,7 +1036,10 @@ fn a_read_is_polled_until_its_batch_is_ready(cx: &mut gpui::TestAppContext) {
         fake.calls()[1..],
         [format!("job {BATCH}"), format!("job {BATCH}")]
     );
-    assert!(drawn(cx, format!("desktop-import-export-button:{IMPORT_ALL}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-button:{IMPORT_ALL}")
+    ));
     // Ready ends the polling.
     cx.executor().advance_clock(Duration::from_millis(2_000));
     cx.run_until_parked();
@@ -952,7 +1055,10 @@ fn a_failed_read_shows_its_copy_and_focuses_choose(cx: &mut gpui::TestAppContext
     });
     cx.run_until_parked();
     let [.., choose] = export_handles(&workspace, cx);
-    assert!(drawn(cx, format!("desktop-import-export-error:{NOT_AN_EXPORT}")));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-error:{NOT_AN_EXPORT}")
+    ));
     assert!(focused(cx).as_ref() == Some(&choose));
 }
 
@@ -987,7 +1093,9 @@ fn import_all_stops_when_the_dialog_closes(cx: &mut gpui::TestAppContext) {
     let (workspace, cx) = export_tab(cx, &fake);
     read_export(&workspace, cx, &fake, ready(batch));
     let before = workspace.read_with(cx, |workspace, _| workspace.threads.len());
-    workspace.update_in(cx, |workspace, window, cx| workspace.import_all_exports(window, cx));
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.import_all_exports(window, cx)
+    });
     cx.run_until_parked();
     assert_eq!(fake.calls().len(), 2, "the first chat is on its way");
     press(cx, "escape");
@@ -996,12 +1104,19 @@ fn import_all_stops_when_the_dialog_closes(cx: &mut gpui::TestAppContext) {
     let calls = fake.calls();
     assert_eq!(
         calls[1..],
-        [format!("thread chatgpt:a1 {BATCH}"), format!("discard {BATCH}")],
+        [
+            format!("thread chatgpt:a1 {BATCH}"),
+            format!("discard {BATCH}")
+        ],
         "no further chat is asked for after the close"
     );
     workspace.read_with(cx, |workspace, cx| {
         assert!(workspace.top_layer.is_none());
-        assert_eq!(workspace.threads.len(), before, "the late answer adds no thread");
+        assert_eq!(
+            workspace.threads.len(),
+            before,
+            "the late answer adds no thread"
+        );
         assert!(workspace.known_import_keys(cx).is_empty());
         assert!(!workspace.import_picker.export.importing);
     });
