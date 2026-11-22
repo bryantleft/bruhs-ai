@@ -130,7 +130,9 @@ The release script checks the native binaries' commit and version, bundles the w
   --password <app-specific>`.
 - The bundle carries `Contents/Resources/THIRD_PARTY_LICENSES`, written by
   `scripts/third-party-licenses.sh` (needs
-  `cargo install --locked cargo-about --features cli`).
+  `cargo install --locked cargo-about --features cli`). The same command writes
+  `THIRD_PARTY_LICENSES.zip` for the Settings browser. When dependencies or bundled
+  assets change, copy that archive into `bruhs-desktop/assets/` for source builds.
 - `BRUHS_RELEASE_VERSION`, set by the bundle script, makes a build a release:
   it then updates from GitHub releases instead of git.
 - The icon is `packaging/macos/AppIcon.icns`, generated from

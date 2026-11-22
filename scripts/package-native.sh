@@ -23,7 +23,7 @@ for platform in Linux Windows; do
   if [[ $platform == Windows ]]; then ext=".exe"; dest="$work/windows/Bruhs"; fi
   mkdir -p "$dest"
   for name in bruhs-desktop bruhs-server bruhs-capture; do install -m755 "$bin/$name$ext" "$dest/"; done
-  cp -R "$resources/web" "$resources/THIRD_PARTY_LICENSES" LICENSE "$dest/"
+  cp -R "$resources/web" "$resources/THIRD_PARTY_LICENSES" "$resources/THIRD_PARTY_LICENSES.zip" LICENSE "$dest/"
 done
 scripts/sign-windows.sh "$work/windows/Bruhs"
 target="$PWD/dist/Bruhs-Windows-x64.zip"
