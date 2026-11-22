@@ -142,12 +142,28 @@ pub(in crate::views::workspace) struct ExportPicker {
     import_task: Option<Task<()>>,
 }
 
+/// Which import keys the threads here carry: how many, and a sum of
+/// their hashes that is the same in any order. Deleting one imported
+/// thread and importing another between two draws changes it, where a
+/// count of threads would not.
+type ImportsHere = (usize, u64);
+
+pub(in crate::views::workspace) fn imports_here<'a>(
+    keys: impl IntoIterator<Item = &'a str>,
+) -> ImportsHere {
+    use std::hash::{BuildHasher as _, BuildHasherDefault, DefaultHasher};
+    let hasher = BuildHasherDefault::<DefaultHasher>::default();
+    keys.into_iter().fold((0, 0), |(count, sum), key| {
+        (count + 1, sum.wrapping_add(hasher.hash_one(key)))
+    })
+}
+
 /// What [`ExportPicker::rows_cache`] was built from, and what it holds.
 struct RowsCache {
     batch: String,
     query: String,
-    /// Threads here, and how many of them came from an export.
-    threads: (usize, usize),
+    /// Which imported threads are here (see [`imports_here`]).
+    threads: ImportsHere,
     rows: Rc<Vec<ImportCandidate>>,
     left: bool,
 }
@@ -370,12 +386,10 @@ impl Workspace {
             .as_ref()
             .map(|ui| ui.search.read(cx).value().to_string())
             .unwrap_or_default();
-        let threads = (
-            self.threads.len(),
+        let threads = imports_here(
             self.threads
                 .iter()
-                .filter(|thread| thread.chat.read(cx).import_key.is_some())
-                .count(),
+                .filter_map(|thread| thread.chat.read(cx).import_key.as_deref()),
         );
         if let Some(cache) = export.rows_cache.borrow().as_ref() {
             if cache.batch == batch.id && cache.query == query && cache.threads == threads {
@@ -771,7 +785,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{done_line, reading_progress};
+    use super::{done_line, imports_here, reading_progress};
     use bruhs_models::imports::reading_line;
     use bruhs_models::logic::portable::ImportSource;
 
@@ -783,6 +797,19 @@ mod tests {
             Some("Imported 2 chats from ChatGPT. Imported 1 chat from Grok.")
         );
         assert_eq!(done_line(&[]), None);
+    }
+
+    #[test]
+    fn the_rows_follow_which_imports_are_here_not_how_many() {
+        let before = imports_here(["grok:g1", "chatgpt:c1"]);
+        // The same keys in another order are the same threads.
+        assert_eq!(imports_here(["chatgpt:c1", "grok:g1"]), before);
+        // One imported thread deleted and another imported between two
+        // draws: the counts match, the rows must not stay as they were.
+        let after = imports_here(["grok:g1", "chatgpt:c2"]);
+        assert_eq!(after.0, before.0);
+        assert_ne!(after, before);
+        assert_eq!(imports_here([]), (0, 0));
     }
 
     #[test]
