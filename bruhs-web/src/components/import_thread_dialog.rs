@@ -517,15 +517,23 @@ pub fn ImportThreadDialog() -> impl IntoView {
                         ""
                     }}
                 </span>
-                <button
-                    type="button"
-                    on:click=move |_| close()
-                    class="text-rambutan-500 hover:text-rambutan-300 transition-colors cursor-pointer"
-                >
-                    "Cancel"
-                </button>
+                {cancel_button(on_close)}
             </div>
         </Dialog>
+    }
+}
+
+/// The footer's Cancel: a 44 px target on touch, like the dialog's other
+/// controls.
+fn cancel_button(close: Callback<()>) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            on:click=move |_| close.run(())
+            class="bruhs-control text-rambutan-500 hover:text-rambutan-300 transition-colors cursor-pointer"
+        >
+            "Cancel"
+        </button>
     }
 }
 
@@ -534,6 +542,17 @@ mod tests {
     use super::*;
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::EpochMs;
+
+    #[test]
+    fn cancel_is_a_touch_sized_target() {
+        // `bruhs-control` is 44 px tall and wide on a coarse pointer, as
+        // every other control in the dialog is (ui standards).
+        let html = Owner::new().with(|| {
+            leptos::tachys::view::RenderHtml::to_html(cancel_button(Callback::new(|()| {})))
+        });
+        assert!(html.contains(">Cancel<"), "{html}");
+        assert!(html.contains("bruhs-control"), "{html}");
+    }
 
     fn imported(cwd: Option<&str>, session: Option<&str>) -> ImportedThread {
         ImportedThread::new(
