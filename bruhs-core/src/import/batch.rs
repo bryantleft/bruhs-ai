@@ -26,14 +26,14 @@
 use super::agents::AgentRoots;
 use super::archive::{never_opened, walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport};
 use super::json_stream::for_each_record;
-use super::text::{clip_part, shown_name, TITLE_MAX_CHARS};
+use super::text::{shown_name, TITLE_MAX_CHARS};
 use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
-    import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob, ImportJobState,
-    MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT, EXPORT_TOO_LARGE,
-    FOLDER_MISSING, GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES,
-    MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
+    cut_short_line, import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob,
+    ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT,
+    EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE,
+    MAX_BATCHES, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
@@ -42,6 +42,7 @@ use bruhs_models::EpochMs;
 use rand::TryRngCore as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
@@ -687,7 +688,7 @@ impl ImportHost {
             cancel,
             candidates: Vec::new(),
             index: BTreeMap::new(),
-            memory: Vec::new(),
+            memory: MemoryTexts::default(),
             counts: BatchCounts::default(),
             stored: 0,
             claude_manifest: false,
@@ -979,7 +980,7 @@ struct BatchReader<'r> {
     candidates: Vec<ImportCandidate>,
     /// Each stored conversation's `import_key`, and its file's number.
     index: BTreeMap<String, u32>,
-    memory: Vec<String>,
+    memory: MemoryTexts,
     counts: BatchCounts,
     stored: u64,
     claude_manifest: bool,
@@ -1039,9 +1040,7 @@ impl BatchReader<'_> {
             // Memory keys with no text offer nothing.
             // The same file in two parts of a split export comes once.
             if let Some(MemorySuggestion { text, .. }) = claude_ai::memory(v) {
-                if !self.memory.contains(&text) {
-                    self.memory.push(text);
-                }
+                self.memory.add(text);
             }
         } else if claude_ai::is_manifest(v) {
             self.claude_manifest = true;
@@ -1133,11 +1132,8 @@ impl BatchReader<'_> {
         if self.claude_manifest && !claude_chats {
             warnings.push(CLAUDE_MANIFEST.to_string());
         }
-        let memory = (!self.memory.is_empty())
-            .then(|| MemorySuggestion {
-                source: ImportSource::ClaudeAi,
-                text: clip_part(self.memory.join("\n\n"), MAX_PART_CHARS),
-            })
+        let memory = std::mem::take(&mut self.memory)
+            .suggestion()
             .into_iter()
             .collect();
         let mut candidates = std::mem::take(&mut self.candidates);
@@ -1169,6 +1165,67 @@ impl BatchReader<'_> {
         let path = dir.join(BATCH);
         std::fs::rename(&tmp, &path).map_err(|error| ImportError::io(&path, error))?;
         Ok(self.counts)
+    }
+}
+
+/// Claude's memory as a read collects it: each distinct text once, by
+/// its digest, joined with a blank line and cut to [`MAX_PART_CHARS`].
+/// Texts are held only until the joined text reaches the cut, and past it
+/// only their characters are counted, so a read holds about two parts'
+/// worth however much memory an export repeats (final review C2).
+#[derive(Default)]
+pub(super) struct MemoryTexts {
+    held: Vec<String>,
+    seen: HashSet<[u8; 32]>,
+    /// Characters of every distinct text joined, separators included.
+    chars: usize,
+}
+
+impl MemoryTexts {
+    /// Adds `text` unless it came before.
+    pub(super) fn add(&mut self, text: String) {
+        if !self.seen.insert(Sha256::digest(text.as_bytes()).into()) {
+            return;
+        }
+        let before = self.chars;
+        let separator = if self.seen.len() > 1 { 2 } else { 0 };
+        self.chars = before
+            .saturating_add(separator)
+            .saturating_add(text.chars().count());
+        if before < MAX_PART_CHARS {
+            self.held.push(text);
+        }
+    }
+
+    /// Characters the held texts take, joined (tests).
+    #[cfg(test)]
+    pub(super) fn held_chars(&self) -> usize {
+        self.held
+            .iter()
+            .map(|text| text.chars().count())
+            .sum::<usize>()
+            .saturating_add(2 * self.held.len().saturating_sub(1))
+    }
+
+    /// The joined memory as one suggestion, cut as
+    /// [`clip_part`](super::text::clip_part) cuts the whole join: what was
+    /// left out is counted, held or not.
+    pub(super) fn suggestion(self) -> Option<MemorySuggestion> {
+        if self.held.is_empty() {
+            return None;
+        }
+        let mut text = self.held.join("\n\n");
+        if self.chars > MAX_PART_CHARS {
+            if let Some((cut, _)) = text.char_indices().nth(MAX_PART_CHARS) {
+                text.truncate(cut);
+            }
+            text.push('\n');
+            text.push_str(&cut_short_line(self.chars - MAX_PART_CHARS));
+        }
+        Some(MemorySuggestion {
+            source: ImportSource::ClaudeAi,
+            text,
+        })
     }
 }
 

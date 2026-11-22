@@ -2,13 +2,14 @@
 //! short-lived batches, one read at a time. Every root is a temp folder.
 
 use super::archive::Limits;
-use super::batch::{ImportHost, ImportUpload};
-use super::test_support::{fixture, zip_of};
-use super::text::shown_name;
+use super::batch::{ImportHost, ImportUpload, MemoryTexts};
+use super::test_support::{assert_scales_linearly, fixture, zip_of};
+use super::text::{clip_part, shown_name};
 use super::ImportError;
 use bruhs_models::imports::{
-    ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST, EXPORT_TOO_LARGE,
-    FOLDER_MISSING, GROK_BEST_EFFORT, NOT_AN_EXPORT, TOO_MANY_FILES,
+    cut_short_line, ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST,
+    EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, MAX_PART_CHARS, NOT_AN_EXPORT,
+    TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{title_from_prompt, ImportSource};
 use bruhs_models::EpochMs;
@@ -846,4 +847,81 @@ fn a_hundred_thousand_node_chat_fits_the_shipped_caps() {
     assert_eq!(batch.counts.conversations, 1);
     assert_eq!(batch.counts.cut_short, 1);
     assert!(host.thread(&batch.id, ImportSource::ChatGpt, "big").is_ok());
+}
+
+/// Memory is held only up to the part cut, and the cut counts what was
+/// left out exactly as cutting the whole join would (final review C2).
+#[test]
+fn memory_holds_one_part_and_counts_the_rest() {
+    let texts: Vec<String> = (0..50)
+        .map(|n| format!("{}-{n}", "m".repeat(100_000)))
+        .collect();
+    let mut memory = MemoryTexts::default();
+    for text in texts.iter().chain(&texts) {
+        memory.add(text.clone());
+    }
+    assert!(
+        memory.held_chars() <= MAX_PART_CHARS + 100_010,
+        "{} characters held",
+        memory.held_chars()
+    );
+    let suggestion = memory.suggestion().expect("memory is offered");
+    assert_eq!(
+        suggestion.text,
+        clip_part(texts.join("\n\n"), MAX_PART_CHARS)
+    );
+    assert_eq!(MemoryTexts::default().suggestion(), None);
+}
+
+/// Repeated memory is found by digest, so many records dedupe in linear
+/// time, however alike their texts are (final review C2).
+#[test]
+fn memory_dedupes_in_linear_time() {
+    assert_scales_linearly(
+        "memory dedupe",
+        2_000,
+        |n| {
+            (0..n)
+                .map(|i| format!("{}-{i}", "m".repeat(64)))
+                .collect::<Vec<_>>()
+        },
+        |texts| {
+            let mut memory = MemoryTexts::default();
+            for text in texts {
+                memory.add(text.clone());
+            }
+            std::hint::black_box(memory.suggestion());
+        },
+    );
+}
+
+/// Many large memory files in one ZIP give one memory within a part
+/// (final review C2's ZIP, scaled to the test caps).
+#[test]
+fn many_memory_files_give_one_part() {
+    let place = Place::new();
+    let host = place.host();
+    let files: Vec<(String, Vec<u8>)> = (0..120)
+        .map(|n| {
+            let text = format!("{}-{n}", "m".repeat(100_000));
+            (
+                format!("memories/{n}.json"),
+                json_bytes(&json!({ "conversations_memory": text })),
+            )
+        })
+        .collect();
+    let entries: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+        .collect();
+    let batch = read(&host, &[&zip_of(&entries, true)]);
+    assert_eq!(batch.memory.len(), 1);
+    let text = &batch.memory[0].text;
+    let more = 120 * 100_004 + 2 * 119 - MAX_PART_CHARS - 10 * 2 - 90;
+    assert!(
+        text.ends_with(&cut_short_line(more)),
+        "{}",
+        &text[text.len() - 80..]
+    );
+    assert!(text.chars().count() <= MAX_PART_CHARS + 64);
 }
