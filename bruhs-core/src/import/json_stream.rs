@@ -374,7 +374,8 @@ impl<R: Read> Read for RecordBudget<R> {
 /// - A top-level array gives each element, each within `record` bytes
 ///   and `values` values (`CONVERSATION_TOO_LARGE`).
 /// - A top-level object gives its `conversations` array's elements and
-///   skips every other key unheld. A [`EntryKind::Manifest`] or
+///   skips every other key unheld; one with no `conversations` key gives
+///   a single empty object, which matches no record kind. A [`EntryKind::Manifest`] or
 ///   [`EntryKind::Memory`] object, or a [`EntryKind::Bare`] file of at most
 ///   `small_json` bytes (`bare_len`), is instead given once, whole.
 /// - Manifests, memory files and small bare files are read within
@@ -488,15 +489,23 @@ impl<'de> Visitor<'de> for Top<'_> {
             }
             return self.give(Value::Object(object));
         }
+        let mut listed = false;
         loop {
             // A key is held while it is compared, so it has a budget too.
             self.record
                 .set(self.limits.record, self.limits.values, DAMAGED_EXPORT);
             let Some(key) = map.next_key::<String>()? else {
-                return Ok(());
+                // An object with no list read as nothing: one empty
+                // record, so the caller counts it as unrecognised.
+                return if listed {
+                    Ok(())
+                } else {
+                    self.give(Value::Object(serde_json::Map::new()))
+                };
             };
             self.record.lift();
             if key == "conversations" {
+                listed = true;
                 map.next_value_seed(Conversations(&mut self))?;
             } else {
                 // Skipped unheld: serde reads past it without keeping it.

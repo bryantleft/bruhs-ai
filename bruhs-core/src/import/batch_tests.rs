@@ -1024,3 +1024,22 @@ fn picked_paths_below_private_folders_are_refused() {
     let job = host.read_paths(vec![open]).unwrap();
     assert_eq!(ready(wait(&host, &job.id)).candidates.len(), 4);
 }
+
+/// A bare upload past `small_json` is streamed, so a single conversation
+/// object at its top reads as nothing: it counts as unrecognised instead
+/// of vanishing (final review minor).
+#[test]
+fn a_large_single_object_upload_counts_as_unknown() {
+    let place = Place::new();
+    let host = ImportHost::new(place.root()).with_limits(Limits {
+        small_json: 1024,
+        ..Limits::TEST
+    });
+    #[cfg(unix)]
+    let host = host.with_free_space(Arc::new(|_: &Path| Ok(u64::MAX)));
+    let single = json_bytes(&chatgpt_records()[0]);
+    assert!(single.len() > 1024, "{} bytes", single.len());
+    let batch = read(&host, &[&single, fixture("claude-conversations.json")]);
+    assert_eq!(batch.counts.skipped_unknown, 1);
+    assert_eq!(batch.counts.conversations, 4);
+}
