@@ -756,10 +756,15 @@ impl Workspace {
     }
 
     /// The dialog is going, for any reason: its batch goes with it (F23).
-    /// Called wherever `top_layer` is replaced.
+    /// Called wherever `top_layer` is replaced. Move in goes the same way:
+    /// its scans, its crew watch and any pasted answer are dropped, as the
+    /// web unmounts its body.
     pub(in crate::views::workspace) fn leave_import_dialog(&mut self) {
         if self.top_layer == Some(TopLayer::ImportThread) {
             self.discard_import_batch();
+        }
+        if self.top_layer == Some(TopLayer::MoveIn) {
+            self.move_in.open = None;
         }
     }
 }

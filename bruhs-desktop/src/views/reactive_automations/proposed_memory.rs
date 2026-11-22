@@ -36,6 +36,13 @@ pub(super) struct ImportCrew {
     /// Each card's Approve, by proposal id: focus moves to the next one
     /// after a decision.
     approve: RefCell<HashMap<String, FocusHandle>>,
+    /// The proposal just decided, with its bruh, until the service answers.
+    deciding: Option<(String, String)>,
+}
+
+/// A test selector for one line of the card's shared copy.
+fn copy(text: &str) -> String {
+    format!("desktop-proposed-copy:{text}")
 }
 
 /// One pending proposal as the card shows it.
@@ -91,7 +98,7 @@ impl ReactiveAutomations {
                 })
                 .collect()
         };
-        let locked = self.busy;
+        let locked = self.busy || imports.deciding.is_some();
         let section = (!list.is_empty()).then(|| {
             div()
                 .debug_selector(|| "desktop-proposed-memory".to_string())
@@ -100,8 +107,8 @@ impl ReactiveAutomations {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(heading(PROPOSED_MEMORY))
-                .child(muted(PROPOSED_HINT))
+                .child(heading(PROPOSED_MEMORY).debug_selector(|| copy(PROPOSED_MEMORY)))
+                .child(muted(PROPOSED_HINT).debug_selector(|| copy(PROPOSED_HINT)))
                 .children(list.into_iter().zip(approve).enumerate().map(
                     |(index, (card, approve))| {
                         self.render_proposal_card(agent_id, index, card, &approve, locked, cx)
@@ -111,9 +118,16 @@ impl ReactiveAutomations {
         Some(
             div()
                 .id("desktop-proposed-root")
+                .debug_selector(|| "desktop-proposed-root".to_string())
                 .track_focus(&root)
+                .role(Role::Region)
+                .aria_label(PROPOSED_MEMORY)
                 .min_w_0()
                 .w_full()
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .children(section),
         )
         .map(|root| div().w_full().min_w_0().child(root))
@@ -150,9 +164,9 @@ impl ReactiveAutomations {
             .when(locked, |el| {
                 el.opacity(WAITING_OPACITY).cursor_not_allowed()
             })
-            .child(label);
-            bruhs_ui::press::on_press_view(el, cx, move |this, window, cx| {
-                this.decide_memory(&agent, &id, yes, window, cx);
+            .child(div().debug_selector(move || copy(label)).child(label));
+            bruhs_ui::press::on_press_view(el, cx, move |this, _window, cx| {
+                this.decide_memory(&agent, &id, yes, cx);
             })
         };
         let text_id = SharedString::from(format!("desktop-proposed-text-{}", card.id));
@@ -183,7 +197,11 @@ impl ReactiveAutomations {
                         .text_size(px(12.0))
                         .line_height(relative(1.5))
                         .text_color(theme::durian_300())
-                        .child(MEMORY_CHANGED),
+                        .child(
+                            div()
+                                .debug_selector(|| copy(MEMORY_CHANGED))
+                                .child(MEMORY_CHANGED),
+                        ),
                 )
             })
             .child(
@@ -229,20 +247,12 @@ impl ReactiveAutomations {
         agent_id: &str,
         id: &str,
         approve: bool,
-        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.busy {
+        if self.busy || self.crew.imports.deciding.is_some() {
             return;
         }
-        let next = self.snapshot.as_ref().and_then(|snapshot| {
-            let handles = self.crew.imports.approve.borrow();
-            cards(snapshot, agent_id)
-                .iter()
-                .filter(|card| card.id != id)
-                .find_map(|card| handles.get(&card.id).cloned())
-        });
-        let target = next.or_else(|| self.crew.imports.root.get().cloned());
+        self.crew.imports.deciding = Some((agent_id.to_string(), id.to_string()));
         self.send_in(
             ReactiveCommand::DecideProposal {
                 id: id.to_string(),
@@ -251,10 +261,46 @@ impl ReactiveAutomations {
             Scope::Agent(agent_id.to_string()),
             cx,
         );
-        if let Some(target) = target {
-            target.focus(window, cx);
-        }
         cx.notify();
+    }
+
+    /// Once the service has answered a decision: the card it decided has
+    /// gone, so focus moves to the next card's Approve, or to the region
+    /// when none is left; a refusal leaves the card, and focus, where they
+    /// are, ready to be pressed again (M3). Runs before each draw.
+    pub(super) fn settle_memory_decision(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some((agent_id, id)) = self.crew.imports.deciding.clone() else {
+            return;
+        };
+        if self.crew_waiting() {
+            return;
+        }
+        let left = self
+            .snapshot
+            .as_ref()
+            .map(|snapshot| cards(snapshot, &agent_id))
+            .unwrap_or_default();
+        let still_here = left.iter().any(|card| card.id == id);
+        if still_here && self.bruh_refusal(&agent_id).is_none() {
+            // Accepted, and the snapshot without the card is on its way.
+            return;
+        }
+        self.crew.imports.deciding = None;
+        // A refusal, or the owner has moved to another page meanwhile.
+        if still_here || self.bruh_page_agent() != Some(agent_id.as_str()) {
+            return;
+        }
+        let next = {
+            let handles = self.crew.imports.approve.borrow();
+            left.iter().find_map(|card| handles.get(&card.id).cloned())
+        };
+        if let Some(target) = next.or_else(|| self.crew.imports.root.get().cloned()) {
+            cx.defer_in(window, move |_this, window, cx| target.focus(window, cx));
+        }
     }
 
     /// Every bruh, by id and name, for By prompt's **For bruh**; `None`
@@ -334,16 +380,8 @@ impl ReactiveAutomations {
     }
 
     /// The create the follow-up waited for was refused: nothing follows.
-    pub(super) fn drop_import_follow_up(&mut self, agent_id: &str) {
-        if self
-            .crew
-            .imports
-            .follow_up
-            .as_ref()
-            .is_some_and(|(id, _)| id == agent_id)
-        {
-            self.crew.imports.follow_up = None;
-        }
+    pub(super) fn drop_import_follow_up(&mut self) {
+        self.crew.imports.follow_up = None;
     }
 
     /// `BRUHS_DESKTOP_SMOKE_SCENE`: a crew of one bruh, Pinch, whose
@@ -444,9 +482,10 @@ pub(super) struct ProposedHost(pub(super) Entity<ReactiveAutomations>, pub(super
 impl Render for ProposedHost {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let agent = self.1.clone();
-        let body = self
-            .0
-            .update(cx, |panel, cx| panel.render_proposed_memory(&agent, cx));
+        let body = self.0.update(cx, |panel, cx| {
+            panel.settle_memory_decision(_window, cx);
+            panel.render_proposed_memory(&agent, cx)
+        });
         div().w(px(640.0)).children(body)
     }
 }
@@ -464,7 +503,7 @@ mod tests {
         ReactiveSnapshot,
     };
     use bruhs_models::EpochMs;
-    use gpui::{AppContext as _, Entity, VisualTestContext};
+    use gpui::{AppContext as _, Entity, FocusHandle, VisualTestContext};
     use std::{cell::RefCell, rc::Rc};
 
     fn agent(id: &str, memory: &str) -> ReactiveAgent {
@@ -526,6 +565,7 @@ mod tests {
         panel.update(cx, |panel, cx| {
             panel.show_crew_for_test(Vec::new(), CREW_PROTOCOL, cx);
             panel.show_snapshot_for_test(snapshot, cx);
+            panel.show_bruh(Some("a".into()), cx);
         });
         cx.run_until_parked();
         (panel, cx)
@@ -566,9 +606,17 @@ mod tests {
             "another bruh's"
         );
         assert!(!drawn(cx, "desktop-proposed-stale-p1".into()));
-        // The copy is the shared copy.
-        let labels = [PROPOSED_MEMORY, PROPOSED_HINT, APPROVE_MEMORY, DECLINE];
-        assert!(labels.iter().all(|label| !label.is_empty()));
+        // The heading, the hint and both buttons draw the shared copy.
+        for label in [PROPOSED_MEMORY, PROPOSED_HINT, APPROVE_MEMORY, DECLINE] {
+            assert!(
+                drawn(cx, format!("desktop-proposed-copy:{label}")),
+                "{label}"
+            );
+        }
+        assert!(!drawn(
+            cx,
+            format!("desktop-proposed-copy:{MEMORY_CHANGED}")
+        ));
 
         // The memory changes while the card shows: it warns at once.
         panel.update(cx, |panel, cx| {
@@ -577,10 +625,8 @@ mod tests {
             panel.show_snapshot_for_test(stale, cx);
         });
         cx.run_until_parked();
-        assert!(
-            drawn(cx, "desktop-proposed-stale-p1".into()),
-            "{MEMORY_CHANGED}"
-        );
+        assert!(drawn(cx, "desktop-proposed-stale-p1".into()));
+        assert!(drawn(cx, format!("desktop-proposed-copy:{MEMORY_CHANGED}")));
 
         // Trailing spaces on the current memory aren't a change (F31).
         panel.update(cx, |panel, cx| {
@@ -623,78 +669,66 @@ mod tests {
         assert!(approve.bottom() <= card.bottom(), "{approve:?} in {card:?}");
     }
 
-    #[gpui::test]
-    fn approve_and_decline_go_through_the_owner_path(cx: &mut gpui::TestAppContext) {
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        let bounds = cx.debug_bounds(selector).expect(selector);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+    }
+
+    fn decide(id: &str, approve: bool) -> ReactiveCommand {
+        ReactiveCommand::DecideProposal {
+            id: id.into(),
+            approve,
+        }
+    }
+
+    fn two_cards() -> ReactiveSnapshot {
         let mut two = snapshot();
         two.proposals.push(proposal("p3", "a", "Newer text", 30));
-        let (panel, cx) = open(cx, two);
-        let approve = cx
-            .debug_bounds("desktop-proposed-approve-p3")
-            .expect("approve");
-        cx.simulate_click(approve.center(), gpui::Modifiers::default());
-        cx.run_until_parked();
-        let decline = cx
-            .debug_bounds("desktop-proposed-decline-p1")
-            .expect("decline");
-        cx.simulate_click(decline.center(), gpui::Modifiers::default());
-        cx.run_until_parked();
-        panel.update(cx, |panel, _| {
-            assert_eq!(
-                panel.sent_for_test(),
-                [
-                    ReactiveCommand::DecideProposal {
-                        id: "p3".into(),
-                        approve: true
-                    },
-                    ReactiveCommand::DecideProposal {
-                        id: "p1".into(),
-                        approve: false
-                    },
-                ]
-            );
+        two
+    }
+
+    /// The service's answer: the snapshot with `decided` no longer pending.
+    fn answered(panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext, decided: &[&str]) {
+        panel.update(cx, |panel, cx| {
+            let mut next = two_cards();
+            for proposal in &mut next.proposals {
+                if decided.contains(&proposal.id.as_str()) {
+                    proposal.status = ProposalStatus::Approved;
+                }
+            }
+            panel.show_snapshot_for_test(next, cx);
         });
-        // While a command is on its way, a decision waits.
-        panel.update(cx, |panel, _| panel.set_busy_for_test(true));
-        let approve = cx
-            .debug_bounds("desktop-proposed-approve-p1")
-            .expect("approve");
-        cx.simulate_click(approve.center(), gpui::Modifiers::default());
         cx.run_until_parked();
-        panel.update(cx, |panel, _| assert_eq!(panel.sent_for_test().len(), 2));
+    }
+
+    fn sent(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<ReactiveCommand> {
+        panel.read_with(cx, |panel, _| panel.sent_for_test().to_vec())
     }
 
     #[gpui::test]
-    fn a_decision_moves_focus_to_the_next_card_then_the_region(cx: &mut gpui::TestAppContext) {
-        let mut two = snapshot();
-        two.proposals.push(proposal("p3", "a", "Newer text", 30));
-        let (panel, cx) = open(cx, two);
-        let handles = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
-            panel.read_with(cx, |panel, _| {
-                let imports = &panel.crew.imports;
-                let approve = imports.approve.borrow();
-                (
-                    approve.get("p1").cloned(),
-                    imports.root.get().cloned().expect("root"),
-                )
-            })
-        };
-        let (p1, root) = handles(&panel, cx);
-        let p1 = p1.expect("p1's Approve");
-        let approve = cx
-            .debug_bounds("desktop-proposed-approve-p3")
-            .expect("approve");
-        cx.simulate_click(approve.center(), gpui::Modifiers::default());
+    fn approve_and_decline_go_through_the_owner_path(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(cx, two_cards());
+        click(cx, "desktop-proposed-approve-p3");
+        // Until the service answers, the other card waits too.
+        click(cx, "desktop-proposed-decline-p1");
+        assert_eq!(sent(&panel, cx), [decide("p3", true)]);
+        answered(&panel, cx, &["p3"]);
+        click(cx, "desktop-proposed-decline-p1");
+        assert_eq!(sent(&panel, cx), [decide("p3", true), decide("p1", false)]);
+        // A refusal frees the card; while another command is on its way, a
+        // decision still waits.
+        panel.update(cx, |panel, cx| panel.refuse_for_test("a", "No.", cx));
         cx.run_until_parked();
-        let focused = cx.update(|window, cx| window.focused(cx));
-        assert!(focused.as_ref() == Some(&p1), "the next card's Approve");
-        // The service approved it: its card goes. Enter decides the last.
-        panel.update(cx, |panel, cx| {
-            let mut left = snapshot();
-            left.proposals.push(proposal("p3", "a", "Newer text", 30));
-            left.proposals[2].status = ProposalStatus::Approved;
-            panel.show_snapshot_for_test(left, cx);
-        });
-        cx.run_until_parked();
+        panel.update(cx, |panel, _| panel.set_busy_for_test(true));
+        click(cx, "desktop-proposed-approve-p1");
+        assert_eq!(sent(&panel, cx).len(), 2);
+    }
+
+    fn press_enter(cx: &mut VisualTestContext) {
         let keystroke = gpui::Keystroke::parse("enter").unwrap();
         cx.simulate_event(gpui::KeyDownEvent {
             keystroke: keystroke.clone(),
@@ -703,16 +737,67 @@ mod tests {
         });
         cx.simulate_event(gpui::KeyUpEvent { keystroke });
         cx.run_until_parked();
-        panel.update(cx, |panel, _| {
-            assert_eq!(
-                panel.sent_for_test().last(),
-                Some(&ReactiveCommand::DecideProposal {
-                    id: "p1".into(),
-                    approve: true
-                })
-            );
+    }
+
+    fn focused(cx: &mut VisualTestContext) -> Option<FocusHandle> {
+        cx.update(|window, cx| window.focused(cx))
+    }
+
+    fn approve_handle(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+        id: &str,
+    ) -> FocusHandle {
+        panel.read_with(cx, |panel, _| {
+            panel
+                .crew
+                .imports
+                .approve
+                .borrow()
+                .get(id)
+                .cloned()
+                .expect("Approve")
+        })
+    }
+
+    #[gpui::test]
+    fn focus_moves_once_the_decided_card_goes(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(cx, two_cards());
+        let p3 = approve_handle(&panel, cx, "p3");
+        let p1 = approve_handle(&panel, cx, "p1");
+        let root = panel.read_with(cx, |panel, _| {
+            panel.crew.imports.root.get().cloned().expect("root")
         });
-        let focused = cx.update(|window, cx| window.focused(cx));
-        assert!(focused.as_ref() == Some(&root), "the region, none left");
+        cx.update(|window, cx| window.focus(&p3, cx));
+        press_enter(cx);
+        assert_eq!(sent(&panel, cx), [decide("p3", true)]);
+        assert!(
+            focused(cx).as_ref() == Some(&p3),
+            "focus waits for the answer"
+        );
+        answered(&panel, cx, &["p3"]);
+        assert!(
+            focused(cx).as_ref() == Some(&p1),
+            "then the next card's Approve"
+        );
+        press_enter(cx);
+        answered(&panel, cx, &["p3", "p1"]);
+        assert!(focused(cx).as_ref() == Some(&root), "the region, none left");
+        assert!(drawn(cx, "desktop-proposed-root".into()));
+    }
+
+    #[gpui::test]
+    fn a_refused_decision_keeps_the_card_and_focus(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(cx, two_cards());
+        let p3 = approve_handle(&panel, cx, "p3");
+        cx.update(|window, cx| window.focus(&p3, cx));
+        press_enter(cx);
+        panel.update(cx, |panel, cx| panel.refuse_for_test("a", "Too late.", cx));
+        cx.run_until_parked();
+        assert!(focused(cx).as_ref() == Some(&p3), "focus stays on the card");
+        assert!(drawn(cx, "desktop-proposed-card-p3".into()));
+        // It can be pressed again.
+        press_enter(cx);
+        assert_eq!(sent(&panel, cx), [decide("p3", true), decide("p3", true)]);
     }
 }

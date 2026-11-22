@@ -509,11 +509,12 @@ impl Workspace {
             // Move in on a fixture scan, By prompt with an export's memory,
             // and the Proposed memory card (`-stale` once the memory has
             // changed since); nothing reaches the server.
-            "move-in" | "move-in-prompt" => {
+            "move-in" | "move-in-many" | "move-in-prompt" => {
                 self.reactive_automations
                     .update(cx, |panel, cx| panel.smoke_memory_fixture(false, cx));
-                self.move_in.scan = Some(move_in_ui::smoke_scan());
-                let start = if scene == "move-in" {
+                let more = if scene == "move-in-many" { 8 } else { 0 };
+                self.move_in.scan = Some(move_in_ui::smoke_scan(more));
+                let start = if scene != "move-in-prompt" {
                     move_in_ui::MoveInStart {
                         tab: move_in_ui::MoveInTab::OpenClaw,
                         text: None,

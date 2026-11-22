@@ -755,6 +755,127 @@ fn escape_closes_move_in_and_returns_focus(cx: &mut gpui::TestAppContext) {
         focused(cx).as_ref() == Some(&opener),
         "focus returns to the opener"
     );
+    // Closed, Move in keeps nothing: no scans, no crew watch, no text (M1).
+    workspace.read_with(cx, |workspace, _| assert!(workspace.move_in.open.is_none()));
+}
+
+#[gpui::test]
+fn make_this_bruh_waits_for_the_crew(cx: &mut gpui::TestAppContext) {
+    let fake = Rc::new(FakeScans::default());
+    *fake.openclaw.borrow_mut() = Some(web_scan());
+    let (workspace, cx) = move_in(cx, &fake, start(MoveInTab::OpenClaw));
+    // Before the crew loads, Make this bruh keeps its place and does nothing.
+    click(cx, format!("desktop-move-in-button:{MAKE_BRUH}"));
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.top_layer, Some(TopLayer::MoveIn));
+        assert!(workspace.overlay.is_none());
+    });
+    crew(&workspace, cx, &[]);
+    click(cx, format!("desktop-move-in-button:{MAKE_BRUH}"));
+    workspace.read_with(cx, |workspace, _| {
+        assert!(matches!(workspace.overlay, Some(Overlay::CreateBruh)));
+        assert!(
+            workspace.move_in.open.is_none(),
+            "Move in went with its text"
+        );
+    });
+}
+
+/// One more frame, as a real window draws after `on_next_frame`.
+fn next_frame(cx: &mut VisualTestContext) {
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+}
+
+/// Whether `inner` is drawn wholly inside the body's visible part.
+fn in_view(cx: &mut VisualTestContext, inner: &'static str) -> bool {
+    let body = cx.debug_bounds("desktop-move-in-body").expect("body");
+    let inner = cx.debug_bounds(inner).unwrap_or_else(|| panic!("{inner}"));
+    inner.top() >= body.top() && inner.bottom() <= body.bottom()
+}
+
+#[gpui::test]
+fn the_focused_field_is_in_view_at_640_by_480(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = workspace_window(cx);
+    cx.simulate_resize(gpui::size(gpui::px(640.0), gpui::px(480.0)));
+    let fake = Rc::new(FakeScans::default());
+    let scan = fake_scan(&fake);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.move_in.scan = Some(scan);
+        workspace.open_move_in(
+            MoveInStart {
+                tab: MoveInTab::ByPrompt,
+                text: Some("Likes tea.".into()),
+                from: Some(export_memory_from(ImportSource::ClaudeAi)),
+            },
+            window,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    crew(&workspace, cx, &[("a", "Pinch", "")]);
+    // The prompt keeps to its own box.
+    let prompt = cx
+        .debug_bounds(leak(format!("desktop-move-in-prompt:{MOVE_IN_PROMPT}")))
+        .expect("prompt");
+    assert!(prompt.size.height <= gpui::px(162.0), "{prompt:?}");
+    let answer_focus = workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .move_in
+            .open
+            .as_ref()
+            .unwrap()
+            .by_prompt
+            .answer
+            .focus_handle(cx)
+    });
+    assert!(focused(cx).as_ref() == Some(&answer_focus));
+    // The pinned Propose memory came with the crew and shrank the body:
+    // the next frame (the test platform draws it on request) scrolls again.
+    next_frame(cx);
+    let body = cx.debug_bounds("desktop-move-in-body");
+    let field = cx.debug_bounds("desktop-move-in-answer");
+    assert!(
+        in_view(cx, "desktop-move-in-answer"),
+        "Their answer shows with focus in it: {body:?} {field:?}"
+    );
+}
+
+#[gpui::test]
+fn tab_scrolls_the_last_row_into_view_at_640_by_480(cx: &mut gpui::TestAppContext) {
+    let fake = Rc::new(FakeScans::default());
+    let mut many = web_scan();
+    many.personas = (0..12).map(|n| persona(&format!("Bruh{n}"), "x")).collect();
+    *fake.openclaw.borrow_mut() = Some(many);
+    let (workspace, cx) = move_in(cx, &fake, start(MoveInTab::OpenClaw));
+    cx.simulate_resize(gpui::size(gpui::px(640.0), gpui::px(480.0)));
+    cx.run_until_parked();
+    let rows = workspace.read_with(cx, |workspace, _| {
+        workspace
+            .move_in
+            .open
+            .as_ref()
+            .unwrap()
+            .openclaw
+            .rows
+            .clone()
+    });
+    // From Folder: Look here, Choose folder, then every row.
+    let seen = tab_through(cx, 2 + rows.len());
+    assert!(seen.last().unwrap().as_ref() == rows.last());
+    cx.run_until_parked();
+    assert!(
+        in_view(cx, "desktop-move-in-row:Bruh11"),
+        "the last row shows"
+    );
+    let list = cx.debug_bounds("desktop-move-in-rows").expect("rows");
+    let last = cx.debug_bounds("desktop-move-in-row:Bruh11").unwrap();
+    // Each row keeps its two lines: the list scrolls, rows never squash.
+    assert!(last.size.height >= gpui::px(48.0), "{last:?}");
+    assert!(
+        last.top() >= list.top() && last.bottom() <= list.bottom(),
+        "{last:?} in {list:?}"
+    );
 }
 
 #[gpui::test]
@@ -786,15 +907,24 @@ fn by_prompt_tabs_to_its_controls_and_cmd_enter_proposes(cx: &mut gpui::TestAppC
     {
         assert!(seen[at].as_ref() == Some(want), "stop {at}");
     }
-    // Cmd+Enter in Their answer proposes, with no newline added.
-    cx.update(|window, cx| window.focus(&answer_focus, cx));
-    set_answer(&workspace, cx, "Likes tea.");
-    cx.update(|window, cx| window.focus(&answer_focus, cx));
-    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+    // Cmd+Enter in Their answer adds no newline: while the crew is busy
+    // nothing is proposed, and the area holds exactly what was typed (M6).
+    let cmd_enter = if cfg!(target_os = "macos") {
         "cmd-enter"
     } else {
         "ctrl-enter"
-    });
+    };
+    let panel = workspace.read_with(cx, |workspace, _| workspace.reactive_automations.clone());
+    panel.update(cx, |panel, _| panel.set_busy_for_test(true));
+    set_answer(&workspace, cx, "Likes tea.");
+    cx.update(|window, cx| window.focus(&answer_focus, cx));
+    cx.simulate_keystrokes(cmd_enter);
+    cx.run_until_parked();
+    assert!(sent(&workspace, cx).is_empty());
+    assert_eq!(answer(&workspace, cx), "Likes tea.");
+    // Then it proposes.
+    panel.update(cx, |panel, _| panel.set_busy_for_test(false));
+    cx.simulate_keystrokes(cmd_enter);
     cx.run_until_parked();
     let commands = sent(&workspace, cx);
     let [ReactiveCommand::Propose {

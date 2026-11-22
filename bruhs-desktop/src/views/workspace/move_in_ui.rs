@@ -26,6 +26,7 @@ use bruhs_models::logic::portable::ImportSource;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 use gpui::PathPromptOptions;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub(super) mod by_prompt;
@@ -80,17 +81,18 @@ fn server_scan() -> ScanCall {
 }
 
 /// `BRUHS_DESKTOP_SMOKE_SCENE=move-in`: the web screenshot's scan, Pinch
-/// in a workspace, answered with no server.
+/// in a workspace, answered with no server. With `workspaces`, that many
+/// more personas follow Pinch, so the list scrolls (`move-in-many`).
 #[cfg(debug_assertions)]
-pub(super) fn smoke_scan() -> ScanCall {
+pub(super) fn smoke_scan(workspaces: usize) -> ScanCall {
     use bruhs_models::imports::{FileUse, PersonaFile, SkipReason};
     Rc::new(
-        |(source, _path): (ImportSource, Option<String>), _cx: &App| {
+        move |(source, _path): (ImportSource, Option<String>), _cx: &App| {
             let file = |name: &str, use_| PersonaFile {
                 name: name.into(),
                 use_,
             };
-            let personas = if source == ImportSource::OpenClaw {
+            let mut personas = if source == ImportSource::OpenClaw {
                 vec![PersonaCandidate {
                     id: "smoke-pinch".into(),
                     source,
@@ -119,6 +121,14 @@ pub(super) fn smoke_scan() -> ScanCall {
             } else {
                 Vec::new()
             };
+            if let Some(pinch) = personas.first().cloned() {
+                personas.extend((1..=workspaces).map(|n| PersonaCandidate {
+                    id: format!("smoke-workspace-{n}"),
+                    folder: format!("~/.openclaw/workspace-{n}"),
+                    name: format!("Workspace {n}"),
+                    ..pinch.clone()
+                }));
+            }
             let looked_in = if source == ImportSource::OpenClaw {
                 vec![
                     "~/.openclaw/workspace".into(),
@@ -156,6 +166,12 @@ pub(super) struct MoveIn {
     pub(super) make: FocusHandle,
     pub(super) by_prompt: by_prompt::ByPrompt,
     body_scroll: ScrollHandle,
+    /// The control focus was on at the last draw, the body block holding
+    /// it, where that block sat and how tall the body was: when any of them
+    /// changes (Tab, a block appearing above it, a pinned line below), the
+    /// body scrolls to it again. A wheel
+    /// scroll moves none of them, so it is never undone.
+    last_focus: RefCell<FocusSpot>,
     /// Settles a By prompt proposal once the crew answers.
     _watch: Subscription,
 }
@@ -257,7 +273,46 @@ pub(super) fn move_in_label(text: &'static str) -> Div {
         .child(text)
 }
 
+/// Where focus was at the last draw (see [`MoveIn::last_focus`]).
+#[derive(Default, PartialEq)]
+pub(super) struct FocusSpot {
+    focus: Option<FocusHandle>,
+    block: Option<usize>,
+    top: Option<Pixels>,
+    /// The body's own height: pinned lines appearing below shrink it.
+    height: Pixels,
+}
+
+/// One block of a tab's scrolling body, and the controls inside it: when
+/// one of them takes focus, the body scrolls the block into view, since
+/// GPUI never scrolls to focus by itself (I1).
+pub(super) struct BodyPart {
+    pub(super) element: AnyElement,
+    pub(super) focus: Vec<FocusHandle>,
+}
+
+impl BodyPart {
+    pub(super) fn new(element: impl IntoElement, focus: Vec<FocusHandle>) -> Self {
+        Self {
+            element: element.into_any_element(),
+            focus,
+        }
+    }
+
+    /// A block with nothing to focus.
+    pub(super) fn text(element: impl IntoElement) -> Self {
+        Self::new(element, Vec::new())
+    }
+}
+
 impl Workspace {
+    /// Whether New bruh can open yet, and why not when the service is
+    /// known to be older. Make this bruh and Make a bruh wait for it.
+    pub(super) fn crew_make_state(&self, cx: &App) -> (bool, Option<&'static str>) {
+        let panel = self.reactive_automations.read(cx);
+        (panel.crew_ready(), panel.crew_reason())
+    }
+
     /// Opens Move in on `start`'s tab, from the palette (OpenClaw) or the
     /// Export file tab's **Use as a bruh's memory** (By prompt, filled).
     /// Each opening starts fresh, and focus goes to the tab's first field.
@@ -297,6 +352,7 @@ impl Workspace {
             make: stop(),
             by_prompt,
             body_scroll: ScrollHandle::new(),
+            last_focus: RefCell::new(FocusSpot::default()),
             _watch: watch,
         });
         self.show_move_in_tab(start.tab, window, cx);
@@ -586,7 +642,7 @@ impl Workspace {
         open: &MoveIn,
         source: ImportSource,
         cx: &Context<'_, Self>,
-    ) -> (Vec<AnyElement>, Vec<AnyElement>) {
+    ) -> (Vec<BodyPart>, Vec<AnyElement>) {
         let pane = open.pane(source);
         let none_found = if source == ImportSource::Hermes {
             NONE_FOUND_HERMES
@@ -594,74 +650,86 @@ impl Workspace {
             NONE_FOUND_OPENCLAW
         };
         let mut body = vec![
-            move_in_text("privacy", AGENTS_PRIVACY.to_owned(), theme::rambutan_300())
-                .into_any_element(),
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(move_in_label(FOLDER))
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .debug_selector(|| "desktop-move-in-folder".to_string())
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    Styled::h(
-                                        Input::new(&pane.folder).aria_label(FOLDER),
-                                        px(theme::CONTROL_PX),
-                                    )
-                                    .px(px(10.0))
-                                    .font_family(theme::CODE_FONT_FAMILY)
-                                    .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX)),
-                                ),
-                        )
-                        .child(move_in_button(
-                            LOOK_HERE,
-                            &open.look,
-                            pane.loading,
-                            cx,
-                            move |this, window, cx| this.look_here(source, window, cx),
-                        ))
-                        .child(move_in_button(
-                            CHOOSE_FOLDER,
-                            &open.choose,
-                            pane.loading,
-                            cx,
-                            move |this, window, cx| this.choose_move_in_folder(source, window, cx),
-                        )),
-                )
-                .into_any_element(),
+            BodyPart::text(move_in_text(
+                "privacy",
+                AGENTS_PRIVACY.to_owned(),
+                theme::rambutan_300(),
+            )),
+            BodyPart::new(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(move_in_label(FOLDER))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .debug_selector(|| "desktop-move-in-folder".to_string())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        Styled::h(
+                                            Input::new(&pane.folder).aria_label(FOLDER),
+                                            px(theme::CONTROL_PX),
+                                        )
+                                        .px(px(10.0))
+                                        .font_family(theme::CODE_FONT_FAMILY)
+                                        .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX)),
+                                    ),
+                            )
+                            .child(move_in_button(
+                                LOOK_HERE,
+                                &open.look,
+                                pane.loading,
+                                cx,
+                                move |this, window, cx| this.look_here(source, window, cx),
+                            ))
+                            .child(move_in_button(
+                                CHOOSE_FOLDER,
+                                &open.choose,
+                                pane.loading,
+                                cx,
+                                move |this, window, cx| {
+                                    this.choose_move_in_folder(source, window, cx)
+                                },
+                            )),
+                    ),
+                vec![
+                    pane.folder.focus_handle(cx),
+                    open.look.clone(),
+                    open.choose.clone(),
+                ],
+            ),
         ];
         if let Some(scan) = pane.scan.as_ref() {
             if !scan.looked_in.is_empty() {
-                body.push(
-                    move_in_text(
-                        "places",
-                        looked_in_line(&scan.looked_in),
-                        theme::rambutan_300(),
-                    )
-                    .into_any_element(),
-                );
+                body.push(BodyPart::text(move_in_text(
+                    "places",
+                    looked_in_line(&scan.looked_in),
+                    theme::rambutan_300(),
+                )));
             }
             if scan.personas.is_empty() {
-                body.push(
-                    move_in_text("none", none_found.to_owned(), theme::rambutan_200())
-                        .into_any_element(),
-                );
+                body.push(BodyPart::text(move_in_text(
+                    "none",
+                    none_found.to_owned(),
+                    theme::rambutan_200(),
+                )));
             } else {
-                body.push(self.render_persona_rows(pane, source, cx));
+                body.push(BodyPart {
+                    element: self.render_persona_rows(pane, source, cx),
+                    focus: pane.rows.clone(),
+                });
             }
         }
         let chosen = pane.chosen();
         if let Some(persona) = chosen {
-            body.push(
+            body.push(BodyPart::text(
                 div()
                     .debug_selector(|| "desktop-move-in-preview".to_string())
                     .flex()
@@ -674,22 +742,25 @@ impl Workspace {
                     .border_color(theme::longan_700().opacity(PANEL_RING_OPACITY))
                     .children(persona_lines(persona).into_iter().map(|line| {
                         move_in_text("line", line, theme::rambutan_300()).into_any_element()
-                    }))
-                    .into_any_element(),
-            );
+                    })),
+            ));
         }
         let mut pinned = Vec::new();
         if chosen.is_some() {
+            let (ready, reason) = self.crew_make_state(cx);
             pinned.push(
                 div()
                     .flex()
-                    .child(move_in_button(
-                        MAKE_BRUH,
-                        &open.make,
-                        false,
-                        cx,
-                        move |this, window, cx| this.make_this_bruh(source, window, cx),
-                    ))
+                    .child(
+                        move_in_button(
+                            MAKE_BRUH,
+                            &open.make,
+                            !ready,
+                            cx,
+                            move |this, window, cx| this.make_this_bruh(source, window, cx),
+                        )
+                        .when_some(reason, |el, reason| el.aria_description(reason)),
+                    )
                     .into_any_element(),
             );
         }
@@ -711,6 +782,7 @@ impl Workspace {
         let picked = pane.picked.min(scan.personas.len().saturating_sub(1));
         div()
             .id("desktop-move-in-rows")
+            .debug_selector(|| "desktop-move-in-rows".to_string())
             .role(Role::Group)
             .aria_label(source.label())
             .flex_shrink_0()
@@ -738,6 +810,7 @@ impl Workspace {
                         } else {
                             Toggled::False
                         })
+                        .flex_shrink_0()
                         .w_full()
                         .min_h(px(theme::CONTROL_PX))
                         .flex()
@@ -781,7 +854,52 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_move_in(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
+    /// Once focus moves (the dialog opening, Tab, a click), the body scrolls
+    /// the block holding the focused control into view, and the persona
+    /// list its row, the least distance needed.
+    fn scroll_move_in_to_focus(
+        &self,
+        open: &MoveIn,
+        body: &[BodyPart],
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let focused = window.focused(cx);
+        let at = focused
+            .as_ref()
+            .and_then(|focused| body.iter().position(|part| part.focus.contains(focused)));
+        let now = FocusSpot {
+            focus: focused.clone(),
+            block: at,
+            top: at
+                .and_then(|at| open.body_scroll.bounds_for_item(at))
+                .map(|bounds| bounds.top()),
+            height: open.body_scroll.bounds().size.height,
+        };
+        if *open.last_focus.borrow() == now {
+            return;
+        }
+        open.last_focus.replace(now);
+        let (Some(focused), Some(at)) = (focused, at) else {
+            return;
+        };
+        // The scroll reads the body's size from the frame before; one more
+        // draw settles it once the layout this one draws is known.
+        cx.on_next_frame(window, |_this, _window, cx| cx.notify());
+        open.body_scroll.scroll_to_item(at);
+        if let Some(source) = tab_source(open.tab) {
+            let pane = open.pane(source);
+            if let Some(row) = pane.rows.iter().position(|row| *row == focused) {
+                pane.rows_scroll.scroll_to_item(row);
+            }
+        }
+    }
+
+    pub(super) fn render_move_in(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
         let Some(open) = &self.move_in.open else {
             return div().into_any_element();
         };
@@ -789,6 +907,8 @@ impl Workspace {
             Some(source) => self.render_agent_pane(open, source, cx),
             None => self.render_by_prompt(open, cx),
         };
+        self.scroll_move_in_to_focus(open, &body, window, cx);
+        let body = body.into_iter().map(|part| part.element);
         let scroll = div()
             .id("desktop-move-in-body")
             .debug_selector(|| "desktop-move-in-body".to_string())

@@ -912,6 +912,7 @@ impl ReactiveAutomations {
     /// The page's inputs and data, made before it draws. The work runs only
     /// when the snapshot or the runs changed since the last frame.
     pub(super) fn ensure_bruh_page(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.settle_memory_decision(window, cx);
         // Settings reads the vault listing as it opens and forgets it as
         // it closes, as the web's section does.
         match self.bruh.as_mut() {

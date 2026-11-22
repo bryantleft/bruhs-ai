@@ -18,6 +18,9 @@ const ANSWER_FIELD_PX: f32 = 139.0;
 /// The bruh list's option radius and hover, as the New bruh role list.
 const OPTION_RADIUS_PX: f32 = 6.0;
 const OPTION_HOVER_OPACITY: f32 = 0.60;
+/// Web `max-h-40`: the prompt scrolls in its own box, so the fields below
+/// it fit at 640 by 480.
+const PROMPT_MAX_HEIGHT_PX: f32 = 160.0;
 
 /// The heading a pasted answer goes under: today's date here.
 fn pasted_from_today() -> String {
@@ -229,6 +232,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if !self.crew_make_state(cx).0 {
+            return;
+        }
         let Some(tab) = self.by_prompt() else {
             return;
         };
@@ -386,48 +392,58 @@ impl Workspace {
         &self,
         open: &MoveIn,
         cx: &Context<'_, Self>,
-    ) -> (Vec<AnyElement>, Vec<AnyElement>) {
+    ) -> (Vec<BodyPart>, Vec<AnyElement>) {
         let tab = &open.by_prompt;
         let bruhs = self.reactive_automations.read(cx).move_in_bruhs();
         let target = bruhs.as_deref().and_then(|bruhs| tab.target(bruhs));
         let waiting = self.by_prompt_waiting(cx);
         let empty = tab.answer.read(cx).value().trim().is_empty();
         let mut body = vec![
-            div()
-                .id("desktop-move-in-prompt")
-                .debug_selector(|| format!("desktop-move-in-prompt:{MOVE_IN_PROMPT}"))
-                .w_full()
-                .min_w_0()
-                .p_3()
-                .rounded(px(IMPORT_RADIUS_PX))
-                .bg(theme::longan_950().opacity(PANEL_FILL_OPACITY))
-                .border_1()
-                .border_color(theme::longan_700().opacity(PANEL_RING_OPACITY))
-                .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-                .line_height(relative(1.5))
-                .text_color(theme::rambutan_200())
-                .child(
-                    TextView::markdown("desktop-move-in-prompt-text", MOVE_IN_PROMPT)
-                        .selectable(true),
-                )
-                .into_any_element(),
-            div()
-                .flex()
-                .child(move_in_button(
+            BodyPart::text(
+                div()
+                    .id("desktop-move-in-prompt")
+                    .debug_selector(|| format!("desktop-move-in-prompt:{MOVE_IN_PROMPT}"))
+                    .w_full()
+                    .min_w_0()
+                    .p_3()
+                    .rounded(px(IMPORT_RADIUS_PX))
+                    .bg(theme::longan_950().opacity(PANEL_FILL_OPACITY))
+                    .border_1()
+                    .border_color(theme::longan_700().opacity(PANEL_RING_OPACITY))
+                    .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
+                    .line_height(relative(1.5))
+                    .text_color(theme::rambutan_200())
+                    .max_h(px(PROMPT_MAX_HEIGHT_PX))
+                    // A scroll box would otherwise shrink to nothing in the body.
+                    .flex_shrink_0()
+                    .child(
+                        TextView::markdown("desktop-move-in-prompt-text", MOVE_IN_PROMPT)
+                            .selectable(true),
+                    )
+                    .overflow_y_scrollbar(),
+            ),
+            BodyPart::new(
+                div().flex().child(move_in_button(
                     if tab.copied { COPIED } else { COPY_PROMPT },
                     &tab.copy,
                     false,
                     cx,
                     |this, window, cx| this.copy_move_in_prompt(window, cx),
-                ))
-                .into_any_element(),
-            move_in_text("hint", MOVE_IN_HINT.to_owned(), theme::rambutan_300()).into_any_element(),
+                )),
+                vec![tab.copy.clone()],
+            ),
+            BodyPart::text(move_in_text(
+                "hint",
+                MOVE_IN_HINT.to_owned(),
+                theme::rambutan_300(),
+            )),
         ];
+        let (ready, reason) = self.crew_make_state(cx);
         match bruhs.as_deref() {
             // Before the crew loads, neither the picker nor "Make a bruh
             // first." shows.
             None => {}
-            Some([]) => body.push(
+            Some([]) => body.push(BodyPart::new(
                 div()
                     .flex()
                     .items_center()
@@ -437,21 +453,24 @@ impl Workspace {
                         NO_BRUHS.to_owned(),
                         theme::rambutan_200(),
                     ))
-                    .child(move_in_button(
-                        MAKE_A_BRUH,
-                        &tab.make_bruh,
-                        false,
-                        cx,
-                        |this, window, cx| this.make_bruh_from_answer(window, cx),
-                    ))
-                    .into_any_element(),
-            ),
-            Some(bruhs) => body.push(
-                self.render_bruh_picker(tab, bruhs, target.as_ref(), cx)
-                    .into_any_element(),
-            ),
+                    .child(
+                        move_in_button(
+                            MAKE_A_BRUH,
+                            &tab.make_bruh,
+                            !ready,
+                            cx,
+                            |this, window, cx| this.make_bruh_from_answer(window, cx),
+                        )
+                        .when_some(reason, |el, reason| el.aria_description(reason)),
+                    ),
+                vec![tab.make_bruh.clone()],
+            )),
+            Some(bruhs) => body.push(BodyPart::new(
+                self.render_bruh_picker(tab, bruhs, target.as_ref(), cx),
+                vec![tab.bruh.clone()],
+            )),
         }
-        body.push(
+        body.push(BodyPart::new(
             div()
                 .flex()
                 .flex_col()
@@ -468,9 +487,9 @@ impl Workspace {
                                 .font_family(theme::CODE_FONT_FAMILY)
                                 .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX)),
                         ),
-                )
-                .into_any_element(),
-        );
+                ),
+            vec![tab.answer.focus_handle(cx)],
+        ));
         let mut pinned = Vec::new();
         if bruhs.as_ref().is_some_and(|bruhs| !bruhs.is_empty()) {
             pinned.push(

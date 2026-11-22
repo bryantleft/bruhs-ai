@@ -262,13 +262,12 @@ impl ReactiveAutomations {
     /// The service refused: keep the dialog open with its reason. No bruh,
     /// so no memory follows.
     pub(super) fn create_failed(&mut self) {
-        if let Some(id) = self
-            .create
-            .as_mut()
-            .and_then(|create| create.pending.take())
-        {
-            self.drop_import_follow_up(&id);
+        if let Some(create) = self.create.as_mut() {
+            create.pending = None;
         }
+        // One create is on its way at a time, so the refusal is the one the
+        // follow-up waits for, even once the dialog has closed (M5).
+        self.drop_import_follow_up();
     }
 
     /// Type `name` into the open dialog's Name.
