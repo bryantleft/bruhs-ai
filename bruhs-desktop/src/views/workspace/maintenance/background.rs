@@ -184,16 +184,16 @@ impl Workspace {
     pub(super) fn background_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         let policy = self.maintenance.prefs.activity;
         let status = if self.maintenance.power.is_some() && self.background_paused() {
-            "Automatic checks are paused by the current power policy."
+            "Paused by power policy."
         } else {
-            "Set the frequency of Git fetches, provider health checks and host power checks."
+            "Cadence for Git fetches and health checks."
         };
         let mut rows = vec![self.environment_maintenance_row(
             "settings-row-background-profile",
             "Background activity profile",
             status,
             match policy.profile {Profile::Balanced=>"Balanced",Profile::Performance=>"Performance",Profile::BatterySaver=>"Battery saver",Profile::Custom=>"Custom"},
-            self.choice_control(
+            settings_ui::control_column(self.choice_control(
                 "background-profile",
                 "Background activity profile",
                 policy.profile.key(),
@@ -204,7 +204,7 @@ impl Workspace {
                     ("custom", "Custom"),
                 ],
                 cx,
-            ),
+            )),
         )];
         if policy.profile != Profile::Custom {
             return rows;

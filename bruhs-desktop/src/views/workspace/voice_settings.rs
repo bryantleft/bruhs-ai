@@ -205,15 +205,15 @@ impl Workspace {
             .position(|rule| rule.command == "voice.dictate");
         let mut input = self.microphone_rows(cx);
         let mut transcription = vec![self.settings_row("settings-row-voice-destination","Transcribe with",
-            "Local Whisper keeps audio on this host. A cloud provider or compatible server receives audio when you stop.",
-            self.choice_control("settings-voice-destination","Transcribe with",destination.key(),
-                &[("off","Off"),("local","Local Whisper"),("openai","OpenAI"),("xai","xAI"),("openrouter","OpenRouter"),("compatible","Compatible server")],cx))];
+            "Whisper runs locally; cloud providers receive audio on stop.",
+            settings_ui::control_column(self.choice_control("settings-voice-destination","Transcribe with",destination.key(),
+                &[("off","Off"),("local","Local Whisper"),("openai","OpenAI"),("xai","xAI"),("openrouter","OpenRouter"),("compatible","Compatible server")],cx)))];
         transcription.extend(self.voice_cloud_rows(cx));
         if destination == Destination::Local {
             transcription.push(self.settings_row(
                 "desktop-settings-row-voice-model",
                 "Transcription model",
-                "Run Whisper on the capture host. Models download on first use.",
+                "Downloaded on first use.",
                 model,
             ));
             transcription.extend(self.voice_model_rows(cx));
@@ -235,13 +235,13 @@ impl Workspace {
             transcription.push(self.settings_row(
                 "desktop-settings-row-voice-language",
                 "Transcription language",
-                "Multilingual models can detect the language or use a chosen language.",
+                "",
                 self.voice_language_control(cx),
             ));
             transcription.push(self.settings_row(
                 "desktop-settings-row-voice-silence",
                 "Silence filtering",
-                if matches!(destination, Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)) {"OpenAI handles silence automatically."}else{"Skip quiet recordings and trim silence around speech before transcribing."},
+                if matches!(destination, Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)) {"Handled automatically by OpenAI."}else{"Skip quiet recordings and trim silence."},
                 settings_ui::switch(
                     "settings-voice-silence",
                     self.dictation_prefs.silence_filtering,
@@ -260,7 +260,7 @@ impl Workspace {
         let mut cleanup = vec![self.settings_row(
             "desktop-settings-row-voice-fillers",
             "Remove filler words",
-            "Remove spoken hesitations for the transcription language. Keep the correction cue during cleanup.",
+            "Strip spoken hesitations during cleanup.",
             settings_ui::switch(
                 "settings-voice-fillers",
                 self.dictation_prefs.remove_filler_words,
@@ -281,13 +281,13 @@ impl Workspace {
             "desktop-settings-row-dictation-shortcut-mode",
             "Dictation shortcut mode",
             mode.hint(),
-            self.choice_control(
+            settings_ui::control_column(self.choice_control(
                 "settings-voice-shortcut-mode",
                 "Dictation shortcut mode",
                 mode.label(),
                 &[("Auto", "Auto"), ("Hold", "Hold"), ("Toggle", "Toggle")],
                 cx,
-            ),
+            )),
         ));
         if let Some(index) = shortcut {
             let key = &self.keybindings[index].key;

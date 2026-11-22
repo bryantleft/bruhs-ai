@@ -2427,7 +2427,7 @@ fn secret_variable_check_tracks_valid_input_and_disappears_on_cancel(
 #[gpui::test]
 fn rich_composer_setting_preserves_draft_and_queues_markdown(cx: &mut gpui::TestAppContext) {
     use super::{click_debug_selector, press_key, thread_menu_workspace};
-    use crate::views::workspace::{OpenSettings, SettingsSection};
+    use crate::views::workspace::OpenSettings;
     let (workspace, cx, id, _) = thread_menu_workspace(cx);
     cx.simulate_resize(gpui::size(gpui::px(1040.), gpui::px(820.)));
     let chat = workspace.update_in(cx, |ws, w, cx| {
@@ -2974,7 +2974,6 @@ fn worktree_submodule_defaults_preserve_existing_workspace_files(cx: &mut gpui::
 fn new_thread_workspace_uses_scoped_defaults_and_preserves_draft_selection(
     cx: &mut gpui::TestAppContext,
 ) {
-    use super::super::SettingsSection;
     use bruhs_models::logic::run_place::WorkspaceChoice::{Checkout, NewWorktree};
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
     let repo = tempfile::tempdir().unwrap();
@@ -3098,7 +3097,7 @@ fn an_existing_environment_placement_survives_the_upgrade(cx: &mut gpui::TestApp
 fn settings_model_search_saves_custom_ids_and_resets_only_the_chosen_scope(
     cx: &mut gpui::TestAppContext,
 ) {
-    use super::super::{SettingsSection, SETTINGS_MODEL_DROPDOWN_ID};
+    use super::super::SETTINGS_MODEL_DROPDOWN_ID;
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
     cx.simulate_resize(gpui::size(px(1040.), px(820.)));
     workspace.update_in(cx, |ws, w, cx| {
@@ -3210,7 +3209,7 @@ fn default_model_automatic_prefers_a_ready_runtime_and_restores_an_explicit_mode
 async fn model_picker_favorites_survive_restart_and_are_shared_with_the_composer(
     cx: &mut gpui::TestAppContext,
 ) {
-    use super::super::{SettingsSection, SETTINGS_MODEL_DROPDOWN_ID};
+    use super::super::SETTINGS_MODEL_DROPDOWN_ID;
     use super::launch::{init, launch, quit, saved};
     init(cx);
     let dir = tempfile::tempdir().unwrap();
@@ -3286,7 +3285,7 @@ async fn model_picker_favorites_survive_restart_and_are_shared_with_the_composer
 async fn model_options_stay_with_project_fallback_and_restored_thread(
     cx: &mut gpui::TestAppContext,
 ) {
-    use super::super::{SETTINGS_MODEL_DROPDOWN_ID, SettingsSection};
+    use super::super::SETTINGS_MODEL_DROPDOWN_ID;
     use super::launch::{init, launch, quit, saved};
     use bruhs_models::delivery::generation::OptionKind::{ContextWindow, Effort};
     init(cx);

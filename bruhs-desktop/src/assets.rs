@@ -36,6 +36,7 @@ pub const LIST_CHECKS_ICON_PATH: &str = "icons/list-checks.svg";
 pub const MIC_ICON_PATH: &str = "icons/mic.svg";
 pub const USERS_ICON_PATH: &str = "icons/users.svg";
 pub const CLOCK_ICON_PATH: &str = "icons/clock.svg";
+pub const SMARTPHONE_ICON_PATH: &str = "icons/smartphone.svg";
 pub const CALENDAR_ICON_PATH: &str = "icons/calendar.svg";
 pub const PLUS_ICON_PATH: &str = "icons/plus.svg";
 // The capture dialog's destinations (`CaptureKind::icon`).
@@ -245,6 +246,7 @@ impl AssetSource for DesktopAssets {
             WRENCH_ICON_PATH => Ok(Some(Cow::Borrowed(WRENCH_ICON))),
             HAMMER_ICON_PATH => Ok(Some(Cow::Borrowed(HAMMER_ICON))),
             CLOCK_ICON_PATH => Ok(Some(Cow::Borrowed(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>"#))),
+            SMARTPHONE_ICON_PATH => Ok(Some(Cow::Borrowed(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>"#))),
             CHEVRON_LEFT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_LEFT_ICON))),
             CHEVRON_RIGHT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_RIGHT_ICON))),
             CIRCLE_ALERT_ICON_PATH => Ok(Some(Cow::Borrowed(CIRCLE_ALERT_ICON))),

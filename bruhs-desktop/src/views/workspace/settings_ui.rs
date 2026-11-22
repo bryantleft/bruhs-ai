@@ -51,6 +51,21 @@ const SLIDER_THUMB_PX: f32 = 16.0;
 const GRAPE_RADIUS_PX: f32 = 8.0;
 const SEED_RADIUS_PX: f32 = 4.0;
 
+/// Convert raw HTTP transport errors into a concise offline notice for Settings rows.
+pub(super) fn friendly_server_error(error: &impl std::fmt::Display) -> String {
+    let raw = error.to_string();
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("error sending request")
+        || lower.contains("connection refused")
+        || lower.contains("failed to connect")
+        || lower.contains("could not connect")
+    {
+        "Local server unavailable.".to_owned()
+    } else {
+        raw
+    }
+}
+
 /// Web `stepper::snap`: snap to the step grid (from `min`) and clamp.
 pub fn snap(v: f64, min: Option<f64>, max: Option<f64>, step: f64) -> f64 {
     let step = if step > 0.0 { step } else { 1.0 };
@@ -985,7 +1000,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-auto-record",
                 "Auto record calendar meetings",
-                "Start recording when a Google Calendar event begins. Needs the bruhs-capture daemon running and a calendar connected.",
+                "Start recording when a calendar event begins.",
                 switch(
                     "desktop-settings-auto-record",
                     settings.enabled,
@@ -1003,7 +1018,7 @@ impl Workspace {
             self.settings_row_opts(
                 "desktop-settings-row-min-attendees",
                 "Minimum attendees",
-                "Only events with at least this many attendees are recorded.",
+                "",
                 None,
                 disabled,
                 self.render_settings_stepper(SettingsStepper::MinAttendees, disabled, cx),
@@ -1011,7 +1026,7 @@ impl Workspace {
             self.settings_row_opts(
                 "desktop-settings-row-stop-delay",
                 "Stop after the event ends",
-                "Grace period before the recording stops.",
+                "Grace period before stopping.",
                 None,
                 disabled,
                 self.render_settings_stepper(SettingsStepper::StopDelay, disabled, cx),
@@ -1019,7 +1034,7 @@ impl Workspace {
             self.settings_row_opts(
                 "desktop-settings-row-prompt-before-starting",
                 "Prompt before starting",
-                "Off means recordings start silently.",
+                "",
                 None,
                 disabled,
                 switch(
@@ -1065,7 +1080,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-always-skip",
                 "Always skip events",
-                "Events you told the prompt to never record.",
+                "Events excluded from auto-recording.",
                 label_text(
                     if skipped.is_empty() {
                         "None".to_string()
@@ -1173,14 +1188,14 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-transcription-provider",
             "Transcription provider",
-            "Applies to the final transcript on your next recording. Whisper keeps audio on this device. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on this device.",
+            "Used for the final transcript. Whisper runs locally.",
             provider_control,
         )];
         if prefs.transcription.provider == bruhs_models::TranscriptionProvider::OpenAiCompatible {
             rows.push(self.settings_row(
                 "desktop-settings-row-transcription-server-model",
                 "Server transcription model",
-                "Enter a model ID supported by your configured server. It must return timestamped segments in verbose_json format. Configure the server URL, key, and request deadline in the capture daemon environment.",
+                "Model ID returning verbose_json segments.",
                 div().w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
                     .child(Input::new(&self.settings_transcription_model_input)
                         .aria_label("Server transcription model"))
@@ -1232,14 +1247,14 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-whisper-model",
                 "Transcription model",
-                "Downloaded on first use. Applies to your next recording.",
+                "Downloaded on first use.",
                 final_control,
             ));
         }
         rows.push(self.settings_row(
                 "desktop-settings-row-live-whisper-model",
                 "Live preview model",
-            "Used for the live transcript while recording. Smaller is faster; the final pass uses your selected provider and model.",
+            "Local model for live transcripts while recording.",
                 live_control,
             ));
         rows
@@ -1253,7 +1268,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-subspeaker",
             "Distinguish multiple speakers",
-            "Clusters voice embeddings on the system audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use.",
+            "Separate remote speakers (~30 MB download).",
             switch(
                 "desktop-settings-subspeaker",
                 diarize.subspeaker_enabled,
@@ -1272,7 +1287,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-max-speakers",
                 "Max speakers",
-                "Higher resolves more people on large calls; lower is faster with fewer false splits.",
+                "Higher finds more people on large calls.",
                 code_text(
                     diarize.max_speakers.to_string(),
                     CODE_SM_PX,
@@ -1290,7 +1305,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-video-ocr",
             "Read participant names from video",
-            "Reads name hints from the screen locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission.",
+            "Read on-screen names locally. Requires Screen Recording.",
             switch(
                 "desktop-settings-video-ocr",
                 diarize.video_ocr_enabled,
@@ -1308,7 +1323,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-auto-link",
             "Link voices across meetings",
-            "Match new clusters against known speaker profiles by voice similarity. Off makes every cluster a fresh profile you can link by hand.",
+            "Match speakers across meetings by voice.",
             switch(
                 "desktop-settings-auto-link",
                 diarize.cross_meeting_linking_auto,
@@ -1331,7 +1346,7 @@ impl Workspace {
                 self.settings_row(
                     "desktop-settings-row-link-threshold",
                     "Linking threshold",
-                    "Higher means fewer false matches, lower means better recall. Default 0.75.",
+                    "Higher reduces false matches. Default 0.75.",
                     code_text(
                         format!("{:.2}", diarize.cross_meeting_linking_threshold),
                         CODE_SM_PX,
@@ -1363,7 +1378,7 @@ impl Workspace {
         vec![self.settings_row(
             "desktop-settings-row-observations",
             "Person observations",
-            "Each meeting summary also captures topics, decisions, action items, tone and notable quotes per speaker. Profiles populate the People page.",
+            "Capture topics, decisions, and quotes per speaker.",
             switch(
                 "desktop-settings-observations",
                 extract,

@@ -72,14 +72,14 @@ impl Workspace {
         self.settings_row(
             "settings-row-environment-identification",
             "Environment identification",
-            "Choose how this build appears in the sidebar header.",
-            self.choice_control(
+            "Build badge in the sidebar header.",
+            settings_ui::control_column(self.choice_control(
                 "settings-environment-mark",
                 "Environment identification",
                 current,
                 &choices,
                 cx,
-            ),
+            )),
         )
     }
 

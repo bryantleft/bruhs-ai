@@ -15,9 +15,9 @@ fn follow_up_button(
 ) -> AnyElement {
     div()
         .id(id)
-        .h(px(theme::APP_CONTROL_HEIGHT_PX))
+        .h(px(theme::CONTROL_SM_PX))
         .px(px(12.0))
-        .rounded(px(8.0))
+        .rounded(px(6.0))
         .flex()
         .items_center()
         .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
@@ -52,7 +52,7 @@ fn follow_up_button(
 }
 
 impl SettingsSection {
-    pub(super) const ALL: [SettingsSection; 30] = [
+    pub(super) const ALL: [SettingsSection; 27] = [
         Self::General,
         Self::Appearance,
         Self::Chat,
@@ -74,10 +74,7 @@ impl SettingsSection {
         Self::Vault,
         Self::Apps,
         Self::Calendar,
-        Self::Recording,
-        Self::Transcription,
-        Self::Speakers,
-        Self::People,
+        Self::Meetings,
         Self::Maintenance,
         Self::Backup,
         Self::Diagnostics,
@@ -90,7 +87,6 @@ impl SettingsSection {
                 SettingsSection::Updates => Some("Agents"),
                 SettingsSection::Projects => Some("Code"),
                 SettingsSection::Environments => Some("Connections"),
-                SettingsSection::Recording => Some("Meetings"),
                 SettingsSection::Maintenance => Some("Application"),
                 _ => None,
             }
@@ -133,10 +129,7 @@ impl SettingsSection {
             Self::Access => "access",
             Self::Archived => "archived",
             Self::Calendar => "calendar",
-            Self::Recording => "recording",
-            Self::Transcription => "transcription",
-            Self::Speakers => "speakers",
-            Self::People => "people",
+            Self::Meetings => "meetings",
             Self::Keyboard => "keyboard",
             Self::About => "about",
         }
@@ -144,8 +137,10 @@ impl SettingsSection {
 
     #[cfg(any(test, debug_assertions))]
     pub(super) fn from_id(id: &str) -> Option<Self> {
-        if id == "beta" {
-            return Some(Self::General);
+        match id {
+            "beta" => return Some(Self::General),
+            "recording" | "transcription" | "speakers" | "people" => return Some(Self::Meetings),
+            _ => {}
         }
         Self::ALL.into_iter().find(|section| section.id() == id)
     }
@@ -165,23 +160,20 @@ impl SettingsSection {
             Self::Projects => assets::FOLDER_ICON_PATH,
             Self::SourceControl => assets::GIT_BRANCH_ICON_PATH,
             Self::Diagnostics => assets::ACTIVITY_ICON_PATH,
-            Self::Maintenance => assets::ACTIVITY_ICON_PATH,
+            Self::Maintenance => assets::WRENCH_ICON_PATH,
             Self::Worktrees => assets::GIT_BRANCH_ICON_PATH,
             Self::Voice => assets::MIC_ICON_PATH,
             Self::Threads => assets::BOT_ICON_PATH,
             Self::Browser => assets::TOOL_GLOBE_ICON_PATH,
             Self::SnapShots => assets::CAMERA_ICON_PATH,
-            Self::ScheduledTasks => assets::CALENDAR_ICON_PATH,
+            Self::ScheduledTasks => assets::CLOCK_ICON_PATH,
             Self::Environments => assets::TOOL_TERMINAL_ICON_PATH,
-            Self::Devices => assets::SQUARE_ICON_PATH,
-            Self::Labs => assets::ACTIVITY_ICON_PATH,
+            Self::Devices => assets::SMARTPHONE_ICON_PATH,
+            Self::Labs => assets::BRAIN_ICON_PATH,
             Self::Access => "icons/shield.svg",
             Self::Archived => assets::INBOX_ICON_PATH,
             Self::Calendar => assets::CALENDAR_ICON_PATH,
-            Self::Recording => assets::MIC_ICON_PATH,
-            Self::Transcription => assets::ACTIVITY_ICON_PATH,
-            Self::Speakers => assets::USERS_ICON_PATH,
-            Self::People => assets::BOOK_OPEN_ICON_PATH,
+            Self::Meetings => assets::MIC_ICON_PATH,
             Self::Keyboard => assets::KEYBOARD_ICON_PATH,
             Self::About => assets::HELP_CIRCLE_ICON_PATH,
         }
@@ -196,7 +188,7 @@ impl SettingsSection {
             Self::Updates => "Providers & updates",
             Self::Appearance => "Appearance",
             Self::Chat => "Chat",
-            Self::Diffs => "Diffs & pull requests",
+            Self::Diffs => "Diffs",
             Self::Projects => "Projects",
             Self::SourceControl => "Source control",
             Self::Diagnostics => "Diagnostics",
@@ -213,35 +205,19 @@ impl SettingsSection {
             Self::Access => "Sharing & access",
             Self::Archived => "Archived threads",
             Self::Calendar => "Calendar",
-            Self::Recording => "Recording",
-            Self::Transcription => "Transcription",
-            Self::Speakers => "Speakers",
-            Self::People => "People",
+            Self::Meetings => "Meetings",
             Self::Keyboard => "Keybindings",
             Self::About => "About",
         }
     }
 
-    /// Web `SettingsSection` descriptions under each card title.
+    /// Optional subtitle shown under standalone section cards.
     pub(super) fn description(self) -> &'static str {
         match self {
             Self::Vault => bruhs_models::vault::VAULT_DESCRIPTION,
             Self::Apps => bruhs_models::apps::APPS_DESCRIPTION,
             Self::Backup => bruhs_models::backup::BACKUP_DESCRIPTION,
-            Self::General => "",
-            Self::Environments | Self::Devices | Self::Labs => "",
-            Self::Access => "Manage network access, Tailscale HTTPS and paired phones on this machine.",
-            Self::Updates => "Provider CLIs and this build of bruhs.",
-            Self::Diagnostics | Self::SourceControl | Self::Maintenance | Self::Appearance | Self::Projects => "", Self::ScheduledTasks | Self::SnapShots | Self::Browser | Self::Chat | Self::Voice | Self::Diffs | Self::Worktrees => "", Self::Threads | Self::Archived => "",
-            Self::Calendar => "Google Calendar sync for the calendar view and automatic meeting recording.",
-            Self::Recording => "When bruhs starts recording meetings on its own.",
-            Self::Transcription => {
-                "Provider and model for the final transcript, plus a live preview on this device."
-            }
-            Self::Speakers => "Telling voices apart and remembering them across meetings.",
-            Self::People => "What meeting summaries record about each person.",
-            Self::Keyboard => "Customize shortcuts and when they apply.",
-            Self::About => "",
+            _ => "",
         }
     }
 
@@ -271,10 +247,7 @@ impl SettingsSection {
             Self::Access => "desktop-settings-nav-access",
             Self::Archived => "desktop-settings-nav-archived",
             Self::Calendar => "desktop-settings-nav-calendar",
-            Self::Recording => "desktop-settings-nav-recording",
-            Self::Transcription => "desktop-settings-nav-transcription",
-            Self::Speakers => "desktop-settings-nav-speakers",
-            Self::People => "desktop-settings-nav-people",
+            Self::Meetings => "desktop-settings-nav-meetings",
             Self::Keyboard => "desktop-settings-nav-keyboard",
             Self::About => "desktop-settings-nav-about",
         }
@@ -991,9 +964,14 @@ impl Workspace {
         div()
             .id("desktop-settings-follow-up")
             .debug_selector(|| "desktop-settings-follow-up".to_string())
+            .p(px(2.0))
+            .rounded(px(8.0))
+            .bg(theme::longan_950())
+            .border_1()
+            .border_color(gpui::white().opacity(0.08))
             .flex()
             .items_center()
-            .gap_2()
+            .gap(px(2.0))
             .child(follow_up_button(
                 "desktop-settings-follow-up-queue",
                 "Queue",
@@ -1298,10 +1276,13 @@ impl Workspace {
         description: &'static str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
+        if title.is_empty() && description.is_empty() {
+            return self.settings_card_body(rows).into_any_element();
+        }
         self.settings_card_with_heading(self.settings_heading(title, description).into_any_element(), rows)
     }
 
-    pub(super) fn settings_card_with_heading(&self, heading: AnyElement, rows: Vec<AnyElement>) -> AnyElement {
+    fn settings_card_body(&self, rows: Vec<AnyElement>) -> Div {
         let mut body = div()
             .rounded(px(14.0))
             .border_1()
@@ -1320,12 +1301,16 @@ impl Workspace {
                     .child(row),
             );
         }
+        body
+    }
+
+    pub(super) fn settings_card_with_heading(&self, heading: AnyElement, rows: Vec<AnyElement>) -> AnyElement {
         div()
             .flex()
             .flex_col()
             .gap(px(SETTINGS_SECTION_GAP_PX))
             .child(heading)
-            .child(body)
+            .child(self.settings_card_body(rows))
             .into_any_element()
     }
 
@@ -1435,10 +1420,15 @@ impl Workspace {
                     section,
                     source_title: Some(section.label().into()),
                     title: self.ui_language().text(section.label()).into(),
-                    keywords: if section == SettingsSection::General {
-                        "Notifications alerts quiet hours sidebar external editor".into()
-                    } else {
-                        section.description().into()
+                    keywords: match section {
+                        SettingsSection::General => {
+                            "Notifications alerts quiet hours sidebar external editor".into()
+                        }
+                        SettingsSection::Diffs => "pull requests changes review".into(),
+                        SettingsSection::Meetings => {
+                            "recording transcription speakers people whisper diarize".into()
+                        }
+                        _ => section.description().into(),
                     },
                     selector: None,
                 });
@@ -1817,7 +1807,7 @@ impl Workspace {
         let editor = vec![self.settings_row(
             "desktop-settings-row-editor",
             "Editor",
-            "Where ⌘O and the diff panel's Open button send the project and files.",
+            "Used by ⌘O and Open buttons.",
             settings_ui::control_column(editor_control),
         )];
         div()
@@ -1833,7 +1823,7 @@ impl Workspace {
                     self.settings_row(
                         "desktop-settings-row-confirm-unpin",
                         "Unpin confirmation",
-                        "Ask before removing a thread from Pinned.",
+                        "",
                         settings_ui::switch(
                             "settings-confirm-unpin",
                             self.confirm_thread_unpin,
@@ -1849,7 +1839,7 @@ impl Workspace {
                     self.settings_row(
                         "desktop-settings-row-confirm-archive",
                         "Archive confirmation",
-                        "Ask before moving a thread to Archived threads.",
+                        "",
                         settings_ui::switch(
                             "settings-confirm-archive",
                             self.confirm_thread_archive,
@@ -1865,7 +1855,7 @@ impl Workspace {
                     self.settings_row(
                         "desktop-settings-row-confirm-delete",
                         "Delete confirmation",
-                        "Ask before deleting a thread and its chat history.",
+                        "",
                         settings_ui::switch(
                             "settings-confirm-delete",
                             self.confirm_thread_delete,
@@ -1887,7 +1877,7 @@ impl Workspace {
                 vec![self.language_row(cx), self.settings_row(
                     "desktop-settings-row-clock",
                     "Time format",
-                    "System default follows your device’s clock preference.",
+                    "",
                     settings_ui::control_column(self.choice_control(
                         "settings-clock-format",
                         "Time format",
@@ -1950,7 +1940,7 @@ impl Workspace {
         self.settings_row_with_reset(
             "desktop-settings-row-rich-composer",
             label,
-            "Show formatted Markdown as you type.",
+            "Preview Markdown as you type.",
             None,
             false,
             Some(toggle),
@@ -1983,22 +1973,17 @@ impl Workspace {
                 .collect(),
         }];
         let (toggle, select) = self.settings_dropdown_handlers(SETTINGS_SEND_SHORTCUT, cx);
-        let alternate = match self.send_shortcut {
-            SendShortcut::Enter => format!("Press {modifier} + Enter to switch actions for one message."),
-            SendShortcut::ModEnter => format!("Press {modifier} + Shift + Enter to switch actions for one message."),
-            SendShortcut::ModEnterMultiline => format!("Switch actions with {modifier} + Enter for one line or {modifier} + Shift + Enter for multiple lines."),
-        };
         vec![
-            self.settings_row("settings-row-tool-visibility","Tool calls in chat","Choose how much agent activity appears. Zen shows the final answer. Errors and approval requests stay visible.",settings_ui::control_column(self.choice_control("settings-tool-visibility","Tool calls in chat",self.tool_visibility.key(),&[("all","Show all"),("failures","Hide successful"),("hide","Hide all"),("zen","Zen")],cx))),
-            self.settings_row("desktop-settings-row-slash-skills","Show skills in slash menu","Include installed provider and project skills in the / menu. Type $ to search skills directly.",settings_ui::switch("settings-slash-skills",self.slash_skills,false,"Show skills in slash menu",cx,|this,_,cx|{
+            self.settings_row("settings-row-tool-visibility","Tool calls in chat","How much tool activity appears in chat.",settings_ui::control_column(self.choice_control("settings-tool-visibility","Tool calls in chat",self.tool_visibility.key(),&[("all","Show all"),("failures","Hide successful"),("hide","Hide all"),("zen","Zen")],cx))),
+            self.settings_row("desktop-settings-row-slash-skills","Show skills in slash menu","Include skills in /.",settings_ui::switch("settings-slash-skills",self.slash_skills,false,"Show skills in slash menu",cx,|this,_,cx|{
                 this.slash_skills=!this.slash_skills;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);
             })),
             self.settings_row("desktop-settings-row-reader-announcements","Screen reader announcements",
-                "Announce turn status, assistant messages before tool calls, or each tool step.",
+                "What to announce during a turn.",
                 settings_ui::control_column(self.choice_control("settings-reader-announcements","Screen reader announcements",self.screen_reader.announcements.key(),
                     &[("status","Status only"),("messages","Status and messages"),("everything","Everything")],cx))),
             self.settings_row("desktop-settings-row-reader-title","Screen reader window title",
-                "Start the window title with the active thread’s status and name. Both appear in app switchers and shared screens.",
+                "Prefix window title with thread status and name.",
                 settings_ui::switch("settings-reader-title",self.screen_reader.window_title,false,"Screen reader window title",cx,|this,_,cx|{
                     this.screen_reader.window_title=!this.screen_reader.window_title;
                     this.persist_and_notify(cx);
@@ -2007,19 +1992,19 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-send-shortcut",
                 "Send shortcut",
-                "Choose which keys send a prompt. Shift + Enter starts a new line.",
-                dropdown(SETTINGS_SEND_SHORTCUT, "Send shortcut", self.send_shortcut.id(), groups, self.settings_listbox(SETTINGS_SEND_SHORTCUT), toggle, select),
+                "Shift + Enter adds a new line.",
+                settings_ui::control_column(dropdown(SETTINGS_SEND_SHORTCUT, "Send shortcut", self.send_shortcut.id(), groups, self.settings_listbox(SETTINGS_SEND_SHORTCUT), toggle, select)),
             ),
             self.settings_row(
                 "desktop-settings-row-follow-up",
                 "Follow up behavior",
-                &format!("Queue for the next turn or steer the current Claude turn. {alternate} Codex always queues."),
-                settings_ui::control_column(self.render_follow_up_control(cx)),
+                "Queue or steer when sending mid-turn.",
+                self.render_follow_up_control(cx),
             ),
             self.settings_row(
                 "desktop-settings-row-autocompact",
                 "Automatically compact after",
-                "Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no automatic compaction.",
+                "Claude token threshold (100k to 1M).",
                 settings_ui::control_column(
                     div()
                         .w_full()
@@ -2031,7 +2016,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-compact-idle",
                 "Compact idle threads",
-                "For Claude threads over 200,000 tokens, compact before the cache expires or offer Compact when you return. Choose Never to use /compact manually.",
+                "Compact long Claude threads when idle.",
                 settings_ui::control_column(self.render_compact_idle_control(cx)),
             ),
         ]
@@ -2043,8 +2028,8 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-diff-colors",
                 "Diff colors",
-                "Choose colors for added and removed lines.",
-                self.choice_control(
+                "",
+                settings_ui::control_column(self.choice_control(
                     "settings-diff-colors",
                     "Diff colors",
                     if prefs.blue_orange {
@@ -2057,12 +2042,12 @@ impl Workspace {
                         ("blue-orange", "Blue & orange"),
                     ],
                     cx,
-                ),
+                )),
             ),
             self.settings_row(
                 "desktop-settings-row-diff-whitespace",
                 "Hide whitespace changes",
-                "Ignore whitespace-only edits in working tree and thread diffs.",
+                "",
                 settings_ui::switch(
                     "settings-diff-whitespace",
                     prefs.hide_whitespace,
@@ -2084,8 +2069,8 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-diff-file-state",
                 "Default diff file state",
-                "Choose how files open in the changes panel.",
-                self.choice_control(
+                "",
+                settings_ui::control_column(self.choice_control(
                     "settings-diff-file-state",
                     "Default diff file state",
                     if prefs.collapsed {
@@ -2095,28 +2080,28 @@ impl Workspace {
                     },
                     &[("expanded", "Expanded"), ("collapsed", "Collapsed")],
                     cx,
-                ),
+                )),
             ),
             self.settings_row(
                 "desktop-settings-row-diff-layout",
                 "Diff layout",
-                "Read changes in one column or compare both versions side by side.",
-                self.choice_control(
+                "",
+                settings_ui::control_column(self.choice_control(
                     "settings-diff-layout",
                     "Diff layout",
                     if prefs.split { "split" } else { "stacked" },
                     &[("stacked", "Stacked"), ("split", "Side by side")],
                     cx,
-                ),
+                )),
             ),
             self.settings_row("desktop-settings-row-proactive-panels","Open pull requests and changes panels proactively",
-                "Open a linked pull request first. Otherwise, open changes when a turn edits at least three files or 50 lines.",
+                "Open linked PRs or changes after large edits.",
                 settings_ui::switch("settings-proactive-panels",prefs.proactive_panels,false,"Open panels proactively",cx,|this,_,cx|{
                     this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.proactive_panels=!prefs.proactive_panels;panel.set_preferences(prefs,cx)});
                     this.persist_and_notify(cx);
                 })),
             self.settings_row("desktop-settings-row-open-pull-links","Open pull requests in bruhs",
-                "Open GitHub pull request links in bruhs. Turn off to use the usual link destination.",
+                "Open GitHub PR links inside bruhs.",
                 settings_ui::switch("settings-open-pull-links",prefs.open_pull_links_in_app,false,"Open pull requests in bruhs",cx,|this,_,cx|{
                     this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.open_pull_links_in_app=!prefs.open_pull_links_in_app;panel.set_preferences(prefs,cx)});
                     this.persist_and_notify(cx);
@@ -2167,7 +2152,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-contrast",
                 "Contrast",
-                "Adjust contrast across the interface.",
+                "",
                 percent_slider(
                     settings_ui::SettingsSlider::Contrast,
                     self.appearance.contrast,
@@ -2176,7 +2161,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-glass-opacity",
                 "Glass opacity",
-                "Adjust the opacity of menus, dialogs and the composer.",
+                "Opacity of menus, dialogs, and composer.",
                 percent_slider(
                     settings_ui::SettingsSlider::GlassOpacity,
                     self.appearance.glass_opacity,
@@ -2185,14 +2170,14 @@ impl Workspace {
         ];
         let interface = vec![
             self.environment_mark_row(cx),
-            self.settings_row("desktop-settings-row-panel-animations","Panel animations","Set how fast panels open and close. Zero turns animation off.",
+            self.settings_row("desktop-settings-row-panel-animations","Panel animations","Duration in ms. 0 disables animation.",
                 settings_ui::control_column(div().w_full().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(self.render_settings_slider(settings_ui::SettingsSlider::PanelDuration,cx))).child(format!("{} ms",self.appearance.panel_duration_ms)).into_any_element())),
 
             self.settings_row(
                 "desktop-settings-row-chat-width",
                 "Chat width",
-                "Set the width of the conversation and composer.",
-                self.choice_control(
+                "",
+                settings_ui::control_column(self.choice_control(
                     "settings-chat-width",
                     "Chat width",
                     self.chat_width.id(),
@@ -2202,20 +2187,20 @@ impl Workspace {
                         ("full", "Full width"),
                     ],
                     cx,
-                ),
+                )),
             ),
             self.thread_detail_settings_row(cx),
             self.settings_row(
                 "desktop-settings-row-effort-display", "Effort display",
-                "Show reasoning effort in the composer as a word or bars.",
-                self.choice_control("settings-effort-display", "Effort display",
+                "",
+                settings_ui::control_column(self.choice_control("settings-effort-display", "Effort display",
                     if self.appearance.effort_label { "label" } else { "bars" },
-                    &[("label", "Word (default)"), ("bars", "Bars")], cx),
+                    &[("label", "Word (default)"), ("bars", "Bars")], cx)),
             ),
             self.settings_row(
                 "desktop-settings-row-render-math",
                 "Render math",
-                "Typeset LaTeX in chat messages.",
+                "Typeset LaTeX in chat.",
                 settings_ui::switch(
                     "settings-render-math",
                     self.appearance.render_math,
@@ -2232,7 +2217,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-zoom",
                 "Interface size",
-                "Adjust the size of text and controls on this device.",
+                "",
                 div()
                     .flex()
                     .items_center()
@@ -2329,7 +2314,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-access-mode",
                 "Access mode",
-                "Choose whether the agent may edit files or run commands. Permission support depends on its runtime.",
+                "Default file and command permissions.",
                 settings_ui::control_column(mode_control),
             ),
         ];
@@ -2338,13 +2323,13 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-thread-access",
                 "Messages between threads",
-                "Lets a thread's agent list your other threads, read them, and send one a message or start a new thread. Read only keeps listing and reading. Off removes the tools. Plan turns only read.",
+                "Let agents list, read, or message other threads.",
                 settings_ui::control_column(self.render_thread_access_control(cx)),
             ),
             self.settings_row(
                 "desktop-settings-row-thread-hops",
                 "Agent message limit",
-                "How many messages agents may send each other in a row before the chain stops and hands back to you. A message you type starts the count again.",
+                "Max consecutive agent-to-agent messages.",
                 settings_ui::control_column(self.render_thread_hops_control(cx)),
             ),
         ];
@@ -2353,7 +2338,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-title-instructions",
                 "Thread title instructions",
-                "Describe how new and regenerated titles should read. Local titles support a prefix and a maximum length.",
+                "Style rules for new and regenerated titles.",
                 settings_ui::control_column(
                     div()
                         .w_full()
@@ -2369,7 +2354,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-project-title",
                 "Project title instructions",
-                "Optional extra lines for one project. They are applied after the instructions above.",
+                "Extra rules for one project.",
                 settings_ui::control_column(
                     div()
                         .w_full()
@@ -2401,13 +2386,13 @@ impl Workspace {
                 vec![self.settings_row(
                     "desktop-settings-row-project-start-folder",
                     "Add project starts in",
-                    "Starting folder for the project browser. Leave empty to use your home folder.",
+                    "Default folder for Add project.",
                     settings_ui::control_column(
                         Input::new(&self.project_start_folder_input)
                             .aria_label("Add project starts in")
                             .into_any_element(),
                     ),
-                ),self.settings_row("desktop-settings-row-clone-host-folders","Clone into host folders","Place cloned repositories in host and owner folders under the selected directory.",
+                ),self.settings_row("desktop-settings-row-clone-host-folders","Clone into host folders","Group clones by host and owner.",
                     settings_ui::switch("settings-clone-host-folders",self.clone_host_folders,false,"Clone into host folders",cx,|this,_,cx|{
                         this.clone_host_folders=!this.clone_host_folders;this.persist_and_notify(cx);
                     }))],
@@ -2622,7 +2607,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "desktop-settings-row-working-section",
             "Working section",
-            if self.labs_sidebar.enabled {"Project folders are enabled in Labs. Working threads appear in their project folder."} else {"Group working threads in the sidebar. Threads return to the active list when they need your approval."},
+            if self.labs_sidebar.enabled {"Project folders are enabled in Labs. Working threads appear in their project folder."} else {"Group working threads in the sidebar."},
             toggle,
         ));
         rows
@@ -2690,17 +2675,17 @@ impl Workspace {
         app.extend([
                 self.settings_row(
                     "settings-update-track", "Update track",
-                    if packaged { "Stable releases or the latest published nightly build." } else { "This development build follows its Git checkout." },
-                    if packaged { self.choice_control("settings-update-track", "Update track", self.updates.read(cx).track.key(), &[("stable", "Stable"), ("nightly", "Nightly")], cx) } else { muted("Source checkout") },
+                    if packaged { "" } else { "Follows this Git checkout." },
+                    if packaged { settings_ui::control_column(self.choice_control("settings-update-track", "Update track", self.updates.read(cx).track.key(), &[("stable", "Stable"), ("nightly", "Nightly")], cx)) } else { muted("Source checkout") },
                 ),
                 self.launcher_row(cx),
                 self.settings_row(
-                    "settings-about-mobile", "Mobile app", "Pair a phone with this host and choose its access.",
+                    "settings-about-mobile", "Mobile app", "Pair a phone with this host.",
                     on_press_view(action("about-open-mobile", "Pair a device"), cx,
                         |this, _, cx| this.set_settings_section(SettingsSection::Access, cx)).into_any_element(),
                 ),
                 self.settings_row(
-                    "settings-about-welcome", "Welcome page", "See your agents, open a project or connect your phone.",
+                    "settings-about-welcome", "Welcome page", "Reopen the setup overview.",
                     on_press_view(action("about-open-welcome", "Open welcome page"), cx, |this, window, cx| {
                         this.open_overlay(Overlay::Welcome);
                         this.focus_first_modal_tab_stop(window, cx);
@@ -2710,13 +2695,13 @@ impl Workspace {
         ]);
         let legal = vec![
                 self.settings_row(
-                    "settings-about-privacy", "Privacy policy", "Read how bruhs handles your data.",
+                    "settings-about-privacy", "Privacy policy", "",
                     on_press_view(action("about-open-privacy", "Read policy"), cx,
                         |_, _, cx| cx.open_url("https://bruhs.ai/privacy")).into_any_element(),
                 ),
                 self.settings_row(
                     "settings-about-licenses", "Open source licenses",
-                    "Licenses for components included in this build.",
+                    "",
                     on_press_view(action("about-open-licenses", self.ui_language().text("View licenses"))
                         .track_focus(&self.license_trigger).debug_selector(|| "about-open-licenses".into()), cx, |this, window, cx| {
                         this.open_license_browser(window,cx);
@@ -2727,13 +2712,13 @@ impl Workspace {
                 self.settings_row(
                     "desktop-settings-about-mcp",
                     "MCP servers",
-                    "Configured through Claude Code settings; connected servers appear in each session's init event.",
+                    "Configured via Claude Code.",
                     muted("Managed by Claude Code"),
                 ),
                 self.settings_row(
                     "desktop-settings-about-design",
                     "Design system",
-                    "Bruhs: fruit tokens, monospace type, no shadows.",
+                    "",
                     design_link,
                 ),
         ];
@@ -2771,7 +2756,7 @@ impl Workspace {
                     .child(self.render_settings_general(cx))
                     .into_any_element()
             }
-            SettingsSection::Updates => return container.child(div().flex().flex_col().gap(px(24.)).child(self.settings_card(section.label(),section.description(),self.render_settings_updates_rows(cx))).child(self.provider_health_card(cx)).child(self.usage_hubs_card(cx)).child(self.generators_card(cx))).into_any_element(),
+            SettingsSection::Updates => return container.child(div().flex().flex_col().gap(px(24.)).child(self.settings_card("Updates", "", self.render_settings_updates_rows(cx))).child(self.provider_health_card(cx)).child(self.usage_hubs_card(cx)).child(self.generators_card(cx))).into_any_element(),
             SettingsSection::Archived => self.render_archived_threads(cx),
             SettingsSection::Projects => {
                 return container
@@ -2800,7 +2785,11 @@ impl Workspace {
             SettingsSection::Labs => {
                 return container.child(self.settings_card("Beta", "", self.labs_rows(cx))).into_any_element();
             }
-            SettingsSection::Access => vec![self.render_mobile(cx).into_any_element()],
+            SettingsSection::Access => {
+                return container
+                    .child(self.render_mobile(cx))
+                    .into_any_element()
+            }
             SettingsSection::Browser => self.render_browser_rows(cx),
             SettingsSection::SnapShots => self.render_snapshot_rows(cx),
             SettingsSection::Voice => return container.child(self.render_voice_settings(cx)).into_any_element(),
@@ -2817,10 +2806,36 @@ impl Workspace {
                     .into_any_element()
             }
             SettingsSection::Calendar => self.render_settings_calendar_rows(cx),
-            SettingsSection::Recording => self.render_settings_recording_rows(cx),
-            SettingsSection::Transcription => self.render_settings_transcription_rows(cx),
-            SettingsSection::Speakers => self.render_settings_speakers_rows(cx),
-            SettingsSection::People => self.render_settings_people_rows(cx),
+            SettingsSection::Meetings => {
+                return container
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(24.0))
+                            .child(self.settings_card(
+                                "Transcription",
+                                "",
+                                self.render_settings_transcription_rows(cx),
+                            ))
+                            .child(self.settings_card(
+                                "Recording",
+                                "",
+                                self.render_settings_recording_rows(cx),
+                            ))
+                            .child(self.settings_card(
+                                "Speakers",
+                                "",
+                                self.render_settings_speakers_rows(cx),
+                            ))
+                            .child(self.settings_card(
+                                "People",
+                                "",
+                                self.render_settings_people_rows(cx),
+                            )),
+                    )
+                    .into_any_element()
+            }
             SettingsSection::Keyboard => {
                 return container
                     .child(self.render_keybinding_settings(cx))
@@ -2830,8 +2845,10 @@ impl Workspace {
                 return container.child(self.render_about(cx)).into_any_element();
             }
         };
+        let description = section.description();
+        let title = if description.is_empty() { "" } else { section.label() };
         container
-            .child(self.settings_card(section.label(), section.description(), rows))
+            .child(self.settings_card(title, description, rows))
             .into_any_element()
     }
 
@@ -3398,7 +3415,7 @@ mod ui_audit_tests {
         cx.simulate_resize(size(px(641.0), px(481.0)));
         workspace.update_in(cx, |workspace, window, cx| {
             workspace.open_settings(&super::OpenSettings, window, cx);
-            workspace.set_settings_section(SettingsSection::Transcription, cx);
+            workspace.set_settings_section(SettingsSection::Meetings, cx);
         });
         cx.run_until_parked();
         let overlay = cx

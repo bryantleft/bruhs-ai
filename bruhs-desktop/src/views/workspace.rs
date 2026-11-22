@@ -821,10 +821,7 @@ enum SettingsSection {
     Apps,
     Backup,
     Calendar,
-    Recording,
-    Transcription,
-    Speakers,
-    People,
+    Meetings,
     Keyboard,
     About,
 }

@@ -71,7 +71,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "voice-row-clean-transcripts",
             "Clean up transcripts",
-            "Send the transcript and nearby draft text to the cleanup model before inserting it.",
+            "Edit transcripts with a model before inserting.",
             settings_ui::switch(
                 "voice-cleanup-enabled",
                 prefs.enabled,
@@ -91,21 +91,21 @@ impl Workspace {
         rows.push(self.settings_row(
             "voice-row-cleanup-style",
             "Instructions",
-            "Choose how the model edits punctuation, lists and spoken corrections.",
-            self.choice_control(
+            "How the model edits dictated text.",
+            settings_ui::control_column(self.choice_control(
                 "settings-voice-cleanup-style",
                 "Cleanup instructions",
                 if prefs.custom { "custom" } else { "default" },
                 &[("default", "Default"), ("custom", "Custom")],
                 cx,
-            ),
+            )),
         ));
         if prefs.custom {
             rows.push(
                 self.settings_row(
                     "voice-row-cleanup-prompt",
                     "Custom instructions",
-                    "Describe the edits to apply to dictated text.",
+                    "Describe how to edit dictated text.",
                     settings_ui::control_column(
                         self.voice_cleanup_fields
                             .instructions
@@ -118,16 +118,16 @@ impl Workspace {
         rows.push(self.settings_row(
             "voice-row-cleanup-model",
             "Cleanup model",
-            "Use the text generation model for this project or choose a separate model.",
-            self.text_model_control(
+            "Model used to clean up transcripts.",
+            settings_ui::control_column(self.text_model_control(
                 "settings-voice-cleanup-model",
                 "Cleanup model",
                 prefs.model.as_deref().filter(|model|!self.generator_unavailable(model)).unwrap_or("inherit"),
                 &[("inherit","Use text generation model")],
                 cx,
-            ),
+            )),
         ));
-        rows.push(self.settings_row("voice-row-correction-cue","Correction cue","Say this word before correcting something you just dictated. Leave it blank to disable the cue.",
+        rows.push(self.settings_row("voice-row-correction-cue","Correction cue","Spoken word that triggers a correction. Leave blank to disable.",
             settings_ui::control_column(self.voice_cleanup_fields.cue.element("Correction cue",false).into_any_element())));
         rows
     }

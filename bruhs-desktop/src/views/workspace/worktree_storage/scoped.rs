@@ -185,7 +185,7 @@ impl Workspace {
         if choice == WorkspaceChoice::PreviousWorktree || self.previous_worktree.is_some() {
             options.push(("previous_worktree", "Previous worktree"));
         }
-        let control = self.choice_control(id, "Default workspace", choice.as_str(), &options, cx);
+        let control = settings_ui::control_column(self.choice_control(id, "Default workspace", choice.as_str(), &options, cx));
         let actions = self.setting_source_actions(
             WorktreeSetting::Placement,
             id,
@@ -203,11 +203,7 @@ impl Workspace {
         self.settings_row_with_reset(
             row,
             "Workspace",
-            if scoped {
-                "Where new threads in this project start."
-            } else {
-                "Where new threads start unless a project has its own preference."
-            },
+            "Where new threads start.",
             None,
             false,
             Some(control),
@@ -229,7 +225,7 @@ impl Workspace {
             .or(env_choice)
             .or(self.checkout_defaults.submodules)
             .unwrap_or(Submodules::Recursive);
-        let control = self.choice_control(
+        let control = settings_ui::control_column(self.choice_control(
             id,
             label,
             current.key(),
@@ -239,7 +235,7 @@ impl Workspace {
                 ("none", "None"),
             ],
             cx,
-        );
+        ));
         let changed = if self.settings_project_scope.is_empty() {
             env_choice.is_some()
         } else {

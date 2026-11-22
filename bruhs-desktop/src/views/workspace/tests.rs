@@ -446,7 +446,7 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
         cx.notify();
     });
     cx.run_until_parked();
-    click_debug_selector(cx, "desktop-settings-nav-transcription");
+    click_debug_selector(cx, "desktop-settings-nav-meetings");
     cx.run_until_parked();
     click_debug_selector(cx, "desktop-transcription-provider");
     cx.run_until_parked();
@@ -545,10 +545,7 @@ fn settings_section_ids_are_stable() {
             "vault",
             "apps",
             "calendar",
-            "recording",
-            "transcription",
-            "speakers",
-            "people",
+            "meetings",
             "maintenance",
             "backup",
             "diagnostics",
@@ -7579,4 +7576,83 @@ fn saved_snooze_choices_set_the_selected_threads_wake_time(cx: &mut gpui::TestAp
         let until = this.threads.iter().find(|t| t.id == id).unwrap().snoozed_until_ms.unwrap();
         assert!((before + 135 * 60_000..=EpochMs::now().as_millis() + 135 * 60_000).contains(&until));
     });
+}
+
+#[gpui::test]
+fn update_confirm_responsive_geometry_matches_t3_beta_breakpoints(cx: &mut gpui::TestAppContext) {
+    use bruhs_models::updates::AppUpdateState;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    let updates = workspace.read_with(cx, |workspace, _| workspace.updates.clone());
+    let report = update_report(("0.166.0", "0.167.0"), AppUpdateState::UpToDate, vec![]);
+    updates.update(cx, |u, cx| u.set_report_for_test(report, cx));
+    workspace.update_in(cx, |ws, _, cx| {
+        ws.overlay = Some(Overlay::UpdateConfirm {
+            from_settings: true,
+            details_open: false,
+        });
+        cx.notify();
+    });
+
+    // At 1040px and 640px: centered 576px dialog, 32px side-by-side footer buttons with 8px gap.
+    for width in [1040.0_f32, 640.0_f32] {
+        cx.simulate_resize(gpui::size(px(width), px(800.0)));
+        cx.run_until_parked();
+        let dialog = rendered_bounds(cx, "desktop-modal-dialog");
+        let cancel = rendered_bounds(cx, "desktop-update-confirm-cancel");
+        let run = rendered_bounds(cx, "desktop-update-confirm-run");
+        assert!(
+            (f32::from(dialog.size.width) - 576.0).abs() <= 1.0,
+            "width={width}: expected 576px dialog, got {:?}",
+            dialog.size.width
+        );
+        assert!(
+            (f32::from(cancel.size.height) - theme::CONTROL_PX).abs() <= 1.0
+                && (f32::from(run.size.height) - theme::CONTROL_PX).abs() <= 1.0,
+            "width={width}: expected 32px buttons, got {:?} and {:?}",
+            cancel.size.height,
+            run.size.height
+        );
+        assert!(
+            (f32::from(cancel.origin.y) - f32::from(run.origin.y)).abs() <= 1.0,
+            "width={width}: expected side-by-side buttons, got y={:?} and {:?}",
+            cancel.origin.y,
+            run.origin.y
+        );
+        let gap = f32::from(run.left()) - f32::from(cancel.right());
+        assert!(
+            (gap - 8.0).abs() <= 1.0,
+            "width={width}: expected 8px horizontal gap, got {gap}"
+        );
+    }
+
+    // At 639px and 540px: full-width bottom sheet, 36px stacked full-width footer buttons with 8px gap.
+    for width in [639.0_f32, 540.0_f32] {
+        cx.simulate_resize(gpui::size(px(width), px(800.0)));
+        cx.run_until_parked();
+        let dialog = rendered_bounds(cx, "desktop-modal-dialog");
+        let cancel = rendered_bounds(cx, "desktop-update-confirm-cancel");
+        let run = rendered_bounds(cx, "desktop-update-confirm-run");
+        assert!(
+            (f32::from(dialog.size.width) - width).abs() <= 1.0,
+            "width={width}: expected full-width sheet, got {:?}",
+            dialog.size.width
+        );
+        assert!(
+            (f32::from(dialog.bottom()) - 800.0).abs() <= 1.0,
+            "width={width}: expected bottom-anchored sheet, got bottom={:?}",
+            dialog.bottom()
+        );
+        assert!(
+            (f32::from(cancel.size.height) - 36.0).abs() <= 1.0
+                && (f32::from(run.size.height) - 36.0).abs() <= 1.0,
+            "width={width}: expected 36px stacked buttons, got {:?} and {:?}",
+            cancel.size.height,
+            run.size.height
+        );
+        let gap = f32::from(run.top()) - f32::from(cancel.bottom());
+        assert!(
+            (gap - 8.0).abs() <= 1.0,
+            "width={width}: expected 8px vertical gap, got {gap}"
+        );
+    }
 }

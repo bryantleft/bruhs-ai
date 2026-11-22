@@ -66,8 +66,8 @@ impl Workspace {
         self.settings_row(
             "settings-row-quit-shortcut",
             "Quit shortcut",
-            "Choose how the keyboard shortcut closes bruhs.",
-            self.choice_control(
+            "",
+            settings_ui::control_column(self.choice_control(
                 "settings-quit-shortcut",
                 "Quit shortcut",
                 self.quit_gesture.mode.key(),
@@ -77,7 +77,7 @@ impl Workspace {
                     ("double-click", "Press twice"),
                 ],
                 cx,
-            ),
+            )),
         )
     }
     pub(super) fn choose_quit_mode(&mut self, key: &str, cx: &mut Context<'_, Self>) {

@@ -271,13 +271,13 @@ impl Workspace {
         let id = if self.settings_project_scope.is_empty() { "settings-enable-auto-pull" } else { "settings-auto-pull" };
         let mut rows = vec![self.defaults_scope_row(cx), self.scoped_switch_row(
             ScopedSwitch::AutoPull, id, "desktop-settings-row-auto-pull", "Automatically pull",
-            "Fast-forward a clean default checkout with no local commits after fetching its remote.",
+            "Fast-forward clean default checkouts after fetch.",
             self.maintenance.prefs.auto_pull, cx,
         )];
         let (delivery, template_row) = self.delivery_preference_rows(cx);
         rows.extend(delivery);
         div().flex().flex_col().gap_4()
-            .child(self.settings_card("Source control", "", rows))
+            .child(self.settings_card("", "", rows))
             .child(self.source_writer_card(template_row, cx)).into_any_element()
     }
 
@@ -314,7 +314,7 @@ impl Workspace {
             self.maintenance
                 .sleep_error
                 .as_deref()
-                .unwrap_or("Prevent idle system sleep while a desktop agent turn is running.")
+                .unwrap_or("Prevent idle sleep during active turns.")
                 .to_owned(),
             if self.maintenance.prefs.keep_awake {"On"} else {"Off"},
             settings_ui::switch(
@@ -333,7 +333,7 @@ impl Workspace {
         let providers = self.environment_maintenance_row(
             "desktop-settings-row-provider-checks",
             "Provider update checks",
-            "Check provider registries for new CLI versions when online update checks are enabled.",
+            "Check for new provider CLI versions.",
             if self.maintenance.prefs.provider_checks {"On"} else {"Off"},
             settings_ui::switch(
                 "settings-provider-checks",
@@ -354,7 +354,7 @@ impl Workspace {
                 },
             ),
         );
-        let git_description = self.maintenance.git_status.as_deref().unwrap_or("Refresh remote branches for open and recent projects. Enter 0 to disable scheduled fetches. Projects with automatic pull still refresh every five minutes.").to_owned();
+        let git_description = self.maintenance.git_status.as_deref().unwrap_or("Seconds between remote fetches (0 to disable).").to_owned();
         let git = self.environment_maintenance_row("desktop-settings-row-fetch-interval","Git fetch interval",git_description,
             format!("{} seconds", self.maintenance.prefs.fetch_seconds),
             div().w(px(144.)).flex().items_center().gap_2().child(div().flex_1().min_w_0().child(Input::new(&self.maintenance.seconds).aria_label("Git fetch interval in seconds"))).child("seconds").into_any_element());
