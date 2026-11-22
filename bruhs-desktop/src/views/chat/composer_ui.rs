@@ -94,7 +94,7 @@ pub const CHIP_ICON_SIZE_PX: f32 = theme::ICON_PX;
 /// The model chip's chevron, beside its 12px label.
 pub const CHIP_CHEVRON_SIZE_PX: f32 = theme::ICON_XS_PX;
 pub const CHIP_HOVER_BG_OPACITY: f32 = 0.50;
-pub const CHIP_MODEL_MAX_WIDTH_PX: f32 = 160.0;
+pub const CHIP_MODEL_MAX_WIDTH_PX: f32 = 220.0;
 
 // Send / stop (web `size-control rounded-orb`).
 pub const SEND_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
