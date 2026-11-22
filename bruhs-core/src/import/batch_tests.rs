@@ -8,8 +8,8 @@ use super::text::{clip_part, shown_name};
 use super::ImportError;
 use bruhs_models::imports::{
     cut_short_line, ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST,
-    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FOLDER_MISSING, FOLDER_PRIVATE, GROK_BEST_EFFORT,
-    MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
+    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE,
+    GROK_BEST_EFFORT, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{title_from_prompt, ImportSource, PortablePart};
 use bruhs_models::EpochMs;
@@ -464,9 +464,10 @@ fn paths_are_read_in_place_and_never_deleted() {
     );
     assert_eq!(tree(&place.dir.path().join("picked")), listing);
 
-    // A picked file whose name is never opened is refused (F33).
+    // A picked file whose name is never opened adds nothing (F33).
     let users = place.picked("users.json", fixture("chatgpt-conversations.json"));
-    assert_eq!(refused(host.read_paths(vec![users])), FOLDER_PRIVATE);
+    let job = host.read_paths(vec![users]).unwrap();
+    assert_eq!(failed(wait(&host, &job.id)), NOT_AN_EXPORT);
 
     let missing = place.dir.path().join("picked").join("gone.zip");
     assert_eq!(refused(host.read_paths(vec![missing])), FOLDER_MISSING);
@@ -1006,7 +1007,7 @@ fn picked_paths_below_private_folders_are_refused() {
     let private = put(".config/x/credentials/export.zip");
     let folder = put("secrets/exports/conversations.json");
     let folder = folder.parent().unwrap().to_path_buf();
-    assert_eq!(refused(host.read_paths(vec![private])), FOLDER_PRIVATE);
+    assert_eq!(refused(host.read_paths(vec![private])), FILE_PRIVATE);
     assert_eq!(refused(host.read_paths(vec![folder])), FOLDER_PRIVATE);
     // As typed, against the home.
     assert_eq!(
@@ -1017,12 +1018,39 @@ fn picked_paths_below_private_folders_are_refused() {
     {
         let link = home.join("export.zip");
         std::os::unix::fs::symlink(home.join(".config/x/credentials/export.zip"), &link).unwrap();
-        assert_eq!(refused(host.read_paths(vec![link])), FOLDER_PRIVATE);
+        assert_eq!(refused(host.read_paths(vec![link])), FILE_PRIVATE);
     }
+    // A folder named for secrets, picked itself, is refused too.
+    assert_eq!(
+        refused(host.read_paths(vec![home.join("secrets")])),
+        FOLDER_PRIVATE
+    );
     // One refused path refuses the pick, so nothing is read.
     assert!(place.batches().is_empty());
     let job = host.read_paths(vec![open]).unwrap();
     assert_eq!(ready(wait(&host, &job.id)).candidates.len(), 4);
+}
+
+/// Every file of an unzipped export, picked together: the chats are read
+/// and the export's own `users.json` is left out and counted (re-review
+/// N1).
+#[test]
+fn a_picked_users_json_beside_the_chats_is_left_out() {
+    let place = Place::new();
+    let host = place.host();
+    let chats = place.picked(
+        "export/conversations.json",
+        fixture("chatgpt-conversations.json"),
+    );
+    let users = place.picked(
+        "export/users.json",
+        br#"[{"email_address":"owner@example.com"}]"#,
+    );
+    let job = host.read_paths(vec![chats, users]).unwrap();
+    let batch = ready(wait(&host, &job.id));
+    assert_eq!(batch.candidates.len(), 4);
+    assert_eq!(batch.counts.skipped_files, 1);
+    assert_eq!(batch.counts.files_read, 1);
 }
 
 /// A bare upload past `small_json` is streamed, so a single conversation

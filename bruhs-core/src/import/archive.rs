@@ -138,6 +138,9 @@ const fn levels(n: usize) -> u8 {
 pub(crate) enum ExportInput {
     File(PathBuf),
     Folder(PathBuf),
+    /// A picked file never opened by its own name (F33): left out and
+    /// counted, never read.
+    Skipped,
 }
 
 /// What an opened entry holds, by its name (D4).
@@ -361,6 +364,10 @@ pub(crate) fn walk_with(
         match input {
             ExportInput::File(path) => walker.file(path),
             ExportInput::Folder(path) => walker.folder(path),
+            ExportInput::Skipped => {
+                walker.skip();
+                Ok(())
+            }
         }?;
         (walker.hooks.input_done)(done);
         Ok(())

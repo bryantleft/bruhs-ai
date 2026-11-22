@@ -24,7 +24,7 @@
 //! from an export.
 
 use super::agents::{picked_private, AgentRoots};
-use super::archive::{walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport};
+use super::archive::{never_opened, walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport};
 use super::json_stream::for_each_record;
 use super::text::{shown_name, TITLE_MAX_CHARS};
 use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
@@ -32,9 +32,9 @@ use bruhs_models::agent::Role;
 use bruhs_models::imports::{
     cut_short_line, import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob,
     ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, CONVERSATION_TOO_LARGE,
-    DAMAGED_EXPORT, EXPORT_TOO_LARGE, FOLDER_MISSING, FOLDER_PRIVATE, GROK_BEST_EFFORT,
-    IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
-    NOT_AN_EXPORT, TOO_MANY_FILES,
+    DAMAGED_EXPORT, EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE,
+    GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES, MAX_MESSAGES,
+    MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
@@ -298,10 +298,11 @@ impl ImportHost {
     /// - `Refused(NOT_AN_EXPORT)` for no paths, `TOO_MANY_FILES` past
     ///   `upload_files`, `FOLDER_MISSING` for a path that isn't absolute
     ///   once expanded (nothing resolves against the working folder) or
-    ///   isn't a regular file or a folder, `FOLDER_PRIVATE` for a path
-    ///   with a part that is never opened below the home (D4, as typed
-    ///   or resolved), `EXPORT_TOO_LARGE` when the files pass
-    ///   `upload_bytes`.
+    ///   isn't a regular file or a folder, `FOLDER_PRIVATE` for a folder
+    ///   and `FILE_PRIVATE` for a file inside a folder never opened below
+    ///   the home (D4, as typed or resolved), `EXPORT_TOO_LARGE` when the
+    ///   files pass `upload_bytes`. A file whose own name is never opened
+    ///   is left out and counted.
     /// - [`ImportError::Busy`] while another read holds the slot.
     pub fn read_paths(&self, paths: Vec<PathBuf>) -> Result<ImportJob, ImportError> {
         if paths.is_empty() {
@@ -324,13 +325,28 @@ impl ImportHost {
             if !meta.is_dir() && !meta.is_file() {
                 return Err(missing());
             }
-            // Every part of the picked path and of the one it resolves to,
-            // below the home, as a scan checks its places (F33).
-            if picked_private(&self.agents, &path, &real) {
-                return Err(ImportError::Refused(FOLDER_PRIVATE));
-            }
+            // Every folder of the picked path and of the one it resolves
+            // to, below the home, as a scan checks its places, and a
+            // picked folder's own name (F33).
             if meta.is_dir() {
+                if picked_private(&self.agents, &path, &real) {
+                    return Err(ImportError::Refused(FOLDER_PRIVATE));
+                }
                 inputs.push(ExportInput::Folder(real));
+                continue;
+            }
+            let parent = |path: &Path| path.parent().map(Path::to_path_buf).unwrap_or_default();
+            if picked_private(&self.agents, &parent(&path), &parent(&real)) {
+                return Err(ImportError::Refused(FILE_PRIVATE));
+            }
+            // A file private by its own name only (an export's
+            // `users.json`) is left out and counted, as an entry is.
+            let named_private = [path.as_path(), real.as_path()].iter().any(|path| {
+                path.file_name()
+                    .is_some_and(|name| never_opened(&name.to_string_lossy()))
+            });
+            if named_private {
+                inputs.push(ExportInput::Skipped);
             } else {
                 bytes = bytes.saturating_add(meta.len());
                 inputs.push(ExportInput::File(real));

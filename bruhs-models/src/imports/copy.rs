@@ -159,9 +159,12 @@ pub const IMPORT_CHAT_GONE: &str = "That chat isn't here anymore.";
 /// page that isn't the owner's (final review B I1).
 pub const OWNER_ONLY_MEMORY: &str = "Open Bruhs from its own address to change a bruh's memory.";
 
-// Final review, readers
+// Final review, readers.
 /// The last item of a names list cut to its first few: "and {n} more".
 pub const NAMES_MORE_TEMPLATE: &str = "{n} more";
+/// Refusal for a picked export file inside a folder named for secrets.
+pub const FILE_PRIVATE: &str =
+    "Bruhs doesn't open files in folders named for secrets, such as credentials.";
 
 /// Every constant above.
 pub const ALL_COPY: &[&str] = &[
@@ -278,8 +281,9 @@ pub const ALL_COPY: &[&str] = &[
     // Final review, server.
     IMPORT_CHAT_GONE,
     OWNER_ONLY_MEMORY,
-    // Final review, readers
+    // Final review, readers.
     NAMES_MORE_TEMPLATE,
+    FILE_PRIVATE,
 ];
 
 #[cfg(test)]
