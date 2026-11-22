@@ -21,7 +21,7 @@ use bruhs_models::EpochMs;
 use leptos::{html, prelude::*};
 
 use crate::api::{imports as api, ApiError};
-use crate::state::MoveInOpen;
+use crate::state::{ImportThreadOpen, MoveInOpen};
 
 /// What the file input offers: ZIPs and bare JSON files.
 pub(super) const ACCEPT: &str = ".zip,.json,application/zip,application/json";
@@ -36,6 +36,23 @@ const WARN: &str = "text-label-sm text-durian-300";
 const STATUS: &str = "text-label-sm text-rambutan-300 empty:sr-only";
 const ERROR: &str = "text-label-sm text-lychee-300 empty:sr-only";
 const ROW: &str = "flex w-full flex-col items-start gap-0.5 px-4 py-2 text-left cursor-pointer";
+
+/// **Use as a bruh's memory**: Import thread closes, which discards its
+/// batch (F23), and Move in opens on `start` in its place, as on the
+/// desktop. The text travels in `start`; nothing stacks under Move in.
+fn hand_to_move_in(
+    import_open: Option<RwSignal<bool>>,
+    move_in: Option<RwSignal<Option<MoveInStart>>>,
+    start: MoveInStart,
+) {
+    let Some(move_in) = move_in else {
+        return;
+    };
+    if let Some(import_open) = import_open {
+        import_open.set(false);
+    }
+    move_in.set(Some(start));
+}
 
 /// The control that takes focus after the tab changes under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -676,7 +693,8 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                     state.picked.set(0);
                 }
                 on:keydown=on_keydown
-                class="w-full rounded-grape bg-longan-900 px-2.5 py-1.5 text-label-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-longan-700 focus:outline-none focus:inset-ring-persimmon-500/60"
+                // 44 px on a coarse pointer, like the tab's buttons.
+                class="bruhs-control w-full rounded-grape bg-longan-900 px-2.5 py-1.5 text-label-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-longan-700 focus:outline-none focus:inset-ring-persimmon-500/60"
             />
             {move || {
                 empty.track();
@@ -702,6 +720,7 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
     // The export's memory of the owner, each offered as a bruh's memory:
     // it opens Move in at By prompt with the text and where it came from
     // (D14). The batch can go when this dialog closes; the text travels.
+    let import_open = use_context::<ImportThreadOpen>().map(|open| open.0);
     let move_in = use_context::<MoveInOpen>().map(|open| open.0);
     let memory_view = move |batch: &ImportBatch| {
         batch
@@ -712,13 +731,15 @@ pub(super) fn ExportTab(on_import: Callback<ImportCandidate>, busy: Signal<bool>
                 let source = suggestion.source;
                 let text = suggestion.text.clone();
                 let use_memory = move |_| {
-                    if let Some(move_in) = move_in {
-                        move_in.set(Some(MoveInStart {
+                    hand_to_move_in(
+                        import_open,
+                        move_in,
+                        MoveInStart {
                             tab: MoveInTab::ByPrompt,
                             text: Some(text.clone()),
                             from: Some(export_memory_from(source)),
-                        }));
-                    }
+                        },
+                    );
                 };
                 view! {
                     <div class="flex flex-wrap items-center gap-2">
@@ -1068,6 +1089,7 @@ mod tests {
                 search.contains(&format!("aria-label=\"{EXPORT_SEARCH}\"")),
                 "{search}"
             );
+            assert!(search.contains("bruhs-control"), "{search}");
             assert!(!html.contains("Search titles and folders"), "{html}");
             assert!(!html.contains(NO_MATCHING_CHATS), "{html}");
             // The selected row wears the selection tone (blueberry).
@@ -1115,6 +1137,29 @@ mod tests {
             assert_eq!(texts(&html, "data-export-use-memory"), [USE_AS_MEMORY]);
             ready(state, batch());
             assert!(!tab(state).contains(USE_AS_MEMORY));
+        });
+    }
+
+    #[test]
+    fn using_an_exports_memory_closes_import_thread_for_move_in() {
+        Owner::new().with(|| {
+            let import_open = RwSignal::new(true);
+            let move_in = RwSignal::new(None::<MoveInStart>);
+            let start = MoveInStart {
+                tab: MoveInTab::ByPrompt,
+                text: Some("Likes short answers.".into()),
+                from: Some(export_memory_from(ImportSource::ClaudeAi)),
+            };
+            hand_to_move_in(Some(import_open), Some(move_in), start.clone());
+            // Import thread is gone (its close discards the batch), and
+            // Move in holds the text on By prompt.
+            assert!(!import_open.get_untracked());
+            assert_eq!(move_in.get_untracked(), Some(start.clone()));
+
+            // With no Move in to open, Import thread stays.
+            let import_open = RwSignal::new(true);
+            hand_to_move_in(Some(import_open), None, start);
+            assert!(import_open.get_untracked());
         });
     }
 
