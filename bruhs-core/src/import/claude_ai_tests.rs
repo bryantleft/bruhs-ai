@@ -10,7 +10,9 @@ use bruhs_models::imports::{
     attached_line, attachment_line, cut_short_line, AUDIO_NOT_IMPORTED, DOCUMENT_NOT_IMPORTED,
     IMAGE_NOT_IMPORTED, MAX_ATTACHMENT_TEXT_CHARS, MAX_MESSAGES, MAX_PART_CHARS, PROJECT_MEMORY,
 };
-use bruhs_models::logic::portable::{ImportSource, PortablePart, PortableToolCall};
+use bruhs_models::logic::portable::{
+    title_from_prompt, ImportSource, PortablePart, PortableToolCall,
+};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
@@ -789,4 +791,24 @@ fn tool_call_ids_are_clean_and_short() {
     assert!(!call.id.contains('\u{202e}'), "{}", call.id);
     assert!(call.id.chars().count() <= 121, "{}", call.id.len());
     assert_eq!(call.output.as_deref(), Some("done"));
+}
+
+/// A title that cleans to nothing names the chat by its branch's first
+/// prompt, even when that prompt is past the messages kept (final review
+/// minor, D6).
+#[test]
+fn a_hidden_title_names_the_chat_by_its_first_prompt() {
+    let pairs: Vec<Value> = (0..=MAX_MESSAGES / 2)
+        .flat_map(|n| {
+            [
+                json!({ "sender": "human", "text": format!("Question {n}") }),
+                json!({ "sender": "assistant", "text": "ok" }),
+            ]
+        })
+        .collect();
+    let record =
+        json!({ "uuid": "conv-hidden", "name": "\u{202e}\u{200b}", "chat_messages": pairs });
+    let parsed = conversation(&record).expect("the chat imports");
+    assert_eq!(parsed.messages.len(), MAX_MESSAGES);
+    assert_eq!(parsed.candidate.title, title_from_prompt("Question 0"));
 }

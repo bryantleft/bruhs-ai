@@ -1334,8 +1334,9 @@ fn nodes(source: ImportSource, raw: &Value) -> usize {
 }
 
 /// A provider's title as a row shows it: one clean line of at most
-/// [`TITLE_MAX_CHARS`]. A title with nothing left once cleaned names the
-/// chat by its first prompt, as a missing title does (M7).
+/// [`TITLE_MAX_CHARS`]. A reader already names a chat whose title cleans
+/// to nothing by its branch's first prompt (M7, D6); one still empty
+/// falls back to the first prompt kept.
 fn row_title(title: &str, messages: &[PortableMessage]) -> String {
     let shown = shown_name(title, TITLE_MAX_CHARS);
     if !shown.is_empty() {

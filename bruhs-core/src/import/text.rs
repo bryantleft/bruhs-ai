@@ -296,6 +296,13 @@ pub(crate) fn model_slug(model: &str) -> Option<&str> {
     (fits && !model.is_empty() && !model.chars().any(is_hidden_char)).then_some(model)
 }
 
+/// Whether a provider's title leaves anything to show once cleaned. A
+/// reader names a chat whose title doesn't by its branch's first prompt
+/// (D6), before any message is drained.
+pub(crate) fn shows_as_title(title: &str) -> bool {
+    !shown_name(title, TITLE_MAX_CHARS).is_empty()
+}
+
 /// [`bruhs_models::imports::attachment_line`] for an export's file name,
 /// shown through [`shown_name`].
 pub(crate) fn attachment_line(name: &str) -> String {

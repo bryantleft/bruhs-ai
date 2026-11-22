@@ -15,7 +15,7 @@
 
 use super::text::{
     attached_line, attachment_line, clip_part, clip_strings, export_time, shown_name,
-    NAME_MAX_CHARS,
+    shows_as_title, NAME_MAX_CHARS,
 };
 use super::{output_text, ParsedConversation, Transcript};
 use bruhs_models::imports::{
@@ -171,19 +171,21 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
         messages.drain(..messages.len() - MAX_MESSAGES);
     }
 
-    let title = non_empty(v.get("name")).map_or_else(
-        || {
-            let first = branch.iter().find_map(|&at| {
-                let node = nodes[at];
-                (sender(node) == Some(Sender::Human))
-                    .then(|| typed_text(node))
-                    .map(|text| text.trim().to_string())
-                    .filter(|text| !text.is_empty())
-            });
-            title_from_prompt(&first.unwrap_or_default())
-        },
-        str::to_string,
-    );
+    let title = non_empty(v.get("name"))
+        .filter(|title| shows_as_title(title))
+        .map_or_else(
+            || {
+                let first = branch.iter().find_map(|&at| {
+                    let node = nodes[at];
+                    (sender(node) == Some(Sender::Human))
+                        .then(|| typed_text(node))
+                        .map(|text| text.trim().to_string())
+                        .filter(|text| !text.is_empty())
+                });
+                title_from_prompt(&first.unwrap_or_default())
+            },
+            str::to_string,
+        );
     let updated = v
         .get("updated_at")
         .and_then(export_time)

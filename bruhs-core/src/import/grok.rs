@@ -15,7 +15,7 @@
 //! the role, matched without regard to case, and never `model`, which
 //! human responses carry too.
 
-use super::text::{attachment_line, clip_part, export_time, strip_grok_markup};
+use super::text::{attachment_line, clip_part, export_time, shows_as_title, strip_grok_markup};
 use super::{ParsedConversation, Transcript};
 use bruhs_models::imports::{
     conversation_key, IMAGE_NOT_IMPORTED, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
@@ -77,10 +77,12 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
         messages.drain(..messages.len() - MAX_MESSAGES);
     }
 
-    let title = non_empty(meta.get("title")).map_or_else(
-        || title_from_prompt(&first_prompt.unwrap_or_default()),
-        str::to_string,
-    );
+    let title = non_empty(meta.get("title"))
+        .filter(|title| shows_as_title(title))
+        .map_or_else(
+            || title_from_prompt(&first_prompt.unwrap_or_default()),
+            str::to_string,
+        );
     // Grok's modify_time lags the newest response by up to days.
     let updated = meta
         .get("modify_time")

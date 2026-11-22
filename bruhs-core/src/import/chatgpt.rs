@@ -10,7 +10,8 @@
 //! a self-parent ends it instead of looping.
 
 use super::text::{
-    attachment_line, clip_part, export_time, strip_citations, strip_writing_directives,
+    attachment_line, clip_part, export_time, shows_as_title, strip_citations,
+    strip_writing_directives,
 };
 use super::{ParsedConversation, Transcript};
 use bruhs_models::imports::{
@@ -93,8 +94,7 @@ pub(crate) fn conversation(v: &Value) -> Option<ParsedConversation> {
     let title = v
         .get("title")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
+        .filter(|title| shows_as_title(title))
         .map_or_else(
             || title_from_prompt(&first_prompt(&tree, &branch).unwrap_or_default()),
             str::to_string,
