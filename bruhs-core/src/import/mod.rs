@@ -383,8 +383,16 @@ impl Transcript {
                     started_at_ms: at_ms,
                     model: None,
                 });
-        if let Some(model) = model.filter(|m| !m.is_empty() && *m != "<synthetic>") {
-            message.model = Some(model.to_string());
+        // Every part names the reply's model, so it is taken only when it
+        // reads as a slug and differs from the one already kept: a huge
+        // value is never copied onto each reply, or once per part.
+        if let Some(model) = model
+            .and_then(text::model_slug)
+            .filter(|m| *m != "<synthetic>")
+        {
+            if message.model.as_deref() != Some(model) {
+                message.model = Some(model.to_string());
+            }
         }
         message.parts.push(part);
     }

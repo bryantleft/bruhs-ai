@@ -283,6 +283,19 @@ pub(crate) fn shown_name(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// Characters of a model slug a reply keeps.
+pub(crate) const MODEL_MAX_CHARS: usize = 128;
+
+/// `model` when it reads as a model slug a reply can carry: not empty, at
+/// most [`MODEL_MAX_CHARS`] characters and no hidden character. Anything
+/// else is left out rather than cut, since a cut slug names no model.
+/// Counts at most one character past the limit, so a huge value costs no
+/// more than a short one.
+pub(crate) fn model_slug(model: &str) -> Option<&str> {
+    let fits = model.chars().nth(MODEL_MAX_CHARS).is_none();
+    (fits && !model.is_empty() && !model.chars().any(is_hidden_char)).then_some(model)
+}
+
 /// [`bruhs_models::imports::attachment_line`] for an export's file name,
 /// shown through [`shown_name`].
 pub(crate) fn attachment_line(name: &str) -> String {

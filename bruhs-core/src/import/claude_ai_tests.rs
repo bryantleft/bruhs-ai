@@ -706,3 +706,44 @@ fn only_claude_records_are_recognised() {
     assert!(conversation(&user).is_none());
     assert_eq!(memory(&user), None);
 }
+
+/// A conversation-level `model` is a slug, never a payload: a long one, or
+/// one with hidden characters, stays out of every reply instead of being
+/// copied onto each (final review C1).
+#[test]
+fn a_huge_or_hidden_model_stays_out_of_every_reply() {
+    let huge = "m".repeat(64 * 1024);
+    let pairs: Vec<Value> = (0..1_000)
+        .flat_map(|n| {
+            [
+                json!({ "sender": "human", "text": format!("q{n}") }),
+                json!({ "sender": "assistant", "text": format!("a{n}") }),
+            ]
+        })
+        .collect();
+    let record = json!({ "uuid": "conv-huge-model", "model": huge, "chat_messages": pairs });
+    let parsed = conversation(&record).expect("the conversation imports");
+    assert_eq!(parsed.messages.len(), 2_000);
+    assert!(parsed
+        .messages
+        .iter()
+        .all(|message| message.model.is_none()));
+    let size = serde_json::to_vec(&parsed.messages).unwrap().len();
+    assert!(size < 1 << 20, "{size} bytes");
+
+    // A slug of 128 characters is kept; one more, or a hidden character,
+    // is not.
+    let reply = |model: &str| {
+        let record = json!({
+            "uuid": "conv-model",
+            "model": model,
+            "chat_messages": [{ "sender": "assistant", "text": "hi" }],
+        });
+        conversation(&record).unwrap().messages[0].model.clone()
+    };
+    let longest = "c".repeat(128);
+    assert_eq!(reply(&longest).as_deref(), Some(longest.as_str()));
+    assert_eq!(reply(&"c".repeat(129)), None);
+    assert_eq!(reply("claude\u{202e}-sonnet"), None);
+    assert_eq!(reply("claude\u{200b}-sonnet"), None);
+}
