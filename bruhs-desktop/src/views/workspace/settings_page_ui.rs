@@ -1521,77 +1521,175 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn render_settings_nav(&self, width: f32, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_settings_nav(
+        &self,
+        width: f32,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let compact = width < 768.0;
         let expanded = compact && self.settings_search_open;
         let rail = compact && !expanded;
         let has_query = !self.settings_search.read(cx).value().trim().is_empty();
+        let search_focused = self.settings_search.focus_handle(cx).is_focused(window);
+        let search_header_border =
+            theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY);
         let search = if rail {
             div()
-                .id("desktop-settings-show-search")
-                .debug_selector(|| "desktop-settings-show-search".to_owned())
-                .tab_index(0)
-                .border_1()
-                .border_color(gpui::transparent_black())
-                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                .role(Role::Button)
-                .aria_label(self.ui_language().text("Search settings"))
-                .cursor_pointer()
-                .h(px(40.))
+                .debug_selector(|| "desktop-settings-search-header".to_owned())
+                .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
+                .flex_shrink_0()
+                .border_b_1()
+                .border_color(search_header_border)
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(
-                    svg()
-                        .path(assets::TOOL_SEARCH_ICON_PATH)
-                        .size(px(theme::ICON_PX))
-                        .text_color(theme::rambutan_400()),
+                    div()
+                        .id("desktop-settings-show-search")
+                        .debug_selector(|| "desktop-settings-show-search".to_owned())
+                        .tab_index(0)
+                        .size(px(30.))
+                        .rounded(px(8.))
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .role(Role::Button)
+                        .aria_label(self.ui_language().text("Search settings"))
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            svg()
+                                .path(assets::TOOL_SEARCH_ICON_PATH)
+                                .size(px(theme::ICON_PX))
+                                .text_color(theme::rambutan_400()),
+                        )
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| {
+                                this.focus_settings_search(window, cx)
+                            })
+                        }),
                 )
-                .map(|el| {
-                    on_press_view(el, cx, |this, window, cx| {
-                        this.focus_settings_search(window, cx)
-                    })
-                })
                 .into_any_element()
         } else {
             div()
+                .debug_selector(|| "desktop-settings-search-header".to_owned())
+                .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
+                .px(px(8.))
+                .flex_shrink_0()
+                .border_b_1()
+                .border_color(search_header_border)
                 .flex()
                 .items_center()
-                .gap_1()
-                .px_2()
-                .h(px(48.))
                 .child(
-                    svg()
-                        .path(assets::TOOL_SEARCH_ICON_PATH)
-                        .size(px(theme::ICON_PX))
-                        .text_color(theme::rambutan_500()),
+                    div()
+                        .id("desktop-settings-search-box")
+                        .debug_selector(|| "desktop-settings-search-box".to_owned())
+                        .h(px(30.))
+                        .w_full()
+                        .min_w_0()
+                        .px(px(8.))
+                        .rounded(px(8.))
+                        .bg(theme::longan_950().opacity(0.65))
+                        .border_1()
+                        .border_color(if search_focused {
+                            theme::persimmon_400()
+                        } else {
+                            theme::longan_800().opacity(0.9)
+                        })
+                        .hover(|el| {
+                            if search_focused {
+                                el
+                            } else {
+                                el.bg(theme::longan_950().opacity(0.85))
+                                    .border_color(theme::longan_700())
+                            }
+                        })
+                        .cursor_text()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.focus_settings_search(window, cx);
+                        }))
+                        .child(
+                            svg()
+                                .path(assets::TOOL_SEARCH_ICON_PATH)
+                                .size(px(14.))
+                                .flex_shrink_0()
+                                .text_color(if search_focused {
+                                    theme::rambutan_300()
+                                } else {
+                                    theme::rambutan_500()
+                                }),
+                        )
+                        .child(
+                            div().min_w_0().flex_1().child(
+                                Input::new(&self.settings_search)
+                                    .appearance(false)
+                                    .px_0()
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .cleanable(false)
+                                    .text_size(px(13.))
+                                    .role(Role::EditableComboBox)
+                                    .aria_expanded(
+                                        has_query && !self.settings_search_results.is_empty(),
+                                    )
+                                    .aria_label(self.ui_language().text("Search settings")),
+                            ),
+                        )
+                        .when(!has_query && !search_focused, |el| {
+                            el.child(
+                                div()
+                                    .h(px(18.))
+                                    .min_w(px(18.))
+                                    .px_1()
+                                    .flex_shrink_0()
+                                    .rounded(px(4.))
+                                    .bg(theme::longan_800().opacity(0.9))
+                                    .border_1()
+                                    .border_color(gpui::white().opacity(0.08))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_size(px(11.))
+                                    .font_family(theme::CODE_FONT_FAMILY)
+                                    .text_color(theme::rambutan_400())
+                                    .child("/"),
+                            )
+                        })
+                        .when(has_query, |el| {
+                            let button = web_button(
+                                "settings-clear-search",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::IconSmall,
+                                ButtonState::Enabled,
+                            )
+                            .debug_selector(|| "settings-clear-search".to_owned())
+                            .aria_label(self.ui_language().text("Clear settings search"))
+                            .size(px(20.))
+                            .min_w(px(20.))
+                            .min_h(px(20.))
+                            .flex_shrink_0()
+                            .child(
+                                svg()
+                                    .path(assets::CLOSE_ICON_PATH)
+                                    .size(px(12.))
+                                    .text_color(theme::rambutan_400()),
+                            );
+                            el.child(on_press_view(button, cx, |this, window, cx| {
+                                this.settings_search.update(cx, |input, cx| {
+                                    input.set_value("", window, cx);
+                                    input.focus(window, cx);
+                                });
+                                this.refresh_settings_search(cx);
+                            }))
+                        }),
                 )
-                .child(
-                    div().min_w_0().flex_1().child(
-                        Input::new(&self.settings_search)
-                            .appearance(false)
-                            .role(Role::EditableComboBox)
-                            .aria_expanded(has_query && !self.settings_search_results.is_empty())
-                            .aria_label(self.ui_language().text("Search settings")),
-                    ),
-                )
-                .when(!has_query, |el| {
-                    el.child(div().text_xs().text_color(theme::rambutan_500()).child("/"))
-                })
-                .when(has_query, |el| {
-                    let button = web_button("settings-clear-search", WebButtonVariant::Ghost, WebButtonSize::IconSmall, ButtonState::Enabled)
-                        .debug_selector(|| "settings-clear-search".to_owned())
-                        .aria_label(self.ui_language().text("Clear settings search"))
-                        .flex_shrink_0()
-                        .child(svg().path(assets::CLOSE_ICON_PATH).size(px(theme::ICON_PX)).text_color(theme::rambutan_500()));
-                    el.child(on_press_view(button, cx, |this, window, cx| {
-                        this.settings_search.update(cx, |input, cx| {
-                            input.set_value("", window, cx);
-                            input.focus(window, cx);
-                        });
-                        this.refresh_settings_search(cx);
-                    }))
-                })
                 .into_any_element()
         };
         let shell = div()
@@ -1602,7 +1700,7 @@ impl Workspace {
             .theme_background("sidebar", theme::longan_900(), cx)
             .flex_shrink_0()
             .border_r_1()
-            .border_color(theme::longan_800().opacity(0.6))
+            .border_color(search_header_border)
             .flex()
             .flex_col()
             .child(search);
@@ -1621,12 +1719,13 @@ impl Workspace {
             }
         })
             .id("desktop-settings-links")
+            .debug_selector(|| "desktop-settings-links".to_owned())
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.settings_nav_scroll)
             .px(px(8.))
-            .pb_2()
+            .py_2()
             .flex()
             .flex_col()
             .gap(px(2.0))
@@ -2973,7 +3072,7 @@ impl Workspace {
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx)
                     }))
-                    .child(self.render_settings_nav(width, cx))
+                    .child(self.render_settings_nav(width, window, cx))
                     .when(width >= 768.0 || !self.settings_search_open, |dialog| dialog.child(
                         div()
                             .flex_1()
@@ -3310,6 +3409,17 @@ mod ui_audit_tests {
             } else {
                 assert!(nav.size.width < dialog.size.width / 2.);
                 assert!(cx.debug_bounds("desktop-settings-content").is_some());
+                let search_header = cx
+                    .debug_bounds("desktop-settings-search-header")
+                    .expect("search header");
+                let pane_header = cx
+                    .debug_bounds("desktop-settings-header")
+                    .expect("settings header");
+                let links = cx
+                    .debug_bounds("desktop-settings-links")
+                    .expect("settings links");
+                assert!((f32::from(search_header.bottom()) - f32::from(pane_header.bottom())).abs() <= 1.0);
+                assert!(links.top() >= search_header.bottom() - px(1.0));
             }
             cx.simulate_input("project");
             cx.run_until_parked();
