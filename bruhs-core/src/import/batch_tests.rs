@@ -8,8 +8,8 @@ use super::text::{clip_part, shown_name};
 use super::ImportError;
 use bruhs_models::imports::{
     cut_short_line, ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST,
-    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, MAX_PART_CHARS,
-    NOT_AN_EXPORT, TOO_MANY_FILES,
+    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FOLDER_MISSING, FOLDER_PRIVATE, GROK_BEST_EFFORT,
+    MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{title_from_prompt, ImportSource, PortablePart};
 use bruhs_models::EpochMs;
@@ -464,10 +464,9 @@ fn paths_are_read_in_place_and_never_deleted() {
     );
     assert_eq!(tree(&place.dir.path().join("picked")), listing);
 
-    // A picked file whose name is never opened adds nothing (F33).
+    // A picked file whose name is never opened is refused (F33).
     let users = place.picked("users.json", fixture("chatgpt-conversations.json"));
-    let job = host.read_paths(vec![users]).unwrap();
-    assert_eq!(failed(wait(&host, &job.id)), NOT_AN_EXPORT);
+    assert_eq!(refused(host.read_paths(vec![users])), FOLDER_PRIVATE);
 
     let missing = place.dir.path().join("picked").join("gone.zip");
     assert_eq!(refused(host.read_paths(vec![missing])), FOLDER_MISSING);
@@ -980,4 +979,48 @@ fn a_thread_fits_the_record_cap() {
     assert!(raw.len() < cap, "{} bytes", raw.len());
     let job = upload(&host, &[&raw]);
     assert_eq!(failed(wait(&host, &job.id)), CONVERSATION_TOO_LARGE);
+}
+
+/// A picked path is checked in every part below the home, as typed and
+/// as resolved, as the agent scan checks its places: a file under
+/// `credentials/`, a link into it and a folder under `secrets/` are all
+/// refused (final review I2).
+#[test]
+fn picked_paths_below_private_folders_are_refused() {
+    let place = Place::new();
+    let home = place.dir.path().join("home");
+    let host = place
+        .host()
+        .with_agent_roots(super::agents::AgentRoots::under(&home));
+    let zip = zip_of(
+        &[("conversations.json", fixture("chatgpt-conversations.json"))],
+        true,
+    );
+    let put = |rest: &str| {
+        let path = home.join(rest);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &zip).unwrap();
+        path
+    };
+    let open = put("exports/export.zip");
+    let private = put(".config/x/credentials/export.zip");
+    let folder = put("secrets/exports/conversations.json");
+    let folder = folder.parent().unwrap().to_path_buf();
+    assert_eq!(refused(host.read_paths(vec![private])), FOLDER_PRIVATE);
+    assert_eq!(refused(host.read_paths(vec![folder])), FOLDER_PRIVATE);
+    // As typed, against the home.
+    assert_eq!(
+        refused(host.read_paths(vec![PathBuf::from("~/secrets/exports")])),
+        FOLDER_PRIVATE
+    );
+    #[cfg(unix)]
+    {
+        let link = home.join("export.zip");
+        std::os::unix::fs::symlink(home.join(".config/x/credentials/export.zip"), &link).unwrap();
+        assert_eq!(refused(host.read_paths(vec![link])), FOLDER_PRIVATE);
+    }
+    // One refused path refuses the pick, so nothing is read.
+    assert!(place.batches().is_empty());
+    let job = host.read_paths(vec![open]).unwrap();
+    assert_eq!(ready(wait(&host, &job.id)).candidates.len(), 4);
 }

@@ -171,6 +171,30 @@ pub fn scan(
     })
 }
 
+/// Whether a path the owner picked leads somewhere never opened: a part
+/// of `named` below the home, or of `resolved` below the resolved home
+/// (all of either when it isn't under its home), is a name a scan never
+/// opens, such as `credentials` or `secrets`. The desktop's export picker
+/// checks its paths with this, as a scan checks its places (F33).
+pub(crate) fn picked_private(roots: &AgentRoots, named: &Path, resolved: &Path) -> bool {
+    let home = roots
+        .named_home()
+        .and_then(|home| std::fs::canonicalize(home).ok());
+    private_below(roots.named_home(), named) || private_below(home.as_deref(), resolved)
+}
+
+/// Whether a part of `path` below `home`, or of all of it when it isn't
+/// under `home`, is never opened.
+fn private_below(home: Option<&Path>, path: &Path) -> bool {
+    let below = home
+        .and_then(|home| path.strip_prefix(home).ok())
+        .unwrap_or(path);
+    below.components().any(|part| match part {
+        Component::Normal(name) => files::never_open(&name.to_string_lossy()),
+        _ => false,
+    })
+}
+
 /// One scan's state: the resolved home, and what it has found.
 struct Scan<'a> {
     roots: &'a AgentRoots,
@@ -237,15 +261,7 @@ impl<'a> Scan<'a> {
     /// Whether a part of `folder` below the resolved home, or of all of it
     /// when it isn't under the home, is never opened (`credentials`, say).
     fn private(&self, folder: &Path) -> bool {
-        let below = self
-            .home
-            .as_deref()
-            .and_then(|home| folder.strip_prefix(home).ok())
-            .unwrap_or(folder);
-        below.components().any(|part| match part {
-            Component::Normal(name) => files::never_open(&name.to_string_lossy()),
-            _ => false,
-        })
+        private_below(self.home.as_deref(), folder)
     }
 
     /// A typed or picked folder: `~` and `~/…` read against the home. It
