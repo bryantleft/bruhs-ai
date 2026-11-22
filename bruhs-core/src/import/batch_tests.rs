@@ -8,8 +8,8 @@ use super::text::{clip_part, shown_name};
 use super::ImportError;
 use bruhs_models::imports::{
     cut_short_line, ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST,
-    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE,
-    GROK_BEST_EFFORT, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
+    EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE, GROK_BEST_EFFORT,
+    MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{title_from_prompt, ImportSource, PortablePart};
 use bruhs_models::EpochMs;
@@ -940,6 +940,8 @@ fn a_thread_fits_the_record_cap() {
         "uuid": "conv-merged",
         "name": "Merged",
         "chat_messages": [
+            { "sender": "human", "text": "Question one" },
+            { "sender": "assistant", "text": "Short answer" },
             { "sender": "human", "text": "Write it all" },
             { "sender": "assistant", "content": (0..4).map(block).collect::<Vec<_>>() },
         ],
@@ -960,6 +962,11 @@ fn a_thread_fits_the_record_cap() {
     };
     assert!(newest.starts_with('3'), "the newest block stays");
     assert!(reply.parts.len() < 4, "the oldest blocks go");
+    // The huge reply gives up its own blocks before any prompt goes
+    // (re-review m2).
+    let texts: Vec<String> = thread.messages.iter().map(|m| m.text()).collect();
+    assert_eq!(thread.messages.len(), 4, "every prompt stays");
+    assert_eq!(texts[..3], ["Question one", "Short answer", "Write it all"]);
 
     // A thread file past the cap isn't read back.
     let file = place.root().join(&batch.id).join("threads").join("0.json");
@@ -971,15 +978,28 @@ fn a_thread_fits_the_record_cap() {
         Err(ImportError::Gone)
     ));
 
-    // One part that can't fit even alone is a chat too large to import.
+    // One part that can't fit even alone is cut from its own text, and
+    // the chat counts as cut instead of failing the read (re-review m3).
     let wide = json!([{
         "uuid": "conv-wide",
         "chat_messages": [{ "sender": "assistant", "text": "\u{20ac}".repeat(199_000) }],
     }]);
     let raw = json_bytes(&wide);
     assert!(raw.len() < cap, "{} bytes", raw.len());
-    let job = upload(&host, &[&raw]);
-    assert_eq!(failed(wait(&host, &job.id)), CONVERSATION_TOO_LARGE);
+    let batch = read(&host, &[&raw]);
+    assert_eq!(batch.counts.cut_short, 1);
+    let thread = host
+        .thread(&batch.id, ImportSource::ClaudeAi, "conv-wide")
+        .unwrap();
+    assert!(serde_json::to_vec(&thread).unwrap().len() <= cap);
+    let text = thread.messages[0].text();
+    let kept = text.chars().take_while(|c| *c == '\u{20ac}').count();
+    assert!((1..199_000).contains(&kept), "{kept}");
+    assert!(
+        text.ends_with(&cut_short_line(199_000 - kept)),
+        "{}",
+        &text[text.len() - 60..]
+    );
 }
 
 /// A picked path is checked in every part below the home, as typed and

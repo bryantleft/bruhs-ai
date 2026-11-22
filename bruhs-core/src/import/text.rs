@@ -373,7 +373,7 @@ pub(crate) fn clip_strings(value: &Value, budget: usize) -> Value {
 }
 
 /// Characters of every string leaf in `value`, keys left out.
-fn string_chars(value: &Value) -> usize {
+pub(crate) fn string_chars(value: &Value) -> usize {
     let mut total: usize = 0;
     let mut stack = vec![value];
     while let Some(at) = stack.pop() {

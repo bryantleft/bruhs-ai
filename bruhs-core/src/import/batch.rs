@@ -26,18 +26,19 @@
 use super::agents::{picked_private, AgentRoots};
 use super::archive::{never_opened, walk_with, EntryKind, ExportInput, Hooks, Limits, WalkReport};
 use super::json_stream::for_each_record;
-use super::text::{shown_name, TITLE_MAX_CHARS};
+use super::text::{clip_part, clip_strings, shown_name, string_chars, TITLE_MAX_CHARS};
 use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
     cut_short_line, import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob,
-    ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, CONVERSATION_TOO_LARGE,
-    DAMAGED_EXPORT, EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE,
-    GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES, MAX_MESSAGES,
-    MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
+    ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT,
+    EXPORT_TOO_LARGE, FILE_PRIVATE, FOLDER_MISSING, FOLDER_PRIVATE, GROK_BEST_EFFORT, IMPORT_BUSY,
+    IMPORT_FAILED, IMPORT_GONE, MAX_BATCHES, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS,
+    NOT_AN_EXPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
+    PortablePart, PortableToolCall,
 };
 use bruhs_models::EpochMs;
 use rand::TryRngCore as _;
@@ -1095,8 +1096,12 @@ impl BatchReader<'_> {
         let mut cut =
             nodes(candidate.source, raw) > MAX_NODES || parsed.messages.len() >= MAX_MESSAGES;
         candidate.title = row_title(&candidate.title, &parsed.messages);
-        let (bytes, fitted) =
-            thread_bytes(candidate.clone(), parsed.messages, self.host.limits.record)?;
+        let Some((bytes, fitted)) =
+            thread_bytes(candidate.clone(), parsed.messages, self.host.limits.record)?
+        else {
+            counts.cut_short = counts.cut_short.saturating_add(1);
+            return Ok(());
+        };
         cut |= fitted;
         let size = to_u64(bytes.len());
         if self.stored.saturating_add(size) > self.host.limits.stored {
@@ -1190,47 +1195,82 @@ impl BatchReader<'_> {
 /// bytes, and whether anything was left out to fit (final review I1). A
 /// reply merges every assistant node until the next prompt, and the
 /// context repeats the newest message whole, so a thread can outgrow its
-/// record. Past `cap` the oldest messages go, then the oldest parts of
-/// the one left, until the messages take half of what is left to try;
-/// the newest part always stays. A thread that still doesn't fit is a
-/// chat too large to import.
+/// record. Past `cap`, each round keeps the messages within half of what
+/// is left to try ([`trim`]); once one part is all that is left, that
+/// part is cut from its own text, by halves. `None` when even that
+/// doesn't fit: the chat is left out and counted as cut.
 fn thread_bytes(
     candidate: ImportCandidate,
     messages: Vec<PortableMessage>,
     cap: u64,
-) -> Result<(Vec<u8>, bool), ImportError> {
+) -> Result<Option<(Vec<u8>, bool)>, ImportError> {
+    let fits = |candidate, messages| -> Result<Result<Vec<u8>, ImportedThread>, ImportError> {
+        let thread = ImportedThread::new(candidate, messages);
+        let bytes = serde_json::to_vec(&thread).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
+        Ok(if to_u64(bytes.len()) <= cap {
+            Ok(bytes)
+        } else {
+            Err(thread)
+        })
+    };
     let (mut candidate, mut messages) = (candidate, messages);
     let mut budget = cap / 2;
     let mut cut = false;
     loop {
-        let thread = ImportedThread::new(candidate, messages);
-        let bytes = serde_json::to_vec(&thread).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
-        if to_u64(bytes.len()) <= cap {
-            return Ok((bytes, cut));
-        }
+        let thread = match fits(candidate, messages)? {
+            Ok(bytes) => return Ok(Some((bytes, cut))),
+            Err(thread) => thread,
+        };
         ImportedThread {
             candidate,
             messages,
             ..
         } = thread;
         let one_part = match messages.as_slice() {
-            [] => true,
             [only] => only.parts.len() <= 1,
-            _ => false,
+            _ => messages.is_empty(),
         };
         if one_part {
-            return Err(ImportError::Refused(CONVERSATION_TOO_LARGE));
+            break;
         }
-        drop_oldest(&mut messages, budget);
+        trim(&mut messages, budget);
         cut = true;
         budget /= 2;
     }
+    let Some(part) = messages.first_mut().and_then(|message| message.parts.pop()) else {
+        return Ok(None);
+    };
+    let mut limit = part_chars(&part) / 2;
+    while limit > 0 {
+        if let Some(message) = messages.first_mut() {
+            message.parts.push(clipped(&part, limit));
+        }
+        let thread = match fits(candidate, messages)? {
+            Ok(bytes) => return Ok(Some((bytes, true))),
+            Err(thread) => thread,
+        };
+        ImportedThread {
+            candidate,
+            messages,
+            ..
+        } = thread;
+        if let Some(message) = messages.first_mut() {
+            message.parts.pop();
+        }
+        limit /= 2;
+    }
+    Ok(None)
 }
 
-/// `messages` without their oldest messages, then the oldest parts of the
-/// first one left, until they take at most `budget` bytes serialized. The
-/// newest message and its newest part always stay.
-fn drop_oldest(messages: &mut Vec<PortableMessage>, budget: u64) {
+/// `messages` cut to about `budget` bytes serialized, keeping the newest.
+/// The newest message keeps its newest parts within half the budget
+/// first, so a huge last reply loses its own oldest parts before any
+/// prompt goes; then the oldest messages go, then the oldest parts of the
+/// first one left. The newest message and its newest part always stay.
+fn trim(messages: &mut Vec<PortableMessage>, budget: u64) {
+    if let Some(last) = messages.last_mut() {
+        drop_oldest_parts(&mut last.parts, budget / 2);
+    }
     let sizes: Vec<u64> = messages.iter().map(serialized_len).collect();
     let mut total = sizes
         .iter()
@@ -1241,19 +1281,51 @@ fn drop_oldest(messages: &mut Vec<PortableMessage>, budget: u64) {
         first += 1;
     }
     messages.drain(..first);
-    let Some(message) = messages.first_mut() else {
-        return;
-    };
-    let sizes: Vec<u64> = message.parts.iter().map(serialized_len).collect();
+    if let Some(message) = messages.first_mut() {
+        drop_oldest_parts(&mut message.parts, budget);
+    }
+}
+
+/// `parts` without their oldest ones until they take at most `budget`
+/// bytes serialized; the newest always stays.
+fn drop_oldest_parts(parts: &mut Vec<PortablePart>, budget: u64) {
+    let sizes: Vec<u64> = parts.iter().map(serialized_len).collect();
     let mut total = sizes
         .iter()
         .fold(0_u64, |sum, size| sum.saturating_add(*size));
     let mut first = 0;
-    while total > budget && first + 1 < message.parts.len() {
+    while total > budget && first + 1 < parts.len() {
         total = total.saturating_sub(sizes[first]);
         first += 1;
     }
-    message.parts.drain(..first);
+    parts.drain(..first);
+}
+
+/// Characters of text `part` holds: its text, or the larger of a tool
+/// call's input strings and output.
+fn part_chars(part: &PortablePart) -> usize {
+    match part {
+        PortablePart::Text(text) | PortablePart::Thinking(text) => text.chars().count(),
+        PortablePart::ToolCall(call) => string_chars(&call.input).max(
+            call.output
+                .as_deref()
+                .map_or(0, |output| output.chars().count()),
+        ),
+    }
+}
+
+/// `part` with its text cut to `limit` characters, each cut ending with
+/// its cut line.
+fn clipped(part: &PortablePart, limit: usize) -> PortablePart {
+    match part {
+        PortablePart::Text(text) => PortablePart::Text(clip_part(text.clone(), limit)),
+        PortablePart::Thinking(text) => PortablePart::Thinking(clip_part(text.clone(), limit)),
+        PortablePart::ToolCall(call) => PortablePart::ToolCall(PortableToolCall {
+            input: clip_strings(&call.input, limit),
+            output: call.output.clone().map(|output| clip_part(output, limit)),
+            ..call.clone()
+        }),
+    }
 }
 
 /// Bytes `value` takes as JSON, counted without keeping them.
