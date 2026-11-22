@@ -1,4 +1,4 @@
-//! Owner-configured references for provider process variables. Values only exist during launch.
+//! Owner-configured variables for provider launches and account metadata requests.
 use bruhs_models::agent::AgentProvider;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -53,28 +53,32 @@ fn read(path: &Path) -> io::Result<SecretSources> {
         Err(e) => Err(e),
     }
 }
+fn unset_consumers(source: &str) -> io::Result<()> {
+    crate::text_generators::unset_secret_source(source)?;
+    crate::usage_hubs::unset_source(source)?;
+    crate::agent_extensions::environment::unset_source(source)
+}
+
 pub fn load() -> io::Result<SecretSources> {
     let path = file()?;
     let data = read(&path)?;
     if data.pending_generator_reset.is_some() {
         // The source is already absent. A locked generator database must not
         // prevent other accounts from resolving their configured fields.
-        if let Ok(repaired) = update_with(&path, None, crate::text_generators::unset_secret_source)
-        {
+        if let Ok(repaired) = update_with(&path, None, unset_consumers) {
             return Ok(repaired);
         }
     }
     Ok(data)
 }
+pub(crate) fn configured() -> io::Result<SecretSources> {
+    read(&file()?)
+}
 pub(super) fn source_exists(id: &str) -> io::Result<bool> {
-    Ok(read(&file()?)?.sources.contains_key(id))
+    Ok(configured()?.sources.contains_key(id))
 }
 pub fn change(edit: Change) -> io::Result<SecretSources> {
-    update_with(
-        &file()?,
-        Some(edit),
-        crate::text_generators::unset_secret_source,
-    )
+    update_with(&file()?, Some(edit), unset_consumers)
 }
 fn update_with(
     path: &Path,
@@ -204,12 +208,27 @@ impl SecretSources {
             validate_reference(&field.reference)
         }
     }
+    async fn read_binding(&self, binding: &Binding, op: &Path) -> io::Result<String> {
+        self.validate(binding)?;
+        read_field(op, &self.sources[&binding.source], &binding.reference).await
+    }
+
+    /// Probe one provider variable without opening unrelated credential fields.
+    pub(crate) async fn provider_variable(
+        &self,
+        target: &str,
+        name: &str,
+    ) -> io::Result<Option<String>> {
+        match self.bindings.iter().find(|b| b.target == target && b.variable == name) {
+            Some(binding) => self.read_binding(binding, Path::new("op")).await.map(Some),
+            None => Ok(std::env::var(name).ok()),
+        }
+    }
+
     async fn resolve(&self, target: &str, op: &Path) -> io::Result<Vec<(String, String)>> {
         let mut vars = Vec::new();
         for b in self.bindings.iter().filter(|b| b.target == target) {
-            self.validate(b)?;
-            let source = &self.sources[&b.source];
-            let value = read_field(op, source, &b.reference).await?;
+            let value = self.read_binding(b, op).await?;
             vars.push((b.variable.clone(), value));
         }
         Ok(vars)
@@ -339,10 +358,14 @@ pub(crate) async fn for_turn(
     } else {
         provider.as_str().into()
     };
+    for_target(&target).await
+}
+
+pub(crate) async fn for_target(target: &str) -> io::Result<Vec<(String, String)>> {
     let data = tokio::task::spawn_blocking(load)
         .await
         .map_err(io::Error::other)??;
-    data.resolve(&target, Path::new("op")).await
+    data.resolve(target, Path::new("op")).await
 }
 
 #[cfg(all(test, unix))]

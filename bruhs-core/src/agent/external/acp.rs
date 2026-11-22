@@ -68,6 +68,7 @@ pub(super) async fn stream(options: Options, turn: TurnContext) {
 fn selected<'a>(
     model: &'a str,
     instances: &'a [AcpInstance],
+    availability: &crate::agent_extensions::availability::ProviderAvailability,
 ) -> io::Result<(&'a AcpInstance, &'a str)> {
     let selection = model
         .strip_prefix("acp/")
@@ -77,7 +78,7 @@ fn selected<'a>(
     })?;
     let instance = instances
         .iter()
-        .find(|i| i.id == id && i.enabled)
+        .find(|i| i.id == id && availability.acp_enabled(i))
         .ok_or_else(|| {
             io::Error::other(format!(
                 "ACP instance {id} is missing or disabled. Configure it in Workbench → Providers."
@@ -109,16 +110,7 @@ fn native_selection(
     {
         let option = config.as_array().and_then(|options| options.iter().find(|option| option["id"] == config_id))
             .ok_or_else(|| io::Error::other(format!("ACP agent does not advertise selector {config_id}. Configure its native selector ID in Workbench → Providers.")))?;
-        let known = option["type"] == "select"
-            && option["options"].as_array().is_some_and(|options| {
-                options.iter().any(|option| {
-                    option["value"] == value
-                        || option["options"].as_array().is_some_and(|group| {
-                            group.iter().any(|option| option["value"] == value)
-                        })
-                })
-            });
-        if !known {
+        if !select_offers(option, value) {
             return Err(io::Error::other(format!("ACP selector {config_id} does not advertise value {value}. Review the agent's current native mode/model IDs.")));
         }
         return Ok(Selection {
@@ -191,8 +183,13 @@ async fn run_config(
             "ACP unattended runs are unavailable: isolate inherited plugins/hooks with an enforced runtime before enabling them.",
         ));
     }
-    let (instance, model) = selected(&options.model, &config.acp)?;
-    let mut command = tokio::process::Command::new(&instance.command);
+    let availability = crate::agent_extensions::availability::ProviderAvailability::load_for_project(&options.cwd)?;
+    let (instance, model) = selected(&options.model, &config.acp, &availability)?;
+    let kiro = instance.driver == Some(bruhs_models::agent_extensions::AcpDriver::Kiro);
+    if kiro && !instance.modes.contains_key(options.mode.as_str()) {
+        return Err(io::Error::other("Kiro supports Default (Supervised) and Full access. Choose one of those access modes."));
+    }
+    let mut command = tokio::process::Command::new(instance.executable());
     command
         .args(&instance.args)
         .current_dir(&options.cwd)
@@ -201,8 +198,9 @@ async fn run_config(
         &mut command,
         true,
         &crate::connections::PRIVATE_ENV.map(String::from),
-        &options.secret_env,
+        &[],
     );
+    crate::agent_extensions::environment::apply(&mut command, instance, &options.secret_env).await?;
     let mut child = process::CliProcess::spawn("ACP agent", &mut command)?;
     turn.register_process(child.pid());
     let mut stdin = child
@@ -229,16 +227,19 @@ async fn run_config(
             }
             None => ("session/new", json!({"cwd":options.cwd,"mcpServers":mcp})),
         };
-        let session = rpc(
-            &mut child,
-            &mut stdin,
-            turn,
-            options.mode,
-            2,
-            method,
-            params,
-        )
-        .await?;
+        let opened = rpc(&mut child, &mut stdin, turn, options.mode, 2, method, params.clone()).await;
+        let session = match opened {
+            Err(err) if !kiro && err.get_ref().is_some_and(|e| e.is::<AuthenticationRequired>()) => {
+                let preferred = instance.registry.as_ref().and_then(|origin| origin.auth_method_id.as_deref());
+                let method_id = agent_auth_method(&initialized, preferred)?.ok_or(err)?;
+                rpc(
+                    &mut child, &mut stdin, turn, options.mode, 6, "authenticate",
+                    json!({"methodId": method_id}),
+                ).await?;
+                rpc(&mut child, &mut stdin, turn, options.mode, 7, method, params).await?
+            }
+            result => result?,
+        };
         let session_id = native
             .or_else(|| session["sessionId"].as_str())
             .ok_or_else(|| io::Error::other("ACP agent returned no session ID."))?
@@ -249,38 +250,147 @@ async fn run_config(
                 "Configure this ACP agent's native mode ID for the selected access mode, or explicitly choose Full access. Bruhs will not substitute an instruction for access enforcement.",
             ));
         }
-        let mut selections = Vec::new();
-        if model != "default" {
-            selections.push((
-                Selector::Model,
-                instance.model_config_id.as_deref().unwrap_or("model"),
-                model,
-            ));
-        }
-        // Model selection can replace dependent configuration. Apply access
-        // last and require the agent to confirm the resulting native value.
-        if let Some(mode_id) = mode_id {
-            selections.push((
-                Selector::Mode,
-                instance.mode_config_id.as_deref().unwrap_or("mode"),
-                mode_id.as_str(),
-            ));
-        }
         let mut configuration = session;
-        for (index, (selector, config_id, value)) in selections.into_iter().enumerate() {
-            let selection =
-                native_selection(&configuration, &session_id, selector, config_id, value)?;
+        let mut agent_switched = false;
+        if let Some(agent) = options.kiro_selection.agent.as_deref().filter(|_| kiro) {
+            if offered_choice(&configuration, "mode", agent)
+                && !current_choice(&configuration, "mode", agent)
+            {
+                let updated = rpc(
+                    &mut child,
+                    &mut stdin,
+                    turn,
+                    options.mode,
+                    11,
+                    "session/set_config_option",
+                    json!({"sessionId":session_id,"configId":"mode","value":agent}),
+                )
+                .await?;
+                configuration =
+                    updated_configuration(configuration, updated, Some(("mode".into(), agent.into())))?;
+                agent_switched = true;
+            }
+        }
+        let model_option = kiro_model_option(&configuration);
+        let catalog;
+        let requested = if kiro && model == "default" && (agent_switched || model_option.is_some()) {
+            catalog = crate::agent_extensions::kiro::Catalog::load(instance);
+            catalog.default_id()
+        } else {
+            model
+        };
+        if requested != "default"
+            && (!kiro || !model_option.is_some_and(|option| option["currentValue"] == requested))
+        {
+            let selector = if kiro {
+                model_option
+                    .and_then(|option| option["id"].as_str())
+                    .unwrap_or("model")
+            } else {
+                instance.model_config_id.as_deref().unwrap_or("model")
+            };
+            let selection = if kiro {
+                Selection {
+                    method: "session/set_config_option",
+                    params: json!({"sessionId":session_id,"configId":selector,"value":requested}),
+                    expected: None,
+                }
+            } else {
+                native_selection(
+                    &configuration,
+                    &session_id,
+                    Selector::Model,
+                    selector,
+                    requested,
+                )?
+            };
             let updated = rpc(
                 &mut child,
                 &mut stdin,
                 turn,
                 options.mode,
-                3 + u64::try_from(index).map_err(io::Error::other)?,
+                3,
                 selection.method,
                 selection.params,
             )
             .await?;
             configuration = updated_configuration(configuration, updated, selection.expected)?;
+        }
+        if let Some(effort) = options.kiro_selection.effort.as_deref().filter(|_| kiro) {
+            // Kiro may publish the new model's options shortly after acknowledging the write.
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !kiro_model_option(&configuration)
+                .is_some_and(|option| option["currentValue"] == requested)
+            {
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+                let ready = tokio::select! {
+                    () = turn.tx.closed() => return Err(io::Error::new(io::ErrorKind::Interrupted, "ACP task was cancelled.")),
+                    ready = tokio::time::timeout_at(deadline, child.stdout_ready()) => ready,
+                };
+                match ready {
+                    Err(_) => break,
+                    Ok(result) => result?,
+                }
+                let message =
+                    tokio::time::timeout(super::CONFIG_TIMEOUT, read_message(&mut child, turn))
+                        .await
+                        .map_err(|_| io::Error::other("Kiro did not finish an ACP message."))??;
+                if let Some(values) = config_notification(&message, &session_id) {
+                    configuration["configOptions"] = values.clone();
+                }
+                handle_message(&mut stdin, turn, options.mode, &message).await?;
+            }
+            if kiro_model_option(&configuration)
+                .is_some_and(|option| option["currentValue"] == requested)
+                && offered_choice(&configuration, "effortLevel", effort)
+                && !current_choice(&configuration, "effortLevel", effort)
+            {
+                match rpc(
+                    &mut child,
+                    &mut stdin,
+                    turn,
+                    options.mode,
+                    12,
+                    "session/set_config_option",
+                    json!({"sessionId":session_id,"configId":"effortLevel","value":effort}),
+                )
+                .await
+                {
+                    Ok(update) => configuration = updated_configuration(configuration, update, None)?,
+                    Err(e) if e.get_ref().is_some_and(|cause| cause.is::<RpcRejection>()) => {
+                        tracing::debug!("Kiro declined the selected reasoning level")
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        // Apply access after all settings that can reset it and require native confirmation.
+        if let Some(mode_id) = mode_id {
+            if kiro && !configuration["configOptions"].is_array() {
+                return Err(io::Error::other(
+                    "Kiro V3 did not advertise its Autopilot access setting.",
+                ));
+            }
+            let selection = native_selection(
+                &configuration,
+                &session_id,
+                Selector::Mode,
+                instance.mode_config_id.as_deref().unwrap_or("mode"),
+                mode_id,
+            )?;
+            let updated = rpc(
+                &mut child,
+                &mut stdin,
+                turn,
+                options.mode,
+                4,
+                selection.method,
+                selection.params,
+            )
+            .await?;
+            updated_configuration(configuration, updated, selection.expected)?;
         }
         let stamped = format!("acp:{}:{session_id}", instance.id);
         if !turn
@@ -339,6 +449,116 @@ async fn run_config(
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct AuthenticationRequired(String);
+
+fn agent_auth_method<'a>(
+    initialized: &'a Value,
+    preferred: Option<&'a str>,
+) -> io::Result<Option<&'a str>> {
+    let Some(methods) = initialized["authMethods"].as_array() else {
+        return Ok(preferred);
+    };
+    let agent_managed = |m: &Value| m.get("type").is_none() || m["type"] == "agent";
+    if let Some(id) = preferred {
+        let method = methods.iter().find(|m| m["id"] == id).ok_or_else(|| {
+            io::Error::other(format!(
+                "The ACP agent did not advertise authentication method {id}."
+            ))
+        })?;
+        if !agent_managed(method) {
+            return Err(io::Error::other(format!(
+                "Authentication method {id} requires an external sign-in."
+            )));
+        }
+        return Ok(Some(id));
+    }
+    Ok(methods
+        .iter()
+        .filter(|m| agent_managed(m))
+        .find_map(|m| m["id"].as_str()))
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct RpcRejection(String);
+
+fn config_notification<'a>(message: &'a Value, id: &str) -> Option<&'a Value> {
+    let p = &message["params"];
+    let update = &p["update"];
+    (message["method"] == "session/update"
+        && p["sessionId"] == id
+        && update["sessionUpdate"] == "config_option_update"
+        && update["configOptions"].is_array())
+    .then_some(&update["configOptions"])
+}
+fn kiro_model_option(config: &Value) -> Option<&Value> {
+    config["configOptions"]
+        .as_array()?
+        .iter()
+        .find(|o| o["id"] == "model" || o["category"] == "model")
+}
+fn current_choice(config: &Value, id: &str, value: &str) -> bool {
+    config["configOptions"].as_array().is_some_and(|rows| {
+        rows.iter()
+            .any(|o| o["id"] == id && o["currentValue"] == value)
+    })
+}
+fn select_offers(option: &Value, value: &str) -> bool {
+    option["type"] == "select"
+        && option["options"].as_array().is_some_and(|choices| {
+            choices.iter().any(|entry| {
+                entry["value"] == value
+                    || entry["options"]
+                        .as_array()
+                        .is_some_and(|group| group.iter().any(|choice| choice["value"] == value))
+            })
+        })
+}
+fn offered_choice(config: &Value, id: &str, value: &str) -> bool {
+    config["configOptions"].as_array().is_some_and(|rows| {
+        rows.iter()
+            .any(|o| o["id"] == id && select_offers(o, value))
+    })
+}
+async fn read_message(child: &mut process::CliProcess, turn: &TurnContext) -> io::Result<Value> {
+    let line = child
+        .next_line_with_limit(&turn.tx, Some(FRAME_BYTES))
+        .await
+        .map_err(|ending| {
+            io::Error::other(match ending {
+                process::Ending::Failed(message) => message,
+                process::Ending::Eof => {
+                    "ACP agent closed its output. Check the executable and its login in a terminal."
+                        .into()
+                }
+                process::Ending::ConsumerGone => "ACP task was cancelled.".into(),
+            })
+        })?;
+    serde_json::from_str(&line)
+        .map_err(|e| io::Error::other(format!("ACP returned invalid JSON: {e}")))
+}
+async fn handle_message(
+    stdin: &mut ChildStdin,
+    turn: &TurnContext,
+    mode: PermissionMode,
+    message: &Value,
+) -> io::Result<()> {
+    if message["method"] == "session/request_permission" {
+        permission(stdin, turn, mode, message).await?;
+    } else if message.get("id").is_some() && message.get("method").is_some() {
+        write(stdin,json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"Bruhs did not advertise this client capability."}})).await?;
+    } else if message["method"] == "session/update" {
+        for event in events(&message["params"]["update"]) {
+            if !turn.forward(event).await {
+                return Err(io::Error::other("Task cancelled."));
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn rpc(
     child: &mut process::CliProcess,
     stdin: &mut ChildStdin,
@@ -354,37 +574,39 @@ async fn rpc(
             json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
         )
         .await?;
+        let mut latest = None;
         loop {
-            let line = child
-                .next_line_with_limit(&turn.tx, Some(FRAME_BYTES))
-                .await
-                .map_err(|ending| io::Error::other(match ending {
-                    process::Ending::Failed(message)=>message,
-                    process::Ending::Eof=>"ACP agent closed its output. Check the executable and its login in a terminal.".into(),
-                    process::Ending::ConsumerGone=>"ACP task was cancelled.".into(),
-                }))?;
-            let message: Value = serde_json::from_str(&line)
-                .map_err(|e| io::Error::other(format!("ACP returned invalid JSON: {e}")))?;
+            let message = read_message(child, turn).await?;
+            if method == "session/set_config_option" {
+                if let Some(values) = params["sessionId"]
+                    .as_str()
+                    .and_then(|id| config_notification(&message, id))
+                {
+                    latest = Some(values.clone());
+                }
+            }
             if message["id"].as_u64() == Some(id) && message.get("method").is_none() {
                 if let Some(error) = message.get("error") {
-                    return Err(io::Error::other(format!("{method}: {}", error["message"])));
+                    let message = format!("{method}: {}", error["message"]);
+                    if error["code"] == -32000 {
+                        return Err(io::Error::other(AuthenticationRequired(message)));
+                    }
+                    return Err(io::Error::other(RpcRejection(message)));
                 }
-                return message
+                let mut result = message
                     .get("result")
                     .cloned()
-                    .ok_or_else(|| io::Error::other("ACP result is missing."));
-            }
-            if message["method"] == "session/request_permission" {
-                permission(stdin, turn, mode, &message).await?;
-            } else if message.get("id").is_some() && message.get("method").is_some() {
-                write(stdin,json!({"jsonrpc":"2.0","id":message["id"],"error":{"code":-32601,"message":"Bruhs did not advertise this client capability."}})).await?;
-            } else if message["method"] == "session/update" {
-                for event in events(&message["params"]["update"]) {
-                    if !turn.forward(event).await {
-                        return Err(io::Error::other("Task cancelled."));
+                    .ok_or_else(|| io::Error::other("ACP result is missing."))?;
+                if let Some(options) = latest {
+                    let confirms_write = |list: &Value| list.as_array().is_some_and(|rows| rows.iter().any(|option|
+                        option["id"] == params["configId"] && option["currentValue"] == params["value"]));
+                    if result.is_object() && !confirms_write(&result["configOptions"]) && confirms_write(&options) {
+                        result["configOptions"] = options;
                     }
                 }
+                return Ok(result);
             }
+            handle_message(stdin, turn, mode, &message).await?;
         }
     };
     tokio::select! {
@@ -394,7 +616,8 @@ async fn rpc(
             "ACP task was cancelled.",
         )),
         result = async {
-            if method == "session/prompt" {
+            // Sign-in can wait for the user in the agent. Cancel still interrupts the RPC.
+            if matches!(method, "session/prompt" | "authenticate") {
                 exchange.await
             } else {
                 tokio::time::timeout(super::CONFIG_TIMEOUT, exchange)
@@ -408,7 +631,6 @@ async fn rpc(
         } => result,
     }
 }
-
 async fn permission(
     stdin: &mut ChildStdin,
     turn: &TurnContext,
@@ -483,11 +705,26 @@ fn events(update: &Value) -> Vec<QueryEvent> {
             tool: update["title"].as_str().unwrap_or("ACP tool").into(),
             input: update["rawInput"].clone(),
         }],
-        Some("tool_call_update") => vec![QueryEvent::ToolResult {
-            tool_use_id: update["toolCallId"].as_str().unwrap_or("").into(),
-            content: update["rawOutput"].to_string(),
-            is_error: update["status"] == "failed",
-        }],
+        Some("tool_call_update") => {
+            let status = update["status"].as_str().unwrap_or("");
+            let is_terminal = matches!(status, "completed" | "failed" | "cancelled")
+                || (status.is_empty() && !update["rawOutput"].is_null());
+            if is_terminal {
+                vec![QueryEvent::ToolResult {
+                    tool_use_id: update["toolCallId"].as_str().unwrap_or("").into(),
+                    content: match &update["rawOutput"] {
+                        Value::String(text) => text.clone(),
+                        Value::Null => String::new(),
+                        other => other.to_string(),
+                    },
+                    is_error: status == "failed",
+                }]
+            } else {
+                vec![QueryEvent::Raw(
+                    json!({"type":"acp_update","update":update}),
+                )]
+            }
+        }
         _ => vec![QueryEvent::Raw(
             json!({"type":"acp_update","update":update}),
         )],
@@ -536,33 +773,42 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn cancellation_interrupts_a_blocked_rpc_write() {
-        let (mut child, mut input, turn, events) = stalled_rpc_input().await;
-        let mut request = Box::pin(rpc(
-            &mut child,
-            &mut input,
-            &turn,
-            PermissionMode::Plan,
-            1,
-            "session/prompt",
-            json!({"text":"x".repeat(1024 * 1024)}),
-        ));
-        let pending = std::future::poll_fn(|cx| {
-            std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
-        })
-        .await;
-        drop(events);
-        let result =
-            tokio::time::timeout(std::time::Duration::from_secs(1), request.as_mut()).await;
-        drop(request);
-        drop(input);
-        // Always kill/reap the owned fixture before asserting the result.
-        let cleanup = child.finish(process::Ending::ConsumerGone).await;
-        assert!(cleanup.is_none());
-        assert!(pending, "the pipe did not exercise write backpressure");
-        assert!(
-            matches!(result, Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted),
-            "cancellation did not interrupt the RPC write"
-        );
+        for method in ["session/prompt", "authenticate"] {
+            let (mut child, mut input, turn, events) = stalled_rpc_input().await;
+            tokio::time::pause();
+            let mut request = Box::pin(rpc(
+                &mut child,
+                &mut input,
+                &turn,
+                PermissionMode::Plan,
+                1,
+                method,
+                json!({"text":"x".repeat(1024 * 1024)}),
+            ));
+            let pending = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
+            })
+            .await;
+            tokio::time::advance(super::super::CONFIG_TIMEOUT).await;
+            let still_pending = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
+            }).await;
+            drop(events);
+            let result =
+                tokio::time::timeout(std::time::Duration::from_secs(1), request.as_mut()).await;
+            drop(request);
+            drop(input);
+            tokio::time::resume();
+            // Always kill/reap the owned fixture before asserting the result.
+            let cleanup = child.finish(process::Ending::ConsumerGone).await;
+            assert!(cleanup.is_none());
+            assert!(still_pending, "{method} timed out while waiting for the user");
+            assert!(pending, "the pipe did not exercise write backpressure");
+            assert!(
+                matches!(result, Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted),
+                "cancellation did not interrupt the RPC write"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -671,6 +917,29 @@ mod tests {
     }
 
     #[test]
+    fn registry_auth_chooses_agent_managed_methods_and_checks_the_preference() {
+        let initialized = json!({"authMethods":[{"id":"browser","type":"terminal"},{"id":"personal"},{"id":"work","type":"agent"}]});
+        assert_eq!(
+            agent_auth_method(&initialized, None).unwrap(),
+            Some("personal")
+        );
+        assert_eq!(
+            agent_auth_method(&initialized, Some("work")).unwrap(),
+            Some("work")
+        );
+        assert!(agent_auth_method(&initialized, Some("browser")).is_err());
+        assert!(agent_auth_method(&initialized, Some("missing")).is_err());
+        assert_eq!(
+            agent_auth_method(&json!({}), Some("legacy")).unwrap(),
+            Some("legacy")
+        );
+        assert_eq!(
+            agent_auth_method(&json!({"authMethods":[]}), None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn config_selection_validates_groups_and_requires_the_native_echo() {
         let session = json!({"configOptions":[{"id":"access","type":"select","currentValue":"build","options":[{"value":"read-only","name":"Read"}]},{"id":"engine","type":"select","currentValue":"first","options":[{"group":"models","options":[{"value":"second","name":"Second"}]}]}]});
         let selected =
@@ -718,6 +987,107 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn registry_override_authenticates_only_when_challenged_and_retries_once() {
+        use bruhs_models::agent_extensions::ExtensionConfig;
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("registry.py");
+        std::fs::write(&script, r#"
+import json, sys
+scenario = sys.argv[1]
+authenticated = False
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request["method"]
+    with open("calls", "a") as calls: print(method, file=calls)
+    response = {"jsonrpc":"2.0", "id":request["id"]}
+    if method == "initialize":
+        response["result"] = {"protocolVersion":1, "authMethods":[{"id":"browser","type":"terminal"},{"id":"device","type":"agent"}]}
+    elif method == "session/new":
+        if scenario == "other-error" or scenario == "repeated" or (scenario != "ready" and not authenticated):
+            response["error"] = {"code":-32001 if scenario == "other-error" else -32000, "message":"fixture challenge"}
+        else: response["result"] = {"sessionId":"session"}
+    elif method == "authenticate":
+        assert request["params"] == {"methodId":"device"}
+        authenticated = True
+        response["result"] = {}
+    elif method == "session/prompt": response["result"] = {"stopReason":"end_turn"}
+    else: raise AssertionError(method)
+    print(json.dumps(response), flush=True)
+"#).unwrap();
+        let calls = directory.path().join("calls");
+        for (scenario, preferred, expected) in [
+            ("ready", "device", "initialize session/new session/prompt"),
+            ("local", "", "initialize session/new authenticate session/new session/prompt"),
+            (
+                "challenge",
+                "",
+                "initialize session/new authenticate session/new session/prompt",
+            ),
+            (
+                "challenge",
+                "device",
+                "initialize session/new authenticate session/new session/prompt",
+            ),
+            ("challenge", "browser", "initialize session/new"),
+            ("other-error", "device", "initialize session/new"),
+            (
+                "repeated",
+                "device",
+                "initialize session/new authenticate session/new",
+            ),
+        ] {
+            std::fs::write(&calls, "").unwrap();
+            let mut instance: AcpInstance = serde_json::from_value(json!({
+                "id":"test","name":"Registry fixture","enabled":true,"command":"missing-managed-launcher",
+                "args":[script,scenario],
+                "registry":{"agent_id":"fixture","version":"1","distribution":"npm","executable_override":"python3"}
+            })).unwrap();
+            instance.registry.as_mut().unwrap().auth_method_id =
+                (!preferred.is_empty()).then(|| preferred.to_owned());
+            if scenario == "local" {
+                instance.registry = None;
+                instance.command = "python3".into();
+            }
+            let config = ExtensionConfig {
+                acp: vec![instance],
+                ..Default::default()
+            };
+            let sessions = Default::default();
+            let registry = std::sync::Arc::new(crate::BackgroundTaskRegistry::new());
+            let (turn, _events) = crate::agent::tests::turn_context(
+                &sessions,
+                &registry,
+                &bruhs_models::ids::ThreadId::new_v4(),
+                1,
+            );
+            let options = Options::new(
+                bruhs_models::agent::AgentProvider::Acp,
+                "hello",
+                directory.path().to_str().unwrap(),
+                "acp/test/default",
+                PermissionMode::BypassPermissions,
+                None,
+                None,
+            );
+            let result = run_config(&options, &turn, &config).await;
+            assert_eq!(
+                result.is_ok(),
+                expected.ends_with("session/prompt"),
+                "{scenario}: {result:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&calls)
+                    .unwrap()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                expected
+            );
+        }
+    }
+
     #[tokio::test]
     async fn modern_config_applies_model_then_confirms_access_before_the_prompt() {
         let directory = tempfile::tempdir().unwrap();
@@ -747,6 +1117,10 @@ for line in sys.stdin:
 "#).unwrap();
         let config = bruhs_models::agent_extensions::ExtensionConfig {
             acp: vec![AcpInstance {
+                driver: None,
+                registry: None,
+                accent_color: None,
+                environment: Default::default(),
                 id: "modern".into(),
                 name: "Modern fixture".into(),
                 command: "python3".into(),
@@ -823,6 +1197,10 @@ for line in sys.stdin:
 "#).unwrap();
         let config = bruhs_models::agent_extensions::ExtensionConfig {
             acp: vec![AcpInstance {
+                driver: None,
+                registry: None,
+                accent_color: None,
+                environment: Default::default(),
                 id: "fixture".into(),
                 name: "Fixture".into(),
                 command: "python3".into(),

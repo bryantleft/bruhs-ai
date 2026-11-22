@@ -124,35 +124,24 @@ async fn run(
         .await
         .map_err(internal)?
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-        job.dictate(wav, options.language.as_deref())
+        job.dictate(wav, &options)
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?
     } else {
         let path = state.models.ensure_whisper(model, |_, _| {}).await.map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, format!("Local dictation model is unavailable: {error}. Check the model download and retry.")))?;
         let language = options
-            .language
+            .language.clone()
             .or_else(|| (!model.descriptor().multilingual).then(|| "en".into()));
         runtime::infer(&state.dictation, &path, model, samples, language, permit).await?
     };
     Ok(Json(DictationTranscript {
-        text: if options.remove_filler_words {
-            without_fillers(&text)
+        text: if options.remove_filler_words && !options.client_filters_text {
+            bruhs_models::voice_dictionary::without_fillers(&text, options.language.as_deref(), "")
         } else {
             text
         },
         model: model_name,
     }))
-}
-
-/// Remove only standalone spoken hesitations. Keep hyphenated words, names and code intact.
-fn without_fillers(text: &str) -> String {
-    text.split_whitespace()
-        .filter(|word| {
-            let token = word.trim_matches(|c: char| ",.!?;:".contains(c));
-            !token.eq_ignore_ascii_case("um") && !token.eq_ignore_ascii_case("uh")
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn internal(error: tokio::task::JoinError) -> (StatusCode, String) {
@@ -169,7 +158,7 @@ mod tests {
     #[test]
     fn filler_cleanup_preserves_words_containing_a_filler() {
         assert_eq!(
-            without_fillers("Um, update the album, uh, using uh-huh."),
+            bruhs_models::voice_dictionary::without_fillers("Um, update the album, uh, using uh-huh.", Some("en"), ""),
             "update the album, using uh-huh."
         );
     }
@@ -183,6 +172,7 @@ mod tests {
         let result = transcribe(
             State(Arc::new(state)),
             Query(DictationOptions {
+                client_filters_text: false,
                 model: bruhs_models::WhisperModel::BaseEn,
                 language: Some("en".into()),
                 remove_filler_words: true,

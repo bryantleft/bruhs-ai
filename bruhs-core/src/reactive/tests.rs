@@ -1453,3 +1453,35 @@ async fn full_webhook_queue_accepts_existing_windows_and_retries_failed_new_wind
         WebhookOutcome::WindowOpened
     );
 }
+
+#[test]
+fn desktop_turn_recovery_can_only_claim_the_latest_interrupted_owner_once() {
+    use std::io::{ErrorKind, Write};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("turn.lock");
+    let id = uuid::Uuid::new_v4();
+    let mut owner = super::claim_turn_file(&path, None).unwrap();
+    owner.write_all(id.as_bytes()).unwrap();
+    assert_eq!(
+        super::claim_turn_file(&path, Some(id)).unwrap_err().kind(),
+        ErrorKind::WouldBlock
+    );
+    drop(owner);
+    assert_eq!(
+        super::claim_turn_file(&path, Some(uuid::Uuid::new_v4()))
+            .unwrap_err()
+            .kind(),
+        ErrorKind::NotFound
+    );
+    drop(super::claim_turn_file(&path, Some(id)).unwrap());
+    assert_eq!(
+        super::claim_turn_file(&path, Some(id)).unwrap_err().kind(),
+        ErrorKind::NotFound
+    );
+    std::fs::write(&path, id.as_bytes()).unwrap();
+    drop(super::claim_turn_file(&path, None).unwrap());
+    assert_eq!(
+        super::claim_turn_file(&path, Some(id)).unwrap_err().kind(),
+        ErrorKind::NotFound
+    );
+}

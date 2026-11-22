@@ -1,5 +1,7 @@
 //! A macOS Labs preference shared by the desktop and its local task host.
 //! Cache entries contain only a private checkout written from a Git tree.
+mod index;
+
 use super::{clone_fs, git, register_checkout, GitCommand, GitError};
 use sha2::{Digest, Sha256};
 use std::{
@@ -12,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
+use unicode_normalization::UnicodeNormalization;
 
 fn dirs() -> io::Result<directories::ProjectDirs> {
     directories::ProjectDirs::from("dev", "bruhs", "bruhs-ai")
@@ -50,8 +53,12 @@ impl Cache {
         let lock = self.lock()?;
         lock.lock()?;
         if on {
-            if !self.flag.is_file() {
-                fs::write(&self.flag, uuid::Uuid::new_v4().to_string())?;
+            if self.generation().is_none() {
+                use std::io::Write;
+                let mut pending = tempfile::NamedTempFile::new_in(self.flag.parent().unwrap())?;
+                pending.write_all(uuid::Uuid::new_v4().to_string().as_bytes())?;
+                pending.as_file().sync_all()?;
+                pending.persist(&self.flag)?;
             }
         } else {
             match fs::remove_file(&self.flag) {
@@ -82,8 +89,12 @@ pub fn enabled() -> bool {
     Cache::local().is_ok_and(|c| c.generation().is_some())
 }
 
-pub fn set_enabled(on: bool) -> io::Result<()> {
-    Cache::local()?.set(on)
+/// Finish outstanding cache operations before clearing their snapshots. The
+/// blocking file lock must leave the async executor free to finish those jobs.
+pub async fn set_enabled(on: bool) -> io::Result<()> {
+    tokio::task::spawn_blocking(move || Cache::local()?.set(on))
+        .await
+        .map_err(io::Error::other)?
 }
 
 const LIMIT: usize = 64 * 1024 * 1024;
@@ -103,10 +114,12 @@ async fn value(repo: &Path, args: &[&str]) -> Option<String> {
         .map(|s| s.trim_end_matches('\n').to_owned())
 }
 
+#[derive(PartialEq, Eq)]
 struct Tree {
     id: String,
     bucket: PathBuf,
     profile: String,
+    checkout_hook: Option<PathBuf>,
 }
 
 // Git can materialize different bytes for the same tree. Include checkout
@@ -139,16 +152,28 @@ async fn describe(cache: &Cache, repo: &Path, start: &str) -> Option<Tree> {
         return None;
     }
     let config = output(repo, &["config", "--null", "--list"]).await?;
-    // These can give a linked checkout different materialization rules.
-    if config
-        .split(|&b| b == 0)
-        .filter_map(|s| s.split(|&b| b == b'\n').next())
-        .any(|key| {
-            key.starts_with(b"includeif.")
-                || matches!(key, b"core.sparsecheckout" | b"extensions.worktreeconfig")
-        })
-    {
-        return None;
+    let mut checkout_hook = None;
+    for entry in config.split(|&b| b == 0) {
+        let mut pair = entry.splitn(2, |&b| b == b'\n');
+        let key = pair.next()?;
+        let setting = pair.next().unwrap_or_default();
+        if key == b"core.sparsecheckout" && !matches!(setting, b"false" | b"0" | b"off" | b"no") {
+            return None;
+        }
+        if key == b"core.hookspath" {
+            let folder = Path::new(std::ffi::OsStr::from_bytes(setting));
+            checkout_hook = if folder.is_absolute() {
+                None
+            } else {
+                if folder
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    return None;
+                }
+                Some(folder.join("post-index-change"))
+            };
+        }
     }
     let mut hash = Sha256::new();
     // Branch tracking and identity change routinely and do not affect checkout.
@@ -179,6 +204,15 @@ async fn describe(cache: &Cache, repo: &Path, start: &str) -> Option<Tree> {
         if !p.is_absolute() {
             return None;
         }
+        if p == Path::new("/dev/null") {
+            hash.update([0]);
+            continue;
+        }
+        match fs::metadata(&p) {
+            Ok(meta) if !meta.is_file() || meta.len() > LIMIT as u64 => return None,
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return None,
+            _ => {}
+        }
         match fs::read(p) {
             Ok(bytes) => hash.update(bytes),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -194,6 +228,7 @@ async fn describe(cache: &Cache, repo: &Path, start: &str) -> Option<Tree> {
         id,
         bucket,
         profile: format!("{:x}", hash.finalize()),
+        checkout_hook,
     })
 }
 
@@ -201,19 +236,53 @@ impl Tree {
     fn entry(&self) -> PathBuf {
         self.bucket.join(format!("{}-{}", self.id, self.profile))
     }
+    // Attribute transitions can change the checkout representation of an otherwise
+    // identical blob. Leave those transitions to a fresh Git checkout.
+    async fn changed_paths(&self, repo: &Path, base: &str) -> Option<usize> {
+        let list = output(
+            repo,
+            &[
+                "diff-tree",
+                "-r",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                base,
+                &self.id,
+            ],
+        )
+        .await?;
+        let mut count = 0;
+        for path in list.split(|&b| b == 0).filter(|p| !p.is_empty()) {
+            if path.rsplit(|&b| b == b'/').next() == Some(b".gitattributes") {
+                return None;
+            }
+            count += 1;
+        }
+        Some(count)
+    }
+
     async fn eligible(&self, repo: &Path) -> bool {
-        let Some(list) = output(repo, &["ls-tree", "-rz", &self.id]).await else {
+        let Some(list) = output(repo, &["ls-tree", "--full-tree", "-rtz", &self.id]).await else {
             return false;
         };
         let mut names = vec![];
+        let mut spellings = std::collections::HashSet::new();
         for line in list.split(|&b| b == 0).filter(|s| !s.is_empty()) {
             let Some(tab) = line.iter().position(|&b| b == b'\t') else {
                 return false;
             };
-            if line.starts_with(b"160000 ") {
+            let Ok(path) = std::str::from_utf8(&line[tab + 1..]) else {
+                return false;
+            };
+            if !spellings.insert(path.nfd().flat_map(char::to_lowercase).collect::<String>()) {
+                // Git decides how to handle colliding names on this filesystem.
                 return false;
             }
-            names.extend_from_slice(&line[tab + 1..]);
+            if line.starts_with(b"040000 ") || line.starts_with(b"160000 ") {
+                continue;
+            }
+            names.extend_from_slice(path.as_bytes());
             names.push(0);
         }
         let source = format!("--source={}", self.id);
@@ -277,6 +346,10 @@ async fn indexed(repo: &Path, stage: &Path, args: &[&str]) -> bool {
         "-c",
         "core.splitIndex=false",
         "-c",
+        "index.version=2",
+        "-c",
+        "index.skipHash=false",
+        "-c",
         "core.untrackedCache=false",
         "-c",
         "core.trustctime=false",
@@ -336,6 +409,25 @@ async fn warm(cache: Cache, generation: String, repo: PathBuf) -> Option<()> {
     if tree.entry().is_dir() || !tree.eligible(&repo).await {
         return None;
     }
+    for (_, base, cached) in entries(&tree).ok()? {
+        if cached
+            .file_name()?
+            .as_bytes()
+            .ends_with(tree.profile.as_bytes())
+            && tree
+                .changed_paths(&repo, &base)
+                .await
+                .is_some_and(|count| count < 500)
+        {
+            return None;
+        }
+    }
+    // The build lock also covers recovery from an interrupted snapshot writer.
+    for child in fs::read_dir(&tree.bucket).ok()?.flatten() {
+        if child.file_name().as_bytes().starts_with(b".building-") {
+            let _ = fs::remove_dir_all(child.path());
+        }
+    }
     let stage = tempfile::Builder::new()
         .prefix(".building-")
         .tempdir_in(&tree.bucket)
@@ -350,7 +442,11 @@ async fn warm(cache: Cache, generation: String, repo: PathBuf) -> Option<()> {
     {
         return None;
     }
-    let stamp = seal(stage.path()).ok()?;
+    let built = stage.path().to_owned();
+    let stamp = tokio::task::spawn_blocking(move || seal(&built))
+        .await
+        .ok()?
+        .ok()?;
     fs::write(stage.path().join("seal"), stamp).ok()?;
     fs::rename(stage.path(), tree.entry()).ok()?;
     if let Ok(items) = entries(&tree) {
@@ -398,6 +494,18 @@ pub(super) fn warm_after_checkout(repo: &Path) {
     });
 }
 
+fn clone_verified(entry: &Path, stage: &Path) -> Option<()> {
+    let stamp = fs::read_to_string(entry.join("seal")).ok()?;
+    if stamp != seal(entry).ok()? {
+        let _ = fs::remove_dir_all(entry);
+        return None;
+    }
+    clone_fs::clone_path(&entry.join("files"), &stage.join("files")).ok()?;
+    let index = index::for_clone(&entry.join("index"), &stage.join("files"))?;
+    fs::write(stage.join("index"), index).ok()?;
+    (stamp == seal(entry).ok()?).then_some(())
+}
+
 async fn prepare(repo: &Path, tree: &Tree, stage: &Path) -> Option<()> {
     let mut candidates = entries(tree).ok()?;
     candidates.sort_by_key(|(_, id, _)| id != &tree.id);
@@ -409,42 +517,25 @@ async fn prepare(repo: &Path, tree: &Tree, stage: &Path) -> Option<()> {
         {
             continue;
         }
-        if base != tree.id {
-            let list = output(
-                repo,
-                &[
-                    "diff-tree",
-                    "-r",
-                    "--no-renames",
-                    "--name-only",
-                    "-z",
-                    &base,
-                    &tree.id,
-                ],
-            )
-            .await?;
-            if list
-                .split(|&b| b == 0)
-                .any(|p| p.rsplit(|&b| b == b'/').next() == Some(b".gitattributes"))
-            {
-                continue;
-            }
-        }
-        let stamp = fs::read_to_string(entry.join("seal")).ok()?;
-        if stamp != seal(&entry).ok()? {
-            // Never publish a checkout from an edited or incomplete cache entry.
-            let _ = fs::remove_dir_all(&entry);
+        if base != tree.id
+            && (tree.changed_paths(repo, &base).await.is_none() || !tree.eligible(repo).await)
+        {
             continue;
         }
-        clone_fs::clone_path(&entry.join("files"), &stage.join("files")).ok()?;
-        fs::copy(entry.join("index"), stage.join("index")).ok()?;
-        if stamp != seal(&entry).ok()? {
-            return None;
-        }
+        let source = entry.clone();
+        let target = stage.to_owned();
+        tokio::task::spawn_blocking(move || clone_verified(&source, &target))
+            .await
+            .ok()??;
         if base != tree.id
             && !indexed(repo, stage, &["read-tree", "-m", "-u", &base, &tree.id]).await
         {
             return None;
+        }
+        if let Some(hook) = &tree.checkout_hook {
+            if stage.join("files").join(hook).try_exists().ok()? {
+                return None;
+            }
         }
         let now = SystemTime::now();
         for p in [&entry, &tree.bucket] {
@@ -458,6 +549,7 @@ async fn prepare(repo: &Path, tree: &Tree, stage: &Path) -> Option<()> {
 // Registration happens only after the cloned tree is ready. Construction stays
 // inside a private sibling of the destination until Git publishes the worktree.
 async fn publish(
+    cache: &Cache,
     repo: &Path,
     dest: &Path,
     stage: &Path,
@@ -465,33 +557,54 @@ async fn publish(
     new_branch: Option<&str>,
     start: &str,
 ) -> Result<(), GitError> {
-    let registration = stage.join("checkout");
+    let parent = dest
+        .parent()
+        .ok_or_else(|| GitError::Failed("Missing worktree parent.".into()))?;
+    let name = dest
+        .file_name()
+        .ok_or_else(|| GitError::Failed("Missing worktree name.".into()))?;
+    let private = stage.join("registration");
+    fs::create_dir(&private)?;
+    let registration = private.join(name);
     let registered = registration
         .to_str()
         .ok_or_else(|| GitError::Failed("Invalid checkout path.".into()))?;
     register_checkout(repo, registered, new_branch, start, true).await?;
     let finish = async {
-        let actual = value(&registration, &["rev-parse", "HEAD^{tree}"]).await;
-        if actual.as_ref() == Some(&tree.id) {
-            let index = value(
-                &registration,
-                &["rev-parse", "--path-format=absolute", "--git-path", "index"],
-            )
-            .await
-            .ok_or_else(|| GitError::Failed("Git index unavailable.".into()))?;
-            for file in fs::read_dir(stage.join("files"))? {
-                let file = file?;
-                fs::rename(file.path(), registration.join(file.file_name()))?;
-            }
-            // The index can be on another volume when the owner chooses a checkout folder.
-            fs::copy(stage.join("index"), index)?;
-        } else {
-            // The ref advanced during preparation. Check out the commit Git actually claimed.
-            let out = git(&registration, &["read-tree", "--reset", "-u", "HEAD"]).await?;
-            if !out.success() {
-                return Err(out.failure());
-            }
+        let actual = describe(cache, &registration, "HEAD").await;
+        if actual.as_ref() != Some(tree) {
+            return Err(GitError::Failed(
+                "The checkout configuration or starting commit changed.".into(),
+            ));
         }
+        let index = value(
+            &registration,
+            &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+        )
+        .await
+        .ok_or_else(|| GitError::Failed("Git index unavailable.".into()))?;
+        // Swap whole directories so even top-level files keep the inode and
+        // ctime written into the prepared index. Both paths are private.
+        let files = stage.join("files");
+        fs::copy(registration.join(".git"), files.join(".git"))?;
+        let from =
+            std::ffi::CString::new(files.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        let to = std::ffi::CString::new(registration.as_os_str().as_bytes())
+            .map_err(io::Error::other)?;
+        // SAFETY: both NUL-terminated filesystem paths live through the call.
+        if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) } != 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        // The index can be on another volume when the owner chooses a checkout folder.
+        fs::copy(stage.join("index"), index)?;
+        if dest.symlink_metadata().is_ok() {
+            return Err(GitError::Failed(
+                "Worktree destination already exists.".to_owned(),
+            ));
+        }
+        // Git appends the source basename when its destination is a directory.
+        // Always name the existing parent, so a racing creator of the final
+        // directory gets an "already exists" error instead of a nested checkout.
         let moved = git(
             repo,
             &[
@@ -499,7 +612,7 @@ async fn publish(
                 "move",
                 "--",
                 registered,
-                &dest.to_string_lossy(),
+                &parent.to_string_lossy(),
             ],
         )
         .await?;
@@ -512,8 +625,21 @@ async fn publish(
     .await;
     if let Err(error) = finish {
         // Only the unpublished private directory belongs to this operation.
-        let _ = git(repo, &["worktree", "remove", "--force", "--", registered]).await;
-        return Err(error);
+        let removed = git(repo, &["worktree", "remove", "--force", "--", registered]).await?;
+        if !removed.success() || dest.symlink_metadata().is_ok() {
+            return Err(error);
+        }
+        // Registration already claimed the branch. Give stock Git the final
+        // destination, including its checkout filters and hooks, exactly once.
+        tracing::debug!(%error,"Falling back to ordinary Git worktree creation");
+        return register_checkout(
+            repo,
+            &dest.to_string_lossy(),
+            None,
+            new_branch.unwrap_or(start),
+            false,
+        )
+        .await;
     }
     // --no-checkout defers the normal hook. It must see the final working directory.
     let head = value(dest, &["rev-parse", "HEAD"])
@@ -547,7 +673,7 @@ async fn use_cache(
     new_branch: Option<&str>,
     start: &str,
 ) -> Result<bool, GitError> {
-    if cache.generation().is_none() {
+    if !dest.is_absolute() || cache.generation().is_none() {
         return Ok(false);
     }
     let Ok(lock) = cache.lock() else {
@@ -556,10 +682,14 @@ async fn use_cache(
     if lock.try_lock_shared().is_err() || cache.generation().is_none() {
         return Ok(false);
     }
+    let Some(root) = super::cow::toplevel(repo).await else {
+        return Ok(false);
+    };
+    let repo = root.as_path();
     let Some(tree) = describe(cache, repo, start).await else {
         return Ok(false);
     };
-    if !tree.bucket.is_dir() || !tree.eligible(repo).await {
+    if !tree.bucket.is_dir() {
         return Ok(false);
     }
     let Some(parent) = dest.parent() else {
@@ -574,7 +704,7 @@ async fn use_cache(
     if prepare(repo, &tree, stage.path()).await.is_none() {
         return Ok(false);
     }
-    publish(repo, dest, stage.path(), &tree, new_branch, start).await?;
+    publish(cache, repo, dest, stage.path(), &tree, new_branch, start).await?;
     Ok(true)
 }
 
@@ -627,6 +757,15 @@ mod tests {
         symlink("tracked.sh", project.join("link")).unwrap();
         fs::write(project.join(".gitignore"), "ignored\n").unwrap();
         fs::write(project.join("ignored"), "private").unwrap();
+        // A gitlink stays an empty, uninitialized submodule in the snapshot.
+        let module_commit = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{},module", module_commit.trim()),
+        ]);
+        fs::create_dir(project.join("module")).unwrap();
         repo.git(&["add", "."]);
         repo.git(&["commit", "-qm", "files"]);
         fs::write(project.join("README.md"), "private edit").unwrap();
@@ -642,7 +781,7 @@ mod tests {
         .unwrap();
         fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(!enabled());
-        set_enabled(true).unwrap();
+        set_enabled(true).await.unwrap();
         let first = dests.path().join("first");
         super::super::add_worktree(project, "main", &first, "bruhs/cold")
             .await
@@ -666,6 +805,7 @@ mod tests {
             "hello\n"
         );
         assert!(!warm.join("ignored").exists());
+        assert!(fs::read_dir(warm.join("module")).unwrap().next().is_none());
         assert_eq!(
             fs::read_link(warm.join("link")).unwrap(),
             Path::new("tracked.sh")
@@ -673,6 +813,16 @@ mod tests {
         assert_ne!(
             fs::metadata(warm.join("tracked.sh")).unwrap().mode() & 0o111,
             0
+        );
+        let index_stat = value(&warm, &["ls-files", "--debug", "--", "README.md"])
+            .await
+            .unwrap();
+        let inode = warm.join("README.md").symlink_metadata().unwrap().ino() as u32;
+        assert!(
+            index_stat
+                .lines()
+                .any(|line| line.split_whitespace().last() == Some(inode.to_string().as_str())),
+            "Git should trust the cloned file on the first status: {index_stat}"
         );
         assert_eq!(
             value(&warm, &["status", "--porcelain"]).await.as_deref(),
@@ -710,6 +860,32 @@ mod tests {
             value(&near, &["rev-parse", "HEAD"]).await,
             value(project, &["rev-parse", "main"]).await
         );
+        // A branch moving after the clone was prepared gets a stock checkout at
+        // the new commit. Its hook still sees the final path exactly once.
+        let pending = tempfile::tempdir_in(dests.path()).unwrap();
+        let before = describe(&cache, project, "main").await.unwrap();
+        prepare(project, &before, pending.path()).await.unwrap();
+        fs::write(project.join("new"), "later").unwrap();
+        repo.git(&["add", "new"]);
+        repo.git(&["commit", "-qm", "advance again"]);
+        let moved = dests.path().join("moved-base");
+        let prior_hooks = fs::read_to_string(&hook_log).unwrap().lines().count();
+        publish(
+            &cache,
+            project,
+            &moved,
+            pending.path(),
+            &before,
+            Some("bruhs/moved"),
+            "main",
+        )
+        .await
+        .unwrap();
+        assert_eq!(fs::read_to_string(moved.join("new")).unwrap(), "later");
+        assert_eq!(
+            fs::read_to_string(&hook_log).unwrap().lines().count(),
+            prior_hooks + 1
+        );
         // Local edits in one clone stay there. Altering the private cache invalidates it.
         fs::write(warm.join("README.md"), "warm only").unwrap();
         assert_eq!(
@@ -733,7 +909,16 @@ mod tests {
                 .eligible(project)
                 .await
         );
-        set_enabled(false).unwrap();
+        repo.git(&["config", "filter.custom.smudge", "sed s/hello/filtered/g"]);
+        let filtered = dests.path().join("filtered");
+        super::super::add_worktree(project, "main", &filtered, "bruhs/filtered")
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(filtered.join("README.md")).unwrap(),
+            "filtered\n"
+        );
+        set_enabled(false).await.unwrap();
         assert!(!enabled() && !cache.root.exists());
         assert!(warm.join("README.md").is_file() && project.join("ignored").is_file());
     }

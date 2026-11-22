@@ -1,6 +1,6 @@
 //! A tool-free rewrite of newly dictated text. Draft context is input only.
 use crate::prompt_suggestion::{
-    isolated_reply, unfence, usage_permits, Instructions, SuggestionError,
+    isolated_reply, unfence, usage_permits_in_project, Instructions, SuggestionError,
 };
 use bruhs_models::agent::model_info;
 use std::{ops::Range, time::Duration};
@@ -32,6 +32,17 @@ pub async fn clean(
     style: Option<&str>,
     cue: &str,
 ) -> Result<String, SuggestionError> {
+    clean_in_project(std::path::Path::new(""), model, transcript, draft, style, cue).await
+}
+
+pub async fn clean_in_project(
+    project: &std::path::Path,
+    model: &str,
+    transcript: &str,
+    draft: &DraftContext,
+    style: Option<&str>,
+    cue: &str,
+) -> Result<String, SuggestionError> {
     if transcript.trim().is_empty() || transcript.len() > 64 * 1024 {
         return Err(SuggestionError::InvalidRequest);
     }
@@ -47,7 +58,7 @@ pub async fn clean(
         .filter(|m| !m.provider.is_external())
         .ok_or(SuggestionError::UnsupportedProvider)?;
     tokio::time::timeout(Duration::from_secs(30), async {
-        if !usage_permits(info.provider).await {
+        if !usage_permits_in_project(info.provider, project).await {
             return Err(SuggestionError::UsageReserved);
         }
         let workspace = tokio::task::spawn_blocking(tempfile::tempdir)
@@ -63,6 +74,7 @@ pub async fn clean(
                 generation: None,
             },
             workspace.path(),
+            project,
         )
         .await?;
         parse(&result)

@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::agent::{custom_model_selection, AgentProvider, ModelInfo, MODEL_CATALOG};
 
 /// Runtimes whose CLI can list the account's models.
-pub const DISCOVERABLE_PROVIDERS: [AgentProvider; 1] = [AgentProvider::Cursor];
+pub const DISCOVERABLE_PROVIDERS: [AgentProvider; 2] =
+    [AgentProvider::Cursor, AgentProvider::Antigravity];
 
 /// One selectable model, owned so a runtime's reported models can sit beside
 /// the static catalog.
@@ -205,6 +206,118 @@ pub fn parse_cursor_models(output: &str) -> Option<Vec<ModelChoice>> {
     Some(models)
 }
 
+/// Parse models advertised by an ACP `session/new` result (`configOptions` model
+/// selector or `models.availableModels`) under `provider`'s prefix.
+pub fn parse_acp_models(session: &serde_json::Value, provider: AgentProvider) -> Vec<ModelChoice> {
+    let mut models: Vec<ModelChoice> = Vec::new();
+    let mut push = |raw_id: &str, raw_label: Option<&str>| {
+        let raw_id = raw_id.trim();
+        if raw_id.is_empty() || raw_id == "default" {
+            return;
+        }
+        let prefixed = format!("{}{raw_id}", provider.model_prefix());
+        let Some(selection) = custom_model_selection(&prefixed) else {
+            return;
+        };
+        let id = selection.into_inner();
+        if models.iter().any(|existing| existing.id == id) {
+            return;
+        }
+        let label = raw_label
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map_or_else(
+                || id[provider.model_prefix().len()..].to_string(),
+                str::to_string,
+            );
+        models.push(ModelChoice {
+            id,
+            label,
+            provider,
+        });
+    };
+
+    if let Some(options) = session["configOptions"].as_array() {
+        for option in options {
+            let is_model = option["id"].as_str() == Some("model")
+                || option["category"].as_str() == Some("model");
+            if !is_model {
+                continue;
+            }
+            for entry in option["options"].as_array().into_iter().flatten() {
+                if let Some(group) = entry["options"].as_array() {
+                    for choice in group {
+                        if let Some(value) = choice["value"].as_str() {
+                            push(value, choice["name"].as_str().or(choice["label"].as_str()));
+                        }
+                    }
+                } else if let Some(value) = entry["value"].as_str() {
+                    push(value, entry["name"].as_str().or(entry["label"].as_str()));
+                }
+            }
+        }
+    }
+
+    if let Some(available) = session["models"]["availableModels"].as_array() {
+        for entry in available {
+            let raw_id = entry["modelId"]
+                .as_str()
+                .or_else(|| entry["id"].as_str())
+                .unwrap_or_default();
+            let raw_label = entry["name"]
+                .as_str()
+                .or_else(|| entry["displayName"].as_str());
+            push(raw_id, raw_label);
+        }
+    }
+
+    models
+}
+
+/// Parse models from Antigravity's `v1internal:fetchAvailableModels` response.
+/// Gemini models sort first, followed by third-party models offered by the account.
+pub fn parse_antigravity_models(data: &serde_json::Value) -> Vec<ModelChoice> {
+    let Some(map) = data["models"].as_object() else {
+        return Vec::new();
+    };
+    let mut entries: Vec<(u8, String, String)> = Vec::new();
+    for (raw_id, model) in map {
+        if model["disabled"] == true || model["hidden"] == true || model["isInternal"] == true {
+            continue;
+        }
+        let Some(selection) = custom_model_selection(&format!(
+            "{}{}",
+            AgentProvider::Antigravity.model_prefix(),
+            raw_id.trim()
+        )) else {
+            continue;
+        };
+        let id = selection.into_inner();
+        let label = model["displayName"]
+            .as_str()
+            .or_else(|| model["name"].as_str())
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map_or_else(|| raw_id.trim().to_string(), str::to_string);
+        let provider = model["modelProvider"].as_str();
+        let rank = if raw_id.starts_with("gemini-") || provider == Some("MODEL_PROVIDER_GOOGLE") {
+            0
+        } else {
+            1
+        };
+        entries.push((rank, id, label));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    entries
+        .into_iter()
+        .map(|(_, id, label)| ModelChoice {
+            id,
+            label,
+            provider: AgentProvider::Antigravity,
+        })
+        .collect()
+}
+
 /// `rest` without a trailing `(current)`, `(default)` or `(current, default)`.
 fn strip_markers(rest: &str) -> &str {
     let Some(open) = rest
@@ -226,7 +339,8 @@ fn strip_markers(rest: &str) -> &str {
 
 /// `text` without terminal escape sequences: CSI (`ESC [ … final byte`), OSC
 /// (`ESC ] … BEL` or `ESC ] … ESC \`, as in hyperlinks) and two-byte escapes.
-fn strip_ansi(text: &str) -> String {
+/// Remove terminal formatting before interpreting CLI metadata.
+pub fn strip_ansi(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -460,6 +574,65 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<RuntimeModels>("{}").unwrap(),
             RuntimeModels::default()
+        );
+    }
+
+    #[test]
+    fn parses_antigravity_acp_and_api_model_listings() {
+        let session = serde_json::json!({
+            "configOptions": [
+                {"id": "mode", "options": [{"value": "plan", "name": "Plan"}]},
+                {
+                    "id": "model",
+                    "type": "select",
+                    "options": [
+                        {"value": "gemini-4-neon", "name": "Gemini 4 Neon"},
+                        {"group": "Gemini", "options": [
+                            {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                            {"value": "gemini-4-neon", "name": "Duplicate"}
+                        ]}
+                    ]
+                }
+            ],
+            "models": {
+                "availableModels": [
+                    {"modelId": "gemini-3.8-flash", "name": "Gemini 3.8 Flash"},
+                    {"modelId": "default", "name": "Default"}
+                ]
+            }
+        });
+        let parsed = parse_acp_models(&session, AgentProvider::Antigravity);
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|m| (m.id.as_str(), m.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("antigravity/gemini-4-neon", "Gemini 4 Neon"),
+                ("antigravity/gemini-4-argon", "Gemini 4 Argon"),
+                ("antigravity/gemini-3.8-flash", "Gemini 3.8 Flash"),
+            ]
+        );
+
+        let api = serde_json::json!({
+            "models": {
+                "claude-sonnet-5": {"displayName": "Claude Sonnet 5", "modelProvider": "MODEL_PROVIDER_ANTHROPIC"},
+                "gemini-4-neon": {"displayName": "Gemini 4 Neon", "modelProvider": "MODEL_PROVIDER_GOOGLE"},
+                "gemini-4-argon": {"modelProvider": "MODEL_PROVIDER_GOOGLE"},
+                "hidden-model": {"displayName": "Hidden", "hidden": true}
+            }
+        });
+        let from_api = parse_antigravity_models(&api);
+        assert_eq!(
+            from_api
+                .iter()
+                .map(|m| (m.id.as_str(), m.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("antigravity/gemini-4-argon", "gemini-4-argon"),
+                ("antigravity/gemini-4-neon", "Gemini 4 Neon"),
+                ("antigravity/claude-sonnet-5", "Claude Sonnet 5"),
+            ]
         );
     }
 }

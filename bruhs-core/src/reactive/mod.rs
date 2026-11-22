@@ -220,6 +220,54 @@ pub enum WebhookTarget {
     Task(String),
 }
 
+/// The desktop and the scheduler can live in separate processes. Hold this
+/// advisory lock for the lifetime of a provider turn in an ordinary chat.
+pub fn desktop_turn_lock(id: &bruhs_models::ids::ThreadId) -> std::io::Result<std::fs::File> {
+    claim_desktop_turn(id, None)
+}
+
+/// A restarted desktop may only acquire the exact turn left by the previous
+/// owner. Scheduled runs use the same lock and invalidate any older claim.
+pub fn claim_desktop_turn(
+    id: &bruhs_models::ids::ThreadId,
+    interrupted: Option<uuid::Uuid>,
+) -> std::io::Result<std::fs::File> {
+    use sha2::{Digest, Sha256};
+    let directory = crate::agent_extensions::directory()?.join("desktop-turns");
+    std::fs::create_dir_all(&directory)?;
+    let name = format!("{:x}.lock", Sha256::digest(id.as_str().as_bytes()));
+    claim_turn_file(&directory.join(name), interrupted)
+}
+
+fn claim_turn_file(path: &Path, interrupted: Option<uuid::Uuid>) -> std::io::Result<std::fs::File> {
+    use std::io::{Error, ErrorKind, Read};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock()?;
+    let len = file.metadata()?.len();
+    if let Some(expected) = interrupted {
+        let mut bytes = [0; 16];
+        if len == bytes.len() as u64 {
+            file.read_exact(&mut bytes)?;
+        }
+        if len != bytes.len() as u64 || bytes != *expected.as_bytes() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "The interrupted turn has already ended.",
+            ));
+        }
+    }
+    if len > 0 {
+        file.set_len(0)?;
+        file.sync_data()?;
+    }
+    Ok(file)
+}
+
 impl ReactiveRuntime {
     pub async fn weekly_reports(
         &self,
@@ -403,6 +451,34 @@ impl ReactiveRuntime {
         Ok(fired)
     }
 
+    /// Check an offline local task database before forgetting its desktop conversations.
+    pub fn has_scheduled_desktop_threads(
+        ids: &[bruhs_models::ids::ThreadId],
+    ) -> Result<bool, ReactiveError> {
+        let path = Self::default_path()?;
+        if !path
+            .try_exists()
+            .map_err(|e| ReactiveError::Storage(e.to_string()))?
+        {
+            return Ok(false);
+        }
+        let db = rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        if !db.table_exists(None, "desktop_task_threads")? {
+            return Ok(false);
+        }
+        let mut query =
+            db.prepare("SELECT EXISTS(SELECT 1 FROM desktop_task_threads WHERE thread_id=?1)")?;
+        for id in ids {
+            if query.query_row([id.as_str()], |row| row.get::<_, bool>(0))? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn default_path() -> Result<std::path::PathBuf, ReactiveError> {
         if let Some(path) = std::env::var_os("BRUHS_REACTIVE_DB") {
             if path.is_empty() {
@@ -452,6 +528,70 @@ impl ReactiveRuntime {
 
     pub fn watch_changes(&self) -> watch::Receiver<u64> {
         self.changes.subscribe()
+    }
+
+    pub async fn linked_schedule_inventory(&self, links: bool) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
+        self.call(move |db| store::linked_threads::inventory(db, links)).await
+    }
+
+    pub async fn linked_thread(&self, task: String, thread: bruhs_models::ids::ThreadId, before: Option<String>) -> Result<bruhs_models::reactive::LinkedThreadPage, ReactiveError> {
+        self.call(move |db| store::linked_threads::read(db, &task, &thread, before.as_deref())).await
+    }
+
+    pub async fn reply_to_linked_thread(&self, task: String, thread: bruhs_models::ids::ThreadId, reply: bruhs_models::reactive::LinkedThreadReply) -> Result<(), ReactiveError> {
+        self.call(move |db| store::linked_threads::send(db, &task, &thread, reply)).await?;
+        self.changed();
+        Ok(())
+    }
+
+    pub async fn scheduled_task_inventory(&self) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
+        self.call(store::scheduled_task_inventory).await
+    }
+
+    pub async fn linked_task_definition(
+        &self,
+        id: String,
+    ) -> Result<bruhs_models::reactive::LinkedTaskDefinition, ReactiveError> {
+        self.call(move |db| store::linked_tasks::definition(db, &id))
+            .await
+    }
+
+    pub async fn save_linked_task(
+        &self,
+        id: String,
+        edit: bruhs_models::reactive::LinkedTaskSave,
+        paths: Vec<String>,
+    ) -> Result<bruhs_models::reactive::ScheduledTaskSummary, ReactiveError> {
+        let result = self
+            .call(move |db| store::linked_tasks::save_task(db, &id, edit, &paths))
+            .await?;
+        self.changed();
+        Ok(result)
+    }
+
+    pub async fn set_linked_schedule_enabled(
+        &self,
+        id: String,
+        enabled: bool,
+    ) -> Result<bruhs_models::reactive::ScheduledTaskSummary, ReactiveError> {
+        let task = self.call(move |db| store::set_linked_schedule_enabled(db, &id, enabled)).await?;
+        self.changed();
+        Ok(task)
+    }
+
+    pub async fn delete_linked_schedule(&self, id: String) -> Result<(), ReactiveError> {
+        self.call(move |db| store::delete_linked_schedule(db, id)).await?;
+        self.changed();
+        Ok(())
+    }
+
+    pub async fn run_linked_schedule(&self, id: String, request: uuid::Uuid) -> Result<(), ReactiveError> {
+        self.call(move |db| store::transaction(db, |db| {
+            store::reports::guard_managed_identity(db, &id)?;
+            store::run_scheduled_task(db, &id, &request.to_string())
+        })).await?;
+        self.changed();
+        Ok(())
     }
 
     pub async fn snapshot(&self) -> Result<ReactiveSnapshot, ReactiveError> {
@@ -571,6 +711,30 @@ impl ReactiveRuntime {
         query: String,
     ) -> Result<Vec<bruhs_models::reactive::TaskThreadChoice>, ReactiveError> {
         self.call(move |db| store::task_conversations::search(db, &project, &query))
+            .await
+    }
+
+    pub async fn project_conversations(
+        &self,
+        project: String,
+        query: String,
+    ) -> Result<Vec<bruhs_models::reactive::TaskThreadChoice>, ReactiveError> {
+        let mut scheduled = self.task_threads(project.clone(), query.clone()).await?;
+        let desktop =
+            tokio::task::spawn_blocking(move || store::desktop_tasks::choices(&project, &query))
+                .await
+                .map_err(|_| ReactiveError::Storage("Desktop thread search stopped.".into()))??;
+        scheduled.retain(|c| c.desktop_model.is_none());
+        scheduled.extend(desktop);
+        Ok(scheduled)
+    }
+
+    pub async fn desktop_task_turns(
+        &self,
+        thread: bruhs_models::ids::ThreadId,
+        after: i64,
+    ) -> Result<Vec<bruhs_models::reactive::DesktopTaskTurn>, ReactiveError> {
+        self.call(move |db| store::desktop_tasks::turns(db, &thread, after))
             .await
     }
 

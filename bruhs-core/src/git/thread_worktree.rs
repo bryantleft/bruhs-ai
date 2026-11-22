@@ -47,7 +47,7 @@ pub async fn prepare_thread_worktree<'a>(
                 }
                 local_suggestion(&text, naming.mode)
             }
-            Ok(_) => crate::thread_title::branch_name_with_options(model, options, prompt, naming)
+            Ok(_) => crate::thread_title::branch_name_with_options(repo, model, options, prompt, naming)
                 .await
                 .map_err(|e| e.to_string()),
         };
@@ -60,7 +60,7 @@ pub async fn prepare_thread_worktree<'a>(
         .map_err(GitError::Failed)?;
     if dest.exists() {
         let branch = owned_branch(repo, &dest, identity).await?;
-        initialize_worktree_submodules(&dest, prefs.submodules).await?;
+        initialize_worktree_submodules(repo, &dest, prefs.submodules).await?;
         return Ok(ThreadCheckout {
             path: dest,
             branch,

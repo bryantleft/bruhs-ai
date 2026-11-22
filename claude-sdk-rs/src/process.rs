@@ -175,6 +175,15 @@ impl CliProcess {
         self.child.stdin.take()
     }
 
+    /// Wait for the start of a frame without consuming a partial line if the wait is cancelled.
+    #[allow(dead_code)] // The ACP adapter also compiles this shared process reader.
+    pub(crate) async fn stdout_ready(&mut self) -> std::io::Result<()> {
+        if self.stdout.fill_buf().await?.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Provider closed its output."));
+        }
+        Ok(())
+    }
+
     /// The next stdout line without its line ending (invalid UTF-8 is
     /// replaced, not fatal), or why there is none. Notices a dropped receiver
     /// even while the CLI is silent.

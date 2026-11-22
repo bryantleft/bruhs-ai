@@ -142,6 +142,8 @@ mod tests {
     use super::*;
     fn window(name: &str, used_percent: f64, resets_at: Option<i64>) -> QuotaWindow {
         QuotaWindow {
+            window_id: None,
+            duration_minutes: None,
             provider: "claude".into(),
             account: "current".into(),
             name: name.into(),

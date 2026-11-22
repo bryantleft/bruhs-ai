@@ -23,12 +23,41 @@ const API_TIMEOUT: Duration = Duration::from_secs(10);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const USER_AGENT: &str = concat!("bruhs-update-check/", env!("CARGO_PKG_VERSION"));
 
-/// The release asset architecture for this binary (`arm64`, `x86_64`).
-pub fn release_arch() -> &'static str {
-    match std::env::consts::ARCH {
+/// Whether macOS is translating this Intel executable on Apple silicon.
+pub fn running_under_rosetta() -> bool {
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        let mut translated: libc::c_int = 0;
+        let mut size = std::mem::size_of_val(&translated);
+        // sysctlbyname writes one native integer. Older Intel systems may lack this key.
+        let result = unsafe {
+            libc::sysctlbyname(
+                c"sysctl.proc_translated".as_ptr(),
+                (&raw mut translated).cast(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        result == 0 && size == std::mem::size_of_val(&translated) && translated == 1
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+    {
+        false
+    }
+}
+
+fn target_arch(binary: &'static str, translated: bool) -> &'static str {
+    match binary {
+        "x86_64" if translated => "arm64",
         "aarch64" => "arm64",
         other => other,
     }
+}
+
+/// Choose the native release asset, including for an Intel app running under Rosetta.
+pub fn release_arch() -> &'static str {
+    target_arch(std::env::consts::ARCH, running_under_rosetta())
 }
 
 /// The `.app` bundle this process runs from, if any.
@@ -563,6 +592,25 @@ pub fn install_on_exit(current_app: &Path, staged: &Path) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_translated_install_requests_the_native_update_zip() {
+        let release = serde_json::json!({
+            "tag_name": "v0.2.0",
+            "assets": [
+                {"name": "Bruhs-macOS-arm64.zip", "browser_download_url": "native"},
+                {"name": "Bruhs-macOS-x86_64.zip", "browser_download_url": "intel"}
+            ]
+        });
+        for (binary, translated, expected) in [
+            ("x86_64", true, "native"),
+            ("x86_64", false, "intel"),
+            ("aarch64", false, "native"),
+        ] {
+            let target = target_arch(binary, translated);
+            assert_eq!(parse_latest(&release, target).unwrap().zip_url.as_deref(), Some(expected));
+        }
+    }
 
     #[test]
     fn latest_release_json_is_read_for_this_arch() {

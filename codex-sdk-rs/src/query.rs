@@ -111,6 +111,9 @@ fn command(options: &QueryOptions) -> Command {
     if let Some(ref model) = options.model {
         cmd.arg(format!("--model={model}"));
     }
+    if options.standard_cyber_access {
+        cmd.arg("--cyber-access-program=standard");
+    }
 
     if let Some(ref profile) = options.profile {
         cmd.arg(format!("--profile={profile}"));

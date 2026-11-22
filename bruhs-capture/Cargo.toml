@@ -14,7 +14,7 @@ workspace = true
 keyring = { workspace = true }
 base64 = "0.22"
 bruhs-models = { workspace = true }
-axum = { workspace = true, features = ["json"] }
+axum = { workspace = true, features = ["json", "multipart"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 futures-core = { workspace = true }

@@ -8,6 +8,23 @@ pub(super) fn initialize(db: &mut Connection) -> Result<(), ReactiveError> {
                 thread_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, project TEXT NOT NULL,
                 title TEXT NOT NULL, checkout TEXT NOT NULL, session_id TEXT, stamp TEXT,
                 updated INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS desktop_task_store(id INTEGER PRIMARY KEY CHECK(id=1),identity TEXT NOT NULL);
+             INSERT OR IGNORE INTO desktop_task_store VALUES(1,lower(hex(randomblob(16))));
+             CREATE TABLE IF NOT EXISTS desktop_task_threads(thread_id TEXT PRIMARY KEY,model TEXT NOT NULL,last_desktop_session TEXT);
+             CREATE TABLE IF NOT EXISTS desktop_task_turns(seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                 thread_id TEXT NOT NULL,title TEXT NOT NULL,model TEXT NOT NULL,payload TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS desktop_task_turns_thread ON desktop_task_turns(thread_id,seq);
+             CREATE TRIGGER IF NOT EXISTS forget_desktop_task AFTER DELETE ON task_conversations
+             BEGIN DELETE FROM desktop_task_threads WHERE thread_id=OLD.thread_id;
+                   DELETE FROM desktop_task_turns WHERE thread_id=OLD.thread_id; END;
+             CREATE TRIGGER IF NOT EXISTS record_desktop_task_turn AFTER UPDATE OF payload ON reactive_runs
+             WHEN NEW.status IN ('completed','failed') AND OLD.status <> NEW.status
+                AND EXISTS(SELECT 1 FROM desktop_task_threads WHERE thread_id=json_extract(NEW.payload,'$.thread_id'))
+             BEGIN INSERT INTO desktop_task_turns(thread_id,title,model,payload)
+                 SELECT t.thread_id,coalesce(json_extract(s.payload,'$.task_title'),c.title),t.model,NEW.payload
+                 FROM desktop_task_threads t JOIN task_conversations c USING(thread_id)
+                 LEFT JOIN reactive_subscriptions s ON s.id=json_extract(NEW.payload,'$.subscription_id')
+                 WHERE t.thread_id=json_extract(NEW.payload,'$.thread_id'); END;
              CREATE TABLE IF NOT EXISTS deleted_task_runs(id TEXT PRIMARY KEY);
              CREATE INDEX IF NOT EXISTS reactive_runs_thread ON reactive_runs(json_extract(payload,'$.thread_id'));
              CREATE INDEX IF NOT EXISTS task_conversations_project ON task_conversations(project,updated DESC);
@@ -170,7 +187,7 @@ pub(in crate::reactive) fn search(
     query: &str,
 ) -> Result<Vec<TaskThreadChoice>, ReactiveError> {
     let query = query.trim().to_lowercase();
-    let mut statement=db.prepare("SELECT c.thread_id,c.title,c.agent_id,c.checkout FROM task_conversations c
+    let mut statement=db.prepare("SELECT c.thread_id,c.title,c.agent_id,c.checkout,t.model,json_extract(a.payload,'$.model') FROM task_conversations c LEFT JOIN desktop_task_threads t USING(thread_id)
         JOIN reactive_agents a ON a.id=c.agent_id WHERE c.project=?1 AND json_extract(a.payload,'$.project_path')=c.project
         ORDER BY c.updated DESC,c.rowid DESC")?;
     let mut rows = statement.query([project])?;
@@ -194,7 +211,7 @@ pub(super) fn uses_agent_thread(db: &Connection, run: &ReactiveRun) -> Result<bo
         |row| row.get(0),
     )?)
 }
-fn stamp(agent: &ReactiveAgent) -> Result<String, ReactiveError> {
+pub(super) fn stamp(agent: &ReactiveAgent) -> Result<String, ReactiveError> {
     encode(&(
         &agent.project_path,
         &agent.model,
@@ -265,8 +282,8 @@ pub(super) fn destinations(
 pub(super) fn selected(
     db: &Connection,
 ) -> Result<std::collections::BTreeMap<String, TaskThreadChoice>, ReactiveError> {
-    let mut statement = db.prepare("SELECT d.subscription_id,c.thread_id,c.title,c.agent_id,c.checkout FROM task_destinations d
-        JOIN task_conversations c USING(thread_id) WHERE d.chosen=1")?;
+    let mut statement = db.prepare("SELECT d.subscription_id,c.thread_id,c.title,c.agent_id,c.checkout,t.model,json_extract(a.payload,'$.model') FROM task_destinations d
+        JOIN task_conversations c USING(thread_id) JOIN reactive_agents a ON a.id=c.agent_id LEFT JOIN desktop_task_threads t USING(thread_id) WHERE d.chosen=1")?;
     let mut rows = statement.query([])?;
     let mut result = std::collections::BTreeMap::new();
     while let Some(row) = rows.next()? {
@@ -275,14 +292,58 @@ pub(super) fn selected(
     Ok(result)
 }
 
+pub(super) fn binding(
+    db: &Connection,
+    task: &str,
+) -> Result<Option<(TaskThreadChoice, bool)>, ReactiveError> {
+    let mut statement = db.prepare("SELECT c.thread_id,c.title,c.agent_id,c.checkout,t.model,json_extract(a.payload,'$.model'),d.chosen
+        FROM task_destinations d JOIN task_conversations c USING(thread_id)
+        JOIN reactive_agents a ON a.id=c.agent_id LEFT JOIN desktop_task_threads t USING(thread_id)
+        WHERE d.subscription_id=?1")?;
+    let mut rows = statement.query([task])?;
+    rows.next()?
+        .map(|row| Ok((choice(row, 0)?, row.get(6)?)))
+        .transpose()
+}
+
+pub(super) fn linked_agent(
+    db: &Connection,
+    project: &str,
+    id: &ThreadId,
+) -> Result<ReactiveAgent, ReactiveError> {
+    let agent: Option<String> = db
+        .query_row(
+            "SELECT c.agent_id FROM task_conversations c WHERE c.thread_id=?1 AND c.project=?2
+         AND NOT EXISTS (SELECT 1 FROM desktop_task_threads WHERE thread_id=c.thread_id)",
+            params![id.as_str(), project],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let agent = agent.ok_or_else(|| {
+        ReactiveError::Conflict("Choose an available conversation in this project.".into())
+    })?;
+    reports::guard_managed_identity(db, &agent)?;
+    let saved: ReactiveAgent = required(db, "reactive_agents", &agent, "agent")?;
+    if saved.project_path != project {
+        return Err(ReactiveError::Conflict(
+            "The conversation moved to another project.".into(),
+        ));
+    }
+    Ok(saved)
+}
+
 fn choice(row: &rusqlite::Row<'_>, offset: usize) -> Result<TaskThreadChoice, ReactiveError> {
     let id: String = row.get(offset)?;
+    let desktop_model: Option<String> = row.get(offset + 4)?;
+    let agent_model = if desktop_model.is_some() { None } else { row.get(offset + 5)? };
     Ok(TaskThreadChoice {
         thread_id: ThreadId::try_from(id)
             .map_err(|_| ReactiveError::Storage("Invalid saved task thread ID.".into()))?,
         title: row.get(offset + 1)?,
         agent_id: row.get(offset + 2)?,
         checkout: decode(row.get(offset + 3)?)?,
+        desktop_model,
+        agent_model,
     })
 }
 
@@ -292,6 +353,10 @@ pub(super) fn reply(
     thread: &ThreadId,
     message: &str,
 ) -> Result<(), ReactiveError> {
+    reply_once(db, task, thread, message, None)
+}
+
+pub(super) fn reply_once(db: &Connection, task: &str, thread: &ThreadId, message: &str, request: Option<uuid::Uuid>) -> Result<(), ReactiveError> {
     text(message, "Thread message", true)?;
     let sub: Subscription = required(db, "reactive_subscriptions", task, "task")?;
     let current = current(db, task)?;
@@ -299,6 +364,18 @@ pub(super) fn reply(
         return Err(ReactiveError::Conflict(
             "This task's destination has changed.".into(),
         ));
+    }
+    if let Some(id) = request {
+        if run_was_deleted(db, &id.to_string())? {
+            return Err(ReactiveError::Conflict("This reply was deleted.".into()));
+        }
+        if let Some(run) = get::<ReactiveRun>(db, "reactive_runs", &id.to_string())? {
+            if run.trigger == Some(RunTrigger::Chat) && run.thread_id == *thread
+                && run.subscription_id.as_deref() == Some(task) && run.owner_message.as_deref() == Some(message) {
+                return Ok(());
+            }
+            return Err(ReactiveError::Conflict("This reply identifier is already in use.".into()));
+        }
     }
     let agent = enabled_agent(db, &sub.agent_id)?;
     queue_capacity(db)?;
@@ -311,6 +388,7 @@ pub(super) fn reply(
         RunStatus::Queued,
         0,
     )?;
+    if let Some(id) = request { run.id = id.to_string(); }
     run.source_id = Some(sub.source_id);
     run.trigger = Some(RunTrigger::Chat);
     run.owner_message = Some(message.to_owned());
@@ -344,6 +422,7 @@ pub(super) fn delete(
         )
         .optional()?;
     let Some(agent) = agent else { return Ok(()) };
+    let desktop = super::desktop_tasks::is_desktop(db, thread)?;
     reports::guard_managed_identity(db, &agent)?;
     let mut statement =
         db.prepare("SELECT subscription_id FROM task_destinations WHERE thread_id=?1")?;
@@ -378,5 +457,11 @@ pub(super) fn delete(
         [id],
     )?;
     db.execute("DELETE FROM task_conversations WHERE thread_id=?1", [id])?;
+    if desktop {
+        let shared: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM reactive_subscriptions WHERE json_extract(payload,'$.agent_id')=?1)",[&agent],|row| row.get(0))?;
+        if !shared {
+            apply(db, &ReactiveChange::DeleteAgent { id: agent })?;
+        }
+    }
     Ok(())
 }

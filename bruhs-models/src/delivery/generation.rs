@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 pub enum OptionKind {
     Effort,
     ServiceTier,
+    CyberAccessProgram,
     ContextWindow,
     FastMode,
     Ultracode,
@@ -42,6 +43,7 @@ impl OptionKind {
         match self {
             Self::Effort => "effort",
             Self::ServiceTier => "service_tier",
+            Self::CyberAccessProgram => "cyber_access_program",
             Self::ContextWindow => "context_window",
             Self::FastMode => "fast_mode",
             Self::Ultracode => "ultracode",
@@ -96,6 +98,24 @@ pub fn model_options(model: &str) -> Vec<ModelOption> {
 pub struct GenerationOptions(BTreeMap<OptionKind, String>);
 
 impl GenerationOptions {
+    pub fn clear(&mut self,kind:OptionKind) {self.0.remove(&kind);}
+    pub fn configured(&self, kind: OptionKind) -> Option<&str> {
+        self.0.get(&kind).map(String::as_str)
+    }
+    pub(super) fn iter(&self) -> impl Iterator<Item = (&OptionKind, &String)> {
+        self.0.iter()
+    }
+    pub fn set_choice(
+        &mut self,
+        option: &super::writer_catalog::WriterOption,
+        value: &str,
+    ) -> bool {
+        if !option.accepts(value) {
+            return false;
+        }
+        self.0.insert(option.kind, value.to_owned());
+        true
+    }
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

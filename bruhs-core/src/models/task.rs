@@ -1,9 +1,28 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKind {
+    #[default]
     Shell,
+    Subagent,
+    Swarm,
+    BackgroundAgent,
+}
+
+impl TaskKind {
+    pub const fn badge_label(self) -> &'static str {
+        match self {
+            Self::Shell => "Shell",
+            Self::Subagent => "Subagent",
+            Self::Swarm => "Teamwork",
+            Self::BackgroundAgent => "Agent",
+        }
+    }
+
+    pub const fn is_agent_work(self) -> bool {
+        matches!(self, Self::Subagent | Self::Swarm | Self::BackgroundAgent)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13,6 +32,12 @@ pub enum TaskStatus {
     Exited,
     Killed,
     Failed,
+}
+
+impl TaskStatus {
+    pub const fn succeeded(&self, exit_code: Option<i32>) -> bool {
+        matches!(self, Self::Exited) && matches!(exit_code, None | Some(0))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -333,6 +333,14 @@ fn dedicated_preset_owns_configuration_and_preserves_existing_owner_context() {
         },
     )
     .unwrap();
+    assert!(matches!(
+        super::super::set_linked_schedule_enabled(&mut connection, &preset.subscription_id(), true),
+        Err(ReactiveError::Conflict(_))
+    ));
+    assert!(matches!(
+        super::super::delete_linked_schedule(&mut connection, preset.subscription_id()),
+        Err(ReactiveError::Conflict(_))
+    ));
     for command in [
         ReactiveCommand::SetAutomationEnabled {
             id: preset.subscription_id(),

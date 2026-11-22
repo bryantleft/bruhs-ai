@@ -1,6 +1,6 @@
 //! Bounded next-message predictions, separate from the user's provider session.
 
-use bruhs_models::delivery::generation::{GenerationOptions, OptionKind};
+use bruhs_models::delivery::generation::GenerationOptions;
 use std::{path::Path, time::Duration};
 
 use bruhs_models::{
@@ -47,6 +47,10 @@ pub enum SuggestionError {
 /// A disposable, isolated request. Dropping this future drops the SDK stream
 /// and kills its child. Nothing resumes or changes the conversation session.
 pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, SuggestionError> {
+    suggest_in_project(request, Path::new("")).await
+}
+
+pub async fn suggest_in_project(request: SuggestionRequest, project: &Path) -> Result<SuggestionReply, SuggestionError> {
     let info = model_info(&request.model).ok_or(SuggestionError::InvalidRequest)?;
     if info.provider.is_external() {
         return Err(SuggestionError::UnsupportedProvider);
@@ -54,6 +58,8 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
     if !request.is_valid() {
         return Err(SuggestionError::InvalidRequest);
     }
+    crate::agent_extensions::availability::require_enabled_for_project(info.provider, project)
+        .map_err(SuggestionError::Provider)?;
     let _flight = FLIGHT.try_acquire().map_err(|_| SuggestionError::Busy)?;
     let started = std::time::Instant::now();
     let result = tokio::time::timeout(DEADLINE, async {
@@ -81,6 +87,7 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
                 generation: None,
             },
             workspace.path(),
+            project,
         )
         .await;
         // Cleanup must not block an async worker. TempDir also cleans up on cancellation.
@@ -112,6 +119,7 @@ pub(crate) async fn isolated_reply(
     model: &str,
     instructions: &Instructions<'_>,
     cwd: &Path,
+    project: &Path,
 ) -> Result<String, SuggestionError> {
     isolated_agent_reply(
         provider,
@@ -119,6 +127,7 @@ pub(crate) async fn isolated_reply(
         model,
         instructions,
         cwd,
+        project,
         ReplyUse::Background,
     )
     .await
@@ -135,14 +144,36 @@ pub(crate) async fn isolated_agent_reply(
     model: &str,
     instructions: &Instructions<'_>,
     cwd: &Path,
+    project: &Path,
     purpose: ReplyUse<'_>,
 ) -> Result<String, SuggestionError> {
-    if instructions
-        .generation
-        .is_some_and(|options| !options.valid_for(model))
-    {
-        return Err(SuggestionError::InvalidRequest);
-    }
+    crate::agent_extensions::availability::require_enabled_for_project(provider, project)
+        .map_err(SuggestionError::Provider)?;
+    let resolved = if let Some(saved) = instructions.generation {
+        let catalog = crate::agent::writer_catalog_for_project(project).await;
+        let bundled = bruhs_models::delivery::writer_catalog::WriterCatalog::default();
+        match catalog.model(model).or_else(|| bundled.model(model)) {
+            Some(m) if m.provider == provider => {
+                Some(m.resolve(saved).ok_or(SuggestionError::InvalidRequest)?)
+            }
+            // A previously saved model can still run with provider defaults
+            // when its metadata is temporarily unavailable.
+            None if saved.is_empty()
+                && bruhs_models::delivery::writer_catalog::cli_provider(model)
+                    == Some(provider) =>
+            {
+                Some(saved.clone())
+            }
+            _ => return Err(SuggestionError::InvalidRequest),
+        }
+    } else {
+        None
+    };
+    let instructions = &Instructions {
+        generation: resolved.as_ref(),
+        ..*instructions
+    };
+    let model = provider.model_id(model);
     let reply_limit = match (purpose, provider) {
         (ReplyUse::RequestedGuide, _) => 65_536,
         (_, AgentProvider::Codex) => 4096,
@@ -175,7 +206,12 @@ pub(crate) struct Instructions<'a> {
 }
 
 pub(crate) async fn usage_permits(provider: AgentProvider) -> bool {
-    quota::permits(provider).await
+    usage_permits_in_project(provider, Path::new("")).await
+}
+
+pub(crate) async fn usage_permits_in_project(provider: AgentProvider, project: &Path) -> bool {
+    crate::agent_extensions::availability::require_enabled_for_project(provider, project).is_ok()
+        && quota::permits(provider).await
 }
 
 /// Strip one complete enclosing Markdown fence, never prose around it.
@@ -214,28 +250,9 @@ fn claude_options(
     cwd: &Path,
 ) -> claude_sdk_rs::QueryOptions {
     let mut options = crate::agent::claude_query_options_from_env(prompt);
-    let mut api_model = model.to_owned();
+    options.model = Some(model.to_owned());
     if let Some(selected) = instructions.generation {
-        let value = |kind| selected.value(model, kind);
-        let mut settings = serde_json::Map::new();
-        for (kind, key) in [
-            (OptionKind::Thinking, "alwaysThinkingEnabled"),
-            (OptionKind::FastMode, "fastMode"),
-            (OptionKind::Ultracode, "ultracode"),
-        ] {
-            if let Some(v) = value(kind) {
-                settings.insert(key.to_owned(), (v == "on").into());
-            }
-        }
-        if !settings.is_empty() {
-            options.settings = Some(serde_json::Value::Object(settings).to_string());
-        }
-        if let Some(effort) = value(OptionKind::Effort) {
-            options = options.effort(effort);
-        }
-        if value(OptionKind::ContextWindow) == Some("1m") {
-            api_model.push_str("[1m]");
-        }
+        crate::agent::model_options::apply_claude(&mut options,selected);
     } else {
         options = options.effort("low");
         if !instructions.think {
@@ -244,7 +261,6 @@ fn claude_options(
     }
     options
         .cwd(cwd)
-        .model(api_model)
         .tools(claude_sdk_rs::Tools::None)
         .system_prompt(instructions.text)
         .setting_sources(Vec::<String>::new())
@@ -346,23 +362,10 @@ fn codex_options(
                 .map_err(|error| SuggestionError::Provider(error.to_string()))?,
         );
     }
-    let selected = |kind| instructions.generation.and_then(|o| o.value(model, kind));
-    for (key, value) in [
-        (
-            "model_reasoning_effort",
-            Some(selected(OptionKind::Effort).unwrap_or("low")),
-        ),
-        (
-            "service_tier",
-            selected(OptionKind::ServiceTier).filter(|v| *v != "default"),
-        ),
-    ] {
-        if let Some(value) = value {
-            options = options.config(
-                ConfigOverride::new(key, serde_json::Value::from(value).to_string())
-                    .map_err(|e| SuggestionError::Provider(e.to_string()))?,
-            );
-        }
+    if let Some(selected) = instructions.generation {
+        crate::agent::model_options::apply_codex(&mut options,selected);
+    } else {
+        options.config.push(ConfigOverride::reasoning_effort("low"));
     }
     Ok(options)
 }
@@ -422,7 +425,7 @@ mod tests {
     #[test]
     fn writer_options_reach_each_isolated_provider() {
         let options: GenerationOptions =
-            serde_json::from_value(serde_json::json!({"effort":"ultra","service_tier":"priority"}))
+            serde_json::from_value(serde_json::json!({"effort":"ultra","service_tier":"priority","cyber_access_program":"standard"}))
                 .unwrap();
         let mut request = Instructions {
             text: "Write a title",
@@ -439,6 +442,7 @@ mod tests {
                 .map(|c| c.value())
                 .collect::<Vec<_>>()
         };
+        assert!(codex.standard_cyber_access);
         assert_eq!(config("model_reasoning_effort"), [r#""ultra""#]);
         assert_eq!(config("service_tier"), [r#""priority""#]);
         let opus = serde_json::from_value(

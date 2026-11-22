@@ -62,10 +62,39 @@ pub struct WorktreePreferences {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WorktreeSubmodules {
+    /// Resolve the repository policy at checkout time, with recursive initialization by default.
+    FromProject,
     #[default]
     None,
     TopLevel,
     Recursive,
+}
+
+impl WorktreeSubmodules {
+    pub fn parse_choice(key: &str) -> Option<Self> {
+        Some(match key {
+            "none" => Self::None,
+            "top-level" => Self::TopLevel,
+            "recursive" => Self::Recursive,
+            _ => return None,
+        })
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::FromProject => "inherit",
+            Self::None => "none",
+            Self::TopLevel => "top-level",
+            Self::Recursive => "recursive",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FromProject => "Inherit",
+            Self::None => "None",
+            Self::TopLevel => "Top level only",
+            Self::Recursive => "Recursive",
+        }
+    }
 }
 
 /// A worktree the client can offer as "previous".

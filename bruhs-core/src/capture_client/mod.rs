@@ -428,16 +428,42 @@ pub async fn transcribe_selected_dictation(
     remote_model: Option<&str>,
     cloud: Option<bruhs_models::cloud_speech::Provider>,
 ) -> Result<bruhs_models::local_tools::DictationTranscript, CaptureClientError> {
+    transcribe_dictation_with_hints(daemon, options, wav, remote_model, cloud, None).await
+}
+
+pub async fn transcribe_dictation_with_hints(
+    daemon: &DaemonEndpoint,
+    options: &bruhs_models::local_tools::DictationOptions,
+    wav: Vec<u8>,
+    remote_model: Option<&str>,
+    cloud: Option<bruhs_models::cloud_speech::Provider>,
+    hints: Option<&bruhs_models::cloud_speech::SpeechHints>,
+) -> Result<bruhs_models::local_tools::DictationTranscript, CaptureClientError> {
     let path = match cloud {
-        Some(provider)=>vec!["dictation","cloud",provider.id(),"transcribe"],
-        None if remote_model.is_some()=>vec!["dictation","compatible"],
-        None=>vec!["dictation"],
+        Some(provider) => vec!["dictation", "cloud", provider.id(), "transcribe"],
+        None if remote_model.is_some() => vec!["dictation", "compatible"],
+        None => vec!["dictation"],
     };
-    let mut request=client()?.post(daemon.url(&path)?);
-    if let Some(model)=remote_model {request=request.query(&[("remote_model",model)]);}
-    let request = request.query(options)
-        .header("Content-Type", "audio/wav")
-        .body(wav);
+    let mut request = client()?.post(daemon.url(&path)?);
+    if let Some(model) = remote_model {
+        request = request.query(&[("remote_model", model)]);
+    }
+    let request = request.query(options);
+    let request =
+        match hints.filter(|_| cloud.is_some_and(|provider| provider.accepts_vocabulary())) {
+            Some(hints) => request.multipart(
+                reqwest::multipart::Form::new()
+                    .text(
+                        "hints",
+                        serde_json::to_string(hints).map_err(CaptureClientError::Parse)?,
+                    )
+                    .part(
+                        "audio",
+                        reqwest::multipart::Part::bytes(wav).file_name("dictation.wav"),
+                    ),
+            ),
+            None => request.header("Content-Type", "audio/wav").body(wav),
+        };
     let mut response = daemon
         .authorize(request)
         .await

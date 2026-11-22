@@ -71,6 +71,7 @@ async fn restart_records_interruption_without_spawning_or_killing_a_saved_pid() 
         error: None,
         updated_at_ms: 0,
         connection_id: Some(Uuid::new_v4()),
+        forwarding_socket: None,
     };
     let data = Store {
         hosts: BTreeMap::from([(profile.id, host)]),
@@ -210,7 +211,9 @@ async fn connect_and_disconnect_own_the_master_and_its_proxy_descendant() {
         .command(RemoteHostCommand::Connect { id: profile.id })
         .await
         .unwrap();
-    wait_state(&manager, profile.id, RemoteHostState::Connected).await;
+    let connected = wait_state(&manager, profile.id, RemoteHostState::Connected).await;
+    let socket = connected.forwarding_socket.unwrap();
+    assert!(socket.ends_with("api"));
     assert!(manager
         .command(RemoteHostCommand::Connect { id: profile.id })
         .await
@@ -222,6 +225,7 @@ async fn connect_and_disconnect_own_the_master_and_its_proxy_descendant() {
         .await
         .unwrap();
     wait_state(&manager, profile.id, RemoteHostState::Disconnected).await;
+    assert!(!socket.parent().unwrap().exists());
     wait_stopped(&master, &proxy).await;
     let arguments = std::fs::read_to_string(root.path().join("argv.jsonl")).unwrap();
     assert!(arguments.contains("StrictHostKeyChecking=yes"));

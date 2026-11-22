@@ -1,4 +1,4 @@
-//! Bounded, owner-only delivery history, independent of the global event snapshot.
+//! Bounded, task-specific delivery history, independent of the global event snapshot.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 

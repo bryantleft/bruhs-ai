@@ -1215,3 +1215,36 @@ pub fn confirm_title(count: usize) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Update information a linked desktop can display without sharing host paths
+/// or installer command output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedProviderUpdate {
+    pub provider: AgentProvider,
+    pub state: ProviderUpdateState,
+    pub installed: Option<String>,
+    pub latest: Option<String>,
+    pub can_update: bool,
+    pub run: Option<LinkedProviderRun>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedProviderRun {
+    pub id: u64,
+    pub provider: AgentProvider,
+    pub phase: RunPhase,
+    pub outcome: Option<RunOutcome>,
+}
+
+impl From<&ProviderRun> for LinkedProviderRun {
+    fn from(run: &ProviderRun) -> Self {
+        Self { id: run.id, provider: run.provider, phase: run.phase, outcome: run.outcome }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkedProviderTarget {
+    pub installed: String,
+    pub latest: String,
+}

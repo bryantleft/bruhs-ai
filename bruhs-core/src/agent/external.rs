@@ -11,13 +11,17 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 pub(super) mod acp;
+pub mod health;
+pub(crate) mod metadata;
 pub(super) mod models;
+pub(super) mod writer_catalog;
 #[path = "../../../claude-sdk-rs/src/process.rs"]
-mod process;
+pub(super) mod process;
 
 #[derive(Clone)]
 pub(crate) struct Options {
     provider: AgentProvider,
+    pub(super) kiro_selection: crate::agent_extensions::kiro::Selection,
     pub(super) secret_env: Vec<(String, String)>,
     prompt: String,
     cwd: PathBuf,
@@ -52,6 +56,7 @@ impl Options {
         Self {
             provider,
             secret_env: Vec::new(),
+            kiro_selection: Default::default(),
             prompt: prompt.into(),
             cwd: cwd.into(),
             model: model.into(),
@@ -262,7 +267,7 @@ struct Prepared {
     _files: tempfile::TempDir,
 }
 
-fn executable(provider: AgentProvider) -> io::Result<PathBuf> {
+pub(super) fn executable(provider: AgentProvider) -> io::Result<PathBuf> {
     let (override_var, fallback) = match provider {
         AgentProvider::Cursor => ("BRUHS_CURSOR_BIN", "cursor-agent"),
         AgentProvider::Antigravity => ("BRUHS_ANTIGRAVITY_BIN", "agy"),
@@ -901,6 +906,16 @@ impl Parser {
                     && !string(step, "text_delta").is_empty()
                 {
                     events.push(self.text(string(step, "text_delta"), false));
+                }
+                if matches!(string(step, "step_type"), "thought" | "thinking") {
+                    let delta = if !string(step, "thinking_delta").is_empty() {
+                        string(step, "thinking_delta")
+                    } else {
+                        string(step, "text_delta")
+                    };
+                    if !delta.is_empty() {
+                        events.push(self.text(delta, true));
+                    }
                 }
                 if string(step, "step_type") == "tool" {
                     let id = format!("step-{}", step["step_index"]);

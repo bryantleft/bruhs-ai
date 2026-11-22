@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::watch;
 
-#[cfg(any(test, feature = "test-support"))]
 const LOG_TAIL_MAX: usize = 64 * 1024;
 
 /// Finished (non-running) tasks kept before the oldest are evicted.
@@ -199,9 +198,11 @@ impl BackgroundTaskRegistry {
         self.emit_all(&events);
     }
 
-    /// Test fixture: append to a task's log tail (capped at 64 KiB).
-    #[cfg(any(test, feature = "test-support"))]
+    /// Append to a task's log tail (capped at 64 KiB).
     pub fn append_log(&self, id: &str, chunk: &str) {
+        if chunk.is_empty() {
+            return;
+        }
         let updated = {
             let mut tasks = self.lock_tasks();
             let Some(task) = tasks.get_mut(id) else {
@@ -225,6 +226,176 @@ impl BackgroundTaskRegistry {
             updated
         };
         self.emit(TaskEvent::Updated(updated));
+    }
+
+    /// Update a task's display label.
+    pub fn update_label(&self, id: &str, label: impl Into<String>) {
+        let label = label.into();
+        let updated = {
+            let mut tasks = self.lock_tasks();
+            let Some(task) = tasks.get_mut(id) else {
+                return;
+            };
+            if task.label == label {
+                return;
+            }
+            task.label = label;
+            let updated = task.clone();
+            drop(tasks);
+            updated
+        };
+        self.emit(TaskEvent::Updated(updated));
+    }
+
+    /// Merge JSON object keys into `task.meta`.
+    pub fn merge_meta(&self, id: &str, patch: serde_json::Value) {
+        let Some(entries) = patch.as_object() else {
+            return;
+        };
+        let updated = {
+            let mut tasks = self.lock_tasks();
+            let Some(task) = tasks.get_mut(id) else {
+                return;
+            };
+            if !task.meta.is_object() {
+                task.meta = serde_json::json!({});
+            }
+            if let Some(target) = task.meta.as_object_mut() {
+                for (key, value) in entries {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+            let updated = task.clone();
+            drop(tasks);
+            updated
+        };
+        self.emit(TaskEvent::Updated(updated));
+    }
+
+    /// Transition one running task to a terminal status, optionally appending
+    /// a completion summary to its log tail.
+    pub fn complete_task(
+        &self,
+        id: &str,
+        status: TaskStatus,
+        exit_code: Option<i32>,
+        note: Option<&str>,
+    ) -> bool {
+        let events = {
+            let mut tasks = self.lock_tasks();
+            let Some(task) = tasks.get_mut(id) else {
+                return false;
+            };
+            if task.status != TaskStatus::Running {
+                return false;
+            }
+            task.status = status;
+            task.ended_at = Some(now_ms());
+            if exit_code.is_some() {
+                task.exit_code = exit_code;
+            }
+            if let Some(note) = note.map(str::trim).filter(|s| !s.is_empty()) {
+                if !task.log_tail.is_empty() && !task.log_tail.ends_with('\n') {
+                    task.log_tail.push('\n');
+                }
+                task.log_tail.push_str(note);
+                if task.log_tail.len() > LOG_TAIL_MAX {
+                    let excess = task.log_tail.len() - LOG_TAIL_MAX;
+                    let trim_at = task
+                        .log_tail
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .find(|&i| i >= excess)
+                        .unwrap_or(excess);
+                    task.log_tail = task.log_tail[trim_at..].to_string();
+                }
+            }
+            let mut events = vec![TaskEvent::Updated(task.clone())];
+            events.extend(
+                evict_finished(&mut tasks)
+                    .into_iter()
+                    .map(TaskEvent::Removed),
+            );
+            drop(tasks);
+            events
+        };
+        self.emit_all(&events);
+        true
+    }
+
+    /// Stop a single running task (marks it `Killed`). Returns `NotFound` if
+    /// no task has `id`.
+    pub fn stop_task(&self, id: &str) -> Result<BackgroundTask, RemoveTaskError> {
+        let (task, events) = {
+            let mut tasks = self.lock_tasks();
+            let Some(task) = tasks.get_mut(id) else {
+                return Err(RemoveTaskError::NotFound(id.to_string()));
+            };
+            if task.status == TaskStatus::Running {
+                task.status = TaskStatus::Killed;
+                task.ended_at = Some(now_ms());
+                let updated = task.clone();
+                let mut events = vec![TaskEvent::Updated(updated.clone())];
+                events.extend(
+                    evict_finished(&mut tasks)
+                        .into_iter()
+                        .map(TaskEvent::Removed),
+                );
+                drop(tasks);
+                (updated, events)
+            } else {
+                let existing = task.clone();
+                drop(tasks);
+                (existing, Vec::new())
+            }
+        };
+        self.emit_all(&events);
+        Ok(task)
+    }
+
+    /// Running task ids in `thread_id` whose `meta[key]` equals `value`
+    /// (case-insensitive for string values).
+    pub fn find_running_by_meta(&self, thread_id: &str, key: &str, value: &str) -> Vec<String> {
+        let tasks = self.lock_tasks();
+        tasks
+            .values()
+            .filter(|t| {
+                t.thread_id == thread_id
+                    && t.status == TaskStatus::Running
+                    && t.meta
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|v| v.eq_ignore_ascii_case(value))
+            })
+            .map(|t| t.id.clone())
+            .collect()
+    }
+
+    /// Complete every running task of `kind` belonging to `thread_id`.
+    pub fn finish_thread_kind(&self, thread_id: &str, kind: TaskKind, status: TaskStatus) {
+        self.finish_where(|t| t.thread_id == thread_id && t.kind == kind, status);
+    }
+
+    /// Whether `thread_id` currently has any running background task, subagent,
+    /// or teamwork worker.
+    pub fn has_running_for_thread(&self, thread_id: &str) -> bool {
+        let tasks = self.lock_tasks();
+        tasks
+            .values()
+            .any(|t| t.thread_id == thread_id && t.status == TaskStatus::Running)
+    }
+
+    /// Distinct thread ids that currently have at least one running task.
+    pub fn running_thread_ids(&self) -> Vec<String> {
+        let tasks = self.lock_tasks();
+        let mut ids: Vec<String> = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Running)
+            .map(|t| t.thread_id.clone())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
     }
 
     /// Remove a finished task.
@@ -285,8 +456,21 @@ impl BackgroundTaskRegistry {
     }
 
     /// The running tasks among `ids` exited with the turn that started them.
+    /// Asynchronous teamwork/subagent tasks marked `meta.persists_after_turn = true`
+    /// remain running after a normal turn end so the thread stays in Working
+    /// status while background workers execute.
     pub fn mark_tasks_ended(&self, ids: &[String]) {
-        self.finish_where(|t| ids.contains(&t.id), TaskStatus::Exited);
+        self.finish_where(
+            |t| {
+                ids.contains(&t.id)
+                    && !t
+                        .meta
+                        .get("persists_after_turn")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+            },
+            TaskStatus::Exited,
+        );
     }
 
     /// The running tasks among `ids` were killed with the turn that started

@@ -15,6 +15,7 @@ workspace = true
 # anywhere `serde` + `uuid` does (including wasm32-unknown-unknown).
 
 [dependencies]
+indexmap = { version = "2", features = ["serde"] }
 # NFC before a backup password reaches the key derivation (`backup::normalize_password`).
 unicode-normalization = "0.1.26"
 regex = "1"

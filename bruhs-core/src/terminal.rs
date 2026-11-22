@@ -271,15 +271,30 @@ impl TerminalManager {
 
     /// Spawn a shell and start streaming its output.
     pub fn create(&self, spec: TerminalSpec) -> Result<TerminalInfo, TerminalError> {
-        self.create_with_program(spec, None)
+        self.create_command(spec, None, None)
     }
 
     /// `create`, running `program` (program + args) instead of the login
     /// shell. Tests use it for a predictable `/bin/sh`.
+    #[cfg(test)]
     fn create_with_program(
         &self,
         spec: TerminalSpec,
         program: Option<&[String]>,
+    ) -> Result<TerminalInfo, TerminalError> {
+        let prepared = program.and_then(|parts| parts.split_first()).map(|(program,args)| {
+            let mut cmd = CommandBuilder::new(program);
+            cmd.args(args);
+            cmd
+        });
+        self.create_command(spec,prepared,None)
+    }
+
+    pub(crate) fn create_command(
+        &self,
+        spec: TerminalSpec,
+        prepared: Option<CommandBuilder>,
+        completion: Option<tokio::sync::oneshot::Sender<bool>>,
     ) -> Result<TerminalInfo, TerminalError> {
         let id = uuid::Uuid::new_v4().to_string();
         let short_id: String = id.chars().take(8).collect();
@@ -302,21 +317,12 @@ impl TerminalManager {
             })
             .map_err(TerminalError::Pty)?;
 
-        let mut cmd = match program {
-            Some([program, args @ ..]) => {
-                let mut c = CommandBuilder::new(program);
-                c.args(args);
-                c
-            }
-            _ => {
-                let shell = pick_shell(std::env::var("SHELL").ok().as_deref());
-                let mut c = CommandBuilder::new(&shell);
-                if !cfg!(windows) {
-                    c.arg("-l");
-                }
-                c
-            }
-        };
+        let mut cmd = prepared.unwrap_or_else(|| {
+            let shell = pick_shell(std::env::var("SHELL").ok().as_deref());
+            let mut c = CommandBuilder::new(&shell);
+            if !cfg!(windows) { c.arg("-l"); }
+            c
+        });
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -404,11 +410,11 @@ impl TerminalManager {
                     }
                 }
                 let child = lock(&reader_session.child).take();
-                if let Some(mut child) = child {
-                    if let Err(e) = child.wait() {
-                        tracing::debug!("terminal child wait failed: {e}");
-                    }
-                }
+                let succeeded = child.is_some_and(|mut child| match child.wait() {
+                    Ok(status) => status.success(),
+                    Err(e) => { tracing::debug!("terminal child wait failed: {e}"); false }
+                });
+                if let Some(completion) = completion { let _ = completion.send(succeeded); }
                 if registered_rx.recv().is_err() {
                     return; // creation was abandoned
                 }

@@ -220,6 +220,96 @@ pub fn tool_label(call: &impl ToolCallView, state: ToolState, root: Option<&str>
                     format!("{} agent: {}", tense("Running", "Ran"), d)
                 }
             }
+            "invoke_subagent" => {
+                let role = if !s("Role").is_empty() {
+                    s("Role")
+                } else if !s("role").is_empty() {
+                    s("role")
+                } else {
+                    s("TypeName")
+                };
+                if role.is_empty() {
+                    tense("Starting subagent", "Started subagent").to_string()
+                } else {
+                    format!("{} subagent: {}", tense("Starting", "Started"), role)
+                }
+            }
+            "spawn_agent" => {
+                let role = if !s("role").is_empty() {
+                    s("role")
+                } else {
+                    s("description")
+                };
+                if role.is_empty() {
+                    tense("Spawning agent", "Spawned agent").to_string()
+                } else {
+                    format!("{} agent: {}", tense("Spawning", "Spawned"), role)
+                }
+            }
+            "delegate_task" | "mcp__t3-code__delegate_task" => {
+                let title = if !s("title").is_empty() {
+                    s("title")
+                } else {
+                    s("toolSummary")
+                };
+                if title.is_empty() {
+                    tense("Delegating task", "Delegated task").to_string()
+                } else {
+                    format!("{} {}", tense("Delegating", "Delegated"), title)
+                }
+            }
+            "swarm" => {
+                let action = s("action");
+                let name = s("name");
+                let title = s("title");
+                match action.as_str() {
+                    "add" if !name.is_empty() => {
+                        format!("{} swarm worker {}", tense("Adding", "Added"), name)
+                    }
+                    "add" => tense("Adding swarm worker", "Added swarm worker").to_string(),
+                    "kill" if !name.is_empty() => {
+                        format!("{} swarm worker {}", tense("Stopping", "Stopped"), name)
+                    }
+                    "status" => tense("Checking swarm status", "Checked swarm status").to_string(),
+                    "title" if !title.is_empty() => {
+                        format!("{} swarm: {}", tense("Naming", "Named"), title)
+                    }
+                    "model" if !name.is_empty() => {
+                        format!("{} model for {}", tense("Switching", "Switched"), name)
+                    }
+                    _ => tense("Coordinating teamwork", "Coordinated teamwork").to_string(),
+                }
+            }
+            "run_workflow" => {
+                let desc = s("Description");
+                if desc.is_empty() {
+                    tense("Running workflow", "Ran workflow").to_string()
+                } else {
+                    format!("{} workflow: {}", tense("Running", "Ran"), desc)
+                }
+            }
+            "manage_subagents" => {
+                let action = s("Action");
+                match action.as_str() {
+                    "kill" | "kill_all" => {
+                        tense("Stopping subagents", "Stopped subagents").to_string()
+                    }
+                    _ => tense("Checking subagents", "Checked subagents").to_string(),
+                }
+            }
+            "run_command" => {
+                let summary = s("toolSummary");
+                if !summary.is_empty() {
+                    summary
+                } else {
+                    let program = bash_program(&s("CommandLine"));
+                    if program.is_empty() {
+                        tense("Running a command", "Ran a command").to_string()
+                    } else {
+                        format!("{} {}", tense("Running", "Ran"), program)
+                    }
+                }
+            }
             "File changes" => {
                 let changes = call.input()["changes"].as_array();
                 match changes.map(Vec::as_slice) {
@@ -442,6 +532,26 @@ mod tests {
             "Edited /n.ipynb"
         );
         assert_eq!(label("Read", json!({})), "Read");
+        assert_eq!(
+            label("invoke_subagent", json!({"Role": "Codebase Researcher"})),
+            "Started subagent: Codebase Researcher"
+        );
+        assert_eq!(
+            label("swarm", json!({"action": "add", "name": "builder"})),
+            "Added swarm worker builder"
+        );
+        assert_eq!(
+            label("swarm", json!({"action": "status"})),
+            "Checked swarm status"
+        );
+        assert_eq!(
+            label("swarm", json!({"action": "kill", "name": "builder"})),
+            "Stopped swarm worker builder"
+        );
+        assert_eq!(
+            label("run_workflow", json!({"Description": "Audit crates"})),
+            "Ran workflow: Audit crates"
+        );
     }
 
     #[test]

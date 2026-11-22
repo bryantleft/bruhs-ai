@@ -412,6 +412,9 @@ pub struct DictationTranscript {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DictationOptions {
+    /// A client with scoped dictionaries applies aliases and filters the returned text together.
+    #[serde(default)]
+    pub client_filters_text: bool,
     #[serde(default)]
     pub silence_filtering: bool,
     #[serde(default)]

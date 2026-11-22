@@ -10,7 +10,13 @@ use std::{
 };
 
 static WRITER: Mutex<()> = Mutex::new(());
+pub mod availability;
+pub mod environment;
 pub mod history;
+pub mod instances;
+pub mod kiro;
+pub mod quota;
+pub mod registry;
 
 pub fn directory() -> std::io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("BRUHS_WORKBENCH_DIR") {
@@ -24,7 +30,7 @@ pub fn directory() -> std::io::Result<PathBuf> {
         .ok_or_else(|| std::io::Error::other("Private application data directory is unavailable."))
 }
 
-fn private_directory(root: &Path) -> std::io::Result<()> {
+pub(crate) fn private_directory(root: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     #[cfg(unix)]
     {
@@ -37,9 +43,11 @@ fn private_directory(root: &Path) -> std::io::Result<()> {
 pub fn load_config_at(root: &Path) -> std::io::Result<ExtensionConfig> {
     match std::fs::read(root.join("agents.json")) {
         Ok(bytes) => {
-            let config: ExtensionConfig =
-                serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-            config.validate().map_err(std::io::Error::other)?;
+            let config: ExtensionConfig = serde_json::from_slice(&bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            config
+                .validate()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             Ok(config)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ExtensionConfig::default()),
@@ -53,10 +61,46 @@ pub fn load_config() -> std::io::Result<ExtensionConfig> {
 
 pub fn save_config_at(root: &Path, config: &ExtensionConfig) -> std::io::Result<()> {
     config.validate().map_err(std::io::Error::other)?;
-    let _guard = WRITER
-        .lock()
-        .map_err(|_| std::io::Error::other("Agent configuration lock failed."))?;
+    let _lock = lock_config(root)?;
+    // Workbench can replace a damaged config. A device handle must still
+    // belong to a readable prior configuration or be supplied by the editor.
+    let previous = match load_config_at(root) {
+        Ok(config) => config,
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => ExtensionConfig::default(),
+        Err(e) => return Err(e),
+    };
+    environment::persist(root, &previous, config, Default::default())
+}
+
+fn lock_config(root: &Path) -> std::io::Result<std::fs::File> {
     private_directory(root)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("agents.lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+/// Change one existing instance without replacing settings from another editor.
+pub fn set_acp_enabled(id: &str, enabled: bool) -> std::io::Result<()> {
+    let root = directory()?;
+    let _lock = lock_config(&root)?;
+    let mut config = load_config_at(&root)?;
+    let agent = config
+        .acp
+        .iter_mut()
+        .find(|agent| agent.id == id)
+        .ok_or_else(|| {
+            std::io::Error::other("This ACP instance was removed. Refresh provider status.")
+        })?;
+    agent.enabled = enabled;
+    write_config(&root, &config)
+}
+
+fn write_config(root: &Path, config: &ExtensionConfig) -> std::io::Result<()> {
     let mut temporary = tempfile::NamedTempFile::new_in(root)?;
     serde_json::to_writer_pretty(&mut temporary, config).map_err(std::io::Error::other)?;
     temporary.as_file().sync_all()?;
@@ -113,10 +157,22 @@ pub fn limits_from_codex(result: &serde_json::Value, now: i64) -> Vec<QuotaWindo
                 .filter(|n| n.is_finite() && (0.0..=100.0).contains(n))
             {
                 out.push(QuotaWindow {
+                    window_id: None,
                     provider: "codex".into(),
                     account: account.clone(),
                     name: name.into(),
                     used_percent: used,
+                    duration_minutes: Some(
+                        window["windowDurationMins"]
+                            .as_u64()
+                            .and_then(|n| u32::try_from(n).ok())
+                            .filter(|n| *n > 0)
+                            .unwrap_or_else(|| match (name, bucket["planType"].as_str()) {
+                                ("secondary", _) => 10080,
+                                (_, Some("free" | "go")) => 43200,
+                                _ => 300,
+                            }),
+                    ),
                     resets_at: window["resetsAt"].as_i64(),
                     observed_at: now,
                 });
@@ -140,10 +196,12 @@ pub fn record_claude_limit(event: &serde_json::Value) -> std::io::Result<()> {
     append(
         &directory()?,
         &Entry::Limit(QuotaWindow {
+            window_id: None,
             provider: "claude".into(),
             account: "current".into(),
             name: info["rateLimitType"].as_str().unwrap_or("account").into(),
             used_percent: used * 100.0,
+            duration_minutes: None,
             resets_at: info["resetsAt"].as_i64(),
             observed_at: chrono::Utc::now().timestamp(),
         }),

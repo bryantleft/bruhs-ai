@@ -70,6 +70,9 @@ pub struct RemoteHost {
     pub local_url: String,
     #[serde(default)]
     pub connection_id: Option<Uuid>,
+    /// Private local socket for this live SSH generation, filled by the owner service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarding_socket: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

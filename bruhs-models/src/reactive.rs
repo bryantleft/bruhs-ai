@@ -153,19 +153,34 @@ pub enum TaskDestinationEdit {
     Existing {
         thread_id: crate::ids::ThreadId,
     },
+    Desktop { thread_id: crate::ids::ThreadId },
     /// Detach only the binding that was shown when the owner opened the editor.
     FirstRun {
         previous: crate::ids::ThreadId,
     },
 }
 
-/// A conversation found in the selected project's scheduled task history.
+/// A conversation available as a scheduled task destination in the selected project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskThreadChoice {
     pub thread_id: crate::ids::ThreadId,
     pub title: String,
     pub agent_id: String,
     pub checkout: TaskCheckout,
+    /// Present for an ordinary desktop conversation. Its model is owned by the thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_model: Option<String>,
+    /// Model of the agent that owns a scheduled conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopTaskTurn {
+    pub sequence: i64,
+    pub title: String,
+    pub model: String,
+    pub run: ReactiveRun,
 }
 
 /// Filesystem location used when a scheduled task starts a provider turn.
@@ -251,6 +266,78 @@ pub struct AutomationSetup {
     pub agent: ReactiveAgent,
     pub source: EventSource,
     pub subscription: Subscription,
+}
+
+/// Editable task fields for a paired environment. Agent memory and stored credentials stay on the host.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LinkedTaskDefinition {
+    pub setup: AutomationSetup,
+    pub revision: String,
+    pub agent_locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<TaskThreadChoice>,
+    #[serde(default)]
+    pub conversation_chosen: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkedTaskSave {
+    pub request_id: uuid::Uuid,
+    /// Absent when creating a new task.
+    pub expected: Option<String>,
+    pub setup: AutomationSetup,
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_secret: Option<WebhookSigningSecret>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<TaskDestinationEdit>,
+}
+
+/// Read-only inventory shared with a desktop holding a project schedules grant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledTaskSummary {
+    pub id: String,
+    pub title: String,
+    pub project_path: String,
+    pub schedule: SourceKind,
+    pub next_run_at: Option<EpochMs>,
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ScheduledThreadLink>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledThreadLink {
+    pub id: crate::ids::ThreadId,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LinkedThreadMessage {
+    pub key: String,
+    pub assistant: bool,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LinkedThreadPage {
+    pub thread: ScheduledThreadLink,
+    pub messages: Vec<LinkedThreadMessage>,
+    pub before: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkedThreadReply {
+    pub request_id: uuid::Uuid,
+    pub message: String,
+}
+
+impl SourceKind {
+    pub fn is_scheduled_task(&self) -> bool {
+        matches!(self, Self::Once { .. } | Self::Schedule { .. } | Self::Calendar { .. } | Self::Webhook)
+    }
 }
 
 impl Subscription {
@@ -440,6 +527,10 @@ pub enum ReactiveCommand {
         thread_id: crate::ids::ThreadId,
         linked_tasks: std::collections::BTreeSet<String>,
     },
+    /// Delete the confirmed schedule links for a set of desktop conversations together.
+    DeleteCheckoutTaskThreads {
+        threads: std::collections::BTreeMap<crate::ids::ThreadId, std::collections::BTreeSet<String>>,
+    },
     /// An owner reply in a scheduled task's saved destination.
     ChatInTaskThread {
         task_id: String,
@@ -589,6 +680,11 @@ pub struct ReactiveSnapshot {
     /// Manually selected destinations. Its presence signals support for project thread search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_task_threads: Option<std::collections::BTreeMap<String,TaskThreadChoice>>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub desktop_task_store: String,
+    /// Most recent delivered turn sequence for each desktop destination.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub desktop_task_activity: std::collections::BTreeMap<String, i64>,
     /// This host can delete scheduled conversations and their linked tasks atomically.
     #[serde(default)]
     pub can_delete_task_threads: bool,

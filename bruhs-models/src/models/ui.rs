@@ -69,6 +69,8 @@ pub enum AppView {
     Bruh {
         agent_id: String,
     },
+    /// A schedule's conversation lives on the paired environment that owns it.
+    LinkedTaskThread { host: uuid::Uuid, task: String, thread: crate::ids::ThreadId },
     /// One room: its transcript, members and settings.
     Room {
         room_id: String,
@@ -99,6 +101,8 @@ impl AppView {
             Self::Bruh { agent_id } => {
                 format!("/bruhs/{}", utf8_percent_encode(agent_id, ROUTE_COMPONENT))
             }
+            Self::LinkedTaskThread { host, task, thread } => format!("/linked/{host}/tasks/{}/thread/{}",
+                utf8_percent_encode(task, ROUTE_COMPONENT), utf8_percent_encode(thread.as_str(), ROUTE_COMPONENT)),
             Self::Room { room_id } => {
                 format!("/rooms/{}", utf8_percent_encode(room_id, ROUTE_COMPONENT))
             }
@@ -122,6 +126,14 @@ impl AppView {
             return uuid::Uuid::parse_str(id).ok().map(|_| Self::Whiteboards {
                 board_id: Some(id.into()),
             });
+        }
+        if let Some(rest) = route.strip_prefix("/linked/") {
+            let parts: Vec<_> = rest.split('/').collect();
+            let [host, "tasks", task, "thread", thread] = parts.as_slice() else { return None };
+            let task = percent_decode_str(task).decode_utf8().ok()?.into_owned();
+            if task.trim().is_empty() || task.len() > 128 { return None; }
+            return Some(Self::LinkedTaskThread { host: host.parse().ok()?, task,
+                thread: crate::ids::ThreadId::try_from(percent_decode_str(thread).decode_utf8().ok()?.into_owned()).ok()? });
         }
         if let Some(rest) = route.strip_prefix("/meeting-notes/") {
             let note_id = percent_decode_str(rest).decode_utf8().ok()?;
@@ -214,6 +226,7 @@ impl AppView {
             Self::Terminal => "terminal",
             Self::Bruh { .. } => "bruh",
             Self::Room { .. } => "room",
+            Self::LinkedTaskThread { .. } => "linked-task-thread",
         }
     }
 }
@@ -376,6 +389,11 @@ mod tests {
             AppView::Tasks,
             AppView::Calendar,
             AppView::Life,
+            AppView::LinkedTaskThread {
+                host: uuid::Uuid::nil(),
+                task: "reviews/daily".into(),
+                thread: crate::ids::ThreadId::try_from("host-review").unwrap(),
+            },
             AppView::Automations,
             AppView::Workbench,
             AppView::Whiteboards { board_id: None },

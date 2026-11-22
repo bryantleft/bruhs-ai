@@ -46,7 +46,7 @@ fn command(executable: &Path) -> Command {
 }
 
 pub(super) fn tunnel_args(profile: &RemoteHostProfile, control: &Path) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "-N".into(),
         "-T".into(),
         "-o".into(),
@@ -80,7 +80,20 @@ pub(super) fn tunnel_args(profile: &RemoteHostProfile, control: &Path) -> Vec<St
         profile.ssh_port.to_string(),
         "--".into(),
         profile.host.clone(),
-    ]
+    ];
+    #[cfg(unix)]
+    args.splice(
+        0..0,
+        [
+            "-L".into(),
+            format!(
+                "{}:127.0.0.1:{}",
+                control.with_file_name("api").display(),
+                profile.remote_port
+            ),
+        ],
+    );
+    args
 }
 
 async fn bounded(
@@ -228,7 +241,7 @@ impl RemoteHostManager {
                 }
                 let check=output(&self.0.executable,&check_args);
                 let result=tokio::select! {_=cancelled.changed()=>return Ok(()),result=tokio::time::timeout_at(deadline,check)=>result.map_err(|_|"SSH did not authenticate and acknowledge its private control socket within the chosen connection budget.".to_owned())?.map_err(|e|e.to_string())?};
-                if result.0 {self.connected(profile.id,generation).await.map_err(|e|e.to_string())?;break;}
+                if result.0 {self.connected(profile.id,generation,cfg!(unix).then(||control.with_file_name("api"))).await.map_err(|e|e.to_string())?;break;}
                 // Reuse the native mobile connection-status cadence; probes are
                 // local control-socket commands, not new network connections.
                 tokio::select! {_=cancelled.changed()=>return Ok(()),_ = tokio::time::sleep_until(std::cmp::min(deadline,tokio::time::Instant::now()+Duration::from_millis(bruhs_models::mobile::REFRESH_MS)))=>{}}

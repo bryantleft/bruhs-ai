@@ -254,7 +254,78 @@ async fn execute(
     let mut context = claim.context.clone();
     let mut changes = runtime.watch_changes();
     let mut effective_run = run.clone();
-    let mut effective_agent = agent.clone();
+    let mut effective_agent=agent.clone();
+    let _desktop_lock = if claim.desktop_thread {
+        let lock = match super::desktop_turn_lock(&run.thread_id) {
+            Ok(lock) => lock,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let id = run.id.clone();
+                runtime
+                    .call(move |db| store::defer_desktop_turn(db, &id))
+                    .await?;
+                return Ok(());
+            }
+            Err(error) => {
+                let id = run.id.clone();
+                runtime
+                    .call(move |db| {
+                        store::finish_run(
+                            db,
+                            &id,
+                            RunStatus::Failed,
+                            None,
+                            Some(error.to_string()),
+                            None,
+                        )
+                    })
+                    .await?;
+                return Ok(());
+            }
+        };
+        let mut agent = agent.clone();
+        let id = run.id.clone();
+        let prepared = runtime
+            .call(move |db| {
+                store::transaction(db, |db| {
+                    let mut next = store::run_record(db, &id)?;
+                    if next.status != RunStatus::Running {
+                        return Ok(None);
+                    }
+                    let context = store::desktop_tasks::prepare_turn(db, &mut agent, &mut next)?;
+                    next.fresh_session = next.session_id.is_none();
+                    store::save_run(db, &next)?;
+                    Ok(Some((next, agent, context)))
+                })
+            })
+            .await;
+        match prepared {
+            Ok(Some((next, agent, history))) => {
+                effective_agent=agent;
+                effective_run = next;
+                context = history;
+            }
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                let id = run.id.clone();
+                runtime
+                    .call(move |db| {
+                        store::finish_run(
+                            db,
+                            &id,
+                            RunStatus::Failed,
+                            None,
+                            Some(error.to_string()),
+                            None,
+                        )
+                    })
+                    .await?;
+                return Ok(());
+            }
+        }
+        Some(lock)
+    } else {
+        None
+    };
     let mut bruh = claim.bruh.clone();
     let requested_run = run.clone();
     let preparation = runtime
@@ -312,8 +383,8 @@ async fn execute(
         // Weekly reports only read their frozen evidence.
         bruh = BruhProfile::default();
     }
-    if !run.task_checkout.is_project() {
-        match task_checkout::resolve(Path::new(&agent.project_path), run).await {
+    if !effective_run.task_checkout.is_project() {
+        match task_checkout::resolve(Path::new(&agent.project_path), &effective_run).await {
             Ok(checkout) => effective_agent.project_path = checkout,
             Err(error) => {
                 let id = run.id.clone();
@@ -362,11 +433,16 @@ async fn execute(
         .await
     {
         Ok(stream) => stream,
-        Err(_) => {
+        Err(crate::SendMessageError::ThreadBusy(_)) => {
             let id = run.id.clone();
             runtime
                 .call(move |connection| store::return_to_queue(connection, &id))
                 .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            let id=run.id.clone();
+            runtime.call(move |db| store::finish_run(db,&id,RunStatus::Failed,None,Some(error.to_string()),None)).await?;
             return Ok(());
         }
     };

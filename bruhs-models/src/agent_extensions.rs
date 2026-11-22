@@ -3,14 +3,38 @@ use crate::num::ToFloatLossy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Per-thread Kiro session options. Older clients omit both values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KiroSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+impl KiroSelection {
+    pub fn is_empty(&self) -> bool {
+        self.agent.is_none() && self.effort.is_none()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AcpInstance {
+    /// Built-in drivers using ACP retain their own launch and access configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<AcpDriver>,
     pub id: String,
     pub name: String,
+    /// Optional #RRGGBB marker displayed next to this instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<RegistryOrigin>,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "AcpEnvironment::is_empty")]
+    pub environment: AcpEnvironment,
     #[serde(default)]
     pub models: Vec<String>,
     /// Provider-native mode IDs. ACP modes are not an operating-system sandbox.
@@ -25,7 +49,109 @@ pub struct AcpInstance {
     pub enabled: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpDriver {
+    Kiro,
+}
+
 impl AcpInstance {
+    pub fn kiro(id: String, name: String, binary: &str) -> Self {
+        use crate::agent::PermissionMode;
+        Self {
+            driver: Some(AcpDriver::Kiro),
+            id,
+            name,
+            command: if binary.trim().is_empty() { "kiro-cli" } else { binary.trim() }.into(),
+            args: ["acp", "--agent-engine=v3", "--auth-method=cli"].map(String::from).into(),
+            modes: [
+                (PermissionMode::Default.as_str().into(), "off".into()),
+                (PermissionMode::BypassPermissions.as_str().into(), "on".into()),
+            ].into(),
+            mode_config_id: Some("autopilot".into()),
+            model_config_id: None,
+            models: Vec::new(),
+            environment: Default::default(),
+            accent_color: None,
+            registry: None,
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryOrigin {
+    pub agent_id: String,
+    pub version: String,
+    pub distribution: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_override: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_method_id: Option<String>,
+    /// Launch defaults supplied by the installed release, before any user edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<RegistryDefaults>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryDefaults {
+    pub args: Vec<String>,
+    pub environment: BTreeMap<String, String>,
+}
+
+/// Preserve the order of variable rows when an instance is reopened.
+pub type AcpEnvironment = indexmap::IndexMap<String, AcpVariable>;
+
+/// Only plain variables carry their value in the portable configuration.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AcpVariable {
+    Plain { value: String },
+    Device { revision: uuid::Uuid },
+    OnePassword { source: String, reference: String },
+}
+
+/// An ACP session ID is local to the instance that issued it.
+pub fn acp_session_matches_model(session: &str, model: &str) -> bool {
+    let selected = model.strip_prefix("acp/").and_then(|value| value.split_once('/'));
+    let owner = session.strip_prefix("acp:").and_then(|value| value.split_once(':'));
+    matches!((selected, owner), (Some((id, _)), Some((source, native))) if id == source && !native.is_empty())
+}
+
+pub fn valid_environment_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Windows process environments compare variable names without case.
+pub fn same_environment_name(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
+pub fn parse_accent_color(color: &str) -> Option<u32> {
+    let hex = color.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(hex, 16).ok()
+}
+
+impl AcpInstance {
+    /// Keep the managed executable for repairs and upgrades even when chat uses an override.
+    pub fn executable(&self) -> &str {
+        self.registry
+            .as_ref()
+            .and_then(|origin| origin.executable_override.as_deref())
+            .unwrap_or(&self.command)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.id.is_empty()
             || !self
@@ -44,6 +170,61 @@ impl AcpInstance {
             return Err(
                 "ACP needs a name, an executable, and literal arguments without NUL bytes.".into(),
             );
+        }
+        if let Some(origin) = &self.registry {
+            if origin.executable_override.as_ref().is_some_and(|value| {
+                value.trim().is_empty() || value.starts_with('-') || value.contains('\0')
+            }) {
+                return Err("Enter an executable name or path for the registry override.".into());
+            }
+            if origin.auth_method_id.as_ref().is_some_and(|id| {
+                id.trim().is_empty() || id.chars().any(char::is_control)
+            }) {
+                return Err("Enter an ACP authentication method ID.".into());
+            }
+        }
+        if self
+            .accent_color
+            .as_deref()
+            .is_some_and(|value| parse_accent_color(value).is_none())
+        {
+            return Err("Enter an accent color as #RRGGBB.".into());
+        }
+        #[cfg(windows)]
+        {
+            let mut names = std::collections::BTreeSet::new();
+            if !self
+                .environment
+                .keys()
+                .all(|name| names.insert(name.to_ascii_uppercase()))
+            {
+                return Err("Environment variable names must be unique on this device.".into());
+            }
+        }
+        for (name, value) in &self.environment {
+            if !valid_environment_name(name) {
+                return Err("Variable names must begin with a letter or underscore and contain only letters, numbers, and underscores.".into());
+            }
+            match value {
+                AcpVariable::Plain { value } if value.contains('\0') => {
+                    return Err(format!("The value for {name} contains a NUL character."))
+                }
+                AcpVariable::OnePassword { source, reference }
+                    if source.is_empty() || !reference.starts_with("op://") =>
+                {
+                    return Err(format!(
+                        "Choose a 1Password source and reference for {name}."
+                    ))
+                }
+                _ => {}
+            }
+        }
+        if self.driver == Some(AcpDriver::Kiro) {
+            let defaults = Self::kiro(String::new(), String::new(), "");
+            if self.registry.is_some() || self.args != defaults.args || self.modes != defaults.modes
+                || self.mode_config_id != defaults.mode_config_id || self.model_config_id.is_some() {
+                return Err("Kiro instances require the Kiro V3 launch and access settings.".into());
+            }
         }
         for model in &self.models {
             format!("acp/{}/{model}", self.id)
@@ -161,10 +342,15 @@ impl UsageTotal {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuotaWindow {
+    /// Provider identity when independent windows share a display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
     pub provider: String,
     pub account: String,
     pub name: String,
     pub used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_minutes: Option<u32>,
     pub resets_at: Option<i64>,
     pub observed_at: i64,
 }
@@ -260,12 +446,59 @@ mod tests {
         assert!((priced.estimated_usd.unwrap() - 0.00056).abs() < 1e-12);
     }
     #[test]
+    fn environment_rows_keep_entry_order_across_serialization() {
+        let raw = r##"{"id":"work","name":"Work","command":"agent","environment":{"Z":{"kind":"plain","value":"last alphabetically"},"A":{"kind":"plain","value":""}}}"##;
+        let agent: AcpInstance = serde_json::from_str(raw).unwrap();
+        let restored: AcpInstance =
+            serde_json::from_slice(&serde_json::to_vec(&agent).unwrap()).unwrap();
+        assert_eq!(
+            restored
+                .environment
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["Z", "A"]
+        );
+    }
+
+    #[test]
+    fn optional_acp_accent_round_trips_with_legacy_config() {
+        let mut agent: AcpInstance = serde_json::from_value(serde_json::json!({
+            "id":"local", "name":"Local", "command":"agent"
+        }))
+        .unwrap();
+        assert!(agent.validate().is_ok());
+        assert!(serde_json::to_value(&agent)
+            .unwrap()
+            .get("accent_color")
+            .is_none());
+        agent.accent_color = Some("#17B89a".into());
+        assert!(agent.validate().is_ok());
+        assert_eq!(
+            parse_accent_color(agent.accent_color.as_ref().unwrap()),
+            Some(0x17b89a)
+        );
+        assert_eq!(
+            serde_json::from_value::<AcpInstance>(serde_json::to_value(&agent).unwrap()).unwrap(),
+            agent
+        );
+        for invalid in ["", "#123", "#aabbccdd", "abcdef", "#+12345", "#az1234"] {
+            agent.accent_color = Some(invalid.into());
+            assert!(agent.validate().is_err());
+        }
+    }
+
+    #[test]
     fn rejects_duplicate_agents_and_invalid_prices() {
         let agent = AcpInstance {
+            driver: None,
             id: "a".into(),
             name: "Agent".into(),
+            registry: None,
+            accent_color: None,
             command: "agent".into(),
             args: vec![],
+            environment: Default::default(),
             models: vec!["default".into()],
             modes: BTreeMap::new(),
             mode_config_id: None,

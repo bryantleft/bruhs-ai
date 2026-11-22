@@ -425,9 +425,33 @@ where
 pub enum TaskKind {
     #[default]
     Shell,
+    /// A delegated subagent spawned inside a thread (`invoke_subagent`, `Agent`, `Task`, `spawn_agent`).
+    Subagent,
+    /// A teamwork / swarm worker (`swarm` add).
+    Swarm,
+    /// An asynchronous background agent or workflow (`delegate_task`, `run_workflow`, background `Agent`).
+    BackgroundAgent,
     /// A kind this build does not know.
     #[serde(other)]
     Other,
+}
+
+impl TaskKind {
+    /// Short badge text for the Tasks panel on desktop and web.
+    pub const fn badge_label(self) -> &'static str {
+        match self {
+            Self::Shell => "Shell",
+            Self::Subagent => "Subagent",
+            Self::Swarm => "Teamwork",
+            Self::BackgroundAgent => "Agent",
+            Self::Other => "Task",
+        }
+    }
+
+    /// True for subagents, teamwork workers, and background agents.
+    pub const fn is_agent_work(self) -> bool {
+        matches!(self, Self::Subagent | Self::Swarm | Self::BackgroundAgent)
+    }
 }
 
 /// Lifecycle of a background task.
@@ -441,6 +465,13 @@ pub enum TaskStatus {
     /// A status this build does not know.
     #[serde(other)]
     Unknown,
+}
+
+impl TaskStatus {
+    /// Whether a finished task completed cleanly (`Exited` with exit code 0 or no exit code).
+    pub const fn succeeded(self, exit_code: Option<i32>) -> bool {
+        matches!(self, Self::Exited) && matches!(exit_code, None | Some(0))
+    }
 }
 
 /// A background shell the agent started (`GET /api/tasks`, the
@@ -501,6 +532,8 @@ pub struct AgentRequest {
     /// Claude `--effort`. Omitted for Codex and when the CLI default should stand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "crate::agent_extensions::KiroSelection::is_empty")]
+    pub kiro_selection: crate::agent_extensions::KiroSelection,
     /// Claude `--autocompact`. Omitted when unset, and never sent to Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocompact: Option<String>,

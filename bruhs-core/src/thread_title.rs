@@ -2,9 +2,9 @@
 mod conversation;
 mod links;
 use crate::prompt_suggestion::{
-    isolated_agent_reply, unfence, usage_permits, Instructions, ReplyUse, SuggestionError,
+    isolated_agent_reply, unfence, usage_permits_in_project, Instructions, ReplyUse, SuggestionError,
 };
-use bruhs_models::{agent::model_info, delivery::generation::GenerationOptions};
+use bruhs_models::delivery::{generation::GenerationOptions, writer_catalog::cli_provider};
 pub use conversation::{conversation, Conversation, TitleTurn};
 use std::time::Duration;
 
@@ -146,7 +146,7 @@ pub async fn title_with_source(
     if !links.is_empty() {
         data["linked_subjects"] = links.into();
     }
-    generate_text(model, None, message.files, data, &instructions, 120).await
+    generate_text(cwd, model, None, message.files, data, &instructions, 120).await
 }
 
 /// Generate a branch name in the same isolated provider session used for short text.
@@ -155,9 +155,10 @@ pub async fn branch_name<'a>(
     first_message: impl Into<FirstMessage<'a>>,
     naming: &bruhs_models::logic::run_place::branch_naming::Naming,
 ) -> Result<String, SuggestionError> {
-    branch_name_with_options(model, None, first_message, naming).await
+    branch_name_with_options(std::path::Path::new(""), model, None, first_message, naming).await
 }
 pub(crate) async fn branch_name_with_options<'a>(
+    project: &std::path::Path,
     model: &str,
     generation: Option<&GenerationOptions>,
     first_message: impl Into<FirstMessage<'a>>,
@@ -179,10 +180,11 @@ pub(crate) async fn branch_name_with_options<'a>(
         return Err(SuggestionError::InvalidRequest);
     }
     let data = serde_json::json!({"first_message": message.text.chars().take(4096).collect::<String>(), "title_style": style.chars().take(4096).collect::<String>()});
-    generate_text(model, generation, message.files, data, "Name a Git branch for the supplied first message. Use attached images as primary context for visual issues. Follow the supplied naming instructions. Return only JSON with a single string field \"title\" containing the complete proposed name. Never use tools.", 4096).await
+    generate_text(project, model, generation, message.files, data, "Name a Git branch for the supplied first message. Use attached images as primary context for visual issues. Follow the supplied naming instructions. Return only JSON with a single string field \"title\" containing the complete proposed name. Never use tools.", 4096).await
 }
 
 async fn generate_text(
+    project: &std::path::Path,
     model: &str,
     generation: Option<&GenerationOptions>,
     files: &[UploadedFile],
@@ -201,6 +203,7 @@ async fn generate_text(
     data["attachments"] = attachments.into();
     let prompt = data.to_string();
     let reply = run_text(
+        project,
         model,
         generation,
         &prompt,
@@ -212,12 +215,14 @@ async fn generate_text(
 }
 
 pub(crate) async fn isolated_text(
+    project: &std::path::Path,
     model: &str,
     generation: Option<&GenerationOptions>,
     prompt: &str,
     instructions: &str,
 ) -> Result<String, SuggestionError> {
     run_text(
+        project,
         model,
         generation,
         prompt,
@@ -228,6 +233,7 @@ pub(crate) async fn isolated_text(
 }
 
 async fn run_text(
+    project: &std::path::Path,
     model: &str,
     generation: Option<&GenerationOptions>,
     prompt: &str,
@@ -239,21 +245,18 @@ async fn run_text(
         let images = match purpose { ReplyUse::Naming(images) => images, _ => &[] };
         return tokio::time::timeout(deadline, crate::text_generators::generate(model, instructions, prompt, images)).await.map_err(|_| SuggestionError::TimedOut)?.map_err(SuggestionError::Provider);
     }
-    let info = model_info(model).ok_or(SuggestionError::InvalidRequest)?;
-    if info.provider.is_external() {
-        return Err(SuggestionError::InvalidRequest);
-    }
+    let provider = cli_provider(model).ok_or(SuggestionError::InvalidRequest)?;
     tokio::time::timeout(
         deadline,
         async {
-            if !usage_permits(info.provider).await {
+            if !usage_permits_in_project(provider, project).await {
                 return Err(SuggestionError::UsageReserved);
             }
             let workspace = tokio::task::spawn_blocking(tempfile::tempdir)
                 .await
                 .map_err(std::io::Error::other)??;
             isolated_agent_reply(
-                info.provider,
+                provider,
                 prompt,
                 model,
                 &Instructions {
@@ -262,6 +265,7 @@ async fn run_text(
                     generation,
                 },
                 workspace.path(),
+                project,
                 purpose,
             )
             .await

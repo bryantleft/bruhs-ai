@@ -5,13 +5,47 @@ use sha2::{Digest, Sha256};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AccessScope {
     Owner,
+    Keybindings { editable: bool },
+    Projects,
+    ProjectNames,
+    ProjectUsage { #[serde(default)] rename: bool },
+    ProjectSchedules {
+        #[serde(default)]
+        rename: bool,
+        #[serde(default)]
+        toggle: bool,
+        #[serde(default)]
+        run: bool,
+        #[serde(default)]
+        delete: bool,
+        #[serde(default)]
+        deliveries: bool,
+        #[serde(default)]
+        edit: bool,
+        #[serde(default)]
+        conversations: bool,
+        #[serde(default)]
+        read_threads: bool,
+        #[serde(default)]
+        reply_threads: bool,
+        #[serde(default)]
+        usage: bool,
+    },
     Guest { task_id: ThreadId },
+}
+
+impl AccessScope {
+    pub fn shares_usage(&self) -> bool {
+        matches!(self, Self::ProjectUsage { .. } | Self::ProjectSchedules { usage: true, .. })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccessGrant {
     pub id: String,
     pub scope: AccessScope,
+    #[serde(default)]
+    pub provider_updates: bool,
     pub expires_at: EpochMs,
 }
 
@@ -29,6 +63,18 @@ impl CoordinationRuntime {
         scope: AccessScope,
         lifetime_seconds: u32,
     ) -> Result<IssuedAccess, CoordinationError> {
+        self.issue_access_with_updates(scope, lifetime_seconds, false).await
+    }
+
+    pub async fn issue_access_with_updates(
+        &self,
+        scope: AccessScope,
+        lifetime_seconds: u32,
+        provider_updates: bool,
+    ) -> Result<IssuedAccess, CoordinationError> {
+        if provider_updates && !matches!(&scope, AccessScope::Projects | AccessScope::ProjectNames | AccessScope::ProjectUsage { .. } | AccessScope::ProjectSchedules { .. }) {
+            return Err(invalid("Provider updates require a Projects grant."));
+        }
         if lifetime_seconds == 0 {
             return Err(invalid("Choose an access lifetime greater than zero."));
         }
@@ -52,6 +98,7 @@ impl CoordinationRuntime {
         let grant = AccessGrant {
             id: uuid::Uuid::new_v4().to_string(),
             scope,
+            provider_updates,
             expires_at,
         };
         data.grants.insert(digest(&token), grant.clone());
@@ -76,6 +123,10 @@ impl CoordinationRuntime {
     }
 
     pub async fn authorize(&self, token: &str) -> Result<AccessScope, CoordinationError> {
+        Ok(self.authorize_grant(token).await?.scope)
+    }
+
+    pub async fn authorize_grant(&self, token: &str) -> Result<AccessGrant, CoordinationError> {
         let data = self.0.data.lock().await;
         let grant = data
             .grants
@@ -87,7 +138,7 @@ impl CoordinationRuntime {
                 return Err(CoordinationError::Unauthorized);
             }
         }
-        Ok(grant.scope.clone())
+        Ok(grant.clone())
     }
 
     pub async fn scoped_snapshot(
@@ -96,6 +147,7 @@ impl CoordinationRuntime {
     ) -> Result<CoordinationSnapshot, CoordinationError> {
         match scope {
             AccessScope::Owner => Ok(self.snapshot().await),
+            AccessScope::Projects | AccessScope::ProjectUsage { .. } | AccessScope::ProjectNames | AccessScope::ProjectSchedules { .. } | AccessScope::Keybindings { .. } => Err(CoordinationError::Unauthorized),
             AccessScope::Guest { task_id } => {
                 let mut task = self.task(task_id).await?;
                 task.approvals.clear();

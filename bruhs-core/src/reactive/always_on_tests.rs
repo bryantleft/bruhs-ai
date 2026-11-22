@@ -807,16 +807,20 @@ async fn run_now_targets_one_paused_task_and_preserves_its_regular_schedule() {
             .await
             .unwrap();
     }
-    let request = || ReactiveCommand::RunScheduledTask {
-        id: "manual".into(),
-        run_id: "owner-request".into(),
-    };
-    runtime.command(request()).await.unwrap();
-    let snapshot = runtime.command(request()).await.unwrap();
+    let request_id = uuid::Uuid::new_v4();
+    let (first, duplicate) = tokio::join!(
+        runtime.run_linked_schedule("manual".into(), request_id),
+        runtime.run_linked_schedule("manual".into(), request_id)
+    );
+    first.unwrap();
+    duplicate.unwrap();
+    let snapshot = runtime.command(ReactiveCommand::RunScheduledTask {
+        id: "manual".into(), run_id: request_id.to_string(),
+    }).await.unwrap();
     assert!(snapshot.events.is_empty());
     assert_eq!(snapshot.runs.len(), 1);
     let manual = claim_one(&runtime).await.unwrap().run;
-    assert_eq!(manual.id, "owner-request");
+    assert_eq!(manual.id, request_id.to_string());
     assert_eq!(manual.trigger, Some(RunTrigger::ManualTask));
     assert_eq!(manual.subscription_id.as_deref(), Some("manual"));
     assert!(

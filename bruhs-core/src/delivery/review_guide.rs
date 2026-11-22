@@ -1,7 +1,7 @@
 //! Revision-bound guided tours of forge diffs. Only the host reads change data.
 mod patch;
 use super::{DeliveryError, DeliveryResult, DeliveryService};
-use bruhs_models::{agent::model_info, delivery::*};
+use bruhs_models::delivery::*;
 use patch::Patch;
 use serde::Deserialize;
 use serde_json::json;
@@ -597,9 +597,8 @@ async fn generate(
     preferences: &str,
 ) -> DeliveryResult<Vec<GuideStop>> {
     use crate::prompt_suggestion::{isolated_agent_reply, unfence, Instructions, ReplyUse};
-    let provider = model_info(model)
-        .ok_or_else(|| invalid("The review guide model is unavailable."))?
-        .provider;
+    let provider = writer_catalog::cli_provider(model)
+        .ok_or_else(|| invalid("The review guide model is unavailable."))?;
     let pull = source.pull;
     let paths: Vec<_> = patch.files.keys().map(String::as_str).collect();
     if paths.is_empty() {
@@ -640,6 +639,7 @@ async fn generate(
                 generation,
             },
             cwd.path(),
+            source.path,
             ReplyUse::RequestedGuide,
         )
         .await

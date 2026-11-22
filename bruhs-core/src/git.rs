@@ -27,6 +27,8 @@ mod clone_fs;
 #[cfg(target_os = "macos")]
 pub mod checkout_cache;
 mod project_clone;
+mod project_identity;
+pub use project_identity::{project_identity, ProjectIdentity};
 mod project_setup;
 mod thread_worktree;
 pub use thread_worktree::{ThreadCheckout, prepare_thread_worktree};
@@ -822,7 +824,7 @@ async fn add_worktree_inner(
             && resolve(repo) != resolve(dest)
             && worktree_branch(repo, dest).await?.flatten().as_deref() == Some(branch.as_str())
         {
-            return initialize_worktree_submodules(dest, prefs.submodules).await;
+            return initialize_worktree_submodules(repo, dest, prefs.submodules).await;
         }
         return Err(GitError::Failed(
             "worktree destination already exists".into(),
@@ -862,7 +864,7 @@ async fn add_worktree_inner(
     if let Some(identity) = new_thread {
         thread_worktree::write_owner(dest, branch.as_str(), identity).await?;
     }
-    initialize_worktree_submodules(dest, prefs.submodules).await?;
+    initialize_worktree_submodules(repo, dest, prefs.submodules).await?;
     let seeded = seed_worktree_build_dirs(repo, dest).await;
     if !seeded.is_empty() {
         tracing::info!(
@@ -893,15 +895,86 @@ async fn register_checkout(
     if out.success() { Ok(()) } else { Err(out.failure()) }
 }
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectCheckoutDefaults {
+    pub submodules: Option<bruhs_models::logic::run_place::WorktreeSubmodules>,
+    pub placement: Option<bruhs_models::logic::run_place::WorkspaceChoice>,
+}
+
+/// Read the repository defaults off the UI thread. An absent or invalid field inherits.
+pub fn project_checkout_defaults(project: &Path) -> ProjectCheckoutDefaults {
+    use bruhs_models::logic::run_place::{WorkspaceChoice, WorktreeSubmodules};
+    let Some(config) = read_project_config(project) else {
+        return ProjectCheckoutDefaults::default();
+    };
+    ProjectCheckoutDefaults {
+        submodules: config
+            .get("worktreeSubmodules")
+            .and_then(|v| v.as_str())
+            .and_then(WorktreeSubmodules::parse_choice),
+        placement: match config.get("defaultThreadEnvMode").and_then(|v| v.as_str()) {
+            Some("local") => Some(WorkspaceChoice::Checkout),
+            Some("worktree") => Some(WorkspaceChoice::NewWorktree),
+            _ => None,
+        },
+    }
+}
+
+pub fn project_submodules(
+    project: &Path,
+) -> Option<bruhs_models::logic::run_place::WorktreeSubmodules> {
+    project_checkout_defaults(project).submodules
+}
+
+fn read_project_config(project: &Path) -> Option<serde_json::Value> {
+    use std::io::Read;
+
+    const MAX_BYTES: u64 = 64 * 1024;
+    let path = project.join("t3.json");
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    if !std::fs::symlink_metadata(&path).ok()?.is_file() {
+        return None;
+    }
+    let file = options.open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > MAX_BYTES {
+        return None;
+    }
+    let mut data = Vec::new();
+    file.take(MAX_BYTES + 1).read_to_end(&mut data).ok()?;
+    if data.len() as u64 > MAX_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&data).ok()
+}
+
 async fn initialize_worktree_submodules(
+    project: &Path,
     checkout: &Path,
     mode: bruhs_models::logic::run_place::WorktreeSubmodules,
 ) -> Result<(), GitError> {
     use bruhs_models::logic::run_place::WorktreeSubmodules;
+    let mode = if mode == WorktreeSubmodules::FromProject {
+        let project = project.to_path_buf();
+        tokio::task::spawn_blocking(move || project_submodules(&project))
+            .await
+            .map_err(|err| GitError::Failed(err.to_string()))?
+            .unwrap_or(WorktreeSubmodules::Recursive)
+    } else {
+        mode
+    };
     let args: &[&str] = match mode {
         WorktreeSubmodules::None => return Ok(()),
         WorktreeSubmodules::TopLevel => &["submodule", "update", "--init"],
-        WorktreeSubmodules::Recursive => &["submodule", "update", "--init", "--recursive"],
+        WorktreeSubmodules::FromProject | WorktreeSubmodules::Recursive => {
+            &["submodule", "update", "--init", "--recursive"]
+        }
     };
     let update = GitCommand::new(checkout, args)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -1441,10 +1514,21 @@ mod tests {
         repo.git(&["commit", "-qm", "submodule"]);
         let output = tempfile::tempdir().unwrap();
         let dest = output.path().join("thread");
-        add_worktree(repo.path(), "main", &dest, "bruhs/module")
+        // The caller sees an uncommitted repository preference on the original checkout.
+        repo.write("t3.json", r#"{"worktreeSubmodules":"none"}"#);
+        let prefs = WorktreePreferences {
+            submodules: WorktreeSubmodules::FromProject,
+            ..Default::default()
+        };
+        add_worktree_with_preferences(repo.path(), "main", &dest, "bruhs/module", prefs)
             .await
             .unwrap();
         assert!(!dest.join("module/README.md").exists());
+        repo.write("t3.json", r#"{"worktreeSubmodules":"recursive"}"#);
+        assert_eq!(
+            project_submodules(repo.path()),
+            Some(WorktreeSubmodules::Recursive)
+        );
         // A registered checkout can resume using an existing local clone without
         // changing Git’s security policy for submodule transports.
         repo.git(&[
@@ -1453,18 +1537,9 @@ mod tests {
             sub.path().to_str().unwrap(),
             dest.join("module").to_str().unwrap(),
         ]);
-        add_worktree_with_preferences(
-            repo.path(),
-            "main",
-            &dest,
-            "bruhs/module",
-            WorktreePreferences {
-                submodules: WorktreeSubmodules::Recursive,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        add_worktree_with_preferences(repo.path(), "main", &dest, "bruhs/module", prefs)
+            .await
+            .unwrap();
         assert!(dest.join("module/README.md").is_file());
     }
 

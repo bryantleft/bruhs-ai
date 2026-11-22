@@ -1,6 +1,7 @@
 //! Reviewable repository delivery operations shared by native and web clients.
 
 pub mod generation;
+pub mod writer_catalog;
 use generation::GenerationOptions;
 use serde::{Deserialize, Serialize};
 

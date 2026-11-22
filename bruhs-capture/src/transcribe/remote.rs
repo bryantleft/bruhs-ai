@@ -3,7 +3,8 @@
 
 use super::{segment_sink::SegmentSink, whisper::DecodedSegment};
 use crate::state::CaptureState;
-use bruhs_models::cloud_speech::Provider as CloudProvider;
+use bruhs_models::cloud_speech::{Provider as CloudProvider, SpeechHints};
+use bruhs_models::local_tools::DictationOptions;
 use bruhs_models::{num::ToIntSaturating, TranscriptSegment};
 use reqwest::{header, multipart, redirect, Client, Url};
 use serde::Deserialize;
@@ -93,6 +94,7 @@ impl RemoteProvider {
             Ok(Some(remote)) => Ok(RemoteJob {
                 remote: remote.clone(),
                 cloud: None,
+                hints: SpeechHints::default(),
                 model: model.trim().to_owned(),
             }),
             Ok(None) => Err(RemoteError::Configuration(
@@ -180,6 +182,7 @@ fn remote_client(
 pub struct RemoteJob {
     remote: RemoteClient,
     cloud: Option<CloudProvider>,
+    hints: SpeechHints,
     model: String,
 }
 
@@ -196,6 +199,7 @@ impl RemoteJob {
         provider: CloudProvider,
         model: String,
         key: &str,
+        hints: SpeechHints,
     ) -> Result<Self, RemoteError> {
         let (base, path) = match provider {
             CloudProvider::OpenAi => ("https://api.openai.com/v1", None),
@@ -210,6 +214,7 @@ impl RemoteJob {
         Ok(Self {
             remote,
             cloud: Some(provider),
+            hints,
             model,
         })
     }
@@ -219,13 +224,16 @@ impl RemoteJob {
     pub async fn dictate(
         &self,
         wav: Vec<u8>,
-        language: Option<&str>,
+        options: &DictationOptions,
     ) -> Result<String, RemoteError> {
         if wav.len() > MAX_UPLOAD_BYTES {
             return Err(RemoteError::Response(
                 "This recording exceeds the transcription service’s file limit.",
             ));
         }
+        let language = options.language.as_deref().filter(|code| {
+            self.cloud.is_none() || bruhs_models::cloud_speech::LANGUAGES.contains(code)
+        });
         let request = self.remote.client.post(self.remote.endpoint.clone());
         let request = if self.cloud == Some(CloudProvider::OpenRouter) {
             use base64::Engine as _;
@@ -254,6 +262,29 @@ impl RemoteJob {
                 form = form.text(field, language.to_owned());
                 if self.cloud == Some(CloudProvider::Xai) {
                     form = form.text("format", "true");
+                }
+            }
+            if let Some(provider) = self.cloud {
+                let field = if provider == CloudProvider::OpenAi {
+                    "keywords[]"
+                } else {
+                    "keyterm"
+                };
+                for term in &self.hints.terms {
+                    if provider == CloudProvider::OpenAi && term.contains(['<', '>', '\r', '\n']) {
+                        continue;
+                    }
+                    form = form.text(field, term.clone());
+                }
+                if provider == CloudProvider::Xai {
+                    form = form.text(
+                        "filler_words",
+                        (!options.remove_filler_words || self.hints.preserve_correction_words)
+                            .to_string(),
+                    );
+                    if !options.silence_filtering {
+                        form = form.text("vad_threshold", "0");
+                    }
                 }
             }
             request.multipart(form)

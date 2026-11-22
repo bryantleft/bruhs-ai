@@ -60,6 +60,38 @@ async fn save(runtime: &ReactiveRuntime, automation: AutomationSetup) -> Reactiv
 }
 
 #[tokio::test]
+async fn scheduled_task_inventory_projects_only_shared_metadata() {
+    let (_dir, runtime) = empty_runtime().await;
+    let mut automation = setup();
+    save(&runtime, automation.clone()).await;
+    assert!(runtime.scheduled_task_inventory().await.unwrap().is_empty());
+    assert!(matches!(runtime.set_linked_schedule_enabled("paperwork".into(), false).await, Err(ReactiveError::NotFound(_))));
+    assert!(matches!(runtime.delete_linked_schedule("paperwork".into()).await, Err(ReactiveError::NotFound(_))));
+    assert!(runtime.snapshot().await.unwrap().subscriptions[0].enabled);
+    automation.source.kind = SourceKind::Webhook;
+    automation.source.enabled = false;
+    automation.subscription.task_title = Some("Daily review".into());
+    save(&runtime, automation.clone()).await;
+    let tasks = runtime.scheduled_task_inventory().await.unwrap();
+    assert_eq!(serde_json::to_value(tasks).unwrap(), json!([{
+        "id": "paperwork", "title": "Daily review", "schedule": {"type": "webhook"}, "next_run_at": null,
+        "project_path": automation.agent.project_path, "enabled": false
+    }]));
+    let id = automation.subscription.id.clone();
+    for enabled in [true, true, false, false] {
+        let summary = runtime.set_linked_schedule_enabled(id.clone(), enabled).await.unwrap();
+        assert_eq!(summary.enabled, enabled);
+        assert_eq!(runtime.scheduled_task_inventory().await.unwrap(), vec![summary]);
+    }
+    runtime.delete_linked_schedule(id.clone()).await.unwrap();
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(snapshot.subscriptions.is_empty());
+    assert_eq!(snapshot.agents[0].id, automation.agent.id);
+    assert_eq!(snapshot.sources[0].id, automation.source.id);
+    assert!(matches!(runtime.delete_linked_schedule(id).await, Err(ReactiveError::NotFound(_))));
+}
+
+#[tokio::test]
 async fn a_single_review_activates_the_whole_setup_and_automatic_read_only_drafts() {
     let (_dir, runtime) = empty_runtime().await;
     let automation = setup();
@@ -266,7 +298,8 @@ async fn pausing_one_automation_keeps_shared_work_and_agent_chat_available() {
 async fn activation_never_wakes_another_enabled_subscription_through_shared_dependencies() {
     for dependency in ["agent", "source", "both"] {
         let (_dir, runtime) = empty_runtime().await;
-        let first = setup();
+        let mut first = setup();
+        first.source.kind = SourceKind::Webhook;
         save(&runtime, first.clone()).await;
         let mut other = first.subscription.clone();
         other.id = "other".into();
@@ -299,6 +332,7 @@ async fn activation_never_wakes_another_enabled_subscription_through_shared_depe
                 .unwrap();
         }
         let before = runtime.snapshot().await.unwrap();
+        assert!(matches!(runtime.set_linked_schedule_enabled("paperwork".into(), true).await, Err(ReactiveError::Conflict(_))));
         let error = runtime
             .command(ReactiveCommand::SetAutomationEnabled {
                 id: "paperwork".into(),
@@ -615,4 +649,244 @@ async fn webhook_security_survives_restart_and_expires_from_trusted_arrival() {
     runtime.command(save_task(&disabled, None)).await.unwrap();
     assert!(runtime.command(save_task(&task, None)).await.is_err());
     assert_eq!(runtime.snapshot().await.unwrap().runs.len(), 2);
+}
+
+#[tokio::test]
+async fn linked_task_editor_confines_components_and_retries_and_detects_stale_edits() {
+    let (_dir, host) = empty_runtime().await;
+    let mut unrelated = setup();
+    unrelated.agent.memory = "private scratchpad".into();
+    save(&host, unrelated.clone()).await;
+    let paths = vec![unrelated.agent.project_path.clone()];
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut draft = unrelated.clone();
+    draft.agent.memory.clear();
+    draft.subscription.id = id.clone();
+    draft.source.kind = SourceKind::Webhook;
+    let create = LinkedTaskSave {
+        request_id: uuid::Uuid::new_v4(),
+        expected: None,
+        setup: draft,
+        enabled: false,
+        signing_secret: None,
+        destination: None,
+    };
+    assert!(
+        host.save_linked_task(id.clone(), create.clone(), vec![])
+            .await
+            .is_err()
+    );
+    let first = host
+        .save_linked_task(id.clone(), create.clone(), paths.clone())
+        .await
+        .unwrap();
+    assert!(!first.enabled);
+    assert_eq!(
+        host.save_linked_task(id.clone(), create.clone(), paths.clone())
+            .await
+            .unwrap(),
+        first
+    );
+    let def = host.linked_task_definition(id.clone()).await.unwrap();
+    assert_ne!(def.setup.agent.id, unrelated.agent.id);
+    assert_ne!(def.setup.source.id, unrelated.source.id);
+    let mut edited = LinkedTaskSave {
+        request_id: uuid::Uuid::new_v4(),
+        expected: Some(def.revision),
+        setup: def.setup,
+        enabled: true,
+        signing_secret: None,
+        destination: None,
+    };
+    let mut invalid = edited.clone();
+    invalid.setup.source.id.clone_from(&unrelated.source.id);
+    assert!(
+        host.save_linked_task(id.clone(), invalid, paths.clone())
+            .await
+            .is_err()
+    );
+    edited.setup.subscription.task_title = Some("Renamed on host".into());
+    let saved = host
+        .save_linked_task(id.clone(), edited.clone(), paths.clone())
+        .await
+        .unwrap();
+    assert!(saved.enabled);
+    assert_eq!(saved.title, "Renamed on host");
+    assert_eq!(
+        host.save_linked_task(id.clone(), edited.clone(), paths.clone())
+            .await
+            .unwrap(),
+        saved
+    );
+    edited.request_id = uuid::Uuid::new_v4();
+    assert!(matches!(
+        host.save_linked_task(id.clone(), edited, paths).await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    assert!(
+        host.linked_task_definition(unrelated.subscription.id.clone())
+            .await
+            .is_err()
+    );
+    let snapshot = host.snapshot().await.unwrap();
+    assert!(
+        snapshot.agents.contains(&unrelated.agent) && snapshot.sources.contains(&unrelated.source)
+    );
+    host.delete_linked_schedule(id.clone()).await.unwrap();
+    assert!(matches!(
+        host.save_linked_task(id, create, vec![unrelated.agent.project_path])
+            .await,
+        Err(ReactiveError::Conflict(_))
+    ));
+}
+
+#[tokio::test]
+async fn linked_task_conversation_resolves_the_host_agent_and_detaches_without_changing_it() {
+    let (dir, host) = empty_runtime().await;
+    let mut owner = setup();
+    owner.source.kind = SourceKind::Schedule { every_ms: 3600000 };
+    owner.agent.memory = "Private notes for the original agent".into();
+    owner.subscription.task_conversation = TaskConversation::Continue;
+    save(&host, owner.clone()).await;
+    let run = |id: &str| ReactiveCommand::RunScheduledTask {
+        id: id.into(),
+        run_id: uuid::Uuid::new_v4().to_string(),
+    };
+    host.command(run(&owner.subscription.id)).await.unwrap();
+    let project = owner.agent.project_path.clone();
+    let thread = host
+        .task_threads(project.clone(), "".into())
+        .await
+        .unwrap()
+        .remove(0);
+    let mut draft = setup();
+    draft.source.kind = SourceKind::Schedule { every_ms: 3600000 };
+    draft.subscription.id = uuid::Uuid::new_v4().to_string();
+    draft.subscription.task_conversation = TaskConversation::Continue;
+    draft.subscription.task_title = Some("Follow-up".into());
+    draft.agent.instructions = "Client provided agent settings".into();
+    let id = draft.subscription.id.clone();
+    let mut edit = LinkedTaskSave {
+        request_id: uuid::Uuid::new_v4(),
+        expected: None,
+        setup: draft,
+        enabled: false,
+        signing_secret: None,
+        destination: Some(TaskDestinationEdit::Existing {
+            thread_id: thread.thread_id.clone(),
+        }),
+    };
+    edit.setup.agent.project_path = "/other".into();
+    assert!(
+        host.save_linked_task(id.clone(), edit.clone(), vec!["/other".into()])
+            .await
+            .is_err()
+    );
+    edit.setup.agent.project_path = project.clone();
+    host.save_linked_task(id.clone(), edit.clone(), vec![project.clone()])
+        .await
+        .unwrap();
+    host.save_linked_task(id.clone(), edit.clone(), vec![project.clone()])
+        .await
+        .unwrap();
+    host.command(run(&id)).await.unwrap();
+    assert!(
+        host.snapshot()
+            .await
+            .unwrap()
+            .runs
+            .iter()
+            .any(|r| r.subscription_id.as_ref() == Some(&id) && r.thread_id == thread.thread_id)
+    );
+    drop(host);
+    let host = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
+    let saved = host.linked_task_definition(id.clone()).await.unwrap();
+    assert!(
+        saved.agent_locked
+            && saved.conversation_chosen
+            && saved.setup.agent.memory.is_empty()
+            && saved.setup.agent.instructions.is_empty()
+    );
+    assert_eq!(saved.conversation.unwrap().thread_id, thread.thread_id);
+    assert!(host.linked_schedule_inventory(false).await.unwrap().iter().all(|t| t.thread.is_none()));
+    let linked = host.linked_schedule_inventory(true).await.unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert_eq!(linked.thread.unwrap().id, thread.thread_id);
+    let reply = LinkedThreadReply { request_id: uuid::Uuid::new_v4(), message: "Reply after restart".into() };
+    for _ in 0..2 {
+        host.reply_to_linked_thread(id.clone(), thread.thread_id.clone(), reply.clone()).await.unwrap();
+    }
+    let page = host.linked_thread(id.clone(), thread.thread_id.clone(), None).await.unwrap();
+    assert_eq!(page.messages.iter().filter(|m| !m.assistant && m.text == reply.message).count(), 1);
+    assert!(!page.messages.iter().any(|m| m.text.contains("Private notes")));
+    edit.setup = saved.setup;
+    edit.expected = Some(saved.revision);
+    edit.request_id = uuid::Uuid::new_v4();
+    edit.destination = Some(TaskDestinationEdit::FirstRun {
+        previous: thread.thread_id.clone(),
+    });
+    host.save_linked_task(id.clone(), edit, vec![project])
+        .await
+        .unwrap();
+    assert!(host.linked_thread(id.clone(), thread.thread_id.clone(), None).await.is_err());
+    assert!(host.reply_to_linked_thread(id.clone(), thread.thread_id, reply).await.is_err());
+    let detached = host.linked_task_definition(id).await.unwrap();
+    assert!(detached.conversation.is_none());
+    assert_ne!(detached.setup.agent.id, owner.agent.id);
+    assert!(host.snapshot().await.unwrap().agents.contains(&owner.agent));
+}
+
+#[tokio::test]
+async fn linked_task_editor_preserves_host_memory_and_shared_trigger() {
+    let (_dir, host) = empty_runtime().await;
+    let mut setup = setup();
+    setup.source.kind = SourceKind::Webhook;
+    setup.agent.memory = "host-only context".into();
+    save(&host, setup.clone()).await;
+    let mut sibling = setup.clone();
+    sibling.subscription.id = "other".into();
+    save(&host, sibling.clone()).await;
+    let id = setup.subscription.id.clone();
+    let def = host.linked_task_definition(id.clone()).await.unwrap();
+    assert!(def.agent_locked && def.setup.agent.memory.is_empty());
+    let mut edit = LinkedTaskSave {
+        request_id: uuid::Uuid::new_v4(),
+        expected: Some(def.revision),
+        setup: def.setup,
+        enabled: true,
+        signing_secret: None,
+        destination: None,
+    };
+    edit.setup.agent.instructions = "overwrite a shared prompt".into();
+    assert!(matches!(
+        host.save_linked_task(id.clone(), edit.clone(), vec![])
+            .await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    edit.setup.agent.instructions = setup.agent.instructions.clone();
+    edit.setup.source.kind = SourceKind::Schedule {
+        every_ms: 3_600_000,
+    };
+    host.save_linked_task(id.clone(), edit, vec![])
+        .await
+        .unwrap();
+    assert_ne!(
+        host.linked_task_definition(id)
+            .await
+            .unwrap()
+            .setup
+            .source
+            .id,
+        setup.source.id
+    );
+    assert_eq!(
+        host.linked_task_definition(sibling.subscription.id)
+            .await
+            .unwrap()
+            .setup
+            .source,
+        setup.source
+    );
+    assert!(host.snapshot().await.unwrap().agents.contains(&setup.agent));
 }

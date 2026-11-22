@@ -6,7 +6,12 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bruhs_models::runtime_models::{cursor_list_error, parse_cursor_models, RuntimeModels};
+use bruhs_models::runtime_models::{
+    cursor_list_error, parse_acp_models, parse_antigravity_models, parse_cursor_models,
+    RuntimeModels,
+};
+use serde_json::{json, Value};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 use super::{executable, AgentProvider};
@@ -28,7 +33,7 @@ static LISTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// return an empty list without an error. A failed refresh keeps the models
 /// listed before and adds the error.
 pub(crate) async fn list(provider: AgentProvider) -> RuntimeModels {
-    if provider != AgentProvider::Cursor {
+    if !matches!(provider, AgentProvider::Cursor | AgentProvider::Antigravity) {
         return RuntimeModels::default();
     }
     if let Some(fresh) = cached(provider, Instant::now()) {
@@ -38,12 +43,38 @@ pub(crate) async fn list(provider: AgentProvider) -> RuntimeModels {
     if let Some(fresh) = cached(provider, Instant::now()) {
         return fresh;
     }
-    let listed = match executable(provider) {
-        Ok(program) => list_cursor(program.as_os_str(), LIST_TIMEOUT).await,
-        Err(error) => RuntimeModels {
-            models: Vec::new(),
-            error: Some(error.to_string()),
+    refresh_locked(provider).await
+}
+
+/// Refresh the signed-in account listing for an explicit status probe.
+pub(super) async fn refresh_cursor() -> RuntimeModels {
+    let _listing = LISTING.lock().await;
+    refresh_locked(AgentProvider::Cursor).await
+}
+
+/// Refresh the signed-in Antigravity model listing for an explicit status probe.
+pub(super) async fn refresh_antigravity() -> RuntimeModels {
+    let _listing = LISTING.lock().await;
+    refresh_locked(AgentProvider::Antigravity).await
+}
+
+async fn refresh_locked(provider: AgentProvider) -> RuntimeModels {
+    let listed = match provider {
+        AgentProvider::Cursor => match executable(provider) {
+            Ok(program) => list_cursor(program.as_os_str(), LIST_TIMEOUT).await,
+            Err(error) => RuntimeModels {
+                models: Vec::new(),
+                error: Some(error.to_string()),
+            },
         },
+        AgentProvider::Antigravity => match executable(provider) {
+            Ok(program) => list_antigravity(program.as_os_str(), LIST_TIMEOUT).await,
+            Err(error) => RuntimeModels {
+                models: Vec::new(),
+                error: Some(error.to_string()),
+            },
+        },
+        _ => RuntimeModels::default(),
     };
     store(provider, listed, Instant::now())
 }
@@ -139,6 +170,143 @@ async fn list_cursor(program: &OsStr, timeout: Duration) -> RuntimeModels {
             "Cursor printed a model list bruhs does not recognize. Check `cursor-agent --list-models`."
                 .into(),
         ),
+    }
+}
+
+const ACP_LIST_BYTES: u64 = 512 * 1024;
+
+/// Query `agy acp` (`initialize` + `session/new`) for its advertised Gemini and
+/// third-party models, falling back to the signed-in account's
+/// `fetchAvailableModels` endpoint when ACP does not return models.
+async fn list_antigravity(program: &OsStr, timeout: Duration) -> RuntimeModels {
+    let acp = list_antigravity_acp(program, timeout).await;
+    if !acp.models.is_empty() {
+        return acp;
+    }
+    if let Ok(Some(payload)) = crate::usage_hubs::antigravity_models().await {
+        let models = parse_antigravity_models(&payload);
+        if !models.is_empty() {
+            return RuntimeModels {
+                models,
+                error: None,
+            };
+        }
+    }
+    acp
+}
+
+async fn list_antigravity_acp(program: &OsStr, timeout: Duration) -> RuntimeModels {
+    let failed = |error: String| RuntimeModels {
+        models: Vec::new(),
+        error: Some(error),
+    };
+    let Ok(cwd) = tempfile::tempdir() else {
+        return failed("Antigravity could not prepare a probe directory.".into());
+    };
+    let mut command = Command::new(program);
+    command
+        .arg("acp")
+        .current_dir(cwd.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    crate::connections::protect_command(&mut command);
+    if let Ok(vars) = crate::secret_sources::for_target("antigravity").await {
+        for (key, value) in vars {
+            command.env(key, value);
+        }
+    }
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return failed("Antigravity CLI not found. Install it, then run `agy` to sign in.".into());
+        }
+        Err(error) => return failed(format!("Antigravity could not be started: {error}")),
+    };
+    #[cfg(unix)]
+    let _group = super::process::ProcessGroup::of(&child);
+    let Some(mut stdin) = child.stdin.take() else {
+        return failed("Antigravity ACP stdin unavailable.".into());
+    };
+    let Some(stdout) = child.stdout.take() else {
+        return failed("Antigravity ACP stdout unavailable.".into());
+    };
+    let cwd_str = cwd.path().to_string_lossy().to_string();
+    let probe = async move {
+        let init = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": 1,
+                "clientInfo": {"name": "bruhs", "version": env!("CARGO_PKG_VERSION")},
+                "clientCapabilities": {}
+            }
+        });
+        stdin
+            .write_all(format!("{init}\n").as_bytes())
+            .await
+            .map_err(|e| format!("Antigravity ACP write failed: {e}"))?;
+        let mut lines = BufReader::new(stdout.take(ACP_LIST_BYTES)).lines();
+        let mut initialized = false;
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| format!("Antigravity ACP read failed: {e}"))?
+        {
+            let Ok(frame) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if frame["id"] == 1 && frame.get("method").is_none() {
+                if let Some(err) = frame.get("error") {
+                    let msg = err["message"]
+                        .as_str()
+                        .unwrap_or("Antigravity ACP initialize failed.");
+                    return Err(msg.to_string());
+                }
+                initialized = true;
+                let new_session = json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/new",
+                    "params": {
+                        "cwd": cwd_str,
+                        "mcpServers": []
+                    }
+                });
+                stdin
+                    .write_all(format!("{new_session}\n").as_bytes())
+                    .await
+                    .map_err(|e| format!("Antigravity ACP session/new failed: {e}"))?;
+                continue;
+            }
+            if initialized && frame["id"] == 2 && frame.get("method").is_none() {
+                if let Some(err) = frame.get("error") {
+                    let msg = err["message"]
+                        .as_str()
+                        .unwrap_or("Sign in with `agy` to list Antigravity models.");
+                    return Err(msg.to_string());
+                }
+                return Ok(parse_acp_models(
+                    &frame["result"],
+                    AgentProvider::Antigravity,
+                ));
+            }
+        }
+        Err("Antigravity closed its ACP stream before listing models.".into())
+    };
+    match tokio::time::timeout(timeout, probe).await {
+        Ok(Ok(models)) => RuntimeModels {
+            models,
+            error: None,
+        },
+        Ok(Err(error)) => failed(error),
+        Err(_) => failed(format!(
+            "Antigravity did not list models within {timeout:?}."
+        )),
     }
 }
 
@@ -293,5 +461,23 @@ printf 'Available models\n\nauto - Auto (current, default)\ngpt-5 - GPT-5\n\nTip
         assert_eq!(cached(provider, later), Some(kept));
         assert_eq!(cached(provider, later + RETRY_AFTER), None);
         lock_cache().retain(|(cached, _, _)| *cached != provider);
+    }
+
+    #[tokio::test]
+    async fn lists_antigravity_gemini_models_from_acp_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let program = fixture(
+            &directory,
+            r#"[ "$1" = "acp" ] || exit 9
+read -r init || exit 1
+printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n'
+read -r sess || exit 1
+printf '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1","configOptions":[{"id":"model","type":"select","options":[{"value":"gemini-4-neon","name":"Gemini 4 Neon"},{"value":"gemini-4-argon","name":"Gemini 4 Argon"}]}]}}\n'
+"#,
+        );
+        let listed = list_antigravity_acp(program.as_os_str(), LIST_TIMEOUT).await;
+        assert_eq!(listed.error, None);
+        let ids: Vec<&str> = listed.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["antigravity/gemini-4-neon", "antigravity/gemini-4-argon"]);
     }
 }

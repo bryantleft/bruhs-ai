@@ -304,11 +304,23 @@ async fn cloud_destinations_use_the_selected_model_language_and_transport() {
         ),
     ] {
         let model = provider.fixed_model().unwrap_or("scratch/test");
-        let mut job = RemoteJob::cloud(provider, model.into(), "private-fixture-key").unwrap();
+        let hints = SpeechHints {
+            terms: vec!["Bruhs".into(), "Crème brûlée".into(), "<Scratch>".into()],
+            preserve_correction_words: true,
+        };
+        let mut job =
+            RemoteJob::cloud(provider, model.into(), "private-fixture-key", hints).unwrap();
         assert_eq!(job.remote.endpoint.as_str(), expected_url);
         job.remote.endpoint = Url::parse(&format!("{base}/audio/transcriptions")).unwrap();
+        let mut options = DictationOptions {
+            client_filters_text: false,
+            model: Default::default(),
+            language: Some("es".into()),
+            remove_filler_words: true,
+            silence_filtering: false,
+        };
         assert_eq!(
-            job.dictate(vec![1, 2, 3], Some("es")).await.unwrap(),
+            job.dictate(vec![1, 2, 3], &options).await.unwrap(),
             "synthetic result"
         );
         let (headers, bytes) = received.recv().await.unwrap();
@@ -322,6 +334,7 @@ async fn cloud_destinations_use_the_selected_model_language_and_transport() {
             );
             assert_eq!(json["provider"]["zdr"], true);
             assert_eq!(json["language"], "es");
+            assert_eq!(json.as_object().unwrap().len(), 4);
         } else {
             let body = String::from_utf8_lossy(&bytes);
             assert!(body.contains(&format!("name=\"model\"\r\n\r\n{model}")));
@@ -332,6 +345,35 @@ async fn cloud_destinations_use_the_selected_model_language_and_transport() {
             };
             assert!(body.contains(&format!("name=\"{field}\"\r\n\r\nes")));
             assert!(body.contains("filename=\"dictation.wav\""));
+            let field = if provider == CloudProvider::OpenAi {
+                "keywords[]"
+            } else {
+                "keyterm"
+            };
+            for term in ["Bruhs", "Crème brûlée"] {
+                assert!(body.contains(&format!("name=\"{field}\"\r\n\r\n{term}\r\n")));
+            }
+            assert_eq!(body.contains("<Scratch>"), provider == CloudProvider::Xai);
+            assert_eq!(
+                body.contains("name=\"vad_threshold\"\r\n\r\n0"),
+                provider == CloudProvider::Xai
+            );
+            assert_eq!(
+                body.contains("name=\"filler_words\"\r\n\r\ntrue"),
+                provider == CloudProvider::Xai
+            );
+        }
+        options.language = Some("cy".into());
+        options.silence_filtering = true;
+        job.hints.preserve_correction_words = false;
+        job.dictate(vec![4], &options).await.unwrap();
+        let (_, bytes) = received.recv().await.unwrap();
+        let body = String::from_utf8_lossy(&bytes);
+        assert!(!body.contains("language"));
+        assert!(!body.contains("vad_threshold"));
+        if provider == CloudProvider::Xai {
+            assert!(body.contains("name=\"filler_words\"\r\n\r\nfalse"));
+            assert!(!body.contains("name=\"format\""));
         }
     }
     server.abort();

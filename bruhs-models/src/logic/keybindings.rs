@@ -16,6 +16,66 @@ pub struct Keybinding {
     pub when: Option<String>,
 }
 
+/// A single settings edit, applied independently to each environment's rules.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum KeybindingEdit {
+    Upsert {
+        rule: Keybinding,
+        replace: Option<Keybinding>,
+    },
+    Remove {
+        rule: Keybinding,
+    },
+}
+
+impl KeybindingEdit {
+    pub fn apply(&self, rules: &mut Vec<Keybinding>) -> Result<(), &'static str> {
+        match self {
+            Self::Upsert { rule, replace } => {
+                if rule.command.trim().is_empty()
+                    || rule.command.len() > 256
+                    || rule.key.len() > 256
+                    || rule.when.as_ref().is_some_and(|s| s.len() > 1024)
+                    || !when_syntax_ok(rule.when.as_deref().unwrap_or(""))
+                    || (!rule.key.is_empty()
+                        && parse_chord(&rule.key, cfg!(target_os = "macos")).is_none())
+                {
+                    return Err("Enter a valid command, shortcut and condition.");
+                }
+                if let Some(previous) = replace {
+                    if previous.command != rule.command {
+                        return Err("A replacement must keep its command.");
+                    }
+                    if let Some(index) = rules.iter().position(|r| r == previous) {
+                        rules[index] = rule.clone();
+                        return Ok(());
+                    }
+                }
+                if !rules.contains(rule) {
+                    rules.push(rule.clone());
+                }
+            }
+            Self::Remove { rule } => {
+                if let Some(index) = rules.iter().position(|r| r == rule) {
+                    if rules.iter().filter(|r| r.command == rule.command).count() == 1 {
+                        rules[index].key.clear();
+                    } else {
+                        rules.remove(index);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EnvironmentKeybindings {
+    pub editable: bool,
+    pub rules: Vec<Keybinding>,
+}
+
 /// A key with its modifiers already resolved for this machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chord {
@@ -43,23 +103,34 @@ pub struct KeyContext {
     pub is_desktop: bool,
 }
 
+/// Condition names and their values in the current window. The editor and
+/// shortcut matcher share this list.
+pub fn condition_variables() -> impl Iterator<Item = &'static str> {
+    FLAGS.iter().map(|(name, _)| *name)
+}
+
+type FlagReader = fn(KeyContext) -> bool;
+const FLAGS: &[(&str, FlagReader)] = &[
+    ("terminalFocus", |ctx| ctx.terminal_focus),
+    ("terminalOpen", |ctx| ctx.terminal_open),
+    ("previewFocus", |ctx| ctx.preview_focus),
+    ("previewOpen", |ctx| ctx.preview_open),
+    ("modelPickerOpen", |ctx| ctx.model_picker_open),
+    ("usagePageOpen", |ctx| ctx.usage_page_open),
+    ("composerFocus", |ctx| ctx.composer_focus),
+    ("composerDraft", |ctx| ctx.composer_draft),
+    ("turnRunning", |ctx| ctx.turn_running),
+    ("editableFocus", |ctx| ctx.editable_focus),
+    ("isWeb", |ctx| ctx.is_web),
+    ("isDesktop", |ctx| ctx.is_desktop),
+];
+
 impl KeyContext {
     fn flag(self, name: &str) -> bool {
-        match name {
-            "terminalFocus" => self.terminal_focus,
-            "terminalOpen" => self.terminal_open,
-            "previewFocus" => self.preview_focus,
-            "previewOpen" => self.preview_open,
-            "modelPickerOpen" => self.model_picker_open,
-            "usagePageOpen" => self.usage_page_open,
-            "composerFocus" => self.composer_focus,
-            "composerDraft" => self.composer_draft,
-            "turnRunning" => self.turn_running,
-            "editableFocus" => self.editable_focus,
-            "isWeb" => self.is_web,
-            "isDesktop" => self.is_desktop,
-            _ => false,
-        }
+        FLAGS
+            .iter()
+            .find(|(key, _)| *key == name)
+            .is_some_and(|(_, read)| read(self))
     }
 }
 
@@ -291,55 +362,38 @@ pub fn stored_keybindings(saved: Option<Vec<Keybinding>>) -> Vec<Keybinding> {
     }
 }
 
-/// GPUI spelling of a rule key. `mod` becomes `cmd`.
+pub fn rules_from_saved(mut saved: Vec<Keybinding>, schema: u8) -> Vec<Keybinding> {
+    if saved.is_empty() {
+        return stored_keybindings(None);
+    }
+    if schema == 0 {
+        let is_mac = cfg!(target_os = "macos");
+        let chord = parse_chord("mod+,", is_mac).expect("shipped shortcut");
+        let mut settings = saved.iter().filter(|rule| rule.command == "settings.open");
+        let untouched = settings
+            .next()
+            .is_some_and(|rule| rule.key == "mod+/" && rule.when.is_none())
+            && settings.next().is_none();
+        if untouched && !chord_claimed(&saved, &chord, is_mac) {
+            saved.push(Keybinding {
+                key: "mod+,".into(),
+                command: "settings.open".into(),
+                when: None,
+            });
+        }
+    }
+    stored_keybindings(Some(saved))
+}
+
+/// GPUI spelling with the same platform modifier used by the rule matcher.
 pub fn gpui_shortcut(rule_key: &str) -> Option<String> {
-    let parts: Vec<&str> = rule_key
-        .split('+')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect();
-    if parts.is_empty() {
-        return None;
-    }
-    let mut cmd = false;
-    let mut ctrl = false;
-    let mut alt = false;
-    let mut shift = false;
-    let mut key = None;
-    for (index, part) in parts.iter().enumerate() {
-        let token = part.to_ascii_lowercase();
-        let last = index + 1 == parts.len();
-        let modifier = match token.as_str() {
-            "mod" | "cmd" | "meta" | "command" => {
-                cmd = true;
-                true
-            }
-            "ctrl" | "control" => {
-                ctrl = true;
-                true
-            }
-            "alt" | "option" => {
-                alt = true;
-                true
-            }
-            "shift" => {
-                shift = true;
-                true
-            }
-            _ => false,
-        };
-        if modifier {
-            if last {
-                return None;
-            }
-            continue;
-        }
-        if !last {
-            return None;
-        }
-        key = Some(canonical_key(&token));
-    }
-    let key = key?;
+    let Chord {
+        command: cmd,
+        ctrl,
+        alt,
+        shift,
+        key,
+    } = parse_chord(rule_key, cfg!(target_os = "macos"))?;
     let mut out = String::new();
     for (enabled, name) in [(cmd, "cmd"), (ctrl, "ctrl"), (alt, "alt"), (shift, "shift")] {
         if enabled {
@@ -383,23 +437,34 @@ pub fn resolve<'a>(
     ctx: &KeyContext,
     mod_is_command: bool,
 ) -> Option<&'a str> {
+    matching_binding(rules, pressed, ctx, mod_is_command)
+        .0
+        .map(|rule| rule.command.as_str())
+}
+
+/// Select the last eligible rule and report whether different commands claim
+/// this key. Native static bindings need the selected action in that case.
+pub fn matching_binding<'a>(
+    rules: &'a [Keybinding],
+    pressed: &Chord,
+    ctx: &KeyContext,
+    mod_is_command: bool,
+) -> (Option<&'a Keybinding>, bool) {
     let mut found = None;
+    let mut first = None;
+    let mut shared = false;
     for rule in rules {
-        if rule.command.is_empty() {
+        if rule.command.is_empty()
+            || parse_chord(&rule.key, mod_is_command).as_ref() != Some(pressed)
+        {
             continue;
         }
-        let Some(chord) = parse_chord(&rule.key, mod_is_command) else {
-            continue;
-        };
-        if &chord != pressed {
-            continue;
+        shared |= *first.get_or_insert(rule.command.as_str()) != rule.command;
+        if when_holds(rule.when.as_deref(), ctx) {
+            found = Some(rule);
         }
-        if !when_holds(rule.when.as_deref(), ctx) {
-            continue;
-        }
-        found = Some(rule.command.as_str());
     }
-    found
+    (found, shared)
 }
 
 fn when_holds(when: Option<&str>, ctx: &KeyContext) -> bool {
@@ -425,14 +490,32 @@ fn canonical_key(token: &str) -> String {
     }
 }
 
-enum Expr {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WhenExpr {
     Flag(String),
-    Not(Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
-    Or(Box<Expr>, Box<Expr>),
+    Not(Box<WhenExpr>),
+    And(Box<WhenExpr>, Box<WhenExpr>),
+    Or(Box<WhenExpr>, Box<WhenExpr>),
 }
 
-impl Expr {
+impl std::fmt::Display for WhenExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn operand(e: &WhenExpr) -> String {
+            match e {
+                WhenExpr::And(..) | WhenExpr::Or(..) => format!("({e})"),
+                _ => e.to_string(),
+            }
+        }
+        match self {
+            Self::Flag(name) => f.write_str(name),
+            Self::Not(inner) => write!(f, "!{}", operand(inner)),
+            Self::And(left, right) => write!(f, "{} && {}", operand(left), operand(right)),
+            Self::Or(left, right) => write!(f, "{} || {}", operand(left), operand(right)),
+        }
+    }
+}
+
+impl WhenExpr {
     fn eval(&self, ctx: KeyContext) -> bool {
         match self {
             Self::Flag(name) => ctx.flag(name),
@@ -473,33 +556,33 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_or(&mut self) -> Option<Expr> {
+    fn parse_or(&mut self) -> Option<WhenExpr> {
         let mut left = self.parse_and()?;
         while self.eat("||") {
             let right = self.parse_and()?;
-            left = Expr::Or(Box::new(left), Box::new(right));
+            left = WhenExpr::Or(Box::new(left), Box::new(right));
         }
         Some(left)
     }
 
-    fn parse_and(&mut self) -> Option<Expr> {
+    fn parse_and(&mut self) -> Option<WhenExpr> {
         let mut left = self.parse_unary()?;
         while self.eat("&&") {
             let right = self.parse_unary()?;
-            left = Expr::And(Box::new(left), Box::new(right));
+            left = WhenExpr::And(Box::new(left), Box::new(right));
         }
         Some(left)
     }
 
-    fn parse_unary(&mut self) -> Option<Expr> {
+    fn parse_unary(&mut self) -> Option<WhenExpr> {
         if self.eat("!") {
             let inner = self.parse_unary()?;
-            return Some(Expr::Not(Box::new(inner)));
+            return Some(WhenExpr::Not(Box::new(inner)));
         }
         self.parse_primary()
     }
 
-    fn parse_primary(&mut self) -> Option<Expr> {
+    fn parse_primary(&mut self) -> Option<WhenExpr> {
         if self.eat("(") {
             let inner = self.parse_or()?;
             if !self.eat(")") {
@@ -522,11 +605,11 @@ impl<'a> Parser<'a> {
         }
         let name = rest[..length].to_string();
         self.index += length;
-        Some(Expr::Flag(name))
+        Some(WhenExpr::Flag(name))
     }
 }
 
-fn parse_when(input: &str) -> Option<Expr> {
+pub fn parse_when(input: &str) -> Option<WhenExpr> {
     let mut parser = Parser { input, index: 0 };
     let expr = parser.parse_or()?;
     parser.skip();
@@ -706,7 +789,14 @@ mod tests {
             3
         );
         assert_eq!(stored_keybindings(None).len(), defaults.len());
-        assert_eq!(gpui_shortcut("mod+shift+g").as_deref(), Some("cmd-shift-g"));
+        assert_eq!(
+            gpui_shortcut("mod+shift+g").as_deref(),
+            Some(if cfg!(target_os = "macos") {
+                "cmd-shift-g"
+            } else {
+                "ctrl-shift-g"
+            })
+        );
         assert_eq!(gpui_shortcut("alt+w").as_deref(), Some("alt-w"));
         assert_eq!(gpui_shortcut("/").as_deref(), Some("/"));
         let palette = press("mod+k", true);

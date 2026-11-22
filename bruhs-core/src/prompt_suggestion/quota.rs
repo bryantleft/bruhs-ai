@@ -123,6 +123,13 @@ fn codex_permits(result: &Value, now: i64) -> bool {
 /// Read account metadata through the installed CLI's own authentication. No
 /// thread, turn, login action, token-file read, or inference request is made.
 pub(crate) async fn read_codex_limits() -> std::io::Result<Value> {
+    read_codex_quota(false).await.map(|(limits, _)| limits)
+}
+
+/// Read identity from the same app-server session as its rate-limit observation.
+pub(crate) async fn read_codex_quota(
+    with_identity: bool,
+) -> std::io::Result<(Value, Option<String>)> {
     let mut command = Command::new("codex");
     command
         .args([
@@ -157,8 +164,29 @@ pub(crate) async fn read_codex_limits() -> std::io::Result<Value> {
         )
         .await?;
     let response = read_response(&mut stdout, 2).await;
-    child.kill().await?;
-    response
+    let mut email = None;
+    if with_identity && response.is_ok() {
+        let account_id = 3;
+        let request =
+            json!({"id":account_id,"method":"account/read","params":{"refreshToken":false}});
+        let account = async {
+            stdin.write_all(format!("{request}\n").as_bytes()).await?;
+            read_response(&mut stdout, account_id).await
+        };
+        if let Ok(Ok(data)) = tokio::time::timeout(std::time::Duration::from_secs(2), account).await
+        {
+            if data["account"]["type"] == "chatgpt" {
+                email = data["account"]["email"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
+            }
+        }
+    }
+    // Older CLIs can close stdout immediately after returning limits.
+    let _ = child.kill().await;
+    response.map(|limits| (limits, email))
 }
 
 async fn read_response(

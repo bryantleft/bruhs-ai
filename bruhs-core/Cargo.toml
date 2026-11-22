@@ -21,8 +21,8 @@ bruhs-backup = { workspace = true }
 claude-sdk-rs = { path = "../claude-sdk-rs" }
 codex-sdk-rs = { path = "../codex-sdk-rs" }
 serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
+uuid = { workspace = true, features = ["v5"] }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "net", "io-util", "io-std", "fs"] }
 tokio-stream = { workspace = true }
 tokio-tungstenite = "0.29"
@@ -33,7 +33,7 @@ futures-core = { workspace = true }
 futures-util = { workspace = true }
 async-trait = "0.1"
 # ── Phase 1 (Calendar v1 Google Sync) ──
-reqwest = { workspace = true, features = ["stream"] }
+reqwest = { workspace = true, features = ["stream", "multipart"] }
 axum = { workspace = true }
 keyring = { workspace = true }
 directories = { workspace = true }
@@ -41,6 +41,8 @@ base64 = "0.22"
 percent-encoding = "2"
 zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1"
+bzip2 = "0.6"
+tar = "0.4"
 hmac = "0.12"
 # One-time codes (RFC 6238) use HMAC-SHA1 by default.
 sha1 = "0.10"
@@ -52,6 +54,7 @@ iana-time-zone = "0.1"
 url = "2"
 tracing = { workspace = true }
 thiserror = { workspace = true }
+toml = "0.8"
 # `serde`: keychain items travel inside sealed sets and backups.
 zeroize = { workspace = true, features = ["serde"] }
 htmd = "0.6"
@@ -67,8 +70,6 @@ libc = "0.2"
 rustix = { version = "1", features = ["fs"] }
 # `backup`: rollback-mode databases are snapshotted with the online backup API.
 rusqlite = { workspace = true, features = ["backup"] }
-# Backups are a tar stream inside the encrypted container (no xattrs).
-tar = { version = "0.4", default-features = false }
 tokio-postgres = "=0.7.18"
 sqlparser = { version = "=0.64.0", features = ["visitor"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
@@ -88,6 +89,8 @@ tempfile = { workspace = true }
 sha2 = { workspace = true, features = ["asm"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+unicode-normalization = "0.1"
+sha1 = "0.10"
 # Include trusted roots installed by macOS device management.
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 # Pith's scanner measures what deleting a worktree frees from APFS private

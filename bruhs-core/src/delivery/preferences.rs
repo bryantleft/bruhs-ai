@@ -142,13 +142,33 @@ impl DeliveryService {
         change: DeliveryPreferenceChange,
     ) -> DeliveryResult<DeliveryPreferences> {
         let endpoint_writer = match &change {
-            DeliveryPreferenceChange::WriterModel(Some(bruhs_models::delivery::WriterModel::Separate { model, .. }))
-                if crate::text_generators::split_selection(model).is_some() =>
-            {
-                crate::text_generators::active(model).await.map_err(DeliveryError::Storage)?
+            DeliveryPreferenceChange::WriterModel(Some(
+                bruhs_models::delivery::WriterModel::Separate { model, .. },
+            )) if crate::text_generators::split_selection(model).is_some() => {
+                crate::text_generators::active(model)
+                    .await
+                    .map_err(DeliveryError::Storage)?
             }
             _ => false,
         };
+        use bruhs_models::delivery::{GuideModel, WriterModel};
+        let model_change = match &change {
+            DeliveryPreferenceChange::GenerationOption { model, .. }
+            | DeliveryPreferenceChange::WriterModel(Some(WriterModel::Separate {
+                model, ..
+            }))
+            | DeliveryPreferenceChange::ReviewGuideModel(Some(GuideModel::Separate {
+                model,
+                ..
+            })) => Some(model),
+            _ => None,
+        };
+        let catalog = if model_change.is_some() && !endpoint_writer {
+            Some(crate::agent::writer_catalog_for_project(path.unwrap_or_else(|| Path::new(""))).await)
+        } else {
+            None
+        };
+        let selected_model = model_change.and_then(|id| catalog.as_ref()?.model(id));
         let main = match path {
             Some(path) => super::writer::main_checkout(path).await?,
             None => None,
@@ -166,8 +186,7 @@ impl DeliveryService {
                     value,
                 } => {
                     use bruhs_models::delivery::{
-                        generation::{model_options, GenerationTarget},
-                        GuideModel, WriterModel,
+                        generation::GenerationTarget, GuideModel, WriterModel,
                     };
                     let current = match path {
                         Some(path) => effective_writer(&journal.preferences, path, main.as_deref()),
@@ -182,10 +201,9 @@ impl DeliveryService {
                             )
                         })?;
                     let mut options = previous.clone();
-                    if !model_options(&model)
-                        .iter()
-                        .any(|o| o.kind == kind && options.set(o, &value))
-                    {
+                    let descriptor =
+                        selected_model.and_then(|m| m.options.iter().find(|o| o.kind == kind));
+                    if !descriptor.is_some_and(|o| options.set_choice(o, &value)) {
                         return Err(DeliveryError::Invalid(
                             "Choose an option supported by this model.".into(),
                         ));
@@ -206,17 +224,17 @@ impl DeliveryService {
                     prefs.review_guide_instructions = value.map(|text| text.trim().to_owned())
                 }
                 DeliveryPreferenceChange::ReviewGuideModel(value) => {
-                    if let Some(bruhs_models::delivery::GuideModel::Separate { model, options }) =
+                    if let Some(bruhs_models::delivery::GuideModel::Separate { options, .. }) =
                         &value
                     {
-                        if !options.valid_for(model) {
+                        if !options.is_empty()
+                            && selected_model.and_then(|m| m.resolve(options)).is_none()
+                        {
                             return Err(DeliveryError::Invalid(
                                 "Choose options supported by this model.".into(),
                             ));
                         }
-                        if !bruhs_models::agent::model_info(model)
-                            .is_some_and(|m| !m.provider.is_external())
-                        {
+                        if selected_model.is_none() {
                             return Err(DeliveryError::Invalid(
                                 "Choose a coding agent for review guides.".into(),
                             ));
@@ -233,17 +251,17 @@ impl DeliveryService {
                     prefs.writing_style = None;
                 }
                 DeliveryPreferenceChange::WriterModel(value) => {
-                    if let Some(bruhs_models::delivery::WriterModel::Separate { model, options }) =
+                    if let Some(bruhs_models::delivery::WriterModel::Separate { options, .. }) =
                         &value
                     {
-                        if !options.valid_for(model) {
+                        if !options.is_empty()
+                            && selected_model.and_then(|m| m.resolve(options)).is_none()
+                        {
                             return Err(DeliveryError::Invalid(
                                 "Choose options supported by this model.".into(),
                             ));
                         }
-                        if !endpoint_writer && !bruhs_models::agent::model_info(model)
-                            .is_some_and(|m| !m.provider.is_external())
-                        {
+                        if !endpoint_writer && selected_model.is_none() {
                             return Err(DeliveryError::Invalid(
                                 "Choose an available text generation model.".into(),
                             ));

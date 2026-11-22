@@ -49,6 +49,42 @@ impl VoiceDictionary {
         Ok(())
     }
 
+    /// Highest-priority scope first. Aliases reserve spellings but never leave as hints.
+    pub fn preferred_terms(scopes: &[&Self], hints: &[&str]) -> Vec<String> {
+        use std::collections::HashSet;
+        use unicode_normalization::UnicodeNormalization as _;
+        let key = |s: &str| s.trim().nfc().collect::<String>().to_lowercase();
+        let known: HashSet<_> = scopes
+            .iter()
+            .flat_map(|scope| &scope.0)
+            .flat_map(|(term, aliases)| std::iter::once(term).chain(aliases))
+            .map(|word| key(word))
+            .collect();
+        let mut used = HashSet::new();
+        let mut terms = Vec::new();
+        for hint in hints {
+            let term = hint.split_whitespace().collect::<Vec<_>>().join(" ");
+            let id = key(&term);
+            if !term.is_empty()
+                && term.encode_utf16().count() <= 50
+                && !known.contains(&id)
+                && used.insert(id)
+            {
+                terms.push(term);
+            }
+        }
+        for scope in scopes {
+            for (term, aliases) in &scope.0 {
+                if used.insert(key(term)) {
+                    terms.push(term.clone());
+                    used.extend(aliases.iter().map(|alias| key(alias)));
+                }
+            }
+        }
+        terms.truncate(100);
+        terms
+    }
+
     pub fn apply(&self, project: Option<&Self>, text: &str) -> String {
         Self::apply_scopes(std::iter::once(self).chain(project), text)
     }
@@ -104,9 +140,95 @@ impl VoiceDictionary {
     }
 }
 
+/// Remove standalone speech hesitations while retaining dictated paragraphs, code and the cleanup cue.
+pub fn without_fillers(text: &str, language: Option<&str>, correction: &str) -> String {
+    let language_words = match language.and_then(|code| code.split(['-', '_']).next()) {
+        Some("en") => "|um|ah|eh",
+        Some("fr") => "|euh",
+        Some("de") => "|ähm|äh",
+        _ => "",
+    };
+    let fillers =
+        format!(r"\b(?:uhhh|uhh|uhm|umm|uh|ehh|ehm|ahm|hmm|hm|mmm|хм|ммм{language_words})\b[,.]?");
+    let cue = correction
+        .split_whitespace()
+        .map(regex::escape)
+        .collect::<Vec<_>>()
+        .join(r"\s+");
+    let pattern = if cue.is_empty() {
+        fillers
+    } else {
+        format!(r"(?P<cue>\b{cue}\b)|{fillers}")
+    };
+    let Ok(pattern) = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(true)
+        .build()
+    else {
+        return text.to_owned();
+    };
+    let filtered = pattern.replace_all(text, |captures: &regex::Captures<'_>| {
+        let found = captures.get(0).expect("complete match");
+        if captures.name("cue").is_some()
+            || text[..found.start()].ends_with('-')
+            || text[found.end()..].starts_with('-')
+        {
+            found.as_str().to_owned()
+        } else {
+            String::new()
+        }
+    });
+    filtered
+        .trim()
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn filler_filter_honors_language_correction_phrases_and_paragraphs() {
+        assert_eq!(
+            without_fillers(
+                "Euh, bonjour hmm.\n\nEuh attends, euh salut",
+                Some("fr"),
+                "euh attends"
+            ),
+            "bonjour\n\nEuh attends, salut"
+        );
+        assert_eq!(
+            without_fillers("Ähm, der Albumtitel ist äh gut.", Some("de"), ""),
+            "der Albumtitel ist gut."
+        );
+        assert_eq!(
+            without_fillers("um, um actually, uh-huh", Some("en"), "um actually"),
+            "um actually, uh-huh"
+        );
+        assert_eq!(
+            without_fillers("Euh, ah, um, hmm.", None, ""),
+            "Euh, ah, um,"
+        );
+    }
+
+    #[test]
+    fn cloud_vocabulary_reserves_project_terms_and_limits_the_combined_list() {
+        let mut personal = VoiceDictionary::default();
+        for index in 0..100 {
+            personal.add(&format!("Personal {index}"), None).unwrap();
+        }
+        let mut project = VoiceDictionary::default();
+        project.add("Montréal", None).unwrap();
+        project.add("Montreal", Some("Montréal")).unwrap();
+        let words = VoiceDictionary::preferred_terms(
+            &[&project, &personal],
+            &["Montre\u{301}al", "montreal", "Project Name"],
+        );
+        assert_eq!(&words[..2], ["Project Name", "Montréal"]);
+        assert_eq!(words.len(), 100);
+    }
+
     #[test]
     fn project_aliases_override_device_spellings_without_rewriting_substrings() {
         let mut device = VoiceDictionary::default();
@@ -120,6 +242,13 @@ mod tests {
             "BRUHS in New York, cold brewski and C++."
         );
         assert_eq!(device.apply(None, "brews"), "Bruhs");
+        assert_eq!(
+            VoiceDictionary::preferred_terms(
+                &[&project, &device],
+                &["sorry", "BReWs", " NY   office "]
+            ),
+            ["sorry", "NY office", "BRUHS", "C++", "New York"]
+        );
     }
 }
 

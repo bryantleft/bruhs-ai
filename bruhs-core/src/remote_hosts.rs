@@ -38,6 +38,7 @@ struct Store {
     hosts: BTreeMap<Uuid, RemoteHost>,
 }
 struct Control {
+    socket: Option<PathBuf>,
     generation: Uuid,
     cancel: watch::Sender<bool>,
 }
@@ -112,7 +113,16 @@ impl RemoteHostManager {
             .running
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let hosts=data.hosts.values().cloned().map(|mut host|{if host.state.active()&&!running.contains_key(&host.profile.id){host.state=RemoteHostState::Interrupted;host.error=Some("The SSH process ended before its final status could be stored. Repair storage and restart Bruhs before reconnecting.".into());}host}).collect();
+        let hosts = data.hosts.values().cloned().map(|mut host| {
+            let control=running.get(&host.profile.id);
+            host.forwarding_socket=control.filter(|c|host.state==RemoteHostState::Connected && Some(c.generation)==host.connection_id)
+                .and_then(|c|c.socket.clone());
+            if host.state.active() && control.is_none(){
+                host.state=RemoteHostState::Interrupted;
+                host.error=Some("The SSH process ended before its final status could be stored. Repair storage and restart Bruhs before reconnecting.".into());
+            }
+            host
+        }).collect();
         drop(running);
         drop(data);
         RemoteHostSnapshot {hosts,error:(!self.0.healthy.load(std::sync::atomic::Ordering::Acquire)).then(||"SSH profile storage failed. Disconnect any active tunnels, repair storage and restart Bruhs before making another connection.".into())}
@@ -184,6 +194,7 @@ impl RemoteHostManager {
                 error: None,
                 updated_at_ms: now(),
                 connection_id: None,
+                forwarding_socket: None,
             },
         );
         self.persist(&mut data).await?;
@@ -219,7 +230,11 @@ impl RemoteHostManager {
             .running
             .lock()
             .map_err(|_| conflict("The tunnel process registry is unavailable. Restart Bruhs."))?
-            .insert(id, Control { generation, cancel });
+            .insert(id, Control {
+                generation,
+                cancel,
+                socket: None,
+            });
         drop(data);
         let manager = self.clone();
         tokio::spawn(async move {
@@ -252,11 +267,26 @@ impl RemoteHostManager {
         drop(data);
         Ok(())
     }
-    async fn connected(&self, id: Uuid, generation: Uuid) -> RemoteHostResult<()> {
+    async fn connected(
+        &self,
+        id: Uuid,
+        generation: Uuid,
+        socket: Option<PathBuf>,
+    ) -> RemoteHostResult<()> {
         let mut data = self.0.data.lock().await;
         if let Some(host) = data.hosts.get_mut(&id).filter(|host| {
             host.connection_id == Some(generation) && host.state == RemoteHostState::Connecting
         }) {
+            if let Some(control) = self
+                .0
+                .running
+                .lock()
+                .map_err(|_| conflict("SSH process registry unavailable."))?
+                .get_mut(&id)
+                .filter(|c| c.generation == generation)
+            {
+                control.socket = socket;
+            }
             host.state = RemoteHostState::Connected;
             host.updated_at_ms = now();
             self.persist(&mut data).await?;

@@ -199,6 +199,8 @@ pub struct QueryOptions {
     pub cwd: PathBuf,
     /// Model (`--model`); `None` uses the configured default.
     pub model: Option<String>,
+    /// Explicitly select Standard access for this exec turn. Defaults to the CLI setting.
+    pub standard_cyber_access: bool,
     /// Config profile (`--profile`).
     pub profile: Option<String>,
     /// Sandbox and approval policy. Defaults to [`CodexAccess::default`].
@@ -232,6 +234,7 @@ impl Default for QueryOptions {
             images: Vec::new(),
             cwd: PathBuf::from("."),
             model: None,
+            standard_cyber_access: false,
             profile: None,
             access: CodexAccess::default(),
             session: Session::New,

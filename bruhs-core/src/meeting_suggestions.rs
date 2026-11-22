@@ -64,6 +64,7 @@ pub async fn suggest(
                 generation: None,
             },
             workspace.path(),
+            std::path::Path::new(""),
         )
         .await;
         tokio::task::spawn_blocking(move || drop(workspace));

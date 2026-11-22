@@ -292,6 +292,22 @@ fn background_task_round_trips_and_tolerates_unknown_states() {
     // `/api/tasks/stream` snapshots are a JSON array of tasks.
     let snapshot: Vec<BackgroundTask> = serde_json::from_value(json!([task_json()])).unwrap();
     assert_eq!(snapshot.len(), 1);
+    for (raw, expected, badge, agent) in [
+        ("subagent", TaskKind::Subagent, "Subagent", true),
+        ("swarm", TaskKind::Swarm, "Teamwork", true),
+        ("background_agent", TaskKind::BackgroundAgent, "Agent", true),
+        ("shell", TaskKind::Shell, "Shell", false),
+    ] {
+        let parsed: TaskKind = serde_json::from_value(json!(raw)).unwrap();
+        assert_eq!(parsed, expected);
+        assert_eq!(parsed.badge_label(), badge);
+        assert_eq!(parsed.is_agent_work(), agent);
+    }
+    assert!(TaskStatus::Exited.succeeded(None));
+    assert!(TaskStatus::Exited.succeeded(Some(0)));
+    assert!(!TaskStatus::Exited.succeeded(Some(1)));
+    assert!(!TaskStatus::Killed.succeeded(None));
+    assert!(!TaskStatus::Failed.succeeded(Some(0)));
 }
 
 #[test]

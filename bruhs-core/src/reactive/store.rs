@@ -6,7 +6,10 @@ use serde_json::Value;
 use std::{collections::HashSet, path::Path};
 
 mod always_on;
+pub(super) mod linked_tasks;
+pub(super) mod linked_threads;
 pub(super) mod task_conversations;
+pub(in crate::reactive) mod desktop_tasks;
 pub(super) mod webhook_deliveries;
 pub(super) mod webhook_windows;
 pub(super) mod webhook_security;
@@ -98,6 +101,7 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
         CREATE TABLE IF NOT EXISTS reactive_source_generations(id TEXT PRIMARY KEY,generation TEXT NOT NULL);
         INSERT OR IGNORE INTO reactive_source_generations(id,generation) SELECT id,'' FROM reactive_sources;
         CREATE TABLE IF NOT EXISTS reactive_subscriptions(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS linked_task_saves(task TEXT PRIMARY KEY,request TEXT NOT NULL,revision TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS task_webhook_addresses(task TEXT PRIMARY KEY,token TEXT NOT NULL,scope TEXT NOT NULL);
         CREATE TRIGGER IF NOT EXISTS delete_task_webhook_address AFTER DELETE ON reactive_subscriptions
             BEGIN DELETE FROM task_webhook_addresses WHERE task=OLD.id; END;
@@ -230,6 +234,97 @@ fn save<T: Serialize>(
     Ok(())
 }
 
+fn source_deadline(connection: &Connection, source: &EventSource) -> Result<Option<EpochMs>, ReactiveError> {
+    let Some(key) = super::sources::schedule_cursor_key(&source.kind) else { return Ok(None); };
+    let saved: Option<String> = connection.prepare_cached(
+        "SELECT payload FROM reactive_cursors WHERE source_id=?1 AND cursor_key=?2",
+    )?.query_row(params![source.id, key], |row| row.get(0)).optional()?;
+    let checkpoint = match saved {
+        None => Value::Null,
+        Some(json) => match serde_json::from_str(&json) {
+            Ok(value) => value,
+            // Source health reports checkpoint errors. Keep Settings available for repairs.
+            Err(_) => return Ok(None),
+        },
+    };
+    Ok(super::sources::next_deadline(&source.kind, &checkpoint)
+        .and_then(|ms| i64::try_from(ms).ok())
+        .and_then(|ms| EpochMs::new(ms).ok()))
+}
+
+pub(super) fn scheduled_task_inventory(
+    connection: &mut Connection,
+) -> Result<Vec<ScheduledTaskSummary>, ReactiveError> {
+    schedule_summaries(connection, None)
+}
+
+fn schedule_summaries(
+    connection: &Connection,
+    id: Option<&str>,
+) -> Result<Vec<ScheduledTaskSummary>, ReactiveError> {
+    let mut query = connection.prepare_cached(
+        "SELECT t.payload, a.payload, s.payload FROM reactive_subscriptions t
+         JOIN reactive_agents a ON a.id = json_extract(t.payload, '$.agent_id')
+         JOIN reactive_sources s ON s.id = json_extract(t.payload, '$.source_id')
+         WHERE (?1 IS NULL OR t.id = ?1) ORDER BY t.id",
+    )?;
+    let rows = query.query_map([id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    let mut tasks = Vec::new();
+    for row in rows {
+        let (subscription, agent, source) = row?;
+        let subscription: Subscription = decode(subscription)?;
+        let agent: ReactiveAgent = decode(agent)?;
+        let source: EventSource = decode(source)?;
+        if source.kind.is_scheduled_task() {
+            let enabled = subscription.enabled && source.enabled && agent.enabled;
+            let next_run_at = if enabled { source_deadline(connection, &source)? } else { None };
+            tasks.push(ScheduledTaskSummary {
+                title: subscription.title(&agent).to_owned(),
+                enabled,
+                id: subscription.id,
+                project_path: agent.project_path,
+                schedule: source.kind,
+                next_run_at,
+                thread: None,
+            });
+        }
+    }
+    Ok(tasks)
+}
+
+pub(super) fn delete_linked_schedule(connection: &mut Connection, id: String) -> Result<(), ReactiveError> {
+    transaction(connection, |db| {
+        if schedule_summaries(db, Some(&id))?.is_empty() {
+            return Err(ReactiveError::NotFound("Scheduled task unavailable.".into()));
+        }
+        reports::guard_managed_identity(db, &id)?;
+        apply(db, &ReactiveChange::DeleteSubscription { id })
+    })
+}
+
+pub(super) fn set_linked_schedule_enabled(
+    connection: &mut Connection,
+    id: &str,
+    enabled: bool,
+) -> Result<ScheduledTaskSummary, ReactiveError> {
+    transaction(connection, |db| {
+        let lookup = || {
+            schedule_summaries(db, Some(id))?.pop()
+                .ok_or_else(|| ReactiveError::NotFound("Scheduled task unavailable.".into()))
+        };
+        let current = lookup()?;
+        reports::guard_managed_identity(db, id)?;
+        if current.enabled && enabled {
+            return Ok(current);
+        }
+        // Pausing also disables the subscription when a shared parent is already paused.
+        set_automation_enabled(db, id, enabled)?;
+        lookup()
+    })
+}
+
 pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, ReactiveError> {
     let limit = i64::try_from(HISTORY_LIMIT)
         .map_err(|_| ReactiveError::Invalid("History page size is invalid.".into()))?;
@@ -269,28 +364,8 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
     let sources = records(connection, "reactive_sources")?;
     let subscriptions = records(connection, "reactive_subscriptions")?;
     let mut next_run_by_source = std::collections::BTreeMap::new();
-    let mut checkpoints = connection.prepare_cached(
-        "SELECT payload FROM reactive_cursors WHERE source_id=?1 AND cursor_key=?2",
-    )?;
     for source in enabled_sources(&sources, &agents, &subscriptions) {
-        let Some(key) = super::sources::schedule_cursor_key(&source.kind) else {
-            continue;
-        };
-        let saved: Option<String> = checkpoints
-            .query_row(params![source.id, key], |row| row.get(0))
-            .optional()?;
-        let checkpoint = match saved {
-            None => Value::Null,
-            Some(json) => match serde_json::from_str(&json) {
-                Ok(value) => value,
-                // Source health reports checkpoint errors. Keep Settings available for repairs.
-                Err(_) => continue,
-            },
-        };
-        if let Some(due) = super::sources::next_deadline(&source.kind, &checkpoint)
-            .and_then(|ms| i64::try_from(ms).ok())
-            .and_then(|ms| EpochMs::new(ms).ok())
-        {
+        if let Some(due) = source_deadline(connection, source)? {
             next_run_by_source.insert(source.id.clone(), due);
         }
     }
@@ -300,6 +375,8 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         subscriptions,
         task_threads: task_conversations::destinations(connection)?,
         selected_task_threads: Some(task_conversations::selected(connection)?),
+        desktop_task_store: connection.query_row("SELECT identity FROM desktop_task_store WHERE id=1",[],|r|r.get(0))?,
+        desktop_task_activity: desktop_tasks::activity(connection)?,
         can_delete_task_threads: true,
         can_address_task_webhooks: true,
         next_run_by_source: Some(next_run_by_source),
@@ -690,7 +767,7 @@ fn validate_automation(
 }
 
 /// An owner can run a paused schedule once without touching its clock or other subscribers.
-fn run_scheduled_task(
+pub(super) fn run_scheduled_task(
     connection: &Connection,
     id: &str,
     run_id: &str,
@@ -734,6 +811,9 @@ fn run_scheduled_task(
     run.id = run_id.into();
     run.source_id = Some(source.id);
     run.trigger = Some(RunTrigger::ManualTask);
+    if desktop_tasks::is_desktop(connection, &run.thread_id)? {
+        run.owner_message = Some(subscription.instructions);
+    }
     save_run(connection, &run)
 }
 
@@ -769,6 +849,9 @@ fn save_scheduled_task(
         Some(TaskDestinationEdit::Existing { thread_id }) => {
             task_conversations::validate_selection(db, &automation, thread_id)?;
         }
+        Some(TaskDestinationEdit::Desktop { thread_id }) => {
+            desktop_tasks::prepare_binding(db, &automation, thread_id)?;
+        }
         Some(TaskDestinationEdit::FirstRun { previous }) => {
             // Check the previous binding before a checkout edit can detach it.
             task_conversations::detach(db, &id, previous)?;
@@ -776,7 +859,7 @@ fn save_scheduled_task(
         None => {}
     }
     apply(db, &ReactiveChange::SaveAutomation { automation })?;
-    if let Some(TaskDestinationEdit::Existing { thread_id }) = destination {
+    if let Some(TaskDestinationEdit::Existing { thread_id } | TaskDestinationEdit::Desktop { thread_id }) = destination {
         task_conversations::bind(db, &id, thread_id)?;
     }
     if activate_parents {
@@ -1295,6 +1378,17 @@ pub(super) fn command(
             }
             ReactiveCommand::DeleteTaskThread {thread_id,linked_tasks} => {
                 task_conversations::delete(connection,&thread_id,&linked_tasks)?;
+            }
+            ReactiveCommand::DeleteCheckoutTaskThreads { threads } => {
+                for (id, tasks) in threads {
+                    if desktop_tasks::is_desktop(connection, &id)? {
+                        task_conversations::delete(connection, &id, &tasks)?;
+                    } else if !tasks.is_empty() {
+                        return Err(ReactiveError::Conflict(
+                            "The schedules linked to this checkout changed. Review them again.".into(),
+                        ));
+                    }
+                }
             }
             ReactiveCommand::ChatInTaskThread { task_id, thread_id, message } => {
                 task_conversations::reply(connection, &task_id, &thread_id, &message)?;
@@ -2069,6 +2163,7 @@ const MAX_BATCH_PROMPT_BYTES: usize = 256 * 1024;
 
 /// One claimed run, plus the memory and history the agent sees before its request.
 pub(super) struct Claim {
+    pub desktop_thread: bool,
     pub agent: ReactiveAgent,
     pub bruh: bruhs_models::crew::BruhProfile,
     pub run: ReactiveRun,
@@ -2237,6 +2332,7 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
         } else {
             run.session_id = task_conversations::session(connection, &agent, &run)?;
         }
+        let desktop_thread = !agent_thread && desktop_tasks::is_desktop(connection, &run.thread_id)?;
         run.fresh_session = run.session_id.is_none();
         // A room run reads the room as it is now; a resumed one keeps the
         // owner's decision it was queued with.
@@ -2249,6 +2345,7 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
         run.updated_at = EpochMs::now();
         save_run(connection, &run)?;
         Ok(Some(Claim {
+            desktop_thread,
             agent,
             bruh,
             run,
@@ -2392,6 +2489,19 @@ pub(super) fn cancelled_output(
             }
             run.updated_at = EpochMs::now();
             save_run(connection, &run)?;
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn defer_desktop_turn(db: &mut Connection, id: &str) -> Result<(), ReactiveError> {
+    transaction(db, |db| {
+        let mut run = run_record(db, id)?;
+        if run.status == RunStatus::Running {
+            run.status = RunStatus::Queued;
+            run.not_before =
+                EpochMs::saturating_from_i64(EpochMs::now().as_millis().saturating_add(1_000));
+            save_run(db, &run)?;
         }
         Ok(())
     })
