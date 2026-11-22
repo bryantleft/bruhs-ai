@@ -373,9 +373,12 @@ fn generator_keys_come_from_the_generators_database() {
         .unwrap();
     assert_eq!(catalogs(&bare).unwrap(), without);
     // A link in its place is never followed: the walk leaves it out too.
-    let link = empty.path().join("link.sqlite3");
-    std::os::unix::fs::symlink(&fixture.generators, &link).unwrap();
-    assert_eq!(catalogs(&link).unwrap(), without);
+    #[cfg(unix)]
+    {
+        let link = empty.path().join("link.sqlite3");
+        std::os::unix::fs::symlink(&fixture.generators, &link).unwrap();
+        assert_eq!(catalogs(&link).unwrap(), without);
+    }
     // A file that isn't a database, or a key that isn't a UUID, is a
     // damaged catalog, never a dropped key.
     let junk = empty.path().join("junk.sqlite3");
@@ -414,6 +417,7 @@ fn generator_items_are_uuids() {
             "{account}"
         );
     }
+    #[cfg(unix)]
     assert!(check_items(&[item(GENERATORS_SERVICE, GENERATOR_KEY, "v")]).is_ok());
 }
 
