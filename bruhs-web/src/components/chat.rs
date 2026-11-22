@@ -2208,7 +2208,7 @@ pub fn ChatPage() -> impl IntoView {
                                                 format!("{count} active runs")
                                             };
                                             let overflow = count.saturating_sub(4);
-                                            let visible: Vec<_> = running.into_iter().take(4).collect();
+                                            let visible = running.into_iter().take(4);
                                             Some(view! {
                                                 <div
                                                     role="status"
@@ -2229,7 +2229,7 @@ pub fn ChatPage() -> impl IntoView {
                                                         </button>
                                                     </div>
                                                     <div class="mt-1.5 space-y-1">
-                                                        {visible.into_iter().map(|task| {
+                                                        {visible.map(|task| {
                                                             let stop_id = task.id.clone();
                                                             let badge_cls = match task.kind {
                                                                 bruhs_models::api::TaskKind::Swarm => "bg-blueberry-400/15 text-blueberry-400",
