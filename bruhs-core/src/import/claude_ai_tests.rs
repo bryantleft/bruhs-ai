@@ -195,12 +195,34 @@ fn tool_inputs_are_cut_in_document_order() {
         clip_strings(&value, 6),
         json!({
             "a": "abcd",
-            "b": [clip_part("efgh".into(), 2), clip_part("ij".into(), 0), 3, null],
+            "b": [format!("ef\n{}", cut_short_line(4)), "", 3, null],
             "c": { "d": "" },
         })
     );
     assert_eq!(clip_strings(&value, 100), value);
     assert_eq!(clip_strings(&json!(7), 0), json!(7));
+}
+
+/// Past the budget every string is emptied and one cut line counts them
+/// all, so many tiny strings can't each grow a cut line (final review
+/// I1, scaled from 4 Mi strings).
+#[test]
+fn many_small_strings_get_one_cut_line() {
+    let value = json!({ "a": vec!["x"; 200_000] });
+    let clipped = clip_strings(&value, 1_000);
+    let strings: Vec<&str> = clipped["a"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item.as_str().unwrap())
+        .collect();
+    assert_eq!(strings.len(), 200_000);
+    let line = format!("\n{}", cut_short_line(199_000));
+    assert_eq!(strings[1_000], line);
+    assert!(strings[..1_000].iter().all(|text| *text == "x"));
+    assert!(strings[1_001..].iter().all(|text| text.is_empty()));
+    let chars: usize = strings.iter().map(|text| text.chars().count()).sum();
+    assert_eq!(chars, 1_000 + line.chars().count());
 }
 
 #[test]

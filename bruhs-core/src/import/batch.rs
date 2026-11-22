@@ -31,9 +31,10 @@ use super::{chatgpt, claude_ai, grok, ImportError, ParsedConversation};
 use bruhs_models::agent::Role;
 use bruhs_models::imports::{
     cut_short_line, import_key, valid_batch_id, AgentScan, BatchCounts, ImportBatch, ImportJob,
-    ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, DAMAGED_EXPORT,
-    EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED, IMPORT_GONE,
-    MAX_BATCHES, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT, TOO_MANY_FILES,
+    ImportJobState, MemorySuggestion, BATCH_TTL_MS, CLAUDE_MANIFEST, CONVERSATION_TOO_LARGE,
+    DAMAGED_EXPORT, EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, IMPORT_BUSY, IMPORT_FAILED,
+    IMPORT_GONE, MAX_BATCHES, MAX_MESSAGES, MAX_NODES, MAX_PART_CHARS, NOT_AN_EXPORT,
+    TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
@@ -450,7 +451,8 @@ impl ImportHost {
             .join(batch)
             .join(THREADS)
             .join(format!("{n}.json"));
-        let bytes = read_own(&path, self.limits.stored).ok_or(ImportError::Gone)?;
+        // Every thread a read writes fits `record` (`thread_bytes`).
+        let bytes = read_own(&path, self.limits.record).ok_or(ImportError::Gone)?;
         serde_json::from_slice(&bytes).map_err(|_| ImportError::Refused(DAMAGED_EXPORT))
     }
 
@@ -1076,10 +1078,12 @@ impl BatchReader<'_> {
             counts.over_limit = counts.over_limit.saturating_add(1);
             return Ok(());
         }
-        let cut = nodes(candidate.source, raw) > MAX_NODES || parsed.messages.len() >= MAX_MESSAGES;
+        let mut cut =
+            nodes(candidate.source, raw) > MAX_NODES || parsed.messages.len() >= MAX_MESSAGES;
         candidate.title = row_title(&candidate.title, &parsed.messages);
-        let thread = ImportedThread::new(candidate.clone(), parsed.messages);
-        let bytes = serde_json::to_vec(&thread).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
+        let (bytes, fitted) =
+            thread_bytes(candidate.clone(), parsed.messages, self.host.limits.record)?;
+        cut |= fitted;
         let size = to_u64(bytes.len());
         if self.stored.saturating_add(size) > self.host.limits.stored {
             return Err(ImportError::Refused(EXPORT_TOO_LARGE));
@@ -1166,6 +1170,92 @@ impl BatchReader<'_> {
         std::fs::rename(&tmp, &path).map_err(|error| ImportError::io(&path, error))?;
         Ok(self.counts)
     }
+}
+
+/// The thread `candidate` and `messages` make, serialized within `cap`
+/// bytes, and whether anything was left out to fit (final review I1). A
+/// reply merges every assistant node until the next prompt, and the
+/// context repeats the newest message whole, so a thread can outgrow its
+/// record. Past `cap` the oldest messages go, then the oldest parts of
+/// the one left, until the messages take half of what is left to try;
+/// the newest part always stays. A thread that still doesn't fit is a
+/// chat too large to import.
+fn thread_bytes(
+    candidate: ImportCandidate,
+    messages: Vec<PortableMessage>,
+    cap: u64,
+) -> Result<(Vec<u8>, bool), ImportError> {
+    let (mut candidate, mut messages) = (candidate, messages);
+    let mut budget = cap / 2;
+    let mut cut = false;
+    loop {
+        let thread = ImportedThread::new(candidate, messages);
+        let bytes = serde_json::to_vec(&thread).map_err(|_| ImportError::Refused(IMPORT_FAILED))?;
+        if to_u64(bytes.len()) <= cap {
+            return Ok((bytes, cut));
+        }
+        ImportedThread {
+            candidate,
+            messages,
+            ..
+        } = thread;
+        let one_part = match messages.as_slice() {
+            [] => true,
+            [only] => only.parts.len() <= 1,
+            _ => false,
+        };
+        if one_part {
+            return Err(ImportError::Refused(CONVERSATION_TOO_LARGE));
+        }
+        drop_oldest(&mut messages, budget);
+        cut = true;
+        budget /= 2;
+    }
+}
+
+/// `messages` without their oldest messages, then the oldest parts of the
+/// first one left, until they take at most `budget` bytes serialized. The
+/// newest message and its newest part always stay.
+fn drop_oldest(messages: &mut Vec<PortableMessage>, budget: u64) {
+    let sizes: Vec<u64> = messages.iter().map(serialized_len).collect();
+    let mut total = sizes
+        .iter()
+        .fold(0_u64, |sum, size| sum.saturating_add(*size));
+    let mut first = 0;
+    while total > budget && first + 1 < messages.len() {
+        total = total.saturating_sub(sizes[first]);
+        first += 1;
+    }
+    messages.drain(..first);
+    let Some(message) = messages.first_mut() else {
+        return;
+    };
+    let sizes: Vec<u64> = message.parts.iter().map(serialized_len).collect();
+    let mut total = sizes
+        .iter()
+        .fold(0_u64, |sum, size| sum.saturating_add(*size));
+    let mut first = 0;
+    while total > budget && first + 1 < message.parts.len() {
+        total = total.saturating_sub(sizes[first]);
+        first += 1;
+    }
+    message.parts.drain(..first);
+}
+
+/// Bytes `value` takes as JSON, counted without keeping them.
+fn serialized_len(value: &impl Serialize) -> u64 {
+    struct Count(u64);
+    impl io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(to_u64(bytes.len()));
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, value).map_or(u64::MAX, |()| count.0)
 }
 
 /// Claude's memory as a read collects it: each distinct text once, by

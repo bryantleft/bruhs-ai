@@ -323,21 +323,35 @@ pub(crate) fn clip_part(text: String, limit: usize) -> String {
 }
 
 /// `value` with its string leaves cut to `budget` characters in all,
-/// in document order: each is cut like [`clip_part`] once the budget runs
-/// out, so a huge tool input can't pass in whole. Keys stay. Iterative,
+/// in document order: the string the budget runs out in is cut there and
+/// ends with one `cut_short_line` for everything left out, and every
+/// later string is emptied, so a huge tool input can't pass in whole and
+/// many small strings can't each grow a cut line. Keys stay. Iterative,
 /// so a deep value can't overflow the stack.
 pub(crate) fn clip_strings(value: &Value, budget: usize) -> Value {
+    let total = string_chars(value);
+    if total <= budget {
+        return value.clone();
+    }
     let mut out = value.clone();
     let mut left = budget;
+    let mut cut = false;
     let mut stack: Vec<&mut Value> = vec![&mut out];
     while let Some(at) = stack.pop() {
         match at {
+            Value::String(text) if cut => text.clear(),
             Value::String(text) => {
                 let chars = text.chars().count();
                 if chars > left {
-                    *text = clip_part(std::mem::take(text), left);
+                    if let Some((at, _)) = text.char_indices().nth(left) {
+                        text.truncate(at);
+                    }
+                    text.push('\n');
+                    text.push_str(&cut_short_line(total - budget));
+                    cut = true;
+                } else {
+                    left -= chars;
                 }
-                left = left.saturating_sub(chars);
             }
             // Pushed in reverse so they pop in document order.
             Value::Array(items) => stack.extend(items.iter_mut().rev()),
@@ -349,4 +363,19 @@ pub(crate) fn clip_strings(value: &Value, budget: usize) -> Value {
         }
     }
     out
+}
+
+/// Characters of every string leaf in `value`, keys left out.
+fn string_chars(value: &Value) -> usize {
+    let mut total: usize = 0;
+    let mut stack = vec![value];
+    while let Some(at) = stack.pop() {
+        match at {
+            Value::String(text) => total = total.saturating_add(text.chars().count()),
+            Value::Array(items) => stack.extend(items),
+            Value::Object(fields) => stack.extend(fields.values()),
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+    }
+    total
 }

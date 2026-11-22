@@ -8,10 +8,10 @@ use super::text::{clip_part, shown_name};
 use super::ImportError;
 use bruhs_models::imports::{
     cut_short_line, ImportBatch, ImportJob, ImportJobState, ARCHIVE_REFUSED, CLAUDE_MANIFEST,
-    EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, MAX_PART_CHARS, NOT_AN_EXPORT,
-    TOO_MANY_FILES,
+    CONVERSATION_TOO_LARGE, EXPORT_TOO_LARGE, FOLDER_MISSING, GROK_BEST_EFFORT, MAX_PART_CHARS,
+    NOT_AN_EXPORT, TOO_MANY_FILES,
 };
-use bruhs_models::logic::portable::{title_from_prompt, ImportSource};
+use bruhs_models::logic::portable::{title_from_prompt, ImportSource, PortablePart};
 use bruhs_models::EpochMs;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -924,4 +924,60 @@ fn many_memory_files_give_one_part() {
         &text[text.len() - 80..]
     );
     assert!(text.chars().count() <= MAX_PART_CHARS + 64);
+}
+
+/// A reply that merges many blocks, repeated whole in the context, can
+/// outgrow its record: the thread keeps its newest parts within the
+/// record cap and counts as cut, and a thread file past the cap doesn't
+/// load (final review I1, scaled to the 1 MiB test cap).
+#[test]
+fn a_thread_fits_the_record_cap() {
+    let place = Place::new();
+    let host = place.host();
+    let cap = usize::try_from(Limits::TEST.record).unwrap();
+    let block = |n: usize| json!({ "type": "text", "text": format!("{n}{}", "x".repeat(199_000)) });
+    let record = json!({
+        "uuid": "conv-merged",
+        "name": "Merged",
+        "chat_messages": [
+            { "sender": "human", "text": "Write it all" },
+            { "sender": "assistant", "content": (0..4).map(block).collect::<Vec<_>>() },
+        ],
+    });
+    let raw = json_bytes(&json!([record]));
+    assert!(raw.len() < cap, "{} bytes", raw.len());
+    let batch = read(&host, &[&raw]);
+    assert_eq!(batch.counts.conversations, 1);
+    assert_eq!(batch.counts.cut_short, 1);
+    let thread = host
+        .thread(&batch.id, ImportSource::ClaudeAi, "conv-merged")
+        .unwrap();
+    assert!(serde_json::to_vec(&thread).unwrap().len() <= cap);
+    let reply = thread.messages.last().unwrap();
+    let newest = match reply.parts.last() {
+        Some(PortablePart::Text(text)) => text,
+        other => panic!("a text part, not {other:?}"),
+    };
+    assert!(newest.starts_with('3'), "the newest block stays");
+    assert!(reply.parts.len() < 4, "the oldest blocks go");
+
+    // A thread file past the cap isn't read back.
+    let file = place.root().join(&batch.id).join("threads").join("0.json");
+    let mut big = serde_json::to_vec(&thread).unwrap();
+    big.resize(cap + 1, b' ');
+    std::fs::write(&file, &big).unwrap();
+    assert!(matches!(
+        host.thread(&batch.id, ImportSource::ClaudeAi, "conv-merged"),
+        Err(ImportError::Gone)
+    ));
+
+    // One part that can't fit even alone is a chat too large to import.
+    let wide = json!([{
+        "uuid": "conv-wide",
+        "chat_messages": [{ "sender": "assistant", "text": "\u{20ac}".repeat(199_000) }],
+    }]);
+    let raw = json_bytes(&wide);
+    assert!(raw.len() < cap, "{} bytes", raw.len());
+    let job = upload(&host, &[&raw]);
+    assert_eq!(failed(wait(&host, &job.id)), CONVERSATION_TOO_LARGE);
 }
