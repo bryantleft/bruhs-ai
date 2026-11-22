@@ -626,6 +626,7 @@ impl Workspace {
         if should_open {
             self.open_top_layer(TopLayer::CommandBar);
         } else {
+            self.leave_import_dialog();
             self.top_layer = None;
         }
         self.palette_mode = PaletteMode::Commands;

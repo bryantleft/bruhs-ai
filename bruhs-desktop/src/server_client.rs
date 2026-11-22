@@ -18,6 +18,8 @@ pub(crate) mod backup;
 mod computer;
 #[path = "server_client/database.rs"]
 mod database;
+#[path = "server_client/imports.rs"]
+mod imports;
 #[path = "server_client/mail.rs"]
 mod mail;
 #[path = "server_client/mail_compose.rs"]

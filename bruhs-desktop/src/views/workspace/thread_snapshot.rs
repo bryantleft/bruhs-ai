@@ -27,6 +27,7 @@ impl DesktopThread {
                 .session_provider
                 .map(|provider| provider.as_str().to_string()),
             import_context: chat.import_context.clone(),
+            import_key: chat.import_key.clone(),
             fork: chat.fork.clone(),
             goal: chat.goal.clone(),
             worktree_path: chat.worktree_path.clone(),

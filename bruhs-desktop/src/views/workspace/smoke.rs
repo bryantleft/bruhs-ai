@@ -128,6 +128,57 @@ impl Workspace {
         )
     }
 
+    /// `import-export-ready`: a read of ChatGPT and Grok chats, as the web's
+    /// `task-10-check` captures show it. Its id is no batch id, so closing
+    /// the dialog sends nothing.
+    fn smoke_export_fixture(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        use bruhs_models::imports::{BatchCounts, ImportBatch, ImportJob, ImportJobState};
+        use bruhs_models::logic::portable::{ImportCandidate, ImportSource};
+        const WEEK_MS: i64 = 7 * 86_400_000;
+        let now = EpochMs::now().as_millis();
+        let row = |source, id: &str, title: &str, weeks: i64| ImportCandidate {
+            source,
+            id: id.into(),
+            title: title.into(),
+            cwd: None,
+            updated_at: EpochMs::saturating_from_i64(now - weeks * WEEK_MS),
+            provider: None,
+            session_id: None,
+            model: None,
+        };
+        let batch = ImportBatch {
+            id: "smoke-export-fixture".into(),
+            candidates: vec![
+                row(ImportSource::Grok, "g1", "Read this file please.", 28),
+                row(ImportSource::Grok, "g2", "Looping parents", 28),
+                row(ImportSource::Grok, "g3", "Bread starter", 29),
+                row(ImportSource::Grok, "g4", "Weekend in Lisbon", 29),
+                row(ImportSource::ChatGpt, "c1", "Kitchen layout", 52),
+                row(ImportSource::ChatGpt, "c2", "Balcony herbs", 53),
+                row(ImportSource::ChatGpt, "c3", "Tax questions", 60),
+                row(ImportSource::ChatGpt, "c4", "Rocket notes", 61),
+            ],
+            counts: BatchCounts {
+                conversations: 8,
+                skipped_empty: 1,
+                skipped_unknown: 1,
+                dropped_branches: 3,
+                ..BatchCounts::default()
+            },
+            warnings: vec![bruhs_models::imports::GROK_BEST_EFFORT.to_owned()],
+            best_effort: true,
+            ..ImportBatch::default()
+        };
+        self.import_picker.export.job = Some(ImportJob {
+            id: batch.id.clone(),
+            state: ImportJobState::Ready {
+                batch: Box::new(batch),
+            },
+        });
+        self.focus_export_control(import_ui::export_tab::ExportFocus::Search, window, cx);
+        cx.notify();
+    }
+
     /// `BRUHS_DESKTOP_SMOKE_SCENE`: put the window in one named state for a
     /// comparison screenshot. Returns false for an unknown scene.
     pub fn smoke_scene(
@@ -154,6 +205,15 @@ impl Workspace {
             "model-picker" => self.toggle_model_picker(&ToggleModelPicker, window, cx),
             "project-picker" => self.open_project_picker(&OpenProjectPicker, window, cx),
             "import-thread" => self.open_import_thread(&ImportThread, window, cx),
+            // The Export file tab: its start, and a ready read with Grok's
+            // best-effort note (a fixture; nothing reaches the server).
+            "import-export" | "import-export-ready" => {
+                self.open_import_thread(&ImportThread, window, cx);
+                self.set_import_tab(import_ui::ImportTab::Export, window, cx);
+                if scene == "import-export-ready" {
+                    self.smoke_export_fixture(window, cx);
+                }
+            }
             "task-create" => self.open_task_create(window, cx),
             "event-create" => self.open_event_create(None, window, cx),
             "meetings" => self.open_meetings_list(cx),

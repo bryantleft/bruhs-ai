@@ -64,6 +64,7 @@ impl Workspace {
         }
         self.theme_navigation = Default::default();
         self.overlay = None;
+        self.leave_import_dialog();
         self.top_layer = None;
         self.capture_edit_id = None;
         self.capture_error = None;
@@ -253,6 +254,7 @@ impl Workspace {
         self.cancel_picker_tasks();
         self.close_sidebar_menus();
         self.modal_scroll.set_offset(Point::default());
+        self.leave_import_dialog();
         self.top_layer = None;
         self.theme_navigation.collapse();
         self.overlay = Some(overlay);
@@ -264,6 +266,7 @@ impl Workspace {
         self.cancel_picker_tasks();
         self.close_sidebar_menus();
         self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. } | Overlay::Welcome));
+        self.leave_import_dialog();
         self.top_layer = Some(top_layer);
     }
 

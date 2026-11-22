@@ -5004,6 +5004,7 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         session_id: None,
         session_provider: None,
         import_context: None,
+        import_key: None,
         fork: None,
         goal: None,
         worktree_path: None,

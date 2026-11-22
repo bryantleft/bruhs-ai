@@ -1106,6 +1106,8 @@ struct PersistedThread {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     import_context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    import_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     fork: Option<std::sync::Arc<crate::views::chat::ForkContext>>,
     /// Local `/goal` text. Missing on states saved before goals.
     #[serde(default, skip_serializing_if = "Option::is_none")]

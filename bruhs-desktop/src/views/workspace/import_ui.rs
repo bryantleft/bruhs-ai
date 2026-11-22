@@ -5,10 +5,16 @@
 //!
 //! Listing, loading and exporting read other tools' files or run their
 //! CLIs, so all of it runs on the background executor.
+//!
+//! The Export file tab (`export_tab`) brings in chats from a ChatGPT,
+//! Claude.ai or Grok data export, which the server reads.
 
 use super::*;
-use bruhs_core::import::ImportRoots;
+use bruhs_core::import::{ImportError, ImportRoots};
 use bruhs_models::agent::Role as AgentRole;
+use bruhs_models::imports::{
+    import_key, EXPORT_TAB, T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED,
+};
 use bruhs_models::logic::portable::{
     IMPORT_CONTEXT_MAX_CHARS, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
     PortablePart, PortableToolCall, import_model, resume_command, transcript_markdown,
@@ -47,10 +53,20 @@ pub(super) const IMPORT_TAB_SELECTED_RING_OPACITY: f32 = 0.30;
 pub(super) const IMPORT_TAB_HOVER_BG_OPACITY: f32 = 0.50;
 pub(super) const IMPORT_FOOTER_BORDER_OPACITY: f32 = 0.50;
 
+pub(super) mod export_tab;
+
+/// The dialog's tab: a local tool, or the Export file tab (F24). Only a
+/// local tab searches the tool's own store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ImportTab {
+    Local(ImportSource),
+    Export,
+}
+
 /// The dialog's state. Closing it leaves the last listing; opening it
 /// starts over.
 pub(super) struct ImportPicker {
-    pub(super) source: ImportSource,
+    pub(super) tab: ImportTab,
     /// The newest listing, newest thread first.
     pub(super) found: Vec<ImportCandidate>,
     pub(super) selected: usize,
@@ -62,12 +78,15 @@ pub(super) struct ImportPicker {
     /// only the newest search fills the list.
     list_task: Option<Task<()>>,
     import_task: Option<Task<()>>,
+    /// The Export file tab's read and rows. They outlive a tab change and
+    /// go when the dialog closes (F23).
+    pub(super) export: export_tab::ExportPicker,
 }
 
 impl Default for ImportPicker {
     fn default() -> Self {
         Self {
-            source: ImportSource::ClaudeCode,
+            tab: ImportTab::Local(ImportSource::ClaudeCode),
             found: Vec::new(),
             selected: 0,
             loading: false,
@@ -76,6 +95,7 @@ impl Default for ImportPicker {
             scroll: ScrollHandle::new(),
             list_task: None,
             import_task: None,
+            export: export_tab::ExportPicker::default(),
         }
     }
 }
@@ -155,10 +175,12 @@ pub(super) fn import_row_detail(
     format!("{place}, {when}, {how}")
 }
 
-/// Candidates whose session is not already a thread here.
+/// Candidates not already a thread here: by the session they continue, or
+/// by their `import_key` (D8).
 pub(super) fn visible_candidates<'a>(
     found: &'a [ImportCandidate],
     known_sessions: &HashSet<String>,
+    known_keys: &HashSet<String>,
 ) -> Vec<&'a ImportCandidate> {
     found
         .iter()
@@ -167,8 +189,23 @@ pub(super) fn visible_candidates<'a>(
                 .session_id
                 .as_ref()
                 .is_none_or(|session| !known_sessions.contains(session))
+                && !known_keys.contains(&import_key(candidate.source, &candidate.id))
         })
         .collect()
+}
+
+/// A failed Continue in T3 Code as its notice. The import's own T3 copy
+/// already names T3 Code and shows as it is; any other failure gets the
+/// "T3: " prefix, as on the web.
+pub(super) fn t3_failure(error: &ImportError) -> String {
+    match error {
+        ImportError::Refused(copy)
+            if [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED].contains(copy) =>
+        {
+            (*copy).to_owned()
+        }
+        other => format!("T3: {other}"),
+    }
 }
 
 /// An imported message as a desktop message: text parts become the content,
@@ -306,21 +343,29 @@ impl Workspace {
         self.import_picker.error = None;
         self.import_picker.importing = false;
         self.import_picker.import_task = None;
+        self.prepare_export_tab(window, cx);
         let input = self.import_input.clone();
         input.update(cx, |input, cx| input.set_value("", window, cx));
         // Setting the value searches through the subscription; an already
         // empty field does not change, so search here as well.
         self.refresh_import_list(cx);
-        cx.defer_in(window, move |_this, window, cx| {
-            input.update(cx, |input, cx| input.focus(window, cx));
-        });
+        if self.import_picker.tab == ImportTab::Export {
+            // The web dialog's first control there: Choose export file.
+            self.focus_export_control(export_tab::ExportFocus::Choose, window, cx);
+        } else {
+            cx.defer_in(window, move |_this, window, cx| {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            });
+        }
         cx.notify();
     }
 
     /// List the picked source for the current query, 200ms after typing
     /// stops (at once for an empty query).
     pub(super) fn refresh_import_list(&mut self, cx: &mut Context<'_, Self>) {
-        let source = self.import_picker.source;
+        let ImportTab::Local(source) = self.import_picker.tab else {
+            return;
+        };
         let query = self.import_input.read(cx).value().trim().to_string();
         let delay = (!query.is_empty()).then_some(IMPORT_SEARCH_DEBOUNCE);
         self.import_picker.loading = true;
@@ -365,15 +410,50 @@ impl Workspace {
         picker.scroll.set_offset(Point::default());
     }
 
-    pub(super) fn set_import_source(&mut self, source: ImportSource, cx: &mut Context<'_, Self>) {
-        if self.import_picker.source == source {
+    pub(super) fn set_import_tab(
+        &mut self,
+        tab: ImportTab,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.import_picker.tab == tab {
             return;
         }
-        self.import_picker.source = source;
+        self.import_picker.tab = tab;
+        // Focus left in a field the new tab doesn't draw would leave every
+        // key dead: it moves to the dialog, so Tab starts from the top.
+        cx.defer_in(window, |this, window, cx| {
+            let gone = match this.import_picker.tab {
+                ImportTab::Export => this.import_input.focus_handle(cx).is_focused(window),
+                ImportTab::Local(_) => this.import_picker.export.ui.as_ref().is_some_and(|ui| {
+                    ui.search.focus_handle(cx).is_focused(window)
+                        || [&ui.choose, &ui.list, &ui.all, &ui.another]
+                            .into_iter()
+                            .any(|handle| handle.is_focused(window))
+                }),
+            };
+            if gone {
+                this.focus_modal_dialog(window, cx);
+            }
+        });
+        if tab == ImportTab::Export {
+            // The read and its rows stay as they were.
+            self.prepare_export_tab(window, cx);
+            cx.notify();
+            return;
+        }
         // Rows of the previous source must not be imported by a quick Enter.
         self.import_picker.found.clear();
         self.import_picker.error = None;
         self.refresh_import_list(cx);
+    }
+
+    /// `import_key`s of the chats already here from an export.
+    pub(super) fn known_import_keys(&self, cx: &App) -> HashSet<String> {
+        self.threads
+            .iter()
+            .filter_map(|thread| thread.chat.read(cx).import_key.clone())
+            .collect()
     }
 
     /// Provider sessions the threads here already continue.
@@ -386,13 +466,18 @@ impl Workspace {
 
     pub(super) fn visible_import_candidates(&self, cx: &App) -> Vec<ImportCandidate> {
         let known = self.known_session_ids(cx);
-        visible_candidates(&self.import_picker.found, &known)
+        let keys = self.known_import_keys(cx);
+        visible_candidates(&self.import_picker.found, &known, &keys)
             .into_iter()
             .cloned()
             .collect()
     }
 
     fn move_import_selection(&mut self, key: &str, cx: &mut Context<'_, Self>) {
+        if self.import_picker.tab == ImportTab::Export {
+            self.move_export_selection(key, cx);
+            return;
+        }
         let count = self.visible_import_candidates(cx).len();
         if let Some(next) =
             Self::move_command_selected_index(self.import_picker.selected, count, key)
@@ -404,6 +489,10 @@ impl Workspace {
     }
 
     fn import_selected(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.import_picker.tab == ImportTab::Export {
+            self.import_selected_export(window, cx);
+            return;
+        }
         let rows = self.visible_import_candidates(cx);
         let index = Self::clamp_command_selected_index(self.import_picker.selected, rows.len());
         if let Some(candidate) = rows.into_iter().nth(index) {
@@ -461,7 +550,7 @@ impl Workspace {
         } else {
             candidate.title.clone()
         };
-        let thread = Self::create_thread_with_title(
+        let mut thread = Self::create_thread_with_title(
             place.project_name,
             place.run_path.unwrap_or_else(current_dir_string),
             // The thread stays on its session's provider.
@@ -479,11 +568,18 @@ impl Workspace {
             .zip(candidate.provider)
             .filter(|(id, _)| !id.is_empty());
         let context = imported.context.clone();
+        // A chat from an export keeps its key, so it isn't offered again,
+        // and sorts by when it happened (D8).
+        let key = candidate
+            .source
+            .is_export()
+            .then(|| import_key(candidate.source, &candidate.id));
         thread.chat.update(cx, |chat, cx| {
             chat.messages = messages;
             chat.session_id = session.as_ref().map(|(id, _)| id.clone());
             chat.session_provider = session.as_ref().map(|(_, provider)| *provider);
             chat.import_context = context;
+            chat.import_key = key.clone();
             // A resumed session lives in the folder it ran in: a new
             // worktree would hide it from the CLI.
             chat.run_locked = session.is_some();
@@ -492,7 +588,18 @@ impl Workspace {
         });
         let id = thread.id.clone();
         let label = candidate.source.label();
+        if key.is_some() {
+            thread.updated_at_ms = candidate.updated_at;
+        }
         self.threads.push(thread);
+        if key.is_some() && self.top_layer == Some(TopLayer::ImportThread) {
+            // The thread opens behind the dialog, which stays on the batch
+            // (F23); the tab's own line says what came in.
+            let dialog = self.top_layer.take();
+            self.select_thread_by_id(&id, cx);
+            self.top_layer = dialog;
+            return;
+        }
         self.select_thread_by_id(&id, cx);
         self.meetings_hub.update(cx, |hub, cx| {
             hub.show_notice(format!("Imported from {label}"), false, cx);
@@ -632,13 +739,13 @@ impl Workspace {
         }
         let export = cx.background_spawn(async move {
             bruhs_core::import::export_to_t3(Path::new(&project), &title, &model, &markdown)
-                .map_err(|error| error.to_string())
+                .map_err(|error| t3_failure(&error))
         });
         cx.spawn(async move |this, cx| {
             let exported = export.await;
             let _closed = this.update(cx, |this, cx| match exported {
                 Ok(_) => this.show_thread_notice("Started a T3 thread", false, cx),
-                Err(error) => this.show_thread_notice(format!("T3: {error}"), true, cx),
+                Err(error) => this.show_thread_notice(error, true, cx),
             });
         })
         .detach();
@@ -681,7 +788,8 @@ impl Workspace {
     }
 
     fn render_import_source_tabs(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let current = self.import_picker.source;
+        let current = self.import_picker.tab;
+        // Five tabs scroll sideways inside the dialog, never wrap (F25).
         div()
             .mt_2()
             .flex()
@@ -689,21 +797,28 @@ impl Workspace {
             .id("desktop-import-sources")
             .role(Role::TabList)
             .aria_label("Import from")
+            .overflow_x_scroll()
             .children(
                 ImportSource::LOCAL
                     .into_iter()
+                    .map(ImportTab::Local)
+                    .chain([ImportTab::Export])
                     .enumerate()
                     .map(|(index, tab)| {
                         let selected = tab == current;
+                        let (name, label) = match tab {
+                            ImportTab::Local(source) => (source.as_str(), source.label()),
+                            ImportTab::Export => ("export", EXPORT_TAB),
+                        };
                         div()
                             .id(("desktop-import-source", index))
-                            .debug_selector(move || {
-                                format!("desktop-import-source-{}", tab.as_str())
-                            })
+                            .debug_selector(move || format!("desktop-import-source-{name}"))
                             .role(Role::Tab)
-                            .aria_label(tab.label())
+                            .aria_label(label)
                             .aria_selected(selected)
                             .tab_index(0)
+                            .flex_shrink_0()
+                            .whitespace_nowrap()
                             .rounded(px(IMPORT_RADIUS_PX))
                             .border_1()
                             .px(px(10.0))
@@ -733,11 +848,11 @@ impl Workspace {
                                 }
                             })
                             .map(|el| {
-                                on_press_view(el, cx, move |this, _window, cx| {
-                                    this.set_import_source(tab, cx);
+                                on_press_view(el, cx, move |this, window, cx| {
+                                    this.set_import_tab(tab, window, cx);
                                 })
                             })
-                            .child(tab.label())
+                            .child(label)
                     }),
             )
             .into_any_element()
@@ -765,7 +880,11 @@ impl Workspace {
             let text = if picker.loading {
                 IMPORT_LOADING_LABEL.to_string()
             } else {
-                format!("No {} threads found", picker.source.label())
+                let source = match picker.tab {
+                    ImportTab::Local(source) => source,
+                    ImportTab::Export => ImportSource::ClaudeCode,
+                };
+                format!("No {} threads found", source.label())
             };
             return message_row(text, theme::rambutan_300());
         }
@@ -851,7 +970,19 @@ impl Workspace {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let importing = self.import_picker.importing;
+        let on_export = self.import_picker.tab == ImportTab::Export;
+        let importing = self.import_picker.importing || self.import_picker.export.importing;
+        let export_rows = if on_export {
+            self.visible_export_rows(cx)
+        } else {
+            Vec::new()
+        };
+        // The arrow hint shows only with a row to choose (web M6).
+        let choosable = if on_export {
+            !export_rows.is_empty()
+        } else {
+            self.import_picker.error.is_none() && !self.visible_import_candidates(cx).is_empty()
+        };
         div()
             .absolute()
             .top_0()
@@ -898,7 +1029,13 @@ impl Workspace {
                         {
                             return;
                         }
-                        let composing = this.import_input.update(cx, |input, cx| {
+                        // On the Export file tab, arrows and Enter belong to the
+                        // search and the rows; its buttons take their own Enter.
+                        if key != "escape" && !this.import_keys_reach_rows(window, cx) {
+                            return;
+                        }
+                        let input = this.active_import_input();
+                        let composing = input.update(cx, |input, cx| {
                             input.marked_text_range(window, cx).is_some()
                         });
                         if composing {
@@ -943,8 +1080,10 @@ impl Workspace {
                                     .child(IMPORT_DIALOG_LABEL),
                             )
                             .child(self.render_import_source_tabs(cx))
-                            .child(
+                            .when(!on_export, |header| {
+                                header.child(
                                 div()
+                                    .debug_selector(|| "desktop-import-search".to_string())
                                     .mt_2()
                                     .w_full()
                                     .rounded(px(IMPORT_RADIUS_PX))
@@ -968,9 +1107,14 @@ impl Workspace {
                                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                                             .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
                                     ),
-                            ),
+                                )
+                            }),
                     )
-                    .child(self.render_import_rows(cx))
+                    .child(if on_export {
+                        self.render_export_tab(&export_rows, window, cx)
+                    } else {
+                        self.render_import_rows(cx)
+                    })
                     .child(
                         div()
                             .flex_shrink_0()
@@ -987,8 +1131,10 @@ impl Workspace {
                             .text_color(theme::rambutan_300())
                             .child(if importing {
                                 IMPORT_FOOTER_IMPORTING
-                            } else {
+                            } else if choosable {
                                 IMPORT_FOOTER_HINT
+                            } else {
+                                ""
                             })
                             .child(
                                 div()

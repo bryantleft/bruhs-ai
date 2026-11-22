@@ -178,6 +178,7 @@ impl Workspace {
                 persisted.project_permission_override && !persisted.project_name.is_empty();
             (view.session_id, view.session_provider) = (session_id, session_provider);
             view.import_context = persisted.import_context;
+            view.import_key = persisted.import_key;
             view.fork = persisted.fork;
             view.goal = persisted.goal;
             view.worktree_path = persisted.worktree_path;

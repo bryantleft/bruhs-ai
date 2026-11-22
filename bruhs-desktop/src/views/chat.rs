@@ -712,6 +712,8 @@ pub struct ChatView {
     /// Transcript of a thread imported without a session. Turns send it
     /// ahead of the prompt until a provider session holds it.
     pub import_context: Option<String>,
+    /// `import_key(source, id)` of a chat imported from an export (D8).
+    pub import_key: Option<String>,
     pub(crate) fork: Option<std::sync::Arc<ForkContext>>,
     /// Provider of the newest turn, which owns the session it reports.
     turn_provider: AgentProvider,
@@ -1231,6 +1233,7 @@ impl ChatView {
             session_id: None,
             session_provider: None,
             import_context: None,
+            import_key: None,
             fork: None,
             turn_provider: AgentProvider::Claude,
             handoff_pending: false,
@@ -1385,6 +1388,7 @@ impl ChatView {
         self.session_id = None;
         self.session_provider = None;
         self.import_context = None;
+        self.import_key = None;
         self.fork = None;
         self.goal = None;
         self.worktree_path = None;
