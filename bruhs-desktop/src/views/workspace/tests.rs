@@ -5263,6 +5263,7 @@ fn command_actions_should_match_web_reference() {
                 "Import thread...",
                 "Claude Code, Codex, T3, Cursor"
             ),
+            ("move-in", "Agent", "Move in...", "OpenClaw, Hermes Agent, a prompt"),
             ("pin-thread", "Actions", "Pin / unpin thread", "⌘⇧P"),
             (
                 "settle-thread",
@@ -5381,6 +5382,7 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Choose project folder",
             "New thread",
             "Import thread...",
+            "Move in...",
             "Pin / unpin thread",
             "Settle / unsettle thread",
             "Copy thread link",

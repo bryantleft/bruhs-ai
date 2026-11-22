@@ -5,7 +5,7 @@
 use super::lines::fill;
 use super::{
     is_hidden_char, persona_lines, PersonaCandidate, CUT_MARK, EXPORT_MEMORY_FROM_TEMPLATE,
-    IDENTITY_FROM, MOVE_IN_EMPTY, MOVE_IN_TOO_LONG, PASTED_ANSWER_TEMPLATE,
+    IDENTITY_FROM, MEMORY_WAITS, MOVE_IN_EMPTY, MOVE_IN_TOO_LONG, PASTED_ANSWER_TEMPLATE,
 };
 use crate::agent::DEFAULT_AGENT_MODEL;
 use crate::crew::BruhDraft;
@@ -290,6 +290,28 @@ pub fn prefill_from_persona(persona: &PersonaCandidate) -> ImportPrefill {
 pub fn after_created(prefill: &ImportPrefill, agent_id: &str) -> Option<ReactiveCommand> {
     (!prefill.memory.trim().is_empty())
         .then(|| propose_memory(agent_id.to_string(), prefill.memory.clone()))
+}
+
+/// What By prompt's **Make a bruh** starts from: the answer in the area,
+/// when there is any, waiting as the new bruh's memory proposal under
+/// `## <from>`, so pasted or exported memory isn't lost for want of a
+/// bruh. Nothing in the area opens a blank bruh (`Ok(None)`); text over
+/// the cap is refused with its copy, and the area keeps it.
+pub fn prefill_for_answer(answer: &str, from: &str) -> Result<Option<ImportPrefill>, &'static str> {
+    match moved_in_memory("", answer, from) {
+        Ok(memory) => Ok(Some(ImportPrefill {
+            draft: BruhDraft {
+                name: String::new(),
+                instructions: String::new(),
+                model: DEFAULT_AGENT_MODEL.to_string(),
+                effort: None,
+            },
+            memory,
+            lines: vec![MEMORY_WAITS.to_string()],
+        })),
+        Err(MOVE_IN_EMPTY) => Ok(None),
+        Err(copy) => Err(copy),
+    }
 }
 
 /// The Move in dialog's tabs.
@@ -605,6 +627,26 @@ mod tests {
         assert_ne!(cleared, start);
         assert_ne!(MoveInTab::OpenClaw, MoveInTab::Hermes);
         assert_eq!(moved_in_from("2026-11-21"), "Pasted answer, 2026-11-21");
+    }
+
+    #[test]
+    fn make_a_bruh_carries_the_answer_or_refuses_it() {
+        let from = "Claude.ai export";
+        let prefill = prefill_for_answer("  Likes tea.  ", from).unwrap().unwrap();
+        assert_eq!(prefill.memory, "## Claude.ai export\n\nLikes tea.");
+        assert_eq!(prefill.draft.name, "");
+        assert_eq!(prefill.draft.instructions, "");
+        assert_eq!(prefill.draft.model, crate::agent::DEFAULT_AGENT_MODEL);
+        assert_eq!(prefill.lines, [MEMORY_WAITS]);
+        assert_eq!(
+            after_created(&prefill, "b1"),
+            Some(propose_memory("b1".into(), prefill.memory.clone()))
+        );
+        // Nothing in the area: a blank bruh.
+        assert_eq!(prefill_for_answer(" \n", from), Ok(None));
+        // Over the cap: refused with its copy, never a blank bruh.
+        let long = "x".repeat(MAX_TEXT_CHARS);
+        assert_eq!(prefill_for_answer(&long, from), Err(MOVE_IN_TOO_LONG));
     }
 
     #[test]

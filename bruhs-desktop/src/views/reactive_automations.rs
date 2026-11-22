@@ -23,6 +23,7 @@ mod editor_fields;
 mod face_editor;
 mod memory;
 mod notifications;
+mod proposed_memory;
 pub(crate) use notifications::AgentNotificationSettings;
 mod room_dialog;
 mod room_page;
@@ -157,6 +158,7 @@ struct CrewState {
     service_request: Option<Task<()>>,
     updating: bool,
     update_error: Option<String>,
+    imports: proposed_memory::ImportCrew,
 }
 
 // Match the web panel and existing connection status polling.

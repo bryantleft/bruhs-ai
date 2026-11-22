@@ -82,6 +82,7 @@ mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
 mod import_ui;
+mod move_in_ui;
 #[cfg(test)]
 mod keyboard_tests;
 mod mail_compose;
@@ -558,6 +559,8 @@ enum TopLayer {
     },
     /// Import a thread from Claude Code, Codex, T3 Code or Cursor.
     ImportThread,
+    /// Move in: a bruh from OpenClaw or Hermes Agent, or memory By prompt.
+    MoveIn,
     /// Connect a record or cite a source on the open document (web
     /// `RecordPicker`), with the highlighted match.
     RecordPicker {
@@ -1726,6 +1729,7 @@ pub struct Workspace {
     /// The Import thread dialog's source, results and background work.
     import_picker: import_ui::ImportPicker,
     import_input: Entity<InputState>,
+    move_in: move_in_ui::MoveInPicker,
 
     // Child views
     command_input: Entity<InputState>,
@@ -2711,6 +2715,7 @@ impl Workspace {
             modal_scroll: ScrollHandle::new(),
             import_picker: import_ui::ImportPicker::default(),
             import_input,
+            move_in: move_in_ui::MoveInPicker::default(),
             command_input,
             capture_input,
             capture_cancel_focus: cx.focus_handle().tab_index(0).tab_stop(true),
@@ -3972,6 +3977,7 @@ impl Render for Workspace {
                     TopLayer::CommandBar => self.render_command_bar(window, cx),
                     TopLayer::ProjectPicker { .. } => self.render_project_picker(window, cx),
                     TopLayer::ImportThread => self.render_import_thread(window, cx),
+                    TopLayer::MoveIn => self.render_move_in(window, cx),
                     TopLayer::RecordPicker {
                         target,
                         highlighted,

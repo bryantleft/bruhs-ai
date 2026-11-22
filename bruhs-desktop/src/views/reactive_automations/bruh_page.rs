@@ -1329,6 +1329,7 @@ impl ReactiveAutomations {
                 "desktop-bruh-memory",
                 layout
                     .column()
+                    .children(self.render_proposed_memory(agent_id, cx))
                     .child(self.render_agent_records(agent_id, cx)),
             ),
             BruhTab::Routines => self.render_bruh_scroll(

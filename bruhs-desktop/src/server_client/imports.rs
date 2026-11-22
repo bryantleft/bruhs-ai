@@ -122,7 +122,6 @@ impl ServerClient {
 
     /// `GET /api/import/agents?source=&path=`: OpenClaw or Hermes Agent
     /// personas, in `path` or the agent's default places.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 13"))]
     pub async fn scan_agents(
         &self,
         source: ImportSource,

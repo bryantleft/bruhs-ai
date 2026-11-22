@@ -2,11 +2,9 @@
 //! and its answer proposed as a chosen bruh's memory. The answer joins the
 //! bruh's memory only as a proposal the owner approves on its Memory tab.
 
-use bruhs_models::agent::DEFAULT_AGENT_MODEL;
-use bruhs_models::crew::BruhDraft;
 use bruhs_models::imports::{
-    memory_proposed_line, moved_in_from, moved_in_memory, propose_memory, ImportPrefill, COPIED,
-    COPY_PROMPT, FOR_BRUH, MAKE_A_BRUH, MEMORY_WAITS, MOVE_IN_EMPTY, MOVE_IN_HINT, MOVE_IN_PROMPT,
+    memory_proposed_line, moved_in_from, moved_in_memory, prefill_for_answer, propose_memory,
+    ImportPrefill, COPIED, COPY_PROMPT, FOR_BRUH, MAKE_A_BRUH, MOVE_IN_HINT, MOVE_IN_PROMPT,
     NO_BRUHS, PROPOSE_MEMORY, THEIR_ANSWER,
 };
 use leptos::prelude::*;
@@ -29,27 +27,6 @@ fn pasted_from_today() -> String {
         date.get_month() + 1,
         date.get_date()
     ))
-}
-
-/// What **Make a bruh** starts from: the text in the area, when there is
-/// any, waiting as the new bruh's memory proposal, so an export's memory
-/// isn't lost for want of a bruh. Nothing in the area opens a blank bruh;
-/// text over the cap is refused with its copy and stays (M1).
-fn prefill_for_answer(answer: &str, from: &str) -> Result<Option<ImportPrefill>, &'static str> {
-    match moved_in_memory("", answer, from) {
-        Ok(memory) => Ok(Some(ImportPrefill {
-            draft: BruhDraft {
-                name: String::new(),
-                instructions: String::new(),
-                model: DEFAULT_AGENT_MODEL.to_string(),
-                effort: None,
-            },
-            memory,
-            lines: vec![MEMORY_WAITS.to_string()],
-        })),
-        Err(MOVE_IN_EMPTY) => Ok(None),
-        Err(copy) => Err(copy),
-    }
 }
 
 /// The By prompt tab's text, choice and outcome. Move in owns it, so
@@ -304,23 +281,6 @@ mod tests {
                 <ByPromptTab data=data state=state on_make_bruh=Callback::new(|_| {}) />
             })
         })
-    }
-
-    #[test]
-    fn make_a_bruh_carries_the_answer_or_refuses_it() {
-        use bruhs_models::imports::MOVE_IN_TOO_LONG;
-        use bruhs_models::reactive::MAX_TEXT_CHARS;
-        let from = "Claude.ai export";
-        let prefill = prefill_for_answer("  Likes tea.  ", from).unwrap().unwrap();
-        assert_eq!(prefill.memory, "## Claude.ai export\n\nLikes tea.");
-        assert_eq!(prefill.draft.name, "");
-        assert_eq!(prefill.draft.model, DEFAULT_AGENT_MODEL);
-        assert_eq!(prefill.lines, [MEMORY_WAITS]);
-        // Nothing in the area: a blank bruh.
-        assert_eq!(prefill_for_answer(" \n", from), Ok(None));
-        // Over the cap: refused with its copy, never a blank bruh (M1).
-        let long = "x".repeat(MAX_TEXT_CHARS);
-        assert_eq!(prefill_for_answer(&long, from), Err(MOVE_IN_TOO_LONG));
     }
 
     #[test]

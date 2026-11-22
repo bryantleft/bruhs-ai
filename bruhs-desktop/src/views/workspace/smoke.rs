@@ -506,6 +506,45 @@ impl Workspace {
             // The crew: a bruh's page on its Chat or Settings tab, and the
             // New bruh dialog (web-vs-desktop crew comparison).
             "bruh-create" => self.open_create_bruh_dialog(window, cx),
+            // Move in on a fixture scan, By prompt with an export's memory,
+            // and the Proposed memory card (`-stale` once the memory has
+            // changed since); nothing reaches the server.
+            "move-in" | "move-in-prompt" => {
+                self.reactive_automations
+                    .update(cx, |panel, cx| panel.smoke_memory_fixture(false, cx));
+                self.move_in.scan = Some(move_in_ui::smoke_scan());
+                let start = if scene == "move-in" {
+                    move_in_ui::MoveInStart {
+                        tab: move_in_ui::MoveInTab::OpenClaw,
+                        text: None,
+                        from: None,
+                    }
+                } else {
+                    move_in_ui::MoveInStart {
+                        tab: move_in_ui::MoveInTab::ByPrompt,
+                        text: Some("Likes short answers.\nWorks on Bruhs & friends.".into()),
+                        from: Some(bruhs_models::imports::export_memory_from(
+                            bruhs_models::logic::portable::ImportSource::ClaudeAi,
+                        )),
+                    }
+                };
+                self.open_move_in(start, window, cx);
+            }
+            "bruh-memory-proposed" | "bruh-memory-proposed-stale" => {
+                let stale = scene.ends_with("-stale");
+                let agent_id = self
+                    .reactive_automations
+                    .update(cx, |panel, cx| panel.smoke_memory_fixture(stale, cx));
+                self.activate_sidebar_view(
+                    AppView::Bruh {
+                        agent_id: agent_id.clone(),
+                    },
+                    window,
+                    cx,
+                );
+                self.reactive_automations
+                    .update(cx, |panel, cx| panel.smoke_show_bruh_memory(&agent_id, cx));
+            }
             // A room's page, New room and a room's settings (web-vs-desktop
             // room page and dialog).
             "room-new" => self.open_room_dialog(None, window, cx),

@@ -719,6 +719,28 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Move in's **Make this bruh** (or By prompt's **Make a bruh** with an
+    /// answer): the New bruh dialog on the import's name and job, its
+    /// memory waiting to be proposed once the bruh exists (F28). Opening it
+    /// closes Move in.
+    pub(super) fn open_create_bruh_from_import_dialog(
+        &mut self,
+        prefill: bruhs_models::imports::ImportPrefill,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.reactive_automations.read(cx).crew_ready() {
+            return;
+        }
+        let roles = self.roles.resolved("");
+        self.reactive_automations.update(cx, |panel, cx| {
+            panel.open_create_bruh_from_import(roles, prefill, window, cx);
+        });
+        self.open_overlay(Overlay::CreateBruh);
+        self.focus_first_modal_tab_stop(window, cx);
+        cx.notify();
+    }
+
     /// The New bruh dialog: the panel's fields in the shared modal shell.
     pub(super) fn render_create_bruh(
         &self,

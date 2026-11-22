@@ -4,6 +4,9 @@
 
 use super::*;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
+use bruhs_models::imports::{
+    export_memory_from, memory_found_line, MoveInStart, MoveInTab, USE_AS_MEMORY,
+};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 
@@ -133,6 +136,7 @@ impl Workspace {
                             export_text("line", line, theme::rambutan_200())
                         }
                     }));
+                let scroll = scroll.children(Self::render_export_memory(batch, cx));
                 let scroll = if batch.candidates.is_empty() {
                     scroll
                 } else if left {
@@ -184,6 +188,56 @@ impl Workspace {
             .child(scroll.vertical_scrollbar(&export.body_scroll))
             .child(actions)
             .into_any_element()
+    }
+
+    /// The export's memory of the owner, each offered as a bruh's memory:
+    /// it opens Move in at By prompt with the text and where it came from
+    /// (D14). The batch goes when this dialog closes; the text travels.
+    fn render_export_memory(batch: &ImportBatch, cx: &Context<'_, Self>) -> Vec<Div> {
+        batch
+            .memory
+            .iter()
+            .filter(|suggestion| !suggestion.text.trim().is_empty())
+            .enumerate()
+            .map(|(index, suggestion)| {
+                let source = suggestion.source;
+                let text = suggestion.text.clone();
+                let button = web_button(
+                    ("desktop-import-export-use-memory", index),
+                    WebButtonVariant::Outline,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(move || format!("desktop-import-export-button:{USE_AS_MEMORY}"))
+                .flex_shrink_0()
+                .min_h(px(theme::CONTROL_PX))
+                .px_3()
+                .border_color(theme::longan_700())
+                .text_color(theme::rambutan_200())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .aria_label(USE_AS_MEMORY)
+                .child(USE_AS_MEMORY);
+                let button = on_press_view(button, cx, move |this, window, cx| {
+                    let start = MoveInStart {
+                        tab: MoveInTab::ByPrompt,
+                        text: Some(text.clone()),
+                        from: Some(export_memory_from(source)),
+                    };
+                    this.open_move_in(start, window, cx);
+                });
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        export_text("memory", memory_found_line(source), theme::rambutan_200())
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                    .child(button)
+            })
+            .collect()
     }
 
     fn render_export_search(

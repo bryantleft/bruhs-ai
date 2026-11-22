@@ -2,9 +2,16 @@
 //! starting from a role (web `crew/create.rs`). A role is copied once, as a
 //! snapshot: later edits to the role never reach the bruh. The workspace
 //! draws the dialog's shell and footer; this module owns its fields.
+//!
+//! **Make this bruh** opens it with a persona's name and job (D11). The
+//! bruh is still made by `create_command`: Read only, with empty memory and
+//! its own folder. The persona's memory waits as a proposal the owner
+//! approves on the bruh's Memory tab (D12), sent once the bruh exists, even
+//! when the dialog has closed by then.
 use super::*;
 use bruhs_models::agent::DEFAULT_AGENT_MODEL;
 use bruhs_models::crew::{create_command, draft_from_role, BruhDraft, BruhLook};
+pub(crate) use bruhs_models::imports::ImportPrefill;
 use bruhs_models::roles::ResolvedRole;
 
 /// The service made the bruh the dialog asked for; open its page.
@@ -18,6 +25,8 @@ const NO_ROLE_LABEL: &str = "None";
 const ROLE_LABEL: &str = "Start from role";
 /// Web `Textarea rows=2`: two 21px lines, `py-1.5` and the 1px ring.
 const JOB_FIELD_PX: f32 = 55.0;
+/// Web `rows=6`, for a persona's job: six 21px lines and the same frame.
+const PREFILLED_JOB_FIELD_PX: f32 = 139.0;
 const LABEL_TEXT_PX: f32 = 12.0;
 pub(super) const FIELD_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
 pub(super) const FIELD_RADIUS_PX: f32 = 8.0;
@@ -44,6 +53,8 @@ pub(super) struct CreateBruh {
     invalid: Option<String>,
     /// The bruh this dialog asked the service to make, until it answers.
     pending: Option<String>,
+    /// The persona this opening started from (**Make this bruh**).
+    import: Option<ImportPrefill>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -148,9 +159,36 @@ impl ReactiveAutomations {
             look: BruhLook::default(),
             invalid: None,
             pending: None,
+            import: None,
             _subscriptions: subscriptions,
         });
         self.clear_create_error();
+        cx.notify();
+    }
+
+    /// Open the dialog on a persona's name and job, with its preview lines
+    /// under the job. The role picker stays at None.
+    pub(crate) fn open_create_bruh_from_import(
+        &mut self,
+        roles: Vec<ResolvedRole>,
+        prefill: ImportPrefill,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_create_bruh(roles, window, cx);
+        let Some(create) = self.create.as_mut() else {
+            return;
+        };
+        let draft = &prefill.draft;
+        create
+            .name
+            .update(cx, |input, cx| input.set_value(&draft.name, window, cx));
+        create.job.update(cx, |input, cx| {
+            input.set_value(&draft.instructions, window, cx);
+        });
+        create.model.clone_from(&draft.model);
+        create.effort.clone_from(&draft.effort);
+        create.import = Some(prefill);
         cx.notify();
     }
 
@@ -199,13 +237,18 @@ impl ReactiveAutomations {
         let id = uuid::Uuid::new_v4().to_string();
         let folder = folder_choice(&create.folder.read(cx).value());
         let command = create_command(id.clone(), &draft, create.look.clone(), folder);
-        create.pending = Some(id);
+        create.pending = Some(id.clone());
+        if let Some(prefill) = create.import.clone() {
+            self.expect_import_follow_up(id, prefill);
+        }
         self.send_in(command, Scope::CreateBruh, cx);
         cx.notify();
     }
 
-    /// The service made a bruh: open it if this dialog is still waiting.
+    /// The service made a bruh: send a persona's memory as its proposal,
+    /// and open it if this dialog is still waiting.
     pub(super) fn created_bruh(&mut self, agent_id: String, cx: &mut Context<'_, Self>) {
+        self.send_import_follow_up(&agent_id, cx);
         if self
             .create
             .as_ref()
@@ -216,11 +259,36 @@ impl ReactiveAutomations {
         }
     }
 
-    /// The service refused: keep the dialog open with its reason.
+    /// The service refused: keep the dialog open with its reason. No bruh,
+    /// so no memory follows.
     pub(super) fn create_failed(&mut self) {
-        if let Some(create) = self.create.as_mut() {
-            create.pending = None;
+        if let Some(id) = self
+            .create
+            .as_mut()
+            .and_then(|create| create.pending.take())
+        {
+            self.drop_import_follow_up(&id);
         }
+    }
+
+    /// Type `name` into the open dialog's Name.
+    #[cfg(test)]
+    pub(crate) fn set_create_name_for_test(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(create) = self.create.as_ref() {
+            let input = create.name.clone();
+            input.update(cx, |input, cx| input.set_value(name, window, cx));
+        }
+    }
+
+    /// The service made bruh `agent_id`, as its answer would say.
+    #[cfg(test)]
+    pub(crate) fn created_bruh_for_test(&mut self, agent_id: String, cx: &mut Context<'_, Self>) {
+        self.created_bruh(agent_id, cx);
     }
 
     fn clear_create_error(&mut self) {
@@ -370,6 +438,15 @@ impl ReactiveAutomations {
     pub(crate) fn render_create_bruh(&self, cx: &Context<'_, Self>) -> Option<Div> {
         let create = self.create.as_ref()?;
         let disabled = create.pending.is_some();
+        let job_px = if create
+            .import
+            .as_ref()
+            .is_some_and(|prefill| !prefill.draft.instructions.is_empty())
+        {
+            PREFILLED_JOB_FIELD_PX
+        } else {
+            JOB_FIELD_PX
+        };
         let folder_blank = folder_choice(&create.folder.read(cx).value()).is_none();
         let error = create.invalid.clone().or_else(|| {
             self.scoped_error
@@ -404,11 +481,14 @@ impl ReactiveAutomations {
                     Textarea::new(&create.job)
                         .aria_label("Job")
                         .disabled(disabled)
-                        .h(px(JOB_FIELD_PX))
+                        .h(px(job_px))
                         .px(px(FIELD_X_PADDING_PX))
                         .font_family(theme::CODE_FONT_FAMILY)
                         .text_size(px(FIELD_TEXT_PX)),
                 ))
+                .when_some(create.import.as_ref(), |el, prefill| {
+                    el.child(render_prefill_lines(&prefill.lines))
+                })
                 .child(
                     labelled(
                         "Working folder",
@@ -460,6 +540,27 @@ impl ReactiveAutomations {
     }
 }
 
+/// A persona's preview lines, under the job (web `data-create-line`).
+fn render_prefill_lines(lines: &[String]) -> Div {
+    div()
+        .debug_selector(|| "desktop-create-bruh-prefill".to_string())
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(lines.iter().map(|line| {
+            let selector = format!("desktop-create-bruh-line:{line}");
+            div()
+                .debug_selector(move || selector)
+                .min_w_0()
+                .text_size(px(LABEL_TEXT_PX))
+                .line_height(relative(1.5))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .text_color(theme::rambutan_400())
+                .child(line.clone())
+        }))
+}
+
 /// Draws the open dialog's fields by themselves; the workspace otherwise
 /// puts them in its modal.
 #[cfg(test)]
@@ -476,12 +577,16 @@ impl Render for CreateBruhHost {
 #[cfg(test)]
 mod tests {
     use super::{
-        folder_choice, role_draft, CreateBruhHost, ReactiveAutomations, ReactiveBruhCreated,
+        folder_choice, role_draft, CreateBruhHost, ReactiveAutomations, ReactiveBruhCreated, Scope,
         DEFAULT_AGENT_MODEL, NO_ROLE,
     };
     use crate::theme;
-    use bruhs_models::crew::{BruhDraft, CREW_PROTOCOL};
-    use bruhs_models::reactive::ReactiveCommand;
+    use bruhs_models::crew::{AccessLevel, BruhAccess, BruhDraft, CREW_PROTOCOL};
+    use bruhs_models::imports::{
+        persona_lines, prefill_from_persona, FileUse, PersonaCandidate, PersonaFile, MEMORY_WAITS,
+    };
+    use bruhs_models::logic::portable::ImportSource;
+    use bruhs_models::reactive::{ReactiveChange, ReactiveCommand};
     use bruhs_models::roles::ResolvedRole;
     use gpui::{AppContext as _, Entity, VisualTestContext};
     use std::{cell::RefCell, rc::Rc};
@@ -642,6 +747,181 @@ mod tests {
             let create = panel.create.as_ref().unwrap();
             assert_eq!(create.model, DEFAULT_AGENT_MODEL);
             assert_eq!(create.effort, None);
+        });
+    }
+
+    fn persona(memory: &str) -> PersonaCandidate {
+        PersonaCandidate {
+            id: "p1".into(),
+            source: ImportSource::OpenClaw,
+            folder: "/home/example/clawd".into(),
+            name: "Pinch".into(),
+            instructions: "## SOUL.md\n\nBe kind.".into(),
+            memory: memory.into(),
+            files: vec![PersonaFile {
+                name: "SOUL.md".into(),
+                use_: FileUse::Instructions,
+            }],
+            clipped: false,
+            dropped_identity: Vec::new(),
+            left_out_logs: 0,
+        }
+    }
+
+    /// Open the dialog from `persona`, as **Make this bruh** does.
+    fn open_from(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+        persona: &PersonaCandidate,
+    ) {
+        panel.update_in(cx, |panel, window, cx| {
+            panel.open_create_bruh_from_import(
+                vec![role("a", Some("gpt-5.1-codex"))],
+                prefill_from_persona(persona),
+                window,
+                cx,
+            );
+        });
+        cx.run_until_parked();
+    }
+
+    fn drawn(cx: &mut VisualTestContext, selector: String) -> bool {
+        cx.debug_bounds(Box::leak(selector.into_boxed_str()))
+            .is_some()
+    }
+
+    #[gpui::test]
+    fn a_persona_prefills_the_create_dialog(cx: &mut gpui::TestAppContext) {
+        let (panel, cx, _) = open_panel(cx);
+        let persona = persona("## Memory: USER.md\n\nLikes tea.");
+        open_from(&panel, cx, &persona);
+        panel.update(cx, |panel, cx| {
+            let create = panel.create.as_ref().unwrap();
+            assert_eq!(create.name.read(cx).value().as_ref(), "Pinch");
+            assert_eq!(create.job.read(cx).value().as_ref(), persona.instructions);
+            assert_eq!(create.model, DEFAULT_AGENT_MODEL);
+            assert_eq!(create.effort, None);
+            assert_eq!(create.role, NO_ROLE, "the role picker stays at None");
+        });
+        let lines = persona_lines(&persona);
+        assert!(lines.iter().any(|line| line == MEMORY_WAITS), "{lines:?}");
+        for line in &lines {
+            assert!(
+                drawn(cx, format!("desktop-create-bruh-line:{line}")),
+                "{line}"
+            );
+        }
+        // A blank opening shows no persona lines.
+        panel.update_in(cx, |panel, window, cx| {
+            panel.open_create_bruh(Vec::new(), window, cx);
+        });
+        cx.run_until_parked();
+        assert!(!drawn(cx, "desktop-create-bruh-prefill".into()));
+    }
+
+    fn submit_as(panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext) -> String {
+        panel.update(cx, |panel, cx| {
+            panel.submit_create_bruh(cx);
+            created_id(panel)
+        })
+    }
+
+    fn propose(id: &str, memory: &str) -> ReactiveCommand {
+        ReactiveCommand::Propose {
+            change: ReactiveChange::SetMemory {
+                agent_id: id.into(),
+                memory: memory.into(),
+            },
+        }
+    }
+
+    #[gpui::test]
+    fn create_sends_memory_only_as_a_proposal(cx: &mut gpui::TestAppContext) {
+        let (panel, cx, created) = open_panel(cx);
+        open_from(&panel, cx, &persona("Likes tea."));
+        let id = submit_as(&panel, cx);
+        panel.update(cx, |panel, _| {
+            // The bruh is made exactly as any other: Read only, memory
+            // empty, and with no folder the server makes a private one.
+            match panel.sent_for_test() {
+                [ReactiveCommand::CreateBruh { agent, access, .. }] => {
+                    assert_eq!(agent.memory, "");
+                    assert_eq!(agent.project_path, "");
+                    assert_eq!(access.level, AccessLevel::ReadOnly);
+                    assert_eq!(*access, BruhAccess::default());
+                }
+                other => panic!("{other:?}"),
+            }
+        });
+        // The fake service answers the create, with a command on its way:
+        // the proposal waits for it, scoped to the new bruh, never dropped.
+        panel.update(cx, |panel, cx| {
+            panel.set_busy_for_test(true);
+            panel.created_bruh(id.clone(), cx);
+            let waiting: Vec<_> = panel.queued.iter().cloned().collect();
+            assert_eq!(
+                waiting,
+                [(propose(&id, "Likes tea."), Scope::Agent(id.clone()))]
+            );
+            panel.answer_queue_for_test(cx);
+            let proposals = panel
+                .sent_for_test()
+                .iter()
+                .filter(|command| matches!(command, ReactiveCommand::Propose { .. }))
+                .count();
+            assert_eq!(proposals, 1, "exactly one proposal");
+            assert_eq!(
+                panel.sent_for_test().last(),
+                Some(&propose(&id, "Likes tea."))
+            );
+            // Once only.
+            panel.created_bruh(id.clone(), cx);
+            assert_eq!(panel.sent_for_test().len(), 2);
+        });
+        cx.run_until_parked();
+        assert_eq!(created.borrow().len(), 1, "the new bruh opens");
+    }
+
+    #[gpui::test]
+    fn a_persona_without_memory_proposes_nothing(cx: &mut gpui::TestAppContext) {
+        let (panel, cx, _) = open_panel(cx);
+        open_from(&panel, cx, &persona("  "));
+        let id = submit_as(&panel, cx);
+        panel.update(cx, |panel, cx| {
+            panel.created_bruh(id, cx);
+            assert_eq!(panel.sent_for_test().len(), 1, "only the create");
+        });
+    }
+
+    #[gpui::test]
+    fn escape_during_create_still_sends_the_proposal(cx: &mut gpui::TestAppContext) {
+        let (panel, cx, created) = open_panel(cx);
+        open_from(&panel, cx, &persona("Likes tea."));
+        let id = submit_as(&panel, cx);
+        panel.update(cx, |panel, cx| {
+            panel.close_create_bruh(cx);
+            assert!(!panel.create_bruh_open());
+            panel.created_bruh(id.clone(), cx);
+            assert_eq!(
+                panel.sent_for_test().last(),
+                Some(&propose(&id, "Likes tea."))
+            );
+        });
+        cx.run_until_parked();
+        assert!(created.borrow().is_empty(), "a closed dialog opens nothing");
+    }
+
+    #[gpui::test]
+    fn a_refused_create_sends_no_proposal(cx: &mut gpui::TestAppContext) {
+        let (panel, cx, _) = open_panel(cx);
+        open_from(&panel, cx, &persona("Likes tea."));
+        let id = submit_as(&panel, cx);
+        panel.update(cx, |panel, cx| {
+            panel.command_failed(Scope::CreateBruh, "No.".into());
+            assert!(panel.create_bruh_open(), "the dialog stays with its reason");
+            // Even if that id turned up later, nothing follows.
+            panel.created_bruh(id, cx);
+            assert_eq!(panel.sent_for_test().len(), 1);
         });
     }
 

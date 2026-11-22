@@ -114,6 +114,7 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         label: "Import thread...",
         hint: "Claude Code, Codex, T3, Cursor",
     },
+    CommandAction { id: "move-in", group: "Agent", label: bruhs_models::imports::MOVE_IN_COMMAND, hint: bruhs_models::imports::MOVE_IN_COMMAND_HINT },
     CommandAction {
         id: "pin-thread",
         group: "Actions",
@@ -541,6 +542,7 @@ impl Workspace {
             "open-project" => self.open_project_picker(&OpenProjectPicker, window, cx),
             "new-thread" => self.new_thread(&NewThread, window, cx),
             "import-thread" => self.open_import_thread(&ImportThread, window, cx),
+            "move-in" => self.open_move_in(move_in_ui::MoveInStart { tab: move_in_ui::MoveInTab::OpenClaw, text: None, from: None }, window, cx),
             "open-terminal" => self.open_terminal(&OpenTerminal, window, cx),
             "toggle-terminal" => self.toggle_terminal(&ToggleTerminal, window, cx),
             "new-terminal" => self.open_new_terminal(window, cx),
