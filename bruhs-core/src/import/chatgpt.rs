@@ -23,6 +23,7 @@ use bruhs_models::logic::portable::{
 use bruhs_models::num::{ToFloatLossy as _, ToIntSaturating as _};
 use bruhs_models::EpochMs;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 /// Content types that are plumbing, not conversation: custom
 /// instructions, memory snapshots, browsing, errors, the python tool and
@@ -342,14 +343,27 @@ fn visible(message: &Value, transcript: &mut Transcript) -> Option<i64> {
 }
 
 /// A message's text: its parts in order (an image as a placeholder line,
-/// and one placeholder line for its audio however many clips it holds),
-/// then a placeholder line per attachment.
+/// unless an attachment names it, and one placeholder line for its audio
+/// however many clips it holds), then a placeholder line per attachment
+/// name, each name once.
 fn message_text(content: &Value, message: &Value) -> String {
+    let attached: Vec<&Value> = message
+        .get("metadata")
+        .and_then(|metadata| metadata.get("attachments"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .collect();
+    let ids: HashSet<&str> = attached
+        .iter()
+        .filter_map(|attachment| attachment.get("id").and_then(Value::as_str))
+        .filter(|id| !id.is_empty())
+        .collect();
     let mut audio = false;
     let mut lines: Vec<String> = match content.get("parts").and_then(Value::as_array) {
         Some(parts) => parts
             .iter()
-            .filter_map(|part| match part_text(part) {
+            .filter_map(|part| match part_text(part, &ids) {
                 Part::Text(text) => Some(text),
                 Part::Audio if !audio => {
                     audio = true;
@@ -367,18 +381,16 @@ fn message_text(content: &Value, message: &Value) -> String {
     };
     lines.retain(|line| !line.trim().is_empty());
     let mut text = lines.join("\n");
-    let attachments: Vec<String> = message
-        .get("metadata")
-        .and_then(|metadata| metadata.get("attachments"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
+    let mut named: HashSet<&str> = HashSet::new();
+    let attachments: Vec<String> = attached
+        .iter()
         .filter_map(|attachment| {
             ["name", "id"]
                 .iter()
                 .find_map(|key| attachment.get(*key).and_then(Value::as_str))
                 .filter(|name| !name.trim().is_empty())
         })
+        .filter(|name| named.insert(name))
         .map(attachment_line)
         .collect();
     if !attachments.is_empty() {
@@ -399,13 +411,25 @@ enum Part {
 }
 
 /// One part of `content.parts`: a string, a `{text}` object, a spoken
-/// transcription, or a placeholder for media whose bytes stay behind.
-fn part_text(part: &Value) -> Part {
+/// transcription, or a placeholder for media whose bytes stay behind. An
+/// image whose pointer names one of the message's attachments (`ids`)
+/// brings nothing: the attachment's own line names it.
+fn part_text(part: &Value, ids: &HashSet<&str>) -> Part {
     if let Some(text) = part.as_str() {
         return Part::Text(text.to_string());
     }
     match part.get("content_type").and_then(Value::as_str) {
-        Some("image_asset_pointer") => Part::Text(IMAGE_NOT_IMPORTED.to_string()),
+        Some("image_asset_pointer") => {
+            let pointer = part
+                .get("asset_pointer")
+                .and_then(Value::as_str)
+                .map(|pointer| pointer.split_once("://").map_or(pointer, |(_, id)| id));
+            if pointer.is_some_and(|id| ids.contains(id)) {
+                Part::Nothing
+            } else {
+                Part::Text(IMAGE_NOT_IMPORTED.to_string())
+            }
+        }
         Some("audio_asset_pointer" | "real_time_user_audio_video_asset_pointer") => Part::Audio,
         _ => part
             .get("text")

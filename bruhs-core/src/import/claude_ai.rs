@@ -13,7 +13,10 @@
 //! Every walk keeps a visited set and stops at `MAX_NODES`, so a parent
 //! loop ends it instead of looping.
 
-use super::text::{attached_line, attachment_line, clip_part, clip_strings, export_time};
+use super::text::{
+    attached_line, attachment_line, clip_part, clip_strings, export_time, shown_name,
+    NAME_MAX_CHARS,
+};
 use super::{output_text, ParsedConversation, Transcript};
 use bruhs_models::imports::{
     conversation_key, MemorySuggestion, AUDIO_NOT_IMPORTED, DOCUMENT_NOT_IMPORTED,
@@ -372,7 +375,7 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
     let mut parts = Vec::new();
     // Kept calls by id, and the last call when it was kept, for results
     // naming no id.
-    let mut calls: HashMap<String, usize> = HashMap::new();
+    let mut calls: HashMap<&str, usize> = HashMap::new();
     let mut last_call: Option<usize> = None;
     for (position, block) in blocks(message).enumerate() {
         match block_type(block) {
@@ -402,9 +405,16 @@ fn assistant_parts(message: &Value) -> Vec<PortablePart> {
                     last_call = None;
                     continue;
                 };
-                let id = non_empty(block.get("id"))
-                    .map_or_else(|| format!("call-{position}"), str::to_string);
-                calls.insert(id.clone(), parts.len());
+                // Results find their call by the id as written; the part
+                // keeps it as one clean, short line.
+                let raw = non_empty(block.get("id"));
+                if let Some(raw) = raw {
+                    calls.insert(raw, parts.len());
+                }
+                let id = raw
+                    .map(|raw| shown_name(raw, NAME_MAX_CHARS))
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or_else(|| format!("call-{position}"));
                 last_call = Some(parts.len());
                 parts.push(PortablePart::ToolCall(PortableToolCall {
                     id,

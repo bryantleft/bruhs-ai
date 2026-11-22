@@ -769,3 +769,24 @@ fn a_huge_or_hidden_model_stays_out_of_every_reply() {
     assert_eq!(reply("claude\u{202e}-sonnet"), None);
     assert_eq!(reply("claude\u{200b}-sonnet"), None);
 }
+
+/// A tool call's id is shown as one clean, short line, and its result
+/// still finds it by the id as written (final review minor).
+#[test]
+fn tool_call_ids_are_clean_and_short() {
+    let long = format!("call\u{202e}-{}", "9".repeat(500));
+    let parsed = conversation(&holding(json!({
+        "sender": "assistant",
+        "content": [
+            { "type": "tool_use", "id": long, "name": "artifacts", "input": {} },
+            { "type": "tool_result", "tool_use_id": long, "content": "done" },
+        ],
+    })))
+    .expect("the reply imports");
+    let PortablePart::ToolCall(call) = &parsed.messages[0].parts[0] else {
+        panic!("a tool call");
+    };
+    assert!(!call.id.contains('\u{202e}'), "{}", call.id);
+    assert!(call.id.chars().count() <= 121, "{}", call.id.len());
+    assert_eq!(call.output.as_deref(), Some("done"));
+}

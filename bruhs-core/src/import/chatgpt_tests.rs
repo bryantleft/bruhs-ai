@@ -683,3 +683,51 @@ fn the_synthetic_guard_matches_shapes_not_words() {
     assert_eq!(not_synthetic("\"email_address\": null"), None);
     assert_eq!(not_synthetic("/home/pat"), Some("a home path"));
 }
+
+/// An uploaded image is one line, its attachment's, as in Claude's
+/// reader; a name attached twice is one line too (final review minor).
+#[test]
+fn an_attached_image_and_a_repeated_name_are_one_line_each() {
+    let record = json!({
+        "id": "c-attached",
+        "mapping": {
+            "root": { "id": "root", "parent": null, "children": ["u"], "message": null },
+            "u": {
+                "id": "u",
+                "parent": "root",
+                "children": [],
+                "message": {
+                    "author": { "role": "user" },
+                    "content": {
+                        "content_type": "multimodal_text",
+                        "parts": [
+                            { "content_type": "image_asset_pointer", "asset_pointer": "sediment://file_01" },
+                            { "content_type": "image_asset_pointer", "asset_pointer": "file-service://file-02" },
+                            { "content_type": "image_asset_pointer", "asset_pointer": "sediment://file_03" },
+                            "Two photos and a plan",
+                        ],
+                    },
+                    "metadata": {
+                        "attachments": [
+                            { "id": "file_01", "name": "kitchen.png" },
+                            { "id": "file-02", "name": "hall.png" },
+                            { "id": "file-04", "name": "plan.pdf" },
+                            { "id": "file-05", "name": "plan.pdf" },
+                        ],
+                    },
+                },
+            },
+        },
+    });
+    let parsed = conversation(&record).expect("the chat imports");
+    let text = parsed.messages[0].text();
+    assert_eq!(text.matches(IMAGE_NOT_IMPORTED).count(), 1, "{text}");
+    for name in ["kitchen.png", "hall.png"] {
+        assert_eq!(text.matches(&attachment_line(name)).count(), 1, "{text}");
+    }
+    assert_eq!(
+        text.matches(&attachment_line("plan.pdf")).count(),
+        1,
+        "{text}"
+    );
+}
