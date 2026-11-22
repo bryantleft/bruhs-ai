@@ -159,6 +159,10 @@ pub const IMPORT_CHAT_GONE: &str = "That chat isn't here anymore.";
 /// page that isn't the owner's (final review B I1).
 pub const OWNER_ONLY_MEMORY: &str = "Open Bruhs from its own address to change a bruh's memory.";
 
+// Final review, readers
+/// The last item of a names list cut to its first few: "and {n} more".
+pub const NAMES_MORE_TEMPLATE: &str = "{n} more";
+
 /// Every constant above.
 pub const ALL_COPY: &[&str] = &[
     EXPORT_TAB,
@@ -274,6 +278,8 @@ pub const ALL_COPY: &[&str] = &[
     // Final review, server.
     IMPORT_CHAT_GONE,
     OWNER_ONLY_MEMORY,
+    // Final review, readers
+    NAMES_MORE_TEMPLATE,
 ];
 
 #[cfg(test)]

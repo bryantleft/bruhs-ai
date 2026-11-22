@@ -9,11 +9,12 @@ use super::{
     DUPLICATES_ONE, IDENTITY_DROPPED_MANY, IDENTITY_DROPPED_ONE, IMPORTED_TEMPLATE,
     IMPORTING_TEMPLATE, INSTRUCTIONS_FROM_TEMPLATE, LOGS_LEFT_OUT_MANY, LOGS_LEFT_OUT_ONE,
     LOOKED_IN_TEMPLATE, MEMORY_FOUND_TEMPLATE, MEMORY_FROM_TEMPLATE, MEMORY_PROPOSED_TEMPLATE,
-    MEMORY_WAITS, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE, PERSONA_CLIPPED,
-    READING_ONE_FILE_TEMPLATE, READING_TEMPLATE, ROWS_SHOWN_TEMPLATE, ROW_DETAIL_TEMPLATE,
-    SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE, SKIPPED_FILES_MANY, SKIPPED_FILES_ONE,
-    SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE, SKIPPED_TOO_LARGE_TEMPLATE,
-    SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE, SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
+    MEMORY_WAITS, NAMES_MORE_TEMPLATE, NOT_IMPORTED_TEMPLATE, OVER_LIMIT_MANY, OVER_LIMIT_ONE,
+    PERSONA_CLIPPED, READING_ONE_FILE_TEMPLATE, READING_TEMPLATE, ROWS_SHOWN_TEMPLATE,
+    ROW_DETAIL_TEMPLATE, SKIPPED_EMPTY_MANY, SKIPPED_EMPTY_ONE, SKIPPED_FILES_MANY,
+    SKIPPED_FILES_ONE, SKIPPED_LINK_TEMPLATE, SKIPPED_NOT_A_FILE_TEMPLATE,
+    SKIPPED_TOO_LARGE_TEMPLATE, SKIPPED_UNKNOWN_MANY, SKIPPED_UNKNOWN_ONE,
+    SKIPPED_UNREADABLE_TEMPLATE, STARTS_READ_ONLY,
 };
 use crate::logic::portable::{ImportCandidate, ImportSource};
 use crate::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
@@ -68,6 +69,24 @@ fn and_list<S: AsRef<str>>(items: &[S]) -> String {
             format!("{} and {}", head.join(", "), last.as_ref())
         }
     }
+}
+
+/// Names a listing line shows before it counts the rest.
+const MAX_NAMES_SHOWN: usize = 10;
+
+/// `names` joined by "and", the first [`MAX_NAMES_SHOWN`] of them and then
+/// how many more, so a folder of thousands of names stays one short line.
+fn first_names(names: &[&str]) -> String {
+    if names.len() <= MAX_NAMES_SHOWN {
+        return and_list(names);
+    }
+    let more = fill(
+        NAMES_MORE_TEMPLATE,
+        &[("n", &(names.len() - MAX_NAMES_SHOWN).to_string())],
+    );
+    let mut shown: Vec<&str> = names[..MAX_NAMES_SHOWN].to_vec();
+    shown.push(&more);
+    and_list(&shown)
 }
 
 /// A counted sentence: `one` when `n` is 1, else `many` with `{n}` filled.
@@ -221,7 +240,7 @@ pub fn persona_lines(persona: &PersonaCandidate) -> Vec<String> {
     if !not_imported.is_empty() {
         lines.push(fill(
             NOT_IMPORTED_TEMPLATE,
-            &[("files", &and_list(&not_imported))],
+            &[("files", &first_names(&not_imported))],
         ));
     }
     for file in &persona.files {
@@ -537,6 +556,31 @@ mod tests {
                 LOGS_LEFT_OUT_ONE.to_string(),
                 STARTS_READ_ONLY.to_string(),
             ]
+        );
+
+        // Thousands of listed names stay one short line (final review).
+        let names: Vec<String> = (0..20_000).map(|n| format!("memory/n{n}.dev.md")).collect();
+        let crowded = PersonaCandidate {
+            files: names
+                .iter()
+                .map(|name| skipped(name, SkipReason::NotImported))
+                .collect(),
+            ..bare
+        };
+        let lines = persona_lines(&crowded);
+        let first: Vec<&str> = names[..10].iter().map(String::as_str).collect();
+        assert_eq!(
+            lines[0],
+            format!("Not imported: {} and 19990 more.", first.join(", "))
+        );
+        assert!(lines[0].len() < 400, "{}", lines[0].len());
+        let ten = PersonaCandidate {
+            files: crowded.files[..10].to_vec(),
+            ..crowded
+        };
+        assert_eq!(
+            persona_lines(&ten)[0],
+            format!("Not imported: {} and {}.", first[..9].join(", "), first[9])
         );
     }
 
