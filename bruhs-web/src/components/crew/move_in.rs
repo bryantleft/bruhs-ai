@@ -17,7 +17,7 @@ use bruhs_models::logic::portable::ImportSource;
 use leptos::prelude::*;
 
 use self::by_prompt::{ByPromptState, ByPromptTab};
-use super::data::use_crew_snapshot;
+use super::data::{use_crew_snapshot, CrewData};
 use crate::api::{imports as api, ApiError};
 use crate::state::{CreateBruhOpen, CreateBruhPrefill, MoveInOpen};
 use crate::ui::Dialog;
@@ -119,6 +119,8 @@ impl AgentState {
 pub(crate) fn AgentTab(
     source: ImportSource,
     state: AgentState,
+    /// The crew: **Make this bruh** waits until the service speaks crew.
+    data: CrewData,
     on_make: Callback<PersonaCandidate>,
 ) -> impl IntoView {
     let none_found = if source == ImportSource::Hermes {
@@ -210,7 +212,14 @@ pub(crate) fn AgentTab(
                 <div data-move-in-preview="" class="space-y-1 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50">
                     {lines}
                     <div class="pt-1">
-                        <button type="button" data-move-in-make="" class=BUTTON on:click=move |_| on_make.run(persona.clone())>{MAKE_BRUH}</button>
+                        <button
+                            type="button"
+                            data-move-in-make=""
+                            class=BUTTON
+                            aria-disabled=move || (!data.crew_ready()).then_some("true")
+                            aria-description=move || data.service_reason()
+                            on:click=move |_| if data.crew_ready() { on_make.run(persona.clone()) }
+                        >{MAKE_BRUH}</button>
                     </div>
                 </div>
             }
@@ -315,14 +324,14 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
     let on_make_bruh = Callback::new(open_create);
 
     let body = move || match tab.get() {
-        MoveInTab::OpenClaw => {
-            view! { <AgentTab source=ImportSource::OpenClaw state=openclaw on_make=on_make /> }
-                .into_any()
+        MoveInTab::OpenClaw => view! {
+            <AgentTab source=ImportSource::OpenClaw state=openclaw data=data on_make=on_make />
         }
-        MoveInTab::Hermes => {
-            view! { <AgentTab source=ImportSource::Hermes state=hermes on_make=on_make /> }
-                .into_any()
+        .into_any(),
+        MoveInTab::Hermes => view! {
+            <AgentTab source=ImportSource::Hermes state=hermes data=data on_make=on_make />
         }
+        .into_any(),
         MoveInTab::ByPrompt => {
             view! { <ByPromptTab data=data state=by_prompt on_make_bruh=on_make_bruh /> }.into_any()
         }
@@ -355,6 +364,7 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bruhs_models::crew::CREW_PROTOCOL;
     use bruhs_models::imports::{
         looked_in_line, persona_lines, FileUse, PersonaFile, SkipReason, AGENTS_PRIVACY, FOLDER,
         LOOK_HERE, MAKE_BRUH, NONE_FOUND_HERMES, NONE_FOUND_OPENCLAW,
@@ -392,10 +402,14 @@ mod tests {
     }
 
     fn render(source: ImportSource, state: AgentState) -> String {
+        render_with(source, state, CrewData::for_tests(CREW_PROTOCOL))
+    }
+
+    fn render_with(source: ImportSource, state: AgentState, data: CrewData) -> String {
         let _ = any_spawner::Executor::init_futures_executor();
         untrack(|| {
             tachys::view::RenderHtml::to_html(
-                view! { <AgentTab source=source state=state on_make=Callback::new(|_| {}) /> },
+                view! { <AgentTab source=source state=state data=data on_make=Callback::new(|_| {}) /> },
             )
         })
     }
@@ -479,6 +493,42 @@ mod tests {
             assert!(texts(&html, "data-move-in-make").is_empty(), "{html}");
             let html = render(ImportSource::Hermes, state);
             assert_eq!(texts(&html, "data-move-in-none"), [NONE_FOUND_HERMES]);
+        });
+    }
+
+    #[test]
+    fn make_this_bruh_waits_for_the_crew_with_its_reason() {
+        Owner::new().with(|| {
+            let state = AgentState::new();
+            state.scan.set(Some(AgentScan {
+                personas: vec![persona("Pinch", "Likes tea.")],
+                looked_in: vec!["~/clawd".into()],
+            }));
+            // Ready: a plain button.
+            let html = render(ImportSource::OpenClaw, state);
+            let make = tag(&html, "data-move-in-make");
+            assert!(!make.contains("aria-disabled=\""), "{make}");
+            assert!(!make.contains("aria-description=\""), "{make}");
+
+            // Before the crew loads: dimmed, still a Tab stop, no reason yet.
+            let loading = CrewData::for_tests(CREW_PROTOCOL);
+            loading.snapshot.set(None);
+            let html = render_with(ImportSource::OpenClaw, state, loading);
+            let make = tag(&html, "data-move-in-make");
+            assert!(make.contains("aria-disabled=\"true\""), "{make}");
+            assert!(!make.contains(" disabled=\""), "{make}");
+
+            // An older service: dimmed, with the service's reason, as on
+            // the desktop.
+            let older = CrewData::for_tests(0);
+            let reason = older.service_reason().expect("an older service says why");
+            let html = render_with(ImportSource::OpenClaw, state, older);
+            let make = tag(&html, "data-move-in-make");
+            assert!(make.contains("aria-disabled=\"true\""), "{make}");
+            assert!(
+                make.contains(&format!("aria-description=\"{}\"", escaped(reason))),
+                "{make}"
+            );
         });
     }
 

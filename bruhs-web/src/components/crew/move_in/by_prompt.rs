@@ -29,6 +29,12 @@ fn pasted_from_today() -> String {
     ))
 }
 
+/// Whether a key in **Their answer** proposes: Cmd+Enter, or Ctrl+Enter,
+/// as on the desktop. A plain Enter is a new line.
+fn proposes_on(key: &str, meta: bool, ctrl: bool) -> bool {
+    key == "Enter" && (meta || ctrl)
+}
+
 /// The By prompt tab's text, choice and outcome. Move in owns it, so
 /// switching tabs mid-proposal keeps the answer, the confirmation and the
 /// refresh of the views behind (M2).
@@ -131,6 +137,9 @@ pub(crate) fn ByPromptTab(
     let waiting = move || data.busy.get() || proposing.with(Option::is_some);
     let empty = move || answer.with(|answer| answer.trim().is_empty());
     let make_bruh = move || {
+        if !data.crew_ready() {
+            return;
+        }
         let heading = from.get_untracked().unwrap_or_else(pasted_from_today);
         match answer.with_untracked(|answer| prefill_for_answer(answer, &heading)) {
             Err(copy) => error.set(Some(copy)),
@@ -180,7 +189,14 @@ pub(crate) fn ByPromptTab(
                 view! {
                     <div class="flex flex-wrap items-center gap-2">
                         <p data-move-in-no-bruhs="" class="text-label-sm text-rambutan-200">{NO_BRUHS}</p>
-                        <button type="button" data-move-in-make-bruh="" class=BUTTON on:click=move |_| make_bruh()>{MAKE_A_BRUH}</button>
+                        <button
+                            type="button"
+                            data-move-in-make-bruh=""
+                            class=BUTTON
+                            aria-disabled=move || (!data.crew_ready()).then_some("true")
+                            aria-description=move || data.service_reason()
+                            on:click=move |_| make_bruh()
+                        >{MAKE_A_BRUH}</button>
                     </div>
                 }
                 .into_any(),
@@ -232,6 +248,12 @@ pub(crate) fn ByPromptTab(
                     class=format!("{FIELD} resize-y py-2")
                     prop:value=move || answer.get()
                     on:input=move |event| answer.set(event_target_value(&event))
+                    on:keydown=move |event: web_sys::KeyboardEvent| {
+                        if proposes_on(&event.key(), event.meta_key(), event.ctrl_key()) {
+                            event.prevent_default();
+                            propose();
+                        }
+                    }
                 >{answer.get_untracked()}</textarea>
             </label>
             <Show when=has_bruhs>
@@ -394,13 +416,34 @@ mod tests {
     }
 
     #[test]
+    fn cmd_or_ctrl_enter_proposes_and_enter_is_a_new_line() {
+        assert!(proposes_on("Enter", true, false));
+        assert!(proposes_on("Enter", false, true));
+        assert!(!proposes_on("Enter", false, false));
+        assert!(!proposes_on("a", true, false));
+    }
+
+    #[test]
     fn with_no_bruhs_the_tab_offers_to_make_one() {
         Owner::new().with(|| {
             let html = render(with_bruhs(Vec::new()), "");
             assert_eq!(texts(&html, "data-move-in-no-bruhs"), [NO_BRUHS]);
             assert_eq!(texts(&html, "data-move-in-make-bruh"), [MAKE_A_BRUH]);
+            assert!(!tag(&html, "data-move-in-make-bruh").contains("aria-disabled=\""));
             assert!(texts(&html, "data-move-in-option").is_empty(), "{html}");
             assert!(texts(&html, "data-move-in-propose").is_empty(), "{html}");
+
+            // An older service: Make a bruh waits, with the reason, as on
+            // the desktop.
+            let older = CrewData::for_tests(0);
+            let reason = older.service_reason().expect("an older service says why");
+            let html = render(older, "");
+            let make = tag(&html, "data-move-in-make-bruh");
+            assert!(make.contains("aria-disabled=\"true\""), "{make}");
+            assert!(
+                make.contains(&format!("aria-description=\"{}\"", escaped(reason))),
+                "{make}"
+            );
 
             // Before the crew loads, neither shows.
             let loading = CrewData::for_tests(CREW_PROTOCOL);
