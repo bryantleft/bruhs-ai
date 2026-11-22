@@ -55,6 +55,7 @@ pub(super) const IMPORT_TAB_HOVER_BG_OPACITY: f32 = 0.50;
 pub(super) const IMPORT_FOOTER_BORDER_OPACITY: f32 = 0.50;
 
 pub(super) mod export_tab;
+pub(super) mod live_line;
 
 /// The dialog's tab: a local tool, or the Export file tab (F24). Only a
 /// local tab searches the tool's own store.

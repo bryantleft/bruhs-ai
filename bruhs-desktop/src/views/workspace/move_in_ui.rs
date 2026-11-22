@@ -11,6 +11,9 @@
 //! The header stays put, the tab's body scrolls, and its action and status
 //! lines stay pinned below, so at 640 by 480 they never leave the dialog.
 
+use super::import_ui::live_line::{
+    live_line, LiveKind, LiveLine, MOVE_IN_ERROR_LIVE, MOVE_IN_STATUS_LIVE,
+};
 use super::import_ui::{
     IMPORT_DIALOG_WIDTH_PX, IMPORT_LABEL_SM_TEXT_SIZE_PX, IMPORT_RADIUS_PX,
     IMPORT_TAB_HOVER_BG_OPACITY, IMPORT_TAB_SELECTED_BG_OPACITY, IMPORT_TAB_SELECTED_RING_OPACITY,
@@ -281,6 +284,28 @@ pub(super) struct FocusSpot {
     top: Option<Pixels>,
     /// The body's own height: pinned lines appearing below shrink it.
     height: Pixels,
+}
+
+/// What stays pinned under a tab's body: its buttons and its live lines.
+/// The live lines are there even while empty, so the room above the
+/// pinned part opens only when something in it is drawn.
+#[derive(Default)]
+pub(super) struct Pinned {
+    items: Vec<AnyElement>,
+    drawn: bool,
+}
+
+impl Pinned {
+    pub(super) fn push(&mut self, element: impl IntoElement) {
+        self.items.push(element.into_any_element());
+        self.drawn = true;
+    }
+
+    /// A live status or error line, kept in the tree while empty.
+    pub(super) fn push_live(&mut self, line: LiveLine) {
+        self.drawn |= line.drawn();
+        self.items.push(line.into_any_element());
+    }
 }
 
 /// One block of a tab's scrolling body, and the controls inside it: when
@@ -642,7 +667,7 @@ impl Workspace {
         open: &MoveIn,
         source: ImportSource,
         cx: &Context<'_, Self>,
-    ) -> (Vec<BodyPart>, Vec<AnyElement>) {
+    ) -> (Vec<BodyPart>, Pinned) {
         let pane = open.pane(source);
         let none_found = if source == ImportSource::Hermes {
             NONE_FOUND_HERMES
@@ -745,7 +770,7 @@ impl Workspace {
                     })),
             ));
         }
-        let mut pinned = Vec::new();
+        let mut pinned = Pinned::default();
         if chosen.is_some() {
             let (ready, reason) = self.crew_make_state(cx);
             pinned.push(
@@ -764,9 +789,12 @@ impl Workspace {
                     .into_any_element(),
             );
         }
-        if let Some(error) = pane.error.clone() {
-            pinned.push(move_in_text("error", error, theme::lychee_300()).into_any_element());
-        }
+        pinned.push_live(live_line(
+            MOVE_IN_ERROR_LIVE,
+            LiveKind::Alert,
+            pane.error.clone(),
+            |error| move_in_text("error", error, theme::lychee_300()),
+        ));
         (body, pinned)
     }
 
@@ -933,8 +961,8 @@ impl Workspace {
             .gap_2()
             .px_4()
             .pb_3()
-            .when(!pinned.is_empty(), |el| el.pt_1())
-            .children(pinned);
+            .when(pinned.drawn, |el| el.pt_1())
+            .children(pinned.items);
         div()
             .absolute()
             .top_0()

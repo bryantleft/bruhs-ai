@@ -392,7 +392,7 @@ impl Workspace {
         &self,
         open: &MoveIn,
         cx: &Context<'_, Self>,
-    ) -> (Vec<BodyPart>, Vec<AnyElement>) {
+    ) -> (Vec<BodyPart>, Pinned) {
         let tab = &open.by_prompt;
         let bruhs = self.reactive_automations.read(cx).move_in_bruhs();
         let target = bruhs.as_deref().and_then(|bruhs| tab.target(bruhs));
@@ -490,7 +490,7 @@ impl Workspace {
                 ),
             vec![tab.answer.focus_handle(cx)],
         ));
-        let mut pinned = Vec::new();
+        let mut pinned = Pinned::default();
         if bruhs.as_ref().is_some_and(|bruhs| !bruhs.is_empty()) {
             pinned.push(
                 div()
@@ -505,12 +505,18 @@ impl Workspace {
                     .into_any_element(),
             );
         }
-        if let Some(status) = tab.status.clone() {
-            pinned.push(move_in_text("status", status, theme::pandan_300()).into_any_element());
-        }
-        if let Some(error) = tab.error.clone() {
-            pinned.push(move_in_text("error", error, theme::lychee_300()).into_any_element());
-        }
+        pinned.push_live(live_line(
+            MOVE_IN_STATUS_LIVE,
+            LiveKind::Status,
+            tab.status.clone(),
+            |status| move_in_text("status", status, theme::pandan_300()),
+        ));
+        pinned.push_live(live_line(
+            MOVE_IN_ERROR_LIVE,
+            LiveKind::Alert,
+            tab.error.clone(),
+            |error| move_in_text("error", error, theme::lychee_300()),
+        ));
         (body, pinned)
     }
 }

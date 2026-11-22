@@ -4,6 +4,9 @@
 
 use super::*;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
+use crate::views::workspace::import_ui::live_line::{
+    live_line, LiveKind, EXPORT_ERROR_LIVE, EXPORT_STATUS_LIVE,
+};
 use bruhs_models::imports::{
     export_memory_from, memory_found_line, MoveInStart, MoveInTab, USE_AS_MEMORY,
 };
@@ -173,13 +176,21 @@ impl Workspace {
                 (scroll, actions.child(buttons))
             }
         };
+        // Live lines, there while empty, so a screen reader hears each
+        // line put in them (web `role="status"` and `role="alert"`).
         let actions = actions
-            .when_some(export.status.clone(), |el, line| {
-                el.child(export_text("status", line, theme::rambutan_300()))
-            })
-            .when_some(export.error.clone(), |el, line| {
-                el.child(export_text("error", line, theme::lychee_300()))
-            });
+            .child(live_line(
+                EXPORT_STATUS_LIVE,
+                LiveKind::Status,
+                export.status.clone(),
+                |line| export_text("status", line, theme::rambutan_300()),
+            ))
+            .child(live_line(
+                EXPORT_ERROR_LIVE,
+                LiveKind::Alert,
+                export.error.clone(),
+                |line| export_text("error", line, theme::lychee_300()),
+            ));
         div()
             .min_h_0()
             .flex_shrink_1()

@@ -960,3 +960,85 @@ fn the_pinned_actions_stay_in_view_at_640_by_480(cx: &mut gpui::TestAppContext) 
         "{make:?} inside {dialog:?}"
     );
 }
+
+/// The drawn size of `selector`.
+fn size_of(cx: &mut VisualTestContext, selector: &'static str) -> gpui::Size<gpui::Pixels> {
+    cx.debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is drawn"))
+        .size
+}
+
+#[gpui::test]
+fn the_status_and_error_lines_are_live_while_empty(cx: &mut gpui::TestAppContext) {
+    use super::super::import_ui::live_line::{
+        EXPORT_ERROR_LIVE, EXPORT_STATUS_LIVE, MOVE_IN_ERROR_LIVE, MOVE_IN_STATUS_LIVE,
+    };
+    use bruhs_models::imports::{IMPORT_UNREACHABLE, NOT_AN_EXPORT};
+
+    // Export file: both lines are in the tree before anything is said,
+    // and take no room.
+    let (workspace, cx) = workspace_window(cx);
+    let calls = ExportCalls {
+        read: Rc::new(|_, _cx: &gpui::App| Task::ready(Err("unused".into()))),
+        job: Rc::new(|_, _cx: &gpui::App| Task::ready(Err("unused".into()))),
+        thread: Rc::new(|_, _cx: &gpui::App| Task::ready(Err("unused".into()))),
+        discard: Rc::new(|_: String| {}),
+    };
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.import_picker.export.calls = Some(calls);
+        workspace.open_import_thread(&super::super::ImportThread, window, cx);
+        workspace.set_import_tab(ImportTab::Export, window, cx);
+    });
+    cx.run_until_parked();
+    for live in [EXPORT_STATUS_LIVE, EXPORT_ERROR_LIVE] {
+        assert_eq!(size_of(cx, live), gpui::Size::default(), "{live}");
+    }
+    // A refusal lands in the same node, drawn with its words.
+    workspace.update(cx, |workspace, cx| {
+        workspace.import_picker.export.error = Some(NOT_AN_EXPORT.to_string());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(size_of(cx, EXPORT_ERROR_LIVE).height > gpui::px(0.0));
+    assert!(drawn(
+        cx,
+        format!("desktop-import-export-error:{NOT_AN_EXPORT}")
+    ));
+    assert_eq!(size_of(cx, EXPORT_STATUS_LIVE), gpui::Size::default());
+
+    // Move in: an agent tab's error line, then By prompt's two lines.
+    let fake = Rc::new(FakeScans::default());
+    let scan = fake_scan(&fake);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.move_in.scan = Some(scan);
+        workspace.open_move_in(start(MoveInTab::OpenClaw), window, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(size_of(cx, MOVE_IN_ERROR_LIVE), gpui::Size::default());
+    workspace.update(cx, |workspace, cx| {
+        let open = workspace.move_in.open.as_mut().unwrap();
+        open.pane_mut(ImportSource::OpenClaw).error = Some(IMPORT_UNREACHABLE.to_string());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(size_of(cx, MOVE_IN_ERROR_LIVE).height > gpui::px(0.0));
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_move_in(start(MoveInTab::ByPrompt), window, cx);
+    });
+    cx.run_until_parked();
+    for live in [MOVE_IN_STATUS_LIVE, MOVE_IN_ERROR_LIVE] {
+        assert_eq!(size_of(cx, live), gpui::Size::default(), "{live}");
+    }
+    workspace.update(cx, |workspace, cx| {
+        let open = workspace.move_in.open.as_mut().unwrap();
+        open.by_prompt.status = Some(memory_proposed_line("Pinch"));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(size_of(cx, MOVE_IN_STATUS_LIVE).height > gpui::px(0.0));
+    assert!(drawn(
+        cx,
+        format!("desktop-move-in-status:{}", memory_proposed_line("Pinch"))
+    ));
+}
