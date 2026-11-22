@@ -1098,9 +1098,11 @@ impl Workspace {
             .iter()
             .map(|(p, why)| format!("{}, {why}", provider_cli_label(*p)))
             .collect();
+        let compact = bruhs_ui::zoom::css_px(window.viewport_size().width) < 640.0;
         let content = div()
             .debug_selector(|| "desktop-update-confirm".to_string())
-            .p(px(16.0))
+            .px(px(24.0))
+            .py(px(16.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -1110,7 +1112,7 @@ impl Workspace {
             .when(!skipped_hosts.is_empty(), |el| el.child(meta("Skipped machines")).children(skipped_hosts.into_iter().map(meta)))
             .when(show_details, |el| el.children(self.render_app_update_row(UpdateRow::Confirmation, cx)))
             .when(has_targets && show_details, |el| el.child(meta(
-                "Running chats keep the CLI they started with. New sessions use the updated providers.",
+                "Running chats keep their current CLI. New sessions use updated providers.",
             )).child(div().flex().flex_col().gap(px(6.0)).children(rows)))
             .when(restarting, |el| {
                 let working = self.threads.iter().filter(|t| t.chat.read(cx).is_working()).count();
@@ -1119,7 +1121,7 @@ impl Workspace {
                     1 => "Bruhs restarts last and interrupts 1 running thread.".to_owned(),
                     n => format!("Bruhs restarts last and interrupts {n} running threads."),
                 };
-                el.child(meta(format!("{detail} Choose Later during the five-second countdown to keep working.")))
+                el.child(meta(format!("{detail} Choose Later during the countdown to keep working.")))
             })
             .when(combined_dialog, |el| {
                 let text = if details_open { "Hide update details" } else { "Show update details" };
@@ -1150,35 +1152,39 @@ impl Workspace {
                 )
             });
         let machine_title = combined.as_ref().filter(|_|remote).map(|p|match p.machine_count(){1=>"Update 1 machine?".into(),n=>format!("Update {n} machines?")});
+        let button_height = if compact { px(36.0) } else { px(theme::CONTROL_PX) };
+        let cancel_btn = web_button(
+            "update-confirm-cancel",
+            WebButtonVariant::Ghost,
+            WebButtonSize::Default,
+            ButtonState::Enabled,
+        )
+        .h(button_height)
+        .when(compact, |el| el.w_full().justify_center())
+        .debug_selector(|| "desktop-update-confirm-cancel".to_string())
+        .when(combined_dialog, |el| el.track_focus(&self.modal_focus.update_cancel))
+        .aria_label(if combined_dialog { "Cancel updates" } else if has_targets { "Cancel provider updates" } else { "Close update details" })
+        .tab_index(0)
+        .role(Role::Button)
+        .child(if has_targets { "Cancel" } else { "Close" })
+        .map(|el| on_press_view(el, cx, |this, window, cx| {
+            this.dismiss_update_confirm(window, cx);
+        }));
         let footer = div()
             .flex()
-            .justify_end()
-            .gap(px(8.0))
-            .child(
-                web_button(
-                    "update-confirm-cancel",
-                    WebButtonVariant::Ghost,
-                    WebButtonSize::Small,
-                    ButtonState::Enabled,
-                )
-                .debug_selector(|| "desktop-update-confirm-cancel".to_string())
-                .when(combined_dialog, |el| el.track_focus(&self.modal_focus.update_cancel))
-                .aria_label(if combined_dialog { "Cancel updates" } else if has_targets { "Cancel provider updates" } else { "Close update details" })
-                .tab_index(0)
-                .role(Role::Button)
-                .child(if has_targets { "Cancel" } else { "Close" })
-                .map(|el| on_press_view(el, cx, |this, window, cx| {
-                    this.dismiss_update_confirm(window, cx);
-                })),
-            )
+            .when(compact, |el| el.flex_col().gap(px(8.0)))
+            .when(!compact, |el| el.justify_end().gap(px(8.0)))
+            .child(cancel_btn)
             .when(has_targets, |el| {
                 el.child(
                     web_button(
                         "update-confirm-run",
                         WebButtonVariant::Primary,
-                        WebButtonSize::Small,
+                        WebButtonSize::Default,
                         ButtonState::Enabled,
                     )
+                    .h(button_height)
+                    .when(compact, |el| el.w_full().justify_center())
                     .debug_selector(|| "desktop-update-confirm-run".to_string())
                     .aria_label(action)
                     .tab_index(0)
@@ -1203,15 +1209,131 @@ impl Workspace {
                 )
             });
 
-        let title = if let Some(title)=machine_title.as_deref() {title} else if combined_dialog {
-            "Update this Mac?"
+        let title: SharedString = if let Some(title) = machine_title {
+            title.into()
+        } else if combined_dialog {
+            "Update this Mac?".into()
         } else if !has_targets && desktop_update {
-            "Desktop update"
+            "Desktop update".into()
         } else {
-            "Provider and desktop updates"
+            "Provider and desktop updates".into()
         };
-        let width = if combined_dialog { DESKTOP_DIALOG_LG_WIDTH_PX } else { DESKTOP_DIALOG_MD_WIDTH_PX };
-        self.render_modal_shell_sized(title.to_owned(), content, Some(footer), width, window, cx)
+        div()
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .left_0()
+            .occlude()
+            .id("desktop-modal-overlay")
+            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
+            .flex()
+            .when(compact, |el| el.items_end().justify_center())
+            .when(!compact, |el| el.items_center().justify_center().py(px(DESKTOP_DIALOG_EDGE_GAP_PX)))
+            .on_click(cx.listener(|this, _ev, window, cx| {
+                if this.dismiss_update_confirm(window, cx) {
+                    return;
+                }
+                this.close_transient_surfaces();
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("desktop-modal-dialog")
+                    .debug_selector(|| "desktop-modal-dialog".to_string())
+                    .role(Role::Dialog)
+                    .aria_label(title.clone())
+                    .child(self.blur_scrim.backdrop())
+                    .when(compact, |el| el.w_full().rounded_t(px(16.0)))
+                    .when(!compact, |el| el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0)))
+                    .max_h(dialog_max_height(window))
+                    .border_1()
+                    .border_color(theme::ring_modal())
+                    .bg(theme::glass_surface(theme::longan_800()))
+                    .text_color(cx.theme().popover_foreground)
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
+                    .track_focus(&self.modal_start_focus_handle)
+                    .tab_group()
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        this.trap_modal_tab_focus(event, window, cx);
+                    }))
+                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                        cx.stop_propagation();
+                    }))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .px(px(24.0))
+                            .pt(px(24.0))
+                            .pb(px(if compact { 16.0 } else { 24.0 }))
+                            .border_b_1()
+                            .border_color(theme::longan_800())
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_family(theme::HEADING_FONT_FAMILY)
+                                    .text_size(px(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .line_height(relative(1.5))
+                                    .text_color(theme::rambutan_100())
+                                    .child(title),
+                            )
+                            .child(
+                                web_button(
+                                    "close-modal",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::IconSmall,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-modal-close".to_string())
+                                .aria_label("Close dialog")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(theme::ICON_PX))
+                                        .text_color(theme::rambutan_400()),
+                                )
+                                .track_focus(&self.modal_focus.close)
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        if this.dismiss_update_confirm(window, cx) {
+                                            return;
+                                        }
+                                        this.close_transient_surfaces();
+                                        cx.notify();
+                                    })
+                                }),
+                            ),
+                    )
+                    .child(self.render_modal_content_start())
+                    .child(
+                        div()
+                            .id("desktop-modal-body")
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.modal_scroll)
+                            .child(content)
+                            .vertical_scrollbar(&self.modal_scroll),
+                    )
+                    .child(
+                        div()
+                            .id("desktop-modal-footer")
+                            .debug_selector(|| "desktop-modal-footer".into())
+                            .flex_shrink_0()
+                            .px(px(24.0))
+                            .py(px(16.0))
+                            .child(footer),
+                    )
+                    .child(self.render_modal_focus_sentinel()),
+            )
+            .into_any_element()
     }
 
     pub(super) fn render_settings_updates_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -1227,7 +1349,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-update-checks",
             "Check for updates",
-            "Automatically check for desktop and provider updates. Check now runs once. Source builds check the current repository for new commits.",
+            "Check for desktop and provider updates automatically.",
             toggle,
         )];
         let status: SharedString = if let Some(error) = &updates.start_error {
