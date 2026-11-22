@@ -181,16 +181,7 @@ pub async fn get_json<T: DeserializeOwned>(route: &str) -> Result<T, ApiError> {
 
 /// One path segment of a route, percent-encoded.
 pub fn segment(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for byte in raw.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    bruhs_models::logic::text::url_component(raw)
 }
 
 #[cfg(test)]

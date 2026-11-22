@@ -108,7 +108,7 @@ impl AgentState {
                 }
                 Err(error) => {
                     self.loading.try_set(false);
-                    self.error.try_set(Some(error.to_string()));
+                    self.error.try_set(Some(api::import_message(&error)));
                 }
             }
         });

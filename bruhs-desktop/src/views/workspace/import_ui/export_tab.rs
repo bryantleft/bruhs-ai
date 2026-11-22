@@ -9,7 +9,6 @@
 //! dialog discards the batch whenever it closes (F23).
 
 use super::*;
-use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use bruhs_models::imports::{
     batch_lines, export_row_detail, imported_line, importing_line, reading_line, rows_shown_line,
     valid_batch_id, ImportBatch, ImportJob, ImportJobState, ALREADY_HERE, CHOOSE_ANOTHER,
@@ -17,27 +16,17 @@ use bruhs_models::imports::{
     GROK_BEST_EFFORT, IMPORT_ALL, IMPORT_ALL_MAX, IMPORT_FAILED, MAX_ROWS_SHOWN, MAX_UPLOAD_FILES,
     NO_MATCHING_CHATS, TOO_MANY_FILES,
 };
-use bruhs_ui::press::on_press_view;
-use bruhs_ui::zoom::px;
 use gpui::PathPromptOptions;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod render;
+
 /// How often a read is asked how it stands (D3).
 const POLL: Duration = Duration::from_millis(500);
-/// Web `max-h-64`.
-const EXPORT_LIST_MAX_HEIGHT_PX: f32 = 256.0;
-/// Web `px-4`: the list reaches the dialog's edges, as the web's `-mx-4`.
-const EXPORT_EDGE_PX: f32 = 16.0;
-/// Web `bg-blueberry-600/20 inset-ring-blueberry-500/30`: the selection.
-const EXPORT_SELECTED_BG_OPACITY: f32 = 0.20;
-const EXPORT_SELECTED_RING_OPACITY: f32 = 0.30;
-/// Web `focus:inset-ring-persimmon-500/60` on the search field.
-const EXPORT_SEARCH_FOCUS_OPACITY: f32 = 0.60;
-/// Web `aria-disabled:opacity-50`: a button that waits keeps its focus.
-const EXPORT_WAITING_OPACITY: f32 = 0.50;
 
 /// One server call behind the tab, answered on the UI thread.
 pub(in crate::views::workspace) type ExportCall<A, T> =
@@ -144,8 +133,23 @@ pub(in crate::views::workspace) struct ExportPicker {
     queue: VecDeque<ImportCandidate>,
     done: Vec<ImportSource>,
     scroll: ScrollHandle,
+    /// The scrolling part of the tab: the summary and the rows.
+    body_scroll: ScrollHandle,
+    /// The rows and whether any chat is left, kept until the batch, the
+    /// search or the threads change: a draw never rebuilds them (M3).
+    rows_cache: RefCell<Option<RowsCache>>,
     poll_task: Option<Task<()>>,
     import_task: Option<Task<()>>,
+}
+
+/// What [`ExportPicker::rows_cache`] was built from, and what it holds.
+struct RowsCache {
+    batch: String,
+    query: String,
+    /// Threads here, and how many of them came from an export.
+    threads: (usize, usize),
+    rows: Rc<Vec<ImportCandidate>>,
+    left: bool,
 }
 
 impl Default for ExportPicker {
@@ -164,6 +168,8 @@ impl Default for ExportPicker {
             queue: VecDeque::new(),
             done: Vec::new(),
             scroll: ScrollHandle::new(),
+            body_scroll: ScrollHandle::new(),
+            rows_cache: RefCell::new(None),
             poll_task: None,
             import_task: None,
         }
@@ -264,19 +270,6 @@ fn rows_left(batch: &ImportBatch, known_keys: &HashSet<String>) -> bool {
         .any(|row| !known_keys.contains(&import_key(row.source, &row.id)))
 }
 
-/// One line of the tab's text, findable by its words in tests.
-fn export_text(kind: &'static str, text: String, color: Hsla) -> Div {
-    let selector = format!("desktop-import-export-{kind}:{text}");
-    div()
-        .debug_selector(move || selector)
-        .flex_shrink_0()
-        .font_family(theme::UI_SMALL_FONT_FAMILY)
-        .font_weight(FontWeight::MEDIUM)
-        .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-        .text_color(color)
-        .child(text)
-}
-
 impl Workspace {
     /// The tab's controls and calls, made once.
     pub(in crate::views::workspace) fn prepare_export_tab(
@@ -361,21 +354,53 @@ impl Workspace {
         self.import_picker.importing || self.import_picker.export.importing
     }
 
-    /// The ready batch's rows not yet here that match the search.
-    pub(in crate::views::workspace) fn visible_export_rows(
+    /// The ready batch's rows not yet here that match the search, and
+    /// whether any of its chats isn't here yet. Rebuilt only when the
+    /// batch, the search or the threads change.
+    pub(in crate::views::workspace) fn export_view(
         &self,
         cx: &App,
-    ) -> Vec<ImportCandidate> {
+    ) -> (Rc<Vec<ImportCandidate>>, bool) {
         let export = &self.import_picker.export;
         let Some(batch) = export.batch() else {
-            return Vec::new();
+            return (Rc::new(Vec::new()), false);
         };
         let query = export
             .ui
             .as_ref()
             .map(|ui| ui.search.read(cx).value().to_string())
             .unwrap_or_default();
-        export_rows(batch, &self.known_import_keys(cx), &query)
+        let threads = (
+            self.threads.len(),
+            self.threads
+                .iter()
+                .filter(|thread| thread.chat.read(cx).import_key.is_some())
+                .count(),
+        );
+        if let Some(cache) = export.rows_cache.borrow().as_ref() {
+            if cache.batch == batch.id && cache.query == query && cache.threads == threads {
+                return (Rc::clone(&cache.rows), cache.left);
+            }
+        }
+        let keys = self.known_import_keys(cx);
+        let rows = Rc::new(export_rows(batch, &keys, &query));
+        let left = rows_left(batch, &keys);
+        *export.rows_cache.borrow_mut() = Some(RowsCache {
+            batch: batch.id.clone(),
+            query,
+            threads,
+            rows: Rc::clone(&rows),
+            left,
+        });
+        (rows, left)
+    }
+
+    /// The ready batch's rows not yet here that match the search.
+    pub(in crate::views::workspace) fn visible_export_rows(
+        &self,
+        cx: &App,
+    ) -> Rc<Vec<ImportCandidate>> {
+        self.export_view(cx).0
     }
 
     pub(in crate::views::workspace) fn move_export_selection(
@@ -400,7 +425,7 @@ impl Workspace {
         let rows = self.visible_export_rows(cx);
         let count = rows.len().min(MAX_ROWS_SHOWN);
         let at = Self::clamp_command_selected_index(self.import_picker.export.selected, count);
-        if let Some(row) = rows.into_iter().take(count).nth(at) {
+        if let Some(row) = rows.iter().take(count).nth(at).cloned() {
             self.import_export_row(row, window, cx);
         }
     }
@@ -559,6 +584,7 @@ impl Workspace {
                 export.status = None;
                 export.selected = 0;
                 export.scroll.set_offset(Point::default());
+                export.body_scroll.set_offset(Point::default());
                 export.job = Some(job);
                 if let Some(ui) = &export.ui {
                     let search = ui.search.clone();
@@ -590,12 +616,7 @@ impl Workspace {
     /// Focus after the rows changed: the search while chats are left, else
     /// **Choose another file**.
     fn after_export_change(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let keys = self.known_import_keys(cx);
-        let left = self
-            .import_picker
-            .export
-            .batch()
-            .is_some_and(|batch| rows_left(batch, &keys));
+        let left = self.export_view(cx).1;
         let target = if left {
             ExportFocus::Search
         } else {
@@ -626,8 +647,9 @@ impl Workspace {
         }
         let rows = self
             .visible_export_rows(cx)
-            .into_iter()
+            .iter()
             .take(IMPORT_ALL_MAX)
+            .cloned()
             .collect();
         self.import_export_rows(rows, window, cx);
     }
@@ -697,16 +719,12 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The run is over: the imported lines under the tab and as the
-    /// app's notice, as a single import says what came in.
+    /// The run is over: the imported lines under the tab, its one
+    /// announcement, as on the web (M10).
     fn finish_export_imports(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let export = &mut self.import_picker.export;
         export.importing = false;
-        let line = done_line(&export.done);
-        export.status.clone_from(&line);
-        if let Some(line) = line {
-            self.show_thread_notice(line, false, cx);
-        }
+        export.status = done_line(&export.done);
         self.after_export_change(window, cx);
         cx.notify();
     }
@@ -743,273 +761,6 @@ impl Workspace {
         if self.top_layer == Some(TopLayer::ImportThread) {
             self.discard_import_batch();
         }
-    }
-
-    /// A tab button: it keeps its Tab stop while it waits, so focus never
-    /// drops out of the dialog, and does nothing until the wait is over.
-    fn export_button(
-        label: &'static str,
-        focus: &FocusHandle,
-        waiting: bool,
-        cx: &Context<'_, Self>,
-        handler: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
-    ) -> Stateful<Div> {
-        let el = web_button(
-            SharedString::from(format!("desktop-import-export-{label}")),
-            WebButtonVariant::Outline,
-            WebButtonSize::Small,
-            ButtonState::Enabled,
-        )
-        .debug_selector(move || format!("desktop-import-export-button:{label}"))
-        .track_focus(focus)
-        .flex_shrink_0()
-        .min_h(px(theme::CONTROL_PX))
-        .px_3()
-        .border_color(theme::longan_700())
-        .text_color(theme::rambutan_200())
-        .aria_label(label)
-        .when(waiting, |el| {
-            el.opacity(EXPORT_WAITING_OPACITY).cursor_not_allowed()
-        })
-        .child(label);
-        on_press_view(el, cx, handler)
-    }
-
-    /// The tab's body under the dialog's header. `rows` are
-    /// [`Self::visible_export_rows`].
-    pub(in crate::views::workspace) fn render_export_tab(
-        &self,
-        rows: &[ImportCandidate],
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let export = &self.import_picker.export;
-        let Some(ui) = &export.ui else {
-            return div().into_any_element();
-        };
-        let busy = self.export_busy();
-        // In a short window the tab scrolls between the dialog's header and
-        // footer, so the rows keep their height.
-        let body = div()
-            .id("desktop-import-export")
-            .debug_selector(|| "desktop-import-export".to_string())
-            .min_h_0()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .px_4()
-            .py_3();
-        let body = match export.batch() {
-            None => body
-                .children(
-                    [EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK]
-                        .into_iter()
-                        .map(|line| export_text("help", line.to_owned(), theme::rambutan_300())),
-                )
-                .child(export_text(
-                    "warn",
-                    GROK_BEST_EFFORT.to_owned(),
-                    theme::durian_300(),
-                ))
-                .child(div().flex().child(Self::export_button(
-                    CHOOSE_EXPORT,
-                    &ui.choose,
-                    export.reading() || busy,
-                    cx,
-                    |this, window, cx| this.choose_export_files(window, cx),
-                ))),
-            Some(batch) => {
-                let keys = self.known_import_keys(cx);
-                let body = body.children(export_lines(batch).into_iter().map(|(line, warn)| {
-                    if warn {
-                        export_text("warn", line, theme::durian_300())
-                    } else {
-                        export_text("line", line, theme::rambutan_200())
-                    }
-                }));
-                let body = if batch.candidates.is_empty() {
-                    body
-                } else if rows_left(batch, &keys) {
-                    body.child(self.render_export_search(ui, window, cx))
-                        .child(self.render_export_list(ui, rows, cx))
-                } else {
-                    body.child(export_text(
-                        "line",
-                        ALREADY_HERE.to_owned(),
-                        theme::rambutan_200(),
-                    ))
-                };
-                body.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .flex_shrink_0()
-                        .when(!rows.is_empty(), |el| {
-                            el.child(Self::export_button(
-                                IMPORT_ALL,
-                                &ui.all,
-                                busy,
-                                cx,
-                                |this, window, cx| this.import_all_exports(window, cx),
-                            ))
-                        })
-                        .child(Self::export_button(
-                            CHOOSE_ANOTHER,
-                            &ui.another,
-                            busy,
-                            cx,
-                            |this, window, cx| this.choose_export_files(window, cx),
-                        )),
-                )
-            }
-        };
-        body.when_some(export.status.clone(), |el, line| {
-            el.child(export_text("status", line, theme::rambutan_300()))
-        })
-        .when_some(export.error.clone(), |el, line| {
-            el.child(export_text("error", line, theme::lychee_300()))
-        })
-        .into_any_element()
-    }
-
-    fn render_export_search(
-        &self,
-        ui: &ExportUi,
-        window: &Window,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let focused = ui.search.focus_handle(cx).is_focused(window);
-        div()
-            .debug_selector(|| "desktop-import-export-search".to_string())
-            .flex_shrink_0()
-            .w_full()
-            .rounded(px(IMPORT_RADIUS_PX))
-            .bg(theme::longan_900())
-            .border_1()
-            .border_color(if focused {
-                theme::persimmon_500().opacity(EXPORT_SEARCH_FOCUS_OPACITY)
-            } else {
-                theme::longan_700()
-            })
-            // Web `px-2.5`, less the 1px border; a small input in 2px
-            // padding is the web's `py-1.5` field.
-            .px(px(9.0))
-            .py(px(2.0))
-            .child(
-                Input::new(&ui.search)
-                    .small()
-                    .aria_label(EXPORT_SEARCH)
-                    .appearance(false)
-                    .px_0()
-                    .bordered(false)
-                    .focus_bordered(false)
-                    .cleanable(false)
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
-            )
-            .into_any_element()
-    }
-
-    fn render_export_list(
-        &self,
-        ui: &ExportUi,
-        rows: &[ImportCandidate],
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let export = &self.import_picker.export;
-        if rows.is_empty() {
-            return export_text("none", NO_MATCHING_CHATS.to_owned(), theme::rambutan_300())
-                .py_2()
-                .into_any_element();
-        }
-        let now = EpochMs::now();
-        let shown = rows.len().min(MAX_ROWS_SHOWN);
-        let selected = export.selected.min(shown - 1);
-        div()
-            .id("desktop-import-export-list")
-            .debug_selector(|| "desktop-import-export-list".to_string())
-            .track_focus(&ui.list)
-            .role(Role::ListBox)
-            .aria_label(EXPORT_TAB)
-            .mx(px(-EXPORT_EDGE_PX))
-            .flex_shrink_0()
-            .max_h(px(EXPORT_LIST_MAX_HEIGHT_PX))
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-            .overflow_y_scroll()
-            .track_scroll(&export.scroll)
-            .children(rows.iter().take(shown).enumerate().map(|(index, row)| {
-                let chosen = index == selected;
-                let key = import_key(row.source, &row.id);
-                let detail = export_row_detail(row, now);
-                let title = bruhs_models::logic::text::plain_title(&row.title).into_owned();
-                let picked = row.clone();
-                div()
-                    .id(("desktop-import-export-row", index))
-                    .debug_selector(move || format!("desktop-import-export-row-{key}"))
-                    .role(Role::ListBoxOption)
-                    .aria_label(title.clone())
-                    .aria_selected(chosen)
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap_0p5()
-                    .px(px(EXPORT_EDGE_PX - 1.0))
-                    .py(px(7.0))
-                    .border_1()
-                    .cursor_pointer()
-                    .map(|el| {
-                        // Blueberry marks the selection (design rule).
-                        if chosen {
-                            el.bg(theme::blueberry_600().opacity(EXPORT_SELECTED_BG_OPACITY))
-                                .border_color(
-                                    theme::blueberry_500().opacity(EXPORT_SELECTED_RING_OPACITY),
-                                )
-                        } else {
-                            el.border_color(gpui::transparent_black()).hover(|el| {
-                                el.bg(theme::longan_700().opacity(IMPORT_HOVER_ROW_BG_OPACITY))
-                            })
-                        }
-                    })
-                    .on_hover(cx.listener(move |this, hovered, _window, cx| {
-                        if *hovered && this.import_picker.export.selected != index {
-                            this.import_picker.export.selected = index;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _event, window, cx| {
-                        this.import_export_row(picked.clone(), window, cx);
-                    }))
-                    .child(
-                        export_text("title", title, theme::rambutan_200())
-                            .w_full()
-                            .min_w_0()
-                            .truncate(),
-                    )
-                    .child(
-                        export_text("detail", detail, theme::rambutan_400())
-                            .w_full()
-                            .min_w_0()
-                            .truncate(),
-                    )
-            }))
-            .when(rows.len() > MAX_ROWS_SHOWN, |el| {
-                el.child(
-                    export_text(
-                        "more",
-                        rows_shown_line(MAX_ROWS_SHOWN, rows.len()),
-                        theme::rambutan_400(),
-                    )
-                    .px_4()
-                    .py_2(),
-                )
-            })
-            .vertical_scrollbar(&export.scroll)
-            .into_any_element()
     }
 }
 

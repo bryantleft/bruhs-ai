@@ -50,6 +50,9 @@ pub const IMPORT_GONE: &str = "That export isn't here anymore. Choose the file a
 pub const OWNER_ONLY_IMPORT: &str = "Open Bruhs from its own address to import.";
 pub const IMPORT_INVALID: &str = "That request isn't one Bruhs understands.";
 pub const IMPORT_FAILED: &str = "Bruhs couldn't read this export.";
+/// No answer from the server behind an import call.
+pub const IMPORT_UNREACHABLE: &str =
+    "Bruhs couldn't reach its server. Check that it's running, then try again.";
 pub const FOLDER_MISSING: &str = "That folder doesn't exist.";
 pub const FOLDER_PRIVATE: &str =
     "Bruhs doesn't open folders named for secrets, such as credentials.";
@@ -183,6 +186,7 @@ pub const ALL_COPY: &[&str] = &[
     OWNER_ONLY_IMPORT,
     IMPORT_INVALID,
     IMPORT_FAILED,
+    IMPORT_UNREACHABLE,
     FOLDER_MISSING,
     FOLDER_PRIVATE,
     T3_NOT_INSTALLED,

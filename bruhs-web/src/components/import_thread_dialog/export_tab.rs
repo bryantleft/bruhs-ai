@@ -175,7 +175,7 @@ impl ExportState {
                 // state is gone, and the next one's isn't this one's to touch.
                 Err(_) if signal.aborted() => {}
                 Err(ApiError::Aborted) => {}
-                Err(error) => self.failed(error.to_string()),
+                Err(error) => self.failed(api::import_message(&error)),
             }
         });
     }
@@ -354,7 +354,7 @@ impl ExportState {
                 Err(ApiError::Aborted) => return,
                 Err(error) => {
                     self.queue.try_update_value(VecDeque::clear);
-                    self.error.try_set(Some(error.to_string()));
+                    self.error.try_set(Some(api::import_message(&error)));
                     break;
                 }
             }

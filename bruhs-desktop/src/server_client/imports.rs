@@ -11,29 +11,14 @@
 
 use super::{ServerClient, ServerError};
 use bruhs_models::imports::{
-    valid_batch_id, AgentScan, ImportJob, ImportPaths, ALL_COPY, IMPORT_FAILED, IMPORT_GONE,
+    import_failure_line, valid_batch_id, AgentScan, ImportCallFailure, ImportJob, ImportPaths,
+    IMPORT_GONE,
 };
 use bruhs_models::logic::portable::{ImportSource, ImportedThread};
-use bruhs_models::vault::VAULT_UNREACHABLE;
+use bruhs_models::logic::text::url_component;
 
 pub(crate) const FILES_PATH: &str = "/api/import/files";
 const UPLOADS_PATH: &str = "/api/import/uploads";
-/// The longest sentence a failure may show; longer bodies are not copy.
-const MAX_MESSAGE_LEN: usize = 512;
-
-/// `raw` as one percent-encoded URL component, byte for byte as the web's
-/// `api::http::segment` writes it.
-fn segment(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for byte in raw.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
 
 /// `/api/import/uploads/{id}`, for a batch id the server would take.
 pub(crate) fn job_path(id: &str) -> Option<String> {
@@ -46,7 +31,7 @@ pub(crate) fn thread_path(source: ImportSource, upload: &str, id: &str) -> Optio
         format!(
             "/api/import/thread?source={}&id={}&upload={upload}",
             source.as_str(),
-            segment(id)
+            url_component(id)
         )
     })
 }
@@ -56,7 +41,7 @@ pub(crate) fn agents_path(source: ImportSource, path: Option<&str>) -> String {
     let mut route = format!("/api/import/agents?source={}", source.as_str());
     if let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) {
         route.push_str("&path=");
-        route.push_str(&segment(path));
+        route.push_str(&url_component(path));
     }
     route
 }
@@ -69,34 +54,23 @@ fn checked(path: Option<String>) -> Result<String, ServerError> {
 
 impl ServerError {
     /// What the Import thread dialog shows for a failed import call: the
-    /// server's sentence (any 4xx or 503 sentence, and a 500's only when it
-    /// is the import's fixed copy), else the import's own failure copy.
-    /// An unreachable server says so as the other server pages do.
+    /// same line as the web's (`import_failure_line`).
     pub(crate) fn import_message(&self) -> String {
-        match self {
+        let failure = match self {
             Self::Status { code, body, .. } => {
-                let code = code.as_u16();
-                serde_json::from_str::<serde_json::Value>(body)
+                let detail = serde_json::from_str::<serde_json::Value>(body)
                     .ok()
-                    .and_then(|value| {
-                        value
-                            .get("error")?
-                            .as_str()
-                            .map(str::trim)
-                            .map(str::to_owned)
-                    })
-                    .filter(|detail| {
-                        let showable = (400..500).contains(&code)
-                            || code == 503
-                            || (code == 500 && ALL_COPY.contains(&detail.as_str()));
-                        showable && !detail.is_empty() && detail.len() <= MAX_MESSAGE_LEN
-                    })
-                    .unwrap_or_else(|| IMPORT_FAILED.to_owned())
+                    .and_then(|value| value.get("error")?.as_str().map(str::to_owned));
+                return import_failure_line(ImportCallFailure::Answered {
+                    status: code.as_u16(),
+                    detail: detail.as_deref(),
+                });
             }
-            Self::Transport { .. } | Self::Client(_) => VAULT_UNREACHABLE.to_owned(),
-            Self::Decode { .. } => IMPORT_FAILED.to_owned(),
-            Self::Invalid(message) => (*message).to_owned(),
-        }
+            Self::Transport { .. } | Self::Client(_) => ImportCallFailure::Unreachable,
+            Self::Decode { .. } => ImportCallFailure::Unreadable,
+            Self::Invalid(message) => return (*message).to_owned(),
+        };
+        import_failure_line(failure)
     }
 }
 
@@ -361,6 +335,20 @@ mod tests {
                 "{request}"
             );
         }
+    }
+
+    #[test]
+    fn an_unreachable_server_shows_the_shared_line() {
+        use bruhs_models::imports::IMPORT_UNREACHABLE;
+        let answer = runtime().block_on(async {
+            // Nothing listens on a port that was just closed.
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            drop(listener);
+            let client = ServerClient::new(&base, &base).unwrap();
+            client.read_export_files(vec!["/tmp/x.zip".into()]).await
+        });
+        assert_eq!(answer.unwrap_err(), IMPORT_UNREACHABLE);
     }
 
     #[test]

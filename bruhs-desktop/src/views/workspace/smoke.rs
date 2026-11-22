@@ -169,6 +169,32 @@ impl Workspace {
             best_effort: true,
             ..ImportBatch::default()
         };
+        // Its chats come in from the fixture itself, so Import all runs
+        // (`import-export-ready;key:tab tab enter`) with no server.
+        let rows = std::rc::Rc::new(batch.candidates.clone());
+        self.import_picker.export.calls = Some(import_ui::export_tab::ExportCalls {
+            read: std::rc::Rc::new(|_paths: Vec<String>, _cx: &App| {
+                Task::ready(Err(bruhs_models::imports::IMPORT_FAILED.to_owned()))
+            }),
+            job: std::rc::Rc::new(|_id: String, _cx: &App| {
+                Task::ready(Err(bruhs_models::imports::IMPORT_GONE.to_owned()))
+            }),
+            thread: std::rc::Rc::new(
+                move |(source, _batch, id): (ImportSource, String, String), _cx: &App| {
+                    let row = rows.iter().find(|row| row.source == source && row.id == id);
+                    Task::ready(
+                        row.map(|row| {
+                            bruhs_models::logic::portable::ImportedThread::new(
+                                row.clone(),
+                                Vec::new(),
+                            )
+                        })
+                        .ok_or_else(|| bruhs_models::imports::IMPORT_GONE.to_owned()),
+                    )
+                },
+            ),
+            discard: std::rc::Rc::new(|_id: String| {}),
+        });
         self.import_picker.export.job = Some(ImportJob {
             id: batch.id.clone(),
             state: ImportJobState::Ready {

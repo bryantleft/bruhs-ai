@@ -36,6 +36,21 @@ pub fn resolve_rename(draft: &str, original: &str) -> Option<String> {
     }
 }
 
+/// `raw` as one percent-encoded URL component: unreserved characters
+/// (letters, digits, `-`, `_`, `.`, `~`) as they are, every other byte as
+/// `%XX`. Both apps build path and query segments with it.
+pub fn url_component(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -79,5 +94,12 @@ mod tests {
         assert_eq!(crab, "🦀");
         truncate_utf8(&mut crab, 0);
         assert_eq!(crab, "");
+    }
+
+    #[test]
+    fn url_components_keep_only_unreserved_characters() {
+        assert_eq!(super::url_component("a b/c"), "a%20b%2Fc");
+        assert_eq!(super::url_component("~/my-agent_1.x"), "~%2Fmy-agent_1.x");
+        assert_eq!(super::url_component("é&="), "%C3%A9%26%3D");
     }
 }

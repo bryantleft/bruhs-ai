@@ -4,7 +4,10 @@
 //! body with one `file` field per chosen `File`, which the browser streams
 //! from disk; the server never reads the file names (F33).
 
-use bruhs_models::imports::{valid_batch_id, AgentScan, ImportJob, IMPORT_FAILED, IMPORT_GONE};
+use bruhs_models::imports::{
+    import_failure_line, valid_batch_id, AgentScan, ImportCallFailure, ImportJob, IMPORT_FAILED,
+    IMPORT_GONE,
+};
 use bruhs_models::logic::portable::{ImportSource, ImportedThread};
 use gloo_net::http::{Method, RequestBuilder, Response};
 use web_sys::AbortSignal;
@@ -38,6 +41,23 @@ fn agents_path(source: ImportSource, path: Option<&str>) -> String {
         route.push_str(&segment(path));
     }
     route
+}
+
+/// The line an import call's failure shows, the same on both apps
+/// (`import_failure_line`). A 403 keeps the address the owner's own app is
+/// at; a stop or a time limit says so as other calls do.
+pub fn import_message(error: &ApiError) -> String {
+    match error {
+        ApiError::Network(_) => import_failure_line(ImportCallFailure::Unreachable),
+        ApiError::Decode(_) => import_failure_line(ImportCallFailure::Unreadable),
+        ApiError::Http { status, detail } if *status != 403 => {
+            import_failure_line(ImportCallFailure::Answered {
+                status: *status,
+                detail: detail.as_deref(),
+            })
+        }
+        other => other.to_string(),
+    }
 }
 
 /// A batch id the server would refuse is refused here the same way: 404
@@ -159,6 +179,34 @@ mod tests {
             assert_eq!(thread_path(ImportSource::ChatGpt, bad, "x"), None, "{bad}");
             assert_eq!(job_path(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn failures_show_the_shared_import_lines() {
+        use bruhs_models::imports::{IMPORT_BUSY, IMPORT_UNREACHABLE};
+        assert_eq!(
+            import_message(&ApiError::Network("Failed to fetch".into())),
+            IMPORT_UNREACHABLE
+        );
+        assert_eq!(
+            import_message(&ApiError::Decode("<html>".into())),
+            bruhs_models::backup::UNREADABLE_REPLY
+        );
+        assert_eq!(
+            import_message(&ApiError::http(
+                409,
+                &serde_json::json!({ "error": IMPORT_BUSY }).to_string()
+            )),
+            IMPORT_BUSY
+        );
+        assert_eq!(
+            import_message(&ApiError::http(500, r#"{"error":"disk on fire"}"#)),
+            IMPORT_FAILED
+        );
+        assert_eq!(
+            import_message(&ApiError::Aborted),
+            ApiError::Aborted.to_string()
+        );
     }
 
     #[test]

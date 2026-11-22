@@ -23,6 +23,7 @@ use bruhs_models::time::{RelativeTimeStyle, format_relative_ms};
 use bruhs_ui::Sizable as _;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
+use std::rc::Rc;
 use std::time::Duration;
 
 pub(super) const IMPORT_DIALOG_LABEL: &str = "Import thread";
@@ -433,7 +434,8 @@ impl Workspace {
                 }),
             };
             if gone {
-                this.focus_modal_dialog(window, cx);
+                // At once: focus the tab gives a control after this wins.
+                this.modal_start_focus_handle.clone().focus(window, cx);
             }
         });
         if tab == ImportTab::Export {
@@ -858,7 +860,12 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_import_rows(&self, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_import_rows(
+        &self,
+        source: ImportSource,
+        rows: Vec<ImportCandidate>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let picker = &self.import_picker;
         let message_row = |text: String, color: Hsla| {
             div()
@@ -875,15 +882,10 @@ impl Workspace {
         if let Some(error) = picker.error.clone() {
             return message_row(error, theme::lychee_400());
         }
-        let rows = self.visible_import_candidates(cx);
         if rows.is_empty() {
             let text = if picker.loading {
                 IMPORT_LOADING_LABEL.to_string()
             } else {
-                let source = match picker.tab {
-                    ImportTab::Local(source) => source,
-                    ImportTab::Export => ImportSource::ClaudeCode,
-                };
                 format!("No {} threads found", source.label())
             };
             return message_row(text, theme::rambutan_300());
@@ -972,16 +974,22 @@ impl Workspace {
     ) -> AnyElement {
         let on_export = self.import_picker.tab == ImportTab::Export;
         let importing = self.import_picker.importing || self.import_picker.export.importing;
-        let export_rows = if on_export {
-            self.visible_export_rows(cx)
+        // Each tab's rows, once per draw.
+        let (export_rows, export_left) = if on_export {
+            self.export_view(cx)
         } else {
+            (Rc::new(Vec::new()), false)
+        };
+        let local_rows = if on_export {
             Vec::new()
+        } else {
+            self.visible_import_candidates(cx)
         };
         // The arrow hint shows only with a row to choose (web M6).
         let choosable = if on_export {
             !export_rows.is_empty()
         } else {
-            self.import_picker.error.is_none() && !self.visible_import_candidates(cx).is_empty()
+            self.import_picker.error.is_none() && !local_rows.is_empty()
         };
         div()
             .absolute()
@@ -1110,10 +1118,11 @@ impl Workspace {
                                 )
                             }),
                     )
-                    .child(if on_export {
-                        self.render_export_tab(&export_rows, window, cx)
-                    } else {
-                        self.render_import_rows(cx)
+                    .child(match self.import_picker.tab {
+                        ImportTab::Export => {
+                            self.render_export_tab(&export_rows, export_left, window, cx)
+                        }
+                        ImportTab::Local(source) => self.render_import_rows(source, local_rows, cx),
                     })
                     .child(
                         div()

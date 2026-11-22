@@ -290,6 +290,43 @@ pub fn rows_shown_line(shown: usize, total: usize) -> String {
     )
 }
 
+/// How an import call failed, as either app's HTTP client sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportCallFailure<'a> {
+    /// No answer at all.
+    Unreachable,
+    /// An answer this app could not read.
+    Unreadable,
+    /// A failure status, with the `error` sentence of its body if it sent
+    /// one.
+    Answered {
+        status: u16,
+        detail: Option<&'a str>,
+    },
+}
+
+/// The longest server sentence an import failure shows.
+const MAX_FAILURE_LEN: usize = 512;
+
+/// The line both apps show for a failed import call. The server's sentence
+/// shows for a 4xx or 503 answer, and for a 500 only when it is import
+/// copy; anything else is [`super::IMPORT_FAILED`].
+pub fn import_failure_line(failure: ImportCallFailure<'_>) -> String {
+    match failure {
+        ImportCallFailure::Unreachable => super::IMPORT_UNREACHABLE.to_owned(),
+        ImportCallFailure::Unreadable => crate::backup::UNREADABLE_REPLY.to_owned(),
+        ImportCallFailure::Answered { status, detail } => detail
+            .map(str::trim)
+            .filter(|detail| {
+                let shown = (400..500).contains(&status)
+                    || status == 503
+                    || (status == 500 && super::ALL_COPY.contains(detail));
+                shown && !detail.is_empty() && detail.len() <= MAX_FAILURE_LEN
+            })
+            .map_or_else(|| super::IMPORT_FAILED.to_owned(), str::to_owned),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,5 +538,36 @@ mod tests {
                 STARTS_READ_ONLY.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn import_failures_show_the_same_line_on_both_apps() {
+        use super::{import_failure_line, ImportCallFailure};
+        use crate::imports::{IMPORT_BUSY, IMPORT_FAILED, IMPORT_UNREACHABLE, NO_SPACE_IMPORT};
+        let answered =
+            |status, detail| import_failure_line(ImportCallFailure::Answered { status, detail });
+        assert_eq!(
+            import_failure_line(ImportCallFailure::Unreachable),
+            IMPORT_UNREACHABLE
+        );
+        assert_eq!(
+            import_failure_line(ImportCallFailure::Unreadable),
+            crate::backup::UNREADABLE_REPLY
+        );
+        assert_eq!(answered(409, Some(IMPORT_BUSY)), IMPORT_BUSY);
+        assert_eq!(answered(503, Some(" No room. ")), "No room.");
+        assert_eq!(answered(500, Some(IMPORT_FAILED)), IMPORT_FAILED);
+        assert_eq!(answered(500, Some(NO_SPACE_IMPORT)), NO_SPACE_IMPORT);
+        // A 500 that isn't import copy, an empty sentence, a long body and
+        // a 502 all show the import's own line.
+        assert_eq!(
+            answered(500, Some("disk on fire at /Users/me")),
+            IMPORT_FAILED
+        );
+        assert_eq!(answered(400, Some("  ")), IMPORT_FAILED);
+        let long = "x".repeat(600);
+        assert_eq!(answered(400, Some(&long)), IMPORT_FAILED);
+        assert_eq!(answered(502, Some("Bad gateway")), IMPORT_FAILED);
+        assert_eq!(answered(404, None), IMPORT_FAILED);
     }
 }

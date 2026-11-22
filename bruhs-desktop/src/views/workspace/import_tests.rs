@@ -19,7 +19,7 @@ use bruhs_models::imports::{
     batch_lines, export_row_detail, import_key, imported_line, reading_line, BatchCounts,
     ImportBatch, ImportJob, ImportJobState, ALREADY_HERE, CHOOSE_ANOTHER, CHOOSE_EXPORT,
     EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, GROK_BEST_EFFORT, IMPORT_ALL,
-    NOT_AN_EXPORT, T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED,
+    IMPORT_GONE, NOT_AN_EXPORT, T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED,
 };
 use bruhs_models::logic::portable::{
     ImportCandidate, ImportSource, ImportedThread, PortableMessage, PortablePart, PortableToolCall,
@@ -477,6 +477,8 @@ struct FakeImports {
     jobs: RefCell<VecDeque<Result<ImportJob, String>>>,
     threads: RefCell<Vec<ImportCandidate>>,
     failing_thread: RefCell<Option<String>>,
+    /// Threads answered only after this long, as a slow server would.
+    slow_threads: RefCell<Option<Duration>>,
     calls: RefCell<Vec<String>>,
 }
 
@@ -503,13 +505,13 @@ fn fake_calls(fake: &Rc<FakeImports>) -> ExportCalls {
             Task::ready(answer.unwrap_or_else(|| Err(NOT_AN_EXPORT.into())))
         }),
         thread: Rc::new(
-            move |(source, upload, id): (ImportSource, String, String), _cx: &gpui::App| {
+            move |(source, upload, id): (ImportSource, String, String), cx: &gpui::App| {
                 thread
                     .calls
                     .borrow_mut()
                     .push(format!("thread {}:{id} {upload}", source.as_str()));
                 if thread.failing_thread.borrow().as_deref() == Some(id.as_str()) {
-                    return Task::ready(Err(T3_EXPORT_FAILED.to_string()));
+                    return Task::ready(Err(IMPORT_GONE.to_string()));
                 }
                 let row = thread
                     .threads
@@ -517,7 +519,17 @@ fn fake_calls(fake: &Rc<FakeImports>) -> ExportCalls {
                     .iter()
                     .find(|row| row.source == source && row.id == id)
                     .cloned();
-                Task::ready(row.map(|row| exported(&row)).ok_or_else(|| "gone".to_string()))
+                let answer = row.map(|row| exported(&row)).ok_or_else(|| "gone".to_string());
+                match *thread.slow_threads.borrow() {
+                    Some(after) => {
+                        let timer = cx.background_executor().timer(after);
+                        cx.background_spawn(async move {
+                            timer.await;
+                            answer
+                        })
+                    }
+                    None => Task::ready(answer),
+                }
             },
         ),
         discard: Rc::new(move |id: String| {
@@ -825,8 +837,8 @@ fn down_then_enter_imports_the_second_row(cx: &mut gpui::TestAppContext) {
         assert_eq!(thread.updated_at_ms, batch.candidates[1].updated_at);
         let left: Vec<String> = workspace
             .visible_export_rows(cx)
-            .into_iter()
-            .map(|row| row.id)
+            .iter()
+            .map(|row| row.id.clone())
             .collect();
         assert_eq!(left, ["a1", "a2"], "the row leaves the list");
         assert_eq!(workspace.import_picker.export.status.as_deref(), Some(status.as_str()));
@@ -866,8 +878,12 @@ fn import_all_brings_in_the_rows_in_order(cx: &mut gpui::TestAppContext) {
         assert_eq!(workspace.top_layer, Some(TopLayer::ImportThread));
         assert!(!workspace.import_picker.export.importing);
         assert_eq!(workspace.import_picker.export.status.as_deref(), Some(done.as_str()));
+        // The tab's line is the one announcement: no app notice (web M10).
+        let notice = workspace.meetings_hub.read(cx).notice.as_ref();
+        assert!(notice.is_none_or(|notice| !notice.message.contains("Imported")), "{notice:?}");
     });
     assert!(drawn(cx, format!("desktop-import-export-line:{ALREADY_HERE}")));
+    assert!(drawn(cx, format!("desktop-import-export-status:{done}")));
     assert!(!drawn(cx, format!("desktop-import-export-button:{IMPORT_ALL}")));
     assert!(focused(cx).as_ref() == Some(&another), "nothing left: Choose another file");
 }
@@ -886,11 +902,11 @@ fn import_all_stops_at_a_failure_and_says_so(cx: &mut gpui::TestAppContext) {
     let done = imported_line(1, ImportSource::ChatGpt);
     workspace.read_with(cx, |workspace, _| {
         let export = &workspace.import_picker.export;
-        assert_eq!(export.error.as_deref(), Some(T3_EXPORT_FAILED));
+        assert_eq!(export.error.as_deref(), Some(IMPORT_GONE));
         assert_eq!(export.status.as_deref(), Some(done.as_str()));
         assert!(!export.importing);
     });
-    assert!(drawn(cx, format!("desktop-import-export-error:{T3_EXPORT_FAILED}")));
+    assert!(drawn(cx, format!("desktop-import-export-error:{IMPORT_GONE}")));
 }
 
 #[gpui::test]
@@ -960,4 +976,33 @@ fn escape_closes_the_dialog_and_discards_the_batch(cx: &mut gpui::TestAppContext
             .count(),
         1
     );
+}
+
+#[gpui::test]
+fn import_all_stops_when_the_dialog_closes(cx: &mut gpui::TestAppContext) {
+    let fake = Rc::new(FakeImports::default());
+    let batch = export_batch();
+    *fake.threads.borrow_mut() = batch.candidates.clone();
+    *fake.slow_threads.borrow_mut() = Some(Duration::from_secs(1));
+    let (workspace, cx) = export_tab(cx, &fake);
+    read_export(&workspace, cx, &fake, ready(batch));
+    let before = workspace.read_with(cx, |workspace, _| workspace.threads.len());
+    workspace.update_in(cx, |workspace, window, cx| workspace.import_all_exports(window, cx));
+    cx.run_until_parked();
+    assert_eq!(fake.calls().len(), 2, "the first chat is on its way");
+    press(cx, "escape");
+    cx.executor().advance_clock(Duration::from_secs(5));
+    cx.run_until_parked();
+    let calls = fake.calls();
+    assert_eq!(
+        calls[1..],
+        [format!("thread chatgpt:a1 {BATCH}"), format!("discard {BATCH}")],
+        "no further chat is asked for after the close"
+    );
+    workspace.read_with(cx, |workspace, cx| {
+        assert!(workspace.top_layer.is_none());
+        assert_eq!(workspace.threads.len(), before, "the late answer adds no thread");
+        assert!(workspace.known_import_keys(cx).is_empty());
+        assert!(!workspace.import_picker.export.importing);
+    });
 }
