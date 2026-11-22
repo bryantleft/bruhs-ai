@@ -825,7 +825,7 @@ fn shown_folders_drop_hidden_characters() {
     let (dir, roots) = home();
     let workspace = dir.path().join("ws\u{202e}dlc\u{200b}");
     clawd(&workspace);
-    for picked in [workspace.clone(), PathBuf::from("~/ws\u{202e}dlc\u{200b}")] {
+    for picked in [workspace, PathBuf::from("~/ws\u{202e}dlc\u{200b}")] {
         let found = scan_of(&roots, ImportSource::OpenClaw, Some(&picked));
         assert_eq!(found.personas.len(), 1);
         let folder = &found.personas[0].folder;
