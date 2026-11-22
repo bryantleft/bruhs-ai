@@ -4,7 +4,7 @@
 //! sessions are listed by name only.
 
 use super::files::{entries, planned, read_text, FileRead, Kind};
-use super::{persona_id, MAX_LISTED};
+use super::{persona_id, shown_path, MAX_LISTED};
 use bruhs_models::imports::{
     assemble_persona, hermes_entries, FileUse, PersonaCandidate, PersonaFile, PersonaTexts,
     SkipReason,
@@ -122,7 +122,7 @@ pub(crate) fn persona(home: &Path, profile: Option<&str>) -> Option<PersonaCandi
     Some(PersonaCandidate {
         id: persona_id(&folder),
         source,
-        folder: folder.display().to_string(),
+        folder: shown_path(&folder),
         name: assembled.name,
         instructions: assembled.instructions,
         memory: assembled.memory,

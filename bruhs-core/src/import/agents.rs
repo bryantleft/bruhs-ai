@@ -18,7 +18,8 @@
 
 use super::ImportError;
 use bruhs_models::imports::{
-    AgentScan, PersonaCandidate, FOLDER_MISSING, FOLDER_PRIVATE, IMPORT_INVALID, MAX_PERSONAS,
+    is_hidden_char, AgentScan, PersonaCandidate, FOLDER_MISSING, FOLDER_PRIVATE, IMPORT_INVALID,
+    MAX_PERSONAS,
 };
 use bruhs_models::logic::portable::ImportSource;
 use sha2::{Digest as _, Sha256};
@@ -171,6 +172,17 @@ pub fn scan(
     })
 }
 
+/// `path` as the owner reads it: hidden characters (controls, bidi
+/// overrides and the like) dropped, since a folder's name is the owner's
+/// disk, not text Bruhs wrote.
+pub(crate) fn shown_path(path: &Path) -> String {
+    path.display()
+        .to_string()
+        .chars()
+        .filter(|c| !is_hidden_char(*c))
+        .collect()
+}
+
 /// Whether a path the owner picked leads somewhere never opened: a part
 /// of `named` below the home, or of `resolved` below the resolved home
 /// (all of either when it isn't under its home), is a name a scan never
@@ -290,7 +302,8 @@ impl<'a> Scan<'a> {
         self.looked_in.push(shown);
     }
 
-    /// `path` as `~/…` when it is under the home, as named or resolved.
+    /// `path` as `~/…` when it is under the home, as named or resolved,
+    /// through [`shown_path`].
     fn shown(&self, path: &Path) -> String {
         let homes = [self.roots.named_home(), self.home.as_deref()];
         for home in homes.into_iter().flatten() {
@@ -298,11 +311,11 @@ impl<'a> Scan<'a> {
                 return if rest.as_os_str().is_empty() {
                     "~".to_string()
                 } else {
-                    format!("~/{}", rest.display())
+                    format!("~/{}", shown_path(rest))
                 };
             }
         }
-        path.display().to_string()
+        shown_path(path)
     }
 
     /// Adds `persona` unless its folder is already in.

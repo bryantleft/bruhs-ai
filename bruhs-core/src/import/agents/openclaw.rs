@@ -4,7 +4,7 @@
 //! internal files are listed by name only.
 
 use super::files::{entries, planned, read_text, select, FileRead, Kind, Pick};
-use super::{persona_id, MAX_LISTED};
+use super::{persona_id, shown_path, MAX_LISTED};
 use crate::import::text::{shown_name, NAME_MAX_CHARS};
 use bruhs_models::imports::{
     assemble_persona, identity_fields, FileUse, PersonaCandidate, PersonaFile, PersonaTexts,
@@ -82,7 +82,7 @@ pub(crate) fn persona(dir: &Path) -> Option<PersonaCandidate> {
     Some(PersonaCandidate {
         id: persona_id(dir),
         source,
-        folder: dir.display().to_string(),
+        folder: shown_path(dir),
         name: assembled.name,
         instructions: assembled.instructions,
         memory: assembled.memory,
