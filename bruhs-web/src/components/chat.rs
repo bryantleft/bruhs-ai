@@ -327,6 +327,7 @@ pub fn ChatPage() -> impl IntoView {
     let BaseBranchSignal(base_branch) = expect_context::<BaseBranchSignal>();
     let PreviousWorktreeSignal(previous_worktree) = expect_context::<PreviousWorktreeSignal>();
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
+    let background_tasks = use_context::<crate::state::BackgroundTasksSignal>().map(|s| s.0);
     let find_cmds = expect_context::<FindCommands>();
     let title_instructions = expect_context::<crate::state::TitleInstructionsSignal>().0;
 
@@ -1118,6 +1119,7 @@ pub fn ChatPage() -> impl IntoView {
                 while let Some(request_thread) = request_thread.as_ref() {
                     let resumed = resume.is_some() && !fresh;
                     let request = AgentRequest {
+                        kiro_selection: Default::default(),
                         thread_id: request_thread.clone(),
                         prompt: model_prompt.clone(),
                         project_path: project_path.clone(),
@@ -2175,6 +2177,98 @@ pub fn ChatPage() -> impl IntoView {
                                     })}
 
                                     <div class="shrink-0 px-3 pb-4 pt-2 sm:px-5">
+                                        {move || {
+                                            let active_id = active_thread_id.get()?;
+                                            let running = background_tasks.map(|bg| {
+                                                bg.with(|ts| {
+                                                    let mut rows: Vec<_> = ts
+                                                        .iter()
+                                                        .filter(|t| {
+                                                            t.status == bruhs_models::api::TaskStatus::Running
+                                                                && t.thread_id.as_str() == active_id
+                                                        })
+                                                        .cloned()
+                                                        .collect();
+                                                    rows.sort_by_key(|t| t.started_at);
+                                                    rows
+                                                })
+                                            })?;
+                                            if running.is_empty() {
+                                                return None;
+                                            }
+                                            let count = running.len();
+                                            let summary = if count == 1 {
+                                                match running[0].kind {
+                                                    bruhs_models::api::TaskKind::Swarm => "1 teamwork worker running".to_string(),
+                                                    bruhs_models::api::TaskKind::Subagent => "1 subagent running".to_string(),
+                                                    bruhs_models::api::TaskKind::BackgroundAgent => "1 background agent running".to_string(),
+                                                    bruhs_models::api::TaskKind::Shell | bruhs_models::api::TaskKind::Other => "1 background run".to_string(),
+                                                }
+                                            } else {
+                                                format!("{count} active runs")
+                                            };
+                                            let overflow = count.saturating_sub(4);
+                                            let visible: Vec<_> = running.into_iter().take(4).collect();
+                                            Some(view! {
+                                                <div
+                                                    role="status"
+                                                    aria-label=format!("Working: {summary}")
+                                                    class="mx-auto mb-2 w-full max-w-3xl rounded-grape bg-longan-900 px-3 py-2 inset-ring inset-ring-white/10"
+                                                >
+                                                    <div class="flex items-center justify-between gap-2">
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <span class="size-[7px] shrink-0 rounded-orb bg-blueberry-400 animate-status-pulse" aria-hidden="true"></span>
+                                                            <span class="text-label-sm text-rambutan-200 truncate">{format!("Working · {summary}")}</span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            class="shrink-0 rounded-grape px-2 py-0.5 text-label-sm text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100 transition-colors"
+                                                            on:click=move |_| panel.update(|p| p.show(PanelSurface::Tasks))
+                                                        >
+                                                            "Tasks"
+                                                        </button>
+                                                    </div>
+                                                    <div class="mt-1.5 space-y-1">
+                                                        {visible.into_iter().map(|task| {
+                                                            let stop_id = task.id.clone();
+                                                            let badge_cls = match task.kind {
+                                                                bruhs_models::api::TaskKind::Swarm => "bg-blueberry-400/15 text-blueberry-400",
+                                                                bruhs_models::api::TaskKind::Subagent => "bg-mangosteen-400/15 text-mangosteen-400",
+                                                                bruhs_models::api::TaskKind::BackgroundAgent => "bg-pandan-400/15 text-pandan-400",
+                                                                bruhs_models::api::TaskKind::Shell | bruhs_models::api::TaskKind::Other => "bg-longan-800 text-rambutan-400",
+                                                            };
+                                                            view! {
+                                                                <div class="flex items-center gap-2 min-w-0">
+                                                                    <span class=format!("shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none {badge_cls}")>
+                                                                        {task.kind.badge_label()}
+                                                                    </span>
+                                                                    <span class="flex-1 min-w-0 truncate text-code-sm text-rambutan-300">
+                                                                        {task.label}
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        class="shrink-0 rounded-grape px-1.5 py-0.5 text-label-sm text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100 transition-colors"
+                                                                        on:click=move |_| {
+                                                                            let id = stop_id.clone();
+                                                                            wasm_bindgen_futures::spawn_local(async move {
+                                                                                let _ = crate::api::stop_task(&id).await;
+                                                                            });
+                                                                        }
+                                                                    >
+                                                                        "Stop"
+                                                                    </button>
+                                                                </div>
+                                                            }
+                                                        }).collect_view()}
+                                                        {(overflow > 0).then(|| view! {
+                                                            <div class="text-[11px] text-rambutan-500">
+                                                                {format!("+{overflow} more in Tasks")}
+                                                            </div>
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            })
+                                        }}
                                         <crate::components::secret_prompt::SecretPrompts />
                                         <Composer
                                             value=input_value

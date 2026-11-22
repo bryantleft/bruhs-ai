@@ -347,6 +347,7 @@ pub fn Sidebar() -> impl IntoView {
     let TitleInstructionsSignal(title_instructions) = expect_context::<TitleInstructionsSignal>();
     let ComposerDraft(composer_draft) = expect_context::<ComposerDraft>();
     let messages = expect_context::<crate::state::MessagesSignal>().0;
+    let background_tasks = use_context::<crate::state::BackgroundTasksSignal>().map(|s| s.0);
     let dragging = RwSignal::new(None::<String>);
     let menu_thread = RwSignal::new(None::<String>);
     // The open thread menu's top-left corner, measured from its "…" button.
@@ -365,7 +366,19 @@ pub fn Sidebar() -> impl IntoView {
         let searching = query.with(|q| !q.trim().is_empty());
         let now = js_sys::Date::now();
         let active = active_thread_id.get();
-        let streaming = turns.running();
+        let mut streaming = turns.running();
+        if let Some(bg) = background_tasks {
+            bg.with(|ts| {
+                for task in ts {
+                    if task.status == bruhs_models::api::TaskStatus::Running {
+                        let tid = task.thread_id.as_str();
+                        if !streaming.iter().any(|existing| existing == tid) {
+                            streaming.push(tid.to_string());
+                        }
+                    }
+                }
+            });
+        }
         let needs_you = pending_permissions.with(PendingPermissions::threads);
         unread_threads.with(|unread| {
             shelve(
@@ -697,9 +710,17 @@ pub fn Sidebar() -> impl IntoView {
             Signal::derive(move || active_thread_id.get().as_deref() == Some(id_active.as_str()));
         let status = Signal::derive(move || {
             let streaming = turns.is_running(&id_status);
+            let running_bg = background_tasks.is_some_and(|bg| {
+                bg.with(|ts| {
+                    ts.iter().any(|task| {
+                        task.status == bruhs_models::api::TaskStatus::Running
+                            && task.thread_id.as_str() == id_status
+                    })
+                })
+            });
             if streaming && pending_permissions.with(|p| p.has_for(&id_status)) {
                 CardStatus::Approval
-            } else if streaming {
+            } else if streaming || running_bg {
                 CardStatus::Working
             } else if unread_threads.with(|s| s.contains(&id_status)) {
                 CardStatus::Unread

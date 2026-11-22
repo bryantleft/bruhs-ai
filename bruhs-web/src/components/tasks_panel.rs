@@ -1,12 +1,37 @@
 //! Tasks surface for the right panel: running and recent background shells
 //! with their log tails. The panel shell owns the tab bar and close button.
 
-use crate::api::dismiss_task;
+use crate::api::{dismiss_task, stop_task};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
-use bruhs_models::api::TaskStatus;
+use bruhs_models::api::{BackgroundTask, TaskKind, TaskStatus};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
 use leptos::prelude::*;
+
+fn kind_badge_class(kind: TaskKind) -> &'static str {
+    match kind {
+        TaskKind::Swarm => "bg-blueberry-400/15 text-blueberry-400",
+        TaskKind::Subagent => "bg-mangosteen-400/15 text-mangosteen-400",
+        TaskKind::BackgroundAgent => "bg-pandan-400/15 text-pandan-400",
+        TaskKind::Shell | TaskKind::Other => "bg-longan-800 text-rambutan-400",
+    }
+}
+
+fn task_subtitle(task: &BackgroundTask) -> Option<String> {
+    let mut parts: Vec<&str> = Vec::new();
+    for key in ["swarm_title", "model", "workspace"] {
+        if let Some(value) = task
+            .meta
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "inherit")
+        {
+            parts.push(value);
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
 
 /// How long ago `at` was: "now", "3m", "2h", "40d".
 fn relative_time(at: EpochMs) -> String {
@@ -58,6 +83,16 @@ pub fn TasksSurface() -> impl IntoView {
         });
     };
 
+    let on_stop = move |task_id: String| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(error) = stop_task(&task_id).await {
+                if !error.is_status(404) {
+                    log::warn!("could not stop task {task_id}: {error}");
+                }
+            }
+        });
+    };
+
     let toggle_expand = move |id: String| {
         set_expanded_id.update(|curr| {
             if curr.as_deref() == Some(id.as_str()) {
@@ -97,6 +132,9 @@ pub fn TasksSurface() -> impl IntoView {
                                                 children=move |task| {
                                                     let id = task.id.clone();
                                                     let id_for_expand = id.clone();
+                                                    let id_for_stop = id.clone();
+                                                    let kind = task.kind;
+                                                    let subtitle = task_subtitle(&task);
                                                     let label = task.label.clone();
                                                     let started_at = relative_time(task.started_at);
                                                     let log_tail = task.log_tail;
@@ -104,21 +142,42 @@ pub fn TasksSurface() -> impl IntoView {
                                                         move || expanded_id.get().as_deref() == Some(id.as_str());
                                                     view! {
                                                         <div>
-                                                            <button
-                                                                on:click=move |_| toggle_expand(id_for_expand.clone())
-                                                                class="w-full text-left rounded-grape px-3 py-2 hover:bg-longan-800/50 transition"
-                                                            >
-                                                                <div class="flex items-center gap-2">
+                                                            <div class="flex items-center rounded-grape px-3 py-2 hover:bg-longan-800/50 transition group">
+                                                                <button
+                                                                    on:click=move |_| toggle_expand(id_for_expand.clone())
+                                                                    class="flex items-center gap-2 flex-1 text-left min-w-0"
+                                                                >
                                                                     // Animated dots indicator
                                                                     <span class="inline-flex gap-0.5 shrink-0">
                                                                         <span class="size-1 rounded-orb bg-pandan-500"></span>
                                                                         <span class="size-1 rounded-orb bg-pandan-500"></span>
                                                                         <span class="size-1 rounded-orb bg-pandan-500"></span>
                                                                     </span>
-                                                                    <span class="text-body-sm text-rambutan-200 truncate flex-1">{label}</span>
+                                                                    <span class=format!("shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none {}", kind_badge_class(kind))>
+                                                                        {kind.badge_label()}
+                                                                    </span>
+                                                                    <span class="flex-1 min-w-0 flex flex-col">
+                                                                        <span class="text-body-sm text-rambutan-200 truncate">{label}</span>
+                                                                        {subtitle.map(|sub| view! {
+                                                                            <span class="text-[11px] text-rambutan-500 truncate">{sub}</span>
+                                                                        })}
+                                                                    </span>
                                                                     <span class="text-label-sm text-rambutan-500 shrink-0">{started_at}</span>
+                                                                </button>
+                                                                <div class="ml-2 shrink-0">
+                                                                    <Button
+                                                                        variant=ButtonVariant::Ghost
+                                                                        size=ButtonSize::Small
+                                                                        title="Stop task".to_string()
+                                                                        on_click={
+                                                                            let id = id_for_stop;
+                                                                            Callback::new(move |_| on_stop(id.clone()))
+                                                                        }
+                                                                    >
+                                                                        "Stop"
+                                                                    </Button>
                                                                 </div>
-                                                            </button>
+                                                            </div>
                                                             {move || if is_expanded() {
                                                                 let logs = log_tail.clone();
                                                                 view! {
@@ -157,11 +216,12 @@ pub fn TasksSurface() -> impl IntoView {
                                                     let id = task.id.clone();
                                                     let id_for_expand = id.clone();
                                                     let id_for_dismiss = id.clone();
+                                                    let kind = task.kind;
+                                                    let subtitle = task_subtitle(&task);
                                                     let label = task.label.clone();
                                                     let ended_at = task.ended_at.map(relative_time).unwrap_or_default();
-                                                    let exit_code = task.exit_code;
+                                                    let success = task.status.succeeded(task.exit_code);
                                                     let log_tail = task.log_tail;
-                                                    let success = exit_code == Some(0);
                                                     let is_expanded =
                                                         move || expanded_id.get().as_deref() == Some(id.as_str());
                                                     view! {
@@ -178,7 +238,15 @@ pub fn TasksSurface() -> impl IntoView {
                                                                     )>
                                                                         {if success { "✓" } else { "✗" }}
                                                                     </span>
-                                                                    <span class="text-body-sm text-rambutan-200 truncate flex-1">{label}</span>
+                                                                    <span class=format!("shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none {}", kind_badge_class(kind))>
+                                                                        {kind.badge_label()}
+                                                                    </span>
+                                                                    <span class="flex-1 min-w-0 flex flex-col">
+                                                                        <span class="text-body-sm text-rambutan-200 truncate">{label}</span>
+                                                                        {subtitle.map(|sub| view! {
+                                                                            <span class="text-[11px] text-rambutan-500 truncate">{sub}</span>
+                                                                        })}
+                                                                    </span>
                                                                     <span class="text-label-sm text-rambutan-500 shrink-0">{ended_at}</span>
                                                                 </button>
                                                                 // Dismiss button

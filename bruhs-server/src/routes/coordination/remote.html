@@ -93,7 +93,7 @@ a.chip{position:relative;z-index:1;text-decoration:none;border-radius:.25rem;pad
 .transcript{overflow:auto;max-height:min(52vh,560px);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;background:var(--bg);border-radius:.5rem;box-shadow:inset 0 0 0 1px var(--ring);padding:4px 12px}
 .message{padding:8px 0;border-bottom:1px solid var(--ring)}.message:last-child{border-bottom:0}.message strong{display:block;color:var(--muted);font-weight:500;font-size:12px}
 .approval{background:var(--card);border-radius:.5rem;box-shadow:inset 0 0 0 1px var(--persimmon);padding:10px 12px;display:grid;gap:8px}
-.wake-kinds label{display:flex;align-items:center;gap:6px;min-height:32px;color:var(--text)}.wake-kinds input[type=checkbox]{width:18px;min-height:18px;height:18px;margin:0}
+.schedule-grant span{display:flex;align-items:center;gap:8px}.wake-kinds label{display:flex;align-items:center;gap:6px;min-height:32px;color:var(--text)}.wake-kinds input[type=checkbox],.schedule-grant input[type=checkbox]{width:18px;min-height:18px;height:18px;margin:0}
 
 @media(max-width:900px){#board-hint{display:none}.board{grid-template-columns:repeat(4,minmax(260px,82vw));scroll-snap-type:x mandatory}.lane{scroll-snap-align:start}}
 @media(max-width:650px){.bar{padding:8px 12px;gap:6px}#summary{order:10;flex-basis:100%}.bar .project select{max-width:150px}.drawer{width:100vw}.drawer-head,.drawer-body{padding-left:12px;padding-right:12px}}
@@ -108,7 +108,7 @@ a.chip{position:relative;z-index:1;text-decoration:none;border-radius:.25rem;pad
  <button id="new-task" class="primary" type="button" hidden aria-keyshortcuts="n">New task</button>
  <button id="open-handoffs" type="button" hidden>Task handoffs</button>
  <button id="open-specs" type="button" hidden>Specifications</button>
- <button id="open-access" type="button" hidden>Phone access</button>
+ <button id="open-access" type="button" hidden>Manage access</button>
 </header>
 <div class="notices"><p id="error" role="alert" class="error"></p><p id="status" class="muted" role="status" aria-live="polite"></p><p id="wake-error" role="alert" class="error" hidden></p><p id="link-error" class="muted"></p></div>
 <form id="pair" hidden><h2>Pair this device</h2><label>Access token<input id="token" type="password" autocomplete="off" required></label><p class="muted">Create an expiring owner or guest token in Bruhs on the host, then paste it here. Connect through SSH, your private network, or your own HTTPS proxy. There is no hosted relay. The token stays in this tab's session.</p><p class="muted">On a phone, use your browser's Add to Home Screen or Install app action. Reopen and pair if the browser has ended its session. The host must stay awake.</p><button class="primary">Pair this device</button></form>
@@ -133,7 +133,7 @@ a.chip{position:relative;z-index:1;text-decoration:none;border-radius:.25rem;pad
   </form></section>
   <section id="handoffs-pane" hidden><p class="muted">Prepared copies stay on this host until you discard them. Starting a run keeps the original personal task unchanged.</p><div id="handoffs-list"></div><button id="refresh-handoffs" type="button">Refresh handoffs</button></section>
   <section id="spec-pane" hidden><form id="spec-form" style="display:grid;gap:12px"><div class="fields"><label>Specification<select id="spec"><option value="">New specification</option></select></label><label>Title<input id="spec-title" required></label><label>Project folder<input id="spec-project" required></label></div><p id="spec-target" class="muted"></p><label>Acceptance criteria and constraints<textarea id="spec-content" required rows="10"></textarea></label><div class="row"><button>Save specification</button><button id="attach-spec" type="button">Attach to selected task</button></div><p class="muted">Each turn pins its specification revision. A changed specification applies when you send the next message. Running work keeps its pinned revision visible.</p></form></section>
-  <section id="access-pane" hidden style="display:grid;gap:12px"><form id="grant-form" style="display:grid;gap:10px"><p id="grant-target" class="muted"></p><div class="fields"><label>Access<select id="grant-scope"><option value="owner">Owner: task controls</option><option value="guest">Guest: selected task only</option></select></label><label>Expires after this many minutes<input id="grant-minutes" type="number" min="1" required></label></div><div class="row"><button>Create access token</button></div></form><pre id="issued-token" hidden></pre><div id="grants"></div><details><summary>Connect over SSH</summary><div style="display:grid;gap:10px"><label>SSH host or alias<input id="ssh-host" placeholder="me@devbox"></label><label>Local forwarding port<input id="ssh-local" type="number" min="1024" max="65535" placeholder="45001"></label><label>Host task port<input id="ssh-remote" type="number" min="1024" max="65535" placeholder="45000"></label><div class="row"><button id="ssh-command" type="button">Prepare tunnel command</button></div><pre id="ssh-output"></pre><p class="muted">Run the command in your terminal. Keep the host awake. Open the forwarded page and pair with an expiring owner token. For phones, publish the task port through your own HTTPS proxy or Tailscale Serve. The ordinary Bruhs API remains local.</p></div></details></section>
+  <section id="access-pane" hidden style="display:grid;gap:12px"><form id="grant-form" style="display:grid;gap:10px"><p id="grant-target" class="muted"></p><div class="fields"><label>Access<select id="grant-scope"><option value="owner">Owner: task controls</option><option value="guest">Guest: selected task only</option><option value="projects">Projects · Read checkouts</option><option value="project_schedules">Projects · Read scheduled tasks</option><option value="project_schedules_toggle">Projects · Pause and resume scheduled tasks</option><option value="project_schedules_toggle_rename">Projects · Pause and resume tasks and rename checkouts</option><option value="project_schedules_rename">Projects · Read tasks and rename checkouts</option><option value="project_names">Projects · Rename checkouts</option><option value="keybindings-read">Keybindings · Read only</option><option value="keybindings-edit">Keybindings · Edit</option></select></label><label>Expires after this many minutes<input id="grant-minutes" type="number" min="1" required></label></div><label id="grant-provider-updates-field" hidden><span><input id="grant-provider-updates" type="checkbox"> Check and install provider CLI updates on this host</span></label><label id="grant-usage-field" class="schedule-grant" hidden><span><input id="grant-usage" type="checkbox"> Share provider account identities, plans and usage limits</span></label><label id="grant-edit-field" class="schedule-grant" hidden><span><input id="grant-edit" type="checkbox"> Create and edit scheduled tasks, including prompts and unattended runs</span></label><label id="grant-conversations-field" class="schedule-grant" hidden><span><input id="grant-conversations" type="checkbox"> Search conversation titles in shared projects and use those conversations for scheduled runs</span></label><label id="grant-threads-field" class="schedule-grant" hidden><span><input id="grant-threads" type="checkbox"> Open conversations attached to scheduled tasks and read their message history</span></label><label id="grant-thread-replies-field" class="schedule-grant" hidden><span><input id="grant-thread-replies" type="checkbox"> Send replies and run the provider in those conversations</span></label><label id="grant-run-field" class="schedule-grant" hidden><span><input id="grant-run" type="checkbox"> Allow Run now for time-based tasks</span></label><label id="grant-delete-field" class="schedule-grant" hidden><span><input id="grant-delete" type="checkbox"> Allow deleting scheduled tasks</span></label><label id="grant-deliveries-field" class="schedule-grant" hidden><span><input id="grant-deliveries" type="checkbox"> Share webhook delivery history, request previews and task prompts</span></label><div class="row"><button>Create access token</button></div></form><pre id="issued-token" hidden></pre><div id="grants"></div><details><summary>Connect over SSH</summary><div style="display:grid;gap:10px"><label>SSH host or alias<input id="ssh-host" placeholder="me@devbox"></label><label>Local forwarding port<input id="ssh-local" type="number" min="1024" max="65535" placeholder="45001"></label><label>Host task port<input id="ssh-remote" type="number" min="1024" max="65535" placeholder="45000"></label><div class="row"><button id="ssh-command" type="button">Prepare tunnel command</button></div><pre id="ssh-output"></pre><p class="muted">Run the command in your terminal. Keep the host awake. Open the forwarded page and pair with an expiring owner token. For phones, publish the task port through your own HTTPS proxy or Tailscale Serve. The ordinary Bruhs API remains local.</p></div></details></section>
  </div>
 </aside>
 <script>
@@ -208,7 +208,7 @@ function button(label,action,disabled=false,cls){const b=element('button',label,
 function field(label,id,type='textarea',value=''){const l=element('label',label),input=document.createElement(type);input.id=id;input.value=value;l.append(input);return l}
 
 /* Drawer */
-const PANES={task:'detail-pane',create:'create-pane',specs:'spec-pane',access:'access-pane',handoffs:'handoffs-pane'},PANE_TITLE={create:'New task',specs:'Specifications',access:'Phone and guest access',handoffs:'Task handoffs'};
+const PANES={task:'detail-pane',create:'create-pane',specs:'spec-pane',access:'access-pane',handoffs:'handoffs-pane'},PANE_TITLE={create:'New task',specs:'Specifications',access:'Remote access tokens',handoffs:'Task handoffs'};
 const STATE_LABEL={ready:'Queued',running:'Working',waiting_approval:'Needs approval',waiting_child:'Waiting on delegate',completed:'Done',failed:'Failed',cancelled:'Stopped',interrupted:'Interrupted',limited:'Usage limit'};
 function openDrawer(mode,from,focus=true){const wasOpen=!$('drawer').hidden;drawerMode=mode;if(from)opener=from;for(const [m,id]of Object.entries(PANES))$(id).hidden=m!==mode;if(PANE_TITLE[mode])$('drawer-title').textContent=PANE_TITLE[mode];$('drawer').hidden=false;if(!wasOpen&&!matchMedia('(prefers-reduced-motion: reduce)').matches){$('drawer').classList.add('entering');requestAnimationFrame(()=>requestAnimationFrame(()=>$('drawer').classList.remove('entering')))}render();if(focus)$('drawer-title').focus({preventScroll:true})}
 function closeDrawer(restore=true){if($('drawer').hidden)return;saveDrafts();const mode=drawerMode;drawerMode=null;$('drawer').hidden=true;const from=opener;opener=null;renderBoard();
@@ -394,7 +394,7 @@ function renderDetail(){
  if(owner()){
   const effort=effortField('Reasoning effort for the next turn','task-effort',task.effort);effort.querySelector('select').disabled=active(task);detail.append(effort,button('Save effort',()=>command({action:'set_effort',id:task.id,effort:$('task-effort').value||null}),active(task)),element('p','Claude and Codex support effort overrides. Other runtimes use provider default. Changing effort starts no run.','muted'));const budget=field('Run budget in seconds for the next turn (optional)','task-budget','input',task.execution_timeout_seconds||'');budget.querySelector('input').type='number';budget.querySelector('input').min='1';budget.querySelector('input').step='1';budget.querySelector('input').disabled=active(task);detail.append(budget,button('Save run budget',async()=>command({action:'set_execution_budget',id:task.id,seconds:executionBudget('task-budget')}),active(task)),element('p','A budget stops the current run and its active child tasks, preserving their files and partial output. Leave blank for unlimited duration. Saving a budget starts no run. Child tasks inherit the setting.','muted'));const compose=field('Next message','next-message');detail.append(compose);const send=element('div',undefined,'row');send.append(button('Send message',async()=>{await command({action:'send',id:task.id,prompt:$('next-message').value});if(!$('error').textContent&&$('next-message'))$('next-message').value=''},active(task),'primary'));detail.append(send);
   const actions=element('div',undefined,'row section');actions.append(button('Stop task and children',()=>command({action:'cancel',id:task.id}),!active(task)&&!descendantActive(task.id)),button('Bring back answer',()=>command({action:'bring_back',id:task.id}),active(task)||!task.parent_id),task.archived_at?button('Restore to board',()=>command({action:'unarchive',id:task.id})):button('Archive',()=>command({action:'archive',id:task.id}),active(task)),button('Delete task record',()=>command({action:'delete',id:task.id}),active(task)));detail.append(actions);
-  const more=element('div',undefined,'row');more.append(button('Attach specification',()=>openDrawer('specs',null)));if(local){const delivery=button('Review delivery',()=>{if(parent===window)location.href='/api/workbench/ui#delivery='+encodeURIComponent(task.id);else parent.postMessage({type:'bruhs:review-task-delivery',task_id:task.id},location.origin)},active(task));delivery.id='review-delivery';more.append(delivery);more.append(button('Share with a guest',()=>{openDrawer('access',null);$('grant-scope').value='guest';grants().catch(fail)}))}detail.append(more);
+  const more=element('div',undefined,'row');more.append(button('Attach specification',()=>openDrawer('specs',null)));if(local){const delivery=button('Review delivery',()=>{if(parent===window)location.href='/api/workbench/ui#delivery='+encodeURIComponent(task.id);else parent.postMessage({type:'bruhs:review-task-delivery',task_id:task.id},location.origin)},active(task));delivery.id='review-delivery';more.append(delivery);more.append(button('Share with a guest',()=>{$('grant-scope').value='guest';openDrawer('access',null);grants().catch(fail)}))}detail.append(more);
   const recovery=element('div',undefined,'row');recovery.append(button('Resume at reported reset',()=>command({action:'schedule_reset',id:task.id}),active(task)),button(task.auto_resume_on_limit?'Automatic quota recovery: On':'Automatic quota recovery: Off',()=>command({action:'auto_resume',id:task.id,enabled:!task.auto_resume_on_limit})));if(task.resume_at)recovery.append(element('span','Resume scheduled: '+new Date(task.resume_at).toLocaleString()),button('Cancel scheduled resume',()=>command({action:'cancel_resume',id:task.id})));detail.append(recovery);
   const split=document.createElement('details');split.id='child-actions';split.className='section';split.append(element('summary','Delegate, explore, or verify'));split.append(field('Title','child-title','input',task.title),field('Model','child-model','input',task.model),effortField('Reasoning effort','child-effort',task.effort),field('Task or question','child-prompt'));const childActions=element('div',undefined,'row');for(const [label,relationship]of[['Delegate','delegate'],['Fork','fork'],['Side chat','side_chat'],['Verify against specification','verify']])childActions.append(button(label,()=>command({action:'fork',id:task.id,title:$('child-title').value,model:$('child-model').value,effort:$('child-effort').value||null,prompt:$('child-prompt').value||(relationship==='verify'?'Verify the current implementation against the shared specification and cite evidence.':''),relationship,isolation:relationship==='delegate'?{kind:'worktree',base_branch:$('base').value}:{kind:'shared'}})));split.append(childActions,element('p','Delegates get their own worktree and card. Verification starts a read-only agent review in Validating. Review its report and cited check results before accepting the work.','muted'));detail.append(split);
   for(const proposal of snapshot.guest_proposals.filter(p=>p.task_id===task.id)){const p=element('div',undefined,'section');p.append(element('h3','Guest message awaiting your review'),element('p',proposal.text));const r=element('div',undefined,'row');r.append(button('Send to agent',()=>command({action:'guest_proposal',id:proposal.id,accept:true})),button('Dismiss',()=>command({action:'guest_proposal',id:proposal.id,accept:false})));p.append(r);detail.append(p)}
@@ -407,7 +407,7 @@ function render(){
  for(const b of $('create').querySelectorAll('button'))b.disabled=busy;
  renderHeader();renderBoard();
  if(drawerMode==='task'){renderDetail();renderWakes()}else $('wake-section').hidden=true;
- const target=current();$('spec-target').textContent=target?'Attach to: '+target.title:'';$('attach-spec').hidden=!target;$('grant-target').textContent=target?'Guest access shares: '+target.title:'Guest access needs a task. Open one and choose Share with a guest.';$('grant-scope').options[1].disabled=!target;if(!target&&$('grant-scope').value==='guest')$('grant-scope').value='owner';
+ const target=current();$('spec-target').textContent=target?'Attach to: '+target.title:'';$('attach-spec').hidden=!target;renderGrantTarget(target);
  if(!specDirty){const old=$('spec').value;$('spec').replaceChildren(new Option('New specification',''));for(const s of snapshot.specs)$('spec').append(new Option(s.title+', revision '+s.revision,s.id));$('spec').value=old}
  renderedTask=drawerMode==='task'?selected:null;if(renderedTask){const saved=drafts.get(renderedTask);if(saved){for(const [id,value]of Object.entries(saved))if($(id)&&typeof value==='string')$(id).value=value;if(saved.childOpen&&$('child-actions'))$('child-actions').open=true}}
  if(focused&&$(focused)&&$(focused)!==document.activeElement){try{$(focused).focus({preventScroll:true});if(typeof selectionStart==='number')$(focused).setSelectionRange(selectionStart,selectionEnd)}catch{}}
@@ -420,8 +420,111 @@ async function startFromForm(body){const before=new Set(snapshot.tasks.map(t=>t.
 $('create').onsubmit=e=>{e.preventDefault();Promise.resolve().then(()=>currentHandoff?startWorkItem():startFromForm({action:'create',task:taskRequest()})).catch(fail)};$('fanout').onclick=()=>Promise.resolve().then(()=>{if(currentHandoff){fail('Finish this handoff before starting a separate model comparison.');return}const task=taskRequest();task.isolation={kind:'worktree',base_branch:$('base').value};startFromForm({action:'fanout',task,models:$('models').value.split('\n').map(s=>s.trim()).filter(Boolean)})}).catch(fail);
 $('spec').onchange=()=>{const s=snapshot.specs.find(s=>s.id===$('spec').value);$('spec-title').value=s?.title||'';$('spec-project').value=s?.project_path||$('project').value;$('spec-content').value=s?.content||'';specDirty=false};for(const id of ['spec-title','spec-project','spec-content'])$(id).oninput=()=>specDirty=true;
 $('spec-form').onsubmit=async e=>{e.preventDefault();const s=snapshot.specs.find(s=>s.id===$('spec').value);await command({action:'save_spec',id:s?.id||null,project_path:$('spec-project').value,title:$('spec-title').value,content:$('spec-content').value,expected_revision:s?.revision||0});specDirty=false;render()};$('attach-spec').onclick=()=>{if(!selected||!$('spec').value){fail('Open a task and select a saved specification first.');return}command({action:'attach_spec',id:selected,spec_id:$('spec').value})};
-async function grants(){const data=await request('/access');const box=$('grants');box.replaceChildren();for(const grant of data){const row=element('div',undefined,'row section');row.append(element('span',grant.scope.kind+' access expires '+new Date(grant.expires_at).toLocaleString(),'grow'),button('Revoke',async()=>{await request('/access/'+encodeURIComponent(grant.id),undefined,'DELETE');await grants()}));box.append(row)}}
-$('grant-form').onsubmit=async e=>{e.preventDefault();try{const kind=$('grant-scope').value;if(kind==='guest'&&!selected)throw new Error('Open the task to share first.');const minutes=Number($('grant-minutes').value);if(!Number.isInteger(minutes)||minutes<=0)throw new Error('Choose a whole number of minutes greater than zero.');const scope=kind==='owner'?{kind}:{kind,task_id:selected};const issued=await request('/access',{scope,lifetime_seconds:minutes*60});$('issued-token').textContent='Access token: '+issued.token+'\nExpires: '+new Date(issued.grant.expires_at).toLocaleString();$('issued-token').hidden=false;await grants()}catch(e){fail(e)}};
+function renderGrantTarget(task) {
+ $('grant-provider-updates-field').hidden = !$('grant-scope').value.startsWith('project');
+ $('grant-usage-field').hidden = !$('grant-scope').value.startsWith('project');
+ const picker = $('grant-scope');
+ picker.querySelector('option[value="guest"]').disabled = !task;
+ if (!task && picker.value === 'guest') picker.value = 'owner';
+ const target = $('grant-target');
+ for (const field of document.querySelectorAll('.schedule-grant:not(#grant-usage-field)')) field.hidden = !picker.value.startsWith('project_schedules');
+ $('grant-thread-replies-field').hidden = !picker.value.startsWith('project_schedules') || !$('grant-threads').checked;
+ $('grant-conversations-field').hidden = !picker.value.startsWith('project_schedules') || !$('grant-edit').checked;
+ if (picker.value === 'guest') {
+  target.textContent = 'Guest access shares ' + task.title + '.';
+ } else if (picker.value.startsWith('project_schedules_toggle')) {
+  target.textContent = 'Share the task list and allow the linked desktop to pause and resume scheduled tasks on this host.' + (picker.value.endsWith('_rename') ? ' It can also rename checkouts.' : '');
+ } else if (picker.value === 'project_schedules_rename') {
+  target.textContent = 'Share scheduled task summaries and allow the linked desktop to rename checkouts.';
+ } else if (picker.value === 'project_schedules') {
+  target.textContent = 'Share saved checkouts and scheduled task names, schedules, next run times, checkout paths and enabled status.';
+ } else if (picker.value === 'project_names') {
+  target.textContent = 'Share the checkout list and allow the linked desktop to change project display names on this host.';
+ } else if (picker.value === 'projects') {
+  target.textContent = 'Share saved project names, checkout paths and repository identities with a linked desktop.';
+ } else if (picker.value.startsWith('keybindings-')) {
+  target.textContent = 'Use this token to link this host’s keybindings in desktop Settings → Environments.';
+ } else {
+  target.textContent = task ? '' : 'To share a single task, open it and choose Share with a guest.';
+ }
+ target.hidden = !target.textContent;
+}
+$('grant-threads').onchange = () => { if (!$('grant-threads').checked) $('grant-thread-replies').checked=false; renderGrantTarget(current()); };
+$('grant-edit').onchange = () => { if (!$('grant-edit').checked) $('grant-conversations').checked = false; renderGrantTarget(current()); };
+$('grant-scope').onchange = () => { $('grant-provider-updates').checked=false; $('grant-threads').checked=false; $('grant-thread-replies').checked=false; $('grant-conversations').checked = false; $('grant-usage').checked = false; $('grant-run').checked = false; $('grant-edit').checked = false; $('grant-delete').checked = false; $('grant-deliveries').checked = false; renderGrantTarget(current()); };
+function grantLabel(scope) {
+ if (scope.kind === 'project_schedules') {
+  const label = scope.toggle
+   ? (scope.rename ? 'Projects · Pause and resume tasks and rename checkouts' : 'Projects · Pause and resume scheduled tasks')
+   : (scope.rename ? 'Projects · Read tasks and rename checkouts' : 'Projects · Read scheduled tasks');
+  return [label, scope.run && 'Run now', scope.delete && 'Delete tasks', scope.deliveries && 'Webhook deliveries', scope.usage && 'Usage limits', scope.edit && 'Create and edit tasks', scope.edit && scope.conversations && 'Conversation destinations', scope.read_threads && (scope.reply_threads ? 'Read and reply to task threads' : 'Read task threads')].filter(Boolean).join(' · ');
+ }
+ if (scope.kind === 'project_usage') return (scope.rename ? 'Projects · Rename checkouts' : 'Projects · Read checkouts') + ' · Usage limits';
+ if (scope.kind === 'project_names') return 'Projects · Rename checkouts';
+ if (scope.kind === 'projects') return 'Projects · Read checkouts';
+ if (scope.kind === 'keybindings') return scope.editable ? 'Keybindings · Edit' : 'Keybindings · Read only';
+ if (scope.kind === 'guest') return 'Guest · ' + (snapshot.tasks.find(task => task.id === scope.task_id)?.title || scope.task_id);
+ return 'Owner · Task controls';
+}
+async function grants() {
+ const data = await request('/access'), box = $('grants');
+ box.replaceChildren();
+ for (const grant of data) {
+  const row = element('div', undefined, 'row section');
+  const label = grantLabel(grant.scope) + (grant.provider_updates ? ' · Provider updates' : '');
+  const revoke = button('Revoke', async () => {
+   await request('/access/' + encodeURIComponent(grant.id), undefined, 'DELETE');
+   if ($('issued-token').dataset.id === grant.id) {
+    $('issued-token').textContent = '';
+    $('issued-token').hidden = true;
+   }
+   await grants();
+  });
+  revoke.setAttribute('aria-label', 'Revoke ' + label);
+  row.append(element('span', label + ' · Expires ' + new Date(grant.expires_at).toLocaleString(), 'grow'), revoke);
+  box.append(row);
+ }
+}
+$('grant-form').onsubmit = async event => {
+ event.preventDefault();
+ try {
+  const kind = $('grant-scope').value;
+  if (kind === 'guest' && !selected) throw new Error('Open the task to share first.');
+  const minutes = Number($('grant-minutes').value);
+  if (!Number.isSafeInteger(minutes) || minutes <= 0) throw new Error('Choose a whole number of minutes greater than zero.');
+  let scope;
+  switch (kind) {
+   case 'project_schedules_toggle':
+   case 'project_schedules_toggle_rename': scope = {kind: 'project_schedules', toggle: true, rename: kind.endsWith('_rename')}; break;
+   case 'project_schedules_rename': scope = {kind: 'project_schedules', rename: true}; break;
+   case 'projects':
+   case 'project_schedules':
+   case 'project_names':
+   case 'owner': scope = {kind}; break;
+   case 'guest': scope = {kind, task_id: selected}; break;
+   case 'keybindings-read':
+   case 'keybindings-edit': scope = {kind: 'keybindings', editable: kind === 'keybindings-edit'}; break;
+   default: throw new Error('Choose an access scope.');
+  }
+  if ($('grant-usage').checked) {
+   if (scope.kind === 'project_schedules') scope.usage = true;
+   else if (scope.kind === 'projects' || scope.kind === 'project_names') scope = {kind:'project_usage', rename:scope.kind === 'project_names'};
+  }
+  if (scope.kind === 'project_schedules' && $('grant-edit').checked) scope.edit = true;
+  if (scope.kind === 'project_schedules' && $('grant-threads').checked) { scope.read_threads = true; if ($('grant-thread-replies').checked) scope.reply_threads = true; }
+  if (scope.edit && $('grant-conversations').checked) scope.conversations = true;
+  if (scope.kind === 'project_schedules' && $('grant-run').checked) scope.run = true;
+  if (scope.kind === 'project_schedules' && $('grant-delete').checked) scope.delete = true;
+  if (scope.kind === 'project_schedules' && $('grant-deliveries').checked) scope.deliveries = true;
+  const payload = {scope, lifetime_seconds: minutes * 60};
+  if (kind.startsWith('project') && $('grant-provider-updates').checked) payload.provider_updates = true;
+  const issued = await request('/access', payload);
+  $('issued-token').textContent = 'Access token: ' + issued.token + '\nExpires: ' + new Date(issued.grant.expires_at).toLocaleString();
+  $('issued-token').dataset.id = issued.grant.id;
+  $('issued-token').hidden = false;
+  await grants();
+ } catch (error) { fail(error); }
+};
 $('ssh-command').onclick=()=>{const host=$('ssh-host').value.trim(),localPort=Number($('ssh-local').value),remotePort=Number($('ssh-remote').value);if(!/^[a-zA-Z0-9_.@:-]+$/.test(host)||host.startsWith('-')||![localPort,remotePort].every(n=>Number.isInteger(n)&&n>=1024&&n<=65535)){fail('Enter a valid SSH host and ports from 1024 to 65535.');return}$('ssh-output').textContent='ssh -N -L '+localPort+':127.0.0.1:'+remotePort+' '+host+'\nOpen http://127.0.0.1:'+localPort+'/ and pair this browser.'};
 function refreshEvents(){
  const decoder=new TextDecoder(),controlLength='event: refresh'.length;let prefix='',overflow=false,event='',hasData=false,skipLF=false;
@@ -455,6 +558,6 @@ async function listen(){
 $('refresh').onclick=async()=>{if(await refresh()){$('error').textContent='';listen();await loadHandoff(true)}};$('pair').onsubmit=async e=>{e.preventDefault();token=$('token').value;const attempt=++pairRevision,rev=++readRevision;events?.abort();try{const next=await request('/tasks');if(attempt!==pairRevision)return;sessionStorage.setItem('bruhs-task-token',token);$('token').value='';$('error').textContent='';if(rev===readRevision)showSnapshot(next);listen();refreshBoard()}catch(e){if(attempt!==pairRevision)return;token='';fail(e)}};
 $('disconnect').onclick=()=>{++pairRevision;++readRevision;++boardRevision;events?.abort();sessionStorage.removeItem('bruhs-task-token');token='';connected=false;snapshot={tasks:[],specs:[],guest_proposals:[]};board={cards:[],refreshing:false};closeDrawer(false);render();$('pair').hidden=false;$('disconnect').hidden=true;$('status').textContent='Disconnected'};
 $('notify').hidden=!('Notification'in window);$('notify').onclick=async()=>{try{const permission=await Notification.requestPermission();notify=permission==='granted';sessionStorage.setItem('bruhs-task-notifications',notify?'1':'0');$('notify').textContent=notify?'Notifications enabled':'Enable notifications';$('status').textContent=notify?'Task attention notifications are enabled.':'Notifications are unavailable or were not allowed.'}catch(e){fail(e)}};
-$('pair').hidden=local||Boolean(token);if(local||token){refresh().then(async()=>{listen();await loadHandoff();const id=local?new URLSearchParams(location.hash.slice(1)).get('task'):null;if(id){if(snapshot.tasks.some(task=>task.id===id))openTask(id,null);else fail('The source task is no longer available. Retained delivery receipts keep their copied source details.')}})}else render();
+$('pair').hidden=local||Boolean(token);if(local||token){refresh().then(async()=>{listen();await loadHandoff();if(local&&connected&&location.hash==='#access')$('open-access').click();const id=local?new URLSearchParams(location.hash.slice(1)).get('task'):null;if(id){if(snapshot.tasks.some(task=>task.id===id))openTask(id,null);else fail('The source task is no longer available. Retained delivery receipts keep their copied source details.')}})}else render();
 })();
 </script></body></html>

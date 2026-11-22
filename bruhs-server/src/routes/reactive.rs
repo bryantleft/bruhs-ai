@@ -123,9 +123,23 @@ pub async fn report_command(
     Ok(Json(runtime(value)?.weekly_report_command(command).await?))
 }
 
+/// The task host resolves availability for the same checkout that will run the task.
+pub async fn task_models(
+    Query(scope): Query<bruhs_models::delivery::DeliveryPreferenceScope>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let project = std::path::Path::new(scope.path.as_deref().unwrap_or_default());
+    if !project.as_os_str().is_empty() && !project.is_absolute() {
+        return Err(AppError::BadRequest("Choose an absolute project folder.".into()));
+    }
+    let catalog = bruhs_core::agent::writer_catalog_for_project(project).await;
+    Ok(([(axum::http::header::CACHE_CONTROL, "no-store")], Json(catalog)))
+}
+
 #[derive(serde::Deserialize)]
 pub struct ThreadSearch {
     project:String,
+    #[serde(default)]
+    desktop:bool,
     #[serde(default)]
     query:String,
 }
@@ -134,12 +148,35 @@ pub async fn task_threads(
     value: Option<Extension<ReactiveRuntime>>,
     Query(search): Query<ThreadSearch>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let threads = runtime(value)?
-        .task_threads(search.project, search.query)
-        .await?;
+    let host = runtime(value)?;
+    let threads = if search.desktop {
+        host.project_conversations(search.project, search.query).await?
+    } else {
+        host.task_threads(search.project, search.query).await?
+    };
     Ok((
         [(axum::http::header::CACHE_CONTROL, "no-store")],
         Json(threads),
+    ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DesktopTurnQuery {
+    thread: bruhs_models::ids::ThreadId,
+    #[serde(default)]
+    after: i64,
+}
+
+pub async fn desktop_task_turns(
+    value: Option<Extension<ReactiveRuntime>>,
+    Query(query): Query<DesktopTurnQuery>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let turns = runtime(value)?
+        .desktop_task_turns(query.thread, query.after)
+        .await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(turns),
     ))
 }
 

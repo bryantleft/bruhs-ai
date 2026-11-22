@@ -185,19 +185,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.spa_dir.display()
         );
     }
-    let app = router(ServerState {
-        app: state.clone(),
-        config: Arc::clone(&config),
-        updates: bruhs_core::updates::UpdateChecker::new(
+    let updates = bruhs_core::updates::UpdateChecker::new(
             bruhs_core::updates::BuildInfo::new(
                 env!("BRUHS_BUILD_COMMIT"),
                 env!("BRUHS_REPO_ROOT"),
                 "scripts/dev.sh",
             )
             .with_release(env!("BRUHS_RELEASE_VERSION")),
-        ),
+        );
+    let app = router(ServerState {
+        app: state.clone(),
+        config: Arc::clone(&config),
+        updates: updates.clone(),
     })
-    .layer(axum::Extension(reactive))
+    .layer(axum::Extension(reactive.clone()))
     .layer(axum::Extension(restore_control::real(backup.roots())))
     .layer(axum::Extension(backup))
     .layer(axum::Extension(apps))
@@ -256,6 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote_hosts.clone(),
             config.access.clone(),
         ))
+        .layer(axum::Extension(remote_hosts.clone()))
         .layer(axum::Extension(retention))
         .layer(axum::Extension(coordination.clone()))
         .layer(axum::Extension(board_links.clone()))
@@ -266,8 +268,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
         let address: std::net::SocketAddr = bind.parse()?;
         let remote = tokio::net::TcpListener::bind(address).await?;
-        let remote_app = routes::coordination::remote_router(coordination, board_links);
-        tracing::info!(%address,"Paired task listener enabled; only scoped task access is served");
+        let remote_app = routes::coordination::remote_router(coordination, board_links)
+            .layer(axum::Extension(updates))
+            .layer(axum::Extension(reactive));
+        tracing::info!(%address,"Paired listener enabled for scoped task and keybinding access");
         tokio::spawn(async move {
             if let Err(error) = axum::serve(remote, remote_app).await {
                 tracing::error!(%error,"Paired task listener stopped");
@@ -417,6 +421,19 @@ fn router_with_capture_daemon(
             "/api/agent-extensions/config",
             get(routes::agent_extensions::config).post(routes::agent_extensions::save),
         )
+        .route("/api/agent-extensions/pools.js", get(routes::agent_extensions::pools_script))
+        .route(
+            "/api/agent-extensions/usage/pools",
+            get(routes::agent_extensions::pools::snapshot),
+        )
+        .route(
+            "/api/agent-extensions/usage/pools/reset/{handle}",
+            post(routes::agent_extensions::pools::redeem),
+        )
+        .route(
+            "/api/agent-extensions/usage/windows/{provider}",
+            get(routes::agent_extensions::quota_windows),
+        )
         .route(
             "/api/agent-extensions/usage",
             get(routes::agent_extensions::usage),
@@ -520,7 +537,9 @@ fn router_with_capture_daemon(
         )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))
+        .route("/api/reactive/task-models", get(routes::reactive::task_models))
         .route("/api/reactive/task-threads",get(routes::reactive::task_threads))
+        .route("/api/reactive/desktop-task-turns",get(routes::reactive::desktop_task_turns))
         .route("/api/reactive/stream", get(routes::reactive::stream))
         .route(
             "/api/reactive/tasks/{task}/deliveries",
@@ -824,6 +843,7 @@ fn router_with_capture_daemon(
         )
         .route("/api/tasks/stream", get(routes::tasks::get_tasks_stream))
         .route("/api/tasks/{id}", delete(routes::tasks::delete_task))
+        .route("/api/tasks/{id}/stop", post(routes::tasks::stop_task))
         .route("/api/meetings", get(routes::meetings::list_meetings))
         .route(
             "/api/meetings/{id}/local-focus",

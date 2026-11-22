@@ -1,7 +1,7 @@
 //! The local delivery API shares one durable service across every connected surface.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::Html,
     routing::{delete, get, post},
     Extension, Json, Router,
@@ -16,6 +16,7 @@ pub fn router(service: DeliveryService) -> Router {
         .route("/api/delivery/ui", get(ui))
         .route("/api/delivery", get(snapshot))
         .route("/api/delivery/read", post(read))
+        .route("/api/delivery/writer-models", get(writer_models))
         .route("/api/delivery/preferences/read", post(preferences))
         .route("/api/delivery/preferences", post(set_preference))
         .route("/api/delivery/pull-template", post(pull_template))
@@ -66,6 +67,12 @@ async fn preference_path(path: Option<&str>) -> Result<Option<HomePath>, AppErro
         Some(path) => Ok(Some(HomePath::resolve(path).await?)),
         None => Ok(None),
     }
+}
+
+async fn writer_models(Query(scope): Query<DeliveryPreferenceScope>) -> Result<Json<writer_catalog::WriterCatalog>, AppError> {
+    let path = preference_path(scope.path.as_deref()).await?;
+    let project = path.as_ref().map(HomePath::as_path).unwrap_or_else(|| std::path::Path::new(""));
+    Ok(Json(bruhs_core::agent::writer_catalog_for_project(project).await))
 }
 
 async fn preferences(

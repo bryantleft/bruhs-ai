@@ -1,3 +1,4 @@
+pub mod pools;
 use crate::error::AppError;
 use axum::{response::Html, Json};
 use bruhs_models::agent_extensions::{
@@ -57,6 +58,25 @@ pub async fn save(Json(config): Json<ExtensionConfig>) -> Result<Json<ExtensionC
     .map_err(AppError::internal)?;
     Ok(Json(config))
 }
+pub async fn quota_windows(
+    axum::extract::Path(provider): axum::extract::Path<String>,
+) -> Result<Json<Vec<bruhs_models::agent_extensions::QuotaWindow>>, AppError> {
+    use bruhs_models::agent::AgentProvider;
+    let provider = match provider.as_str() {
+        "codex" => AgentProvider::Codex,
+        "claude" => AgentProvider::Claude,
+        "opencode" => AgentProvider::OpenCode,
+        "grok" => AgentProvider::Grok,
+        "antigravity" => AgentProvider::Antigravity,
+        "cursor" => AgentProvider::Cursor,
+        _ => return Err(AppError::BadRequest("Unknown usage provider".into())),
+    };
+    bruhs_core::agent_extensions::quota::provider_windows(provider)
+        .await
+        .map(Json)
+        .map_err(|e| AppError::bad_gateway("Could not read provider usage limits", e))
+}
+
 pub async fn usage() -> Result<Json<UsageSnapshot>, AppError> {
     tokio::task::spawn_blocking(|| {
         bruhs_core::agent_extensions::snapshot_at(&bruhs_core::agent_extensions::directory()?)
@@ -74,6 +94,19 @@ pub async fn refresh() -> Result<Json<UsageSnapshot>, AppError> {
 }
 pub async fn ui() -> Html<&'static str> {
     Html(include_str!("agent_extensions.html"))
+}
+pub async fn pools_script() -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/javascript; charset=utf-8",
+        )],
+        concat!(
+            include_str!("agent_extensions/pool_account.js"),
+            "\n",
+            include_str!("agent_extensions/pools.js")
+        ),
+    )
 }
 pub async fn workbench() -> Html<&'static str> {
     Html(include_str!("workbench.html"))

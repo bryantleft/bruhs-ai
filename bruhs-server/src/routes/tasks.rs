@@ -45,6 +45,18 @@ pub async fn delete_task(
     }
 }
 
+/// POST /api/tasks/:id/stop — marks a running background task, subagent, or
+/// teamwork worker as killed so it exits Working status and can be dismissed.
+pub async fn stop_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<BackgroundTask>, AppError> {
+    match state.registry().stop_task(&id) {
+        Ok(task) => Ok(Json(task)),
+        Err(error) => Err(AppError::NotFound(error.to_string())),
+    }
+}
+
 /// GET /api/tasks/stream — the full task list as one JSON SSE event, sent
 /// on connect and again after every change (not on a timer).
 pub async fn get_tasks_stream(
@@ -100,6 +112,26 @@ mod tests {
             delete_task(State(state), Path(task.id)).await.unwrap(),
             StatusCode::NO_CONTENT
         );
+    }
+
+    #[tokio::test]
+    async fn stopping_a_running_swarm_task_marks_it_killed() {
+        let state = Arc::new(AppState::new());
+        let task = state.registry().register(
+            "thread",
+            TaskKind::Swarm,
+            "builder-1",
+            serde_json::json!({"persists_after_turn": true}),
+        );
+        let Json(stopped) = stop_task(State(state.clone()), Path(task.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(stopped.status, bruhs_core::TaskStatus::Killed);
+        assert!(!state.registry().has_running_for_thread("thread"));
+        assert!(matches!(
+            stop_task(State(state), Path("missing".into())).await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     /// One snapshot on connect, then one per change; nothing while idle

@@ -594,6 +594,12 @@ pub async fn dismiss_task(task_id: &str) -> Result<(), ApiError> {
     send(Method::DELETE, &route, NO_BODY).await.map(drop)
 }
 
+/// Mark a running background task, subagent, or teamwork worker as stopped.
+pub async fn stop_task(task_id: &str) -> Result<(), ApiError> {
+    let route = format!("/api/tasks/{}/stop", segment(task_id));
+    send(Method::POST, &route, NO_BODY).await.map(drop)
+}
+
 /// The user's answer to a `permission_request`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {

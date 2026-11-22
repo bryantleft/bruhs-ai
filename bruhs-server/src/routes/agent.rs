@@ -53,6 +53,8 @@ pub struct AgentRequest {
     /// Missing leaves the provider's configured default.
     #[serde(default)]
     pub effort: Option<String>,
+    #[serde(default)]
+    pub kiro_selection: bruhs_models::agent_extensions::KiroSelection,
     /// Claude `--autocompact`. Missing omits the flag. Codex ignores it.
     #[serde(default)]
     pub autocompact: Option<String>,
@@ -258,6 +260,7 @@ pub async fn post_agent(
     // A chat with no project (life surfaces, meetings) runs in the home
     // directory and needs no coding plugins.
     .lean(project.is_home());
+    turn.kiro_selection = body.kiro_selection;
     if body.fresh_session {
         turn = turn.fresh();
     }

@@ -8,7 +8,12 @@ const panel=document.getElementById('panel');let pendingTask=null,parentOrigin=n
 const desktopComposer=parent===window&&typeof window.ipc?.postMessage==='function';
 function deliverTask(){if(!panelReady)return;if(pendingTask&&panel.getAttribute('src')==='/api/coordination/ui'){panel.contentWindow.postMessage(pendingTask,location.origin);pendingTask=null}if(parentOrigin||desktopComposer)panel.contentWindow.postMessage({type:'bruhs:composer-bridge-ready'},location.origin)}
 function select(){const links=[...document.querySelectorAll('nav a')],taskDelivery=new URLSearchParams(location.hash.slice(1)).get('delivery'),choice=links.find(a=>a.hash===(taskDelivery?'#delivery':location.hash))||links[0];for(const a of links){if(a===choice)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}const taskHash=choice.hash==='#tasks'&&/^#(?:handoff|task)=/.test(location.hash)?location.hash:'';const source=choice.dataset.src+(taskDelivery?'?task='+encodeURIComponent(taskDelivery):taskHash);if(panel.getAttribute('src')!==source){panelReady=false;panel.src=source}else deliverTask();panel.title='Workbench '+choice.textContent.toLowerCase()}
-panel.addEventListener('load',()=>{panelReady=true;deliverTask()});
+panel.addEventListener('load',()=>{
+ panelReady=true;deliverTask();
+ if(desktopComposer&&panel.getAttribute('src')==='/api/agent-extensions/ui#usage'){
+  panel.contentWindow.postMessage({type:'bruhs:usage-links-ready'},location.origin);
+ }
+});
 addEventListener('message',event=>{
  // frame-ancestors restricts the embedding page to the configured Bruhs web
  // origin and loopback. Pin its explicit handshake, including a different dev port.
@@ -17,7 +22,9 @@ addEventListener('message',event=>{
  }
  if(event.origin!==location.origin||event.source!==panel.contentWindow||!event.data||typeof event.data!=='object')return;
  const data=event.data;
- if(data.type==='bruhs:open-workspace'&&typeof data.path==='string'&&typeof data.prompt==='string'){
+ if(data.type==='bruhs:open-usage-page'&&desktopComposer&&panel.getAttribute('src')==='/api/agent-extensions/ui#usage'&&typeof data.url==='string'){
+  window.ipc.postMessage(JSON.stringify({type:data.type,url:data.url}));
+ }else if(data.type==='bruhs:open-workspace'&&typeof data.path==='string'&&typeof data.prompt==='string'){
   pendingTask={type:'bruhs:prefill-task',path:data.path,prompt:data.prompt,title:typeof data.title==='string'?data.title:'Work on issue'};location.hash='#tasks';select();
  }else if(data.type==='bruhs:review-task-delivery'&&typeof data.task_id==='string'){
   pendingTask=null;location.hash='#delivery='+encodeURIComponent(data.task_id);select();
