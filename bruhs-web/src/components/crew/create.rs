@@ -106,7 +106,9 @@ impl FollowUp {
 
 /// After a dialog closes with its opener gone (a Make this bruh button that
 /// unmounted with Move in), focus goes to the top dialog left, or to the
-/// crew rail's New bruh, not to the page body (M7). Runs after the
+/// crew rail's New bruh, not to the page body (M7). With the rail hidden
+/// (the phone drawer shut, the sidebar closed) it goes to the first control
+/// drawn in the main area, or the main area itself. Runs after the
 /// dialog's own restore. A native test build has no page.
 pub(crate) fn keep_focus_after_close() {
     if cfg!(not(target_arch = "wasm32")) {
@@ -128,20 +130,31 @@ pub(crate) fn keep_focus_after_close() {
             .ok()
             .and_then(|dialogs| dialogs.item(dialogs.length().checked_sub(1)?))
             .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok());
+        let find = |selector: &str| {
+            document
+                .query_selector(selector)
+                .ok()
+                .flatten()
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+                .filter(|element| element.offset_parent().is_some())
+        };
         let target = match top {
             Some(top) => top
                 .query_selector("[data-autofocus]")
                 .ok()
                 .flatten()
                 .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+                .filter(|element| element.offset_parent().is_some())
                 .or_else(|| focusable_descendants(&top).into_iter().next()),
-            None => document
-                .query_selector("[data-crew-new]:not([disabled])")
-                .ok()
-                .flatten()
-                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok()),
+            None => find("[data-crew-new]:not([disabled])").or_else(|| {
+                let main = find("#app-main")?;
+                focusable_descendants(&main)
+                    .into_iter()
+                    .next()
+                    .or(Some(main))
+            }),
         };
-        if let Some(target) = target.filter(|target| target.offset_parent().is_some()) {
+        if let Some(target) = target {
             let _ = target.focus();
         }
     });

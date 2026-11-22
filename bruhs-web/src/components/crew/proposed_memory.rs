@@ -142,7 +142,9 @@ pub fn ProposedMemory(
     };
 
     view! {
-        <div node_ref=root data-proposed-root="" tabindex="-1" class="min-w-0 focus:outline-none">
+        // Focus lands here once the last card goes: a labelled region with
+        // the focus ring, as on the desktop, never an unnamed box.
+        <div node_ref=root data-proposed-root="" role="region" aria-label=PROPOSED_MEMORY tabindex="-1" class="min-w-0 rounded-seed focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">
             <Show when=move || list.with(|cards| !cards.is_empty())>
                 <section aria-labelledby="proposed-memory-title" class="mb-4 min-w-0 space-y-2">
                     <h4 id="proposed-memory-title" class="text-label text-rambutan-100">{PROPOSED_MEMORY}</h4>
@@ -278,7 +280,20 @@ mod tests {
             let mut decided = snapshot;
             decided.proposals[0].status = ProposalStatus::Approved;
             let html = render("a", decided);
-            assert!(!html.contains(PROPOSED_MEMORY), "{html}");
+            assert!(!html.contains("data-proposed-card"), "{html}");
+            assert!(!html.contains(PROPOSED_HINT), "{html}");
+            // Focus lands on the root once the last card goes: a labelled
+            // region with a focus ring, not an unnamed box.
+            let root = tag(&html, "data-proposed-root");
+            assert!(root.contains("role=\"region\""), "{root}");
+            assert!(
+                root.contains(&format!("aria-label=\"{PROPOSED_MEMORY}\"")),
+                "{root}"
+            );
+            assert!(
+                root.contains("focus-visible:outline-persimmon-400"),
+                "{root}"
+            );
         });
     }
 
