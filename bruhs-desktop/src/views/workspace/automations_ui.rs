@@ -750,6 +750,7 @@ impl Workspace {
         for (domain, id) in plan.targets {
             match domain {
                 AgentDomain::Chat => {
+                    self.cancel_quota_recovery(&id);
                     self.threads.retain(|thread| thread.id != id);
                     self.unread_thread_ids.remove(&id);
                 }
@@ -1330,7 +1331,14 @@ impl Workspace {
                 })
                 .detach();
             }
+            TaskThreadDeletion::Failed(reason) => {
+                let _=window.prompt(gpui::PromptLevel::Warning,"Couldn’t delete the conversation",Some(reason),
+                    &[gpui::PromptButton::Other("OK".into())],cx);
+            }
             TaskThreadDeletion::Deleted(id) => {
+                if self.threads.iter().any(|t|t.id==id.as_str()) {
+                    self.delete_thread_by_id(id.as_str(),cx);
+                }
                 if let Some(loc) = self
                     .task_thread_view
                     .as_ref()

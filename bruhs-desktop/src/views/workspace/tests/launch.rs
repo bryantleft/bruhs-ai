@@ -7,7 +7,7 @@ use super::*;
 use crate::views::workspace::RestoredRecords;
 use std::path::Path;
 
-pub(super) fn init(cx: &mut gpui::TestAppContext) {
+pub(in crate::views::workspace) fn init(cx: &mut gpui::TestAppContext) {
     cx.executor().allow_parking();
     cx.update(|cx| {
         bruhs_ui::init(cx);
@@ -20,7 +20,7 @@ pub(super) fn init(cx: &mut gpui::TestAppContext) {
 /// The workspace read from `path` (a new one when there is no file yet),
 /// saving back to it. Call [`init`] once per test first; launch a second
 /// time from a clone of the test's `TestAppContext`.
-pub(super) fn launch<'a>(
+pub(in crate::views::workspace) fn launch<'a>(
     cx: &'a mut gpui::TestAppContext,
     path: &Path,
 ) -> (Entity<Workspace>, &'a mut gpui::VisualTestContext) {
@@ -57,7 +57,7 @@ pub(super) fn launch<'a>(
 }
 
 /// The window stops saving, as the app does when it quits.
-pub(super) fn quit(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
+pub(in crate::views::workspace) fn quit(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert!(workspace.save_status.is_saved(), "quit after the last save");
         workspace.persistence_test_path = None;
@@ -65,7 +65,7 @@ pub(super) fn quit(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestConte
 }
 
 /// Waits for the last change to reach the file.
-pub(super) async fn saved(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
+pub(in crate::views::workspace) async fn saved(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
     cx.condition(workspace, |workspace, _| workspace.save_status.is_saved())
         .await;
     cx.run_until_parked();

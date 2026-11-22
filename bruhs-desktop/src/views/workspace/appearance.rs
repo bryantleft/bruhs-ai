@@ -1,6 +1,12 @@
 use super::*;
 use bruhs_ui::theme::ThemeFamily;
 mod collection;
+mod color;
+mod palette;
+mod stylesheet;
+mod background;
+pub(crate) use background::{layer as background_layer, layer_with_radius as rounded_background_layer};
+mod color_families;
 mod community;
 mod editor;
 mod import;
@@ -32,6 +38,7 @@ impl ColorScheme {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct DeviceAppearance {
+    pub(super) language: language::Language,
     pub(super) clock: crate::clock_format::ClockFormat,
     pub(super) scheme: ColorScheme,
     pub(super) light_theme: ThemeFamily,
@@ -47,6 +54,7 @@ pub(super) struct DeviceAppearance {
 impl Default for DeviceAppearance {
     fn default() -> Self {
         Self {
+            language: Default::default(),
             clock: Default::default(),
             scheme: ColorScheme::Dark,
             light_theme: ThemeFamily::Bruhs,
@@ -102,6 +110,12 @@ impl Workspace {
             },
         };
         if let Some(custom) = self.selected_custom_palette(mode) {
+            background::select(
+                self.custom_themes.selection(mode),
+                custom.images.clone(),
+                window,
+                cx,
+            );
             bruhs_ui::Theme::use_color_roles(
                 custom.palette,
                 Some(custom.roles.clone()),
@@ -110,6 +124,7 @@ impl Workspace {
                 cx,
             );
         } else {
+            background::select(None, Default::default(), window, cx);
             bruhs_ui::Theme::use_palette(*self.selected_palette(mode), mode, Some(window), cx);
         }
         self.fonts.apply(cx);

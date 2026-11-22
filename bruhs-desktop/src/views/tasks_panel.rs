@@ -3,7 +3,7 @@ use crate::{
     views::task_registry_subscription::TaskRegistrySubscription,
     views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant},
 };
-use bruhs_core::{AppState, BackgroundTask, TaskStatus};
+use bruhs_core::{AppState, BackgroundTask, TaskKind, TaskStatus};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
 use bruhs_ui::press::on_press_view;
@@ -107,6 +107,14 @@ impl TasksPanelView {
         if self.expanded_task_id.as_deref() == Some(task_id) {
             self.expanded_task_id = None;
         }
+        cx.notify();
+    }
+
+    fn stop_task(&mut self, task_id: &str, cx: &mut Context<'_, Self>) {
+        if let Err(error) = self.app.registry().stop_task(task_id) {
+            tracing::warn!("stop task: {error}");
+        }
+        self.tasks = tasks_panel_snapshot_like_web(self.app.registry().get_all());
         cx.notify();
     }
 
@@ -227,10 +235,13 @@ impl TasksPanelView {
         let is_expanded = self.expanded_task_id.as_deref() == Some(task.id.as_str());
         let task_id_for_expand = task.id.clone();
         let task_id_for_dismiss = task.id.clone();
+        let task_id_for_stop = task.id.clone();
         let task_key = element_key(&task.id);
         let timestamp = tasks_panel_timestamp_like_web(&task, EpochMs::now());
-        let success = desktop_task_success_like_web(task.exit_code);
+        let success = desktop_task_success_like_web(&task.status, task.exit_code);
         let status = task.status.clone();
+        let kind = task.kind;
+        let subtitle = task_meta_subtitle(&task);
         let log_tail = if task.log_tail.is_empty() {
             if task.status == TaskStatus::Running {
                 TASKS_PANEL_RUNNING_EMPTY_LOG.to_string()
@@ -279,15 +290,31 @@ impl TasksPanelView {
                                 })
                             })
                             .child(render_task_status_indicator(&status, success))
+                            .child(render_task_kind_badge(kind))
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .truncate()
-                                    .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY))
-                                    .text_size(px(TASKS_PANEL_ROW_LABEL_TEXT_SIZE_PX))
-                                    .text_color(theme::rambutan_200())
-                                    .child(task.label.clone()),
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY))
+                                            .text_size(px(TASKS_PANEL_ROW_LABEL_TEXT_SIZE_PX))
+                                            .text_color(theme::rambutan_200())
+                                            .child(task.label.clone()),
+                                    )
+                                    .when_some(subtitle, |el, sub| {
+                                        el.child(
+                                            div()
+                                                .truncate()
+                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                                .text_size(px(11.0))
+                                                .text_color(theme::rambutan_500())
+                                                .child(sub),
+                                        )
+                                    }),
                             )
                             .child(
                                 div()
@@ -298,6 +325,34 @@ impl TasksPanelView {
                                     .child(timestamp),
                             ),
                     )
+                    .when(!dismissible && status == TaskStatus::Running, |el| {
+                        el.child(
+                            div().ml_2().child(
+                                web_button(
+                                    ("desktop-task-stop", task_key),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(move || {
+                                    format!("desktop-background-task-stop-{task_key}")
+                                })
+                                .aria_label(format!("Stop {}", task.label))
+                                .tooltip(|window, cx| {
+                                    Tooltip::new("Stop task").build(window, cx)
+                                })
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .map(|el| {
+                                    on_press_view(el, cx, move |this, _window, cx| {
+                                        this.stop_task(&task_id_for_stop, cx);
+                                    })
+                                })
+                                .child("Stop"),
+                            ),
+                        )
+                    })
                     .when(dismissible, |el| {
                         el.child(
                             div().ml_2().child(
@@ -476,8 +531,51 @@ fn desktop_task_completion_mark(success: bool) -> &'static str {
     }
 }
 
-fn desktop_task_success_like_web(exit_code: Option<i32>) -> bool {
-    exit_code == Some(0)
+fn desktop_task_success_like_web(status: &TaskStatus, exit_code: Option<i32>) -> bool {
+    status.succeeded(exit_code)
+}
+
+fn task_meta_subtitle(task: &BackgroundTask) -> Option<String> {
+    let mut parts: Vec<&str> = Vec::new();
+    for key in ["swarm_title", "model", "workspace"] {
+        if let Some(value) = task
+            .meta
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "inherit")
+        {
+            parts.push(value);
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+fn render_task_kind_badge(kind: TaskKind) -> AnyElement {
+    let (bg, fg) = match kind {
+        TaskKind::Swarm => (theme::blueberry_400().opacity(0.16), theme::blueberry_400()),
+        TaskKind::Subagent => (
+            theme::mangosteen_400().opacity(0.16),
+            theme::mangosteen_400(),
+        ),
+        TaskKind::BackgroundAgent => (theme::pandan_400().opacity(0.16), theme::pandan_400()),
+        TaskKind::Shell => (theme::longan_800(), theme::rambutan_400()),
+    };
+    div()
+        .flex_shrink_0()
+        .px_1p5()
+        .py(px(1.0))
+        .rounded(px(4.0))
+        .bg(bg)
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_size(px(10.0))
+        .text_color(fg)
+        .child(kind.badge_label())
+        .into_any_element()
 }
 
 fn render_task_status_indicator(status: &TaskStatus, success: bool) -> AnyElement {
@@ -579,9 +677,11 @@ mod tests {
 
     #[::core::prelude::v1::test]
     fn desktop_tasks_panel_success_condition_should_match_web_panel() {
-        assert!(desktop_task_success_like_web(Some(0)));
-        assert!(!desktop_task_success_like_web(Some(1)));
-        assert!(!desktop_task_success_like_web(None));
+        assert!(desktop_task_success_like_web(&TaskStatus::Exited, Some(0)));
+        assert!(desktop_task_success_like_web(&TaskStatus::Exited, None));
+        assert!(!desktop_task_success_like_web(&TaskStatus::Exited, Some(1)));
+        assert!(!desktop_task_success_like_web(&TaskStatus::Killed, None));
+        assert!(!desktop_task_success_like_web(&TaskStatus::Failed, Some(0)));
     }
 
     #[::core::prelude::v1::test]

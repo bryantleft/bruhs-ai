@@ -40,6 +40,10 @@ impl Workspace {
         self.voice_test_result = Some("Recording for two seconds…".into());
         let prefs = self.dictation_prefs.clone();
         let project = self.active_settings_project(cx);
+        let project_name = project.as_deref().and_then(|path| {
+            self.threads.iter().find(|thread| thread.project_path == path)
+                .map(|thread| thread.project_name.clone())
+        });
         let cleanup_model = self.effective_text_model(project.as_deref(), &self.current_model);
         let microphone = prefs.ordered_microphones();
         let capture = cx.background_spawn(async move {
@@ -59,6 +63,7 @@ impl Workspace {
                                 .transcribe(
                                     wav,
                                     project.as_deref(),
+                                    project_name.as_deref(),
                                     &cleanup_model,
                                     Default::default(),
                                     None,
@@ -90,6 +95,86 @@ impl Workspace {
         .detach();
     }
 
+    fn voice_language_control(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let prefs = &self.dictation_prefs;
+        let saved = prefs.language.as_deref().unwrap_or("auto");
+        let name = |code: &str| {
+            LANGUAGES
+                .iter()
+                .find(|(value, _)| *value == code)
+                .map(|(_, name)| name.to_string())
+                .unwrap_or_else(|| code.to_owned())
+        };
+        let effective = prefs.options().language;
+        let unavailable = saved != "auto" && Some(saved) != effective.as_deref();
+        let effective_label = effective
+            .as_deref()
+            .map(name)
+            .unwrap_or_else(|| "Auto-detect".into());
+        let label = if unavailable {
+            format!("{effective_label} ({} unavailable)", name(saved))
+        } else if saved == "auto" && effective.is_some() {
+            format!("Auto ({effective_label})")
+        } else {
+            effective_label
+        };
+        let mut options = vec![DropdownOption {
+            value: "auto",
+            label: "Auto".into(),
+            description: None,
+        }];
+        if unavailable {
+            options.push(DropdownOption {
+                value: "unavailable",
+                label: format!("{} unavailable", name(saved)),
+                description: None,
+            });
+        }
+        options.extend(
+            LANGUAGES
+                .iter()
+                .skip(1)
+                .filter(|(code, _)| match prefs.destination {
+                    Destination::Cloud(_) => bruhs_models::cloud_speech::LANGUAGES.contains(code),
+                    Destination::Local if !prefs.model.descriptor().multilingual => *code == "en",
+                    _ => true,
+                })
+                .map(|&(value, label)| DropdownOption {
+                    value,
+                    label: label.into(),
+                    description: None,
+                }),
+        );
+        let id = "settings-voice-language";
+        let (toggle, select) = self.settings_dropdown_handlers(id, cx);
+        let unavailable = unavailable.then_some("unavailable");
+        let picker = bruhs_ui::dropdown::Dropdown::new(
+            id,
+            "Transcription language",
+            unavailable.unwrap_or(saved),
+            vec![DropdownGroup {
+                label: None,
+                mark: None,
+                options,
+            }],
+            self.settings_listbox(id),
+            toggle,
+            select,
+        )
+        .selection_label(label, unavailable)
+        .into_any_element();
+        if unavailable.is_some() {
+            div()
+                .w(px(320.))
+                .max_w_full()
+                .min_w_0()
+                .child(picker)
+                .into_any_element()
+        } else {
+            settings_ui::control_column(picker)
+        }
+    }
+
     pub(super) fn render_voice_settings(&self, cx: &Context<'_, Self>) -> AnyElement {
         let model_id = "settings-voice-model";
         let (toggle, select) = self.settings_dropdown_handlers(model_id, cx);
@@ -103,22 +188,6 @@ impl Workspace {
             select,
         ));
         let destination = self.dictation_prefs.destination;
-        let language = if matches!(destination,Destination::Compatible | Destination::Cloud(_))
-            || self.dictation_prefs.model.descriptor().multilingual
-        {
-            settings_ui::control_column(self.choice_control(
-                "settings-voice-language",
-                "Transcription language",
-                self.dictation_prefs.language.as_deref().unwrap_or("auto"),
-                LANGUAGES,
-                cx,
-            ))
-        } else {
-            div()
-                .text_color(theme::rambutan_400())
-                .child("English")
-                .into_any_element()
-        };
         let model_test = web_button(
             "voice-test-model",
             WebButtonVariant::Outline,
@@ -167,7 +236,7 @@ impl Workspace {
                 "desktop-settings-row-voice-language",
                 "Transcription language",
                 "Multilingual models can detect the language or use a chosen language.",
-                language,
+                self.voice_language_control(cx),
             ));
             transcription.push(self.settings_row(
                 "desktop-settings-row-voice-silence",
@@ -191,7 +260,7 @@ impl Workspace {
         let mut cleanup = vec![self.settings_row(
             "desktop-settings-row-voice-fillers",
             "Remove filler words",
-            "Drop “um” and “uh” from dictation.",
+            "Remove spoken hesitations for the transcription language. Keep the correction cue during cleanup.",
             settings_ui::switch(
                 "settings-voice-fillers",
                 self.dictation_prefs.remove_filler_words,
@@ -281,7 +350,11 @@ impl Workspace {
             .gap_5()
             .child(self.settings_card("Input", "", input))
             .child(self.settings_card("Transcription", "", transcription))
-            .child(self.settings_card("Dictionary", "", self.voice_dictionary_rows(cx)))
+            .child(self.settings_card("Dictionary", match destination {
+                Destination::Cloud(provider) if provider.accepts_vocabulary() =>
+                    "Preferred terms from the active dictionaries are sent to the transcription provider. Aliases are applied to the returned text.",
+                _ => "",
+            }, self.voice_dictionary_rows(cx)))
             .child(self.settings_card("Cleanup", "", cleanup))
             .into_any_element()
     }

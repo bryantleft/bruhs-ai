@@ -185,6 +185,7 @@ fn arriving_cursor_models_keep_a_moved_highlight_on_its_model(cx: &mut TestAppCo
     chat.update_in(cx, |chat, window, cx| {
         chat.set_model("gpt-5.5", cx);
         chat.open_model_picker(window, cx);
+        chat.model_picker_query.update(cx, |field,cx| field.set_value("default",window,cx));
         let grok = chat
             .model_picker_matches(cx)
             .iter()
@@ -196,7 +197,7 @@ fn arriving_cursor_models_keep_a_moved_highlight_on_its_model(cx: &mut TestAppCo
             RuntimeModels {
                 models: vec![ModelChoice {
                     id: "cursor/gpt-5".into(),
-                    label: "GPT-5".into(),
+                    label: "Default GPT-5".into(),
                     provider: AgentProvider::Cursor,
                 }],
                 error: None,
@@ -219,7 +220,7 @@ fn opening_the_picker_lists_the_accounts_cursor_models(cx: &mut TestAppContext) 
     use bruhs_models::runtime_models::{ModelChoice, RuntimeModels};
     let (chat, cx) = chat_window(cx);
     cx.update(|_, cx| {
-        cx.set_global(RuntimeModelLister(std::sync::Arc::new(|provider| {
+        cx.set_global(RuntimeModelLister(std::sync::Arc::new(|provider, _| {
             Box::pin(async move {
                 assert_eq!(provider, AgentProvider::Cursor);
                 RuntimeModels {
@@ -234,6 +235,9 @@ fn opening_the_picker_lists_the_accounts_cursor_models(cx: &mut TestAppContext) 
         })));
     });
     chat.update_in(cx, |chat, window, cx| chat.open_model_picker(window, cx));
+    cx.run_until_parked();
+    let cursor_tab = cx.debug_bounds("desktop-model-picker-tab-cursor").unwrap();
+    cx.simulate_click(cursor_tab.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     chat.read_with(cx, |chat, cx| {
         assert!(chat
@@ -556,15 +560,20 @@ fn compact_options_preserve_effort_and_saved_prompt_workflows(cx: &mut TestAppCo
         chat.toggle_effort_menu(window, cx);
     });
     cx.run_until_parked();
-    assert!(cx.debug_bounds("desktop-composer-options-panel").is_some());
+    let panel=cx.debug_bounds("desktop-model-picker").unwrap();
+    let column=cx.debug_bounds("model-options-column").unwrap();
     let effort = cx.debug_bounds("desktop-effort-option-high").unwrap();
-    let panel = cx.debug_bounds("desktop-composer-options-panel").unwrap();
-    assert!(effort.top() >= panel.top() && effort.bottom() <= panel.bottom());
+    assert!(effort.top()>=column.top() && effort.bottom()<=column.bottom() && column.right()<=panel.right());
     cx.simulate_click(effort.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     chat.read_with(cx, |chat, _| {
-        assert_eq!(chat.claude_effort.as_deref(), Some("high"))
+        assert!(chat.model_picker_open);
+        assert_eq!(chat.claude_send_effort().as_deref(), Some("high"));
     });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    let trigger=cx.debug_bounds("desktop-composer-options").unwrap();
+    cx.simulate_click(trigger.center(),gpui::Modifiers::default());
     chat.update_in(cx, |chat, window, cx| {
         chat.input_state.update(cx, |input, cx| {
             input.set_value("Saved local draft", window, cx)
@@ -596,6 +605,104 @@ fn compact_options_preserve_effort_and_saved_prompt_workflows(cx: &mut TestAppCo
         assert!(!chat.composer_options_open);
     });
     assert!(cx.debug_bounds("desktop-stash-menu").is_some());
+}
+
+#[gpui::test]
+fn model_picker_option_column_follows_keyboard_and_window_size(cx: &mut TestAppContext) {
+    use bruhs_models::delivery::generation::OptionKind::{Effort, ServiceTier};
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(960.), px(720.)));
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("gpt-6.1-sol", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    let list = cx.debug_bounds("desktop-model-picker-list").unwrap();
+    let column = cx.debug_bounds("model-options-column").unwrap();
+    assert!(column.left() >= list.right() - px(1.));
+    cx.simulate_keystrokes("right");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, _| {
+        assert!(chat.composer_effort_focus.is_focused(window))
+    });
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.model_options.configured(Effort), Some("medium"))
+    });
+    let tier = cx
+        .debug_bounds("desktop-model-service_tier-priority")
+        .unwrap();
+    cx.simulate_click(tier.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.model_options.configured(ServiceTier), Some("priority"))
+    });
+    cx.simulate_resize(size(px(580.), px(660.)));
+    cx.run_until_parked();
+    let list = cx.debug_bounds("desktop-model-picker-list").unwrap();
+    let column = cx.debug_bounds("model-options-column").unwrap();
+    let footer = cx.debug_bounds("model-options-footer").unwrap();
+    assert!(column.top() >= list.bottom() - px(1.) && footer.top() >= column.bottom() - px(1.));
+    let permissions = cx.debug_bounds("model-picker-permissions").unwrap();
+    cx.simulate_click(permissions.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    let allow_edits = cx
+        .debug_bounds("model-picker-permissions-option-acceptEdits")
+        .unwrap();
+    cx.simulate_click(allow_edits.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert!(chat.model_picker_open);
+        assert!(chat.model_picker_dropdown.is_none());
+        assert_eq!(chat.plan_return_mode.as_str(), "acceptEdits");
+    });
+    let medium = cx.debug_bounds("desktop-effort-option-medium").unwrap();
+    cx.simulate_click(medium.center(), gpui::Modifiers::default());
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        use gpui::Focusable;
+        assert!(chat.model_picker_query.focus_handle(cx).is_focused(window));
+    });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-model-picker").is_none());
+    let chip = cx.debug_bounds("desktop-model-status").unwrap();
+    cx.simulate_click(chip.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.simulate_click(point(px(2.), px(2.)), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-model-picker").is_none());
+}
+
+#[gpui::test]
+fn model_picker_secondary_options_close_independently(cx: &mut TestAppContext) {
+    use bruhs_models::delivery::generation::OptionKind::ContextWindow;
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(820.), px(700.)));
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("claude-sonnet-4-6", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    let trigger = cx.debug_bounds("context_window").unwrap();
+    cx.simulate_click(trigger.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("context_window-list").is_none());
+    assert!(cx.debug_bounds("desktop-model-picker").is_some());
+    cx.simulate_keystrokes("space");
+    cx.run_until_parked();
+    let million = cx.debug_bounds("context_window-option-1m").unwrap();
+    cx.simulate_click(million.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert!(chat.model_picker_open);
+        assert!(chat.model_picker_dropdown.is_none());
+        assert_eq!(chat.model_options.configured(ContextWindow), Some("1m"));
+    });
 }
 
 /// The options and saved prompts panels look like the web's

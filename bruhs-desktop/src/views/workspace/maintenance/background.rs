@@ -188,10 +188,11 @@ impl Workspace {
         } else {
             "Set the frequency of Git fetches, provider health checks and host power checks."
         };
-        let mut rows = vec![self.settings_row(
+        let mut rows = vec![self.environment_maintenance_row(
             "settings-row-background-profile",
             "Background activity profile",
             status,
+            match policy.profile {Profile::Balanced=>"Balanced",Profile::Performance=>"Performance",Profile::BatterySaver=>"Battery saver",Profile::Custom=>"Custom"},
             self.choice_control(
                 "background-profile",
                 "Background activity profile",
@@ -221,10 +222,11 @@ impl Workspace {
                 policy.battery,
             ),
         ] {
-            rows.push(self.settings_row(
+            rows.push(self.environment_maintenance_row(
                 id,
                 label,
                 "Pause scheduled fetches and provider health checks.",
+                if enabled {"On"} else {"Off"},
                 settings_ui::switch(id, enabled, false, label, cx, move |this, _, cx| {
                     let policy = &mut this.maintenance.prefs.activity;
                     match id {
@@ -257,10 +259,11 @@ impl Workspace {
                 policy.idle_seconds,
             ),
         ] {
-            rows.push(self.settings_row(
+            rows.push(self.environment_maintenance_row(
                 id,
                 label,
                 "How often to check the local computer’s power state.",
+                format!("{seconds} seconds"),
                 self.choice_control(id, label, &seconds.to_string(), CADENCE, cx),
             ));
         }

@@ -100,6 +100,7 @@ mod tests {
             std::fs::read(std::env::var_os("BRUHS_TEST_DICTATION_WAV").expect("WAV fixture"))
                 .unwrap();
         let options = bruhs_models::local_tools::DictationOptions {
+            client_filters_text: false,
             model: bruhs_models::WhisperModel::TinyEn,
             language: Some("en".into()),
             silence_filtering: false,

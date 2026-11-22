@@ -1960,6 +1960,13 @@ fn desktop_tool_options_should_match_web_question_option_labels() {
 }
 
 #[test]
+fn signed_out_status_is_authoritative_over_cached_account_details() {
+    for output in [r#"{"loggedIn":false,"account":{"email":"old@example.test"}}"#,r#"{"account":null,"user":null}"#] {
+        assert!(!parse_desktop_auth_status(output, "", None).is_authenticated());
+    }
+}
+
+#[test]
 fn parse_desktop_auth_status_should_read_json_account_fields() {
     let status = parse_desktop_auth_status(
         r#"{"authenticated":true,"email":"dev@example.com","plan":"pro"}"#,

@@ -184,22 +184,28 @@ impl DictationPreferences {
         self != &defaults
     }
 
-    pub async fn spell_transcript(&self, project: Option<&str>, text: &str) -> String {
+    async fn host_dictionaries(
+        &self,
+        project: Option<&str>,
+    ) -> bruhs_models::voice_dictionary::HostDictionaries {
         let request = bruhs_models::voice_dictionary::DictionaryRequest {
             project: project.map(String::from),
             edit: None,
         };
-        let scopes = crate::server_client::ServerClient::workbench_client()
+        crate::server_client::ServerClient::workbench_client()
             .voice_dictionaries(&request)
             .await
-            .unwrap_or_default();
-        let local_project = project.and_then(|path| self.project_dictionaries.get(path));
-        VoiceDictionary::apply_scopes(
-            [&scopes.environment, &self.dictionary, &scopes.project]
-                .into_iter()
-                .chain(local_project),
-            text,
-        )
+            .unwrap_or_default()
+    }
+
+    fn dictionaries<'a>(
+        &'a self,
+        scopes: &'a bruhs_models::voice_dictionary::HostDictionaries,
+        project: Option<&str>,
+    ) -> impl DoubleEndedIterator<Item = &'a VoiceDictionary> {
+        [&scopes.environment, &self.dictionary, &scopes.project]
+            .into_iter()
+            .chain(project.and_then(|path| self.project_dictionaries.get(path)))
     }
 
     pub fn selected_service(&self) -> Result<Option<&str>, &'static str> {
@@ -230,20 +236,46 @@ impl DictationPreferences {
         &self,
         wav: Vec<u8>,
         project: Option<&str>,
+        project_name: Option<&str>,
         text_model: &str,
         draft: bruhs_core::dictation_cleanup::DraftContext,
         cleanup_started: Option<CleanupStarted>,
     ) -> Result<Transcript, String> {
         let model = self.selected_service()?;
-        let response = bruhs_core::capture_client::transcribe_selected_dictation(
+        let provider = match self.destination {
+            Destination::Cloud(provider) => Some(provider),
+            _ => None,
+        };
+        let mut options = self.options();
+        options.client_filters_text = true;
+        let cue = if self.cleanup.enabled {
+            self.cleanup.correction_cue.trim()
+        } else {
+            ""
+        };
+        let mut scopes = None;
+        let hints = if provider.is_some_and(|p| p.accepts_vocabulary()) {
+            let dictionaries = scopes.insert(self.host_dictionaries(project).await);
+            Some(bruhs_models::cloud_speech::SpeechHints {
+                terms: VoiceDictionary::preferred_terms(
+                    &self
+                        .dictionaries(dictionaries, project)
+                        .rev()
+                        .collect::<Vec<_>>(),
+                    &[cue, project_name.unwrap_or_default()],
+                ),
+                preserve_correction_words: !cue.is_empty(),
+            })
+        } else {
+            None
+        };
+        let response = bruhs_core::capture_client::transcribe_dictation_with_hints(
             bruhs_core::capture_client::endpoint(),
-            &self.options(),
+            &options,
             wav,
             model,
-            match self.destination {
-                Destination::Cloud(provider) => Some(provider),
-                _ => None,
-            },
+            provider,
+            hints.as_ref(),
         )
         .await
         .map_err(|e| format!("Dictation failed. {e}"))?;
@@ -253,15 +285,31 @@ impl DictationPreferences {
                 warning: None,
             });
         }
-        let (text, warning) = if self.cleanup.enabled {
+        let scopes = match scopes {
+            Some(dictionaries) => dictionaries,
+            None => self.host_dictionaries(project).await,
+        };
+        let text =
+            VoiceDictionary::apply_scopes(self.dictionaries(&scopes, project), &response.text);
+        let text = if options.remove_filler_words {
+            bruhs_models::voice_dictionary::without_fillers(&text, options.language.as_deref(), cue)
+        } else {
+            text
+        };
+        let (text, warning) = if self.cleanup.enabled && !text.trim().is_empty() {
             let model = match self.cleanup.model.as_deref() {
-                Some(model) if bruhs_core::text_generators::split_selection(model).is_some() =>
-                    match bruhs_core::text_generators::active(model).await { Ok(false) => text_model, _ => model },
+                Some(model) if bruhs_core::text_generators::split_selection(model).is_some() => {
+                    match bruhs_core::text_generators::active(model).await {
+                        Ok(false) => text_model,
+                        _ => model,
+                    }
+                }
                 model => model.unwrap_or(text_model),
             };
-            let clean = bruhs_core::dictation_cleanup::clean(
+            let clean = bruhs_core::dictation_cleanup::clean_in_project(
+                std::path::Path::new(project.unwrap_or_default()),
                 model,
-                &response.text,
+                &text,
                 &draft,
                 self.cleanup
                     .custom
@@ -276,33 +324,36 @@ impl DictationPreferences {
                 Some(clean.await)
             };
             match result {
-                None => (response.text, None),
-                Some(Ok(cleaned)) => (cleaned, None),
+                None => (text, None),
+                Some(Ok(cleaned)) => (
+                    VoiceDictionary::apply_scopes(self.dictionaries(&scopes, project), &cleaned),
+                    None,
+                ),
                 Some(Err(_)) => (
-                    response.text,
+                    text,
                     Some(
                         "Transcript cleanup was unavailable. The original transcript was retained.",
                     ),
                 ),
             }
         } else {
-            (response.text, None)
+            (text, None)
         };
-        Ok(Transcript {
-            text: self.spell_transcript(project, &text).await,
-            warning,
-        })
+        Ok(Transcript { text, warning })
     }
 
     pub fn options(&self) -> bruhs_models::local_tools::DictationOptions {
         bruhs_models::local_tools::DictationOptions {
+            client_filters_text: false,
             model: self.model,
             silence_filtering: self.silence_filtering,
             remove_filler_words: self.remove_filler_words,
-            language: if matches!(
-                self.destination,
-                Destination::Compatible | Destination::Cloud(_)
-            ) || self.model.descriptor().multilingual
+            language: if matches!(self.destination, Destination::Cloud(_)) {
+                self.language
+                    .clone()
+                    .filter(|code| bruhs_models::cloud_speech::LANGUAGES.contains(&code.as_str()))
+            } else if self.destination == Destination::Compatible
+                || self.model.descriptor().multilingual
             {
                 self.language.clone()
             } else {
@@ -478,6 +529,28 @@ fn push_mono(sink: &Arc<Mutex<Vec<f32>>>, data: impl Iterator<Item = f32>, chann
 mod tests {
     use super::push_mono;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn language_intent_survives_cloud_and_english_only_models() {
+        use super::{Destination, DictationPreferences};
+        use bruhs_models::{cloud_speech::Provider, WhisperModel};
+        let mut prefs = DictationPreferences {
+            model: WhisperModel::LargeV3Turbo,
+            language: Some("cy".into()),
+            ..Default::default()
+        };
+        assert_eq!(prefs.options().language.as_deref(), Some("cy"));
+        for provider in [Provider::OpenAi, Provider::Xai, Provider::OpenRouter] {
+            prefs.destination = Destination::Cloud(provider);
+            assert!(prefs.options().language.is_none());
+        }
+        prefs = serde_json::from_slice(&serde_json::to_vec(&prefs).unwrap()).unwrap();
+        prefs.destination = Destination::Local;
+        prefs.model = WhisperModel::BaseEn;
+        assert_eq!(prefs.options().language.as_deref(), Some("en"));
+        prefs.model = WhisperModel::LargeV3Turbo;
+        assert_eq!(prefs.options().language.as_deref(), Some("cy"));
+    }
 
     #[test]
     fn saved_microphones_preserve_order_and_fall_back_when_disconnected() {

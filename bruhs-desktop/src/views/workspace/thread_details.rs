@@ -1,4 +1,5 @@
 //! Device-wide visibility preferences shared by Appearance and the thread details card.
+pub(super) mod usage;
 use super::*;
 use bruhs_models::num::ToFloatLossy as _;
 use bruhs_ui::menu_popover::menu_popover;
@@ -877,22 +878,22 @@ impl Workspace {
             let limit = chat
                 .reported_limit
                 .filter(|(generation, _)| chat.is_quota_turn(*generation));
-            let text = match limit {
-                Some((_, Some(ms))) if ms > EpochMs::now().as_millis() => {
-                    chrono::DateTime::from_timestamp_millis(ms)
+            let provider = AgentProvider::for_model(&chat.model_id);
+            if matches!(provider, AgentProvider::Codex | AgentProvider::Claude | AgentProvider::OpenCode | AgentProvider::Cursor | AgentProvider::Grok | AgentProvider::Antigravity) {
+                rows.push(usage::ThreadUsage(provider).into_any_element());
+            }
+            if let Some((_, reset)) = limit {
+                if reset.is_none_or(|ms| ms > EpochMs::now().as_millis()) {
+                    let text = reset
+                        .and_then(chrono::DateTime::from_timestamp_millis)
                         .map(|t| {
-                            format!(
-                                "Usage limit resets {}",
-                                t.with_timezone(&chrono::Local)
-                                    .format(crate::clock_format::pattern())
-                            )
+                            let local = t.with_timezone(&chrono::Local);
+                            format!("Usage limit resets {}", local.format(crate::clock_format::pattern()))
                         })
-                        .unwrap_or_else(|| "Usage limit reached".into())
+                        .unwrap_or_else(|| "Usage limit reached".into());
+                    rows.push(detail_text("detail-turn-limit", text));
                 }
-                Some((_, None)) => "Usage limit reached".into(),
-                _ => "No usage limit reported".into(),
-            };
-            rows.push(detail_text("detail-usage", text));
+            }
         }
         if prefs.context {
             if let Some(reading) = chat.latest_context_reading() {

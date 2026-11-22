@@ -179,7 +179,7 @@ impl Workspace {
                 })
                 .collect(),
         }];
-        groups.extend(Self::catalog_model_groups(cx, |p| !p.is_external()));
+        groups.extend(self.catalog_model_groups(cx, |p| !p.is_external()));
         groups.extend(self.generator_groups());
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
         dropdown(

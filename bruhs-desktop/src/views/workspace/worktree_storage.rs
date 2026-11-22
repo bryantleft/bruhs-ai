@@ -5,6 +5,8 @@ use bruhs_models::coordination::worktree::KeepWhen;
 
 pub(super) use bruhs_models::coordination::worktree::{CleanupMode, ScratchCleanup, WorktreeRetention};
 pub(super) mod retention;
+mod scoped;
+use scoped::WorktreeSetting;
 
 pub(super) struct CleanupTarget {
     pub path: String,
@@ -190,80 +192,23 @@ impl Workspace {
     }
 
     pub(super) fn worktree_settings(&self, cx: &Context<'_, Self>) -> AnyElement {
-        use bruhs_models::logic::run_place::WorktreeSubmodules;
         let scoped = !self.settings_project_scope.is_empty();
-        let prefs = self.project_defaults.get(&self.settings_project_scope);
         let mut creation = Vec::new();
         if !scoped {
             creation.push(self.worktree_location_row(cx));
         }
-        let remote = if scoped {
-            let current = match prefs.and_then(|p| p.start_from_remote) {
-                None => "inherit",
-                Some(true) => "on",
-                Some(false) => "off",
-            };
-            self.choice_control(
-                "settings-worktree-remote",
-                "Start from remote",
-                current,
-                &[
-                    ("inherit", "Use environment default"),
-                    ("on", "On"),
-                    ("off", "Off"),
-                ],
-                cx,
-            )
-        } else {
-            settings_ui::switch(
-                "settings-worktree-remote",
-                self.worktree_prefs.start_from_remote,
-                false,
-                "Start from remote",
-                cx,
-                |this, _, cx| {
-                    this.worktree_prefs.start_from_remote = !this.worktree_prefs.start_from_remote;
-                    this.stamp_run_prefs_on_threads(cx);
-                    this.persist_and_notify(cx);
-                },
-            )
-        };
-        creation.push(self.settings_row("desktop-settings-row-worktree-remote", "Start from remote", "Create new branches from the latest upstream commit. Use the local base when the remote branch is missing.", remote));
+        creation.push(self.scoped_switch_row(
+            ScopedSwitch::Remote, "settings-worktree-remote", "desktop-settings-row-worktree-remote", "Start from remote",
+            "Create new branches from the latest upstream commit. Use the local base when the remote branch is missing.",
+            self.worktree_prefs.start_from_remote, cx,
+        ));
         creation.push(self.settings_advanced_button(
             "worktree-creation-advanced",
             "Advanced creation settings",
             cx,
         ));
         if self.show_settings_advanced("worktree-creation-advanced") {
-            let mode = if scoped {
-                prefs.and_then(|p| p.submodules)
-            } else {
-                Some(self.worktree_prefs.submodules)
-            };
-            let value = match mode {
-                None => "inherit",
-                Some(WorktreeSubmodules::None) => "none",
-                Some(WorktreeSubmodules::TopLevel) => "top-level",
-                Some(WorktreeSubmodules::Recursive) => "recursive",
-            };
-            let choices = &[
-                ("inherit", "Use environment default"),
-                ("none", "None"),
-                ("top-level", "Top level"),
-                ("recursive", "Recursive"),
-            ];
-            creation.push(self.settings_row(
-                "desktop-settings-row-worktree-submodules",
-                "Submodules",
-                "Choose which Git submodules to initialize in a new worktree.",
-                self.choice_control(
-                    "settings-worktree-submodules",
-                    "Submodules",
-                    value,
-                    if scoped { choices } else { &choices[1..] },
-                    cx,
-                ),
-            ));
+            creation.push(self.submodule_setting(cx));
         }
         div()
             .flex()
@@ -277,16 +222,7 @@ impl Workspace {
     }
 
     fn project_cleanup_mode(&self, project: &str) -> Option<CleanupMode> {
-        let p = self.project_defaults.get(project)?;
-        p.cleanup_mode.or_else(|| {
-            p.cleanup_deleted_worktrees.map(|on| {
-                if on {
-                    CleanupMode::Custom
-                } else {
-                    CleanupMode::Off
-                }
-            })
-        })
+        self.project_defaults.get(project)?.worktree_cleanup_mode()
     }
     pub(super) fn cleanup_rules(&self, project: &str) -> (bool, KeepWhen) {
         let inherited = (self.cleanup_deleted_worktrees, self.cleanup_keep_when);
@@ -457,13 +393,15 @@ impl Workspace {
                     cx.notify();
                     return true;
                 }
+                let (deleted, keep) = self.cleanup_rules(&project);
+                let retention = self.retention();
                 let p = self.project_defaults.entry(project.clone()).or_default();
                 self.settings_advanced.remove("worktree-cleanup-advanced");
-                p.worktree_retention = (mode == Some(CleanupMode::Custom)).then_some(self.worktree_retention);
+                p.worktree_retention = (mode == Some(CleanupMode::Custom)).then_some(retention);
                 self.retention_editor = None;
                 p.cleanup_mode = mode;
-                p.cleanup_deleted_worktrees = (mode == Some(CleanupMode::Custom)).then_some(self.cleanup_deleted_worktrees);
-                p.cleanup_keep_when = (mode == Some(CleanupMode::Custom)).then_some(self.cleanup_keep_when);
+                p.cleanup_deleted_worktrees = (mode == Some(CleanupMode::Custom)).then_some(deleted);
+                p.cleanup_keep_when = (mode == Some(CleanupMode::Custom)).then_some(keep);
                 if *p == Default::default() {
                     self.project_defaults.remove(&project);
                 }
@@ -502,18 +440,15 @@ impl Workspace {
                 ),
                 Some(CleanupMode::Custom) => ("custom", "Use these rules for this project."),
             };
-            rows.push(self.settings_row(
-                "settings-row-worktree-cleanup-mode",
-                "Automatic worktree cleanup",
-                help,
-                settings_ui::control_column(self.choice_control(
-                    "settings-worktree-cleanup-mode",
-                    "Automatic worktree cleanup",
-                    value,
-                    &[("inherit", "Inherit"), ("off", "Off"), ("custom", "Custom")],
-                    cx,
-                )),
-            ));
+            let id = "settings-worktree-cleanup-mode";
+            let row = "settings-row-worktree-cleanup-mode";
+            let label = "Automatic worktree cleanup";
+            let control = settings_ui::control_column(self.choice_control(id, label, value,
+                &[("inherit", "Inherit"), ("off", "Off"), ("custom", "Custom")], cx));
+            let custom_environment = self.cleanup_deleted_worktrees || self.cleanup_keep_when != KeepWhen::default()
+                || self.worktree_retention != WorktreeRetention::default();
+            let actions = self.setting_source_actions(WorktreeSetting::Cleanup,id,row,label,custom_environment.then(||"Custom".into()),"Not set",mode.is_some(),cx);
+            rows.push(self.settings_row_with_reset(row,label,help,None,false,Some(control),Some(actions)));
             if mode != Some(CleanupMode::Custom) {
                 return rows;
             }

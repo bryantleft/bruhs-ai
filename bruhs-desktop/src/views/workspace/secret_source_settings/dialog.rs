@@ -45,7 +45,7 @@ impl SourceSettings {
             || matches!(
                 self.editor,
                 Some(Editor::Remove {
-                    generators: None,
+                    consumers: None,
                     ..
                 })
             )
@@ -238,7 +238,7 @@ impl SourceSettings {
                     false,
                 )
             }
-            Some(Editor::Remove { id, generators }) => {
+            Some(Editor::Remove { id, consumers }) => {
                 let name = self
                     .data
                     .sources
@@ -257,16 +257,11 @@ impl SourceSettings {
                             .unwrap_or(&b.target);
                         format!("{target} · {}", b.variable)
                     })
-                    .chain(
-                        generators
-                            .iter()
-                            .flatten()
-                            .map(|g| format!("{g} · API key")),
-                    )
+                    .chain(consumers.iter().flatten().cloned())
                     .collect();
-                if generators.is_none() && self.busy {
+                if consumers.is_none() && self.busy {
                     body = body.child(muted("Checking linked settings…".into()));
-                } else if generators.is_some() {
+                } else if consumers.is_some() {
                     body = body.child(muted(if uses.is_empty() {
                         format!("No settings read from {name}. Its fields stay in 1Password.")
                     } else {
@@ -311,7 +306,7 @@ impl SourceSettings {
                 matches!(
                     self.editor,
                     Some(Editor::Remove {
-                        generators: None,
+                        consumers: None,
                         ..
                     })
                 )

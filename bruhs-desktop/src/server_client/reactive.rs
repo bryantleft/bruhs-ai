@@ -24,7 +24,7 @@ impl ServerClient {
                     "{}/api/reactive/task-threads",
                     self.base.trim_end_matches('/')
                 ))
-                .query(&[("project", project), ("query", query)])
+                .query(&[("project", project), ("query", query), ("desktop", "true")])
                 .send()
                 .await,
             request,
@@ -33,8 +33,44 @@ impl ServerClient {
         Self::decode(response, request).await
     }
 
-    pub async fn task_runtime_models(&self, provider: bruhs_models::agent::AgentProvider) -> Result<bruhs_models::runtime_models::RuntimeModels, ServerError> {
-        self.get_json(&format!("/api/agent/models/{}", provider.as_str())).await
+    pub async fn desktop_task_turns(
+        &self,
+        thread: &str,
+        after: i64,
+    ) -> Result<Vec<bruhs_models::reactive::DesktopTaskTurn>, ServerError> {
+        let response = Self::check(
+            self.http()?
+                .get(format!(
+                    "{}/api/reactive/desktop-task-turns",
+                    self.base.trim_end_matches('/')
+                ))
+                .query(&[("thread", thread), ("after", &after.to_string())])
+                .send()
+                .await,
+            "Read scheduled replies",
+        )
+        .await?;
+        Self::decode(response, "Read scheduled replies").await
+    }
+
+    pub async fn task_models(
+        &self,
+        project: &str,
+    ) -> Result<bruhs_models::delivery::writer_catalog::WriterCatalog, ServerError> {
+        let scope = bruhs_models::delivery::DeliveryPreferenceScope {
+            path: (!project.is_empty()).then(|| project.to_owned()),
+        };
+        let response = self.http()?.get(self.url("/api/reactive/task-models")).query(&scope).send().await;
+        let response = match Self::check(response, "Read scheduled task models").await {
+            Err(ServerError::Status { code: reqwest::StatusCode::NOT_FOUND, .. }) => {
+                return match self.writer_models(project).await {
+                    Err(ServerError::Status { code: reqwest::StatusCode::NOT_FOUND, .. }) => Ok(Default::default()),
+                    result => result,
+                };
+            }
+            other => other?,
+        };
+        Self::decode(response, "Read scheduled task models").await
     }
 
     pub async fn task_base_branches(&self, project: &str) -> Result<bruhs_core::git::Branches, ServerError> {
@@ -167,6 +203,26 @@ impl ServerClient {
         let request = "Read room messages";
         let response = Self::check(self.http()?.get(url).send().await, request).await?;
         Self::decode(response, request).await
+    }
+
+    pub(crate) async fn remove_checkout_task_threads(
+        &self,
+        threads: std::collections::BTreeMap<
+            bruhs_models::ids::ThreadId,
+            std::collections::BTreeSet<String>,
+        >,
+    ) -> Result<(), ServerError> {
+        let url = self
+            .local_owner_base()?
+            .join("api/reactive/commands")
+            .expect("static URL path");
+        let request = self
+            .local_owner_http()
+            .await?
+            .post(url)
+            .json(&ReactiveCommand::DeleteCheckoutTaskThreads { threads });
+        Self::check(request.send().await, "Remove checkout schedules").await?;
+        Ok(())
     }
 
     pub async fn reactive_command(

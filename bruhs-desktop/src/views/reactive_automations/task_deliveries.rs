@@ -1,11 +1,17 @@
 //! Inspect the selected task's authenticated webhook requests on its host.
 use super::*;
+use crate::views::workspace::LinkedDeliveries;
+
+enum DeliveryOrigin {
+    Local { agent: String, source: String },
+    Linked(LinkedDeliveries),
+}
 
 pub(super) struct DeliveryHistory {
     task: String,
     title: String,
-    agent: String,
-    source: String,
+    origin: DeliveryOrigin,
+    pub(super) return_focus: Option<FocusHandle>,
     request: uuid::Uuid,
     list: Option<Result<Vec<WebhookDeliverySummary>, String>>,
     selected: Option<String>,
@@ -36,9 +42,43 @@ impl ReactiveAutomations {
         else {
             return;
         };
-        self.task_dialog.history = Some(DeliveryHistory {
+        let origin = DeliveryOrigin::Local {
             agent: sub.agent_id.clone(),
             source: sub.source_id.clone(),
+        };
+        self.open_delivery_history(task, title, origin, None, cx);
+    }
+
+    pub(crate) fn open_linked_task_deliveries(
+        &mut self,
+        task: String,
+        title: String,
+        host: LinkedDeliveries,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.task_dialog.focus_on_open = true;
+        self.task_dialog.scroll = ScrollHandle::new();
+        self.open_delivery_history(
+            task,
+            title,
+            DeliveryOrigin::Linked(host),
+            window.focused(cx),
+            cx,
+        );
+    }
+
+    fn open_delivery_history(
+        &mut self,
+        task: String,
+        title: String,
+        origin: DeliveryOrigin,
+        return_focus: Option<FocusHandle>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.task_dialog.history = Some(DeliveryHistory {
+            origin,
+            return_focus,
             task,
             title,
             request: uuid::Uuid::nil(),
@@ -58,25 +98,55 @@ impl ReactiveAutomations {
         let Some(history) = &mut self.task_dialog.history else {
             return;
         };
+        let DeliveryOrigin::Local { agent, source } = &history.origin else {
+            return;
+        };
         let subscription = snapshot.subscriptions.iter().find(|sub| {
-            sub.id == history.task
-                && sub.agent_id == history.agent
-                && sub.source_id == history.source
+            sub.id == history.task && &sub.agent_id == agent && &sub.source_id == source
         });
         if snapshot
             .sources
             .iter()
-            .any(|s| s.id == history.source && s.kind == SourceKind::Webhook)
+            .any(|s| &s.id == source && s.kind == SourceKind::Webhook)
         {
             if let (Some(sub), Some(agent)) = (
                 subscription,
-                snapshot.agents.iter().find(|a| a.id == history.agent),
+                snapshot.agents.iter().find(|a| &a.id == agent),
             ) {
                 sub.title(agent).clone_into(&mut history.title);
                 return;
             }
         }
         self.task_dialog.history = None;
+    }
+
+    pub(crate) fn linked_delivery_origin(&self) -> Option<(&LinkedDeliveries, &str, &str)> {
+        let history = self.task_dialog.history.as_ref()?;
+        let DeliveryOrigin::Linked(reader) = &history.origin else {
+            return None;
+        };
+        Some((reader, &history.task, &history.title))
+    }
+
+    pub(crate) fn reconcile_linked_deliveries(
+        &mut self,
+        title: Option<&str>,
+        visible: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(title) = title {
+            if let Some(history) = &mut self.task_dialog.history {
+                title.clone_into(&mut history.title);
+            }
+        } else if let Some(history) = self.task_dialog.history.take() {
+            if visible {
+                if let Some(focus) = history.return_focus {
+                    focus.focus(window, cx);
+                }
+            }
+        }
+        cx.notify();
     }
 
     fn refresh_task_deliveries(&mut self, cx: &mut Context<'_, Self>) {
@@ -88,9 +158,20 @@ impl ReactiveAutomations {
         history.list = None;
         let task = history.task.clone();
         let client = self.client.clone();
-        let result = spawn_tokio(cx, async move { client.webhook_deliveries(&task).await });
+        let result = match &history.origin {
+            DeliveryOrigin::Linked(host) => {
+                let host = host.clone();
+                spawn_tokio(cx, async move { host.read(&task, None).await })
+            }
+            DeliveryOrigin::Local { .. } => spawn_tokio(cx, async move {
+                client
+                    .webhook_deliveries(&task)
+                    .await
+                    .map_err(reactive_error)
+            }),
+        };
         cx.spawn(async move |this, cx| {
-            let rows = result.await.map_err(reactive_error);
+            let rows = result.await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(history) = this
                     .task_dialog
@@ -120,9 +201,20 @@ impl ReactiveAutomations {
         history.list_scroll = Some(std::mem::take(&mut self.task_dialog.scroll));
         let task = history.task.clone();
         let client = self.client.clone();
-        let result = spawn_tokio(cx, async move { client.webhook_delivery(&task, &id).await });
+        let result = match &history.origin {
+            DeliveryOrigin::Linked(host) => {
+                let host = host.clone();
+                spawn_tokio(cx, async move { host.read(&task, Some(&id)).await })
+            }
+            DeliveryOrigin::Local { .. } => spawn_tokio(cx, async move {
+                client
+                    .webhook_delivery(&task, &id)
+                    .await
+                    .map_err(reactive_error)
+            }),
+        };
         cx.spawn(async move |this, cx| {
-            let result = result.await.map_err(reactive_error);
+            let result = result.await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(history) = this
                     .task_dialog
@@ -130,6 +222,9 @@ impl ReactiveAutomations {
                     .as_mut()
                     .filter(|h| h.request == request && h.selected.is_some())
                 {
+                    if let (DeliveryOrigin::Linked(_), Err(error)) = (&history.origin, &result) {
+                        history.list = Some(Err(error.clone()));
+                    }
                     history.detail = Some(result);
                     cx.notify();
                 }
@@ -215,7 +310,7 @@ impl ReactiveAutomations {
                     )),
             };
             footer = footer.child(
-                ghost_control("delivery-back", "Back", false)
+                control_as("delivery-back", "Back", false, false)
                     .track_focus(&history.back_focus)
                     .on_activate(cx, |this, window, cx| {
                         if let Some(history) = &mut this.task_dialog.history {
@@ -250,7 +345,12 @@ impl ReactiveAutomations {
                     )
                 }
                 Some(Ok(rows)) => {
-                    for row in rows {
+                    content = content.gap_0();
+                    for (index, row) in rows.iter().enumerate() {
+                        if index > 0 {
+                            content =
+                                content.child(div().h_px().flex_shrink_0().bg(theme::ring_modal()));
+                        }
                         let id = row.id.clone();
                         let label = delivery_label(row);
                         content = content.child(
@@ -267,6 +367,7 @@ impl ReactiveAutomations {
                             })
                             .w_full()
                             .justify_start()
+                            .py_2()
                             .child(
                                 div()
                                     .min_w_0()
@@ -296,17 +397,29 @@ impl ReactiveAutomations {
                 }
             }
             footer = footer.child(
-                ghost_control("deliveries-refresh", "Refresh", history.list.is_none())
-                    .on_activate(cx, |this, _, cx| this.refresh_task_deliveries(cx)),
+                control_as(
+                    "deliveries-refresh",
+                    "Refresh",
+                    history.list.is_none(),
+                    false,
+                )
+                .on_activate(cx, |this, _, cx| this.refresh_task_deliveries(cx)),
             );
         }
         footer = footer.child(
             control_as("deliveries-done", "Done", false, true)
                 .track_focus(&history.initial_focus)
-                .on_activate(cx, |this, _, cx| this.dismiss_scheduled_task(cx)),
+                .on_activate(cx, |this, window, cx| {
+                    this.dismiss_scheduled_task(window, cx)
+                }),
         );
         (
-            format!("Deliveries · {}", history.title),
+            match &history.origin {
+                DeliveryOrigin::Local { .. } => format!("Deliveries · {}", history.title),
+                DeliveryOrigin::Linked(host) => {
+                    format!("Deliveries · {} · {}", history.title, host.name())
+                }
+            },
             "Recent requests to this task’s webhook.",
             content.into_any_element(),
             footer,
@@ -335,7 +448,7 @@ fn delivery_label(row: &WebhookDeliverySummary) -> String {
 }
 
 fn delivery_heading(row: &WebhookDeliverySummary) -> Div {
-    use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
+    use bruhs_models::time::{RelativeTimeStyle, format_relative_ms};
     let color = match row.outcome {
         WebhookOutcome::Queued => theme::pandan_400(),
         WebhookOutcome::AwaitingReview => theme::blueberry_400(),
@@ -380,8 +493,14 @@ fn section(label: &'static str, text: &str) -> Div {
                 .aria_label(label),
         )
         .child(
-            updates::selectable_text(label, if text.is_empty() { "(empty)" } else { text })
-                .font_family(theme::CODE_FONT_FAMILY)
+            div()
+                .id(SharedString::from(format!("delivery-preview-{label}")))
+                .max_h(px(256.))
+                .overflow_y_scroll()
+                .child(
+                    updates::selectable_text(label, if text.is_empty() { "(empty)" } else { text })
+                        .font_family(theme::CODE_FONT_FAMILY),
+                )
                 .p_2()
                 .rounded(px(6.))
                 .bg(theme::longan_900()),

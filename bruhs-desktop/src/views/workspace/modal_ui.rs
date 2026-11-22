@@ -49,14 +49,20 @@ impl Workspace {
     }
 
     pub(super) fn close_transient_surfaces(&mut self) {
+        self.license_browser=None;
+        self.settings_dropdown_trigger = None;
         self.details.close();
+        self.provider_editor = None;
+        self.usage_hubs.close();
         self.reset_generator_dialog();
         if self.settings_visible() {self.microphone_test.clear();self.voice_cloud.dismiss();self.voice_models.close();}
         self.cancel_picker_tasks();
         self.action_editor.open = false;
-        self.keybinding_recording = false;
-        self.keybinding_new_for = None;
-        self.keybinding_choosing_command = false;
+        self.keybinding_recording = None;
+        self.keybinding_draft = None;
+        self.linked_keybindings.dismiss_form();
+        self.linked_projects.dismiss();
+        self.keybinding_when_open = None;
         self.date_picker = None;
         if self.event_create_visible() {
             self.selected_calendar_event_id = None;
@@ -166,7 +172,7 @@ impl Workspace {
         self.top_layer.is_none()
             && self.settings_visible()
             && self.settings_section == SettingsSection::ScheduledTasks
-            && self.reactive_automations.read(cx).scheduled_editor_open()
+            && self.scheduled_panel().read(cx).scheduled_editor_open()
     }
 
     pub(super) fn secret_provider_dialog_visible(&self, cx: &App) -> bool {
@@ -175,25 +181,36 @@ impl Workspace {
     }
 
     pub(super) fn active_modal_focus_bounds(&self, cx: &App) -> (FocusHandle, FocusHandle) {
+        if let Some(bounds) = self.usage_hubs.bounds() { return bounds; }
+        if let Some(editor) = &self.provider_editor {return (editor.start.clone(), editor.end.clone());}
         if self.secret_provider_dialog_visible(cx) {
             return self.vault_settings.read(cx).secret_sources().read(cx).focus_bounds();
         }
         if let Some(bounds)=self.generators.focus_bounds(){return bounds;}
         if self.scheduled_task_dialog_visible(cx) {
-            self.reactive_automations.read(cx).scheduled_focus_bounds()
+            self.scheduled_panel().read(cx).scheduled_focus_bounds()
         } else {
             (self.modal_start_focus_handle.clone(), self.modal_end_focus_handle.clone())
         }
     }
 
+    pub(super) fn modal_contains_focus(&self, window: &Window, cx: &App) -> bool {
+        self.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
+            || self.accent_panel_has_focus(window, cx)
+            || self.theme_picker_has_focus(window, cx)
+    }
+
     pub(super) fn step_modal_focus(
-        &self,
+        &mut self,
         reverse: bool,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.step_theme_picker_focus(reverse, window, cx) || self.step_accent_focus(reverse, window, cx) {
+            return;
+        }
         if self.scheduled_task_dialog_visible(cx) {
-            self.reactive_automations.update(cx, |panel, cx| panel.close_task_picker_for_tab(window, cx));
+            self.scheduled_panel().clone().update(cx, |panel, cx| panel.close_task_picker_for_tab(window, cx));
         }
         if self.settings_visible() && self.settings_section == SettingsSection::ScheduledTasks {
             self.reactive_automations.update(cx, |panel,cx| panel.dismiss_task_menu(window,cx));
@@ -333,6 +350,7 @@ impl Workspace {
     }
 
     pub(super) fn set_settings_open_dropdown(&mut self, dropdown: Option<&'static str>) {
+        self.settings_dropdown_trigger = None;
         if let Some(Overlay::Settings { open_dropdown }) = &mut self.overlay {
             *open_dropdown = dropdown;
         }
@@ -372,6 +390,27 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.settings_visible() && self.settings_section == SettingsSection::Keyboard && self.dismiss_binding_editor(window,cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.top_layer.is_none() && self.stop_picking_theme_role(cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.settings_visible() && self.license_browser.as_ref().is_some_and(|browser|
+            browser.update(cx, |panel,cx|panel.escape_search(window,cx))) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.settings_visible() && self.usage_hubs.bounds().is_some() {
+            self.dismiss_hub(window,cx);cx.stop_propagation();return;
+        }
+        if self.settings_visible() && self.provider_editor.is_some() {
+            self.dismiss_provider_editor(window,cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.secret_provider_dialog_visible(cx) {
             self.vault_settings.read(cx).secret_sources().update(cx, |view, cx| view.dismiss(cx));
             cx.stop_propagation();
@@ -401,8 +440,18 @@ impl Workspace {
             return;
         }
         if self.scheduled_task_dialog_visible(cx) {
-            self.reactive_automations.update(cx, |panel, cx| panel.close_scheduled_overlay(window, cx));
+            self.scheduled_panel().clone().update(cx, |panel, cx| panel.close_scheduled_overlay(window, cx));
             cx.stop_propagation();
+            return;
+        }
+        if self.top_layer.is_none() && self.settings_open_dropdown().is_some() {
+            let trigger = self.settings_dropdown_trigger.take();
+            self.set_settings_open_dropdown(None);
+            if let Some(trigger) = trigger {
+                trigger.focus(window, cx);
+            }
+            cx.stop_propagation();
+            cx.notify();
             return;
         }
         if self.dismiss_thread_details(window,cx) || self.clear_focused_settings_query(window, cx) {
@@ -413,7 +462,11 @@ impl Workspace {
             cx.stop_propagation();
             return;
         }
-        if self.top_layer.is_none() && (self.dismiss_theme_editor(window,cx) || self.dismiss_restart_confirm(window, cx)) {
+        if self.top_layer.is_none() && self.cancel_theme_color_picker(window,cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.top_layer.is_none() && (self.dismiss_theme_editor(window,cx) || self.dismiss_restart_confirm(window, cx) || self.dismiss_update_confirm(window, cx)) {
             cx.stop_propagation();
             return;
         }
@@ -775,7 +828,7 @@ impl Workspace {
             .justify_center()
             .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
             .on_click(cx.listener(|this, _ev, window, cx| {
-                if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) { return; }
+                if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) || this.dismiss_update_confirm(window, cx) { return; }
                 this.close_transient_surfaces();
                 cx.notify();
             }))
@@ -845,7 +898,7 @@ impl Workspace {
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .map(|el| {
                                     on_press_view(el, cx, |this, window, cx| {
-                                        if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) { return; }
+                                        if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) || this.dismiss_update_confirm(window, cx) { return; }
                                         this.close_transient_surfaces();
                                         cx.notify();
                                     })
@@ -890,6 +943,8 @@ pub(super) struct ModalFocus {
     pub(super) first_control_pending: bool,
     pub(super) restart_row: FocusHandle,
     pub(super) restart_sidebar: FocusHandle,
+    pub(super) update_all: FocusHandle,
+    pub(super) update_cancel: FocusHandle,
 }
 
 impl ModalFocus {
@@ -903,6 +958,8 @@ impl ModalFocus {
             first_control_pending: false,
             restart_row: cx.focus_handle().tab_stop(true),
             restart_sidebar: cx.focus_handle().tab_stop(true),
+            update_all: cx.focus_handle().tab_stop(true),
+            update_cancel: cx.focus_handle().tab_stop(true),
         }
     }
 }

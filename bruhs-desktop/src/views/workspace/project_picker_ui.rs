@@ -248,6 +248,7 @@ impl Workspace {
             window,
             cx,
         );
+        self.seed_model_options(&thread,cx);
         self.stamp_chat_run_prefs(&thread.chat, cx);
         thread.chat.update(cx, |chat, cx| {
             chat.project_permission_override=scoped_access;
@@ -260,7 +261,7 @@ impl Workspace {
         self.active_view = AppView::Chat;
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());
-        self.remember_project(project);
+        self.remember_project(project, cx);
         self.persist_and_notify(cx);
     }
 
@@ -308,8 +309,6 @@ impl Workspace {
             thread.project_path = path;
             if changed {
                 thread.branch = None;
-                self.run_choice = WorkspaceChoice::Checkout;
-                self.previous_worktree = None;
                 self.base_branch.clear();
             }
             let chat = thread.chat.clone();
@@ -332,7 +331,7 @@ impl Workspace {
         }
         if let Some(project) = project {
             self.active_project = Some(project.clone());
-            self.remember_project(project);
+            self.remember_project(project, cx);
         }
         self.persist_and_notify(cx);
     }
@@ -406,6 +405,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        self.refresh_project_identities(cx);
+        self.refresh_linked_projects(false, cx);
         self.project_picker_task.take();
         self.project_picker_start_warning = None;
         let thread = self.active_thread().map(|thread| thread.chat.entity_id());
@@ -435,53 +436,131 @@ impl Workspace {
         let select_current_name = current_name;
 
         let mut recent_rows = Vec::new();
-        for project in self.listed_projects() {
-            let path = project.path.clone();
-            let name = project.name.clone();
-            let debug_key = element_key(&project.path);
-            recent_rows.push(
-                div()
-                    .id(("desktop-project-recent", element_key(&project.path)))
-                    .debug_selector(move || format!("desktop-project-recent-{debug_key}"))
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap(px(PROJECT_PICKER_RECENT_ROW_GAP_PX))
-                    .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
-                    .px(px(PROJECT_PICKER_RECENT_ROW_X_PADDING_PX))
-                    .py(px(PROJECT_PICKER_RECENT_ROW_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_LABEL_FONT_FAMILY))
-                    .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .text_color(theme::rambutan_400())
+        for group in self.checkout_groups(!self.project_picker_for_terminal()) {
+            if group.members.len() > 1 {
+                let key = group.key;
+                let expanded = self.expanded_project_groups.contains(&key);
+                let group_id = element_key(&key);
+                let button = div()
+                    .id(("recent-group", group_id))
+                    .debug_selector(move || format!("desktop-project-group-{group_id}"))
                     .tab_index(0)
                     .role(Role::Button)
-                    .aria_label(format!("Open recent project {}", project.path))
+                    .aria_expanded(expanded)
+                    .aria_label(format!(
+                        "{}, {} checkouts",
+                        group.label,
+                        group.members.len()
+                    ))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
                     .border_1()
                     .border_color(gpui::transparent_black())
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .cursor_pointer()
-                    .hover(|el| {
-                        el.bg(
-                            theme::longan_800().opacity(PROJECT_PICKER_RECENT_ROW_HOVER_BG_OPACITY)
-                        )
-                        .text_color(theme::rambutan_200())
-                    })
-                    .map(|el| {
-                        on_press_view(el, cx, move |this, window, cx| {
-                            this.select_project_location(path.clone(), name.clone(), window, cx);
-                        })
-                    })
-                    .child(self.project_icon(&project.path,PROJECT_PICKER_ICON_SIZE_PX))
+                    .hover(|el| el.bg(theme::longan_800()))
+                    .text_size(px(PROJECT_PICKER_SECTION_TEXT_SIZE_PX))
+                    .text_color(theme::rambutan_300())
                     .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .child(project.path.clone()),
+                        svg()
+                            .path(assets::CHEVRON_DOWN_ICON_PATH)
+                            .size(px(PROJECT_PICKER_ICON_SIZE_PX))
+                            .when(!expanded, |el| {
+                                el.with_transformation(Transformation::rotate(Radians(
+                                    -std::f32::consts::FRAC_PI_2,
+                                )))
+                            }),
                     )
+                    .child(div().min_w_0().flex_1().truncate().child(group.label))
+                    .child(group.members.len().to_string());
+                recent_rows.push(
+                    on_press_view(button, cx, move |ws, _, cx| {
+                        if !ws.expanded_project_groups.remove(&key) {
+                            ws.expanded_project_groups.insert(key.clone());
+                        }
+                        cx.notify();
+                    })
                     .into_any_element(),
-            );
+                );
+                if !expanded {
+                    continue;
+                }
+            }
+            for project in group.members {
+                let path = project.path.clone();
+                let name = project.name.clone();
+                let debug_key = element_key(&project.scope());
+                let remote = project.host.map(|_| project.clone());
+                let display = if remote.is_some() {
+                    format!(
+                        "View in Settings · {} · {}",
+                        project.environment, project.path
+                    )
+                } else {
+                    project.path.clone()
+                };
+                let display = if project.has_custom_name {
+                    format!("{} · {display}", project.name)
+                } else {
+                    display
+                };
+                recent_rows.push(
+                    div()
+                        .id(("desktop-project-recent", debug_key))
+                        .debug_selector(move || format!("desktop-project-recent-{debug_key}"))
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap(px(PROJECT_PICKER_RECENT_ROW_GAP_PX))
+                        .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
+                        .px(px(PROJECT_PICKER_RECENT_ROW_X_PADDING_PX))
+                        .py(px(PROJECT_PICKER_RECENT_ROW_Y_PADDING_PX))
+                        .font_family(
+                            crate::theme::FontFace::Interface
+                                .with_default(PROJECT_PICKER_LABEL_FONT_FAMILY),
+                        )
+                        .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .text_color(theme::rambutan_400())
+                        .tab_index(0)
+                        .role(Role::Button)
+                        .aria_label(if remote.is_some() {
+                            format!("View checkout {display} in Settings")
+                        } else {
+                            format!("Open recent project {display}")
+                        })
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .cursor_pointer()
+                        .hover(|el| {
+                            el.bg(theme::longan_800()
+                                .opacity(PROJECT_PICKER_RECENT_ROW_HOVER_BG_OPACITY))
+                                .text_color(theme::rambutan_200())
+                        })
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, window, cx| {
+                                if let Some(member) = &remote {
+                                    this.open_linked_checkout(member, window, cx);
+                                } else {
+                                    this.select_project_location(
+                                        path.clone(),
+                                        name.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            })
+                        })
+                        .child(self.project_icon(&project.scope(), PROJECT_PICKER_ICON_SIZE_PX))
+                        .child(div().min_w_0().flex_1().truncate().child(display))
+                        .into_any_element(),
+                );
+            }
         }
         let show_recents = !recent_rows.is_empty();
 

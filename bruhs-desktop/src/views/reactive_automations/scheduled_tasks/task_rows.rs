@@ -16,8 +16,8 @@ impl TaskAction {
         match self {
             Self::Edit => ("Edit", crate::assets::TOOL_PENCIL_ICON_PATH),
             Self::Deliveries => ("Deliveries", crate::assets::CLIPBOARD_LIST_ICON_PATH),
-            Self::Run => ("Run now", crate::assets::ACTIVITY_ICON_PATH),
-            Self::Delete => ("Delete", bruhs_ui::icons::IconName::Delete.path()),
+            Self::Run => ("Run now", bruhs_ui::icons::IconName::Play.path()),
+            Self::Delete => ("Delete", bruhs_ui::icons::IconName::Trash.path()),
         }
     }
 }

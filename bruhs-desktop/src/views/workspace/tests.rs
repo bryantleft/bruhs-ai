@@ -200,7 +200,7 @@ mod calendar_zones;
 mod dialog_focus;
 mod inbox_acceptance;
 mod keys;
-mod launch;
+pub(super) mod launch;
 mod parity_rows;
 mod today_acceptance;
 
@@ -266,16 +266,18 @@ fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpu
             .modal_start_focus_handle
             .contains_focused(window, cx));
     });
-    // The model row is a dropdown now; provider logos head its groups.
+    // Provider buttons switch the model list without leaving Settings.
     click_debug_selector(cx, "desktop-settings-nav-threads");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-row-model");
     click_debug_selector(cx, "desktop-model");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-model-list");
-    assert_provider_logo_bounds(cx, "desktop-provider-logo-claude");
-    assert_provider_logo_bounds(cx, "desktop-provider-logo-codex");
+    assert_rendered_bounds(cx, "desktop-model-tab-claude");
+    assert_rendered_bounds(cx, "desktop-model-tab-codex");
 
+    click_debug_selector(cx, "desktop-model-tab-codex");
+    cx.run_until_parked();
     let model_list = rendered_bounds(cx, "desktop-model-list");
     for _ in 0..20 {
         let model_option = rendered_bounds(cx, "desktop-model-option-gpt-5.5");
@@ -2830,42 +2832,177 @@ fn settings_records_a_dictation_shortcut_and_applies_the_voice_model_to_chats(cx
 }
 
 #[gpui::test]
-fn settings_add_shortcut_only_changes_the_saved_rules_after_recording(cx: &mut gpui::TestAppContext) {
-    let (workspace, cx, _, _) = thread_menu_workspace(cx);
-    let (index, saved) = workspace.update_in(cx, |workspace, window, cx| {
-        workspace.open_settings(&super::OpenSettings, window, cx);
-        workspace.set_settings_section(super::SettingsSection::Keyboard, cx);
-        let index = workspace.keybindings.iter().position(|rule| rule.command == "voice.dictate").unwrap();
-        (index, workspace.keybindings.clone())
-    });
-    cx.run_until_parked();
-    let command = Box::leak(format!("desktop-choose-command-{index}").into_boxed_str());
-    for cancel in [true, false] {
-        click_debug_selector(cx, "desktop-keybindings-add");
-        workspace.update_in(cx, |workspace, window, cx| {
-            workspace.keybinding_filter.update(cx, |input, cx| input.set_value("voice.dictate", window, cx));
+fn settings_new_keybinding_previews_conflicts_and_applies_only_on_save(
+    cx: &mut gpui::TestAppContext,
+) {
+    let (workspace, cx, _, code) = thread_menu_workspace(cx);
+    cx.simulate_resize(gpui::size(gpui::px(1040.), gpui::px(820.)));
+    let checkout = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=Shortcut test",
+            "-c",
+            "user.email=shortcuts@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "Initial",
+        ],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(checkout.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    let saved = workspace.update_in(cx, |ws, w, cx| {
+        let thread = ws.threads.iter_mut().find(|t| t.id == code).unwrap();
+        thread.project_path = checkout.path().to_string_lossy().into_owned();
+        thread.chat.update(cx, |chat, cx| {
+            chat.set_project_context(thread.project_path.clone(), "Alpha", true, cx)
         });
+        ws.active_thread_id = Some(code);
+        ws.open_settings(&super::OpenSettings, w, cx);
+        ws.set_settings_section(super::SettingsSection::Keyboard, cx);
+        ws.keybindings.clone()
+    });
+    let click = |cx: &mut gpui::VisualTestContext, id| {
         cx.run_until_parked();
-        click_debug_selector(cx, command);
+        click_debug_selector(cx, id);
         cx.run_until_parked();
-        workspace.read_with(cx, |workspace, _| assert_eq!(workspace.keybindings, saved));
+    };
+    let shortcut = if cfg!(target_os = "macos") {
+        "cmd-alt-v"
+    } else {
+        "ctrl-alt-v"
+    };
+    for cancel in [true, false] {
+        click(cx, "desktop-keybindings-add");
+        click(cx, "keybinding-new-command");
+        click(cx, "keybinding-new-command-option-branch.menu");
+        click(cx, "keybinding-new-record");
+        press_key(
+            cx,
+            if cfg!(target_os = "macos") {
+                "cmd-b"
+            } else {
+                "ctrl-b"
+            },
+        );
+        assert_rendered_bounds(cx, "keybinding-new-conflict");
+        click(cx, "keybinding-new-record");
+        press_key(cx, "escape");
+        workspace.read_with(cx, |ws, _| assert!(ws.keybinding_draft.is_some()));
+        click(cx, "keybinding-new-record");
+        press_key(cx, shortcut);
+        click(cx, "keybinding-new-when");
+        click(cx, "when-root-+ Group");
+        press_key(cx, "escape");
+        workspace.read_with(cx, |ws, _| {
+            assert!(ws.settings_visible() && ws.keybinding_draft.is_some());
+            assert!(ws.keybinding_when_open.is_none());
+        });
+        workspace.read_with(cx, |ws, _| assert_eq!(ws.keybindings, saved));
         if cancel {
-            press_key(cx, "escape");
-            workspace.read_with(cx, |workspace, _| {
-                assert!(workspace.settings_visible());
-                assert!(workspace.keybinding_new_for.is_none());
-                assert_eq!(workspace.keybindings, saved);
-            });
+            click(cx, "keybinding-new-cancel");
+            workspace.read_with(cx, |ws, _| assert_eq!(ws.keybindings, saved));
         } else {
-            press_key(cx, if cfg!(target_os = "macos") { "cmd-alt-v" } else { "ctrl-alt-v" });
-            workspace.read_with(cx, |workspace, cx| {
-                let bindings = workspace.snapshot(cx).keybindings;
+            click(cx, "keybinding-new-save");
+            workspace.update_in(cx, |ws, w, cx| {
+                let bindings = ws.snapshot(cx).keybindings;
                 assert_eq!(bindings.len(), saved.len() + 1);
                 let added = bindings.last().unwrap();
-                assert_eq!((&*added.command, &*added.key), ("voice.dictate", "mod+alt+v"));
+                assert_eq!(
+                    (&*added.command, &*added.key, added.when.as_deref()),
+                    (
+                        "branch.menu",
+                        "mod+alt+v",
+                        Some("terminalFocus || !terminalFocus")
+                    )
+                );
+                assert!(ws.keybinding_add_focus.is_focused(w));
+                ws.close_transient_surfaces();
+                cx.notify();
             });
+            cx.run_until_parked();
+            workspace.update_in(cx, |ws, w, cx| {
+                ws.active_thread()
+                    .unwrap()
+                    .chat
+                    .clone()
+                    .update(cx, |chat, cx| chat.focus_composer(w, cx));
+            });
+            cx.run_until_parked();
+            assert_rendered_bounds(cx, "desktop-composer-context-strip");
+            workspace.update_in(cx, |_, w, cx| {
+                assert!(
+                    w.available_actions(cx)
+                        .iter()
+                        .any(|a| a.name().ends_with("ToggleBranchMenu")),
+                    "branch menu must be reachable from focus"
+                );
+                assert!(
+                    w.bindings_for_action(&super::ToggleBranchMenu)
+                        .iter()
+                        .any(|b| b
+                            .keystrokes()
+                            .iter()
+                            .any(|k| k.inner() == &gpui::Keystroke::parse(shortcut).unwrap())),
+                    "saved shortcut must reach the action"
+                );
+            });
+            press_key(cx, shortcut);
+            assert_rendered_bounds(cx, "desktop-git-branch-menu");
         }
     }
+}
+
+#[gpui::test]
+fn keybindings_sharing_a_chord_dispatch_the_command_for_the_current_focus(
+    cx: &mut gpui::TestAppContext,
+) {
+    use bruhs_models::logic::keybindings::Keybinding;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    let key = if cfg!(target_os = "macos") {
+        "cmd-alt-u"
+    } else {
+        "ctrl-alt-u"
+    };
+    workspace.update_in(cx, |ws, w, cx| {
+        for (command, when) in [
+            ("sidebar.toggle", "composerFocus"),
+            ("settings.open", "!composerFocus"),
+        ] {
+            ws.keybindings.push(Keybinding {
+                key: "mod+alt+u".into(),
+                command: command.into(),
+                when: Some(when.into()),
+            });
+        }
+        ws.sync_keybindings(cx);
+        ws.active_thread()
+            .unwrap()
+            .chat
+            .clone()
+            .update(cx, |c, cx| c.focus_composer(w, cx));
+    });
+    cx.run_until_parked();
+    press_key(cx, key);
+    workspace.update_in(cx, |ws, w, cx| {
+        assert!(!ws.sidebar_visible);
+        assert!(!ws.settings_visible());
+        ws.workspace_focus_handle.focus(w, cx);
+    });
+    press_key(cx, key);
+    workspace.read_with(cx, |ws, _| assert!(ws.settings_visible()));
 }
 
 #[gpui::test]
@@ -3315,6 +3452,8 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
             .find(|id| *id != workspace.current_model)
             .expect("a second model to pick")
     });
+    click_debug_selector(cx, leaked_debug_selector(format!("desktop-model-picker-tab-{}", bruhs_models::agent::AgentProvider::for_model(target))));
+    cx.run_until_parked();
     click_debug_selector(
         cx,
         leaked_debug_selector(format!(
@@ -4982,6 +5121,8 @@ fn work_item(id: &str, status: DesktopWorkItemStatus) -> DesktopWorkItem {
 
 fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -> PersistedThread {
     PersistedThread {
+        model_options:Default::default(),
+        kiro_choices:Default::default(),
         id: id.to_string(),
         title: "Thread".to_string(),
         project_name: String::new(),
@@ -5011,6 +5152,7 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         project_settings_root: None,
         effort: None,
         run_locked: false,
+        draft_placement: None,
         role: None,
         instructions_stamp: None,
     }
@@ -6918,7 +7060,8 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
         cx.run_until_parked();
     };
     cx.run_until_parked();
-    // Nothing checked yet, then everything current: no pill.
+    // The footer check stays available until there is an actionable update.
+    assert_rendered_bounds(cx, "desktop-sidebar-check-updates");
     assert_no_rendered_bounds(cx, "desktop-sidebar-update");
     seed(
         cx,
@@ -6926,16 +7069,29 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
     );
     assert_no_rendered_bounds(cx, "desktop-sidebar-update");
 
+    assert_rendered_bounds(cx, "desktop-sidebar-check-updates");
+
     // Codex behind: Update confirms first (T3's "Update N machine(s)?").
     seed(
         cx,
         update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]),
     );
+    assert_no_rendered_bounds(cx, "desktop-sidebar-check-updates");
     click_debug_selector(cx, "desktop-sidebar-update");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-update-confirm");
+    let label = rendered_bounds(cx, "desktop-settings-row-update-app-label");
+    let control = rendered_bounds(cx, "desktop-settings-row-update-app-control");
+    assert!(control.top() >= label.bottom(), "version and actions should stack in the update dialog");
     click_debug_selector(cx, "desktop-update-confirm-cancel");
     cx.run_until_parked();
+    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.restart_sidebar.is_focused(window)));
+    keys::press(cx, "enter");
+    assert_rendered_bounds(cx, "desktop-update-confirm");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.restart_sidebar.is_focused(window)));
+
     assert_no_rendered_bounds(cx, "desktop-update-confirm");
     workspace.update_in(cx, |workspace, _window, cx| {
         assert!(workspace
@@ -7066,6 +7222,84 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
     });
 }
 
+#[gpui::test]
+fn desktop_sidebar_checks_for_updates_with_automatic_checks_off(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    let updates = workspace.read_with(cx, |ws, _| ws.updates.clone());
+    updates.update(cx, |u, _| {
+        u.enabled = false;
+        u.provider_checks = false;
+        u.start_error = Some("Previous check".into());
+    });
+    cx.run_until_parked();
+    let button = rendered_bounds(cx, "desktop-sidebar-check-updates");
+    let settings = rendered_bounds(cx, "desktop-sidebar-nav-settings");
+    assert_eq!(button.size, settings.size);
+    assert_eq!(button.top(), settings.top());
+    assert!(button.right() <= settings.left());
+    click_debug_selector(cx, "desktop-sidebar-check-updates");
+    updates.read_with(cx, |u, _| {
+        assert!(!u.enabled);
+        assert!(u.start_error.is_none());
+        assert!(u.checking || u.report.as_ref().is_some_and(|report| report.online));
+    });
+    workspace.read_with(cx, |ws, _| assert!(ws.overlay.is_none()));
+}
+
+#[gpui::test]
+fn settings_combined_update_requires_confirmation_and_returns_to_settings(cx: &mut gpui::TestAppContext) {
+    use super::updates_ui::AppInstall;
+    use bruhs_models::updates::AppUpdateState;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.updates.update(cx, |u, cx| {
+            u.bundle = Some("Fixture.app".into());
+            u.install = AppInstall::Ready {
+                version: "0.2.0".into(), staged: "Staged.app".into(), restart_error: None,
+            };
+            u.set_report_for_test(update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]), cx);
+        });
+        ws.open_settings(&OpenSettings, window, cx);
+        ws.set_settings_section(super::SettingsSection::Updates, cx);
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-settings-updates-update-all");
+    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.update_cancel.is_focused(window)));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    workspace.update_in(cx, |ws, window, _| {
+        assert!(ws.settings_visible());
+        assert!(ws.modal_focus.update_all.is_focused(window));
+    });
+    click_debug_selector(cx, "desktop-settings-updates-update-all");
+    assert_rendered_bounds(cx, "desktop-update-confirm-run");
+    assert_rendered_bounds(cx, "desktop-combined-update-table");
+    assert_no_rendered_bounds(cx, "desktop-settings-row-update-app");
+    click_debug_selector(cx, "desktop-combined-update-details");
+    assert_rendered_bounds(cx, "desktop-settings-row-update-app");
+    click_debug_selector(cx, "desktop-combined-update-details");
+    assert_no_rendered_bounds(cx, "desktop-settings-row-update-app");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    workspace.update_in(cx, |ws, window, cx| {
+        assert!(ws.settings_visible());
+        assert!(ws.modal_focus.update_all.is_focused(window));
+        assert!(ws.updates.read(cx).report.as_ref().unwrap().runs.is_empty());
+    });
+    workspace.update_in(cx, |ws, _, cx| {
+        ws.meetings_hub.update(cx, |hub, cx| {
+            hub.show_update_notice("Restart deferred.".into(), false, cx);
+        });
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-hub-notice-dismiss");
+    workspace.update_in(cx, |ws, window, cx| {
+        assert!(ws.settings_visible());
+        assert!(ws.meetings_hub.read(cx).notice.is_none());
+        assert!(ws.modal_start_focus_handle.is_focused(window));
+    });
+}
+
 /// A downloaded release: "Restart to update" in the sidebar and Settings,
 /// with T3's Later. (Restart itself quits the app, so it is not clicked.)
 #[gpui::test]
@@ -7182,10 +7416,13 @@ fn desktop_update_retries_on_demand_and_retains_a_staged_restart(cx: &mut gpui::
     });
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-about-check-update");
+    assert_no_rendered_bounds(cx, "desktop-update-architecture");
     updates.update(cx, |u, cx| {
+        u.translated = true;
         u.set_report_for_test(release(AppUpdateState::Behind), cx)
     });
     cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-update-architecture");
     click_debug_selector(cx, "desktop-settings-stage-update");
     let failed_at = |cx: &mut gpui::VisualTestContext| {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -7212,6 +7449,15 @@ fn desktop_update_retries_on_demand_and_retains_a_staged_restart(cx: &mut gpui::
         cx.notify();
     });
     cx.run_until_parked();
+    updates.update(cx, |u, cx| {
+        // An offline refresh can finish while the verified-release download is in flight.
+        let mut offline = release(AppUpdateState::Unknown);
+        offline.online = false;
+        u.set_report_for_test(offline, cx);
+    });
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-sidebar-update");
+    assert_no_rendered_bounds(cx, "desktop-sidebar-check-updates");
     assert_rendered_bounds(cx, "desktop-settings-update-progress");
     assert_no_rendered_bounds(cx, "desktop-settings-stage-update");
     updates.update(cx, |u, cx| {

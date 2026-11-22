@@ -1,6 +1,7 @@
 use crate::views::task_registry_subscription::TaskRegistrySubscription;
+use crate::views::theme_regions::ThemeRegion as _;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
-use crate::views::workspace::{provider_label, provider_mark};
+use crate::views::workspace::provider_label;
 use crate::{
     app_state::{spawn_tokio, DesktopState},
     assets, theme,
@@ -77,6 +78,8 @@ mod git_ui;
 mod hints_ui;
 mod mobile;
 mod model_picker_ui;
+mod native_options;
+pub(crate) mod kiro;
 pub(crate) use mobile::mobile_label;
 mod prompt_suggestion;
 pub(crate) mod response_stream;
@@ -87,6 +90,7 @@ mod secret_prompt;
 mod smoke;
 pub(crate) mod screen_reader;
 mod streaming;
+mod restart;
 mod svg_cache;
 mod timeline_ui;
 mod title_rename;
@@ -104,6 +108,7 @@ use content_cache::{BoundedCache, PreparedBlock, PreparedSvg};
 use git_ui::*;
 #[cfg(test)]
 use hints_ui::*;
+#[cfg(test)]
 use model_picker_ui::*;
 #[cfg(debug_assertions)]
 pub(crate) use streaming::desktop_smoke_prompt;
@@ -173,19 +178,56 @@ enum DesktopAuthStatus {
     SignedOut(SignedOut),
 }
 
-pub(crate) fn cli_health(cx:&App)->impl std::future::Future<Output=[&'static str;2]>+Send+'static {
-    let claude=auth::auth_check_program(cx);
-    let codex=codex_auth::codex_program(cx);
-    async move {
-        let (claude,codex)=tokio::join!(
-            async {match claude{Some(p)=>Some(auth::fetch_auth_status_with(&p).await),None=>None}},
-            async {match codex{Some(p)=>Some(codex_auth::fetch_codex_status_with(&p).await),None=>None}}
+pub(crate) fn cli_health(
+    cx: &App,
+    prefs: bruhs_core::agent_extensions::availability::ProviderAvailability,
+) -> impl std::future::Future<Output = Vec<bruhs_core::agent::health::ProviderHealth>> + Send + 'static
+{
+    use bruhs_core::agent::health::{self, ProviderHealth, Status};
+    use bruhs_models::agent::AgentProvider;
+    let claude = auth::auth_check_program(cx, prefs.enabled(AgentProvider::Claude)).map(|p| p.into_owned());
+    let codex = codex_auth::codex_program(cx, prefs.enabled(AgentProvider::Codex));
+    let external = !cfg!(test);
+    #[cfg(feature = "native-performance")]
+    let external = external
+        && !crate::native_performance::block_service(cx, crate::native_performance::Service::Auth);
+    async fn native(provider: AgentProvider, program: Option<String>, enabled: bool) -> ProviderHealth {
+        if !enabled { return ProviderHealth::new(provider, Status::Disabled); }
+        let mut row = ProviderHealth::new(provider, Status::Failed);
+        let Some(program) = program else { return row };
+        let (version, auth) = tokio::join!(
+            health::native_cli_version(std::path::Path::new(&program)),
+            async {
+                if provider == AgentProvider::Claude {
+                    auth::fetch_auth_status_with(&program).await
+                } else {
+                    codex_auth::fetch_codex_status_with(&program).await
+                }
+            }
         );
-        [claude,codex].map(|status| match status {
-            Some(DesktopAuthStatus::SignedIn(_))=>"Signed in",
-            Some(DesktopAuthStatus::SignedOut(account)) if account.error.is_none()=>"Signed out",
-            _=>"Unavailable",
-        })
+        row.status = match auth {
+            DesktopAuthStatus::SignedIn(_) => Status::SignedIn,
+            DesktopAuthStatus::SignedOut(account) if account.error.is_none() => Status::SignedOut,
+            _ => version.as_ref().err().copied().unwrap_or(Status::Failed),
+        };
+        row.version = version.ok().flatten();
+        row
+    }
+    async move {
+        let (claude, codex, external) = tokio::join!(
+            native(AgentProvider::Claude, claude, prefs.enabled(AgentProvider::Claude)),
+            native(AgentProvider::Codex, codex, prefs.enabled(AgentProvider::Codex)),
+            async {
+                if external {
+                    health::external_provider_health(&prefs).await
+                } else {
+                    Vec::new()
+                }
+            }
+        );
+        let mut rows = vec![claude, codex];
+        rows.extend(external);
+        rows
     }
 }
 
@@ -207,6 +249,8 @@ pub enum TurnState {
     Streaming,
     /// The turn ended on its own.
     Finished,
+    /// The desktop restarted while the provider was responding.
+    InterruptedByRestart,
     /// The user stopped the turn before it finished.
     Stopped,
     /// A provider or transport error ended the turn.
@@ -235,6 +279,7 @@ impl TurnState {
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Failed { error } => Some(error),
+            Self::InterruptedByRestart => Some("Interrupted by restart"),
             _ => None,
         }
     }
@@ -479,7 +524,9 @@ pub use bruhs_models::PermissionMode;
 // --- ChatView entity ---
 
 pub enum ChatViewEvent {
+    CheckpointInterruptedRun,
     UsageLimitReached { reset_ms: Option<i64>, generation: u64 },
+    RunningTasksChanged,
     OpenSettings,
     /// The access-mode menu or the Build/Plan chip picked a mode.
     SetPermissionMode(PermissionMode),
@@ -494,6 +541,9 @@ pub enum ChatViewEvent {
     OpenProjectPicker,
     /// The user picked a model in the popover; the workspace makes it current.
     SelectModel(String),
+    ToggleFavoriteModel(String),
+    ModelOptionsChanged,
+    ThreadOptionsChanged,
     /// A turn began: the workspace stamps model + branch on the thread card.
     TurnStarted {
         model_id: String,
@@ -541,12 +591,15 @@ pub enum ChatViewEvent {
     RevertFiles {
         index: usize,
     },
-    /// The workspace chip, effort chip, or base branch changed. Shared by
-    /// every thread. `base_branch` is this session only.
+    /// A successfully created checkout is available to reuse.
+    RememberWorktree(RememberedWorktree),
+    /// Persist a workspace selection for this unsent thread.
+    DraftPlacementChanged,
+    /// A placed thread’s workspace menu edits the default for subsequent threads.
+    NextThreadPlacement(WorkspaceChoice),
+    /// Share effort, base branch and composer preferences.
     RunPrefs {
-        choice: WorkspaceChoice,
         effort: Option<String>,
-        previous: Option<RememberedWorktree>,
         base_branch: String,
         composer: ComposerPrefs,
     },
@@ -557,6 +610,13 @@ pub enum ChatViewEvent {
         project_path: String,
         branch: Option<String>,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct DraftPlacement {
+    pub choice: WorkspaceChoice,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub previous: Option<RememberedWorktree>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -653,8 +713,11 @@ pub struct ChatView {
     pub(crate) details_trigger: FocusHandle,
     pub(crate) details_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub(crate) details_open: bool,
+    restart_turn: Option<restart::Run>,
+    restart_checkpoint: Option<Task<()>>,
     pub(crate) reported_limit: Option<(u64,Option<i64>)>,
     pub running_tasks_count: usize,
+    running_tasks: Vec<bruhs_core::BackgroundTask>,
     pub permission_mode: PermissionMode,
     pub(crate) project_permission_override: bool,
     pub model_id: String,
@@ -679,7 +742,7 @@ pub struct ChatView {
     /// Each turn's action row tracks a handle, keyed by (user row, index),
     /// so the row shows while focus is inside it (web `focus-within`).
     turn_actions_focus: std::cell::RefCell<std::collections::HashMap<(bool, usize), FocusHandle>>,
-    composer_options_section_focus: [FocusHandle; 6],
+    composer_options_section_focus: [FocusHandle; 7],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
     stash: Vec<StashEntry>,
@@ -773,6 +836,11 @@ pub struct ChatView {
     pub effort: Option<String>,
     /// Shared prefs, copied from the workspace so the composer can draw them.
     pub run_choice: WorkspaceChoice,
+    pub(crate) draft_placement: Option<DraftPlacement>,
+    repo_placement_path: Option<String>,
+    repo_placement_read: Option<Task<()>>,
+    repo_placement: Option<WorkspaceChoice>,
+    inherit_repo_placement: bool,
     pub claude_effort: Option<String>,
     /// Stored follow-up. Claude can steer; Codex still queues.
     pub follow_up_steer: bool,
@@ -846,10 +914,24 @@ pub struct ChatView {
     response_media_bindings: std::collections::BTreeMap<String, String>,
     rich_embeds: std::rc::Rc<std::cell::RefCell<rich_response::RichEmbeds>>,
     pub model_picker_open: bool,
+    model_picker_dropdown: Option<&'static str>,
+    model_chip_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    pub(super) favorite_models: super::model_browser::Favorites,
+    model_browser_tab: Option<String>,
     model_picker_index: usize,
     /// Models each runtime's CLI listed for the account; refreshed on open.
+    pub(crate) model_options: bruhs_models::delivery::generation::GenerationOptions,
+    model_catalog_load: Option<Task<()>>,
+    pub(crate) model_catalog: std::sync::Arc<bruhs_models::delivery::writer_catalog::WriterCatalog>,
+    pub(crate) kiro_choices: kiro::KiroChoices,
+    kiro_agents: Option<bruhs_core::agent_extensions::kiro::Agents>,
+    kiro_agent_menu: bool,
+    picker_acp_instances: HashMap<String, (String, Option<u32>)>,
+    picker_availability: Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
     runtime_models: Vec<bruhs_models::runtime_models::Listing>,
     model_picker_scroll: ScrollHandle,
+    model_option_scroll: ScrollHandle,
+    model_picker_rail: FocusHandle,
     model_picker_query: Entity<InputState>,
     _model_picker_subscription: Subscription,
     /// The header's inline rename while it is open.
@@ -878,6 +960,10 @@ pub struct ChatView {
 impl EventEmitter<ChatViewEvent> for ChatView {}
 
 impl ChatView {
+    pub fn is_working(&self) -> bool {
+        self.is_streaming || self.running_tasks_count > 0
+    }
+
     /// The turn streaming now, told apart from the thread's earlier and
     /// later turns, or `None` while none is.
     pub(crate) fn streaming_turn(&self) -> Option<u64> {
@@ -910,8 +996,9 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> Self {
         let input_state = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder(CHAT_INPUT_PLACEHOLDER)
+            let mut field=TextareaState::new(window,cx);
+            field.set_markdown_enabled(true,cx);
+            field.placeholder(CHAT_INPUT_PLACEHOLDER)
                 .auto_grow(CHAT_COMPOSER_MIN_ROWS, CHAT_COMPOSER_MAX_ROWS)
                 .submit_on_enter(true)
         });
@@ -922,6 +1009,7 @@ impl ChatView {
             window,
             |this: &mut Self, _state, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
+                    this.schedule_restart_checkpoint(cx);
                     this.retarget_chips(cx);
                     this.sync_composer_hint_suppression(cx);
                     this.composer_hint_selected_index = 0;
@@ -953,7 +1041,7 @@ impl ChatView {
             },
         );
         let model_picker_query =
-            cx.new(|cx| InputState::new(window, cx).placeholder(MODEL_PICKER_SEARCH_PLACEHOLDER));
+            cx.new(|cx| InputState::new(window, cx).placeholder(super::model_browser::SEARCH_HINT));
         let _model_picker_subscription = cx.subscribe_in(
             &model_picker_query,
             window,
@@ -1110,7 +1198,8 @@ impl ChatView {
             };
             chat.update(cx, |this, cx| {
                 if this.model_picker_open {
-                    if this.handle_model_picker_key(key, picker_digit, window, cx) {
+                    if this.model_picker_dropdown.is_none() && (key == "escape" || picker_digit.is_some() || this.model_picker_query.focus_handle(cx).is_focused(window))
+                        && this.handle_model_picker_key(key, picker_digit, window, cx) {
                         cx.stop_propagation();
                     }
                     return;
@@ -1148,16 +1237,30 @@ impl ChatView {
             while task_events.recv().await.is_ok() {
                 if chat
                     .update(cx, |chat, cx| {
-                        let running_tasks_count =
-                            chat.thread_id.as_deref().map_or(0, |thread_id| {
-                                app.registry()
+                        let running_tasks: Vec<bruhs_core::BackgroundTask> =
+                            chat.thread_id.as_deref().map_or_else(Vec::new, |thread_id| {
+                                let mut rows: Vec<_> = app
+                                    .registry()
                                     .get_by_thread(thread_id)
-                                    .iter()
+                                    .into_iter()
                                     .filter(|task| task.status == TaskStatus::Running)
-                                    .count()
+                                    .collect();
+                                rows.sort_by_key(|task| task.started_at);
+                                rows
                             });
-                        if chat.running_tasks_count != running_tasks_count {
+                        let running_tasks_count = running_tasks.len();
+                        let count_changed = chat.running_tasks_count != running_tasks_count;
+                        let list_changed = count_changed
+                            || chat.running_tasks.len() != running_tasks.len()
+                            || chat.running_tasks.iter().zip(&running_tasks).any(|(a, b)| {
+                                a.id != b.id || a.label != b.label || a.kind != b.kind
+                            });
+                        if list_changed {
+                            chat.running_tasks = running_tasks;
                             chat.running_tasks_count = running_tasks_count;
+                            if count_changed {
+                                cx.emit(ChatViewEvent::RunningTasksChanged);
+                            }
                             cx.notify();
                         }
                     })
@@ -1191,8 +1294,11 @@ impl ChatView {
             details_trigger: cx.focus_handle().tab_stop(true),
             details_trigger_bounds: Default::default(),
             details_open: Default::default(),
+            restart_turn: None,
+            restart_checkpoint: None,
             reported_limit: None,
             running_tasks_count: 0,
+            running_tasks: Vec::new(),
             permission_mode: PermissionMode::Default,
             project_permission_override: false,
             text_generation_model: bruhs_models::logic::prompt_suggestion::default_suggestion_model(AgentProvider::for_model(&model_id)).to_owned(),
@@ -1270,6 +1376,11 @@ impl ChatView {
             run_locked: false,
             effort: None,
             run_choice: WorkspaceChoice::Checkout,
+            draft_placement: None,
+            repo_placement_path: None,
+            repo_placement_read: None,
+            repo_placement: None,
+            inherit_repo_placement: false,
             claude_effort: None,
             readout: Default::default(),
             send_shortcut: SendShortcut::default(),
@@ -1317,9 +1428,23 @@ impl ChatView {
             response_media_bindings: Default::default(),
             rich_embeds: Default::default(),
             model_picker_open: false,
+            model_picker_dropdown: None,
+            model_chip_bounds: Default::default(),
+            favorite_models: Default::default(),
+            model_browser_tab: None,
             model_picker_index: 0,
+            model_options:Default::default(),
+            model_catalog:Default::default(),
+            model_catalog_load:None,
+            kiro_choices: Default::default(),
+            kiro_agents: None,
+            kiro_agent_menu: false,
+            picker_acp_instances: HashMap::new(),
+            picker_availability: Ok(Default::default()),
             runtime_models: Vec::new(),
             model_picker_scroll: ScrollHandle::new(),
+            model_option_scroll: ScrollHandle::new(),
+            model_picker_rail: cx.focus_handle(),
             model_picker_query,
             _model_picker_subscription,
             title_rename: None,
@@ -1336,6 +1461,7 @@ impl ChatView {
             _registry_subscription: registry_subscription,
             _tasks_count_task,
         };
+        view.refresh_kiro_choices();
         view.start_initial_claude_auth_check(cx);
         if AgentProvider::for_model(&view.model_id) == AgentProvider::Codex {
             view.start_initial_codex_auth_check(cx);
@@ -1359,6 +1485,31 @@ impl ChatView {
     fn forget_message_expansions(&mut self) {
         self.expanded_folds.clear();
         self.expanded_thinking.clear();
+    }
+
+    /// A host receipt can arrive after a newer interactive turn. Keep each
+    /// prompt beside its answer and discard index-based caches after an insertion.
+    pub(crate) fn insert_scheduled_exchange(&mut self, request: Message, answer: Message) {
+        let end = answer.completed_at_ms.unwrap_or_default();
+        let later = self.messages.iter().position(|m| {
+            m.role == MessageRole::Assistant && m.started_at_ms.is_some_and(|t| t > end)
+        });
+        if let Some(assistant) = later {
+            let index = assistant
+                .checked_sub(1)
+                .filter(|i| self.messages[*i].role == MessageRole::User)
+                .unwrap_or(assistant);
+            self.messages.splice(index..index, [request, answer]);
+            self.content_blocks.truncate(index);
+            self.rich_embeds.borrow_mut().truncate(index);
+            self.forget_message_expansions();
+            self.expanded_rows.clear();
+            if self.messages_viewport.item_count() == self.messages.len() - 2 {
+                self.messages_viewport.splice(index..index, 2);
+            }
+        } else {
+            self.messages.extend([request, answer]);
+        }
     }
 
     pub fn start_thread(
@@ -1394,6 +1545,10 @@ impl ChatView {
         self.worktree_path = None;
         self.project_settings_root = None;
         self.run_locked = false;
+        self.draft_placement = None;
+        self.repo_placement_path = None;
+        self.repo_placement = None;
+        self.inherit_repo_placement = false;
         self.effort = None;
         self.placing = false;
         self.place_task = None;
@@ -1426,21 +1581,28 @@ impl ChatView {
         self.pending_permission = None;
         self.clear_mention_hints();
         self.abandon_turn();
-        self.running_tasks_count = self.thread_id.as_deref().map_or(0, |thread_id| {
-            cx.global::<DesktopState>()
+        self.running_tasks = self.thread_id.as_deref().map_or_else(Vec::new, |thread_id| {
+            let mut rows: Vec<_> = cx
+                .global::<DesktopState>()
                 .app
                 .registry()
                 .get_by_thread(thread_id)
-                .iter()
+                .into_iter()
                 .filter(|task| task.status == TaskStatus::Running)
-                .count()
+                .collect();
+            rows.sort_by_key(|task| task.started_at);
+            rows
         });
+        self.running_tasks_count = self.running_tasks.len();
         cx.notify();
     }
 
     pub fn set_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         self.dismiss_prompt_suggestion(cx);
-        self.model_id = model_id.into();
+        let model_id=model_id.into();
+        if model_id!=self.model_id {self.model_options=Default::default();}
+        self.model_id = model_id;
+        self.refresh_kiro_choices();
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
         }
@@ -1457,12 +1619,64 @@ impl ChatView {
         self.run_locked || self.worktree_path.is_some()
     }
 
-    /// Native Claude and Codex turns support the composer's effort control.
+    /// Model-specific reasoning settings available on this turn.
     pub(super) fn effort_chip_visible(&self) -> bool {
-        matches!(
-            bruhs_models::agent::AgentProvider::for_model(&self.model_id),
-            bruhs_models::agent::AgentProvider::Claude | bruhs_models::agent::AgentProvider::Codex
-        )
+        !self.kiro_efforts().is_empty() || self.native_model().is_some_and(|m|!m.options.is_empty())
+    }
+
+    /// A draft selection survives shared preference updates and reopening the workspace.
+    pub(crate) fn resolve_draft_placement(
+        &mut self,
+        default: Option<WorkspaceChoice>,
+        cx: &mut Context<'_, Self>,
+    ) -> WorkspaceChoice {
+        let explicit = self
+            .draft_placement
+            .as_ref()
+            .map(|draft| draft.choice)
+            .or(default);
+        self.inherit_repo_placement = explicit.is_none() && self.project_scoped;
+        if self.inherit_repo_placement {
+            let scope = self.settings_project_path();
+            if self.repo_placement_path.as_deref() != Some(scope) {
+                self.repo_placement = None;
+                self.refresh_repo_placement(cx);
+            }
+        } else {
+            self.repo_placement_path = None;
+            self.repo_placement = None;
+        }
+        explicit.or(self.repo_placement).unwrap_or_default()
+    }
+
+    fn refresh_repo_placement(&mut self, cx: &mut Context<'_, Self>) {
+        if !self.inherit_repo_placement {
+            return;
+        }
+        let scope = self.settings_project_path().to_owned();
+        self.repo_placement_path = Some(scope.clone());
+        let path = PathBuf::from(&scope);
+        let read = cx.background_spawn(async move {
+            bruhs_core::git::project_checkout_defaults(&path).placement
+        });
+        self.repo_placement_read = Some(cx.spawn(async move |this, cx| {
+            let value = read.await;
+            let _ = this.update(cx, |chat, cx| chat.update_repo_placement(&scope, value, cx));
+        }));
+    }
+
+    pub(crate) fn update_repo_placement(
+        &mut self,
+        scope: &str,
+        value: Option<WorkspaceChoice>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.inherit_repo_placement && self.settings_project_path() == scope {
+            self.repo_placement_read = None;
+            self.repo_placement = value;
+            self.run_choice = value.unwrap_or_default();
+            cx.notify();
+        }
     }
 
     pub(super) fn apply_run_prefs(
@@ -1476,7 +1690,7 @@ impl ChatView {
     ) {
         self.run_choice = choice;
         self.claude_effort = effort;
-        self.previous_worktree = previous;
+        self.previous_worktree = self.draft_placement.as_ref().and_then(|draft|draft.previous.clone()).or(previous);
         self.base_branch = base_branch;
         self.follow_up_steer = composer.follow_up_steer;
         self.claude_autocompact = composer.autocompact;
@@ -1504,9 +1718,7 @@ impl ChatView {
 
     pub(super) fn emit_run_prefs(&mut self, cx: &mut Context<'_, Self>) {
         cx.emit(ChatViewEvent::RunPrefs {
-            choice: self.run_choice,
             effort: self.claude_effort.clone(),
-            previous: self.previous_worktree.clone(),
             base_branch: self.base_branch.clone(),
             composer: self.composer_prefs(),
         });
@@ -1569,6 +1781,10 @@ impl ChatView {
     }
 
     /// Original project of a thread placed on a managed worktree.
+    fn provider_enabled_for_chat(&self, provider: AgentProvider) -> bool {
+        bruhs_core::agent_extensions::availability::require_enabled_for_project(provider, self.project_path.as_ref()).is_ok()
+    }
+
     pub(crate) fn settings_project_path(&self)->&str {
         self.project_settings_root.as_deref().unwrap_or(&self.project_path)
     }
@@ -1599,6 +1815,10 @@ impl ChatView {
             self.worktree_path = None;
         self.project_settings_root = None;
             self.run_locked = false;
+            self.draft_placement = None;
+            self.repo_placement_path = None;
+            self.repo_placement = None;
+            self.inherit_repo_placement = false;
             self.run_choice = WorkspaceChoice::Checkout;
             self.previous_worktree = None;
             self.base_branch.clear();
@@ -2076,6 +2296,174 @@ fn element_key(value: &str) -> u64 {
     hasher.finish()
 }
 
+impl ChatView {
+    fn render_active_runs_strip(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let count = self.running_tasks.len();
+        let summary = if count == 1 {
+            match self.running_tasks[0].kind {
+                bruhs_core::TaskKind::Swarm => "1 teamwork worker running".to_string(),
+                bruhs_core::TaskKind::Subagent => "1 subagent running".to_string(),
+                bruhs_core::TaskKind::BackgroundAgent => "1 background agent running".to_string(),
+                bruhs_core::TaskKind::Shell => "1 background run".to_string(),
+            }
+        } else {
+            format!("{count} active runs")
+        };
+        let dot = div()
+            .size(px(7.0))
+            .rounded_full()
+            .flex_shrink_0()
+            .bg(theme::blueberry_400());
+        let indicator: AnyElement = if !crate::motion::reduce_motion(cx) {
+            dot.with_animation(
+                "desktop-active-runs-pulse",
+                Animation::new(Duration::from_millis(1600)).repeat(),
+                |el, delta| {
+                    let opacity = if delta < 0.5 {
+                        1.0 - delta * 1.1
+                    } else {
+                        0.45 + (delta - 0.5) * 1.1
+                    };
+                    el.opacity(opacity.clamp(0.45, 1.0))
+                },
+            )
+            .into_any_element()
+        } else {
+            dot.into_any_element()
+        };
+        let visible = self.running_tasks.iter().take(4);
+        let overflow = count.saturating_sub(4);
+        div()
+            .debug_selector(|| "desktop-chat-active-runs".to_string())
+            .w_full()
+            .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
+            .pb_2()
+            .flex_shrink_0()
+            .child(
+                div()
+                    .w_full()
+                    .mx_auto()
+                    .when_some(self.chat_width.limit(), |el, limit| el.max_w(px(limit)))
+                    .rounded(px(10.0))
+                    .bg(theme::longan_900())
+                    .border_1()
+                    .border_color(theme::ring_panel())
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .flex_col()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .child(indicator)
+                                    .child(
+                                        div()
+                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                            .text_size(px(12.0))
+                                            .text_color(theme::rambutan_200())
+                                            .child(format!("Working · {summary}")),
+                                    ),
+                            )
+                            .child(
+                                web_button(
+                                    "desktop-active-runs-open-tasks",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label("Open tasks panel")
+                                .on_click(cx.listener(|_this, _, _, cx| {
+                                    cx.emit(ChatViewEvent::ToggleTasks);
+                                }))
+                                .child("Tasks"),
+                            ),
+                    )
+                    .children(visible.map(|task| {
+                        let stop_id = task.id.clone();
+                        let row_key = element_key(&task.id);
+                        let (bg, fg) = match task.kind {
+                            bruhs_core::TaskKind::Swarm => {
+                                (theme::blueberry_400().opacity(0.16), theme::blueberry_400())
+                            }
+                            bruhs_core::TaskKind::Subagent => {
+                                (theme::mangosteen_400().opacity(0.16), theme::mangosteen_400())
+                            }
+                            bruhs_core::TaskKind::BackgroundAgent => {
+                                (theme::pandan_400().opacity(0.16), theme::pandan_400())
+                            }
+                            bruhs_core::TaskKind::Shell => {
+                                (theme::longan_800(), theme::rambutan_400())
+                            }
+                        };
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .px_1p5()
+                                    .py(px(1.0))
+                                    .rounded(px(4.0))
+                                    .bg(bg)
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .text_size(px(10.0))
+                                    .text_color(fg)
+                                    .child(task.kind.badge_label()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_family(theme::CODE_FONT_FAMILY)
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_300())
+                                    .child(task.label.clone()),
+                            )
+                            .child(
+                                web_button(
+                                    ("desktop-active-run-stop", row_key),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label(format!("Stop {}", task.label))
+                                .on_click(cx.listener(move |_this, _, _, cx| {
+                                    let _ = cx
+                                        .global::<DesktopState>()
+                                        .app
+                                        .registry()
+                                        .stop_task(&stop_id);
+                                }))
+                                .child("Stop"),
+                            )
+                    }))
+                    .when(overflow > 0, |el| {
+                        el.child(
+                            div()
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .text_size(px(11.0))
+                                .text_color(theme::rambutan_500())
+                                .child(format!("+{overflow} more in Tasks")),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.hide_blocked_prompt_suggestion(cx);
@@ -2164,7 +2552,10 @@ impl Render for ChatView {
             .flex_1()
             .h_full()
             .min_w_0()
-            .bg(cx.theme().background)
+            .bg(cx.theme().color_role("cssConversationBackground").or_else(|| cx.theme().color_role("canvas")).unwrap_or(cx.theme().background))
+            .when(cx.theme().color_role("cssConversationBackground").is_none(), |el| el.theme_region("canvas", cx))
+            .children(crate::views::workspace::appearance::background_layer("Conversation", cx))
+            .when_some(cx.theme().color_role("cssConversationForeground"), |el, color| el.text_color(color))
             .flex()
             .flex_col()
             .child(self.readout.element())
@@ -2188,6 +2579,9 @@ impl Render for ChatView {
                         })
                         .when(self.pending_secret.is_some(), |el| {
                             el.child(self.render_secret_prompt(window, cx))
+                        })
+                        .when(!self.running_tasks.is_empty(), |el| {
+                            el.child(self.render_active_runs_strip(cx))
                         })
                         .child(
                             div()
@@ -2220,6 +2614,9 @@ impl Render for ChatView {
                 })
                 .when(self.pending_secret.is_some(), |el| {
                     el.child(self.render_secret_prompt(window, cx))
+                })
+                .when(!self.running_tasks.is_empty(), |el| {
+                    el.child(self.render_active_runs_strip(cx))
                 })
                 .child(
                     div()

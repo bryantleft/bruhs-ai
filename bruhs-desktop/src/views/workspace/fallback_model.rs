@@ -21,31 +21,74 @@ impl Workspace {
     }
 
     pub(super) fn fallback_row(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let mut choices = vec![("off", "Off")];
-        choices.extend(
+        let mut options = vec![DropdownOption {
+            value: "off",
+            label: "Off".into(),
+            description: None,
+        }];
+        options.extend(
             MODEL_CATALOG
                 .iter()
-                .filter(|model| !model.provider.is_external())
-                .map(|model| (model.id, model.label)),
+                .filter(|m| !m.provider.is_external())
+                .map(|m| DropdownOption {
+                    value: m.id,
+                    label: m.label.into(),
+                    description: None,
+                }),
+        );
+        options.extend(self.thread_catalog.models.iter().filter(|m|model_info(&m.id).is_none()).map(|m|DropdownOption{
+            value:bruhs_ui::dropdown::saved_option_value(&m.id),label:m.label.clone(),description:None,
+        }));
+        for instance in self.acp_models.iter().filter(|i| {
+            self.provider_availability
+                .as_ref()
+                .is_ok_and(|prefs| i.enabled(prefs))
+        }) {
+            options.extend(instance.choices.iter().map(|m| DropdownOption {
+                value: bruhs_ui::dropdown::saved_option_value(&m.id),
+                label: m.label.clone(),
+                description: None,
+            }));
+        }
+        let model = self.fallback_model.as_deref().unwrap_or("off");
+        let (toggle, select) = self.settings_dropdown_handlers("settings-fallback-model", cx);
+        let picker = dropdown(
+            "settings-fallback-model",
+            "Fallback model",
+            model,
+            vec![DropdownGroup {
+                label: None,
+                mark: None,
+                options,
+            }],
+            self.settings_listbox("settings-fallback-model"),
+            toggle,
+            select,
         );
         self.settings_row(
             "settings-row-fallback-model",
             "Fallback model",
             "Start new threads with this model when the selected provider is out of usage.",
-            self.choice_control(
-                "settings-fallback-model",
-                "Fallback model",
-                self.fallback_model.as_deref().unwrap_or("off"),
-                &choices,
-                cx,
-            ),
+            div().w(px(self.model_control_width(Some(model)))).max_w_full().min_w_0()
+                .child(self.with_model_options(model, true, picker, cx)).into_any_element(),
         )
     }
 
     pub(super) fn choose_fallback_model(&mut self, value: &str, cx: &mut Context<'_, Self>) {
-        if value != "off" && !model_info(value).is_some_and(|m| !m.provider.is_external()) {
+        let available_instance = self.acp_models.iter().any(|i| {
+            self.provider_availability
+                .as_ref()
+                .is_ok_and(|p| i.enabled(p))
+                && i.choices.iter().any(|m| m.id == value)
+        });
+        if value != "off"
+            && !model_info(value).is_some_and(|m| !m.provider.is_external())
+            && self.thread_catalog.model(value).is_none()
+            && !available_instance
+        {
             return;
         }
+        if self.fallback_model.as_deref()!=Some(value) {self.fallback_options=Default::default();}
         self.fallback_model = (value != "off").then(|| value.to_owned());
         self.monitor_provider_capacity(cx);
         self.persist_and_notify(cx);

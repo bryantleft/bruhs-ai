@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
-    merged: bool,
-    keep: bool,
+    pub(super) merged: bool,
+    pub(super) keep: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,27 +190,14 @@ impl Workspace {
             "off" => Some(false),
             _ => return,
         };
-        let merged = id == "settings-settle-merged";
-        let scope = &self.settings_project_scope;
-        if scope.is_empty() {
-            let Some(value) = next else { return };
-            if merged {
-                self.pull_preferences.merged = value
-            } else {
-                self.pull_preferences.keep = value
-            }
-        } else {
-            let prefs = self.project_defaults.entry(scope.clone()).or_default();
-            if merged {
-                prefs.settle_merged = next
-            } else {
-                prefs.keep_pull = next
-            }
-            if *prefs == Default::default() {
-                self.project_defaults.remove(scope);
-            }
+        let setting = match id {
+            "settings-settle-merged" => ScopedSwitch::Merged,
+            "settings-keep-pull" => ScopedSwitch::KeepPull,
+            _ => return,
+        };
+        if next.is_some() || !self.settings_project_scope.is_empty() {
+            setting.choose(self, next, cx);
         }
-        self.persist_and_notify(cx);
     }
 
     pub(super) fn pull_settlement_rows(
@@ -218,53 +205,19 @@ impl Workspace {
         inactivity: bool,
         cx: &Context<'_, Self>,
     ) -> Vec<AnyElement> {
-        let scope = &self.settings_project_scope;
-        let project = self.project_defaults.get(scope);
-        let rows = [
-            (
-                "desktop-row-settle-merged",
-                "settings-settle-merged",
-                "Auto-settle merged threads",
-                "Settle a thread when its pull request merges. Closed pull requests still settle automatically.",
-                self.pull_preferences.merged,
-                project.and_then(|p| p.settle_merged),
-            ),
-            (
-                "desktop-row-keep-pull",
-                "settings-keep-pull",
-                "Keep threads with a PR",
+        let mut rows = vec![self.scoped_switch_row(
+            ScopedSwitch::Merged, "settings-settle-merged", "desktop-row-settle-merged", "Auto-settle merged threads",
+            "Settle a thread when its pull request merges. Closed pull requests still settle automatically.",
+            self.pull_preferences.merged, cx,
+        )];
+        if inactivity {
+            rows.push(self.scoped_switch_row(
+                ScopedSwitch::KeepPull, "settings-keep-pull", "desktop-row-keep-pull", "Keep threads with a PR",
                 "Keep threads with an open pull request active during periods of inactivity.",
-                self.pull_preferences.keep,
-                project.and_then(|p| p.keep_pull),
-            ),
-        ];
-        rows.into_iter()
-            .filter(|(_, id, ..)| inactivity || *id == "settings-settle-merged")
-            .map(|(row, id, label, description, default, over)| {
-                let control = if scope.is_empty() {
-                    settings_ui::switch(id, default, false, label, cx, move |this, _, cx| {
-                        this.choose_pull_policy(id, if default { "off" } else { "on" }, cx)
-                    })
-                } else {
-                    settings_ui::control_column(self.choice_control(
-                        id,
-                        label,
-                        match over {
-                            Some(true) => "on",
-                            Some(false) => "off",
-                            None => "inherit",
-                        },
-                        &[
-                            ("inherit", "Use environment default"),
-                            ("on", "On"),
-                            ("off", "Off"),
-                        ],
-                        cx,
-                    ))
-                };
-                self.settings_row(row, label, description, control)
-            })
-            .collect()
+                self.pull_preferences.keep, cx,
+            ));
+        }
+        rows
     }
 }
 

@@ -307,7 +307,7 @@ impl PaletteItem {
     pub(super) fn group(&self) -> &'static str {
         match self {
             Self::Action(action) => action.group,
-            Self::Project{..} => "Projects",
+            Self::LinkedProject(_) | Self::Project { .. } => "Projects",
             Self::Thread { .. } => "Threads",
             Self::Server { .. } => preview::LOCAL_SERVERS_GROUP,
             Self::Record(_) => "Records",
@@ -317,7 +317,8 @@ impl PaletteItem {
     pub(super) fn label(&self) -> String {
         match self {
             Self::Action(action) => action.label.to_string(),
-            Self::Project{name,..} => name.clone(),
+            Self::LinkedProject(p) => p.name.clone(),
+            Self::Project { name, .. } => name.clone(),
             Self::Thread { title, .. } => title.clone(),
             Self::Server { port, .. } => preview::local_server_label(*port),
             Self::Record(hit) => format!("{}: {}", hit.document.kind.label(), hit.document.title),
@@ -327,7 +328,8 @@ impl PaletteItem {
     pub(super) fn hint(&self) -> String {
         match self {
             Self::Action(action) => action.hint.to_string(),
-            Self::Project{path,..} => path.clone(),
+            Self::LinkedProject(p) => format!("View in Settings · {} · {}", p.environment, p.path),
+            Self::Project { path, .. } => path.clone(),
             Self::Thread { hint, .. } => hint.clone(),
             Self::Server { command, .. } => command.clone(),
             Self::Record(hit) => hit.document.subtitle.clone(),
@@ -337,7 +339,10 @@ impl PaletteItem {
     pub(super) fn selector(&self) -> String {
         match self {
             Self::Action(action) => format!("desktop-command-action-{}", action.id),
-            Self::Project{path,..} => format!("desktop-command-project-{}",element_key(path)),
+            Self::LinkedProject(p) => {
+                format!("desktop-command-linked-project-{}", element_key(&p.scope()))
+            }
+            Self::Project { path, .. } => format!("desktop-command-project-{}", element_key(path)),
             Self::Thread { id, .. } => format!("desktop-command-thread-{}", element_key(id)),
             Self::Server { port, .. } => format!("desktop-command-server-{port}"),
             Self::Record(hit) => format!(
@@ -626,6 +631,8 @@ impl Workspace {
         // Web ⌘K: toggles the bar alone; a form dialog under it stays open.
         let should_open = !self.command_bar_visible();
         if should_open {
+            self.refresh_project_identities(cx);
+            self.refresh_linked_projects(false, cx);
             self.open_top_layer(TopLayer::CommandBar);
         } else {
             self.leave_import_dialog();
@@ -646,6 +653,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if matches!(mode, PaletteMode::Commands) {
+            self.refresh_project_identities(cx);
+            self.refresh_linked_projects(false, cx);
+        }
         self.palette_mode = mode;
         self.open_top_layer(TopLayer::CommandBar);
         self.reset_and_focus_command_input(window, cx);
@@ -711,7 +722,7 @@ impl Workspace {
         let place = if thread.project_name.is_empty() {
             "Chat".to_string()
         } else {
-            thread.project_name.clone()
+            self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name).to_owned()
         };
         PaletteItem::Thread {
             id: thread.id.clone(),
@@ -734,7 +745,7 @@ impl Workspace {
                 }
                 let chat = thread.chat.read(cx);
                 text_matches_query(&chat.thread_title, query)
-                    || text_matches_query(&thread.project_name, query)
+                    || text_matches_query(self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name), query)
                     || chat
                         .messages
                         .iter()
@@ -790,7 +801,45 @@ impl Workspace {
                     .map(PaletteItem::Action)
                     .collect();
                 if !query.is_empty() {
-                    items.extend(self.listed_projects().into_iter().filter(|p|text_matches_query(&format!("project {} {}",p.name,p.path),&query)).map(|p|PaletteItem::Project{path:p.path,name:p.name}));
+                    for group in self.grouped_projects() {
+                        let grouped = group.members.len() > 1;
+                        let mut matches = group.members.iter().filter(|p| {
+                            text_matches_query(
+                                &format!(
+                                    "project {} {} {} {}",
+                                    p.name, p.path, group.label, p.environment
+                                ),
+                                &query,
+                            )
+                        });
+                        if let Some(first) = matches.next() {
+                            let target = self
+                                .active_project
+                                .as_ref()
+                                .and_then(|active| {
+                                    std::iter::once(first)
+                                        .chain(matches)
+                                        .find(|p| p.host.is_none() && p.path == active.path)
+                                })
+                                .unwrap_or(first);
+                            let name = if grouped {
+                                group.label
+                            } else {
+                                target.name.clone()
+                            };
+                            items.push(if target.host.is_some() {
+                                PaletteItem::LinkedProject(project_grouping::Member {
+                                    name,
+                                    ..target.clone()
+                                })
+                            } else {
+                                PaletteItem::Project {
+                                    path: target.path.clone(),
+                                    name,
+                                }
+                            });
+                        }
+                    }
                     items.extend(self.matching_thread_items(&query, cx));
                     let thread_ids: HashSet<_> = items
                         .iter()
@@ -827,7 +876,10 @@ impl Workspace {
     ) {
         match item {
             PaletteItem::Action(action) => self.execute_command_action(action.id, window, cx),
-            PaletteItem::Project{path,name} => self.open_palette_project(path,name,window,cx),
+            PaletteItem::LinkedProject(p) => self.open_linked_checkout(&p, window, cx),
+            PaletteItem::Project { path, name } => {
+                self.open_palette_project(path, name, window, cx)
+            }
             PaletteItem::Thread { id, .. } => {
                 self.close_transient_surfaces();
                 self.select_thread_by_id(&id, cx);

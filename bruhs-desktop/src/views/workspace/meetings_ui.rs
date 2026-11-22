@@ -2728,6 +2728,11 @@ impl Workspace {
         }
     }
 
+    pub(super) fn settings_has_notice(&self, cx: &Context<'_, Self>) -> bool {
+        self.settings_visible()
+            && self.meetings_hub.read(cx).notice.as_ref().is_some_and(|n| n.show_in_settings)
+    }
+
     /// Web `BannerStack`: a bounded notice rail below page content.
     pub(super) fn render_hub_notice(
         &self,
@@ -2819,6 +2824,7 @@ impl Workspace {
                                 theme::rambutan_100(),
                             )
                             .debug_selector(|| "desktop-hub-notice-dismiss".into())
+                            .debug_selector(|| "desktop-hub-notice-dismiss".into())
                             .my_neg_1()
                             .min_h(px(theme::CONTROL_PX))
                             .min_w(px(theme::CONTROL_PX))
@@ -2828,7 +2834,11 @@ impl Workspace {
                             .justify_center()
                             .map(|el| {
                                 on_press_view(el, cx, |this, window, cx| {
-                                    this.workspace_focus_handle.focus(window, cx);
+                                    if this.settings_visible() {
+                                        this.modal_start_focus_handle.focus(window, cx);
+                                    } else {
+                                        this.workspace_focus_handle.focus(window, cx);
+                                    }
                                     this.meetings_hub
                                         .update(cx, |hub, cx| hub.dismiss_notice(cx));
                                 })

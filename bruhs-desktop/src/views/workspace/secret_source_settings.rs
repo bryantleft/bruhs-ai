@@ -32,7 +32,7 @@ enum Editor {
     },
     Remove {
         id: String,
-        generators: Option<Vec<String>>,
+        consumers: Option<Vec<String>>,
     },
 }
 pub(super) struct SourceSettings {
@@ -62,6 +62,10 @@ impl SourceSettings {
         );
         cx.notify();
     }
+    pub(super) fn bindings(&self) -> &[bruhs_core::secret_sources::Binding] {
+        &self.data.bindings
+    }
+
     pub(super) fn sources(&self) -> &BTreeMap<String, Source> {
         &self.data.sources
     }
@@ -304,7 +308,7 @@ impl SourceSettings {
             }),
             Some(Editor::Remove {
                 id,
-                generators: Some(_),
+                consumers: Some(_),
             }) => Change::RemoveSource(id.clone()),
             Some(Editor::Remove { .. }) => return,
             None => return,
@@ -381,12 +385,21 @@ impl SourceSettings {
         self.trigger_id = format!("remove-source-{id}");
         self.editor = Some(Editor::Remove {
             id: id.clone(),
-            generators: None,
+            consumers: None,
         });
         self.cancel.focus(window, cx);
         let source = id.clone();
         let query = cx.background_spawn(async move {
-            bruhs_core::text_generators::secret_source_consumers(&source)
+            let mut uses = bruhs_core::text_generators::secret_source_consumers(&source)?
+                .into_iter()
+                .map(|g| format!("{g} · API key"))
+                .collect::<Vec<_>>();
+            uses.extend(
+                bruhs_core::agent_extensions::environment::source_consumers(&source)
+                    .map_err(|e| e.to_string())?,
+            );
+            uses.extend(bruhs_core::usage_hubs::source_consumers(&source).map_err(|e| e.to_string())?);
+            Ok::<_, String>(uses)
         });
         cx.spawn(async move |this, cx| {
             let result = query.await;
@@ -394,12 +407,12 @@ impl SourceSettings {
                 this.busy = false;
                 if let Some(Editor::Remove {
                     id: current,
-                    generators,
+                    consumers,
                 }) = &mut this.editor
                 {
                     if *current == id {
                         match result {
-                            Ok(found) => *generators = Some(found),
+                            Ok(found) => *consumers = Some(found),
                             Err(error) => this.error = Some(error),
                         }
                     }

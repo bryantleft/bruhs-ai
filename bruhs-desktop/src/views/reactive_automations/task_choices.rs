@@ -1,11 +1,10 @@
 //! Projects and provider models for a scheduled task on the selected host.
 use super::*;
+use crate::views::model_browser::{self, Browser, FAVORITES, Favorites};
+pub(in crate::views) type ToggleFavorite = Rc<dyn Fn(&str, &mut App)>;
 use bruhs_models::agent::{AgentProvider, ModelId};
-use bruhs_models::runtime_models::{
-    listed_models, listing_error_line, replace_listing, Listing, RuntimeModels,
-    DISCOVERABLE_PROVIDERS,
-};
-use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
+use bruhs_models::delivery::writer_catalog::WriterCatalog;
+use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox, saved_option_value};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TaskField {
@@ -28,6 +27,8 @@ pub(super) struct TaskPickerState {
     pub(super) open: Option<TaskField>,
     project_trigger: FocusHandle,
     model_trigger: FocusHandle,
+    model_tab: Option<String>,
+    model_rail: FocusHandle,
     thread_trigger: FocusHandle,
     thread_results: Vec<TaskThreadChoice>,
     thread_search: Option<Task<()>>,
@@ -37,12 +38,35 @@ pub(super) struct TaskPickerState {
     reset_thread: Option<bruhs_models::ids::ThreadId>,
     search: Entity<InputState>,
     _search_changes: gpui::Subscription,
-    listings: Vec<Listing>,
+    catalog_project: Option<String>,
+    catalog: Option<Result<WriterCatalog, String>>,
     listing_request: Option<uuid::Uuid>,
     follow_project_model: bool,
 }
 
 impl TaskPickerState {
+    pub(super) fn model_problem(&self, project: &str, model: &str) -> Option<&'static str> {
+        let provider = AgentProvider::for_model(model);
+        if provider.is_external() {
+            return Some(
+                "This provider cannot run unattended tasks. Choose a Claude or Codex model, or a conversation using one.",
+            );
+        }
+        let catalog = self.catalog.as_ref()?.as_ref().ok()?;
+        if self.catalog_project.as_deref() != Some(project) {
+            return None;
+        }
+        if catalog.models.is_empty() {
+            return Some("Enable Claude or Codex for this project in Providers & updates.");
+        }
+        if !catalog.models.iter().any(|row| row.provider == provider) {
+            return Some(
+                "The selected provider is disabled for this project. Choose another model or enable the provider in Settings.",
+            );
+        }
+        None
+    }
+
     pub(super) fn displayed_thread(&self) -> Option<&TaskThreadChoice> {
         self.chosen_thread
             .as_ref()
@@ -61,8 +85,14 @@ impl TaskPickerState {
             return None;
         }
         if let Some(choice) = &self.chosen_thread {
-            Some(TaskDestinationEdit::Existing {
-                thread_id: choice.thread_id.clone(),
+            Some(if choice.desktop_model.is_some() {
+                TaskDestinationEdit::Desktop {
+                    thread_id: choice.thread_id.clone(),
+                }
+            } else {
+                TaskDestinationEdit::Existing {
+                    thread_id: choice.thread_id.clone(),
+                }
             })
         } else {
             self.reset_thread
@@ -95,6 +125,8 @@ impl TaskPickerState {
             open: None,
             project_trigger: cx.focus_handle().tab_stop(true),
             model_trigger: cx.focus_handle().tab_stop(true),
+            model_tab: None,
+            model_rail: cx.focus_handle().tab_stop(true),
             thread_trigger: cx.focus_handle().tab_stop(true),
             thread_results: Vec::new(),
             thread_search: None,
@@ -104,7 +136,8 @@ impl TaskPickerState {
             reset_thread: None,
             search,
             _search_changes: subscription,
-            listings: Vec::new(),
+            catalog_project: None,
+            catalog: None,
             listing_request: None,
             follow_project_model: is_new,
         }
@@ -179,11 +212,58 @@ impl ReactiveAutomations {
         cx: &mut Context<'_, Self>,
     ) {
         if let Some(Editor::Automation(editor)) = &mut self.editor {
+            if editor.host_menu_open {
+                editor.host_menu_open = false;
+                cx.notify();
+            }
             if let Some(field) = editor.picker.open.take() {
                 editor.picker.trigger(field).focus(window, cx);
                 cx.notify();
             }
         }
+    }
+
+    pub(super) fn refresh_task_models(&mut self, refresh: bool, cx: &mut Context<'_, Self>) {
+        let Some(Editor::Automation(editor)) = &mut self.editor else {
+            return;
+        };
+        if editor.locked_agent().is_some() {
+            return;
+        }
+        let project = editor.project_path(cx);
+        let picker = &mut editor.picker;
+        if picker.catalog_project.as_ref() == Some(&project) {
+            if !refresh || picker.listing_request.is_some() {
+                return;
+            }
+        } else {
+            picker.catalog = None;
+            picker.catalog_project = Some(project.clone());
+        }
+        let request = uuid::Uuid::new_v4();
+        picker.listing_request = Some(request);
+        let client = self.client.clone();
+        let host = self.linked_task.as_ref().map(|edit| edit.host.clone());
+        let listing = spawn_tokio(cx, async move {
+            if let Some(host) = host {
+                host.models(&project).await
+            } else {
+                client.task_models(&project).await.map_err(reactive_error)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = listing.await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some(Editor::Automation(editor)) = &mut this.editor {
+                    if editor.picker.listing_request == Some(request) {
+                        editor.picker.catalog = Some(result);
+                        editor.picker.listing_request = None;
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     fn toggle_task_picker(
@@ -212,32 +292,8 @@ impl ReactiveAutomations {
                 input.focus(window, cx);
             });
             if field == TaskField::Model {
-                let request = uuid::Uuid::new_v4();
-                editor.picker.listing_request = Some(request);
-                for provider in DISCOVERABLE_PROVIDERS {
-                    let client = self.client.clone();
-                    let listing =
-                        spawn_tokio(
-                            cx,
-                            async move { client.task_runtime_models(provider).await },
-                        );
-                    cx.spawn(async move |this, cx| {
-                        let result = listing.await.unwrap_or_else(|error| RuntimeModels {
-                            models: Vec::new(),
-                            error: Some(reactive_error(error)),
-                        });
-                        let _ = this.update(cx, |this, cx| {
-                            if let Some(Editor::Automation(e)) = &mut this.editor {
-                                if e.picker.listing_request == Some(request)
-                                    && replace_listing(&mut e.picker.listings, provider, result)
-                                {
-                                    cx.notify();
-                                }
-                            }
-                        });
-                    })
-                    .detach();
-                }
+                editor.picker.model_tab = None;
+                self.refresh_task_models(true, cx);
             }
         }
         if field == TaskField::Thread {
@@ -275,6 +331,8 @@ impl ReactiveAutomations {
                             .and_then(|all| all.get(&sub.id))
                             .cloned()
                             .unwrap_or_else(|| TaskThreadChoice {
+                                agent_model: Some(agent.model.clone()),
+                                desktop_model: None,
                                 thread_id: id.clone(),
                                 title: sub.title(agent).into(),
                                 agent_id: agent.id.clone(),
@@ -291,6 +349,7 @@ impl ReactiveAutomations {
             return;
         }
         let client = self.client.clone();
+        let host = self.linked_task.as_ref().map(|edit| edit.host.clone());
         editor.picker.thread_search = Some(cx.spawn(async move |panel, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(100))
@@ -298,7 +357,10 @@ impl ReactiveAutomations {
             let request = cx.update(|cx| {
                 spawn_tokio(
                     cx,
-                    async move { client.task_threads(&project, &query).await },
+                    async move {
+                        if let Some(host) = host { host.conversations(&project, &query).await }
+                        else { client.task_threads(&project, &query).await.map_err(reactive_error) }
+                    },
                 )
             });
             let result = request.await;
@@ -311,7 +373,7 @@ impl ReactiveAutomations {
                 }
                 match result {
                     Ok(threads) => e.picker.thread_results = threads,
-                    Err(error) => e.picker.thread_error = Some(reactive_error(error)),
+                    Err(error) => e.picker.thread_error = Some(error),
                 }
                 cx.notify();
             });
@@ -327,7 +389,14 @@ impl ReactiveAutomations {
         let selected = state.displayed_thread();
         let mut choices = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
-        for choice in selected.into_iter().chain(&state.thread_results) {
+        let current = selected.map(|c| {
+            state
+                .thread_results
+                .iter()
+                .find(|item| item.thread_id == c.thread_id)
+                .unwrap_or(c)
+        });
+        for choice in current.into_iter().chain(&state.thread_results) {
             if seen.insert(&choice.thread_id) {
                 choices.push(choice.clone());
             }
@@ -344,7 +413,12 @@ impl ReactiveAutomations {
             if selected.is_some_and(|c| c.thread_id == choice.thread_id) {
                 key = row
             }
-            options.push(option(row, &choice.title, None));
+            let title = if choice.title.trim().is_empty() {
+                "Untitled thread"
+            } else {
+                &choice.title
+            };
+            options.push(option(row, title, None));
             selection.insert(row, choice);
         }
         let toggle = cx.weak_entity();
@@ -391,6 +465,7 @@ impl ReactiveAutomations {
                 });
             }),
         )
+        .leading_icon(crate::assets::MESSAGE_SQUARE_ICON_PATH)
         .empty_label("No threads found.")
         .placeholder("Started by the first run")
         .searchable(
@@ -416,13 +491,16 @@ impl ReactiveAutomations {
         mut projects: Vec<DropdownOption>,
         project_models: HashMap<String, String>,
         default_model: String,
+        favorites: Favorites,
+        toggle_favorite: ToggleFavorite,
         cx: &Context<'_, Self>,
-    ) -> Div {
+    ) -> (Div, Div) {
         let project = editor.project_path(cx);
         let model = editor.task_model(cx);
         let search = value(&editor.picker.search, cx);
         let query = search.trim();
-        let mut body = div().flex().flex_col().gap_3();
+        let mut project_field = div();
+        let mut model_field = div().flex().flex_col().gap_1();
 
         let project_key = if project.is_empty() || projects.iter().any(|p| p.value == project) {
             project.as_str()
@@ -431,6 +509,7 @@ impl ReactiveAutomations {
             CURRENT
         };
         if editor.picker.open == Some(TaskField::Project)
+            && self.linked_task.is_none()
             && !query.is_empty()
             && !projects.iter().any(|p| p.value == query)
             && (std::path::Path::new(query).is_absolute()
@@ -438,13 +517,20 @@ impl ReactiveAutomations {
         {
             projects.push(option(TYPED, &format!("Use folder “{query}”"), Some(query)));
         }
-        let models = listed_models(&editor.picker.listings);
+        let catalog = editor
+            .picker
+            .catalog
+            .as_ref()
+            .and_then(|result| result.as_ref().ok());
+        let models = catalog
+            .map(|catalog| catalog.models.as_slice())
+            .unwrap_or_default();
         let mut groups: Vec<DropdownGroup> = Vec::new();
-        for provider in AgentProvider::ALL {
+        for provider in [AgentProvider::Claude, AgentProvider::Codex] {
             let options: Vec<_> = models
                 .iter()
                 .filter(|m| m.provider == provider)
-                .map(|m| option(saved_option_value(&m.id), &m.label, Some(&m.id)))
+                .map(|m| option(saved_option_value(&m.id), &m.label, None))
                 .collect();
             if !options.is_empty() {
                 groups.push(DropdownGroup {
@@ -455,15 +541,26 @@ impl ReactiveAutomations {
             }
         }
         let mut extra = Vec::new();
-        let model_key = if models.iter().any(|m| m.id == model) {
-            model.as_str()
-        } else {
-            extra.push(option(CURRENT, &model, None));
-            CURRENT
-        };
+        let selected_model = catalog.and_then(|c| c.model(&model));
+        let model_key = selected_model.map_or(model.as_str(), |m| m.id.as_str());
+        let model_label = selected_model
+            .map_or_else(|| model.clone(), |m| m.label.clone());
+        let browser = Browser::new(
+            models.iter().map(|m| m.id.as_str()),
+            editor.picker.model_tab.as_deref(),
+            &model,
+            &favorites,
+        );
+        let browse = editor.picker.open == Some(TaskField::Model) && query.is_empty();
+        if browse {
+            browser.filter_groups(&mut groups, &favorites);
+        }
         if editor.picker.open == Some(TaskField::Model)
             && query != model
             && query.parse::<ModelId>().is_ok()
+            && models
+                .iter()
+                .any(|m| m.provider == AgentProvider::for_model(query))
             && !models.iter().any(|m| m.id == query)
             && (bruhs_models::agent::custom_model_selection(query).is_some()
                 || !groups.iter().any(|g| {
@@ -496,17 +593,24 @@ impl ReactiveAutomations {
                 project_key,
                 project_groups,
             ),
-            (TaskField::Model, "task-model", "Model", model_key, groups),
+            (
+                TaskField::Model,
+                "task-model",
+                "Model",
+                model_key,
+                groups,
+            ),
         ] {
             if field == TaskField::Model {
                 if let Some(choice) = editor.picker.displayed_thread() {
-                    let model = self
-                        .snapshot
-                        .iter()
-                        .flat_map(|s| &s.agents)
-                        .find(|a| a.id == choice.agent_id)
-                        .map_or("Unavailable", |a| a.model.as_str());
-                    body = body.child(
+                    let model = choice.desktop_model.as_deref().or(choice.agent_model.as_deref()).unwrap_or_else(|| {
+                        self.snapshot
+                            .iter()
+                            .flat_map(|s| &s.agents)
+                            .find(|a| a.id == choice.agent_id)
+                            .map_or("Unavailable", |a| a.model.as_str())
+                    });
+                    model_field = model_field.child(
                         div()
                             .flex()
                             .flex_col()
@@ -566,30 +670,95 @@ impl ReactiveAutomations {
             } else {
                 "Select a model"
             });
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(muted(label))
-                    .child(picker),
-            );
-        }
-        if editor.picker.open == Some(TaskField::Model) {
-            for provider in DISCOVERABLE_PROVIDERS {
-                if let Some(message) = listing_error_line(&editor.picker.listings, provider) {
-                    body = body.child(
-                        muted(message.clone())
-                            .id(SharedString::from(format!(
-                                "task-model-status-{}",
-                                provider.as_str()
-                            )))
-                            .role(Role::Status)
-                            .aria_label(message),
+            let picker = if field == TaskField::Model {
+                let panel = cx.weak_entity();
+                let rail = browse.then(|| {
+                    let focus = &editor.picker.model_rail;
+                    let rail = browser.rail(
+                        "task-model",
+                        focus,
+                        editor.picker.search.focus_handle(cx),
+                        |id| (id.to_owned(), None),
+                        move |tab, window, cx| {
+                            let _ = panel.update(cx, |panel, cx| {
+                                if let Some(Editor::Automation(e)) = &mut panel.editor {
+                                    e.picker.model_tab = Some(tab);
+                                    e.picker
+                                        .search
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                    cx.notify();
+                                }
+                            });
+                        },
                     );
-                }
+                    (rail, focus.clone())
+                });
+                let stars = favorites.clone();
+                let toggle = toggle_favorite.clone();
+                let active = browser.active.clone();
+                let panel = cx.weak_entity();
+                picker
+                    .selection_label(model_label.clone(), None)
+                    .empty_label(if browse && active == FAVORITES {
+                        "No favorite models for this project."
+                    } else {
+                        "No matching models."
+                    })
+                    .option_accessories(rail, move |id| {
+                        if id == TYPED {
+                            return None;
+                        }
+                        let selected = stars.contains(&model_browser::favorite_key(id));
+                        let model = id.to_owned();
+                        let toggle = toggle.clone();
+                        let panel = panel.clone();
+                        let active = active.clone();
+                        Some(model_browser::star(
+                            "task-model",
+                            id,
+                            selected,
+                            move |_, cx| {
+                                let _ = panel.update(cx, |panel, _| {
+                                    if let Some(Editor::Automation(e)) = &mut panel.editor {
+                                        e.picker.model_tab = Some(active.clone());
+                                    }
+                                });
+                                toggle(&model, cx);
+                            },
+                        ))
+                    })
+            } else {
+                picker
+            };
+            let control = div().min_w_0().flex().flex_col().gap_1().child(muted(label)).child(picker);
+            if field == TaskField::Project {
+                project_field = control;
+            } else {
+                model_field = control;
             }
         }
-        body
+        let status = if editor.picker.open == Some(TaskField::Model)
+            && editor.picker.listing_request.is_some()
+        {
+            Some("Checking models on the task host…".to_owned())
+        } else if let Some(Err(error)) = &editor.picker.catalog {
+            Some(format!(
+                "Could not load task models. {error} Reopen Model to retry."
+            ))
+        } else {
+            editor
+                .picker
+                .model_problem(&project, &model)
+                .map(str::to_owned)
+        };
+        if let Some(status) = status {
+            model_field = model_field.child(
+                muted(status.clone())
+                    .id("task-model-status")
+                    .role(Role::Status)
+                    .aria_label(status),
+            );
+        }
+        (project_field, model_field)
     }
 }

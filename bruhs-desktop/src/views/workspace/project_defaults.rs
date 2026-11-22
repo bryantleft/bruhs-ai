@@ -5,10 +5,14 @@ use bruhs_models::logic::run_place::WorktreeSubmodules;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct ProjectDefaults {
+    #[serde(default,skip_serializing_if="crate::views::chat::kiro::KiroChoices::is_empty")]
+    pub kiro:crate::views::chat::kiro::KiroChoices,
     #[serde(skip_serializing_if="Option::is_none")]
     pub artwork:Option<super::project_art::Artwork>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    pub model_options: GenerationOptions,
     #[serde(skip_serializing_if="Option::is_none")]
     pub text_generation_model: Option<String>,
     /// Zero disables inactivity-based settlement. A missing override inherits the environment.
@@ -33,6 +37,8 @@ pub(super) struct ProjectDefaults {
     #[serde(skip_serializing_if="Option::is_none")]
     pub resume_limited:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")]
+    pub continue_threads:Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
     pub response_stream:Option<crate::views::chat::response_stream::Mode>,
     #[serde(skip_serializing_if="Option::is_none")]
     pub snooze_choices: Option<Vec<snooze_options::Choice>>,
@@ -51,6 +57,31 @@ pub(super) struct ProjectDefaults {
     pub submodules: Option<WorktreeSubmodules>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_from_remote: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<WorkspaceChoice>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DefaultModel;
+
+impl super::setting_source::ProjectSetting for DefaultModel {
+    fn project_label(self, prefs: &ProjectDefaults) -> Option<SharedString> {
+        prefs.model.as_deref().map(|id| {
+            model_info(id)
+                .map_or(id, |model| model.label)
+                .to_owned()
+                .into()
+        })
+    }
+
+    fn clear_project(self, prefs: &mut ProjectDefaults) {
+        prefs.model = None;
+        prefs.model_options=Default::default();
+    }
+
+    fn after_reset(self, ws: &mut Workspace, _: &mut Window, cx: &mut Context<'_, Workspace>) {
+        ws.persist_and_notify(cx);
+    }
 }
 
 impl Workspace {
@@ -188,11 +219,22 @@ impl Workspace {
             .and_then(|p| p.model.as_ref())
             .unwrap_or(&self.current_model);
         (
-            self.model_for_new_thread(model).to_owned(),
+            self.available_new_thread_model(path, model),
             prefs
                 .and_then(|p| p.permissions)
                 .unwrap_or(self.permission_mode),
         )
+    }
+
+    pub(super) fn available_new_thread_model(&self, path: &str, requested: &str) -> String {
+        let preferred = self.model_for_new_thread(requested);
+        let Ok(prefs) = bruhs_core::agent_extensions::availability::ProviderAvailability::load_for_project(path.as_ref())
+        else { return preferred.to_owned() };
+        let instances = std::cell::OnceCell::new();
+        let automatic = !self.explicit_model && self.project_defaults.get(path).is_none_or(|p| p.model.is_none());
+        self.enabled_new_thread_model(requested, automatic, &prefs, || {
+            instances.get_or_init(|| crate::views::acp_models::load().unwrap_or_default()).as_slice()
+        }).unwrap_or(requested).to_owned()
     }
 
     pub(super) fn settings_project_options(&self, cx: &App) -> Vec<DropdownOption> {
@@ -207,6 +249,10 @@ impl Workspace {
                     thread.project_name.as_str(),
                 );
             }
+        }
+        let listed = self.listed_projects();
+        for project in &listed {
+            projects.insert(&project.path, &project.name);
         }
         let saved_paths = self.project_defaults.keys().chain(self.project_actions.keys()).map(String::as_str);
         for path in saved_paths.chain(self.reactive_automations.read(cx).automation_project_paths())
@@ -280,12 +326,14 @@ impl Workspace {
                 prefs.response_stream = if value=="inherit" {None} else {let Some(mode)=crate::views::chat::response_stream::Mode::parse(value) else {return false};Some(mode)};
             }
             "settings-auto-pull" => {
-                prefs.auto_pull = match value {
+                let on = match value {
                     "inherit" => None,
                     "on" => Some(true),
                     "off" => Some(false),
                     _ => return false,
                 };
+                ScopedSwitch::AutoPull.choose(self, on, cx);
+                return true;
             }
             "settings-inactive-settlement" => {
                 let days = match value {
@@ -297,15 +345,6 @@ impl Workspace {
                 self.change_settle_days(days, cx);
                 return true;
             }
-            SETTINGS_MODEL_DROPDOWN_ID => {
-                prefs.model = match value {
-                    "inherit" => None,
-                    custom if bruhs_models::agent::custom_model_selection(custom).is_some() => {
-                        Some(custom.to_owned())
-                    }
-                    _ => model_info(value).map(|m| m.id.to_owned()).or(prefs.model),
-                };
-            }
             SETTINGS_ACCESS_MODE_DROPDOWN_ID => {
                 prefs.permissions = if value == "inherit" {
                     None
@@ -314,12 +353,14 @@ impl Workspace {
                 };
             }
             "settings-worktree-remote" => {
-                prefs.start_from_remote = match value {
+                let on = match value {
                     "inherit" => None,
                     "on" => Some(true),
                     "off" => Some(false),
                     _ => return false,
                 };
+                ScopedSwitch::Remote.choose(self, on, cx);
+                return true;
             }
             "settings-worktree-submodules" => {
                 prefs.submodules = match value {
@@ -336,9 +377,6 @@ impl Workspace {
             self.project_defaults.remove(&scope);
         } else {
             self.project_defaults.insert(scope, prefs);
-        }
-        if id == "settings-auto-pull" {
-            self.schedule_project_refresh(cx);
         }
         self.stamp_run_prefs_on_threads(cx);
         self.persist_and_notify(cx);

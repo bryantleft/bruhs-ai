@@ -207,21 +207,16 @@ pub(super) fn parse_desktop_auth_status(
     }
 
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
-        let authenticated = value
-            .get("authenticated")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-            || value
-                .get("loggedIn")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            || matches!(
-                value.get("status").and_then(serde_json::Value::as_str),
-                Some("authenticated") | Some("active")
-            )
-            || value.get("account").is_some()
-            || value.get("email").is_some()
-            || value.get("user").is_some();
+        let explicit = ["authenticated", "loggedIn"].iter().find_map(|key| value[key].as_bool());
+        let authenticated = explicit.unwrap_or_else(|| match value["status"].as_str() {
+            Some("authenticated" | "active") => true,
+            Some("unauthenticated" | "signed_out" | "inactive") => false,
+            _ => ["account","email","user"].iter().any(|key| {
+                let field = &value[key];
+                field.as_str().is_some_and(|text| !text.trim().is_empty())
+                    || field.as_object().is_some_and(|account| !account.is_empty())
+            })
+        });
 
         if !authenticated {
             return DesktopAuthStatus::default();
@@ -288,7 +283,8 @@ struct InitialAuthChecks {
 
 impl Global for InitialAuthChecks {}
 
-pub(super) fn auth_check_program(cx: &App) -> Option<Cow<'static, str>> {
+pub(super) fn auth_check_program(cx: &App, enabled: bool) -> Option<Cow<'static, str>> {
+    if !enabled { return None; }
     #[cfg(feature = "native-performance")]
     if let Some(program) = crate::native_performance::auth_fixture_program(cx) {
         return Some(Cow::Owned(program));
@@ -345,7 +341,7 @@ impl ChatView {
     }
 
     pub(super) fn start_initial_claude_auth_check(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(program) = auth_check_program(cx) else {
+        let Some(program) = auth_check_program(cx, self.provider_enabled_for_chat(AgentProvider::Claude)) else {
             cx.notify();
             return;
         };
@@ -409,7 +405,7 @@ impl ChatView {
 
     pub(super) fn start_claude_auth_check(&mut self, cx: &mut Context<'_, Self>) {
         self.initial_auth_pending = false;
-        if let Some(program) = auth_check_program(cx) {
+        if let Some(program) = auth_check_program(cx, self.provider_enabled_for_chat(AgentProvider::Claude)) {
             self.start_auth_check_with(program, cx);
         } else {
             cx.notify();

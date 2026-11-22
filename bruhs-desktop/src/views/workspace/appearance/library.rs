@@ -4,7 +4,7 @@ use serde_json::Value;
 
 pub(super) const MAX_THEME_BYTES: usize = 262_144;
 
-type Colors = BTreeMap<String, String>;
+pub(super) type Colors = BTreeMap<String, String>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct ThemeFile {
@@ -30,6 +30,7 @@ pub(super) struct InstalledTheme {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct InstalledPalette {
     pub(super) palette: Palette,
+    pub(super) images: super::background::Styles,
     pub(super) roles: bruhs_ui::theme::ColorRoles,
 }
 
@@ -235,7 +236,11 @@ pub(super) fn identifier(name: &str) -> String {
     format!("theme-{}", digits.into_iter().rev().collect::<String>())
 }
 
-fn native_palette(mode: ThemeMode, colors: &Colors) -> Result<InstalledPalette, String> {
+pub(super) fn native_palette(
+    mode: ThemeMode,
+    colors: &Colors,
+    css: &str,
+) -> Result<InstalledPalette, String> {
     if colors.is_empty() {
         return Err("Add at least one color role.".into());
     }
@@ -249,6 +254,7 @@ fn native_palette(mode: ThemeMode, colors: &Colors) -> Result<InstalledPalette, 
             .to_rgba8();
         parsed.insert(role.clone(), rgba);
     }
+    let images=super::stylesheet::apply(css, mode, &mut parsed);
     let mut palette = *ThemeFamily::Bruhs.palette(mode);
     let resolve = |roles: &[&str], fallback: u32, canvas: u32| {
         let Some([r, g, b, a]) = roles.iter().find_map(|role| parsed.get(*role).copied()) else {
@@ -291,6 +297,7 @@ fn native_palette(mode: ThemeMode, colors: &Colors) -> Result<InstalledPalette, 
         *value = resolve(roles, *value, canvas);
     }
     Ok(InstalledPalette {
+        images,
         palette,
         roles: Arc::new(parsed),
     })
@@ -348,13 +355,13 @@ impl TryFrom<ThemeFile> for InstalledTheme {
         }
         let mut palettes = BTreeMap::from([(
             file.appearance,
-            native_palette(file.appearance, &file.colors)?,
+            native_palette(file.appearance, &file.colors, file.css())?,
         )]);
         for (&mode, colors) in &file.variants {
             if mode == file.appearance {
                 return Err("The alternate palette must use the other appearance.".into());
             }
-            palettes.insert(mode, native_palette(mode, colors)?);
+            palettes.insert(mode, native_palette(mode, colors, file.css())?);
         }
         Ok(Self { file, palettes })
     }
@@ -407,6 +414,26 @@ impl InstalledTheme {
 }
 
 impl ThemeFile {
+    pub(super) fn css(&self) -> &str {
+        self.extra
+            .get("css")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    pub(super) fn set_css(&mut self, css: &str) {
+        if css.trim().is_empty() {
+            self.extra.remove("css");
+        } else {
+            self.extra
+                .insert("css".into(), Value::String(css.to_owned()));
+        }
+    }
+
+    pub(super) fn managed(&self) -> bool {
+        self.extra.get("managed").and_then(Value::as_bool) == Some(true)
+    }
+
     pub(super) fn collection(&self) -> Option<&str> {
         self.extra.get("collection")?.get("id")?.as_str()
     }

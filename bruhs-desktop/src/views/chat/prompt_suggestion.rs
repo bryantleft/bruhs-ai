@@ -128,10 +128,11 @@ impl ChatView {
         if !self.prompt_suggestion.begin(key.clone()) {
             return;
         }
+        let project = std::path::PathBuf::from(&self.project_path);
         let task = cx
             .global::<DesktopState>()
             .runtime
-            .spawn(bruhs_core::prompt_suggestion::suggest(request));
+            .spawn(async move { bruhs_core::prompt_suggestion::suggest_in_project(request, &project).await });
         let cancel = AbortOnDrop(task.abort_handle());
         self.suggestion_task = Some(cx.spawn(async move |this, cx| {
             let _cancel = cancel;

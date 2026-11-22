@@ -1,7 +1,10 @@
 pub(crate) mod api_client_panel;
 pub mod braille;
 pub(crate) mod browser_preferences;
+mod acp_models;
 pub mod chat;
+mod model_browser;
+pub(crate) mod language;
 pub(crate) mod copy_feedback;
 pub mod crew_face;
 pub(crate) mod database_panel;
@@ -24,6 +27,7 @@ pub(crate) mod whiteboard;
 pub mod workbench;
 pub mod workspace;
 
+pub(crate) mod theme_regions;
 /// `selector` as the `&'static str` a control's id must be, kept once for
 /// the life of the app: the set grows only with the rows that ask (vault
 /// entries, app accounts, mailboxes and bruhs), and asking again returns

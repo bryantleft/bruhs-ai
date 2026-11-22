@@ -10,6 +10,7 @@ pub(crate) enum TaskThreadDeletion {
         tasks: BTreeMap<String, String>,
     },
     Deleted(ThreadId),
+    Failed(String),
 }
 
 pub(super) struct TaskThreadMenu {
@@ -26,6 +27,21 @@ impl TaskThreadMenu {
             open: false,
         }
     }
+}
+
+fn linked_tasks(snapshot: &ReactiveSnapshot, id: &ThreadId) -> BTreeMap<String, String> {
+    snapshot
+        .subscriptions
+        .iter()
+        .filter(|sub| snapshot.task_threads.get(&sub.id) == Some(id))
+        .filter_map(|sub| {
+            Some((
+                sub.id.clone(),
+                sub.title(snapshot.agents.iter().find(|a| a.id == sub.agent_id)?)
+                    .to_owned(),
+            ))
+        })
+        .collect()
 }
 
 impl ReactiveAutomations {
@@ -99,18 +115,7 @@ impl ReactiveAutomations {
         if menu.open {
             let id = location.thread_id.clone();
             let title = title.to_owned();
-            let tasks: BTreeMap<_, _> = snapshot
-                .subscriptions
-                .iter()
-                .filter(|sub| snapshot.task_threads.get(&sub.id) == Some(&id))
-                .filter_map(|sub| {
-                    Some((
-                        sub.id.clone(),
-                        sub.title(snapshot.agents.iter().find(|a| a.id == sub.agent_id)?)
-                            .to_owned(),
-                    ))
-                })
-                .collect();
+            let tasks = linked_tasks(snapshot, &id);
             let delete = web_button(
                 "task-thread-delete",
                 WebButtonVariant::Ghost,

@@ -1,4 +1,4 @@
-//! Settings → Keybindings. Rules live in the desktop state file. The last
+//! Settings → Keybindings. Each environment owns its shortcut file. The last
 //! matching rule wins. `mod` is Command on macOS and Control elsewhere.
 //!
 //! GPUI still owns dispatch for every command except sidebar undo. Undo stays
@@ -6,6 +6,16 @@
 //! swallows a modified chord, so a customized condition can turn a shortcut
 //! off. A plain key such as `/` or `c` is left alone when its condition fails,
 //! or the character would never reach the field.
+
+mod draft;
+mod condition;
+pub(super) use draft::NewBinding;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum BindingEditor {
+    Existing,
+    New,
+}
 
 use bruhs_ui::input::{Input, InputEvent, InputState};
 use bruhs_ui::zoom::px;
@@ -19,7 +29,7 @@ use gpui::{
 
 use bruhs_models::logic::keybindings::{
     chord_claimed, chord_from_event, default_keybindings, gpui_shortcut, resolve,
-    stored_keybindings, KeyContext, Keybinding,
+    KeyContext, Keybinding, KeybindingEdit,
 };
 
 use crate::views::chat::{FindInThread, StashDraft};
@@ -38,7 +48,6 @@ use super::{
 };
 
 const KEY_INPUT_WIDTH_PX: f32 = 144.0;
-const WHEN_INPUT_WIDTH_PX: f32 = 160.0;
 const FIELD_HEIGHT_PX: f32 = crate::theme::CONTROL_PX;
 
 #[derive(Clone)]
@@ -49,6 +58,7 @@ pub(super) struct InstalledBinding {
 
 enum KeyDecision {
     Dictation,
+    Dispatch(Box<dyn Action>),
     ProjectAction(super::project_actions::ProjectAction, String),
     Undo,
     SidebarFocus(bool),
@@ -64,29 +74,7 @@ enum KeyDecision {
     Pass,
 }
 
-pub(super) fn rules_from_saved(mut saved: Vec<Keybinding>, schema: u8) -> Vec<Keybinding> {
-    if saved.is_empty() {
-        return stored_keybindings(None);
-    }
-    if schema == 0 {
-        let is_mac = cfg!(target_os = "macos");
-        let chord = bruhs_models::logic::keybindings::parse_chord("mod+,", is_mac)
-            .expect("shipped shortcut");
-        let mut settings = saved.iter().filter(|rule| rule.command == "settings.open");
-        let untouched = settings
-            .next()
-            .is_some_and(|rule| rule.key == "mod+/" && rule.when.is_none())
-            && settings.next().is_none();
-        if untouched && !chord_claimed(&saved, &chord, is_mac) {
-            saved.push(Keybinding {
-                key: "mod+,".into(),
-                command: "settings.open".into(),
-                when: None,
-            });
-        }
-    }
-    stored_keybindings(Some(saved))
-}
+pub(super) use bruhs_models::logic::keybindings::rules_from_saved;
 
 /// Bindings `main` installs before the workspace exists. The first sync
 /// unbinds them so a saved rule can move the key.
@@ -230,7 +218,9 @@ pub(super) fn new_keybinding_inputs(
         &key_input,
         window,
         |this, _, event: &InputEvent, window, cx| {
-            if commits_keybinding(event) {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            } else if commits_keybinding(event) {
                 this.commit_keybinding_edit(window, cx);
             }
         },
@@ -239,7 +229,9 @@ pub(super) fn new_keybinding_inputs(
         &when_input,
         window,
         |this, _, event: &InputEvent, window, cx| {
-            if commits_keybinding(event) {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            } else if commits_keybinding(event) {
                 this.commit_keybinding_edit(window, cx);
             }
         },
@@ -264,17 +256,27 @@ fn intercept_keybinding(
     let Some(workspace) = workspace.upgrade() else {
         return;
     };
-    if workspace.read(cx).keybinding_recording
-        && workspace
-            .read(cx)
-            .keybinding_record_focus
-            .is_focused(window)
+    let ws = workspace.read(cx);
+    let focused_draft = ws
+        .keybinding_draft
+        .as_ref()
+        .is_some_and(|draft| draft.focus.is_focused(window));
+    let active = if focused_draft
+        && (event.keystroke.key != "tab" || ws.keybinding_recording == Some(BindingEditor::New))
     {
+        Some(BindingEditor::New)
+    } else {
+        ws.keybinding_recording.filter(|editor| {
+            *editor == BindingEditor::Existing && ws.keybinding_record_focus.is_focused(window)
+        })
+    };
+    if let Some(editor) = active {
+        window.prevent_default();
         cx.stop_propagation();
         workspace.update(cx, |this, cx| {
             let stroke = &event.keystroke;
-            let add_for = this.keybinding_new_for.take();
-            this.keybinding_recording = false;
+
+            this.keybinding_recording = None;
             if stroke.key != "escape" || stroke.modifiers.modified() {
                 let modifiers = stroke.modifiers;
                 let mut parts = Vec::new();
@@ -301,36 +303,63 @@ fn intercept_keybinding(
                 }
                 parts.push(&stroke.key);
                 let shortcut = parts.join("+");
-                if let Some(index) = add_for {
-                    let mut rule = this.keybindings[index].clone();
-                    rule.key = shortcut;
-                    let existing = this.keybindings.iter().position(|candidate| candidate == &rule);
-                    let index = existing.unwrap_or_else(|| {
-                        this.keybindings.push(rule);
-                        this.keybindings.len() - 1
-                    });
-                    this.select_keybinding(index, window, cx);
-                    this.keymap_changed(cx);
-                    this.persist_and_notify(cx);
-                    return;
+                match editor {
+                    BindingEditor::Existing => {
+                        this.keybinding_key_input
+                            .update(cx, |f, cx| f.set_value(shortcut, window, cx));
+                        this.commit_keybinding_edit(window, cx);
+                    }
+                    BindingEditor::New => {
+                        if let Some(draft) = &mut this.keybinding_draft {
+                            draft.key = shortcut;
+                        }
+                    }
                 }
-                this.keybinding_key_input
-                    .update(cx, |field, cx| field.set_value(shortcut, window, cx));
-                this.commit_keybinding_edit(window, cx);
+            } else if editor == BindingEditor::New {
+                if let Some(draft) = &mut this.keybinding_draft {
+                    draft.key.clear();
+                }
             }
             cx.notify();
         });
         return;
     }
+    if matches!(event.keystroke.key.as_str(), "enter" | "tab" | "escape")
+        && workspace.update(cx, |ws, cx| {
+            ws.handle_theme_css_key(&event.keystroke, window, cx)
+        })
+    {
+        window.prevent_default();
+        cx.stop_propagation();
+        return;
+    }
     let editable_input = window.has_focused_input(cx);
+    if event
+        .context_stack
+        .iter()
+        .any(|context| context.contains("RichComposer"))
+    {
+        if let Some(action) = bruhs_ui::input::composer_format_action(&event.keystroke) {
+            cx.stop_propagation();
+            window.dispatch_action(action, cx);
+            return;
+        }
+    }
     let decision = workspace.update(cx, |this, cx| {
         this.key_decision(event, editable_input, window, cx)
     });
     match decision {
+        KeyDecision::Dispatch(action) => {
+            window.prevent_default();
+            cx.stop_propagation();
+            window.dispatch_action(action, cx);
+        }
         KeyDecision::Dictation => {
             cx.stop_propagation();
             window.prevent_default();
-            workspace.update(cx, |this, cx| this.press_voice_shortcut(&event.keystroke, cx));
+            workspace.update(cx, |this, cx| {
+                this.press_voice_shortcut(&event.keystroke, cx)
+            });
         }
         KeyDecision::ProjectAction(action, cwd) => {
             cx.stop_propagation();
@@ -426,7 +455,7 @@ impl Workspace {
             && !modifiers.control
             && !modifiers.alt
             && self.overlay_open()
-            && self.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
+            && self.modal_contains_focus(window, cx)
         {
             return KeyDecision::DialogFocus(modifiers.shift);
         }
@@ -440,14 +469,52 @@ impl Workspace {
         );
         let ctx = self.key_context(event, editable_input, window, cx);
         let mac = cfg!(target_os = "macos");
-        if let Some(command) = resolve(&self.keybindings, &chord, &ctx, mac) {
-            if command == "voice.dictate" && !self.overlay_open() && !ctx.terminal_focus
-                && event.context_stack.iter().any(|stack| stack.primary().is_some_and(|entry| entry.key.as_ref() == "Chat"))
+        let (matched, shared) = bruhs_models::logic::keybindings::matching_binding(
+            &self.keybindings,
+            &chord,
+            &ctx,
+            mac,
+        );
+        if let Some(rule) = matched {
+            let command = rule.command.as_str();
+            if command == "voice.dictate"
+                && !self.overlay_open()
+                && !ctx.terminal_focus
+                && event.context_stack.iter().any(|stack| {
+                    stack
+                        .primary()
+                        .is_some_and(|entry| entry.key.as_ref() == "Chat")
+                })
             {
                 return KeyDecision::Dictation;
             }
             if command == "thread.undo" && self.sidebar_undo.is_some() {
                 return KeyDecision::Undo;
+            }
+            if shared && self.workspace_focus_handle.contains_focused(window, cx) {
+                // GPUI uses static contexts. A user-defined condition can
+                // select an earlier binding than the last registered action.
+                let mut candidates = Vec::new();
+                push_rule_bindings(rule, &mut candidates, &mut Vec::new());
+                let action = candidates
+                    .into_iter()
+                    .filter_map(|binding| {
+                        let rank = match binding.context.as_deref() {
+                            Some(name) => {
+                                event
+                                    .context_stack
+                                    .iter()
+                                    .rposition(|ctx| ctx.contains(name))?
+                                    + 1
+                            }
+                            None => 0,
+                        };
+                        Some((rank, binding.action))
+                    })
+                    .max_by_key(|(rank, _)| *rank);
+                return action.map_or(KeyDecision::Swallow, |(_, action)| {
+                    KeyDecision::Dispatch(action)
+                });
             }
             return KeyDecision::Pass;
         }
@@ -466,7 +533,9 @@ impl Workspace {
         if claimed && !plain_text_key(event) {
             return KeyDecision::Swallow;
         }
-        if !claimed && !self.overlay_open() && !ctx.terminal_focus
+        if !claimed
+            && !self.overlay_open()
+            && !ctx.terminal_focus
             && self.workspace_focus_handle.contains_focused(window, cx)
         {
             if let Some((action, cwd)) = self.shortcut_project_action(&chord, cx) {
@@ -523,32 +592,24 @@ impl Workspace {
         }
     }
 
-    fn record_new_binding(&mut self, index: usize, window: &mut Window, cx: &mut Context<'_, Self>) {
-        self.keybinding_new_for = Some(index);
-        self.keybinding_recording = true;
-        self.keybinding_choosing_command = false;
-        self.keybinding_edit_open = false;
-        let command = self.keybindings[index].command.clone();
-        self.keybinding_filter.update(cx, |input, cx| input.set_value(command, window, cx));
-        self.settings_scroll.set_offset(Default::default());
-        self.keybinding_record_focus.focus(window, cx);
-        cx.notify();
-    }
-
     pub(super) fn select_keybinding(
         &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if index >= self.keybindings.len() {
+        if index >= self.settings_keybindings().len() || !self.linked_keybindings.editable() {
             return;
         }
-        self.keybinding_recording = false;
+        self.keybinding_when_open = None;
+        self.keybinding_recording = None;
         self.keybinding_index = index;
         self.keybinding_edit_open = true;
-        let key = self.keybindings[index].key.clone();
-        let when = self.keybindings[index].when.clone().unwrap_or_default();
+        let key = self.settings_keybindings()[index].key.clone();
+        let when = self.settings_keybindings()[index]
+            .when
+            .clone()
+            .unwrap_or_default();
         self.keybinding_key_input
             .update(cx, |input, cx| input.set_value(key, window, cx));
         self.keybinding_when_input
@@ -561,8 +622,11 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if !self.keybinding_edit_open {
+            return;
+        }
         let index = self.keybinding_index;
-        let Some(row) = self.keybindings.get(index) else {
+        let Some(row) = self.settings_keybindings().get(index) else {
             return;
         };
         let key = self.keybinding_key_input.read(cx).value().to_string();
@@ -572,15 +636,25 @@ impl Workspace {
         } else {
             Some(when_text)
         };
-        if row.key == key && row.when == when {
+        if !bruhs_models::logic::keybindings::when_syntax_ok(when.as_deref().unwrap_or(""))
+            || (!key.trim().is_empty()
+                && !gpui_shortcut(&key).is_some_and(|shortcut| parses(&shortcut)))
+            || (row.key == key && row.when == when)
+        {
             return;
         }
-        if let Some(row) = self.keybindings.get_mut(index) {
-            row.key = key;
-            row.when = when;
-        }
-        self.keymap_changed(cx);
-        self.persist_and_notify(cx);
+        let rule = Keybinding {
+            command: row.command.clone(),
+            key,
+            when,
+        };
+        self.apply_binding_edit(
+            KeybindingEdit::Upsert {
+                rule,
+                replace: Some(row.clone()),
+            },
+            cx,
+        );
     }
 
     pub(super) fn reset_selected_keybinding(
@@ -589,11 +663,15 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         let index = self.keybinding_index;
-        let Some(command) = self.keybindings.get(index).map(|row| row.command.clone()) else {
+        let Some(command) = self
+            .settings_keybindings()
+            .get(index)
+            .map(|row| row.command.clone())
+        else {
             return;
         };
         let nth = self
-            .keybindings
+            .settings_keybindings()
             .iter()
             .take(index)
             .filter(|row| row.command == command)
@@ -606,16 +684,24 @@ impl Workspace {
             return;
         };
         if self
-            .keybindings
+            .settings_keybindings()
             .get(index)
             .is_some_and(|row| row == &original)
         {
             return;
         }
-        self.keybindings[index] = original;
-        self.select_keybinding(index, window, cx);
-        self.keymap_changed(cx);
-        self.persist_and_notify(cx);
+        self.apply_binding_edit(
+            KeybindingEdit::Upsert {
+                rule: original,
+                replace: Some(self.settings_keybindings()[index].clone()),
+            },
+            cx,
+        );
+        if self.linked_keybindings.editable() {
+            self.select_keybinding(index, window, cx);
+        } else {
+            self.keybinding_edit_open = false;
+        }
     }
 
     pub(super) fn undo_sidebar_action(
@@ -657,73 +743,56 @@ impl Workspace {
     }
 
     pub(super) fn render_keybinding_settings(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let choosing = self.keybinding_choosing_command;
+        let add = super::web_button(
+            "desktop-keybindings-add",
+            super::WebButtonVariant::Outline,
+            super::WebButtonSize::Small,
+            super::ButtonState::disabled_if(
+                self.keybinding_draft.is_some() || !self.linked_keybindings.editable(),
+            ),
+        )
+        .debug_selector(|| "desktop-keybindings-add".into())
+        .track_focus(&self.keybinding_add_focus)
+        .aria_label("Add keybinding")
+        .child("+ Add keybinding");
         let toolbar = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_2()
             .px_3()
             .py_2()
             .child(
-                div().flex_1().min_w_0().child(
+                div().flex_1().min_w(px(130.)).child(
                     Input::new(&self.keybinding_filter)
                         .aria_label("Search keybindings")
                         .cleanable(true),
                 ),
             )
-            .child(
-                super::web_button(
-                    "desktop-keybindings-add",
-                    super::WebButtonVariant::Outline,
-                    super::WebButtonSize::Small,
-                    super::ButtonState::Enabled,
-                )
-                .debug_selector(|| "desktop-keybindings-add".to_string())
-                .aria_label(if choosing {
-                    "Cancel adding keybinding"
-                } else {
-                    "Add keybinding"
-                })
-                .child(if choosing {
-                    "Cancel"
-                } else {
-                    "+ Add keybinding"
-                })
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.keybinding_choosing_command = !this.keybinding_choosing_command;
-                    this.keybinding_edit_open = false;
-                    this.keybinding_recording = false;
-                    this.keybinding_new_for = None;
-                    this.keybinding_filter.update(cx, |field, cx| {
-                        field.set_value("", window, cx);
-                        field.focus(window, cx);
-                    });
-                    cx.notify();
-                })),
-            );
+            .child(bruhs_ui::press::on_press_view(add, cx, |this, w, cx| {
+                if this.keybinding_draft.is_none() {
+                    this.open_new_binding(None, w, cx);
+                }
+            }))
+            .child(self.keymap_file_buttons(cx));
         let mut layout = div()
             .flex()
             .flex_col()
             .gap(px(24.))
-            .child(self.settings_card("Keybindings", "", vec![toolbar.into_any_element(),self.keymap_file_buttons(cx)]));
-        if let Some(index) = self.keybinding_new_for {
-            let command = &self.keybindings[index].command;
-            let recorder = super::web_button(
-                "desktop-record-new-shortcut",
-                super::WebButtonVariant::Outline,
-                super::WebButtonSize::Small,
-                super::ButtonState::Enabled,
-            )
-            .debug_selector(|| "desktop-record-new-shortcut".to_string())
-            .track_focus(&self.keybinding_record_focus)
-            .child(format!("Press a shortcut for {} · Esc cancels", command_label(command)))
-            .on_click(cx.listener(|this, _, window, cx| this.keybinding_record_focus.focus(window, cx)));
-            return layout.child(recorder).into_any_element();
+            .child(self.settings_card("Keybindings", "", vec![toolbar.into_any_element()]));
+        if let Some(status) = self.linked_shortcut_status(cx) {
+            layout = layout.child(status);
+        }
+        if let Some(draft) = self
+            .keybinding_draft
+            .as_ref()
+            .filter(|_| self.linked_keybindings.editable())
+        {
+            layout = layout.child(self.new_binding_card(draft, cx));
         }
         let query = self.keybinding_filter.read(cx).value();
-        let mut commands = std::collections::HashSet::new();
         let mut groups: [Vec<AnyElement>; 4] = Default::default();
-        for (index, rule) in self.keybindings.iter().enumerate() {
+        for (index, rule) in self.settings_keybindings().iter().enumerate() {
             let label = command_label(&rule.command);
             if !super::palette_ui::text_matches_query(
                 &format!(
@@ -736,9 +805,6 @@ impl Workspace {
             ) {
                 continue;
             }
-            if choosing && !commands.insert(&rule.command) {
-                continue;
-            }
             let group = match rule.command.split('.').next().unwrap_or("") {
                 "thread" | "chat" => 1,
                 "composer" | "draft" | "model" | "effort" => 2,
@@ -746,32 +812,15 @@ impl Workspace {
                 _ => 0,
             };
             let rows = &mut groups[group];
-            if choosing {
-                let button = super::web_button(
-                    ("desktop-choose-command", index),
-                    super::WebButtonVariant::Ghost,
-                    super::WebButtonSize::Small,
-                    super::ButtonState::Enabled,
-                )
-                .debug_selector(move || format!("desktop-choose-command-{index}"))
-                .child(label)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.record_new_binding(index, window, cx);
-                }));
-                rows.push(button.into_any_element());
-                continue;
-            }
             rows.push(self.render_keybinding_rule(index, rule, cx));
-            if self.keybinding_edit_open && index == self.keybinding_index {
-                let when = self.keybinding_when_input.read(cx).value();
-                rows.push(self.render_keybinding_editor(
-                    &rule.command,
-                    !bruhs_models::logic::keybindings::when_syntax_ok(&when),
-                    cx,
-                ));
+            if self.linked_keybindings.editable()
+                && self.keybinding_edit_open
+                && index == self.keybinding_index
+            {
+                rows.push(self.render_keybinding_editor(&rule.command, cx));
             }
         }
-        if groups.iter().all(Vec::is_empty) {
+        if groups.iter().all(Vec::is_empty) && !self.linked_keybindings.selected_unavailable() {
             layout = layout.child(div().p_4().child("No matching keybindings"));
         }
         for (title, rows) in ["Navigation", "Threads", "Composer", "Workspace"]
@@ -785,12 +834,7 @@ impl Workspace {
         layout.into_any_element()
     }
 
-    fn render_keybinding_editor(
-        &self,
-        command: &str,
-        when_broken: bool,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
+    fn render_keybinding_editor(&self, command: &str, cx: &Context<'_, Self>) -> AnyElement {
         div()
             .debug_selector(|| "desktop-settings-keybinding-editor".to_string())
             .px_4()
@@ -810,13 +854,17 @@ impl Workspace {
                 .debug_selector(|| "desktop-record-shortcut".to_string())
                 .track_focus(&self.keybinding_record_focus)
                 .aria_label("Record shortcut")
-                .child(if self.keybinding_recording {
-                    "Press shortcut… Esc cancels"
-                } else {
-                    "Record shortcut"
-                })
+                .child(
+                    if self.keybinding_recording == Some(BindingEditor::Existing) {
+                        "Press shortcut… Esc cancels"
+                    } else {
+                        "Record shortcut"
+                    },
+                )
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.keybinding_recording = !this.keybinding_recording;
+                    this.keybinding_recording = (this.keybinding_recording
+                        != Some(BindingEditor::Existing))
+                    .then_some(BindingEditor::Existing);
                     this.keybinding_record_focus.focus(window, cx);
                     cx.notify();
                 })),
@@ -828,13 +876,16 @@ impl Workspace {
                 false,
                 &self.keybinding_key_input,
             ))
-            .child(keybinding_field(
-                "desktop-settings-keybinding-when",
-                SharedString::from(format!("When for {command}")),
-                WHEN_INPUT_WIDTH_PX,
-                when_broken,
-                &self.keybinding_when_input,
-            ))
+            .child(self.binding_condition(BindingEditor::Existing, &self.keybinding_when_input, cx))
+            .when_some(
+                draft::conflict_message(
+                    self.settings_keybindings(),
+                    Some(self.keybinding_index),
+                    &self.keybinding_key_input.read(cx).value(),
+                    &self.keybinding_when_input.read(cx).value(),
+                ),
+                |el, message| el.child(div().text_xs().child(message)),
+            )
             .child(
                 div()
                     .id("desktop-settings-keybinding-reset")
@@ -872,7 +923,7 @@ impl Workspace {
                 .aria_label("Add shortcut for this command")
                 .child("Add shortcut")
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.record_new_binding(this.keybinding_index, window, cx);
+                    this.open_new_binding(Some(this.keybinding_index), window, cx);
                 })),
             )
             .child(
@@ -884,26 +935,13 @@ impl Workspace {
                 )
                 .aria_label("Remove selected shortcut")
                 .child("Remove")
-                .on_click(cx.listener(|this, _, window, cx| {
+                .on_click(cx.listener(|this, _, _, cx| {
                     let index = this.keybinding_index;
-                    let command = &this.keybindings[index].command;
-                    // Keep a disabled entry for a default command so restoring an older
-                    // profile will not reinstate the shortcut on the next launch.
-                    if this
-                        .keybindings
-                        .iter()
-                        .filter(|rule| &rule.command == command)
-                        .count()
-                        == 1
-                    {
-                        this.keybindings[index].key.clear();
-                    } else {
-                        this.keybindings.remove(index);
+                    if let Some(rule) = this.settings_keybindings().get(index).cloned() {
+                        this.apply_binding_edit(KeybindingEdit::Remove { rule }, cx);
                     }
-                    this.select_keybinding(index.min(this.keybindings.len() - 1), window, cx);
                     this.keybinding_edit_open = false;
-                    this.keymap_changed(cx);
-                    this.persist_and_notify(cx);
+                    cx.notify();
                 })),
             )
             .into_any_element()
@@ -917,16 +955,7 @@ impl Workspace {
     ) -> AnyElement {
         let selected = self.keybinding_edit_open && index == self.keybinding_index;
         let command = command_label(&rule.command);
-        let key = gpui_shortcut(&rule.key)
-            .and_then(|shortcut| Keystroke::parse_with_os(&shortcut, host_os()).ok())
-            .map(|key| key.display(host_os()).to_string())
-            .unwrap_or_else(|| {
-                if rule.key.is_empty() {
-                    "Unassigned".into()
-                } else {
-                    rule.key.clone()
-                }
-            });
+        let key = shortcut_label(&rule.key);
         let when = rule.when.clone().unwrap_or_default();
         let label = if when.is_empty() {
             format!("{command}: {key}")
@@ -945,17 +974,17 @@ impl Workspace {
             .items_center()
             .justify_between()
             .gap_3()
-            .cursor_pointer()
-            .tab_index(0)
-            .role(Role::Button)
+            .when(self.linked_keybindings.editable(), |el| {
+                el.cursor_pointer().tab_index(0).role(Role::Button)
+            })
             .aria_label(label)
             .aria_toggled(selected.into())
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(crate::theme::persimmon_400()))
             .when(selected, |el| el.bg(crate::theme::longan_800()))
-            .hover(|el| el.bg(crate::theme::longan_800()))
-            .map(|el| {
+            .when(self.linked_keybindings.editable(), |el| {
+                let el = el.hover(|el| el.bg(crate::theme::longan_800()));
                 bruhs_ui::press::on_press_view(el, cx, move |this, window, cx| {
                     if this.keybinding_edit_open && this.keybinding_index == index {
                         this.keybinding_edit_open = false;
@@ -1005,9 +1034,17 @@ impl Workspace {
             )
             .into_any_element()
     }
+
 }
 
-fn command_label(command: &str) -> String {
+pub(super) fn shortcut_label(raw: &str) -> String {
+    gpui_shortcut(raw)
+        .and_then(|shortcut| Keystroke::parse_with_os(&shortcut, host_os()).ok())
+        .map(|key| key.display(host_os()).to_string())
+        .unwrap_or_else(|| if raw.is_empty() { "Unassigned".into() } else { raw.into() })
+}
+
+pub(super) fn command_label(command: &str) -> String {
     match command {
         "command.palette" => "Open command palette".into(),
         "settings.open" => "Open settings".into(),

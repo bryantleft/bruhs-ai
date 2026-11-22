@@ -3,12 +3,13 @@
 use super::*;
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::NOTIFICATIONS_NOTE;
+use crate::views::language::Language;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 
 /// The same notification form is available in Settings and on the Automations page.
 #[derive(IntoElement)]
-pub(crate) struct AgentNotificationSettings(pub Entity<ReactiveAutomations>);
+pub(crate) struct AgentNotificationSettings(pub Entity<ReactiveAutomations>,pub Language);
 
 impl RenderOnce for AgentNotificationSettings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -18,18 +19,18 @@ impl RenderOnce for AgentNotificationSettings {
             }
             panel.ensure_notification_form(window, cx);
             if panel.notify_form.is_some() {
-                return panel.render_notifications(cx);
+                return panel.notification_form_in(self.1,cx);
             }
             card()
-                .child(heading("Agent notifications"))
-                .child(muted(if panel.reading {
+                .child(heading(self.1.text("Agent notifications")))
+                .child(muted(self.1.text(if panel.reading {
                     "Loading notification preferences…"
                 } else {
                     "Connect the local automation server to manage agent notifications."
-                }))
+                })))
                 .when(!panel.reading, |el| {
                     el.child(
-                        ghost_control("settings-retry-notifications", "Retry", panel.busy)
+                        ghost_control("settings-retry-notifications", self.1.text("Retry"), panel.busy)
                             .on_activate(cx, |this, _, cx| this.refresh_snapshot(cx)),
                     )
                 })
@@ -201,10 +202,14 @@ impl ReactiveAutomations {
     /// Web `NotificationsPanel`: a card with its switches, the quiet hours
     /// fields when on, then the note and Save.
     pub(super) fn render_notifications(&self, cx: &Context<'_, Self>) -> Div {
-        let note = muted(NOTIFICATIONS_NOTE).text_color(theme::rambutan_500());
+        self.notification_form_in(Language::En,cx)
+    }
+
+    fn notification_form_in(&self,language:Language,cx:&Context<'_,Self>)->Div {
+        let note = muted(language.text(NOTIFICATIONS_NOTE)).text_color(theme::rambutan_500());
         let mut section = card()
             .debug_selector(|| "reactive-notifications".to_string())
-            .child(heading("Notifications"));
+            .child(heading(language.text("Notifications")));
         let Some(form) = &self.notify_form else {
             return section.child(note);
         };
@@ -218,7 +223,7 @@ impl ReactiveAutomations {
                     .child(
                         toggle(
                             "reactive-notify-updates",
-                            "System notification for updates",
+                            language.text("System notification for updates"),
                             form.system_notify,
                             busy,
                         )
@@ -229,7 +234,7 @@ impl ReactiveAutomations {
                     .child(
                         toggle(
                             "reactive-notify-questions",
-                            "System notification for questions",
+                            language.text("System notification for questions"),
                             form.system_ask,
                             busy,
                         )
@@ -238,7 +243,7 @@ impl ReactiveAutomations {
                         }),
                     )
                     .child(
-                        toggle("reactive-quiet-hours", "Quiet hours", form.quiet, busy)
+                        toggle("reactive-quiet-hours", language.text("Quiet hours"), form.quiet, busy)
                             .on_activate(cx, |this, _, cx| {
                                 this.update_form(|form| form.quiet = !form.quiet, cx)
                             }),
@@ -246,16 +251,16 @@ impl ReactiveAutomations {
             )
             .when(form.quiet, |section| {
                 section
-                    .child(field("Start", &form.start, false, busy))
-                    .child(field("End", &form.end, false, busy))
-                    .child(field("Time zone", &form.time_zone, false, busy))
+                    .child(field(language.text("Start"), &form.start, false, busy))
+                    .child(field(language.text("End"), &form.end, false, busy))
+                    .child(field(language.text("Time zone"), &form.time_zone, false, busy))
             })
             .child(note)
             .child(
                 div().flex().child(
                     control(
                         "reactive-save-notifications",
-                        "Save notification settings",
+                        language.text("Save notification settings"),
                         busy,
                     )
                     .on_activate(cx, |this, _, cx| {

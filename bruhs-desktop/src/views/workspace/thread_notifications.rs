@@ -89,7 +89,7 @@ impl Workspace {
             .into_iter()
             .map(|(_, value, label)| DropdownOption {
                 value,
-                label: label.into(),
+                label: self.ui_language().text(label).into(),
                 description: None,
             })
             .collect();
@@ -97,10 +97,10 @@ impl Workspace {
         vec![
             self.settings_row("desktop-settings-row-thread-notifications", "Thread notifications",
                 "Alert when a thread finishes, fails or needs approval or input while bruhs is open.",
-                settings_ui::control_column(dropdown(MODE_ID, "Thread notifications", current, vec![DropdownGroup { label: None, mark: None, options }],self.settings_listbox(MODE_ID), toggle, select))),
+                settings_ui::control_column(dropdown(MODE_ID, self.ui_language().text("Thread notifications"), current, vec![DropdownGroup { label: None, mark: None, options }],self.settings_listbox(MODE_ID), toggle, select))),
             self.settings_row("desktop-settings-row-in-app-notifications", "In-app notifications",
                 "Show an alert with an Open thread button when another thread needs attention or finishes while this window has focus.",
-                settings_ui::switch("settings-in-app-notifications", self.thread_notifications.in_app,false,"In-app notifications",cx,|this,_,cx| {
+                settings_ui::switch("settings-in-app-notifications", self.thread_notifications.in_app,false,self.ui_language().text("In-app notifications"),cx,|this,_,cx| {
                     this.thread_notifications.in_app = !this.thread_notifications.in_app;
                     this.persist_and_notify(cx);
                 })),

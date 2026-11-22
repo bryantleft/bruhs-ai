@@ -9,6 +9,7 @@
 use gpui::prelude::*;
 use gpui::*;
 use bruhs_ui::input::{Input, Textarea};
+use bruhs_ui::ActiveTheme;
 use bruhs_ui::scroll::ScrollableElement as _;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
@@ -21,11 +22,11 @@ use bruhs_models::logic::follow_up::{
     action_enabled_for, action_label, action_title, composer_action, ComposerAction,
 };
 use bruhs_models::logic::queue::QueuedPrompt;
-use bruhs_models::logic::run_place::{WorkspaceChoice, CLAUDE_EFFORTS};
+use bruhs_models::logic::run_place::WorkspaceChoice;
 
 use super::{
     composer_input_disabled_like_web, composer_input_tab_index_like_web, element_key, title_rename,
-    ChatView, ChatViewEvent, InputEnter, InputEscape, InputMoveDown, InputMoveUp, PermissionMode,
+    ChatView, ChatViewEvent, DraftPlacement, InputEnter, InputEscape, InputMoveDown, InputMoveUp, PermissionMode,
     StashDraft,
 };
 use crate::views::sidebar_order::relative_age;
@@ -559,6 +560,9 @@ impl ChatView {
             .id("chat-header")
             .debug_selector(|| "desktop-chat-header".to_string())
             .group(CHAT_HEADER_GROUP)
+            .when_some(cx.theme().color_role("cssHeaderBackground"), |el, color| el.bg(color))
+            .children(crate::views::workspace::appearance::background_layer("Header", cx))
+            .when_some(cx.theme().color_role("cssHeaderForeground"), |el, color| el.text_color(color))
             .h(px(CHAT_HEADER_HEIGHT_PX))
             .px(px(CHAT_HEADER_X_PADDING_PX))
             .flex()
@@ -1071,16 +1075,25 @@ impl ChatView {
             .key_context("ChatComposer")
             .debug_selector(|| "desktop-composer-input".to_string())
             .capture_action(cx.listener(|this, _: &InputMoveUp, window, cx| {
+                if !this.input_state.focus_handle(cx).is_focused(window) {
+                    return;
+                }
                 if this.handle_composer_hint_key("up", window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &InputMoveDown, window, cx| {
+                if !this.input_state.focus_handle(cx).is_focused(window) {
+                    return;
+                }
                 if this.handle_composer_hint_key("down", window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .capture_action(cx.listener(|this, _: &InputEscape, window, cx| {
+                if !this.input_state.focus_handle(cx).is_focused(window) {
+                    return;
+                }
                 if this.composer_options_open
                     || this.stash_open
                     || this.branch_menu_open
@@ -1097,6 +1110,9 @@ impl ChatView {
                 }
             }))
             .capture_action(cx.listener(|this, action: &InputEnter, window, cx| {
+                if !this.input_state.focus_handle(cx).is_focused(window) {
+                    return;
+                }
                 if !action.secondary && action.shift {
                     return; // The text field inserts the line break.
                 }
@@ -1106,7 +1122,7 @@ impl ChatView {
                 }
                 let needs_modifier = this.send_shortcut.requires_modifier(&this.input_state.read(cx).value());
                 if !action.secondary && needs_modifier {
-                    this.input_state.update(cx, |field, cx| field.insert("\n", window, cx));
+                    this.input_state.update(cx, |field, cx| field.insert_line_break(window, cx));
                 } else if !(action.secondary && action.shift && !needs_modifier) {
                     if this.queue_edit.is_none() && !action.secondary && this.apply_selected_composer_hint(window, cx) {
                         return;
@@ -1246,24 +1262,56 @@ impl ChatView {
 
     fn effort_indicator(&self, effort: Option<&str>) -> AnyElement {
         if self.effort_label {
-            return div().debug_selector(|| "desktop-effort-label".into()).text_size(px(CHIP_TEXT_SIZE_PX))
-                .child(effort.unwrap_or("Auto").to_owned()).into_any_element();
+            return div()
+                .debug_selector(|| "desktop-effort-label".into())
+                .text_size(px(CHIP_TEXT_SIZE_PX))
+                .child(
+                    self.effort_spec()
+                        .and_then(|s| s.choices.iter().find(|c| Some(c.value.as_str()) == effort))
+                        .map(|c| c.label.clone())
+                        .unwrap_or_else(|| effort.unwrap_or("Auto").to_owned()),
+                )
+                .into_any_element();
         }
-        let levels = bruhs_models::logic::run_place::CLAUDE_EFFORTS;
-        let strength = levels.iter().position(|level| Some(*level) == effort).map_or(0, |i| i + 1);
-        div().debug_selector(|| "desktop-effort-bars".into()).flex().items_end().gap(px(1.))
+        let levels: Vec<&str> = if self.kiro_agents.is_some() {
+            self.kiro_efforts().to_vec()
+        } else {
+            self.effort_spec()
+                .into_iter()
+                .flat_map(|s| &s.choices)
+                .map(|c| c.value.as_str())
+                .collect()
+        };
+        let strength = levels
+            .iter()
+            .position(|level| Some(*level) == effort)
+            .map_or(0, |i| i + 1);
+        div()
+            .debug_selector(|| "desktop-effort-bars".into())
+            .flex()
+            .items_end()
+            .gap(px(1.))
             .children((0..levels.len()).map(|i| {
-                div().w(px(2.)).h(px(3. + 2. * i as f32)).rounded(px(1.))
-                    .bg(if i < strength { theme::rambutan_300() } else { theme::longan_700() })
-            })).into_any_element()
+                div()
+                    .w(px(2.))
+                    .h(px(3. + 2. * i as f32))
+                    .rounded(px(1.))
+                    .bg(if i < strength {
+                        theme::rambutan_300()
+                    } else {
+                        theme::longan_700()
+                    })
+            }))
+            .into_any_element()
     }
 
     fn render_composer_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         let draft_empty = self.input_state.read(cx).value().trim().is_empty();
         let separate_stop = self.is_streaming && !draft_empty;
-        let model = model_label(&self.model_id);
+        let model = self.native_model().map(|m| m.label.clone()).unwrap_or_else(||model_label(&self.model_id));
         let model_tooltip = format!("Change model: {model} (⌘⇧M)");
         let compact_model = model.strip_prefix("Claude ").unwrap_or(&model).to_string();
+        let effort = self.claude_send_effort().or_else(||self.effort_spec().map(|s|s.default.clone()));
         let model_chip = self.render_chip(
             "desktop-model-status",
             "desktop-model-status",
@@ -1274,7 +1322,9 @@ impl ChatView {
             div()
                 .min_w_0()
                 .truncate()
-                .child(compact_model)
+                .flex().items_center().gap_1()
+                .child(div().truncate().child(compact_model))
+                .when(self.effort_spec().is_some(),|el|el.child(self.effort_indicator(effort.as_deref())))
                 .into_any_element(),
             Some(self.chevron()),
             |this, window, cx| this.toggle_model_picker(window, cx),
@@ -1287,7 +1337,6 @@ impl ChatView {
             (PermissionMode::AcceptEdits, false) => "Accept edits",
             _ => "",
         };
-        let effort = self.claude_send_effort();
         let tooltip = format!(
             "Composer options. Build access: {}. Mode: {}. Effort: {}",
             composer_access_label(access),
@@ -1298,6 +1347,7 @@ impl ChatView {
             },
             effort.as_deref().unwrap_or("Default"),
         );
+        let model_bounds = self.model_chip_bounds.clone();
         let trigger_bounds = self.composer_options_trigger_bounds.clone();
         let view_id = cx.entity_id();
         div()
@@ -1333,6 +1383,9 @@ impl ChatView {
                         div()
                             .min_w_0()
                             .max_w(px(CHIP_MODEL_MAX_WIDTH_PX))
+                            .on_children_prepainted(move |bounds, _, _| {
+                                if let Some(bounds) = bounds.first() { model_bounds.set(*bounds); }
+                            })
                             .child(model_chip),
                     )
                     .child(
@@ -1353,7 +1406,7 @@ impl ChatView {
                                     |this, window, cx| this.toggle_composer_options(window, cx),
                                     cx,
                                 )
-                                .when(self.effort_chip_visible(), |button| {
+                                .when(!self.kiro_efforts().is_empty(), |button| {
                                     button.w_auto().px_1().gap_1().child(self.effort_indicator(effort.as_deref()))
                                 })
                                 .track_focus(&self.composer_options_trigger_focus)
@@ -1428,7 +1481,7 @@ impl ChatView {
             .child(icon(path, CHIP_ICON_SIZE_PX, theme::rambutan_400()))
     }
 
-    fn composer_access_mode(&self) -> PermissionMode {
+    pub(super) fn composer_access_mode(&self) -> PermissionMode {
         if self.permission_mode == PermissionMode::Plan {
             self.plan_return_mode
         } else {
@@ -1442,7 +1495,9 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) {
         self.close_composer_menus(cx);
+        self.refresh_kiro_choices();
         self.model_picker_open = false;
+        self.refresh_model_catalog(cx);
         self.composer_options_open = true;
         self.composer_options_scroll.set_offset(Point::default());
         cx.defer_in(window, |this, window, cx| {
@@ -1506,13 +1561,15 @@ impl ChatView {
             // Children of the scrolling body: Access, Mode, Effort while
             // shown, Prompts, Dictation, Context.
             let effort = usize::from(self.effort_chip_visible());
+            let agent = usize::from(self.kiro_agent_visible());
             let row = match section {
                 0 => 0,
                 1 => 1,
                 2 => 2,
-                3 => 2 + effort,
-                4 => 4 + effort,
-                _ => 3 + effort,
+                6 => 2 + effort,
+                3 => 2 + effort + agent,
+                4 => 4 + effort + agent,
+                _ => 3 + effort + agent,
             };
             self.composer_options_scroll.scroll_to_item(row);
         }
@@ -1858,8 +1915,9 @@ impl ChatView {
             .child(section(0, "Access", self.render_permission_menu(cx)))
             .child(section(1, "Mode", mode))
             .when(self.effort_chip_visible(), |el| {
-                el.child(section(2, "Effort", self.render_effort_menu(cx)))
+                el.child(section(2, if self.kiro_agents.is_some(){"Reasoning"}else{"Model options"}, self.render_effort_menu(cx)))
             })
+            .when(self.kiro_agent_visible(), |el|el.child(section(6,"Agent",self.render_kiro_agents(cx))))
             .child(section(3, "Prompts", prompts))
             .child(dictation)
             .when(self.return_chip_visible() || has_usage, |el| {
@@ -2658,6 +2716,7 @@ impl ChatView {
         self.composer_options_open = false;
         self.stash_open = false;
         self.workspace_menu_open = open;
+        if open { self.refresh_repo_placement(cx); }
         cx.notify();
     }
 
@@ -2677,10 +2736,23 @@ impl ChatView {
         if !self.effort_chip_visible() {
             return;
         }
+        if self.kiro_agents.is_none() {
+            if self.model_picker_open && self.composer_effort_focus.is_focused(window) {
+                self.close_model_picker(window, cx);
+            } else {
+                if !self.model_picker_open {
+                    self.open_model_picker(window, cx);
+                }
+                self.focus_model_choices(window, cx);
+            }
+            return;
+        }
         if self.composer_options_open && self.effort_menu_open {
             self.close_composer_options(window, cx);
         } else {
-            self.open_composer_options(window, cx);
+            if !self.composer_options_open {
+                self.open_composer_options(window, cx);
+            }
             self.effort_menu_open = true;
             // Effort follows Access and Mode in the scrolling body.
             self.composer_options_reveal.set(Some(2));
@@ -2693,8 +2765,7 @@ impl ChatView {
 
     pub fn use_previous_worktree(&mut self, cx: &mut Context<'_, Self>) {
         if self.previous_worktree.is_some() {
-            self.run_choice = WorkspaceChoice::PreviousWorktree;
-            self.emit_run_prefs(cx);
+            self.choose_run_choice(WorkspaceChoice::PreviousWorktree, cx);
             cx.emit(ChatViewEvent::Notice("Previous worktree".to_string()));
         } else {
             cx.emit(ChatViewEvent::Notice("No previous worktree".to_string()));
@@ -2702,27 +2773,39 @@ impl ChatView {
         cx.notify();
     }
 
-    fn choose_run_choice(&mut self, choice: WorkspaceChoice, cx: &mut Context<'_, Self>) {
-        self.run_choice = choice;
+    pub(in crate::views) fn choose_run_choice(
+        &mut self,
+        choice: WorkspaceChoice,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.placing {
+            return;
+        }
         self.workspace_menu_open = false;
-        self.emit_run_prefs(cx);
-        cx.notify();
-    }
-
-    fn choose_effort(&mut self, effort: Option<String>, cx: &mut Context<'_, Self>) {
-        self.claude_effort = effort;
-        self.effort_menu_open = false;
-        self.emit_run_prefs(cx);
+        if self.thread_has_place() {
+            cx.emit(ChatViewEvent::NextThreadPlacement(choice));
+            cx.notify();
+            return;
+        }
+        self.draft_placement = Some(DraftPlacement {
+            choice,
+            previous: if choice == WorkspaceChoice::PreviousWorktree {
+                self.previous_worktree.clone()
+            } else {
+                None
+            },
+        });
+        self.inherit_repo_placement = false;
+        self.run_choice = choice;
+        cx.emit(ChatViewEvent::DraftPlacementChanged);
         cx.notify();
     }
 
     fn render_effort_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let mut rows = Vec::new();
-        let default_selected = self.claude_effort.is_none();
-        rows.push(self.effort_row("default", "Default", default_selected, None, cx));
-        for level in CLAUDE_EFFORTS {
-            let selected = self.claude_effort.as_deref() == Some(level);
-            rows.push(self.effort_row(level, level, selected, Some(level.to_string()), cx));
+        if self.kiro_agents.is_none() {return self.render_native_options(cx);}
+        let mut rows=Vec::new();
+        for &level in self.kiro_efforts() {
+            rows.push(self.effort_row(level,super::kiro::effort_label(level),self.kiro_display_effort()==Some(level),Some(level.to_owned()),cx));
         }
         div()
             .id("desktop-effort-menu")
@@ -2732,7 +2815,6 @@ impl ChatView {
             .children(rows)
             .into_any_element()
     }
-
     fn effort_row(
         &self,
         key: &'static str,
@@ -2764,7 +2846,7 @@ impl ChatView {
             .role(Role::MenuItem)
             .aria_label(label)
             .aria_selected(selected)
-            .when(key == "default", |el| {
+            .when(if self.kiro_agents.is_some() {selected} else {key=="default"}, |el| {
                 el.track_focus(&self.composer_effort_focus)
             })
             .border_1()
@@ -2773,7 +2855,9 @@ impl ChatView {
             .cursor_pointer()
             .map(|el| {
                 on_press_view(el, cx, move |this, _, cx| {
-                    this.choose_effort(pick.clone(), cx);
+                    this.choose_kiro_effort(pick.clone(),cx);
+                    this.effort_menu_open=false;
+                    cx.notify();
                 })
             })
             .child(label)
@@ -3272,7 +3356,7 @@ impl ChatView {
             .into_any_element()
     }
 
-    fn choose_permission_mode(&mut self, mode: PermissionMode, cx: &mut Context<'_, Self>) {
+    pub(super) fn choose_permission_mode(&mut self, mode: PermissionMode, cx: &mut Context<'_, Self>) {
         self.plan_return_mode = mode;
         cx.emit(ChatViewEvent::SetPermissionMode(mode));
         cx.notify();

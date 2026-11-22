@@ -504,7 +504,7 @@ impl Workspace {
     ) {
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());
-        self.remember_project(project.clone());
+        self.remember_project(project.clone(), cx);
         if self.active_view == AppView::Chat {
             self.terminal_drawer_open = true;
         }

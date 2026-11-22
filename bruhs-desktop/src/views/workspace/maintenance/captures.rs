@@ -156,10 +156,11 @@ impl Workspace {
                 |this, _, cx| this.refresh_capture_retention(None, cx),
             ));
         }
-        self.settings_row(
+        self.environment_maintenance_row(
             "desktop-settings-row-browser-captures",
             label,
             help,
+            match state.days {Some(0)=>"Off".into(),Some(days)=>format!("{days} days"),None=>"Unavailable".into()},
             controls.into_any_element(),
         )
     }

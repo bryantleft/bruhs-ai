@@ -116,7 +116,8 @@ pub(super) async fn run_codex_login_with(program: &str, timing: LoginTiming) -> 
 
 /// The program to check with: `codex`, a fixture under test, or nothing
 /// when a test installed none or a performance run blocks auth.
-pub(super) fn codex_program(cx: &App) -> Option<String> {
+pub(super) fn codex_program(cx: &App, enabled: bool) -> Option<String> {
+    if !enabled { return None; }
     #[cfg(feature = "native-performance")]
     if crate::native_performance::block_service(cx, crate::native_performance::Service::Auth) {
         return None;
@@ -153,7 +154,7 @@ impl ChatView {
     /// A chat made with a Codex model learns the sign-in like the web does
     /// at launch, sharing the check with every other such chat.
     pub(super) fn start_initial_codex_auth_check(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(program) = codex_program(cx) else {
+        let Some(program) = codex_program(cx, self.provider_enabled_for_chat(AgentProvider::Codex)) else {
             return;
         };
         let entity = cx.weak_entity();
@@ -196,7 +197,7 @@ impl ChatView {
     }
 
     pub(super) fn start_codex_auth_check(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(program) = codex_program(cx) else {
+        let Some(program) = codex_program(cx, self.provider_enabled_for_chat(AgentProvider::Codex)) else {
             return;
         };
         let previous_message = self
@@ -223,7 +224,7 @@ impl ChatView {
     }
 
     pub(super) fn start_codex_login(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(program) = codex_program(cx) else {
+        let Some(program) = codex_program(cx, self.provider_enabled_for_chat(AgentProvider::Codex)) else {
             return;
         };
         // The login button only shows while signed out.

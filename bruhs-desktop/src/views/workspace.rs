@@ -65,6 +65,9 @@ use bruhs_ui::press::on_press_view;
 use bruhs_ui::text_field::TextInput;
 
 mod app_links;
+mod default_model;
+mod native_model_options;
+use bruhs_models::delivery::{generation::GenerationOptions,writer_catalog::WriterCatalog};
 mod apps_settings;
 mod automations_ui;
 mod backup_settings;
@@ -92,6 +95,9 @@ mod zoom_tests;
 pub(crate) use import_ui::portable_messages;
 mod inbox_ui;
 mod keybindings_ui;
+mod language;
+mod linked_keybindings;
+pub(crate) use linked_keybindings::{LinkedDeliveries, TaskEditorHost};
 mod keybinding_file;
 mod knowledge_storage;
 mod knowledge_ui;
@@ -119,9 +125,13 @@ mod persistence;
 mod archive;
 mod clone_project;
 mod project_defaults;
+mod kiro_options;
 mod project_actions;
 mod project_art;
 mod project_order;
+mod project_grouping;
+mod project_name;
+mod project_removal;
 mod delivery_preferences;
 mod source_writer;
 mod environments;
@@ -141,7 +151,8 @@ mod voice_settings;
 mod snapshots;
 mod snooze_options;
 mod quota_settings;
-mod appearance;
+pub(crate) mod appearance;
+mod color_sliders;
 mod browser_settings;
 mod thread_notifications;
 mod person_merge;
@@ -155,6 +166,7 @@ mod save_queue;
 mod save_status;
 mod scheduling_ui;
 mod search_record_detail;
+mod license_browser;
 mod settings_page_ui;
 mod settings_ui;
 mod sidebar_ui;
@@ -174,11 +186,16 @@ mod thread_link_ui;
 mod thread_details;
 mod thread_forks;
 mod thread_snapshot;
+mod scheduled_replies;
 mod thread_titles;
 mod welcome;
 mod labs;
 mod pull_settlement;
 mod provider_health;
+mod setting_source;
+use setting_source::ScopedSwitch;
+mod provider_editor;
+mod usage_hubs;
 mod text_generators;
 mod quit_shortcut;
 mod secret_source_settings;
@@ -520,7 +537,7 @@ enum Overlay {
         target: RecordDeleteTarget,
     },
     /// The sidebar Update pill's "Update N providers?".
-    UpdateConfirm,
+    UpdateConfirm { from_settings: bool, details_open: bool },
     ThemeEditor(appearance::ThemeEditor),
     RemoveThemeVariants(appearance::VariantRemoval),
     /// "Restart to update" for a downloaded release.
@@ -611,6 +628,7 @@ enum PaletteMode {
 enum PaletteItem {
     Action(&'static CommandAction),
     Project {path:String,name:String},
+    LinkedProject(project_grouping::Member),
     Thread {
         id: String,
         title: String,
@@ -692,6 +710,27 @@ pub(crate) fn provider_label(provider: AgentProvider) -> &'static str {
         AgentProvider::Claude => "Anthropic",
         AgentProvider::Codex => "OpenAI Codex",
         _ => provider.label(),
+    }
+}
+
+pub(crate) fn accent_dot(color: u32) -> Div {
+    div()
+        .size(px(12.))
+        .flex_none()
+        .rounded_full()
+        .bg(gpui::rgb(color))
+        .border_1()
+        .border_color(theme::rambutan_400().opacity(0.65))
+}
+
+pub(crate) fn provider_identity_mark(
+    provider: AgentProvider,
+    accent: Option<u32>,
+    cx: &App,
+) -> AnyElement {
+    match accent {
+        Some(color) => accent_dot(color).into_any_element(),
+        None => provider_mark(provider, cx),
     }
 }
 
@@ -871,6 +910,8 @@ struct DesktopThread {
 #[serde(default)]
 struct PersistedWorkspaceState {
     current_model: Option<String>,
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    favorite_models: super::model_browser::Favorites,
     #[serde(with = "persisted_enum::optional")]
     permission_mode: Option<PermissionMode>,
     sidebar_visible: Option<bool>,
@@ -886,6 +927,10 @@ struct PersistedWorkspaceState {
     calendar_anchor: Option<String>,
     selected_calendar_event_id: Option<String>,
     threads: Vec<PersistedThread>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    desktop_task_links: BTreeMap<String,BTreeMap<String,String>>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    desktop_task_cursors: BTreeMap<String,i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -934,8 +979,20 @@ struct PersistedWorkspaceState {
     snooze_options: Option<Vec<snooze_options::Choice>>,
     #[serde(skip_serializing_if="Option::is_none")]
     quota_prefs:Option<quota_settings::Preferences>,
+    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
+    quota_recoveries: BTreeMap<String, quota_settings::Recovery>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    interrupted_runs: BTreeMap<String, maintenance::restart::Interrupted>,
+    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    default_options: GenerationOptions,
+    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    fallback_options: GenerationOptions,
     #[serde(skip_serializing_if="Option::is_none")]
     fallback_model:Option<String>,
+    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
+    default_kiro:super::chat::kiro::KiroChoices,
+    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
+    fallback_kiro:super::chat::kiro::KiroChoices,
     #[serde(skip_serializing_if="BTreeMap::is_empty")]
     provider_resets:BTreeMap<String,i64>,
     #[serde(default,skip_serializing_if="project_order::ProjectList::empty")]
@@ -982,7 +1039,7 @@ struct PersistedWorkspaceState {
     /// Web `bruhs.whisper_model` / `bruhs.diarize` / `bruhs.auto_record` /
     /// `bruhs.personality` preferences.
     meeting_prefs: Option<MeetingPrefs>,
-    /// `checkout`, `new_worktree`, or `previous_worktree`. Empty means checkout.
+    /// `checkout`, `new_worktree`, or `previous_worktree`. Empty inherits the repository default.
     #[serde(default)]
     run_choice: String,
     /// Claude `--effort` for the next send. Codex has no effort flag.
@@ -995,6 +1052,8 @@ struct PersistedWorkspaceState {
     send_shortcut: Option<String>,
     #[serde(skip_serializing_if="Option::is_none")]
     slash_skills:Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composer_rich_text: Option<bool>,
     tool_visibility: crate::views::chat::tool_visibility::Visibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     screen_reader: Option<crate::views::chat::screen_reader::ReaderPreferences>,
@@ -1053,12 +1112,20 @@ struct PersistedWorkspaceState {
     /// Shortcut rules. Empty means the shipped defaults.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
+    #[serde(default, skip_serializing_if = "linked_keybindings::SavedLinks::is_empty")]
+    shortcut_links: linked_keybindings::SavedLinks,
+    #[serde(default, skip_serializing_if = "linked_keybindings::SavedLinks::is_empty")]
+    project_links: linked_keybindings::SavedLinks,
     /// Records the addition of the native Settings shortcut once per device.
     keybinding_schema: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PersistedThread {
+    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    model_options: GenerationOptions,
+    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
+    kiro_choices: super::chat::kiro::KiroChoices,
     id: String,
     title: String,
     project_name: String,
@@ -1126,6 +1193,8 @@ struct PersistedThread {
     /// The thread keeps its checkout or worktree. Missing means it has not sent.
     #[serde(default, skip_serializing_if = "skip_false")]
     run_locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    draft_placement: Option<crate::views::chat::DraftPlacement>,
     /// Id of the thread's role: an agent started it with one, or the user
     /// set it with `/role`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1194,6 +1263,8 @@ struct PersistedMessage {
     checkpoint: Option<String>,
     #[serde(default)]
     stopped: bool,
+    #[serde(default, skip_serializing_if = "skip_false")]
+    interrupted_by_restart: bool,
     #[serde(default)]
     error: Option<String>,
 }
@@ -1441,16 +1512,31 @@ pub struct Workspace {
     )]
     local_servers_generation: u64,
     settings_section: SettingsSection,
+    license_browser: Option<Entity<license_browser::LicenseBrowser>>,
+    license_trigger: FocusHandle,
+    license_forward: bool,
     vault_settings: Entity<vault_settings::VaultSettings>,
     apps_settings: Entity<apps_settings::AppsSettings>,
     backup_settings: Entity<backup_settings::BackupSettings>,
+    /// The Vault settings under the name uncommitted work still uses (landing shim).
+    credential_settings: Entity<vault_settings::VaultSettings>,
     /// Provider CLI and app update checks (Settings → Updates, sidebar button).
     updates: Entity<updates_ui::DesktopUpdates>,
     settings_search: Entity<InputState>,
+    settings_model_query: Entity<InputState>,
+    settings_model_trigger: FocusHandle,
+    settings_model_rail: FocusHandle,
+    settings_model_listings: Vec<bruhs_models::runtime_models::Listing>,
+    settings_models_load: Option<Task<()>>,
+    thread_catalog: Arc<WriterCatalog>,
+    thread_catalog_load: Option<Task<()>>,
+    default_options: GenerationOptions,
+    fallback_options: GenerationOptions,
     settings_search_results: Vec<SettingsHit>,
     settings_search_catalog: Vec<SettingsHit>,
     settings_search_index: usize,
     settings_search_open: bool,
+    settings_nav_focus: [FocusHandle; SettingsSection::ALL.len()],
     settings_nav_scroll: ScrollHandle,
     settings_nav_reveal: Rc<std::cell::Cell<bool>>,
     settings_search_inventory: RefCell<Option<Vec<SettingsHit>>>,
@@ -1529,11 +1615,15 @@ pub struct Workspace {
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
     keymap_file:keybinding_file::KeymapFile,
+    linked_keybindings: linked_keybindings::LinkedKeybindings,
+    linked_projects: linked_keybindings::LinkedProjects,
     keybinding_edit_open: bool,
-    keybinding_choosing_command: bool,
-    keybinding_recording: bool,
-    keybinding_new_for: Option<usize>,
+    keybinding_draft: Option<keybindings_ui::NewBinding>,
+    keybinding_when_open: Option<keybindings_ui::BindingEditor>,
+    keybinding_recording: Option<keybindings_ui::BindingEditor>,
     keybinding_record_focus: FocusHandle,
+    keybinding_add_focus: FocusHandle,
+    keybinding_condition_focus: FocusHandle,
     keybinding_filter: Entity<InputState>,
     keybinding_key_input: Entity<InputState>,
     keybinding_when_input: Entity<InputState>,
@@ -1557,23 +1647,29 @@ pub struct Workspace {
     automation_pending: bool,
     active_thread_id: Option<String>,
     current_model: String,
+    explicit_model: bool,
+    favorite_models: super::model_browser::Favorites,
+    model_browser_tab: Option<String>,
     permission_mode: PermissionMode,
     /// Where a thread that has not sent yet will run. Copied onto every chat.
-    run_choice: WorkspaceChoice,
+    run_choice: Option<WorkspaceChoice>,
     /// Claude effort chip. `None` is Default, which omits `--effort`.
     claude_effort: Option<String>,
     /// Stored follow-up. Claude can steer a running turn. Codex still queues.
     follow_up_steer: bool,
     send_shortcut: SendShortcut,
     slash_skills:bool,
+    composer_rich_text: bool,
     tool_visibility: crate::views::chat::tool_visibility::Visibility,
     screen_reader: crate::views::chat::screen_reader::ReaderPreferences,
     last_reader_title: Option<String>,
     chat_width: ChatWidth,
     appearance: appearance::DeviceAppearance,
+    system_language: language::Language,
     custom_themes: Arc<appearance::ThemeLibrary>,
     theme_import_notice: Option<(String, std::time::Instant)>,
     theme_navigation: appearance::CollectionNavigation,
+    theme_preview_active: bool,
     details: thread_details::DetailsUi,
     thread_origins: BTreeMap<String,thread_details::Origin>,
     fonts:font_settings::DeviceFonts,
@@ -1605,7 +1701,19 @@ pub struct Workspace {
     branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
     health_interval_input:Entity<InputState>,
     generators: text_generators::GeneratorSettings,
-    health_result:Option<[&'static str;2]>,
+    acp_models: Vec<crate::views::acp_models::Instance>,
+    provider_availability: Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
+    usage_hubs: usage_hubs::UsageHubs,
+    provider_editor: Option<provider_editor::ProviderEditor>,
+    provider_add_focus: FocusHandle,
+    provider_change_pending: bool,
+    provider_override_source: String,
+    settings_dropdown_trigger: Option<FocusHandle>,
+    first_override_project: FocusHandle,
+    checkout_defaults: bruhs_core::git::ProjectCheckoutDefaults,
+    checkout_defaults_watch: Option<Task<()>>,
+    provider_change_error: Option<String>,
+    health_result:Option<Vec<bruhs_core::agent::health::ProviderHealth>>,
     health_timer:Option<Task<()>>,
     health_check:Option<Task<()>>,
     retention_editor: Option<worktree_storage::retention::DaysEditor>,
@@ -1691,14 +1799,26 @@ pub struct Workspace {
     idle_action_runs: Option<BTreeMap<String, EpochMs>>,
     snooze_editor:snooze_options::Editor,
     quota_prefs:quota_settings::Preferences,
+    project_identities: project_grouping::Identities,
+    expanded_project_groups: std::collections::BTreeSet<String>,
+    project_names:project_name::SyncState,
     project_list:project_order::ProjectList,
+    removal: project_removal::RemovalState,
     response_stream:super::chat::response_stream::Mode,
     text_generation_model: Option<String>,
     title_requests: BTreeMap<String, thread_titles::PendingTitle>,
     title_request_serial: u64,
     task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
+    desktop_task_cursors: BTreeMap<String,i64>,
+    reading_desktop_tasks: HashSet<String>,
+    desktop_task_links: BTreeMap<String,BTreeMap<String,String>>,
     quota_timers:BTreeMap<String,Task<()>>,
+    foreign_runs: BTreeMap<String, maintenance::restart::Interrupted>,
+    quota_recoveries: BTreeMap<String, quota_settings::Recovery>,
+    quota_dispatching: BTreeMap<String, quota_settings::Recovery>,
     fallback_model:Option<String>,
+    default_kiro:super::chat::kiro::KiroChoices,
+    fallback_kiro:super::chat::kiro::KiroChoices,
     provider_resets:BTreeMap<String,i64>,
     capacity_task:Option<Task<()>>,
     snooze_options:Option<Vec<snooze_options::Choice>>,
@@ -1916,6 +2036,9 @@ impl Workspace {
         #[cfg(test)] restore_records: fn(Option<&mut PersistedWorkspaceState>) -> RestoredRecords,
         #[cfg(test)] restore_threads: ThreadRestorer,
     ) -> Self {
+        let untrusted_workspace_state = disk_version == DiskVersion::Untrusted;
+        let favorite_models = persisted.as_ref().map(|s| s.favorite_models.clone()).unwrap_or_default();
+        let explicit_model = persisted.as_ref().is_some_and(|state| state.current_model.is_some());
         let current_model = persisted
             .as_ref()
             .and_then(|state| state.current_model.clone())
@@ -1932,10 +2055,16 @@ impl Workspace {
         let workspace_for_appearance = cx.weak_entity();
         subscriptions.push(window.observe_window_appearance(move |window, cx| {
             let _ = workspace_for_appearance.update(cx, |this, cx| {
-                if this.appearance.scheme == appearance::ColorScheme::System { this.apply_device_appearance(window, cx); }
+                if this.theme_preview_active { this.preview_theme_draft(window, cx); }
+                else if this.appearance.scheme == appearance::ColorScheme::System { this.apply_device_appearance(window, cx); }
             });
         }));
-        let settings_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search settings"));
+        let settings_model_query = cx.new(|cx| InputState::new(window, cx).placeholder(super::model_browser::SEARCH_HINT));
+        subscriptions.push(redraw_on_edit(&settings_model_query, window, cx));
+        let appearance = persisted.as_ref().and_then(|state|state.appearance).unwrap_or_default().normalized();
+        let system_language = language::Language::system();
+        let search_placeholder = appearance.language.effective(system_language).text("Search settings");
+        let settings_search = cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder));
         subscriptions.push(cx.subscribe_in(&settings_search, window, |this: &mut Self, field, event: &InputEvent, window, cx| {
             match event {
                 InputEvent::Focus if !this.settings_search_open => {
@@ -2016,7 +2145,7 @@ impl Workspace {
             event_create_end_input,
             event_create_notes_input,
         } = Self::new_event_form_inputs(window, cx, &mut subscriptions);
-        let sidebar_search = Self::new_sidebar_search(window, cx, &mut subscriptions);
+        let sidebar_search = Self::new_sidebar_search(appearance.language.effective(system_language), window, cx, &mut subscriptions);
         let saved_title_instructions = persisted
             .as_ref()
             .and_then(|state| state.title_instructions.clone())
@@ -2176,10 +2305,8 @@ impl Workspace {
             this.drive_background_automations(cx);
         });
         cx.defer_in(window, |this, _, cx| this.refresh_branch_pull(cx));
-        let run_choice = persisted
-            .as_ref()
-            .map(|state| WorkspaceChoice::parse(&state.run_choice))
-            .unwrap_or_default();
+        let run_choice = persisted.as_ref().filter(|s| !s.run_choice.is_empty())
+            .map(|s| WorkspaceChoice::parse(&s.run_choice));
         let claude_effort = persisted.as_ref().and_then(|state| {
             state
                 .claude_effort
@@ -2234,6 +2361,15 @@ impl Workspace {
         let reopen_view = persisted
             .as_ref()
             .and_then(|state| state.active_view.clone());
+        // Vault replaced Credentials; uncommitted work still reads the old field
+        // name, so both fields hold the same Vault settings (landing shim).
+        let vault_settings = {
+            let settings =
+                cx.new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx));
+            let sources = settings.read(cx).secret_sources();
+            cx.observe(&sources, |_, _, cx| cx.notify()).detach();
+            settings
+        };
         let mut workspace = Self {
             workflow_window: window.window_handle(),
             automation_pending: false,
@@ -2359,7 +2495,14 @@ impl Workspace {
                         this.open_room_dialog(Some(event.room_id.clone()), window, cx)
                     },
                 ));
+                subscriptions.push(cx.subscribe(&panel, |this,_,activity:&crate::views::reactive_automations::DesktopTaskActivity,cx| {
+                    this.read_scheduled_replies(activity,cx);
+                }));
                 subscriptions.push(cx.subscribe_in(&panel, window, |this, _, event: &crate::views::reactive_automations::TaskThreadLocation, window, cx| {
+                    if this.desktop_task_links.contains_key(event.thread_id.as_str()) && this.threads.iter().any(|thread| thread.id == event.thread_id.as_str()) {
+                        this.select_thread_by_id(event.thread_id.as_str(),cx);
+                        return;
+                    }
                     this.activate_sidebar_view(AppView::Bruh { agent_id: event.agent_id.clone() }, window, cx);
                     this.task_thread_view = Some(event.clone());
                     this.persist_and_notify(cx);
@@ -2421,13 +2564,11 @@ impl Workspace {
                 details
             },
             settings_section: SettingsSection::General,
-            vault_settings: {
-                let settings = cx
-                    .new(|cx| vault_settings::VaultSettings::new(meetings_client(), window, cx));
-                let sources = settings.read(cx).secret_sources();
-                cx.observe(&sources, |_, _, cx| cx.notify()).detach();
-                settings
-            },
+            license_browser: None,
+            license_trigger: cx.focus_handle(),
+            license_forward: false,
+            vault_settings: vault_settings.clone(),
+            credential_settings: vault_settings,
             apps_settings: cx
                 .new(|cx| apps_settings::AppsSettings::new(meetings_client(), window, cx)),
             backup_settings: cx
@@ -2438,14 +2579,34 @@ impl Workspace {
                     .and_then(|state| state.update_checks)
                     .unwrap_or(true);
                 let updates = cx.new(|cx| updates_ui::DesktopUpdates::new(enabled, persisted.as_ref().and_then(|s|s.maintenance.as_ref()).is_none_or(|m|m.provider_checks), persisted.as_ref().and_then(|s| s.update_track).unwrap_or_else(|| updates_ui::UpdateTrack::for_installed(env!("BRUHS_RELEASE_VERSION"))), cx));
-                cx.observe(&updates, |_, _, cx| cx.notify()).detach();
+                cx.subscribe(&updates, Self::combined_update_event).detach();
+                let mut registry_revision = 0;
+                cx.observe(&updates, move |ws, u, cx| {
+                    let revision = u.read(cx).registry_revision;
+                    if revision != registry_revision {
+                        registry_revision = revision;
+                        ws.health_check = None;
+                        ws.check_provider_health(cx);
+                    }
+                    cx.notify();
+                }).detach();
                 updates
             },
             settings_search,
+            settings_model_query,
+            settings_model_trigger: cx.focus_handle(),
+            settings_model_rail: cx.focus_handle(),
+            settings_model_listings: Vec::new(),
+            settings_models_load: None,
+            thread_catalog: Default::default(),
+            thread_catalog_load: None,
+            default_options: persisted.as_ref().map(|s|s.default_options.clone()).unwrap_or_default(),
+            fallback_options: persisted.as_ref().map(|s|s.fallback_options.clone()).unwrap_or_default(),
             settings_search_results: Vec::new(),
             settings_search_catalog: Vec::new(),
             settings_search_index: 0,
             settings_search_open: false,
+            settings_nav_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
             settings_nav_scroll: ScrollHandle::new(),
             settings_nav_reveal: Default::default(),
             settings_search_inventory: RefCell::default(),
@@ -2533,11 +2694,15 @@ impl Workspace {
             keybindings,
             keybinding_index: 0,
             keymap_file:keybinding_file::KeymapFile::new(),
+            linked_projects: linked_keybindings::LinkedProjects::restore(persisted.as_ref().map(|s| &s.project_links)),
+            linked_keybindings: linked_keybindings::LinkedKeybindings::restore(persisted.as_ref().map(|s| &s.shortcut_links)),
             keybinding_edit_open: false,
-            keybinding_choosing_command: false,
-            keybinding_recording: false,
-            keybinding_new_for: None,
+            keybinding_draft: None,
+            keybinding_when_open: None,
+            keybinding_recording: None,
             keybinding_record_focus: cx.focus_handle().tab_stop(true),
+            keybinding_add_focus: cx.focus_handle().tab_stop(true),
+            keybinding_condition_focus: cx.focus_handle().tab_stop(true),
             keybinding_filter,
             keybinding_key_input,
             keybinding_when_input,
@@ -2559,6 +2724,9 @@ impl Workspace {
             threads,
             active_thread_id,
             current_model,
+            explicit_model,
+            favorite_models,
+            model_browser_tab: None,
             permission_mode,
             run_choice,
             claude_effort,
@@ -2570,7 +2738,13 @@ impl Workspace {
             voice_models,
             voice_cloud,
             voice_devices: None,
-            worktree_prefs: persisted.as_ref().and_then(|state| state.worktree_prefs).unwrap_or_default(),
+            worktree_prefs: match persisted.as_ref() {
+                Some(state) => state.worktree_prefs.unwrap_or_default(),
+                None => bruhs_models::logic::run_place::WorktreePreferences {
+                    submodules: bruhs_models::logic::run_place::WorktreeSubmodules::FromProject,
+                    ..Default::default()
+                },
+            },
             voice_device_generation: 0,
             voice_testing: false,
             microphone_test: Default::default(),
@@ -2590,11 +2764,14 @@ impl Workspace {
             delivery_preferences:Default::default(),
             theme_import_notice: None,
             theme_navigation: Default::default(),
+            theme_preview_active: false,
             custom_themes: persisted.as_ref().and_then(|state|state.custom_themes.clone()).unwrap_or_default(),
-            appearance: persisted.as_ref().and_then(|state| state.appearance).unwrap_or_default().normalized(),
+            appearance,
+            system_language,
             chat_width: persisted.as_ref().and_then(|state| state.chat_width).unwrap_or_default(),
             last_reader_title: None,
             screen_reader: persisted.as_ref().and_then(|p|p.screen_reader).unwrap_or_default(),
+            composer_rich_text: persisted.as_ref().and_then(|p| p.composer_rich_text).unwrap_or(true),
             slash_skills:persisted.as_ref().and_then(|p|p.slash_skills).unwrap_or(true),
             tool_visibility:persisted.as_ref().map(|p|p.tool_visibility).unwrap_or_default(),
             send_shortcut: persisted.as_ref().and_then(|p| {
@@ -2664,11 +2841,24 @@ impl Workspace {
             project_start_folder_input,
             branch_naming, branch_prefix_input, branch_instructions_input, branch_editor_scope: String::new(), branch_prefix_edited: false, branch_instructions_edited: false,
             generators: text_generators::GeneratorSettings::new(cx),
+            acp_models: crate::views::acp_models::load().unwrap_or_default(),
+            provider_availability: bruhs_core::agent_extensions::availability::ProviderAvailability::load()
+                .map_err(|err| err.to_string()),
+            provider_change_error: None,
+            usage_hubs: usage_hubs::UsageHubs::new(cx),
+            provider_editor: None,
+            provider_add_focus: cx.focus_handle(),
+            provider_change_pending: false,
+            provider_override_source: String::new(),
+            settings_dropdown_trigger: None,
+            first_override_project: cx.focus_handle(),
+            checkout_defaults: Default::default(),
+            checkout_defaults_watch: None,
             health_interval,health_interval_input,health_result:None,health_timer:None,health_check:None,
             retention_editor: None,
             worktree_retention: persisted.as_ref().map(|s| s.worktree_retention).unwrap_or_default(),
             #[cfg(target_os = "macos")]
-            fast_checkout: labs::FastCheckout::load(),
+            fast_checkout: Default::default(),
             location_input,location_status:None,location_busy:false,worktree_cleanup_status:None,settings_advanced: Default::default(),
             cleanup_keep_when: persisted.as_ref().map(|state|state.cleanup_keep_when).unwrap_or_default(),
             pending_scratch_cleanups: persisted.as_mut().map(|s| std::mem::take(&mut s.pending_scratch_cleanups)).unwrap_or_default(),
@@ -2681,10 +2871,22 @@ impl Workspace {
             snooze_options:persisted.as_ref().and_then(|s|s.snooze_options.clone()),
             snooze_editor:snooze_options::Editor::new(window,cx),
             quota_prefs:persisted.as_ref().and_then(|s|s.quota_prefs).unwrap_or_default(),
+            desktop_task_cursors: persisted.as_ref().map(|p| p.desktop_task_cursors.clone()).unwrap_or_default(),
+            reading_desktop_tasks: Default::default(),
+            desktop_task_links: persisted.as_ref().map(|p|p.desktop_task_links.clone()).unwrap_or_default(),
             quota_timers:BTreeMap::new(),
+            foreign_runs:BTreeMap::new(),
+            quota_recoveries:persisted.as_mut().map(|s|std::mem::take(&mut s.quota_recoveries)).unwrap_or_default(),
+            quota_dispatching:BTreeMap::new(),
+            default_kiro:persisted.as_ref().map(|p|p.default_kiro.clone()).unwrap_or_default(),
+            fallback_kiro:persisted.as_ref().map(|p|p.fallback_kiro.clone()).unwrap_or_default(),
             fallback_model:persisted.as_ref().and_then(|p|p.fallback_model.clone()),
             provider_resets:persisted.as_ref().map(|p|p.provider_resets.clone()).unwrap_or_default(),
             capacity_task:None,
+            project_identities: Default::default(),
+            expanded_project_groups: Default::default(),
+            removal: Default::default(),
+            project_names:Default::default(),
             project_list:persisted.as_ref().map(|s|s.project_list.clone()).unwrap_or_default(),
             title_requests: persisted.as_mut().map(|p| std::mem::take(&mut p.title_requests)).unwrap_or_default(),
             title_request_serial:0,
@@ -2818,6 +3020,7 @@ impl Workspace {
         workspace.sync_credential_sections(window, cx);
         workspace.diff_panel.update(cx,|panel,cx|panel.set_default_wrap(workspace.fonts.wrap,cx));
         workspace.restore_project_list(cx);
+        workspace.refresh_project_identities(cx);
         workspace.schedule_project_refresh(cx);
         workspace.start_pull_lifecycle(cx);
         workspace.monitor_provider_capacity(cx);
@@ -2826,10 +3029,18 @@ impl Workspace {
         workspace.schedule_log_cleanup(cx);
         workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
+        if untrusted_workspace_state {
+            workspace.quota_recoveries.clear();
+        } else {
+            workspace.restore_quota_recoveries(cx);
+            if let Some(state) = persisted.as_mut() {
+                workspace.restore_interrupted_runs(std::mem::take(&mut state.interrupted_runs), cx);
+            }
+        }
         workspace.resume_title_requests(cx);
         #[cfg(debug_assertions)]
         if let (Some(prompt),Some(thread))=(crate::views::chat::desktop_smoke_prompt(),workspace.active_thread()){
-            thread.chat.update(cx,|chat,cx|chat.submit_startup_smoke_prompt(prompt,cx));
+            thread.chat.update(cx,|chat,cx|chat.submit_prompt(prompt,cx));
         }
         // Return to the view the app closed on, as the web does from its URL.
         if let Some(view) = reopen_view {
@@ -2840,6 +3051,8 @@ impl Workspace {
         workspace.sync_keybindings(cx);
         workspace.load_generators(cx);
         workspace.refresh_keymap_file(cx);
+        #[cfg(not(test))]
+        workspace.watch_project_names(cx);
         workspace.apply_device_appearance(window, cx);
         workspace.apply_zoom(window, cx);
         // With nothing focused, gpui dispatches keys from the window root,
@@ -2869,6 +3082,7 @@ impl Workspace {
             }
         })
         .detach();
+        workspace.show_update_receipt(cx);
         workspace
     }
 
@@ -2885,6 +3099,8 @@ impl Workspace {
     /// thread's session still resumes on the provider that owns it.
     fn set_current_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         let model_id = model_id.into();
+        if self.current_model != model_id {self.default_options = Default::default();}
+        self.explicit_model = true;
         self.current_model = model_id.clone();
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.set_model(model_id, cx));
@@ -2896,14 +3112,21 @@ impl Workspace {
     /// follows only while it has no turn yet (web: a thread without a model
     /// is on the default).
     fn set_default_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
-        let model_id = model_id.into();
-        self.current_model = model_id.clone();
+        self.save_default_model(Some(model_id.into()), cx);
+    }
+
+    fn save_default_model(&mut self, model: Option<String>, cx: &mut Context<'_, Self>) {
+        if model.as_deref()!=Some(self.current_model.as_str()) {self.default_options=Default::default();}
+        self.explicit_model = model.is_some();
+        self.current_model = model.unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_owned());
         if let Some(chat) = self
             .active_thread()
             .map(|thread| thread.chat.clone())
             .filter(|chat| chat.read(cx).messages.is_empty())
         {
-            chat.update(cx, |chat, cx| chat.set_model(model_id, cx));
+            let path = chat.read(cx).settings_project_path();
+            let (model, _) = self.new_thread_defaults(path);
+            chat.update(cx, |chat, cx| chat.set_model(model, cx));
         }
         self.persist_and_notify(cx);
     }
@@ -3073,6 +3296,16 @@ impl Workspace {
     /// A key this build cannot parse is undone so the next visit does not
     /// drop the forward list.
     fn step_page(&mut self, back: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.settings_visible() && self.settings_section == SettingsSection::About {
+            if back && self.license_browser.is_some() {
+                self.return_to_about(window, cx);
+                return;
+            }
+            if !back && self.license_forward {
+                self.open_license_browser(window, cx);
+                return;
+            }
+        }
         if self.terminal_has_focus(window, cx) {
             cx.propagate();
             return;
@@ -3356,6 +3589,7 @@ impl Workspace {
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
             AppView::Bruh { .. } => self.render_bruh_page(),
+            AppView::LinkedTaskThread { .. } => self.render_linked_thread(cx),
             AppView::Room { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
@@ -3452,6 +3686,10 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.reconcile_linked_task_editor(window,cx);
+        self.reconcile_linked_thread(window,cx);
+        self.reconcile_linked_delivery_dialog(window, cx);
+        self.restore_theme_preview(window,cx);
         if self.settings_visible() && self.settings_section == SettingsSection::SourceControl {
             self.sync_writer_editor(window,cx);
         }
@@ -3579,7 +3817,8 @@ impl Render for Workspace {
         self.preview_panel
             .update(cx, |panel, _| panel.set_shown(preview_shown));
         if self.active_view == AppView::Workbench && self.workbench_panel.is_none() {
-            let panel = cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(window, cx));
+            let usage = std::mem::take(&mut self.usage_hubs.open_workbench_usage);
+            let panel = cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(usage, window, cx));
             // Verification's "Use draft" fills the composer, as on the web.
             self._subscriptions.push(cx.subscribe_in(
                 &panel,
@@ -3592,6 +3831,11 @@ impl Render for Workspace {
             self.workbench_panel = Some(panel);
         }
         if self.active_view == AppView::Workbench {
+            if std::mem::take(&mut self.usage_hubs.open_workbench_usage) {
+                if let Some(panel) = &self.workbench_panel {
+                    panel.update(cx, |panel, cx| panel.open_usage(window, cx));
+                }
+            }
             if let (Some(id), Some(panel)) = (
                 self.work_item_handoff.open.take(),
                 self.workbench_panel.as_ref(),
@@ -3690,7 +3934,7 @@ impl Render for Workspace {
                             .overflow_hidden()
                             .child(self.render_main_surface(window, cx))
                             // Notices float over the view (no layout shift).
-                            .children(self.render_hub_notice(window, cx)),
+                            .when(!self.settings_has_notice(cx), |el| el.children(self.render_hub_notice(window, cx))),
                     );
                 if !right_panel_drawer && (chat_panel_open || panel_fraction>0.0) {
                     // Web: the panel's left edge drags and the width is
@@ -3844,7 +4088,7 @@ impl Render for Workspace {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
-                        && this.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
+                        && this.modal_contains_focus(window, cx)
                     {
                         this.step_modal_focus(false, window, cx);
                     } else {
@@ -3857,7 +4101,7 @@ impl Render for Workspace {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
-                        && this.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
+                        && this.modal_contains_focus(window, cx)
                     {
                         this.step_modal_focus(true, window, cx);
                     } else {
@@ -3937,10 +4181,13 @@ impl Render for Workspace {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
+            .children(crate::views::workspace::appearance::background_layer("Root", cx))
+            .children(self.inspection_frame(true,cx))
             .child(body)
             .when(matches!(self.overlay, Some(Overlay::ThemeEditor(_) | Overlay::RemoveThemeVariants(_))), |el| {
                 el.child(self.render_settings(window, cx))
             })
+            .children(self.inspection_frame(false,cx))
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
                     Overlay::Capture => self.render_capture_dialog(window, cx),
@@ -3961,7 +4208,7 @@ impl Render for Workspace {
                     Overlay::RecordDeleteConfirm { ref target } => {
                         self.render_record_delete_confirm(target, window, cx)
                     }
-                    Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
+                    Overlay::UpdateConfirm { .. } => self.render_update_confirm(window, cx),
                     Overlay::ThemeEditor(editor) => self.render_theme_editor(editor,window,cx),
                     Overlay::RemoveThemeVariants(removal) => self.render_variant_removal(removal, window, cx),
                     Overlay::RestartConfirm { .. } => self.render_restart_confirm(window, cx),
@@ -4012,6 +4259,8 @@ impl Render for Workspace {
                         ),
                 )
             })
+            .when(!self.settings_visible() && ((!sidebar_docked && !sidebar_drawer_open) || self.overlay_open()), |el|
+                el.children(self.floating_update_progress(cx)))
             .when_some(self.quit_hint(),|el,hint|el.child(hint))
     }
 }

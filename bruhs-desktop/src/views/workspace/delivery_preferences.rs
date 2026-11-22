@@ -5,6 +5,8 @@ use bruhs_models::delivery::{
 
 #[derive(Default)]
 pub(super) struct HostPreferences {
+    pub(super) catalog: bruhs_models::delivery::writer_catalog::WriterCatalog,
+    loading_models: bool,
     value: Option<DeliveryPreferences>,
     pub(super) error: Option<String>,
     revision: u64,
@@ -20,9 +22,44 @@ impl Workspace {
         self.delivery_preferences.value = Some(value);
     }
     fn delivery_settings_scope(&self) -> &str {
-        if self.settings_section == SettingsSection::Updates { "" } else { &self.settings_project_scope }
+        if self.settings_section == SettingsSection::Updates {
+            ""
+        } else {
+            &self.settings_project_scope
+        }
+    }
+    fn refresh_writer_models(&mut self, cx: &mut Context<'_, Self>) {
+        if self.delivery_preferences.loading_models {
+            return;
+        }
+        self.delivery_preferences.loading_models = true;
+        let scope = self.delivery_settings_scope().to_owned();
+        let project = scope.clone();
+        let request = crate::app_state::spawn_tokio(cx, async move {
+            crate::server_client::ServerClient::workbench_client()
+                .writer_models(&project)
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                this.delivery_preferences.loading_models = false;
+                if scope != this.delivery_settings_scope() {
+                    this.refresh_writer_models(cx);
+                    return;
+                }
+                if let Ok(catalog) = result {
+                    this.delivery_preferences.catalog = catalog;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
     pub(super) fn load_delivery_preferences(&mut self, cx: &mut Context<'_, Self>) {
+        if self.settings_section == SettingsSection::SourceControl {
+            self.refresh_writer_models(cx);
+        }
         let state = &mut self.delivery_preferences;
         state.value = None;
         state.error = None;
@@ -32,8 +69,8 @@ impl Workspace {
             cx.notify();
             return;
         }
-        let path =
-            (!self.delivery_settings_scope().is_empty()).then(|| self.delivery_settings_scope().to_owned());
+        let path = (!self.delivery_settings_scope().is_empty())
+            .then(|| self.delivery_settings_scope().to_owned());
         let request = crate::app_state::spawn_tokio(cx, async move {
             crate::server_client::ServerClient::workbench_client()
                 .delivery_preferences(path)
@@ -61,10 +98,7 @@ impl Workspace {
         value: &str,
         cx: &mut Context<'_, Self>,
     ) {
-        use bruhs_models::delivery::{
-            generation::{model_options, GenerationTarget},
-            GuideModel,
-        };
+        use bruhs_models::delivery::{generation::GenerationTarget, GuideModel};
         let Some(prefs) = self.loaded_delivery_preferences() else {
             return;
         };
@@ -81,8 +115,12 @@ impl Workspace {
                 let Some((key, value)) = token.split_once('=') else {
                     return;
                 };
-                let Some(spec) = model_options(model)
+                let Some(spec) = self
+                    .delivery_preferences
+                    .catalog
+                    .model(model)
                     .into_iter()
+                    .flat_map(|m| &m.options)
                     .find(|o| o.kind.key() == key)
                 else {
                     return;
@@ -111,8 +149,7 @@ impl Workspace {
                 DeliveryPreferenceChange::ReviewGuideModel(Some(GuideModel::Writer))
             }
             ("settings-guide-model", model)
-                if bruhs_models::agent::model_info(model)
-                    .is_some_and(|m| !m.provider.is_external()) =>
+                if self.delivery_preferences.catalog.model(model).is_some() =>
             {
                 DeliveryPreferenceChange::ReviewGuideModel(Some(GuideModel::Separate {
                     model: model.to_owned(),
@@ -139,8 +176,8 @@ impl Workspace {
                 Some(bruhs_models::delivery::WriterModel::TextGeneration),
             ),
             ("settings-writer-model", model)
-                if self.generator_model(model) || bruhs_models::agent::model_info(model)
-                    .is_some_and(|m| !m.provider.is_external()) =>
+                if self.generator_model(model)
+                    || self.delivery_preferences.catalog.model(model).is_some() =>
             {
                 DeliveryPreferenceChange::WriterModel(Some(
                     bruhs_models::delivery::WriterModel::Separate {

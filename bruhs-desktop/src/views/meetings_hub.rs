@@ -71,6 +71,7 @@ pub struct MeetingPrefs {
 /// Transient notice (web `push_banner`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HubNotice {
+    pub show_in_settings: bool,
     pub message: String,
     pub warning: bool,
     /// An optional button beside Dismiss (web banner action).
@@ -535,6 +536,13 @@ impl MeetingsHub {
         self.notify_notice(message, warning, cx);
     }
 
+    pub fn show_update_notice(&mut self, message: String, warning: bool, cx: &mut Context<'_, Self>) {
+        self.show_notice(message, warning, cx);
+        if let Some(notice) = self.notice.as_mut() {
+            notice.show_in_settings = true;
+        }
+    }
+
     /// Show an informational notice with one action button.
     pub fn show_notice_with_action(
         &mut self,
@@ -559,6 +567,7 @@ impl MeetingsHub {
             // Like web's banner, it stays until the stream opens again
             // instead of expiring with the other notices.
             self.notice = Some(HubNotice {
+                show_in_settings: false,
                 message: STREAM_DISCONNECTED_NOTICE.to_string(),
                 warning: true,
                 action: None,
@@ -603,6 +612,7 @@ impl MeetingsHub {
         cx: &mut Context<'_, Self>,
     ) {
         self.notice = Some(HubNotice {
+            show_in_settings: false,
             message: message.clone(),
             warning,
             action,

@@ -1,13 +1,7 @@
 //! An editable host keymap. Disk and UI editors compare the same revision before writing.
 use super::*;
-use bruhs_models::logic::keybindings::Keybinding;
-use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use bruhs_core::keybinding_file::{sync, ResultState};
+use std::{path::PathBuf, time::Duration};
 
 #[derive(Default)]
 pub(super) struct KeymapFile {
@@ -19,106 +13,6 @@ pub(super) struct KeymapFile {
     watching: bool,
     pub(super) error: Option<String>,
     conflict: bool,
-}
-struct Contents {
-    revision: [u8; 32],
-    rules: Vec<Keybinding>,
-}
-fn read(path: &Path, known: Option<[u8; 32]>) -> io::Result<ResultState> {
-    let meta = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ResultState::NoFile),
-        Err(e) => return Err(e),
-    };
-    if !meta.is_file() || meta.len() > 128 * 1024 {
-        return Err(io::Error::other(
-            "Use a regular keybindings file smaller than 128 KB.",
-        ));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    fs::File::open(path)?
-        .take(128 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > 128 * 1024 {
-        return Err(io::Error::other("The keybindings file exceeds 128 KB."));
-    }
-    let revision = Sha256::digest(&bytes).into();
-    if known == Some(revision) {
-        return Ok(ResultState::Unchanged);
-    }
-    let rules: Vec<Keybinding> = serde_json::from_slice(&bytes).map_err(|e| {
-        io::Error::other(format!(
-            "Check keybindings.json at line {}, column {}.",
-            e.line(),
-            e.column()
-        ))
-    })?;
-    if rules.len() > 256
-        || rules.iter().any(|r| {
-            r.command.trim().is_empty()
-                || r.command.len() > 256
-                || r.key.len() > 256
-                || r.when.as_ref().is_some_and(|s| s.len() > 1024)
-        })
-    {
-        return Err(io::Error::other(
-            "Use up to 256 shortcut rules with a command name.",
-        ));
-    }
-    Ok(ResultState::Data(Contents {
-        revision,
-        rules: super::keybindings_ui::rules_from_saved(rules, 1),
-    }))
-}
-enum ResultState {
-    NoFile,
-    Unchanged,
-    Data(Contents),
-    Conflict,
-}
-fn sync(
-    path: &Path,
-    revision: Option<[u8; 32]>,
-    save: Option<Vec<Keybinding>>,
-    create: bool,
-) -> io::Result<ResultState> {
-    if !create && save.is_none() {
-        return read(path, revision);
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("The settings folder is unavailable."))?;
-    fs::create_dir_all(parent)?;
-    let lock = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path.with_extension("lock"))?;
-    lock.lock()?;
-    let disk = read(path, None)?;
-    let current = match &disk {
-        ResultState::Data(contents) => Some(contents.revision),
-        _ => None,
-    };
-    if create && current.is_some() && revision.is_none() {
-        return Ok(disk);
-    }
-    if current != revision {
-        return Ok(ResultState::Conflict);
-    }
-    let Some(rules) = save else {
-        return Ok(disk);
-    };
-    let mut bytes = serde_json::to_vec_pretty(&rules)?;
-    bytes.push(b'\n');
-    let mut out = tempfile::NamedTempFile::new_in(parent)?;
-    out.write_all(&bytes)?;
-    out.as_file().sync_all()?;
-    out.persist(path)?;
-    Ok(ResultState::Data(Contents {
-        revision: Sha256::digest(bytes).into(),
-        rules,
-    }))
 }
 impl KeymapFile {
     pub(super) fn new() -> Self {
@@ -135,7 +29,7 @@ impl KeymapFile {
 impl Workspace {
     pub(super) fn keymap_changed(&mut self, cx: &mut Context<'_, Self>) {
         self.sync_keybindings(cx);
-        if self.keymap_file.revision.is_some() || self.keymap_file.busy {
+        if self.keymap_file.path.is_some() {
             self.keymap_file.dirty = true;
             self.refresh_keymap_file(cx);
         }
@@ -148,7 +42,7 @@ impl Workspace {
         let Some(path) = state.path.clone() else {
             return;
         };
-        let create = state.open_requested;
+        let create = state.open_requested && !state.dirty;
         let revision = state.revision;
         let dirty = state.dirty;
         let local = self.keybindings.clone();
@@ -182,10 +76,12 @@ impl Workspace {
                         if !newer {
                             if this.keybindings != data.rules {
                                 this.keybindings = data.rules;
-                                this.keybinding_index = 0;
-                                this.keybinding_new_for = None;
-                                this.keybinding_edit_open = false;
-                                this.keybinding_recording = false;
+                                if this.remote_file_button_state().is_none() {
+                                    this.keybinding_index = 0;
+                                    this.keybinding_when_open = None;
+                                    this.keybinding_edit_open = false;
+                                    this.keybinding_recording = None;
+                                }
                                 this.sync_keybindings(cx);
                                 this.persist(cx);
                             }
@@ -208,7 +104,8 @@ impl Workspace {
                     }
                     Ok(ResultState::NoFile) => {
                         this.keymap_file.revision = None;
-                        if open {
+                        this.watch_keymap_file(cx);
+                        if open || this.keymap_file.dirty {
                             this.refresh_keymap_file(cx);
                         }
                     }
@@ -235,15 +132,13 @@ impl Workspace {
             return;
         }
         self.keymap_file.watching = true;
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(2)).await;
-                if this
-                    .update(cx, |this, cx| this.refresh_keymap_file(cx))
-                    .is_err()
-                {
-                    return;
-                }
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            if this
+                .update(cx, |this, cx| this.refresh_keymap_file(cx))
+                .is_err()
+            {
+                return;
             }
         })
         .detach();
@@ -252,24 +147,38 @@ impl Workspace {
         let button = web_button(
             "settings-keymap-file",
             WebButtonVariant::Outline,
-            WebButtonSize::Small,
-            ButtonState::Enabled,
+            WebButtonSize::IconSmall,
+            ButtonState::disabled_if(self.remote_file_button_state() == Some(false)),
         )
+        .debug_selector(|| "settings-keymap-file".into())
         .aria_label("Open keybindings.json")
-        .child("Open keybindings.json");
+        .tooltip(|w, cx| Tooltip::new("Open keybindings.json").build(w, cx))
+        .child(super::updates_ui::icon_svg(
+            assets::FILE_TEXT_ICON_PATH,
+            15.,
+            theme::rambutan_300(),
+        ));
         let mut controls = div()
             .flex()
             .flex_col()
             .items_start()
             .gap_1()
             .child(on_press_view(button, cx, |this, _, cx| {
+                if this.open_selected_shortcut_file(cx) {
+                    return;
+                }
                 if this.keymap_file.conflict {
-                    if let Some(path)=&this.keymap_file.path {cx.open_with_system(path);}
+                    if let Some(path) = &this.keymap_file.path {
+                        cx.open_with_system(path);
+                    }
                     return;
                 }
                 this.keymap_file.open_requested = true;
                 this.refresh_keymap_file(cx);
             }));
+        if self.remote_file_button_state().is_some() {
+            return controls.into_any_element();
+        }
         if self.keymap_file.conflict {
             let reload = web_button(
                 "keymap-file-reload",
@@ -291,44 +200,5 @@ impl Workspace {
         controls
             .when_some(self.keymap_file.error.clone(), |el, e| el.child(e))
             .into_any_element()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Keybinding, ResultState, read, sync};
-    #[test]
-    fn external_edits_survive_races_and_invalid_json() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("keybindings.json");
-        let rule = |key: &str| Keybinding {
-            command: "settings.open".into(),
-            key: key.into(),
-            when: None,
-        };
-        let ResultState::Data(first) = sync(&file, None, Some(vec![rule("ctrl+k")]), true).unwrap()
-        else {
-            panic!("new file")
-        };
-        assert!(matches!(
-            read(&file, Some(first.revision)).unwrap(),
-            ResultState::Unchanged
-        ));
-        let external = serde_json::to_vec(&vec![rule("ctrl+l")]).unwrap();
-        std::fs::write(&file, &external).unwrap();
-        assert!(matches!(
-            sync(
-                &file,
-                Some(first.revision),
-                Some(vec![rule("ctrl+p")]),
-                false
-            )
-            .unwrap(),
-            ResultState::Conflict
-        ));
-        assert_eq!(std::fs::read(&file).unwrap(), external);
-        std::fs::write(&file, b"[").unwrap();
-        assert!(sync(&file, Some(first.revision), Some(vec![]), true).is_err());
-        assert_eq!(std::fs::read(&file).unwrap(), b"[");
     }
 }

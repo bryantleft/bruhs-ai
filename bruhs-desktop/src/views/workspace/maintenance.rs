@@ -1,6 +1,7 @@
 //! Environment maintenance policies and the desktop operations they control.
 mod background;
 mod captures;
+pub(super) mod restart;
 use super::*;
 use crate::app_state::spawn_tokio;
 use std::collections::BTreeSet;
@@ -9,16 +10,18 @@ use std::collections::BTreeSet;
 #[serde(default)]
 pub(super) struct MaintenancePreferences {
     pub provider_checks: bool,
+    pub(super) continue_threads: bool,
     keep_awake: bool,
     fetch_seconds: u32,
     activity:background::Policy,
-    auto_pull: bool,
+    pub(super) auto_pull: bool,
     pub retention_days: u16,
 }
 impl Default for MaintenancePreferences {
     fn default() -> Self {
         Self {
             provider_checks: true,
+            continue_threads: true,
             keep_awake: false,
             fetch_seconds: 0,
             activity:Default::default(),
@@ -265,46 +268,12 @@ impl Workspace {
     }
 
     pub(super) fn render_source_control(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let scoped = !self.settings_project_scope.is_empty();
-        let enabled = self.auto_pull_for(&self.settings_project_scope);
-        let control = if scoped {
-            let selected = match self
-                .project_defaults
-                .get(&self.settings_project_scope)
-                .and_then(|p| p.auto_pull)
-            {
-                None => "inherit",
-                Some(true) => "on",
-                Some(false) => "off",
-            };
-            settings_ui::control_column(self.choice_control(
-                "settings-auto-pull",
-                "Automatically pull",
-                selected,
-                &[
-                    ("inherit", "Use environment default"),
-                    ("on", "On"),
-                    ("off", "Off"),
-                ],
-                cx,
-            ))
-        } else {
-            settings_ui::switch(
-                "settings-enable-auto-pull",
-                enabled,
-                false,
-                "Automatically pull",
-                cx,
-                |this, _, cx| {
-                    this.maintenance.prefs.auto_pull = !this.maintenance.prefs.auto_pull;
-                    this.schedule_project_refresh(cx);
-                    this.persist_and_notify(cx);
-                },
-            )
-        };
-        let mut rows = vec![self.defaults_scope_row(cx), self.settings_row(
-            "desktop-settings-row-auto-pull","Automatically pull",
-            "Fast-forward a clean default checkout with no local commits after fetching its remote.",control)];
+        let id = if self.settings_project_scope.is_empty() { "settings-enable-auto-pull" } else { "settings-auto-pull" };
+        let mut rows = vec![self.defaults_scope_row(cx), self.scoped_switch_row(
+            ScopedSwitch::AutoPull, id, "desktop-settings-row-auto-pull", "Automatically pull",
+            "Fast-forward a clean default checkout with no local commits after fetching its remote.",
+            self.maintenance.prefs.auto_pull, cx,
+        )];
         let (delivery, template_row) = self.delivery_preference_rows(cx);
         rows.extend(delivery);
         div().flex().flex_col().gap_4()
@@ -312,8 +281,34 @@ impl Workspace {
             .child(self.source_writer_card(template_row, cx)).into_any_element()
     }
 
+    fn environment_maintenance_row(
+        &self,
+        selector: &'static str,
+        label: &'static str,
+        description: impl Into<SharedString>,
+        read_only_value: impl Into<SharedString>,
+        control: AnyElement,
+    ) -> AnyElement {
+        if self.settings_project_scope.is_empty() {
+            self.settings_row(selector, label, description, control)
+        } else {
+            self.settings_row_opts(
+                selector,
+                label,
+                description,
+                Some("Select the environment to change this setting.".into()),
+                true,
+                div()
+                    .text_size(px(13.))
+                    .text_color(theme::rambutan_400())
+                    .child(read_only_value.into())
+                    .into_any_element(),
+            )
+        }
+    }
+
     pub(super) fn render_maintenance(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let awake = self.settings_row(
+        let awake = self.environment_maintenance_row(
             "desktop-settings-row-keep-awake",
             "Keep awake while agents work",
             self.maintenance
@@ -321,6 +316,7 @@ impl Workspace {
                 .as_deref()
                 .unwrap_or("Prevent idle system sleep while a desktop agent turn is running.")
                 .to_owned(),
+            if self.maintenance.prefs.keep_awake {"On"} else {"Off"},
             settings_ui::switch(
                 "settings-keep-awake",
                 self.maintenance.prefs.keep_awake,
@@ -334,10 +330,11 @@ impl Workspace {
                 },
             ),
         );
-        let providers = self.settings_row(
+        let providers = self.environment_maintenance_row(
             "desktop-settings-row-provider-checks",
             "Provider update checks",
             "Check provider registries for new CLI versions when online update checks are enabled.",
+            if self.maintenance.prefs.provider_checks {"On"} else {"Off"},
             settings_ui::switch(
                 "settings-provider-checks",
                 self.maintenance.prefs.provider_checks,
@@ -357,24 +354,27 @@ impl Workspace {
                 },
             ),
         );
-        let git=self.settings_row_opts("desktop-settings-row-fetch-interval","Git fetch interval","Refresh remote branches for open and recent projects. Enter 0 to disable scheduled fetches. Projects with automatic pull still refresh every five minutes.",
-            self.maintenance.git_status.clone().map(Into::into),false,
+        let git_description = self.maintenance.git_status.as_deref().unwrap_or("Refresh remote branches for open and recent projects. Enter 0 to disable scheduled fetches. Projects with automatic pull still refresh every five minutes.").to_owned();
+        let git = self.environment_maintenance_row("desktop-settings-row-fetch-interval","Git fetch interval",git_description,
+            format!("{} seconds", self.maintenance.prefs.fetch_seconds),
             div().w(px(144.)).flex().items_center().gap_2().child(div().flex_1().min_w_0().child(Input::new(&self.maintenance.seconds).aria_label("Git fetch interval in seconds"))).child("seconds").into_any_element());
         div()
             .flex()
             .flex_col()
             .gap(px(24.))
-            .child(self.settings_card("Background activity", "", self.background_rows(cx).into_iter().chain([awake,providers,git]).collect()))
+            .child(self.settings_card("Updates", "", vec![self.defaults_scope_row(cx), providers, self.restart_setting(cx)]))
+            .child(self.settings_card("Background activity", "", self.background_rows(cx).into_iter().chain([awake,git]).collect()))
             .child(
                 self.settings_card(
                     "Artifacts and logs",
                     "",
                     vec![
                         self.capture_retention_row(cx),
-                        self.settings_row(
+                        self.environment_maintenance_row(
                             "desktop-settings-row-log-retention",
                             "Delete old rotated logs",
                             "Remove inactive desktop logs after the selected number of days.",
+                            if self.maintenance.prefs.retention_days==0 {"Off".into()} else {format!("{} days",self.maintenance.prefs.retention_days)},
                             settings_ui::control_column(self.choice_control(
                                 "settings-log-retention",
                                 "Delete old rotated logs",
@@ -390,7 +390,7 @@ impl Workspace {
                                 cx,
                             )),
                         ),
-                        self.settings_row(
+                        self.environment_maintenance_row(
                             "desktop-settings-row-log-cleanup",
                             "Delete now",
                             self.maintenance
@@ -400,6 +400,7 @@ impl Workspace {
                                     "Delete browser captures and rotated logs older than their saved retention periods.",
                                 )
                                 .to_owned(),
+                            "Environment only",
                             on_press_view(
                                 web_button(
                                     "settings-delete-expired-logs",

@@ -102,6 +102,7 @@ impl ChatView {
                 .map(|m| &m.state)
             {
                 Some(TurnState::Failed { .. }) => "Failed",
+                Some(TurnState::InterruptedByRestart) => "Interrupted by restart",
                 Some(TurnState::Stopped) => "Stopped",
                 Some(TurnState::Finished) => "Completed",
                 _ => "Ready",

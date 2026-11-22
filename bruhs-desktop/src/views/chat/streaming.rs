@@ -242,6 +242,8 @@ pub(super) async fn stream_agent_response(
     previous_turn: Option<JoinHandle<()>>,
     turn: Result<AgentTurn, IdError>,
     mut retry_prompt: Option<String>,
+    required_session: Option<super::restart::Continuation>,
+    run: super::restart::Run,
     tx: UnboundedSender<AgentUiEvent>,
 ) {
     if let Some(previous_turn) = previous_turn {
@@ -255,6 +257,34 @@ pub(super) async fn stream_agent_response(
             return;
         }
     };
+    let resuming = required_session.is_some();
+    if required_session.as_ref().is_some_and(|required| {
+        turn.fresh_session || turn.session_id.as_ref() != Some(&required.session)
+    }) {
+        let _ = tx.send(AgentUiEvent::Error(
+            "The interrupted session changed before it could resume.".into(),
+        ));
+        return;
+    }
+    let claim = required_session.and_then(|r| r.claim);
+    let desktop_turn = match claim
+        .map(Ok)
+        .unwrap_or_else(|| bruhs_core::reactive::desktop_turn_lock(&turn.thread_id))
+    {
+        Ok(lock) => Arc::new(lock),
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::WouldBlock {
+                "This conversation is running a turn in another process. Try again when it finishes.".to_owned()
+            } else {
+                format!("Could not open the conversation: {error}")
+            };
+            let _ = tx.send(AgentUiEvent::Error(message));
+            return;
+        }
+    };
+    if !run.attach(&desktop_turn) {
+        return;
+    }
     let mut cold_retried = false;
     loop {
         let resumed = turn.session_id.is_some() && !turn.fresh_session;
@@ -267,10 +297,12 @@ pub(super) async fn stream_agent_response(
         };
         let mut saw_session = false;
         let mut limited = false;
-        let Some(message) = forward_turn_events(&mut stream, &tx, &mut saw_session, &mut limited).await else {
+        let Some(message) =
+            forward_turn_events(&mut stream, &tx, &mut saw_session, &mut limited, &run).await
+        else {
             break;
         };
-        if resumed && !saw_session && !cold_retried && !limited {
+        if resumed && !resuming && !saw_session && !cold_retried && !limited {
             // Dropping the stream frees the thread for the retry.
             drop(stream);
             cold_retried = true;
@@ -281,10 +313,12 @@ pub(super) async fn stream_agent_response(
             }
             continue;
         }
+        run.retire();
         let _ = tx.send(AgentUiEvent::Error(message));
         return;
     }
 
+    run.retire();
     let _ = tx.send(AgentUiEvent::Done);
 }
 
@@ -302,13 +336,16 @@ async fn forward_turn_events(
     tx: &UnboundedSender<AgentUiEvent>,
     saw_session: &mut bool,
     limited: &mut bool,
+    run: &super::restart::Run,
 ) -> Option<String> {
     while let Some(event) = stream.next().await {
         match event {
             OrchestratorEvent::Query(QueryEvent::SecretRequest(request)) => {
+                run.wait_for(&request.id);
                 let _ = tx.send(AgentUiEvent::SecretRequest(request));
             }
             OrchestratorEvent::Query(QueryEvent::SecretResolved { id }) => {
+                run.answered(&id);
                 let _ = tx.send(AgentUiEvent::SecretResolved(id));
             }
             OrchestratorEvent::Query(QueryEvent::ThreadRequest(request)) => {
@@ -352,6 +389,7 @@ async fn forward_turn_events(
             OrchestratorEvent::Query(QueryEvent::Init { session_id, .. }) => {
                 if !session_id.is_empty() {
                     *saw_session = true;
+                    run.confirm(&session_id);
                     let _ = tx.send(AgentUiEvent::Session(session_id));
                 }
             }
@@ -368,6 +406,7 @@ async fn forward_turn_events(
             OrchestratorEvent::Query(QueryEvent::PermissionRequest {
                 id, tool, input, ..
             }) => {
+                run.wait_for(&id);
                 let _ = tx.send(AgentUiEvent::PermissionRequest(DesktopPermissionRequest {
                     id,
                     tool,
@@ -375,12 +414,14 @@ async fn forward_turn_events(
                 }));
             }
             OrchestratorEvent::Query(QueryEvent::PermissionCancelled { id }) => {
+                run.answered(&id);
                 let _ = tx.send(AgentUiEvent::PermissionCancelled(id));
             }
             OrchestratorEvent::Query(QueryEvent::Raw(value)) => {
                 if value["type"] == "rate_limit_event" && value["rate_limit_info"]["status"] == "rejected" {
                     *limited = true;
                     let reset = value["rate_limit_info"]["resetsAt"].as_i64().and_then(|s|s.checked_mul(1000));
+                    run.retire();
                     let _ = tx.send(AgentUiEvent::QuotaBlocked(reset));
                 }
                 if value.get("type").and_then(serde_json::Value::as_str) == Some("response_media") {
@@ -393,17 +434,20 @@ async fn forward_turn_events(
                     }
                 }
                 if let Some(request) = desktop_permission_request_from_raw(&value) {
+                    run.wait_for(&request.id);
                     let _ = tx.send(AgentUiEvent::PermissionRequest(request));
                 }
             }
             OrchestratorEvent::BackgroundTaskRegistered(task) => {
-                let _ = tx.send(AgentUiEvent::ToolCall {
-                    id: format!("background-{}", task.id),
-                    tool: "Background task".to_string(),
-                    input: serde_json::json!({
-                        "command": task.label,
-                    }),
-                });
+                if task.kind == bruhs_core::TaskKind::Shell {
+                    let _ = tx.send(AgentUiEvent::ToolCall {
+                        id: format!("background-{}", task.id),
+                        tool: "Background task".to_string(),
+                        input: serde_json::json!({
+                            "command": task.label,
+                        }),
+                    });
+                }
             }
         }
     }
@@ -881,6 +925,7 @@ impl ChatView {
                 Some(ThreadMessageAnswer::Replied(reply.content.clone()))
             }
             Some((TurnState::Stopped, _)) => Some(ThreadMessageAnswer::Stopped),
+            Some((TurnState::InterruptedByRestart, _)) => Some(ThreadMessageAnswer::Failed("Interrupted by restart".into())),
             Some((TurnState::Failed { error }, _)) => {
                 Some(ThreadMessageAnswer::Failed(error.clone()))
             }
@@ -1030,6 +1075,10 @@ impl ChatView {
             || !self.input_state.focus_handle(cx).is_focused(window)
         {
             return false;
+        }
+        if self.input_state.update(cx, |field, cx| field.edit_markdown_key(key, window, cx)) {
+            self.recall = None;
+            return true;
         }
         let (current, start, end) = {
             let input = self.input_state.read(cx);
@@ -1260,41 +1309,93 @@ impl ChatView {
         self.pending_composer = None;
     }
 
-    #[cfg(test)]
-    pub(crate) fn generation_for_test(&self) -> u64 { self.turn_generation }
+    pub(crate) fn turn_generation(&self) -> u64 { self.turn_generation }
 
-    pub(crate) fn is_quota_turn(&self, generation:u64)->bool {
+    pub(crate) fn is_quota_turn(&self, generation: u64) -> bool {
         self.turn_generation == generation && !self.is_streaming && !self.placing
     }
 
-    pub(crate) fn resume_quota_turn(&mut self, generation:u64,cx:&mut Context<'_,Self>) -> bool {
-        if !self.is_quota_turn(generation) || self.session_id.is_none() || self.session_provider != Some(self.turn_provider) ||
-            self.turn_provider != bruhs_models::agent::provider_for_model_id(&self.model_id) ||
-            self.queue_held || !self.prompt_queue.is_empty() || self.pending_composer.is_some() ||
-            !self.input_state.read(cx).value().is_empty() || !self.file_offers.is_empty() ||
-            !self.text_attachments.is_empty() || !self.context_chips.is_empty() {return false;}
-        self.submit_prompt("Continue the interrupted task after the provider usage reset. Check what already completed before taking the next step.".into(),cx);
+    pub(crate) fn quota_composer_available(&self, cx: &App) -> bool {
+        !self.is_streaming && !self.placing && self.recovery_composer_clear(cx)
+    }
+
+    // Keep the last burst of streamed text and tool activity even if the
+    // provider then waits. Batch writes across token and composer changes.
+    pub(super) fn schedule_restart_checkpoint(&mut self, cx: &mut Context<'_, Self>) {
+        if self.restart_checkpoint.is_some() || self.restart_marker().is_none() {
+            return;
+        }
+        self.restart_checkpoint = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ = this.update(cx, |view, cx| {
+                view.restart_checkpoint = None;
+                if view.restart_marker().is_some() {
+                    cx.emit(ChatViewEvent::CheckpointInterruptedRun);
+                }
+            });
+        }));
+    }
+
+    pub(crate) fn restart_marker(&self) -> Option<(uuid::Uuid, u8)> {
+        let run = self.restart_turn.as_ref()?;
+        (self.is_streaming && run.marked_for(self.session_id.as_deref()))
+            .then_some((run.id, run.depth))
+    }
+
+    pub(crate) fn recovery_composer_clear(&self, cx: &App) -> bool {
+        !self.queue_held
+            && self.prompt_queue.is_empty()
+            && self.pending_composer.is_none()
+            && self.input_state.read(cx).value().is_empty()
+            && self.file_offers.is_empty()
+            && self.text_attachments.is_empty()
+            && self.context_chips.is_empty()
+            && !self.has_pending_permission()
+            && !self.handoff_pending
+            && self.pending_secret.is_none()
+    }
+
+    pub(crate) fn resume_quota_turn(&mut self, cx: &mut Context<'_, Self>) -> bool {
+        self.resume_owned_session("Continue the interrupted task after the provider usage reset. Check what already completed before taking the next step.", 0, None, cx)
+    }
+
+    pub(crate) fn may_resume_owned_session(&self, cx: &App) -> bool {
+        let provider = bruhs_models::agent::provider_for_model_id(&self.model_id);
+        self.run_locked
+            && !self.fresh_session
+            && self.session_id.is_some()
+            && self.session_provider == Some(provider)
+            && self.provider_enabled_for_chat(provider)
+            && self.quota_composer_available(cx)
+    }
+
+    pub(crate) fn resume_owned_session(
+        &mut self,
+        prompt: &str,
+        depth: u8,
+        claim: Option<std::fs::File>,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if !self.may_resume_owned_session(cx) {
+            return false;
+        }
+        self.launch_turn(
+            prompt.into(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            self.session_id
+                .clone()
+                .map(|session| super::restart::Continuation {
+                    session,
+                    depth,
+                    claim,
+                }),
+            cx,
+        );
         self.is_streaming || self.placing
     }
 
-    /// Smoke launches follow the same restored worktree preferences and initial branch discovery as typing a prompt.
-    #[cfg(debug_assertions)]
-    pub(crate) fn submit_startup_smoke_prompt(&mut self, content:String,cx:&mut Context<'_,Self>){
-        if self.project_scoped && !self.run_locked && self.run_choice==bruhs_models::logic::run_place::WorkspaceChoice::NewWorktree
-            && self.base_branch.is_empty() && self.git_current_branch.is_none(){
-            let project=self.project_path.clone();
-            let lookup=spawn_tokio(cx,async move{bruhs_core::git::branches(std::path::Path::new(&project)).await});
-            cx.spawn(async move|this,cx|{
-                let result=lookup.await;
-                let _=this.update(cx,|this,cx|{
-                    if let Ok(info)=result{this.git_current_branch=info.current;}
-                    this.submit_prompt(content,cx);
-                });
-            }).detach();
-            return;
-        }
-        self.submit_prompt(content,cx);
-    }
 
     pub fn submit_prompt(&mut self, content: String, cx: &mut Context<'_, Self>) {
         self.finish_submit(content, Vec::new(), Vec::new(), Vec::new(), cx);
@@ -1329,21 +1430,87 @@ impl ChatView {
 
     /// Native reasoning effort for this send. Default preserves CLI settings.
     pub(super) fn claude_send_effort(&self) -> Option<String> {
-        if !self.effort_chip_visible() {
-            return None;
-        }
-        // The thread's role sets the effort when it names one.
-        self.role_profile
-            .as_ref()
-            .and_then(|role| role.effort.as_deref())
-            .or(self.claude_effort.as_deref())
-            .and_then(bruhs_models::logic::run_place::claude_effort)
-            .map(str::to_string)
+        if self.kiro_agents.is_some() {return self.kiro_selection().effort;}
+        use bruhs_models::delivery::generation::OptionKind;
+        let role=self.role_profile.as_ref().and_then(|role| role.effort.as_deref());
+        role.or_else(|| self.model_options.configured(OptionKind::Effort))
+            .or_else(|| self.claude_effort.as_deref().filter(|v| self.effort_spec().is_some_and(|s|s.accepts(v))))
+            .filter(|v| *v!="default").map(str::to_owned)
+
     }
 
     /// Lock the checkout, reuse a worktree, or create one before the agent runs.
     fn place_then_send(
         &mut self,
+        content: String,
+        attachments: Vec<TextAttachment>,
+        chips: Vec<ContextChip>,
+        uploads: Vec<UploadedFile>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let initial_choice = self.run_choice;
+        let inherit = self.inherit_repo_placement;
+        let needs_base = self.base_branch.is_empty() && self.git_current_branch.is_none();
+        if self.project_scoped
+            && !self.thread_has_place()
+            && (inherit || (initial_choice == WorkspaceChoice::NewWorktree && needs_base))
+        {
+            let project = PathBuf::from(self.settings_project_path());
+            self.placing = true;
+            let read = spawn_tokio(cx, async move {
+                let choice = if inherit {
+                    let root = project.clone();
+                    tokio::task::spawn_blocking(move || {
+                        bruhs_core::git::project_checkout_defaults(&root)
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .placement
+                    .unwrap_or_default()
+                } else {
+                    initial_choice
+                };
+                let branch = if choice == WorkspaceChoice::NewWorktree && needs_base {
+                    bruhs_core::git::branches(&project)
+                        .await
+                        .ok()
+                        .and_then(|info| info.current)
+                } else {
+                    None
+                };
+                Ok::<_, String>((choice, branch))
+            });
+            self.place_task = Some(cx.spawn(async move |this, cx| {
+                let result = read.await;
+                let _ = this.update(cx, |chat, cx| {
+                    chat.placing = false;
+                    match result {
+                        Ok((choice, branch)) => {
+                            chat.git_current_branch = chat.git_current_branch.take().or(branch);
+                            chat.send_at_selected_place(
+                                choice,
+                                content,
+                                attachments,
+                                chips,
+                                uploads,
+                                cx,
+                            );
+                        }
+                        Err(error) => {
+                            chat.fail_place(content, attachments, chips, uploads, &error, cx)
+                        }
+                    }
+                });
+            }));
+            cx.notify();
+            return;
+        }
+        self.send_at_selected_place(initial_choice, content, attachments, chips, uploads, cx);
+    }
+
+    fn send_at_selected_place(
+        &mut self,
+        choice: WorkspaceChoice,
         content: String,
         attachments: Vec<TextAttachment>,
         chips: Vec<ContextChip>,
@@ -1357,7 +1524,7 @@ impl ChatView {
         let project = self.project_scoped.then_some(self.project_path.as_str());
         let decision = first_send(
             self.run_locked,
-            self.run_choice,
+            choice,
             project,
             &self.base_branch,
             self.git_current_branch.as_deref(),
@@ -1370,11 +1537,41 @@ impl ChatView {
             }
             Ok(FirstSend::Stay) => {
                 self.lock_place(None, None, cx);
-                self.launch_turn(content, attachments, chips, uploads, cx);
+                self.launch_turn(content, attachments, chips, uploads, None, cx);
             }
             Ok(FirstSend::UsePath { path, branch }) => {
-                self.lock_place(Some(path), Some(branch), cx);
-                self.launch_turn(content, attachments, chips, uploads, cx);
+                let project = PathBuf::from(self.settings_project_path());
+                self.placing = true;
+                let check = spawn_tokio(cx, async move {
+                    let previous = std::path::Path::new(&path);
+                    if !previous.is_dir() {
+                        return Err("The previous worktree folder is missing.".to_owned());
+                    }
+                    let registered = bruhs_core::git::worktree_branch(&project, previous)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| {
+                            "The previous worktree belongs to a different project or was removed."
+                                .to_owned()
+                        })?;
+                    Ok((path, registered.unwrap_or(branch)))
+                });
+                self.place_task = Some(cx.spawn(async move |this, cx| {
+                    let result = check.await;
+                    let _ = this.update(cx, |chat, cx| {
+                        chat.placing = false;
+                        match result {
+                            Ok((path, branch)) => {
+                                chat.lock_place(Some(path), Some(branch), cx);
+                                chat.launch_turn(content, attachments, chips, uploads, None, cx);
+                            }
+                            Err(error) => {
+                                chat.fail_place(content, attachments, chips, uploads, &error, cx)
+                            }
+                        }
+                    });
+                }));
+                cx.notify();
             }
             Ok(FirstSend::Create { base, branch }) => {
                 self.begin_worktree(content, attachments, chips, uploads, base, branch, cx);
@@ -1426,11 +1623,11 @@ impl ChatView {
                             branch: branch.clone(),
                             label: project_label,
                         };
-                        this.previous_worktree = Some(remembered);
-                        this.emit_run_prefs(cx);
+                        this.previous_worktree = Some(remembered.clone());
+                        cx.emit(ChatViewEvent::RememberWorktree(remembered));
                         this.lock_place(Some(path), Some(branch), cx);
                         cx.emit(ChatViewEvent::WorktreeReady);
-                        this.launch_turn(content, attachments, chips, uploads, cx);
+                        this.launch_turn(content, attachments, chips, uploads, None, cx);
                     }
                     Err(error) => {
                         this.fail_place(
@@ -1456,6 +1653,8 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) {
         self.run_locked = true;
+        self.draft_placement = None;
+        self.inherit_repo_placement = false;
         if let Some(path) = worktree {
             let scratch = branch.is_none() && bruhs_core::worktrees::scratch::is_managed_path(std::path::Path::new(&path));
             if !scratch {
@@ -1518,11 +1717,15 @@ impl ChatView {
         attachments: Vec<TextAttachment>,
         chips: Vec<ContextChip>,
         uploads: Vec<UploadedFile>,
+        required_session: Option<super::restart::Continuation>,
         cx: &mut Context<'_, Self>,
     ) {
         // Core refuses a send while the thread's previous turn is still
         // attached. A stopped turn keeps its aborted handle, so the new turn
         // waits for it to unwind (and release the thread) before sending.
+        if let Some(previous) = self.restart_turn.take() {
+            previous.retire();
+        }
         let previous_turn = self.agent_task.take();
         if let Some(task) = &previous_turn {
             task.abort();
@@ -1539,6 +1742,7 @@ impl ChatView {
                 uploads,
                 None,
                 previous_turn,
+                required_session,
                 cx,
             );
             return;
@@ -1568,7 +1772,7 @@ impl ChatView {
             let (pastes, tree) = snap.await;
             let _ = this.update(cx, |this, cx| {
                 this.placing = false;
-                this.finish_launch(content, pastes, chips, uploads, tree, previous_turn, cx);
+                this.finish_launch(content, pastes, chips, uploads, tree, previous_turn, required_session, cx);
             });
         })
         .detach();
@@ -1587,6 +1791,7 @@ impl ChatView {
         uploads: Vec<UploadedFile>,
         checkpoint: Option<String>,
         previous_turn: Option<JoinHandle<()>>,
+        required_session: Option<super::restart::Continuation>,
         cx: &mut Context<'_, Self>,
     ) {
         let turn = self.begin_turn(content, pastes, chips, uploads, checkpoint, cx);
@@ -1603,11 +1808,16 @@ impl ChatView {
         let app = Arc::clone(&desktop_state.app);
         let runtime = Arc::clone(&desktop_state.runtime);
         let (tx, rx) = unbounded_channel();
+        let depth = required_session.as_ref().map_or(0, |r| r.depth);
+        let run = super::restart::Run::new(depth);
+        self.restart_turn = Some(run.clone());
         let agent_task = runtime.spawn(stream_agent_response(
             app,
             previous_turn,
             turn,
             retry_prompt,
+            required_session,
+            run,
             tx,
         ));
         self.attach_turn(agent_task, rx, cx);
@@ -1669,6 +1879,10 @@ impl ChatView {
         // An imported transcript rides along until a session holds it. So
         // does the conversation so far when the saved session belongs to the
         // other provider (the model changed), which cannot resume it.
+        let other_instance = provider == AgentProvider::Acp
+            && self.session_provider == Some(provider)
+            && self.session_id.as_deref().is_some_and(|id|
+                !bruhs_models::agent_extensions::acp_session_matches_model(id, &model_id));
         let other_provider = !self.fresh_session
             && self.session_id.is_some()
             && self.session_provider != Some(provider);
@@ -1680,7 +1894,7 @@ impl ChatView {
             && !self.fresh_session
             && self.session_id.is_some()
             && self.instructions_stamp != stamp;
-        let fresh = self.fresh_session || other_instructions;
+        let fresh = self.fresh_session || other_instructions || other_instance;
         let resume = if fresh {
             None
         } else {
@@ -1689,7 +1903,7 @@ impl ChatView {
         self.turn_stamp = resume.is_none().then_some(stamp);
         let carried = if self.handoff_pending {
             None
-        } else if other_provider || other_instructions || (resume.is_none() && self.fork.is_some()) {
+        } else if other_provider || (!self.fresh_session && other_instance) || other_instructions || (resume.is_none() && self.fork.is_some()) {
             self.conversation_context(&self.messages)
         } else {
             self.import_context.clone()
@@ -1725,7 +1939,7 @@ impl ChatView {
             .then_some(self.claude_autocompact.as_deref())
             .flatten();
         ThreadId::try_from(thread_id).map(|thread_id| {
-            let turn = AgentTurn::new(
+            let mut turn = AgentTurn::new(
                 thread_id,
                 prompt,
                 project_path,
@@ -1739,6 +1953,11 @@ impl ChatView {
             .instructions(instructions)
             // A chat with no project needs no coding plugins (web: no `project_path`).
             .lean(!project_scoped);
+            turn.model_options=self.model_options.clone();
+            if self.role_profile.as_ref().is_some_and(|r|r.effort.is_some()) {
+                turn.model_options.clear(bruhs_models::delivery::generation::OptionKind::Effort);
+            }
+            turn.kiro_selection = self.kiro_selection();
             if fresh {
                 turn.fresh()
             } else {
@@ -1790,14 +2009,16 @@ impl ChatView {
                         AgentUiEvent::SecretRequest(_) => cx.emit(ChatViewEvent::ThreadAttention("Input needed")),
                         _ => {}
                     }
+                    let recovery_update = matches!(&event, AgentUiEvent::Session(_) | AgentUiEvent::PermissionRequest(_) | AgentUiEvent::PermissionCancelled(_) | AgentUiEvent::SecretRequest(_) | AgentUiEvent::SecretResolved(_));
                     let media_update = matches!(&event, AgentUiEvent::ResponseMedia(_));
                     view.apply_agent_event(event);
-                    if media_update
+                    if recovery_update || media_update
                         || saved != (view.session_id.clone(), view.import_context.is_some())
                     {
                         // Saved now, so a crash mid-turn keeps the session.
                         cx.emit(ChatViewEvent::MessagesChanged);
                     }
+                    if !done { view.schedule_restart_checkpoint(cx); }
                     if done {
                         cx.emit(ChatViewEvent::TurnFinished);
                         if let Some(reset_ms) = blocked {
@@ -1824,6 +2045,9 @@ impl ChatView {
     /// Stop listening to the current turn and abort its sender. The aborted
     /// handle stays in `agent_task` for the next submit to wait on.
     pub(super) fn abandon_turn(&mut self) {
+        if let Some(run) = self.restart_turn.take() {
+            run.retire();
+        }
         self.prompt_suggestion.dismiss();
         self.suggestion_task = None;
         self.pending_secret = None;
@@ -1843,6 +2067,9 @@ impl ChatView {
         rx: UnboundedReceiver<AgentUiEvent>,
         cx: &mut Context<'_, Self>,
     ) {
+        if let Some(previous) = self.restart_turn.take() {
+            previous.retire();
+        }
         let previous_turn = self.agent_task.take();
         if let Some(task) = previous_turn {
             task.abort();
@@ -1920,6 +2147,18 @@ impl ChatView {
 
     pub(crate) fn stop_streaming(&mut self, cx: &mut Context<'_, Self>) {
         if !self.is_streaming {
+            if self.running_tasks_count > 0 {
+                if let Some(thread_id) = self.thread_id.as_deref() {
+                    cx.global::<DesktopState>()
+                        .app
+                        .registry()
+                        .mark_stream_killed(thread_id);
+                }
+                self.running_tasks.clear();
+                self.running_tasks_count = 0;
+                cx.emit(ChatViewEvent::RunningTasksChanged);
+                cx.notify();
+            }
             return;
         }
 
@@ -2165,6 +2404,7 @@ impl ChatView {
             let app = Arc::clone(&desktop_state.app);
             let runtime = Arc::clone(&desktop_state.runtime);
             let request_id = request.id;
+            let run = self.restart_turn.clone();
             let delivery = runtime.spawn(async move {
                 let decision = if approved {
                     PermissionDecision::Allow
@@ -2175,11 +2415,12 @@ impl ChatView {
                 };
                 app.resolve_permission(&request_id, decision)
                     .await
+                    .map(|()| { if let Some(run) = run {run.answered(&request_id);} })
                     .map_err(|err| format!("permission {request_id} not delivered: {err}"))
             });
             cx.spawn(async move |this, cx| {
                 let failure = match delivery.await {
-                    Ok(Ok(())) => return,
+                    Ok(Ok(())) => { let _ = this.update(cx, |_, cx| cx.emit(ChatViewEvent::MessagesChanged)); return; },
                     Ok(Err(message)) => message,
                     Err(join) => format!("permission reply did not finish: {join}"),
                 };

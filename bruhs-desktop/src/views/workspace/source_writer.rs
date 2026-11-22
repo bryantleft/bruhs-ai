@@ -1,8 +1,7 @@
 //! The source-control writer can follow the text generator or use a separate model.
 use super::*;
 use bruhs_models::{
-    agent::model_info,
-    delivery::generation::{model_options, GenerationOptions},
+    delivery::generation::GenerationOptions,
     delivery::{DeliveryPreferenceChange, GuideModel, WriterModel, WritingStyle},
 };
 
@@ -288,7 +287,11 @@ impl Workspace {
                 GuideModel::Writer => None,
             };
             let default = match &p.writer_model {
-                WriterModel::Separate { model, .. } if model_info(model).is_some_and(|m| !m.provider.is_external()) => model.clone(),
+                WriterModel::Separate { model, .. }
+                    if self.delivery_preferences.catalog.model(model).is_some() =>
+                {
+                    model.clone()
+                }
                 _ => self.active_settings_writer_default(false),
             };
             let control = self.source_model_control(
@@ -355,7 +358,11 @@ impl Workspace {
             let control = prefs
                 .map(|p| {
                     let model = match &p.writer_model {
-                        WriterModel::Separate { model, options } if !self.generator_unavailable(model) => Some((model.as_str(), options)),
+                        WriterModel::Separate { model, options }
+                            if !self.generator_unavailable(model) =>
+                        {
+                            Some((model.as_str(), options))
+                        }
                         _ => None,
                     };
                     self.source_model_control(
@@ -409,7 +416,7 @@ impl Workspace {
                 id,
                 label,
                 model,
-                {let mut groups=Self::catalog_model_groups(cx, |provider| !provider.is_external()); if id=="settings-writer-model"{groups.extend(self.generator_groups());}groups},
+                self.writer_picker_groups(id == "settings-writer-model", cx),
                 self.settings_listbox(id),
                 toggle,
                 select,
@@ -421,7 +428,7 @@ impl Workspace {
             } else {
                 "settings-writer-options"
             };
-            if let Some(control) = self.generation_options_control(options_id, model, options, cx) {
+            if let Some(control) = self.generation_options_control(options_id, &self.delivery_preferences.catalog,model, options, cx) {
                 controls = controls.child(div().min_w_0().max_w(px(224.)).child(control));
             }
         }
@@ -448,9 +455,52 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn generation_options_control(
+    fn writer_picker_groups(
+        &self,
+        include_endpoints: bool,
+        cx: &Context<'_, Self>,
+    ) -> Vec<DropdownGroup> {
+        use bruhs_ui::dropdown::saved_option_value;
+        let mut groups = Vec::new();
+        for provider in [AgentProvider::Claude, AgentProvider::Codex] {
+            if !self
+                .provider_availability
+                .as_ref()
+                .is_ok_and(|prefs| prefs.enabled(provider))
+            {
+                continue;
+            }
+
+            let options: Vec<_> = self
+                .delivery_preferences
+                .catalog
+                .models
+                .iter()
+                .filter(|m| m.provider == provider)
+                .map(|m| DropdownOption {
+                    value: saved_option_value(&m.id),
+                    label: m.label.clone(),
+                    description: Some(provider.model_id(&m.id).to_owned()),
+                })
+                .collect();
+            if !options.is_empty() {
+                groups.push(DropdownGroup {
+                    label: Some(provider_label(provider)),
+                    mark: Some(provider_mark(provider, cx)),
+                    options,
+                });
+            }
+        }
+        if include_endpoints {
+            groups.extend(self.generator_groups());
+        }
+        groups
+    }
+
+    pub(super) fn generation_options_control(
         &self,
         id: &'static str,
+        catalog:&bruhs_models::delivery::writer_catalog::WriterCatalog,
         model: &str,
         options: &GenerationOptions,
         cx: &Context<'_, Self>,
@@ -460,25 +510,35 @@ impl Workspace {
         let mut selected = Vec::new();
         let mut summary = Vec::new();
         let mut defaults = Vec::new();
-        for spec in model_options(model) {
+        use bruhs_models::delivery::generation::OptionKind;
+        let specs = &catalog.model(model)?.options;
+        for spec in specs {
             let mut rows = Vec::new();
-            for &(value, label) in spec.choices {
+            for choice in &spec.choices {
+                let (value, label) = (choice.value.as_str(), choice.label.as_str());
                 let token = saved_option_value(&format!("{}={value}", spec.kind.key()));
-                if options.effective(&spec) == value {
+                if options.configured(spec.kind).filter(|v| spec.accepts(v)).unwrap_or(&spec.default) == value {
                     selected.push(token);
-                    if spec.kind == bruhs_models::delivery::generation::OptionKind::Thinking {
+                    if spec.kind == OptionKind::Thinking {
                         summary.push(format!("Thinking {label}"));
                     } else if value == "on" {
-                        summary.push(spec.label.to_owned());
-                    } else if value != "off" {
+                        summary.push(spec.label().to_owned());
+                    } else if value != "off"
+                        && (spec.kind != OptionKind::CyberAccessProgram || specs.len() == 1)
+                    {
                         summary.push(label.to_owned());
                     }
                 }
                 if spec.default == value && !matches!(value, "on" | "off") {
                     defaults.push(token);
                 }
-                let description =
-                    (value == "priority").then(|| "2x speed, increased usage".to_owned());
+                let description = match (spec.kind, value) {
+                    (bruhs_models::delivery::generation::OptionKind::ServiceTier, "ultrafast") => {
+                        Some("Even faster, more expensive".to_owned())
+                    }
+                    (bruhs_models::delivery::generation::OptionKind::Effort, _) => None,
+                    _ => choice.description.clone(),
+                };
                 rows.push(DropdownOption {
                     value: token,
                     label: label.to_owned(),
@@ -486,14 +546,14 @@ impl Workspace {
                 });
             }
             groups.push(DropdownGroup {
-                label: Some(spec.label),
+                label: Some(spec.label()),
                 mark: None,
                 options: rows,
             });
         }
         let (primary, others) = selected.split_first()?;
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
-        let label = if id == "settings-guide-options" {
+        let label = if id == "settings-thread-model-options" { "Default model options" } else if id == "settings-fallback-model-options" { "Fallback model options" } else if id == "settings-guide-options" {
             "Review guide model options"
         } else {
             "Source control writer model options"
@@ -514,7 +574,7 @@ impl Workspace {
         )
     }
 
-    fn active_settings_writer_default(&self, allow_generator:bool) -> String {
+    fn active_settings_writer_default(&self, allow_generator: bool) -> String {
         let project = &self.settings_project_scope;
         let active = self
             .project_defaults
@@ -522,7 +582,9 @@ impl Workspace {
             .and_then(|p| p.model.as_deref())
             .unwrap_or(&self.current_model);
         let model = self.effective_text_model(Some(project), active);
-        if (allow_generator && self.generator_model(&model)) || model_info(&model).is_some_and(|m| !m.provider.is_external()) {
+        if (allow_generator && self.generator_model(&model))
+            || self.delivery_preferences.catalog.model(&model).is_some()
+        {
             model
         } else {
             bruhs_models::logic::prompt_suggestion::default_suggestion_model(AgentProvider::Claude)

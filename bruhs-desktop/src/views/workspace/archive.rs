@@ -18,10 +18,22 @@ pub(super) enum ArchivedThread {
 }
 
 impl ArchivedThread {
-    fn id(&self) -> &str {
+    pub(super) fn id(&self) -> &str {
         match self {
             Self::Live(thread, _) => &thread.id,
             Self::Stored(record) => &record.thread.id,
+        }
+    }
+
+    pub(super) fn project_root<'a>(&'a self, cx: &'a App) -> Option<&'a str> {
+        match self {
+            Self::Live(t, _) => {
+                let chat = t.chat.read(cx);
+                chat.project_scoped.then(|| chat.settings_project_path())
+            }
+            Self::Stored(r) if !r.thread.project_name.is_empty() =>
+                r.thread.project_settings_root.as_deref().or(r.thread.project_path.as_deref()),
+            Self::Stored(_) => None,
         }
     }
 
@@ -101,7 +113,7 @@ impl Workspace {
         };
         self.end_thread_waits_on(id, cx);
         self.title_requests.remove(id);
-        self.quota_timers.remove(id);
+        self.cancel_quota_recovery(id);
         self.unread_thread_ids.remove(id);
         self.active_thread_id =
             threads_ui::thread_selection_after_delete(self.active_thread_id.take(), id);

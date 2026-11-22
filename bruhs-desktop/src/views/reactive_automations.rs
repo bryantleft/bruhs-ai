@@ -34,7 +34,7 @@ mod task_deliveries;
 mod task_webhook_url;
 mod task_choices;
 mod setup;
-pub(crate) use scheduled_tasks::{ScheduledTaskDialog, ScheduledTaskSettings};
+pub(crate) use scheduled_tasks::{linked_scheduled_row, ScheduledTaskDialog, ScheduledTaskSettings};
 mod transcript_list;
 mod updates;
 mod vault_grants;
@@ -270,6 +270,7 @@ pub(crate) struct ReactiveProjectOpened {
 }
 
 pub(crate) struct ReactiveAutomations {
+    linked_task: Option<scheduled_tasks::LinkedEdit>,
     client: ServerClient,
     snapshot: Option<ReactiveSnapshot>,
     error: Option<String>,
@@ -607,9 +608,14 @@ fn milliseconds(text: &str, zero: bool) -> Result<u64, String> {
 
 impl ReactiveAutomations {
     pub(crate) fn new(cx: &mut Context<'_, Self>) -> Self {
+        Self::with_linked_task(None, true, cx)
+    }
+
+    fn with_linked_task(linked_task: Option<scheduled_tasks::LinkedEdit>, background: bool, cx: &mut Context<'_, Self>) -> Self {
         let client =
             ServerClient::from_env().unwrap_or_else(|error| ServerClient::unavailable(&error));
         let mut panel = Self {
+            linked_task,
             client,
             snapshot: None,
             error: None,
@@ -667,7 +673,7 @@ impl ReactiveAutomations {
             #[cfg(test)]
             send_failure: None,
         };
-        if cfg!(not(test)) {
+        if cfg!(not(test)) && background {
             panel.start_crew_stream(cx);
             panel.poll = Some(cx.spawn(async move |this, cx| loop {
                 cx.background_executor().timer(REFRESH).await;
@@ -763,6 +769,17 @@ impl ReactiveAutomations {
         {
             asking.confirming = false;
             asking.focus_new_agent = true;
+        }
+        if !snapshot.desktop_task_store.is_empty() {
+            let mut links = snapshot.desktop_task_activity.keys().map(|id| (id.clone(), std::collections::BTreeMap::new()))
+                .collect::<std::collections::BTreeMap<_,_>>();
+            for sub in &snapshot.subscriptions {
+                if let Some(tasks) = snapshot.task_threads.get(&sub.id).and_then(|id|links.get_mut(id.as_str())) {
+                    let title = sub.task_title.as_deref().or_else(|| self.agent_names.get(&sub.agent_id).map(String::as_str)).unwrap_or(&sub.id);
+                    tasks.insert(sub.id.clone(),title.to_owned());
+                }
+            }
+            cx.emit(DesktopTaskActivity { store:snapshot.desktop_task_store.clone(), threads:snapshot.desktop_task_activity.clone(), links });
         }
         self.reconcile_task_deliveries(&snapshot);
         let changed = self.snapshot.as_ref() != Some(&snapshot);
@@ -867,7 +884,13 @@ impl ReactiveAutomations {
                             this.send_in(next, scope, cx);
                         }
                     }
-                    Err(error) => this.command_failed(scope, reactive_error(error)),
+                    Err(error) => {
+                        let message = reactive_error(error);
+                        if matches!(effect, Effect::DeletedThread(_)) {
+                            cx.emit(TaskThreadDeletion::Failed(message.clone()));
+                        }
+                        this.command_failed(scope,message);
+                    }
                 }
                 cx.notify();
             });
@@ -2136,6 +2159,13 @@ impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
 impl EventEmitter<ReactiveRoomDone> for ReactiveAutomations {}
 impl EventEmitter<TaskThreadDeletion> for ReactiveAutomations {}
 impl EventEmitter<TaskThreadLocation> for ReactiveAutomations {}
+pub(crate) struct DesktopTaskActivity {
+    pub store: String,
+    pub threads: std::collections::BTreeMap<String,i64>,
+    pub links: std::collections::BTreeMap<String,std::collections::BTreeMap<String,String>>,
+}
+impl EventEmitter<DesktopTaskActivity> for ReactiveAutomations {}
+
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenRoomSettings> for ReactiveAutomations {}
 impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}

@@ -1,3 +1,5 @@
+use super::project_defaults::ProjectDefaults;
+use super::setting_source::ProjectSetting;
 use super::*;
 use bruhs_models::logic::run_place::branch_naming::{Mode, Naming};
 
@@ -6,6 +8,48 @@ enum Field {
     Mode,
     Prefix,
     Instructions,
+}
+
+impl Field {
+    fn value(self, naming: &Naming) -> &str {
+        match self {
+            Self::Mode => naming.mode.key(),
+            Self::Prefix => &naming.prefix,
+            Self::Instructions => &naming.instructions,
+        }
+    }
+    fn display(value: &str) -> SharedString {
+        if value.is_empty() {
+            "Empty".into()
+        } else {
+            value.to_owned().into()
+        }
+    }
+}
+
+impl ProjectSetting for Field {
+    fn project_label(self, project: &ProjectDefaults) -> Option<SharedString> {
+        match self {
+            Self::Mode => project.branch_mode.map(|m| m.key().into()),
+            Self::Prefix => project.branch_prefix.as_deref().map(Self::display),
+            Self::Instructions => project.branch_instructions.as_deref().map(Self::display),
+        }
+    }
+    fn clear_project(self, prefs: &mut ProjectDefaults) {
+        match self {
+            Self::Mode => prefs.branch_mode = None,
+            Self::Prefix => prefs.branch_prefix = None,
+            Self::Instructions => prefs.branch_instructions = None,
+        }
+    }
+    fn before_reset(self, ws: &mut Workspace, w: &mut Window, cx: &mut Context<'_, Workspace>) {
+        ws.commit_branch_fields(w, cx);
+    }
+    fn after_reset(self, ws: &mut Workspace, w: &mut Window, cx: &mut Context<'_, Workspace>) {
+        ws.load_branch_fields(w, cx);
+        ws.stamp_run_prefs_on_threads(cx);
+        ws.persist_and_notify(cx);
+    }
 }
 
 impl Workspace {
@@ -143,26 +187,36 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn branch_reset(&self, field: Field, cx: &Context<'_, Self>) -> Option<AnyElement> {
+    fn branch_source(
+        &self,
+        field: Field,
+        row: &'static str,
+        label: &'static str,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
         let defaults = Naming::default();
-        let project = &self.settings_project_scope;
-        let changed = if project.is_empty() {
-            match field {
-                Field::Mode => self.branch_naming.mode != defaults.mode,
-                Field::Prefix => self.branch_naming.prefix != defaults.prefix,
-                Field::Instructions => self.branch_naming.instructions != defaults.instructions,
-            }
+        let default = field.value(&defaults);
+        let environment = field.value(&self.branch_naming);
+        let changed = default != environment;
+        let source = self.setting_source(
+            field,
+            row,
+            row,
+            label,
+            changed.then(|| Field::display(environment)),
+            Field::display(default),
+            cx,
+        );
+        let reset = if self.settings_project_scope.is_empty() {
+            changed
         } else {
             self.project_defaults
-                .get(project)
-                .is_some_and(|p| match field {
-                    Field::Mode => p.branch_mode.is_some(),
-                    Field::Prefix => p.branch_prefix.is_some(),
-                    Field::Instructions => p.branch_instructions.is_some(),
-                })
+                .get(&self.settings_project_scope)
+                .and_then(|p| field.project_label(p))
+                .is_some()
         };
-        if !changed {
-            return None;
+        if !reset {
+            return Some(source);
         }
         let (id, label) = match field {
             Field::Mode => ("reset-branch-naming", "Reset branch naming to default"),
@@ -186,32 +240,31 @@ impl Workspace {
                 .size(px(14.))
                 .text_color(theme::rambutan_400()),
         );
-        Some(
-            on_press_view(button, cx, move |this, w, cx| {
-                this.commit_branch_fields(w, cx);
-                let scope = &this.settings_project_scope;
-                if scope.is_empty() {
-                    let defaults = Naming::default();
-                    match field {
-                        Field::Mode => this.branch_naming.mode = defaults.mode,
-                        Field::Prefix => this.branch_naming.prefix = defaults.prefix,
-                        Field::Instructions => this.branch_naming.instructions.clear(),
-                    }
-                } else if let Some(p) = this.project_defaults.get_mut(scope) {
-                    match field {
-                        Field::Mode => p.branch_mode = None,
-                        Field::Prefix => p.branch_prefix = None,
-                        Field::Instructions => p.branch_instructions = None,
-                    }
-                    if *p == Default::default() {
-                        this.project_defaults.remove(scope);
-                    }
+        let reset = on_press_view(button, cx, move |this, w, cx| {
+            this.commit_branch_fields(w, cx);
+            let scope = &this.settings_project_scope;
+            if scope.is_empty() {
+                let defaults = Naming::default();
+                match field {
+                    Field::Mode => this.branch_naming.mode = defaults.mode,
+                    Field::Prefix => this.branch_naming.prefix = defaults.prefix,
+                    Field::Instructions => this.branch_naming.instructions.clear(),
                 }
-                this.load_branch_fields(w, cx);
-                this.stamp_run_prefs_on_threads(cx);
-                this.persist_and_notify(cx);
-            })
-            .into_any_element(),
+            } else if let Some(p) = this.project_defaults.get_mut(scope) {
+                field.clear_project(p);
+                if *p == Default::default() {
+                    this.project_defaults.remove(scope);
+                }
+            }
+            field.after_reset(this, w, cx);
+        });
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .child(source)
+                .child(reset)
+                .into_any_element(),
         )
     }
 
@@ -238,7 +291,12 @@ impl Workspace {
                     .then(|| "The model chooses a prefix such as feat/, fix/ or refactor/.".into()),
                 false,
                 Some(settings_ui::control_column(mode)),
-                self.branch_reset(Field::Mode, cx),
+                self.branch_source(
+                    Field::Mode,
+                    "worktree-naming-mode",
+                    "Worktree branch naming",
+                    cx,
+                ),
             ),
         ];
         match naming.mode {
@@ -254,7 +312,12 @@ impl Workspace {
                             .aria_label("Branch prefix")
                             .into_any_element(),
                     )),
-                    self.branch_reset(Field::Prefix, cx),
+                    self.branch_source(
+                        Field::Prefix,
+                        "worktree-naming-prefix",
+                        "Branch prefix",
+                        cx,
+                    ),
                 ),
             ),
             Mode::Custom => {
@@ -265,7 +328,7 @@ impl Workspace {
                     None,
                     false,
                     None,
-                    self.branch_reset(Field::Instructions, cx),
+                    self.branch_source(Field::Instructions, "worktree-naming-instructions", "Branch naming instructions", cx),
                 );
                 rows.push(
                     div()

@@ -1,6 +1,5 @@
 //! Convert local VS Code workbench theme files into portable T3 version 1 themes.
-mod color;
-mod palette;
+use super::{color, palette};
 
 use super::library::{ThemeFile, identifier, reserved};
 use bruhs_ui::theme::ThemeMode;

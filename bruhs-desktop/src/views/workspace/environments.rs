@@ -127,6 +127,8 @@ impl Workspace {
                 match result {
                     Ok(snapshot) => {
                         state.error = snapshot.error.clone();
+                        this.linked_keybindings.update_tunnels(&snapshot);
+                        this.linked_projects.update_tunnels(&snapshot);
                         state.snapshot = Some(snapshot);
                         if delete_profile { state.deleting = None; }
                         if save_form {
@@ -255,6 +257,22 @@ impl Workspace {
             let name = p.name.clone();
             let mut controls = div().flex().flex_wrap().gap_2();
             if h.state == RemoteHostState::Connected {
+                #[cfg(unix)]
+                if h.forwarding_socket.is_some() {
+                    let project_host = h.clone();
+                    controls = controls.child(on_press_view(button(format!("environment-link-projects-{id}").into(), "Link projects", false),cx,move|this,w,cx|this.open_project_link(Some(&project_host),w,cx)));
+                    let host = h.clone();
+                    controls = controls.child(on_press_view(
+                        button(
+                            format!("environment-link-shortcuts-{id}").into(),
+                            "Link shortcuts",
+                            self.linked_keybindings.linking_busy(),
+                        )
+                        .debug_selector(move || format!("environment-link-shortcuts-{id}")),
+                        cx,
+                        move |this, w, cx| this.open_shortcut_link(Some(&host), w, cx),
+                    ));
+                }
                 let url = format!("http://127.0.0.1:{}/", p.local_port);
                 controls = controls.child(on_press_view(
                     button(format!("environment-open-{id}").into(), "Open", false)
@@ -401,6 +419,9 @@ impl Workspace {
             rows.push(self.settings_row("settings-remote-environments","Remote environments","Connect to a remote bruhs task host over SSH. Open the connected host to pair with it.",
                 on_press_view(button("environment-add".into(),"Add environment",state.saving),cx,|this,w,cx|this.edit_environment(None,w,cx)).into_any_element()));
         }
+        rows.extend(self.project_environment_rows(cx));
+        rows.extend(self.shortcut_environment_rows(cx));
         rows
     }
+
 }

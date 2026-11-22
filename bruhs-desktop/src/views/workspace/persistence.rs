@@ -221,7 +221,23 @@ pub(super) fn save_desktop_state(
     }
     let path = path.ok_or_else(|| SaveError::from("Desktop state path is unavailable."))?;
     state_file::guarded_write(&path, &mut expected, &contents, |bytes| {
-        write_desktop_state_bytes(&path, bytes, generation)
+        write_desktop_state_bytes(&path, bytes, generation)?;
+        let ack = bruhs_core::linked_projects::names::acknowledge(&path, |p| {
+            state.project_list.saved_title(p).or_else(|| {
+                let known = state.recent_projects.iter().chain(&state.active_project)
+                    .any(|entry| entry.path == p) || state.threads.iter().any(|thread| {
+                        !thread.project_name.is_empty() &&
+                            thread.project_settings_root.as_ref().or(thread.project_path.as_ref())
+                                .is_some_and(|root| root == p)
+                    });
+                known.then(|| state.project_list.title(p).map(str::to_owned))
+            })
+        });
+        // The workspace is already durable. A later save can prune the journal.
+        if let Err(err) = ack {
+            tracing::warn!("Could not acknowledge saved checkout names: {err}");
+        }
+        Ok(())
     })
 }
 
@@ -395,7 +411,8 @@ pub(super) fn initial_selected_calendar_event_after_start(
 impl Workspace {
     pub(super) fn snapshot(&self, cx: &App) -> PersistedWorkspaceState {
         PersistedWorkspaceState {
-            current_model: Some(self.current_model.clone()),
+            favorite_models: self.favorite_models.clone(),
+            current_model: self.explicit_model.then(|| self.current_model.clone()),
             permission_mode: Some(self.permission_mode),
             sidebar_visible: Some(self.sidebar_visible),
             active_view: Some(self.active_view.clone()),
@@ -476,7 +493,11 @@ impl Workspace {
             text_generation_model:self.text_generation_model.clone(),
             response_stream:(self.response_stream!=Default::default()).then_some(self.response_stream),
             fallback_model:self.fallback_model.clone(),
+            default_options:self.default_options.clone(),fallback_options:self.fallback_options.clone(),
+            default_kiro:self.default_kiro.clone(),fallback_kiro:self.fallback_kiro.clone(),
             provider_resets:self.provider_resets.clone(),
+            quota_recoveries:self.quota_recoveries.clone(),
+            interrupted_runs:self.interrupted_runs(cx),
             quota_prefs:(self.quota_prefs!=Default::default()).then_some(self.quota_prefs),
             active_project: self
                 .active_project
@@ -514,7 +535,7 @@ impl Workspace {
             right_panel_width: Some(self.right_panel_width),
             zoom: (!crate::zoom::is_default(self.zoom)).then_some(self.zoom),
             meeting_prefs: Some(self.meetings_hub.read(cx).prefs.clone()),
-            run_choice: self.run_choice.as_str().to_string(),
+            run_choice: self.run_choice.map(|choice| choice.as_str()).unwrap_or_default().to_owned(),
             claude_effort: self.claude_effort.clone(),
             diff_preferences: Some(self.diff_panel.read(cx).prefs).filter(|p| *p != Default::default()),
             branch_naming:self.branch_naming.clone(),
@@ -529,12 +550,15 @@ impl Workspace {
             fonts:(self.fonts!=Default::default()).then(||self.fonts.clone()),
             thread_origins: self.thread_origins.clone(),
             title_requests: self.title_requests.clone(),
+            desktop_task_cursors: self.desktop_task_cursors.clone(),
+            desktop_task_links: self.desktop_task_links.clone(),
             task_thread_view: self.task_thread_view.as_ref().filter(|t| matches!(&self.active_view, AppView::Bruh { agent_id } if agent_id == &t.agent_id)).cloned(),
             hidden_inline_thread_details: self.details.hidden_inline.clone(),
             custom_themes: (!self.custom_themes.empty()).then(|| self.custom_themes.clone()),
             appearance: (self.appearance != Default::default()).then_some(self.appearance),
             chat_width: (self.chat_width != ChatWidth::default()).then_some(self.chat_width),
             screen_reader: (self.screen_reader != Default::default()).then_some(self.screen_reader),
+            composer_rich_text: (!self.composer_rich_text).then_some(false),
             slash_skills:(!self.slash_skills).then_some(false),
             tool_visibility:self.tool_visibility,
             send_shortcut: (self.send_shortcut != SendShortcut::Enter).then(|| self.send_shortcut.id().to_owned()),
@@ -553,6 +577,8 @@ impl Workspace {
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
             keybinding_schema: 1,
+            shortcut_links: self.linked_keybindings.saved(),
+            project_links: self.linked_projects.saved(),
         }
     }
 
@@ -598,7 +624,7 @@ impl Workspace {
                     ))
                     .await;
                 // Snapshot once per batch, not once per keystroke or fragment.
-                let Ok((state, meeting_action_receipts, coordinator, generation)) = workspace
+                let Ok((state, meeting_action_receipts, quota_receipts, coordinator, generation)) = workspace
                     .update(cx, |this, cx| {
                         this.save_queue.begin_write();
                         let generation = this
@@ -609,6 +635,7 @@ impl Workspace {
                         (
                             this.snapshot(cx),
                             this.meetings_hub.read(cx).action_save_receipts(),
+                            this.quota_save_receipts(),
                             this.persistence.clone(),
                             generation,
                         )
@@ -616,6 +643,7 @@ impl Workspace {
                 else {
                     return;
                 };
+                let schedule_runs = state.project_links.pending_runs.clone();
                 let scratch = state.pending_scratch_cleanups.clone();
                 let result = cx
                     .background_spawn(async move {
@@ -626,6 +654,7 @@ impl Workspace {
                     let dirty = this.save_queue.finish();
                     this.save_status.finish(result);
                     let saved = this.save_status.is_saved();
+                    this.linked_run_requests_saved(schedule_runs, saved, cx);
                     this.meetings_hub.update(cx, |hub, cx| {
                         if saved {
                             hub.meeting_actions_saved(meeting_action_receipts, cx);
@@ -633,7 +662,10 @@ impl Workspace {
                             hub.meeting_actions_save_failed(meeting_action_receipts, cx);
                         }
                     });
-                    if saved { this.dispatch_saved_scratch(scratch, cx); }
+                    if saved {
+                        this.dispatch_saved_scratch(scratch, cx);
+                        this.dispatch_saved_quota(quota_receipts,cx);
+                    }
                     if saved && dirty {
                         this.persist(cx);
                     }

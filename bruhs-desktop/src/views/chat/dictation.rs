@@ -120,6 +120,7 @@ impl ChatView {
         let thread = self.thread_id.clone();
         let microphone = self.dictation_prefs.ordered_microphones();
         let preferences = self.dictation_prefs.clone();
+        let project_name = self.project_scoped.then(|| self.project_name.clone());
         let project = self
             .project_scoped
             .then(|| self.settings_project_path().to_owned());
@@ -221,7 +222,14 @@ impl ChatView {
                 };
                 Some(crate::app_state::spawn_tokio(cx, async move {
                     preferences
-                        .transcribe(audio, project.as_deref(), &cleanup_model, nearby, control)
+                        .transcribe(
+                            audio,
+                            project.as_deref(),
+                            project_name.as_deref(),
+                            &cleanup_model,
+                            nearby,
+                            control,
+                        )
                         .await
                 }))
             });

@@ -4,6 +4,7 @@
 //! with the Settled fold, and the footer view switcher. Sizes are the web's
 //! Tailwind values in px; colours are the same bruhs tokens.
 
+use crate::views::theme_regions::ThemeRegion as _;
 use bruhs_ui::input::{Input, InputEvent, InputState, TextareaState};
 use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::zoom::px;
@@ -294,26 +295,42 @@ impl Workspace {
     }
 
     pub(super) fn render_sidebar(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+        let theme = cx.theme();
+        let update_pill = self.render_sidebar_update_button(cx);
+        let show_check = update_pill.is_none();
+        let inner = div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .when_some(theme.color_role("cssSidebarInnerBackground"), |el, color| el.bg(color))
+            .children(crate::views::workspace::appearance::background_layer("SidebarInner", cx))
+            .when_some(theme.color_role("cssSidebarInnerForeground"), |el, color| el.text_color(color))
+            .child(self.render_sidebar_header())
+            .child(self.render_sidebar_controls(cx))
+            .children(self.render_crew_rail(window, cx))
+            .child(self.render_sidebar_list(cx))
+            .child(self.render_sidebar_undo(cx))
+            .children(update_pill)
+            .child(self.render_sidebar_footer(show_check, cx));
         div()
             .w_full()
             .h_full()
             .relative()
             .debug_selector(|| "desktop-workspace-sidebar".to_string())
             .key_context("Sidebar")
-            .bg(theme::longan_900())
+            .bg(theme.color_role("cssSidebarBackground").or_else(|| theme.color_role("sidebar")).unwrap_or_else(theme::longan_900))
+            .when(theme.color_role("cssSidebarBackground").is_none() && theme.color_role("cssSidebarInnerBackground").is_none(), |el| el.theme_region("sidebar", cx))
             .border_r_1()
-            .border_color(theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY))
+            .children(crate::views::workspace::appearance::background_layer("Sidebar", cx))
+            .border_color(theme.color_role("cssSidebarBorder").unwrap_or_else(|| {
+                theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY)
+            }))
             .font_family(theme::UI_FONT_FAMILY)
-            .text_color(theme::rambutan_300())
+            .text_color(theme.color_role("cssSidebarForeground").unwrap_or_else(theme::rambutan_300))
             .flex()
             .flex_col()
-            .child(self.render_sidebar_header())
-            .child(self.render_sidebar_controls(cx))
-            .children(self.render_crew_rail(window, cx))
-            .child(self.render_sidebar_list(cx))
-            .child(self.render_sidebar_undo(cx))
-            .children(self.render_sidebar_update_button(cx))
-            .child(self.render_sidebar_footer(cx))
+            .child(inner)
     }
 
     /// Brand row; doubles as the window drag strip behind the traffic lights.
@@ -464,8 +481,8 @@ impl Workspace {
                         index: thread_index, folder,
                         ..
                     } => this.render_thread_card(&this.threads[thread_index], folder, &focus[index], cx),
-                    viewport::SidebarRow::Folder {path,name,count,open} => {
-                        let tooltip=path.clone();
+                    viewport::SidebarRow::Folder {path,checkout,name,count,open} => {
+                        let tooltip=checkout.clone();
                         let debug_path=path.clone();
                         let searching=!this.sidebar_query(cx).trim().is_empty();
                         let folder=div().id(SharedString::from(format!("sidebar-folder-{path}")))
@@ -477,7 +494,7 @@ impl Workspace {
                             .flex().items_center().gap_2().px_2().py_1().text_size(px(SIDEBAR_LABEL_TEXT_PX))
                             .text_color(theme::rambutan_400())
                             .when(!tooltip.is_empty(),|el|el.tooltip(move|w,cx|bruhs_ui::tooltip::Tooltip::new(tooltip.clone()).build(w,cx)))
-                            .child(this.project_icon(path.as_ref(),SIDEBAR_SMALL_ICON_PX))
+                            .child(this.project_icon(checkout.as_ref(),SIDEBAR_SMALL_ICON_PX))
                             .child(div().min_w_0().flex_1().truncate().child(name)).child(count.to_string())
                             .child(icon(assets::CHEVRON_DOWN_ICON_PATH,SIDEBAR_SMALL_ICON_PX,theme::rambutan_500())
                                 .when(!open,|el|el.with_transformation(Transformation::rotate(Radians(-std::f32::consts::FRAC_PI_2)))));
@@ -636,7 +653,7 @@ impl Workspace {
         let chat = thread.chat.read(cx);
         if chat.is_streaming && chat.has_pending_permission() {
             CardStatus::Approval
-        } else if chat.is_streaming {
+        } else if chat.is_working() {
             CardStatus::Working
         } else if self.unread_thread_ids.contains(&thread.id) {
             CardStatus::Unread
@@ -672,7 +689,7 @@ impl Workspace {
         } else if thread.project_name.is_empty() {
             SIDEBAR_NO_PROJECT_LABEL.to_string()
         } else {
-            thread.project_name.clone()
+            self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name).to_owned()
         };
         let provider = bruhs_models::agent::AgentProvider::for_model(&thread.model_id);
         let id_for_select = thread.id.clone();
@@ -1394,7 +1411,7 @@ impl Workspace {
 
     /// Footer view switcher, like the web's: the views in rows of six, then
     /// settings in the last row's last column.
-    fn render_sidebar_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_sidebar_footer(&self, show_check: bool, cx: &Context<'_, Self>) -> AnyElement {
         let settings_active = self.settings_visible();
         let settings = div()
             .id("desktop-sidebar-nav-settings")
@@ -1421,7 +1438,7 @@ impl Workspace {
             })
             .tab_index(0)
             .role(Role::Tab)
-            .aria_label("Settings")
+            .aria_label(self.ui_language().text("Settings"))
             .aria_selected(settings_active)
             .border_1()
             .border_color(gpui::transparent_black())
@@ -1468,6 +1485,9 @@ impl Workspace {
             self.render_sidebar_nav_icon(AppView::People, assets::USERS_ICON_PATH, "People", cx),
             self.render_agent_workflows_nav(cx),
         ];
+        if show_check {
+            cells.push(self.sidebar_check_button(cx));
+        }
         // Settings takes the last column, under the first row's last view:
         // empty cells fill the views' last row up to it, and settings starts
         // a row of its own when the views fill theirs (web `col-start-6`).
@@ -1547,12 +1567,13 @@ impl Workspace {
 impl Workspace {
     /// The sidebar title search; edits redraw the list.
     pub(super) fn new_sidebar_search(
+        language: crate::views::language::Language,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
     ) -> Entity<InputState> {
         let sidebar_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder(SIDEBAR_SEARCH_PLACEHOLDER));
+            cx.new(|cx| InputState::new(window, cx).placeholder(language.text(SIDEBAR_SEARCH_PLACEHOLDER)));
         subscriptions.push(redraw_on_edit(&sidebar_search, window, cx));
         sidebar_search
     }
@@ -1610,7 +1631,8 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{status_pulse_opacity, thread_matches};
+    use super::{CardStatus, status_pulse_opacity, thread_matches};
+    use crate::app_state::DesktopState;
 
     /// Web `bruhs-status-pulse`'s keyframes.
     #[test]
@@ -1655,6 +1677,60 @@ mod tests {
                 "reduced: {reduced}"
             );
         }
+    }
+
+    #[gpui::test]
+    fn thread_with_running_teamwork_task_shows_working_status_after_turn_ends(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use super::super::{element_key, performance_tests::fixture};
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        let (id, task_id) = workspace.update_in(cx, |workspace, window, cx| {
+            workspace.new_thread_in_project("proj".into(), "/tmp/bruhs-teamwork".into(), window, cx);
+            let thread = workspace.threads.last().expect("a thread");
+            let id = thread.id.clone();
+            let task = cx.global::<DesktopState>().app.registry().register(
+                id.clone(),
+                bruhs_core::TaskKind::Swarm,
+                "builder-1",
+                serde_json::json!({ "worker_name": "builder-1", "persists_after_turn": true }),
+            );
+            workspace.sidebar_working_open = true;
+            cx.notify();
+            (id, task.id)
+        });
+        cx.run_until_parked();
+        let key = element_key(&id);
+        let mark: &'static str =
+            Box::leak(format!("desktop-thread-card-status-{key}").into_boxed_str());
+        assert!(
+            cx.debug_bounds(mark).is_some(),
+            "Working mark must show while teamwork worker runs even when not streaming"
+        );
+        assert!(
+            cx.debug_bounds("desktop-chat-active-runs").is_some(),
+            "Active runs strip must surface running background tasks directly in chat"
+        );
+        workspace.update_in(cx, |workspace, _window, cx| {
+            let thread = workspace.threads.iter().find(|t| t.id == id).unwrap();
+            assert!(!thread.chat.read(cx).is_streaming);
+            assert_eq!(workspace.card_status(thread, cx), CardStatus::Working);
+            cx.global::<DesktopState>()
+                .app
+                .registry()
+                .stop_task(&task_id)
+                .unwrap();
+        });
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds("desktop-chat-active-runs").is_none(),
+            "Active runs strip hides once all background runs stop"
+        );
+        workspace.update_in(cx, |workspace, _window, cx| {
+            let thread = workspace.threads.iter().find(|t| t.id == id).unwrap();
+            assert_ne!(workspace.card_status(thread, cx), CardStatus::Working);
+        });
     }
 
     #[test]

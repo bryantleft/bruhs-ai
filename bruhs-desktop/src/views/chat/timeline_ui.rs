@@ -5,6 +5,7 @@
 //! The pure helpers (tool labels, summaries, changed files) are ports of the
 //! web module so both surfaces say the same thing about the same turn.
 
+use crate::views::theme_regions::ThemeRegion as _;
 use crate::views::copy_feedback::CopyFeedback;
 use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 use bruhs_ui::tooltip::Tooltip;
 use gpui::prelude::*;
+use bruhs_ui::ActiveTheme;
 use gpui::*;
 
 #[cfg(any(test, debug_assertions))]
@@ -352,13 +354,19 @@ impl ChatView {
                 div()
                     .max_w(relative(USER_BUBBLE_MAX_WIDTH))
                     .rounded(px(TRANSCRIPT_CARD_RADIUS_PX))
-                    .bg(theme::longan_800())
+                    .bg(cx.theme().color_role("cssUserBubbleBackground").or_else(|| cx.theme().color_role("messageSurface")).unwrap_or(theme::longan_800()))
+                    .when(cx.theme().color_role("cssUserBubbleBackground").is_none(), |el| el.theme_region("messageSurface", cx))
                     .px(px(USER_BUBBLE_X_PADDING_PX))
                     .py(px(USER_BUBBLE_Y_PADDING_PX))
                     .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .line_height(relative(1.5))
-                    .text_color(theme::rambutan_100())
+                    .children(crate::views::workspace::appearance::rounded_background_layer(
+                        "UserBubble",
+                        px(TRANSCRIPT_CARD_RADIUS_PX),
+                        cx,
+                    ))
+                    .text_color(cx.theme().color_role("cssUserBubbleForeground").unwrap_or_else(theme::rambutan_100))
                     .flex()
                     .flex_col()
                     .when_some(caption, |bubble, caption| {
@@ -727,6 +735,12 @@ impl ChatView {
                 .children(work)
                 .child(self.render_working_row(msg, thinking_only));
             return turn.into_any_element();
+        }
+
+        if msg.state == super::TurnState::InterruptedByRestart {
+            return turn.children(thinking).children(work).children(text)
+                .child(div().px_1().text_xs().text_color(theme::rambutan_400()).child("Interrupted by restart"))
+                .into_any_element();
         }
 
         if let Some(error) = msg.state.error() {

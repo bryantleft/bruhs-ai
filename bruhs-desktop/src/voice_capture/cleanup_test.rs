@@ -23,7 +23,7 @@ fn cleanup_uses_bounded_draft_and_retains_raw_speech_on_provider_failure() {
             prefs.cleanup.instructions = "Use sentence case.".into();
             let draft = || DraftContext::around("prefix OMIT suffix", 7..11);
             let reply = prefs
-                .transcribe(vec![1, 2], None, "unused", draft(), None)
+                .transcribe(vec![1, 2], None, None, "unused", draft(), None)
                 .await
                 .unwrap();
             assert_eq!(reply.text, "Green apples.");
@@ -40,7 +40,7 @@ fn cleanup_uses_bounded_draft_and_retains_raw_speech_on_provider_failure() {
             assert_eq!(prompt["correction_cue"], "correction");
             std::fs::write(Path::new(&marker).join("fail"), b"").unwrap();
             let reply = prefs
-                .transcribe(vec![1, 2], None, "unused", draft(), None)
+                .transcribe(vec![1, 2], None, None, "unused", draft(), None)
                 .await
                 .unwrap();
             assert_eq!(reply.text, "red correction green apples");
@@ -48,7 +48,7 @@ fn cleanup_uses_bounded_draft_and_retains_raw_speech_on_provider_failure() {
             std::fs::write(Path::new(&marker).join("wait"), b"").unwrap();
             let (started, ready) = tokio::sync::oneshot::channel();
             let transcription =
-                prefs.transcribe(vec![1, 2], None, "unused", draft(), Some(started));
+                prefs.transcribe(vec![1, 2], None, None, "unused", draft(), Some(started));
             let (reply, ()) = tokio::join!(transcription, async {
                 ready.await.unwrap().send(()).unwrap();
             });

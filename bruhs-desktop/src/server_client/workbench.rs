@@ -35,6 +35,26 @@ impl ServerClient {
     pub async fn prune_browser_captures(&self) -> Result<usize, ServerError> {
         self.send_json(reqwest::Method::POST, "/api/maintenance/browser-captures/prune", None::<&()>).await
     }
+    pub async fn quota_windows(
+        &self,
+        provider: bruhs_models::agent::AgentProvider,
+    ) -> Result<Vec<bruhs_models::agent_extensions::QuotaWindow>, ServerError> {
+        self.get_json(&format!("/api/agent-extensions/usage/windows/{}", provider.as_str()))
+            .await
+    }
+
+    pub async fn writer_models(
+        &self,
+        project: &str,
+    ) -> Result<bruhs_models::delivery::writer_catalog::WriterCatalog, ServerError> {
+        let scope = bruhs_models::delivery::DeliveryPreferenceScope {
+            path: (!project.is_empty()).then(|| project.to_owned()),
+        };
+        let response = self.http()?.get(self.url("/api/delivery/writer-models")).query(&scope).send().await;
+        let response = Self::check(response, "Read writer models").await?;
+        Self::decode(response, "Read writer models").await
+    }
+
     pub async fn delivery_preferences(
         &self,
         path: Option<String>,
@@ -205,6 +225,13 @@ impl ServerClient {
             return Err(ServerError::Invalid("The host did not confirm worktree cleanup."));
         }
         Ok(())
+    }
+
+    pub fn shortcut_access_url(&self) -> Result<reqwest::Url, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/coordination/ui");
+        url.set_fragment(Some("access"));
+        Ok(url)
     }
 
     pub fn workbench_client() -> Self {

@@ -22,13 +22,42 @@ pub(super) struct Entry {
 #[serde(default)]
 pub(super) struct ProjectList {
     mode: Order,
+    #[serde(skip_serializing_if = "project_grouping::Preferences::is_default")]
+    pub(super) grouping: project_grouping::Preferences,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    titles: BTreeMap<String, String>,
     entries: Vec<Entry>,
 }
 
 impl ProjectList {
     pub(super) fn empty(&self) -> bool {
-        self.mode == Order::default() && self.entries.is_empty()
+        self.mode == Order::default() && self.entries.is_empty() && self.grouping.is_default() && self.titles.is_empty()
     }
+    pub(super) fn forget(&mut self, path: &str) {
+        self.entries.retain(|entry| entry.path != path);
+        self.titles.remove(path);
+        self.grouping.forget_checkout(path);
+    }
+    pub(super) fn saved_title(&self, path: &str) -> Option<Option<String>> {
+        self.entries.iter().any(|e| e.path == path).then(|| self.titles.get(path).cloned())
+    }
+
+    pub(super) fn title(&self, path: &str) -> Option<&str> {
+        self.titles.get(path).map(String::as_str)
+    }
+
+    pub(super) fn set_title(&mut self, path: &str, title: Option<&str>) {
+        if let Some(title) = title {
+            if !self.entries.iter().any(|e| e.path == path) {
+                let folder = project_picker_ui::path_display_name(Path::new(path));
+                self.register(path, &folder, EpochMs::now().as_millis(), None);
+            }
+            self.titles.insert(path.to_owned(), title.to_owned());
+        } else {
+            self.titles.remove(path);
+        }
+    }
+
     fn register(&mut self, path: &str, name: &str, created: i64, last_message: Option<i64>) {
         if path.is_empty() || name.is_empty() {
             return;
@@ -93,7 +122,7 @@ impl Workspace {
             );
         }
     }
-    pub(super) fn remember_project(&mut self, project: DesktopProjectLocation) {
+    pub(super) fn remember_project(&mut self, project: DesktopProjectLocation, cx: &mut Context<'_, Self>) {
         self.project_list.register(
             &project.path,
             &project.name,
@@ -101,6 +130,7 @@ impl Workspace {
             None,
         );
         project_picker_ui::push_recent_project(&mut self.recent_projects, project);
+        self.refresh_project_identities(cx);
     }
     pub(super) fn listed_projects(&self) -> Vec<DesktopProjectLocation> {
         let mut ordered: Vec<_> = self.project_list.entries.iter().collect();
@@ -115,7 +145,7 @@ impl Workspace {
             .into_iter()
             .map(|p| DesktopProjectLocation {
                 path: p.path.clone(),
-                name: p.name.clone(),
+                name: self.project_list.title(&p.path).unwrap_or(&p.name).to_owned(),
             })
             .collect();
         for p in &self.recent_projects {
@@ -203,7 +233,7 @@ impl Workspace {
                 rows.push(
                     self.settings_row(
                         "desktop-settings-row-project-position",
-                        p.name.clone(),
+                        self.project_list.title(&p.path).unwrap_or(&p.name).to_owned(),
                         p.path.clone(),
                         div()
                             .flex()
@@ -241,6 +271,7 @@ impl Workspace {
                 for_terminal: false,
                 thread: None,
             });
+            let name = self.listed_projects().into_iter().find(|p| p.path == path).map(|p| p.name).unwrap_or(name);
             self.select_project_location(path, name, window, cx);
         }
     }

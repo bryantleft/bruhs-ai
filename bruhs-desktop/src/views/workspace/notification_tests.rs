@@ -31,6 +31,7 @@ fn show_notice(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, messag
     workspace.update_in(cx, |workspace, _, cx| {
         workspace.meetings_hub.update(cx, |hub, cx| {
             hub.notice = Some(HubNotice {
+                show_in_settings: false,
                 message,
                 warning: true,
                 action: None,

@@ -610,6 +610,9 @@ impl Workspace {
     }
 
     pub(super) fn render_project_actions(&self, cx: &Context<'_, Self>) -> AnyElement {
+        if let Some(view) = self.project_inventory_view(cx) {
+            return view;
+        }
         let scope = &self.settings_project_scope;
         let target = self.action_checkout(cx);
         let button = |id: SharedString, label: &'static str, disabled: bool| {
@@ -723,9 +726,11 @@ impl Workspace {
                 .into_any_element(),
             ),
         );
-        let mut overview = vec![self.defaults_scope_row(cx)];
+        let mut overview = vec![self.projects_scope_row(cx)];
         if !scope.is_empty() {
+            overview.push(self.checkout_name_row(cx));
             overview.push(self.project_art_row(cx));
+            overview.push(self.project_grouping_override_row(cx));
         }
         if let Some(path) = target {
             overview.push(
@@ -754,7 +759,27 @@ impl Workspace {
             .flex_col()
             .gap(px(24.0))
             .child(self.settings_card("Project overview", "", overview))
+            .children(self.linked_checkout_cards(cx))
+            .child(self.settings_card("New threads", "", vec![self.new_thread_model_row(cx), self.new_thread_placement_row(cx)]))
             .child(self.settings_card("Actions", "", rows))
+            .when(
+                !scope.is_empty() && self.listed_projects().iter().any(|p| &p.path == scope),
+                |view| {
+                    let remove = self.remove_checkout_button(
+                        "settings-remove-checkout".into(),
+                        project_removal::Placement::Section,
+                        project_removal::Target::Checkout(scope.to_owned()),
+                        true,
+                        cx,
+                    );
+                    view.child(self.settings_card("Danger", "", vec![self.settings_row(
+                        "settings-remove-checkout-row",
+                        "Remove checkout",
+                        "Remove this checkout and its conversations. Files stay on disk.",
+                        remove,
+                    )]))
+                },
+            )
             .into_any_element()
     }
 }

@@ -806,6 +806,30 @@ mod git {
     }
 
     #[gpui::test]
+    fn previous_worktree_from_another_project_stops_before_the_agent(cx: &mut TestAppContext) {
+        use bruhs_models::logic::run_place::{RememberedWorktree, WorkspaceChoice};
+        let project = repo_with_unstaged_change();
+        let other = repo_with_unstaged_change();
+        let (chat, cx) = chat_window(cx);
+        chat.update(cx, |chat, cx| {
+            chat.set_project_context(project.path().to_string_lossy().into_owned(), "repo", true, cx);
+            chat.previous_worktree = Some(RememberedWorktree {
+                path: other.path().to_string_lossy().into_owned(),
+                branch: "main".into(),
+                label: "other".into(),
+            });
+            chat.choose_run_choice(WorkspaceChoice::PreviousWorktree, cx);
+            chat.submit_prompt("hello".into(), cx);
+        });
+        cx.run_until_parked();
+        chat.read_with(cx, |chat, _| {
+            assert!(!chat.run_locked);
+            assert!(!chat.is_streaming);
+            assert!(chat.messages.last().unwrap().state.error().unwrap().contains("different project"));
+        });
+    }
+
+    #[gpui::test]
     fn sending_without_a_base_branch_fails_before_the_agent(cx: &mut TestAppContext) {
         let (chat, cx) = chat_window(cx);
         chat.update(cx, |chat, cx| {
@@ -820,6 +844,7 @@ mod git {
             chat.base_branch.clear();
             chat.submit_prompt("hello".into(), cx);
         });
+        cx.run_until_parked();
         chat.read_with(cx, |chat, _| {
             assert!(!chat.run_locked);
             assert!(!chat.is_streaming);
@@ -1163,6 +1188,36 @@ fn turns_resume_the_saved_session_of_their_own_provider(cx: &mut TestAppContext)
         let turn = begin(chat, "three", cx);
         assert!(turn.fresh_session);
         assert_eq!(turn.session_id, None);
+    });
+}
+
+#[gpui::test]
+fn switching_acp_instances_starts_a_session_with_the_current_conversation(cx: &mut TestAppContext) {
+    use bruhs_models::agent::AgentProvider;
+
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        chat.model_id = "acp/work/fast".into();
+        chat.session_id = Some("acp:work:s-1".into());
+        chat.session_provider = Some(AgentProvider::Acp);
+        let turn = begin(chat, "first question", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("acp:work:s-1"));
+
+        chat.model_id = "acp/personal/default".into();
+        let turn = begin(chat, "follow up", cx);
+        assert!(turn.fresh_session && turn.session_id.is_none());
+        assert!(turn.prompt.contains("first question") && turn.prompt.ends_with("follow up"));
+        chat.record_session("acp:personal:s-2".into());
+
+        chat.model_id = "acp/personal/fast".into();
+        let turn = begin(chat, "another model", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("acp:personal:s-2"));
+
+        chat.model_id = "acp/work/default".into();
+        chat.fresh_session = true;
+        let turn = begin(chat, "start over", cx);
+        assert!(turn.fresh_session && turn.session_id.is_none());
+        assert_eq!(turn.prompt, "start over");
     });
 }
 

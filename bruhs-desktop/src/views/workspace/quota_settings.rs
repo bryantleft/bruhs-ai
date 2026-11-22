@@ -1,11 +1,13 @@
 //! Only a provider-reported future reset can schedule a limited desktop thread.
 use super::*;
+mod recovery;
+pub(super) use recovery::Recovery;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
-    snooze: bool,
-    resume: bool,
+    pub(super) snooze: bool,
+    pub(super) resume: bool,
 }
 impl Workspace {
     pub(super) fn should_wait_on_quota(&self, path: &str) -> bool {
@@ -35,56 +37,41 @@ impl Workspace {
             "off" => Some(false),
             _ => return,
         };
-        let snooze = id == "settings-quota-snooze";
-        if self.settings_project_scope.is_empty() {
-            let Some(on) = on else { return };
-            if snooze {
-                self.quota_prefs.snooze = on
-            } else {
-                self.quota_prefs.resume = on
-            }
-        } else {
-            let key = self.settings_project_scope.clone();
-            let p = self.project_defaults.entry(key.clone()).or_default();
-            if snooze {
-                p.snooze_limited = on
-            } else {
-                p.resume_limited = on
-            }
-            if *p == Default::default() {
-                self.project_defaults.remove(&key);
-            }
+        let setting = match id {
+            "settings-quota-snooze" => ScopedSwitch::Snooze,
+            "settings-quota-resume" => ScopedSwitch::Resume,
+            _ => return,
+        };
+        if on.is_some() || !self.settings_project_scope.is_empty() {
+            setting.choose(self, on, cx);
         }
-        if !snooze {
-            let cancel: Vec<_> = self
-                .threads
-                .iter()
-                .filter(|t| {
-                    !self
-                        .quota_preferences(t.chat.read(cx).settings_project_path())
-                        .resume
-                })
-                .map(|t| t.id.clone())
-                .collect();
-            for id in cancel {
-                self.quota_timers.remove(&id);
-            }
+    }
+
+    pub(super) fn cancel_disabled_quota_recoveries(&mut self, cx: &App) {
+        let cancel: Vec<_> = self
+            .threads
+            .iter()
+            .filter(|t| {
+                !self
+                    .quota_preferences(t.chat.read(cx).settings_project_path())
+                    .resume
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        for id in cancel {
+            self.cancel_quota_recovery(&id);
         }
-        self.stamp_run_prefs_on_threads(cx);
-        self.persist_and_notify(cx);
     }
 
     pub(super) fn render_quota_settings(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let key = &self.settings_project_scope;
-        let p = self.project_defaults.get(key);
-        let mut rows = Vec::new();
-        for (id,selector,label,desc,environment,project) in [
-            ("settings-quota-resume","desktop-settings-row-quota-resume","Resume after usage limits","Continue the same provider session when its reported limit resets while bruhs is open.",self.quota_prefs.resume,p.and_then(|p|p.resume_limited)),
-            ("settings-quota-snooze","desktop-settings-row-quota-snooze","Snooze until limits reset","Move a limited thread to Snoozed until its provider reports capacity will return.",self.quota_prefs.snooze,p.and_then(|p|p.snooze_limited))]{
-            let control=if key.is_empty(){ settings_ui::switch(id,environment,false,label,cx,move|this,_,cx|this.choose_quota_preference(id,if environment{"off"}else{"on"},cx)) }
-            else {settings_ui::control_column(self.choice_control(id,label,match project{None=>"inherit",Some(true)=>"on",Some(false)=>"off"},&[("inherit","Environment default"),("on","On"),("off","Off")],cx))};
-            rows.push(self.settings_row(selector,label,desc,control));
-        }
+        let rows = vec![
+            self.scoped_switch_row(ScopedSwitch::Resume, "settings-quota-resume", "desktop-settings-row-quota-resume",
+                "Resume after usage limits", "Continue the interrupted session when its limit resets. If bruhs is closed, continue the next time it opens.",
+                self.quota_prefs.resume, cx),
+            self.scoped_switch_row(ScopedSwitch::Snooze, "settings-quota-snooze", "desktop-settings-row-quota-snooze",
+                "Snooze until limits reset", "Move a limited thread to Snoozed until its provider reports capacity will return.",
+                self.quota_prefs.snooze, cx),
+        ];
         self.settings_card("Usage limits", "", rows)
     }
 
@@ -97,7 +84,13 @@ impl Workspace {
     ) {
         let view = chat.read(cx);
         let prefs = self.quota_preferences(view.settings_project_path());
-        if prefs == Preferences::default() || !view.is_quota_turn(generation) {
+        if prefs == Preferences::default()
+            || !view.is_quota_turn(generation)
+            || !view
+                .messages
+                .last()
+                .is_some_and(|m| m.role == MessageRole::Assistant && m.state.error().is_some())
+        {
             return;
         }
         let Some(id) = view.thread_id.clone() else {
@@ -111,42 +104,28 @@ impl Workspace {
         ) {
             return;
         }
+        // A reset supplied with the failure can be saved with the finished turn.
+        self.cancel_quota_recovery(&id);
+        if let Some(at) = reset_ms {
+            self.schedule_limited_thread(&id, &model, generation, at, cx);
+            return;
+        }
         let lookup = crate::app_state::spawn_tokio(cx, async move {
-            if let Some(reset) = reset_ms {
-                Some(reset)
-            } else {
-                bruhs_core::coordination::provider_quota_reset(provider.as_str())
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|t| t.as_millis())
+            bruhs_core::coordination::provider_quota_reset(provider.as_str())
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.as_millis())
+        });
+        let key = id.clone();
+        let task = cx.spawn(async move |this, cx| {
+            if let Some(at) = lookup.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.schedule_limited_thread(&id, &model, generation, at, cx);
+                });
             }
         });
-        let thread_key = id.clone();
-        let task = cx.spawn(async move |this, cx| {
-            let Some(at) = lookup.await else { return };
-            let Ok(Some(delay)) = this.update(cx, |this, cx| {
-                this.schedule_limited_thread(&id, &model, generation, at, cx)
-            }) else {
-                return;
-            };
-            cx.background_executor().timer(delay).await;
-            let _ = this.update(cx, |this, cx| {
-                let Some(t) = this.threads.iter().find(|t| t.id == id) else {
-                    return;
-                };
-                let view = t.chat.read(cx);
-                if t.settled
-                    || view.model_id != model
-                    || !this.quota_preferences(view.settings_project_path()).resume
-                {
-                    return;
-                }
-                t.chat
-                    .update(cx, |chat, cx| chat.resume_quota_turn(generation, cx));
-            });
-        });
-        self.quota_timers.insert(thread_key, task);
+        self.quota_timers.insert(key, task);
     }
 
     fn schedule_limited_thread(
@@ -157,9 +136,11 @@ impl Workspace {
         at: i64,
         cx: &mut Context<'_, Self>,
     ) -> Option<std::time::Duration> {
-        let delay = at
-            .checked_sub(EpochMs::now().as_millis())
-            .filter(|n| *n > 0)?;
+        let delay = at.saturating_sub(EpochMs::now().as_millis());
+        // The reference worker can arm a recently missed reset after waking up.
+        if delay < -86_400_000 {
+            return None;
+        }
         let index = self.threads.iter().position(|t| t.id == id)?;
         let t = &self.threads[index];
         let view = t.chat.read(cx);
@@ -167,13 +148,23 @@ impl Workspace {
             return None;
         }
         let prefs = self.quota_preferences(view.settings_project_path());
-        if prefs.snooze {
+        let recovery = prefs
+            .resume
+            .then(|| Recovery::for_turn(view, at, generation))
+            .flatten();
+        if prefs.snooze && delay > 0 {
             self.threads[index].snoozed_until_ms = Some(at);
+        }
+        if let Some(recovery) = recovery {
+            self.arm_quota_timer(id, at, recovery.request, cx);
+            self.quota_recoveries.insert(id.to_owned(), recovery);
+        }
+        if prefs.snooze || self.quota_recoveries.contains_key(id) {
             self.persist_and_notify(cx);
         }
-        prefs
-            .resume
-            .then(|| std::time::Duration::from_millis(delay as u64))
+        self.quota_recoveries
+            .contains_key(id)
+            .then(|| std::time::Duration::from_millis(delay.max(0) as u64))
     }
 }
 
@@ -187,7 +178,7 @@ mod tests {
             this.choose_quota_preference("settings-quota-snooze", "on", cx);
             let t = this.threads.iter().find(|t| t.id == id).unwrap();
             let model = t.chat.read(cx).model_id.clone();
-            let current = t.chat.read(cx).generation_for_test();
+            let current = t.chat.read(cx).turn_generation();
             let at = EpochMs::now().as_millis() + 120_000;
             this.schedule_limited_thread(&id, &model, current.wrapping_add(1), at, cx);
             assert_eq!(

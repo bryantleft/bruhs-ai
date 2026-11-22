@@ -44,7 +44,7 @@ pub(in crate::views::workspace) struct DaysEditor {
 }
 
 impl Workspace {
-    fn retention(&self) -> WorktreeRetention {
+    pub(super) fn retention(&self) -> WorktreeRetention {
         let project = &self.settings_project_scope;
         match self.project_cleanup_mode(project) {
             Some(CleanupMode::Off) => WorktreeRetention::default(),

@@ -19,7 +19,9 @@ pub(super) struct AutomationEditor {
     task_name: Entity<InputState>,
     once_instant: Option<bruhs_models::EpochMs>,
     pub(super) picker: task_choices::TaskPickerState,
-    is_new: bool,
+    pub(super) is_new: bool,
+    pub(super) host_menu_open: bool,
+    pub(super) host_request: Option<uuid::Uuid>,
     pub(super) filters: Vec<webhook_filters::FilterRow>,
     dedupe: webhook_dedupe::DedupeFields,
     pub(super) security: webhook_security::SecurityFields,
@@ -135,23 +137,14 @@ impl AutomationEditor {
         self.task_name.focus_handle(cx)
     }
 
-    pub(super) fn shared_task_choices(&self, selected_model: Option<&str>) -> Div {
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(field("Project folder", &self.agent.path, false, true))
-            .child(if let Some(model) = selected_model {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(muted("Model"))
-                    .child(muted(model.to_owned()))
-                    .into_any_element()
-            } else {
-                field("Model", &self.agent.model, false, true).into_any_element()
-            })
+    pub(super) fn shared_task_choices(&self, selected_model: Option<&str>) -> (Div, Div) {
+        let project = div().child(field("Project", &self.agent.path, false, true));
+        let model = if let Some(model) = selected_model {
+            div().flex().flex_col().gap_1().child(muted("Model")).child(muted(model.to_owned()))
+        } else {
+            div().child(field("Model", &self.agent.model, false, true))
+        };
+        (project, model)
     }
 
     pub(super) fn task_model(&self, cx: &App) -> String {
@@ -238,7 +231,7 @@ fn webhook_prompt_help() -> Div {
 
 impl ReactiveAutomations {
     fn render_task_prompt(&self, editor: &AutomationEditor, cx: &Context<'_, Self>) -> Div {
-        let body = div().flex().flex_col().gap_1().child(field(
+        let body = div().debug_selector(|| "scheduled-task-prompt".into()).flex().flex_col().gap_1().child(field(
             "Prompt",
             editor.task_prompt(),
             true,
@@ -337,6 +330,8 @@ impl ReactiveAutomations {
             once_instant: None,
             picker: task_choices::TaskPickerState::new(is_new, window, cx),
             is_new,
+            host_menu_open: false,
+            host_request: None,
             open_filter: None,
             task_thread_open: false,
             checkout: task_checkout::CheckoutEditor::new(&subscription.subscription.task_checkout, window, cx),
@@ -362,6 +357,7 @@ impl ReactiveAutomations {
         let Some(Editor::Automation(editor)) = &self.editor else {
             return;
         };
+        if editor.host_request.is_some() { return; }
         let mut setup = match editor.build(self.app_source_block(), self.poll_apps.listing(), cx) {
             Ok(setup) => setup,
             Err(error) => {
@@ -383,19 +379,32 @@ impl ReactiveAutomations {
             }
             let destination = editor.picker.chosen_thread.as_ref();
             if let Some(choice) = destination {
-                let Some(agent) = self
-                    .snapshot
-                    .iter()
-                    .flat_map(|s| &s.agents)
-                    .find(|a| a.id == choice.agent_id && a.project_path == setup.agent.project_path)
-                else {
-                    self.error =
-                        Some("The destination thread is no longer available in this project.".into());
-                    cx.notify();
-                    return;
-                };
-                setup.agent = agent.clone();
-                setup.subscription.agent_id = agent.id.clone();
+                // A paired host resolves the selected agent from its own records at save time.
+                if self.linked_task.is_none() {
+                    let saved_agent = self
+                        .snapshot
+                        .iter()
+                        .flat_map(|s| &s.agents)
+                        .find(|a| a.id == choice.agent_id && a.project_path == setup.agent.project_path);
+                    if let Some(agent) = saved_agent {
+                        setup.agent = agent.clone();
+                        if let Some(model) = &choice.desktop_model {
+                            setup.agent.model.clone_from(model);
+                        }
+                    } else if let Some(model) = &choice.desktop_model {
+                        setup.agent.id.clone_from(&choice.agent_id);
+                        setup.agent.name.clone_from(&choice.title);
+                        setup.agent.model.clone_from(model);
+                        setup.agent.instructions = "Continue the selected desktop conversation.".into();
+                        setup.agent.memory.clear();
+                    } else {
+                        self.error =
+                            Some("The destination thread is no longer available in this project.".into());
+                        cx.notify();
+                        return;
+                    };
+                    setup.subscription.agent_id.clone_from(&setup.agent.id);
+                }
                 if !editor.agent_locked {
                     let mut prompt = value(editor.owner_prompt(), cx);
                     if !setup.subscription.instructions.trim().is_empty()
@@ -407,8 +416,22 @@ impl ReactiveAutomations {
                     setup.subscription.instructions = prompt;
                 }
             }
+            if editor.is_new || setup.agent.model != editor.agent.agent.model
+                || setup.agent.project_path != editor.agent.agent.project_path
+            {
+                let model = destination.and_then(|choice| choice.desktop_model.as_ref().or(choice.agent_model.as_ref())).unwrap_or(&setup.agent.model);
+                if let Some(problem) = editor.picker.model_problem(&setup.agent.project_path, model) {
+                    self.error = Some(problem.to_owned());
+                    cx.notify();
+                    return;
+                }
+            }
             let signing_secret = editor.signing_secret(&setup, cx);
             let destination = editor.picker.destination_edit(editor.task_conversation());
+            if self.linked_task.is_some() {
+                self.save_linked_task(setup, editor.task_enabled, signing_secret, destination, cx);
+                return;
+            }
             let command = if destination.is_none()
                 && signing_secret.is_none()
                 && editor.task_enabled == setup.enabled()
@@ -441,7 +464,7 @@ impl ReactiveAutomations {
     pub(super) fn render_automation_form(
         &self,
         editor: &AutomationEditor,
-        choices: Option<Div>,
+        choices: Option<(Div, Div, Div)>,
         cx: &Context<'_, Self>,
     ) -> Div {
         if let Some(setup) = &editor.review {
@@ -509,16 +532,19 @@ impl ReactiveAutomations {
         if !editor.scheduled_form {
             body = body.child(muted("Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."));
         }
+        let choices = if let Some((host, project, model)) = choices {
+            body = body.child(host);
+            Some((project, model))
+        } else {
+            None
+        };
         if in_dialog || editor.subscription.subscription.task_title.is_some() {
             body = body.child(field("Name", &editor.task_name, false, self.busy));
         } else if !editor.agent_locked {
             body = body.child(field("Automation name", &editor.agent.name, false, self.busy));
         }
-        let destination_first = editor.scheduled_form && choices.is_some()
-            && self.snapshot.as_ref().is_some_and(|s| s.selected_task_threads.is_some());
-        if let Some(choices) = choices {
-            body = body.child(self.render_task_prompt(editor, cx));
-            if destination_first { body=body.child(self.render_task_conversation(editor,cx)); }
+        if let Some((project, model)) = choices {
+            body = body.child(self.render_task_conversation(editor,cx));
             if let Some(choice)=&editor.picker.chosen_thread {
                 if let Some(agent)=self.snapshot.iter().flat_map(|s|&s.agents).find(|a|a.id==choice.agent_id) {
                     body=body.child(muted(format!("Runs as {}",agent.name)));
@@ -526,7 +552,16 @@ impl ReactiveAutomations {
             } else if editor.agent_locked {
                 body = body.child(muted(format!("Runs as {}", editor.agent.agent.name)));
             }
-            body = body.child(choices);
+            if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none() {
+                let (workspace, details) = self.render_task_checkout(editor, cx);
+                body = body.child(div().flex().flex_wrap().items_start().gap_3()
+                    .child(div().flex_1().min_w(px(200.)).child(project))
+                    .child(div().flex_1().min_w(px(200.)).child(workspace)))
+                    .children(details);
+            } else {
+                body = body.child(project);
+            }
+            body = body.child(self.render_task_prompt(editor, cx)).child(model);
         } else if editor.agent_locked {
             body = body.child(muted("This routine runs as this bruh. Change its job and model in Settings.")
                 .debug_selector(|| "automation-runs-as-bruh".to_string()));
@@ -541,9 +576,12 @@ impl ReactiveAutomations {
             }
         }
         if editor.scheduled_form {
-            if !destination_first { body=body.child(self.render_task_conversation(editor,cx)); }
-            if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none() {
-                body = body.child(self.render_task_checkout(editor, cx));
+            if !in_dialog {
+                body = body.child(self.render_task_conversation(editor,cx));
+                if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none() {
+                    let (workspace,details)=self.render_task_checkout(editor,cx);
+                    body = body.child(workspace).children(details);
+                }
             }
             body = body.child(self.schedule_selector(editor, cx));
         } else {
@@ -1205,6 +1243,54 @@ mod tests {
     };
     use crate::theme;
     use gpui::AppContext as _;
+    #[gpui::test]
+    fn scheduled_host_change_keeps_an_incomplete_draft_and_discards_stale_requests(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let (origin, window) = cx.add_window_view(|_, cx| ReactiveAutomations::new(cx));
+        let destination = window.update(|_, cx| cx.new(ReactiveAutomations::new));
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        origin.update_in(window, |panel, w, cx| {
+            panel.snapshot = Some(ReactiveSnapshot::default());
+            panel.edit_scheduled_task(None, w, cx);
+            let Some(Editor::Automation(e)) = &mut panel.editor else {
+                panic!("new draft")
+            };
+            e.select_trigger("schedule", w, cx);
+            e.source
+                .interval
+                .update(cx, |field, cx| field.set_value("unfinished", w, cx));
+            e.set_task_model("first-host-model", w, cx);
+            e.set_project_path("/first-host", w, cx);
+            e.task_enabled = false;
+            panel.select_task_host(Some(first), cx);
+            panel.select_task_host(Some(second), cx);
+            assert!(!panel.awaits_task_host(first));
+            assert!(panel.awaits_task_host(second));
+            panel.review_automation(cx);
+            assert!(panel.sent_for_test().is_empty());
+            assert!(panel.error.is_none());
+        });
+        destination.update_in(window, |panel, w, cx| {
+            panel.receive_task_draft(&origin, "/second-host", "second-host-model", w, cx);
+            let Some(Editor::Automation(e)) = &panel.editor else {
+                panic!("transferred draft")
+            };
+            assert!(e.is_new);
+            assert_eq!(e.project_path(cx), "/second-host");
+            assert_eq!(e.task_model(cx), "second-host-model");
+            assert_eq!(super::value(&e.source.interval, cx), "unfinished");
+            assert!(!e.task_enabled);
+            assert!(e.host_request.is_none());
+        });
+        origin.read_with(window, |p, _| assert!(!p.scheduled_editor_open()));
+    }
+
     #[gpui::test]
     fn scheduled_editor_preserves_calendar_interval_and_once_values(
         cx: &mut gpui::TestAppContext,

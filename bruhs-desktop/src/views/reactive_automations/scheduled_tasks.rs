@@ -56,19 +56,30 @@ impl RenderOnce for ScheduledTaskSettings {
 
 #[derive(IntoElement)]
 pub(crate) struct ScheduledTaskDialog {
+    pub host_field: Div,
     pub panel: Entity<ReactiveAutomations>,
     pub projects: Vec<bruhs_ui::dropdown::DropdownOption>,
     pub project_models: HashMap<String, String>,
     pub default_model: String,
+    pub favorites: crate::views::model_browser::Favorites,
+    pub toggle_favorite: task_choices::ToggleFavorite,
+}
+
+struct DeleteConfirmation {
+    title: String,
+    cancel: FocusHandle,
+    origin: Option<FocusHandle>,
+    accepted: tokio::sync::oneshot::Sender<()>,
 }
 
 pub(super) struct TaskDialogState {
+    delete: Option<DeleteConfirmation>,
     start: FocusHandle,
     end: FocusHandle,
     return_focus: FocusHandle,
     origin: Option<String>,
     pub(super) scroll: ScrollHandle,
-    focus_on_open: bool,
+    pub(super) focus_on_open: bool,
     restore_focus: bool,
     pub(super) history: Option<super::task_deliveries::DeliveryHistory>,
     menu_task: Option<String>,
@@ -85,6 +96,7 @@ impl TaskDialogState {
             scroll: ScrollHandle::new(),
             focus_on_open: false,
             restore_focus: false,
+            delete: None,
             history: None,
             menu_task: None,
             menu_items: std::array::from_fn(|_| cx.focus_handle()),
@@ -95,9 +107,30 @@ impl TaskDialogState {
 impl RenderOnce for ScheduledTaskDialog {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         self.panel.update(cx, |panel, cx| {
-            let editing = panel.task_dialog.history.is_none();
+            let deleting = panel.task_dialog.delete.is_some();
+            let editing = !deleting && panel.task_dialog.history.is_none();
+            if editing { panel.refresh_task_models(false, cx); }
             let (title, description, form, footer) =
-                if let Some(history) = &panel.task_dialog.history {
+                if let Some(prompt) = &panel.task_dialog.delete {
+                    if panel.task_dialog.focus_on_open {
+                        panel.task_dialog.focus_on_open = false;
+                        prompt.cancel.focus(window, cx);
+                    }
+                    let footer = task_footer()
+                        .child(control_as("schedule-delete-cancel", "Cancel", false, false)
+                            .debug_selector(|| "schedule-delete-cancel".into())
+                            .track_focus(&prompt.cancel)
+                            .on_activate(cx, |panel, w, cx| panel.answer_schedule_delete(false, w, cx)))
+                        .child(styled_control("schedule-delete-confirm", "Confirm", false, WebButtonVariant::Destructive)
+                            .debug_selector(|| "schedule-delete-confirm".into())
+                            .on_activate(cx, |panel, w, cx| panel.answer_schedule_delete(true, w, cx)));
+                    (
+                        prompt.title.clone(),
+                        "This permanently removes the schedule. The agent and its past runs stay available.",
+                        div().into_any_element(),
+                        footer,
+                    )
+                } else if let Some(history) = &panel.task_dialog.history {
                     if panel.task_dialog.focus_on_open {
                         panel.task_dialog.focus_on_open = false;
                         history.initial_focus.focus(window, cx);
@@ -113,8 +146,8 @@ impl RenderOnce for ScheduledTaskDialog {
                         editor.first_task_field(cx).focus(window, cx);
                     }
                     let choices = if editor.locked_agent().is_some() {
-                        let model=editor.picker.chosen_thread.as_ref().and_then(|c|
-                            panel.snapshot.as_ref()?.agents.iter().find(|a|a.id==c.agent_id)).map(|a|a.model.as_str());
+                        let model=editor.picker.displayed_thread().and_then(|choice| choice.desktop_model.as_deref().or(choice.agent_model.as_deref()).or_else(||
+                            panel.snapshot.as_ref()?.agents.iter().find(|a| a.id == choice.agent_id).map(|a| a.model.as_str())));
                         editor.shared_task_choices(model)
                     } else {
                         panel.render_task_choices(
@@ -122,20 +155,22 @@ impl RenderOnce for ScheduledTaskDialog {
                             self.projects,
                             self.project_models,
                             self.default_model,
+                            self.favorites,
+                            self.toggle_favorite,
                             cx,
                         )
                     };
-                    let form = panel.render_automation_form(editor, Some(choices), cx);
+                    let form = panel.render_automation_form(editor, Some((self.host_field, choices.0, choices.1)), cx);
                     let footer = task_footer()
                         .child(
                             ghost_control("scheduled-task-cancel", "Cancel", panel.busy)
-                                .on_activate(cx, |this, _, cx| this.dismiss_scheduled_task(cx)),
+                                .on_activate(cx, |this, window, cx| this.dismiss_scheduled_task(window, cx)),
                         )
                         .child(
                             control_as(
                                 "scheduled-task-save",
                                 editor.task_save_label(),
-                                panel.busy,
+                                panel.busy || editor.host_request.is_some(),
                                 true,
                             )
                             .on_activate(cx, |this, _, cx| this.review_automation(cx)),
@@ -149,10 +184,11 @@ impl RenderOnce for ScheduledTaskDialog {
                 };
             let viewport = window.viewport_size();
             let max_height = px((css_px(viewport.height) - 80.).clamp(1., 720.));
+            let max_width = if deleting { 512. } else if editing { 640. } else { 672. };
             let dialog = div()
                 .id("scheduled-task-dialog")
                 .debug_selector(|| "scheduled-task-dialog".into())
-                .role(Role::Dialog)
+                .role(if deleting { Role::AlertDialog } else { Role::Dialog })
                 .aria_label(title.clone())
                 .track_focus(&panel.task_dialog.start)
                 .tab_group()
@@ -166,7 +202,7 @@ impl RenderOnce for ScheduledTaskDialog {
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .w(px((css_px(viewport.width) - 32.).clamp(1., 640.)))
+                .w(px((css_px(viewport.width) - 32.).clamp(1., max_width)))
                 .max_h(max_height)
                 .when(editing, |el| el.h(max_height))
                 .rounded(px(14.))
@@ -180,7 +216,8 @@ impl RenderOnce for ScheduledTaskDialog {
                         .flex_shrink_0()
                         .px_4()
                         .py_3()
-                        .border_b_1()
+                        .when(deleting, |el| el.p_6())
+                        .when(!deleting, |el| el.border_b_1())
                         .border_color(theme::ring_modal())
                         .flex()
                         .items_start()
@@ -196,7 +233,7 @@ impl RenderOnce for ScheduledTaskDialog {
                                 )
                                 .child(muted(description)),
                         )
-                        .child(
+                        .when(!deleting, |el| el.child(
                             web_button(
                                 "scheduled-task-close",
                                 WebButtonVariant::Ghost,
@@ -211,10 +248,10 @@ impl RenderOnce for ScheduledTaskDialog {
                                     .size(px(theme::ICON_PX))
                                     .text_color(theme::rambutan_400()),
                             )
-                            .on_activate(cx, |this, _, cx| this.dismiss_scheduled_task(cx)),
-                        ),
+                            .on_activate(cx, |this, window, cx| this.dismiss_scheduled_task(window, cx)),
+                        )),
                 )
-                .child(
+                .when(!deleting, |el| el.child(
                     div()
                         .id("scheduled-task-dialog-scroll")
                         .debug_selector(|| "scheduled-task-dialog-scroll".into())
@@ -224,7 +261,7 @@ impl RenderOnce for ScheduledTaskDialog {
                         .track_scroll(&panel.task_dialog.scroll)
                         .child(div().p_4().child(form))
                         .vertical_scrollbar(&panel.task_dialog.scroll),
-                )
+                ))
                 .when_some(
                     panel
                         .error
@@ -255,9 +292,13 @@ impl RenderOnce for ScheduledTaskDialog {
                 .items_center()
                 .justify_center()
                 .bg(theme::longan_950().opacity(0.68))
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
-                    this.dismiss_scheduled_task(cx);
+                    if this.task_dialog.delete.is_some() {
+                        this.answer_schedule_delete(false, window, cx);
+                    } else {
+                        this.dismiss_scheduled_task(window, cx);
+                    }
                 }))
                 .child(dialog)
                 .into_any_element()
@@ -278,13 +319,7 @@ pub(super) fn task_footer() -> Div {
 }
 
 fn scheduled(kind: &SourceKind) -> bool {
-    matches!(
-        kind,
-        SourceKind::Once { .. }
-            | SourceKind::Schedule { .. }
-            | SourceKind::Calendar { .. }
-            | SourceKind::Webhook
-    )
+    kind.is_scheduled_task()
 }
 
 fn shared_agent(snapshot: &ReactiveSnapshot, task: &bruhs_models::reactive::Subscription) -> bool {
@@ -340,9 +375,13 @@ fn schedule_timing(setup: &AutomationSetup, snapshot: &ReactiveSnapshot) -> Stat
     let due = deadlines
         .and_then(|times| times.get(&setup.source.id))
         .copied();
-    let (label, exact) = if !setup.enabled() {
+    task_timing_label(&setup.subscription.id, &setup.source.kind, setup.enabled(), due, deadlines.is_some())
+}
+
+fn task_timing_label(id: &str, kind: &SourceKind, enabled: bool, due: Option<bruhs_models::EpochMs>, known: bool) -> Stateful<Div> {
+    let (label, exact) = if !enabled {
         ("Paused".into(), None)
-    } else if setup.source.kind == SourceKind::Webhook {
+    } else if *kind == SourceKind::Webhook {
         ("Listening".into(), None)
     } else if let Some(due) = due {
         (
@@ -352,18 +391,15 @@ fn schedule_timing(setup: &AutomationSetup, snapshot: &ReactiveSnapshot) -> Stat
             ),
             Some(local_time(due)),
         )
-    } else if deadlines.is_some() {
+    } else if known {
         ("Not scheduled".into(), None)
     } else {
         // Older hosts do not report deadlines.
         ("Enabled".into(), None)
     };
-    let summary = format!("{} · {label}", schedule_summary(&setup.source.kind));
+    let summary = format!("{} · {label}", schedule_summary(kind));
     muted(summary.clone())
-        .id(SharedString::from(format!(
-            "task-timing-{}",
-            setup.subscription.id
-        )))
+        .id(SharedString::from(format!("task-timing-{id}")))
         .role(Role::Label)
         .aria_label(summary)
         .when_some(exact, |line, time| {
@@ -374,7 +410,226 @@ fn schedule_timing(setup: &AutomationSetup, snapshot: &ReactiveSnapshot) -> Stat
         })
 }
 
+pub(crate) fn linked_scheduled_row(id: String, task: &ScheduledTaskSummary, controls: Div, thread_link: Option<AnyElement>) -> AnyElement {
+    let timing = task_timing_label(&id, &task.schedule, task.enabled, task.next_run_at, true);
+    div()
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id.clone())
+        .role(Role::Group)
+        .aria_label(format!("Scheduled task {}", task.title))
+        .flex().items_center().justify_between().gap_3().px_4().py_3().min_w_0()
+        .child(div().flex().flex_col().gap_1().flex_1().min_w_0()
+            .child(heading(task.title.clone()))
+            .when(!task.project_path.is_empty(), |info| info.child(muted(task.project_path.clone())))
+            .child(timing).children(thread_link))
+        .child(controls)
+        .into_any_element()
+}
+
+pub(super) struct LinkedEdit {
+    pub(super) host: crate::views::workspace::TaskEditorHost,
+    revision: Option<String>,
+    locked: bool,
+    previous: Option<LinkedTaskSave>,
+}
+
 impl ReactiveAutomations {
+    pub(crate) fn linked_editor(
+        host: crate::views::workspace::TaskEditorHost,
+        task: Option<LinkedTaskDefinition>,
+        path: Option<&str>,
+        model: &str,
+        w: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
+        let shares_conversations = host.shares_conversations();
+        let session = LinkedEdit {
+            host,
+            revision: task.as_ref().map(|t| t.revision.clone()),
+            locked: task.as_ref().is_some_and(|t| t.agent_locked),
+            previous: None,
+        };
+        let mut panel = Self::with_linked_task(Some(session), false, cx);
+        let mut snapshot = ReactiveSnapshot::default();
+        if shares_conversations {
+            let mut selected = std::collections::BTreeMap::new();
+            if let Some((task, choice)) = task.as_ref().and_then(|t| Some((t, t.conversation.as_ref()?))) {
+                let id = task.setup.subscription.id.clone();
+                snapshot.task_threads.insert(id.clone(), choice.thread_id.clone());
+                if task.conversation_chosen { selected.insert(id, choice.clone()); }
+            }
+            snapshot.selected_task_threads = Some(selected);
+        }
+        let original = task.as_ref().and_then(|t| t.conversation.clone());
+        let setup = task.map(|t| t.setup);
+        if let Some(s) = &setup {
+            snapshot.agents.push(s.agent.clone());
+            snapshot.sources.push(s.source.clone());
+            snapshot.subscriptions.push(s.subscription.clone());
+        }
+        panel.snapshot = Some(snapshot);
+        panel.loaded = true;
+        let new = setup.is_none();
+        panel.edit_scheduled_task(setup, w, cx);
+        if let (Some(choice), Some(Editor::Automation(e))) = (original, &mut panel.editor) {
+            e.picker.original_thread = Some(choice);
+        }
+        if let (true, Some(Editor::Automation(e))) = (new, &panel.editor) {
+            e.set_project_path(path.unwrap_or_default(), w, cx);
+            e.set_task_model(model, w, cx);
+        }
+        panel
+    }
+
+    pub(crate) fn new_task_focus(&self) -> FocusHandle {
+        self.task_dialog.return_focus.clone()
+    }
+
+    pub(crate) fn switched_task_panel(
+        host: Option<crate::views::workspace::TaskEditorHost>,
+        local: &Entity<Self>,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
+        let session = host.map(|host| LinkedEdit {
+            host,
+            revision: None,
+            locked: false,
+            previous: None,
+        });
+        let mut panel = Self::with_linked_task(session, false, cx);
+        if let Some(session) = &panel.linked_task {
+            let mut snapshot = ReactiveSnapshot::default();
+            snapshot.selected_task_threads = session.host.shares_conversations().then(Default::default);
+            panel.snapshot = Some(snapshot);
+        } else {
+            panel.snapshot = local.read(cx).snapshot.clone();
+            if panel.snapshot.is_none() {
+                panel.refresh_snapshot(cx);
+            }
+        }
+        panel
+    }
+
+    pub(crate) fn task_host_menu(&self) -> Option<(bool, bool)> {
+        let Some(Editor::Automation(e)) = &self.editor else {
+            return None;
+        };
+        (e.scheduled_form && e.is_new && !self.busy)
+            .then_some((e.host_menu_open, e.host_request.is_some()))
+    }
+
+    pub(crate) fn toggle_task_hosts(&mut self, cx: &mut Context<'_, Self>) {
+        if let Some(Editor::Automation(e)) = &mut self.editor {
+            e.host_menu_open = !e.host_menu_open;
+            e.picker.open = None;
+            e.checkout.close();
+            e.task_thread_open = false;
+            e.open_filter = None;
+            e.security.encoding_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn select_task_host(
+        &mut self,
+        request: Option<uuid::Uuid>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(Editor::Automation(e)) = &mut self.editor {
+            e.host_menu_open = false;
+            e.host_request = request;
+            self.error = None;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn awaits_task_host(&self, request: uuid::Uuid) -> bool {
+        matches!(&self.editor, Some(Editor::Automation(e)) if e.host_request == Some(request))
+    }
+
+    pub(crate) fn task_host_failed(&mut self, message: String, cx: &mut Context<'_, Self>) {
+        self.select_task_host(None, cx);
+        self.error = Some(message);
+    }
+
+    pub(crate) fn receive_task_draft(
+        &mut self,
+        origin: &Entity<Self>,
+        project: &str,
+        model: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let draft = origin.update(cx, |panel, cx| {
+            panel.task_dialog.restore_focus = false;
+            cx.notify();
+            panel.editor.take()
+        });
+        let Some(Editor::Automation(mut draft)) = draft else {
+            return;
+        };
+        let had_thread = draft.picker.displayed_thread().is_some();
+        draft.checkout.change_host(had_thread, window, cx);
+        draft.picker = task_choices::TaskPickerState::new(true, window, cx);
+        draft.host_menu_open = false;
+        draft.host_request = None;
+        draft.set_project_path(project, window, cx);
+        draft.set_task_model(model, window, cx);
+        self.editor = Some(Editor::Automation(draft));
+        self.task_dialog.focus_on_open = false;
+        cx.notify();
+    }
+
+    pub(super) fn save_linked_task(
+        &mut self,
+        setup: AutomationSetup,
+        enabled: bool,
+        signing_secret: Option<WebhookSigningSecret>,
+        destination: Option<TaskDestinationEdit>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.busy {
+            return;
+        }
+        let Some(session) = &mut self.linked_task else {
+            return;
+        };
+        let request_id = session
+            .previous
+            .as_ref()
+            .filter(|e| {
+                e.setup == setup && e.enabled == enabled && e.signing_secret == signing_secret && e.destination == destination
+            })
+            .map_or_else(uuid::Uuid::new_v4, |e| e.request_id);
+        let edit = LinkedTaskSave {
+            request_id,
+            expected: session.revision.clone(),
+            destination,
+            setup,
+            enabled,
+            signing_secret,
+        };
+        session.previous = Some(edit.clone());
+        let host = session.host.clone();
+        self.busy = true;
+        let operation = spawn_tokio(cx, async move { host.save(&edit).await });
+        self.request = Some(cx.spawn(async move |this, cx| {
+            let result = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                this.busy = false;
+                match result {
+                    Ok(()) => {
+                        this.editor = None;
+                        this.error = None;
+                    }
+                    Err(e) => this.error = Some(e),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
     pub(crate) fn tasks_for_thread(&self, thread: &str) -> Vec<(String, String)> {
         let Some(snapshot) = &self.snapshot else {
             return Vec::new();
@@ -422,7 +677,7 @@ impl ReactiveAutomations {
     }
 
     pub(crate) fn scheduled_editor_open(&self) -> bool {
-        self.task_dialog.history.is_some()
+        self.task_dialog.delete.is_some() || self.task_dialog.history.is_some()
             || matches!(&self.editor, Some(Editor::Automation(editor)) if editor.scheduled_form)
     }
 
@@ -431,13 +686,23 @@ impl ReactiveAutomations {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if !self.escape_schedule_picker(window, cx) {
-            self.dismiss_scheduled_task(cx);
+        if let Some(Editor::Automation(e)) = &mut self.editor {
+            if e.host_menu_open {
+                e.host_menu_open = false;
+                cx.notify();
+                return;
+            }
+        }
+        if self.task_dialog.delete.is_some() {
+            self.answer_schedule_delete(false, window, cx);
+        } else if !self.escape_schedule_picker(window, cx) {
+            self.dismiss_scheduled_task(window, cx);
         }
     }
 
-    pub(crate) fn dismiss_scheduled_task(&mut self, cx: &mut Context<'_, Self>) {
-        if self.task_dialog.history.take().is_some() {
+    pub(crate) fn dismiss_scheduled_task(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(history) = self.task_dialog.history.take() {
+            if let Some(focus) = history.return_focus { focus.focus(window, cx); }
             cx.notify();
         } else if self.scheduled_editor_open() && !self.busy {
             self.editor = None;
@@ -475,6 +740,8 @@ impl ReactiveAutomations {
             })
             .and_then(|s| {
                 Some(TaskThreadChoice {
+                    agent_model: None,
+                    desktop_model: None,
                     thread_id: self
                         .snapshot
                         .as_ref()?
@@ -495,7 +762,7 @@ impl ReactiveAutomations {
             if !scheduled(&setup.source.kind) {
                 return;
             }
-            if chosen.is_some()
+            if self.linked_task.as_ref().is_some_and(|t|t.locked) || chosen.is_some()
                 || self
                     .snapshot
                     .as_ref()
@@ -624,26 +891,52 @@ impl ReactiveAutomations {
                 |el|el.child(muted("Deleting the thread also deletes this task.")))
     }
 
+    pub(crate) fn open_schedule_delete_confirmation(
+        &mut self,
+        title: String,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) -> tokio::sync::oneshot::Receiver<()> {
+        let (accepted, answer) = tokio::sync::oneshot::channel();
+        self.task_dialog.delete = Some(DeleteConfirmation {
+            title,
+            cancel: cx.focus_handle(),
+            origin: window.focused(cx),
+            accepted,
+        });
+        self.task_dialog.focus_on_open = true;
+        cx.notify();
+        answer
+    }
+
+    pub(crate) fn cancel_schedule_delete(&mut self) {
+        // Leaving Settings drops the pending answer without performing the command.
+        self.task_dialog.delete.take();
+    }
+
+    fn answer_schedule_delete(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(prompt) = self.task_dialog.delete.take() {
+            if let Some(origin) = prompt.origin {
+                origin.focus(window, cx);
+            }
+            if confirm {
+                let _ = prompt.accepted.send(());
+            }
+            cx.notify();
+        }
+    }
+
     fn confirm_delete_scheduled_task(
-        &self,
+        &mut self,
         id: &str,
         name: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let answer = window.prompt(
-            gpui::PromptLevel::Warning,
-            &format!("Delete the schedule for “{name}”?"),
-            Some("This removes the schedule. The agent and its past runs stay available."),
-            &[
-                gpui::PromptButton::Cancel("Cancel".into()),
-                gpui::PromptButton::Ok("Delete".into()),
-            ],
-            cx,
-        );
+        let answer = self.open_schedule_delete_confirmation(format!("Delete “{name}”?"), window, cx);
         let id = id.to_owned();
         cx.spawn(async move |this, cx| {
-            if answer.await == Ok(1) {
+            if answer.await.is_ok() {
                 let _ = this.update(cx, |this, cx| {
                     this.send_all(
                         vec![apply(ReactiveChange::DeleteSubscription { id })],
@@ -768,10 +1061,11 @@ impl ReactiveAutomations {
                     .selected_task_threads
                     .as_ref()
                     .and_then(|all| all.get(&sub.id));
-                let title = selected.map_or_else(|| setup.title().to_owned(), |t| t.title.clone());
-                let label = selected
-                    .map_or("Open thread", |t| t.title.as_str())
-                    .to_owned();
+                let live_title = selected.filter(|c| c.desktop_model.is_some()).and_then(|c|
+                    cx.try_global::<crate::app_state::ThreadCatalog>()?.threads.iter()
+                        .find(|(id,_)| id == c.thread_id.as_str()).map(|(_,title)|title.as_str()));
+                let title = live_title.or_else(|| selected.map(|c| c.title.as_str())).unwrap_or_else(|| setup.title()).to_owned();
+                let label = if selected.is_some() {title.clone()} else {"Open thread".into()};
                 let location = TaskThreadLocation {
                     task_id: sub.id.clone(),
                     agent_id: sub.agent_id.clone(),

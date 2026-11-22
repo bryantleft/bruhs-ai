@@ -57,6 +57,21 @@ impl CheckoutEditor {
         }
     }
 
+    pub(super) fn change_host(
+        &mut self,
+        had_thread: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, ReactiveAutomations>,
+    ) {
+        let mode = if had_thread && self.selected == "project" {
+            "worktree"
+        } else {
+            self.selected
+        };
+        *self = Self::new(&TaskCheckout::Project, window, cx);
+        self.select(mode);
+    }
+
     pub(super) fn close(&mut self) {
         self.open = false;
         self.branches = None;
@@ -109,12 +124,12 @@ impl ReactiveAutomations {
             choices: None,
         });
         let client = self.client.clone();
-        let result = spawn_tokio(cx, async move { client.task_base_branches(&project).await });
+        let host=self.linked_task.as_ref().map(|edit|edit.host.clone());
+        let result = spawn_tokio(cx, async move { if let Some(host)=host {host.branches(&project).await} else {client.task_base_branches(&project).await.map_err(reactive_error)} });
         cx.spawn(async move |this, cx| {
             let choices = result
                 .await
-                .map(|response| response.branches)
-                .map_err(reactive_error);
+                .map(|response| response.branches);
             let _ = this.update(cx, |this, cx| {
                 if let Some(Editor::Automation(editor)) = &mut this.editor {
                     if let Some(menu) = editor
@@ -137,7 +152,7 @@ impl ReactiveAutomations {
         &self,
         editor: &setup::AutomationEditor,
         cx: &Context<'_, Self>,
-    ) -> Div {
+    ) -> (Div, Option<Div>) {
         let draft = &editor.checkout;
         let toggle = cx.weak_entity();
         let select = toggle.clone();
@@ -184,12 +199,13 @@ impl ReactiveAutomations {
                 });
             }),
         );
-        let mut body = div()
+        let selector = div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(muted("Checkout"))
+            .child(muted("Workspace"))
             .child(picker);
+        let mut body=div().flex().flex_col().gap_2();
         match draft.selected {
             "existing" => body = body.child(field("Checkout path", &draft.path, false, self.busy)),
             "worktree" => {
@@ -283,6 +299,6 @@ impl ReactiveAutomations {
             }
             _ => {}
         }
-        body
+        (selector, (draft.selected != "project").then_some(body))
     }
 }

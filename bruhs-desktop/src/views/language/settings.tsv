@@ -1,0 +1,117 @@
+Settings	Einstellungen	Configuración	Réglages	設定	설정	Configurações	Настройки	设置
+Search settings	Einstellungen durchsuchen	Buscar en la configuración	Rechercher dans les réglages	設定を検索	설정 검색	Buscar nas configurações	Поиск по настройкам	搜索设置
+Close settings	Einstellungen schließen	Cerrar configuración	Fermer les réglages	設定を閉じる	설정 닫기	Fechar configurações	Закрыть настройки	关闭设置
+Settings sections	Einstellungsbereiche	Secciones de configuración	Rubriques des réglages	設定カテゴリ	설정 섹션	Seções das configurações	Разделы настроек	设置类别
+Settings search results	Suchergebnisse	Resultados de búsqueda	Résultats de recherche	設定の検索結果	설정 검색 결과	Resultados da busca	Результаты поиска	设置搜索结果
+No settings found	Keine Einstellungen gefunden	No se encontraron ajustes	Aucun réglage trouvé	該当する設定がありません	검색된 설정이 없습니다	Nenhuma configuração encontrada	Настройки не найдены	未找到设置
+General	Allgemein	General	Général	一般	일반	Geral	Основные	通用
+Appearance	Darstellung	Apariencia	Apparence	外観	모양	Aparência	Оформление	外观
+Chat	Chat	Chat	Discussion	チャット	채팅	Chat	Чат	聊天
+Diffs & pull requests	Diffs und Pull Requests	Diferencias y pull requests	Différences et pull requests	差分とプルリクエスト	변경 사항 및 풀 리퀘스트	Diferenças e pull requests	Изменения и пул-реквесты	差异与拉取请求
+Keybindings	Tastenkürzel	Atajos de teclado	Raccourcis clavier	キーバインド	단축키	Atalhos de teclado	Сочетания клавиш	快捷键
+Voice	Spracheingabe	Voz	Voix	音声	음성	Voz	Голос	语音
+SnapShots	SnapShots	SnapShots	SnapShots	SnapShots	SnapShots	SnapShots	SnapShots	SnapShots
+Agents	Agenten	Agentes	Agents	エージェント	에이전트	Agentes	Агенты	智能体
+Providers & updates	Anbieter und Updates	Proveedores y actualizaciones	Fournisseurs et mises à jour	プロバイダーと更新	공급자 및 업데이트	Provedores e atualizações	Провайдеры и обновления	提供商与更新
+Threads	Unterhaltungen	Conversaciones	Fils de discussion	スレッド	스레드	Conversas	Обсуждения	会话
+Browser	Browser	Navegador	Navigateur	ブラウザー	브라우저	Navegador	Браузер	浏览器
+Devices	Geräte	Dispositivos	Appareils	デバイス	기기	Dispositivos	Устройства	设备
+Scheduled tasks	Geplante Aufgaben	Tareas programadas	Tâches planifiées	スケジュール済みタスク	예약된 작업	Tarefas agendadas	Запланированные задачи	定时任务
+Archived threads	Archivierte Unterhaltungen	Conversaciones archivadas	Fils archivés	アーカイブ済みスレッド	보관된 스레드	Conversas arquivadas	Архив обсуждений	已归档会话
+Code	Code	Código	Code	コード	코드	Código	Код	代码
+Projects	Projekte	Proyectos	Projets	プロジェクト	프로젝트	Projetos	Проекты	项目
+Source control	Versionsverwaltung	Control de versiones	Gestion de versions	ソース管理	소스 제어	Controle de versão	Контроль версий	源代码管理
+Worktrees	Worktrees	Árboles de trabajo	Arbres de travail	ワークツリー	워크트리	Árvores de trabalho	Рабочие деревья	工作树
+Connections	Verbindungen	Conexiones	Connexions	接続	연결	Conexões	Подключения	连接
+Environments	Umgebungen	Entornos	Environnements	環境	환경	Ambientes	Окружения	环境
+Sharing & access	Freigabe und Zugriff	Uso compartido y acceso	Partage et accès	共有とアクセス	공유 및 접근	Compartilhamento e acesso	Общий доступ	共享与访问
+Secrets	Geheimnisse	Secretos	Secrets	シークレット	비밀 정보	Segredos	Секреты	机密
+Meetings	Besprechungen	Reuniones	Réunions	ミーティング	회의	Reuniões	Встречи	会议
+Calendar	Kalender	Calendario	Calendrier	カレンダー	캘린더	Calendário	Календарь	日历
+Recording	Aufnahme	Grabación	Enregistrement	録音	녹음	Gravação	Запись	录制
+Transcription	Transkription	Transcripción	Transcription	文字起こし	받아쓰기	Transcrição	Расшифровка	转录
+Speakers	Sprechende	Hablantes	Intervenants	話者	화자	Falantes	Участники записи	发言人
+People	Personen	Personas	Personnes	連絡先	연락처	Pessoas	Люди	联系人
+Application	Anwendung	Aplicación	Application	アプリケーション	애플리케이션	Aplicativo	Приложение	应用
+Maintenance	Wartung	Mantenimiento	Maintenance	メンテナンス	유지 관리	Manutenção	Обслуживание	维护
+Diagnostics	Diagnose	Diagnóstico	Diagnostic	診断	진단	Diagnóstico	Диагностика	诊断
+Labs	Labor	Funciones experimentales	Laboratoire	試験機能	실험실	Laboratório	Лаборатория	实验室
+About	Über bruhs	Acerca de bruhs	À propos de bruhs	bruhs について	bruhs 정보	Sobre o bruhs	О bruhs	关于 bruhs
+Notifications	Benachrichtigungen	Notificaciones	Notifications	通知	알림	Notificações	Уведомления	通知
+Sidebar	Seitenleiste	Barra lateral	Barre latérale	サイドバー	사이드바	Barra lateral	Боковая панель	侧边栏
+Confirmations	Bestätigungen	Confirmaciones	Confirmations	確認	확인	Confirmações	Подтверждения	确认
+Display	Anzeige	Visualización	Affichage	表示	표시	Exibição	Отображение	显示
+Language	Sprache	Idioma	Langue	言語	언어	Idioma	Язык	语言
+Reset language	Sprache zurücksetzen	Restablecer idioma	Réinitialiser la langue	言語をリセット	언어 초기화	Redefinir idioma	Сбросить язык	重置语言
+System default	Systemstandard	Predeterminado del sistema	Par défaut du système	システムの既定値	시스템 기본값	Padrão do sistema	Как в системе	系统默认
+System default follows your device’s language.	Der Systemstandard übernimmt die Sprache deines Geräts.	El valor predeterminado usa el idioma del dispositivo.	Le réglage par défaut utilise la langue de votre appareil.	システムの既定値ではデバイスの言語を使用します。	시스템 기본값을 선택하면 기기의 언어를 사용합니다.	A opção padrão usa o idioma do dispositivo.	По умолчанию используется язык устройства.	系统默认使用设备的语言。
+Time format	Zeitformat	Formato de hora	Format de l’heure	時刻の形式	시간 형식	Formato de hora	Формат времени	时间格式
+System default follows your device’s clock preference.	Der Systemstandard verwendet das Zeitformat deines Geräts.	El valor predeterminado usa el formato de hora del dispositivo.	Le réglage par défaut utilise le format horaire de votre appareil.	システムの既定値ではデバイスの時刻形式を使用します。	시스템 기본값을 선택하면 기기의 시간 형식을 사용합니다.	A opção padrão usa o formato de hora do dispositivo.	По умолчанию используется формат времени устройства.	系统默认使用设备的时间格式。
+12-hour	12 Stunden	12 horas	12 heures	12 時間制	12시간제	12 horas	12 часов	12 小时制
+24-hour	24 Stunden	24 horas	24 heures	24 時間制	24시간제	24 horas	24 часа	24 小时制
+External editor	Externer Editor	Editor externo	Éditeur externe	外部エディター	외부 편집기	Editor externo	Внешний редактор	外部编辑器
+Editor	Editor	Editor	Éditeur	エディター	편집기	Editor	Редактор	编辑器
+Where ⌘O and the diff panel's Open button send the project and files.	Öffnet Projekte und Dateien mit ⌘O oder „Öffnen“ in der Diff-Ansicht in diesem Editor.	Editor para abrir proyectos y archivos con ⌘O o con Abrir en el panel de diferencias.	Éditeur utilisé par ⌘O et par le bouton Ouvrir du panneau des différences.	⌘O または差分パネルの「開く」でプロジェクトやファイルを開くエディターです。	⌘O 또는 변경 사항 패널의 열기 버튼으로 프로젝트와 파일을 열 편집기입니다.	Editor usado por ⌘O e pelo botão Abrir no painel de diferenças.	В этом редакторе открываются проекты и файлы по ⌘O или кнопке открытия в панели изменений.	通过 ⌘O 或差异面板的打开按钮，用此编辑器打开项目和文件。
+Thread notifications	Benachrichtigungen für Unterhaltungen	Notificaciones de conversaciones	Notifications des fils	スレッドの通知	스레드 알림	Notificações de conversas	Уведомления об обсуждениях	会话通知
+In-app notifications	Benachrichtigungen in der App	Notificaciones en la aplicación	Notifications dans l’application	アプリ内通知	앱 내 알림	Notificações no aplicativo	Уведомления в приложении	应用内通知
+Off	Aus	Desactivado	Désactivé	オフ	끔	Desativado	Выкл.	关闭
+Sound	Ton	Sonido	Son	サウンド	소리	Som	Звук	声音
+Notifications and sound	Benachrichtigungen und Ton	Notificaciones y sonido	Notifications et son	通知とサウンド	알림 및 소리	Notificações e som	Уведомления и звук	通知和声音
+Alert when a thread finishes, fails or needs approval or input while bruhs is open.	Benachrichtigen, wenn eine Unterhaltung endet, fehlschlägt oder eine Freigabe oder Eingabe benötigt, während bruhs geöffnet ist.	Avisar cuando una conversación termine, falle o necesite aprobación o una respuesta mientras bruhs esté abierto.	Avertir quand un fil se termine, échoue ou attend une approbation ou une réponse tant que bruhs est ouvert.	bruhs の起動中に、スレッドの完了や失敗、承認または入力の要求を通知します。	bruhs가 열려 있는 동안 스레드가 완료되거나 실패하거나 승인 또는 입력을 기다리면 알립니다.	Avisar quando uma conversa terminar, falhar ou precisar de aprovação ou resposta enquanto o bruhs estiver aberto.	Пока bruhs открыт, сообщать о завершении, ошибке или запросе подтверждения либо ответа.	bruhs 打开时，在会话完成、失败或需要批准或输入时提醒。
+Show an alert with an Open thread button when another thread needs attention or finishes while this window has focus.	Bei aktivem Fenster eine Meldung mit einer Schaltfläche zum Öffnen anzeigen, wenn eine andere Unterhaltung endet oder Aufmerksamkeit benötigt.	Con esta ventana activa, mostrar un aviso para abrir otra conversación cuando termine o necesite atención.	Lorsque cette fenêtre est active, proposer d’ouvrir tout autre fil qui se termine ou demande votre attention.	このウィンドウの操作中に他のスレッドが完了するか対応が必要になると、スレッドを開くボタン付きの通知を表示します。	이 창이 활성화되어 있을 때 다른 스레드가 완료되거나 확인이 필요하면 스레드 열기 버튼이 있는 알림을 표시합니다.	Com esta janela ativa, mostrar um aviso para abrir outra conversa quando ela terminar ou precisar de atenção.	В активном окне показывать уведомление с кнопкой перехода, когда другое обсуждение завершится или потребует внимания.	此窗口处于焦点时，若其他会话完成或需要处理，显示带有打开会话按钮的提醒。
+Project order	Projektreihenfolge	Orden de los proyectos	Ordre des projets	プロジェクトの順序	프로젝트 순서	Ordem dos projetos	Порядок проектов	项目排序
+Order of folders in the project picker and command palette.	Reihenfolge der Ordner in der Projektauswahl und der Befehlspalette.	Orden de las carpetas en el selector de proyectos y la paleta de comandos.	Ordre des dossiers dans le sélecteur de projets et la palette de commandes.	プロジェクト選択とコマンドパレットでのフォルダーの並び順です。	프로젝트 선택기와 명령 팔레트에서 폴더를 표시하는 순서입니다.	Ordem das pastas no seletor de projetos e na paleta de comandos.	Порядок папок в списке проектов и палитре команд.	项目选择器和命令面板中的文件夹顺序。
+Last user message	Letzte Benutzernachricht	Último mensaje del usuario	Dernier message utilisateur	最後のユーザーメッセージ	마지막 사용자 메시지	Última mensagem do usuário	Последнее сообщение пользователя	最近的用户消息
+Created at	Erstellungszeit	Fecha de creación	Date de création	作成日時	만든 날짜	Data de criação	Дата создания	创建时间
+Manual	Manuell	Manual	Manuel	手動	수동	Manual	Вручную	手动
+Working section	Bereich für laufende Unterhaltungen	Sección de conversaciones en curso	Section des fils en cours	作業中セクション	진행 중 섹션	Seção de conversas em andamento	Раздел текущих обсуждений	进行中分区
+Group working threads in the sidebar. Threads return to the active list when they need your approval.	Laufende Unterhaltungen in der Seitenleiste gruppieren. Wenn eine Freigabe nötig ist, erscheinen sie wieder in der aktiven Liste.	Agrupar las conversaciones en curso en la barra lateral. Volverán a la lista activa cuando necesiten tu aprobación.	Regrouper les fils en cours dans la barre latérale. Ils reviennent dans la liste active lorsqu’une approbation est requise.	作業中のスレッドをサイドバーにまとめます。承認が必要になるとアクティブな一覧に戻ります。	진행 중인 스레드를 사이드바에 모읍니다. 승인이 필요하면 활성 목록으로 돌아옵니다.	Agrupar as conversas em andamento na barra lateral. Elas voltam à lista ativa quando precisam de aprovação.	Группировать текущие обсуждения в боковой панели. При запросе подтверждения они вернутся в активный список.	在侧边栏中分组显示进行中的会话。需要批准时，会话会回到活动列表。
+Project folders are enabled in Labs. Working threads appear in their project folder.	Projektordner sind im Labor aktiviert. Laufende Unterhaltungen erscheinen im jeweiligen Projektordner.	Las carpetas de proyectos están activadas en las funciones experimentales. Las conversaciones en curso aparecen en su carpeta.	Les dossiers de projet sont activés dans le laboratoire. Les fils en cours apparaissent dans leur dossier de projet.	試験機能でプロジェクトフォルダーが有効です。作業中のスレッドは各プロジェクトのフォルダーに表示されます。	실험실에서 프로젝트 폴더가 활성화되어 있습니다. 진행 중인 스레드는 해당 프로젝트 폴더에 표시됩니다.	As pastas de projeto estão ativadas no laboratório. As conversas em andamento aparecem nas respectivas pastas.	Папки проектов включены в лаборатории. Текущие обсуждения отображаются в папках своих проектов.	实验室中已启用项目文件夹。进行中的会话显示在各自的项目文件夹中。
+Unpin confirmation	Lösen bestätigen	Confirmar al desfijar	Confirmer le désépinglage	ピン留め解除の確認	고정 해제 확인	Confirmar ao desafixar	Подтверждать открепление	取消置顶确认
+Archive confirmation	Archivierung bestätigen	Confirmar al archivar	Confirmer l’archivage	アーカイブの確認	보관 확인	Confirmar arquivamento	Подтверждать архивацию	归档确认
+Delete confirmation	Löschen bestätigen	Confirmar al eliminar	Confirmer la suppression	削除の確認	삭제 확인	Confirmar exclusão	Подтверждать удаление	删除确认
+Ask before removing a thread from Pinned.	Vor dem Lösen einer angehefteten Unterhaltung nachfragen.	Pedir confirmación antes de desfijar una conversación.	Demander confirmation avant de désépingler un fil.	スレッドのピン留めを解除する前に確認します。	스레드 고정을 해제하기 전에 확인합니다.	Pedir confirmação antes de desafixar uma conversa.	Запрашивать подтверждение перед откреплением обсуждения.	取消会话置顶前询问。
+Ask before moving a thread to Archived threads.	Vor dem Archivieren einer Unterhaltung nachfragen.	Pedir confirmación antes de archivar una conversación.	Demander confirmation avant d’archiver un fil.	スレッドをアーカイブする前に確認します。	스레드를 보관하기 전에 확인합니다.	Pedir confirmação antes de arquivar uma conversa.	Запрашивать подтверждение перед архивацией обсуждения.	归档会话前询问。
+Ask before deleting a thread and its chat history.	Vor dem Löschen einer Unterhaltung und ihres Verlaufs nachfragen.	Pedir confirmación antes de eliminar una conversación y su historial.	Demander confirmation avant de supprimer un fil et son historique.	スレッドとその履歴を削除する前に確認します。	스레드와 채팅 기록을 삭제하기 전에 확인합니다.	Pedir confirmação antes de excluir uma conversa e seu histórico.	Запрашивать подтверждение перед удалением обсуждения и его истории.	删除会话及聊天记录前询问。
+Quit shortcut	Tastenkürzel zum Beenden	Atajo para salir	Raccourci pour quitter	終了ショートカット	종료 단축키	Atalho para sair	Сочетание для выхода	退出快捷键
+Choose how the keyboard shortcut closes bruhs.	Lege fest, wie das Tastenkürzel bruhs beendet.	Elige cómo se cierra bruhs con el atajo de teclado.	Choisissez comment le raccourci clavier quitte bruhs.	ショートカットで bruhs を終了する方法を選びます。	단축키로 bruhs를 종료하는 방식을 선택합니다.	Escolha como o atalho de teclado fecha o bruhs.	Выберите, как сочетание клавиш закрывает bruhs.	选择快捷键关闭 bruhs 的方式。
+Quit immediately	Sofort beenden	Salir de inmediato	Quitter immédiatement	すぐに終了	즉시 종료	Sair imediatamente	Выход сразу	立即退出
+Hold to quit	Zum Beenden gedrückt halten	Mantener pulsado para salir	Maintenir pour quitter	長押しで終了	길게 눌러 종료	Manter pressionado para sair	Удерживать для выхода	长按退出
+Press twice	Zweimal drücken	Pulsar dos veces	Appuyer deux fois	2 回押す	두 번 누르기	Pressionar duas vezes	Нажать дважды	按两次
+Restore device defaults	Geräteeinstellungen zurücksetzen	Restablecer valores del dispositivo	Rétablir les réglages par défaut	デバイス設定をリセット	기기 기본값 복원	Restaurar padrões do dispositivo	Сбросить настройки устройства	恢复设备默认设置
+Restore device defaults?	Geräteeinstellungen zurücksetzen?	¿Restablecer los valores del dispositivo?	Rétablir les réglages par défaut ?	デバイス設定をリセットしますか？	기기 기본값을 복원할까요?	Restaurar padrões do dispositivo?	Сбросить настройки устройства?	恢复设备默认设置？
+Restore these device preferences to their defaults?	Diese Geräteeinstellungen zurücksetzen?	¿Restablecer estos ajustes a sus valores predeterminados?	Rétablir les valeurs par défaut de ces réglages ?	以下のデバイス設定を既定値に戻しますか？	다음 기기 설정을 기본값으로 복원할까요?	Restaurar os valores padrão destas preferências?	Вернуть этим настройкам устройства значения по умолчанию?	将以下设备偏好恢复为默认值？
+Cancel	Abbrechen	Cancelar	Annuler	キャンセル	취소	Cancelar	Отмена	取消
+Restore defaults	Zurücksetzen	Restablecer	Rétablir	既定値に戻す	기본값 복원	Restaurar padrões	Сбросить	恢复默认值
+Agent notifications	Agentenbenachrichtigungen	Notificaciones de agentes	Notifications des agents	エージェントの通知	에이전트 알림	Notificações de agentes	Уведомления агентов	智能体通知
+Loading notification preferences…	Benachrichtigungseinstellungen werden geladen…	Cargando las preferencias de notificaciones…	Chargement des préférences de notification…	通知設定を読み込み中…	알림 설정을 불러오는 중…	Carregando preferências de notificações…	Загрузка настроек уведомлений…	正在加载通知偏好…
+Connect the local automation server to manage agent notifications.	Verbinde den lokalen Automatisierungsserver, um Agentenbenachrichtigungen zu verwalten.	Conecta el servidor de automatización local para gestionar las notificaciones de agentes.	Connectez le serveur d’automatisation local pour gérer les notifications des agents.	エージェントの通知を管理するにはローカルの自動化サーバーに接続してください。	에이전트 알림을 관리하려면 로컬 자동화 서버에 연결하세요.	Conecte o servidor de automação local para gerenciar as notificações de agentes.	Подключитесь к локальному серверу автоматизации, чтобы управлять уведомлениями агентов.	连接本地自动化服务器以管理智能体通知。
+Retry	Erneut versuchen	Reintentar	Réessayer	再試行	다시 시도	Tentar novamente	Повторить	重试
+System notification for updates	Systembenachrichtigung bei Neuigkeiten	Notificación del sistema para novedades	Notification système pour les mises à jour	更新時にシステム通知	업데이트 시 시스템 알림	Notificação do sistema para atualizações	Системные уведомления об обновлениях	更新时发送系统通知
+System notification for questions	Systembenachrichtigung bei Fragen	Notificación del sistema para preguntas	Notification système pour les questions	質問時にシステム通知	질문 시 시스템 알림	Notificação do sistema para perguntas	Системные уведомления о вопросах	提问时发送系统通知
+Quiet hours	Ruhezeiten	Horario de silencio	Heures silencieuses	通知しない時間帯	방해 금지 시간	Horário silencioso	Тихие часы	免打扰时段
+Start	Beginn	Inicio	Début	開始	시작	Início	Начало	开始
+End	Ende	Fin	Fin	終了	종료	Fim	Конец	结束
+Time zone	Zeitzone	Zona horaria	Fuseau horaire	タイムゾーン	시간대	Fuso horário	Часовой пояс	时区
+Save notification settings	Benachrichtigungseinstellungen speichern	Guardar ajustes de notificaciones	Enregistrer les réglages de notification	通知設定を保存	알림 설정 저장	Salvar configurações de notificações	Сохранить настройки уведомлений	保存通知设置
+Sent by the local server, so they arrive while the app is closed when the background service is on. Off by default.	Der lokale Server sendet Benachrichtigungen auch bei geschlossener App, wenn der Hintergrunddienst läuft. Standardmäßig ausgeschaltet.	El servidor local las envía incluso con la aplicación cerrada si el servicio en segundo plano está activo. Desactivadas por defecto.	Le serveur local les envoie même si l’application est fermée lorsque le service d’arrière-plan est actif. Elles sont désactivées par défaut.	バックグラウンドサービスが有効なら、アプリを閉じてもローカルサーバーから通知が届きます。既定ではオフです。	백그라운드 서비스가 켜져 있으면 앱을 닫아도 로컬 서버에서 알림을 보냅니다. 기본값은 꺼짐입니다.	O servidor local envia notificações mesmo com o aplicativo fechado quando o serviço em segundo plano está ativo. Desativadas por padrão.	Если фоновая служба работает, локальный сервер доставляет уведомления даже при закрытом приложении. По умолчанию они выключены.	后台服务开启时，即使应用已关闭，本地服务器仍会发送通知。默认关闭。
+Clear settings search	Einstellungssuche leeren	Borrar búsqueda de configuración	Effacer la recherche	設定の検索をクリア	설정 검색 지우기	Limpar busca nas configurações	Очистить поиск по настройкам	清除设置搜索
+Search	Suchen	Buscar	Rechercher	検索	검색	Buscar	Поиск	搜索
+Legal	Rechtliches	Información legal	Mentions légales	法的情報	법적 정보	Informações legais	Правовая информация	法律信息
+Open source licenses	Open-Source-Lizenzen	Licencias de código abierto	Licences libres	オープンソースライセンス	오픈 소스 라이선스	Licenças de código aberto	Лицензии открытого ПО	开源许可证
+Licenses for components included in this build.	Lizenzen der in diesem Build enthaltenen Komponenten.	Licencias de los componentes incluidos en esta compilación.	Licences des composants inclus dans cette version.	このビルドに含まれるコンポーネントのライセンスです。	이 빌드에 포함된 구성 요소의 라이선스입니다.	Licenças dos componentes incluídos nesta versão.	Лицензии компонентов этой сборки.	此版本所含组件的许可证。
+The bruhs source license. Packaged builds include dependency notices.	Lizenz des bruhs-Quellcodes. Installationspakete enthalten auch die Lizenzhinweise der Abhängigkeiten.	Licencia del código de bruhs. Las versiones empaquetadas incluyen avisos de las dependencias.	Licence du code source de bruhs. Les distributions incluent les mentions des dépendances.	bruhs のソースライセンスです。配布パッケージには依存関係のライセンス表記も含まれます。	bruhs 소스 라이선스입니다. 배포 빌드에는 종속성 고지도 포함됩니다.	Licença do código-fonte do bruhs. As versões distribuídas incluem os avisos das dependências.	Лицензия исходного кода bruhs. Дистрибутив также содержит уведомления о зависимостях.	bruhs 源代码许可证。发行包还包含依赖项声明。
+View licenses	Lizenzen ansehen	Ver licencias	Voir les licences	ライセンスを表示	라이선스 보기	Ver licenças	Посмотреть лицензии	查看许可证
+Project grouping	Projektgruppierung	Agrupación de proyectos	Regroupement des projets	プロジェクトのグループ化	프로젝트 그룹화	Agrupamento de projetos	Группировка проектов	项目分组
+Reset project grouping	Projektgruppierung zurücksetzen	Restablecer la agrupación de proyectos	Réinitialiser le regroupement des projets	プロジェクトのグループ化をリセット	프로젝트 그룹화 재설정	Redefinir agrupamento de projetos	Сбросить группировку проектов	重置项目分组
+Combine checkouts of the same repository in the sidebar, project picker and command palette.	Checkouts desselben Repositorys in der Seitenleiste, der Projektauswahl und der Befehlspalette gruppieren.	Agrupa las copias del mismo repositorio en la barra lateral, el selector de proyectos y la paleta de comandos.	Regrouper les copies du même dépôt dans la barre latérale, le sélecteur de projets et la palette de commandes.	同じリポジトリのチェックアウトをサイドバー、プロジェクト選択、コマンドパレットでまとめます。	사이드바, 프로젝트 선택기 및 명령 팔레트에서 같은 저장소의 체크아웃을 묶습니다.	Agrupa cópias do mesmo repositório na barra lateral, no seletor de projetos e na paleta de comandos.	Объединять копии одного репозитория в боковой панели, списке проектов и палитре команд.	在侧边栏、项目选择器和命令面板中合并同一仓库的检出目录。
+Back to About	Zurück zu „Über“	Volver a Acerca de	Revenir à À propos	「このアプリについて」に戻る	정보로 돌아가기	Voltar para Sobre	Вернуться к разделу «О программе»	返回关于页面
+Third-party notices	Drittanbieterhinweise	Avisos de terceros	Mentions des tiers	サードパーティに関する表記	서드 파티 고지	Avisos de terceiros	Уведомления сторонних разработчиков	第三方声明
+Search licenses	Lizenzen durchsuchen	Buscar licencias	Rechercher des licences	ライセンスを検索	라이선스 검색	Pesquisar licenças	Поиск лицензий	搜索许可证
+Search open-source licenses	Open-Source-Lizenzen durchsuchen	Buscar licencias de código abierto	Rechercher des licences libres	オープンソースライセンスを検索	오픈 소스 라이선스 검색	Pesquisar licenças de código aberto	Поиск лицензий открытого ПО	搜索开源许可证
+View project source for {name}	Quellcode von {name} ansehen	Ver el código fuente de {name}	Voir le code source de {name}	{name} のソースコードを表示	{name} 소스 코드 보기	Ver o código-fonte de {name}	Посмотреть исходный код {name}	查看 {name} 的源代码
+Could not load open-source notices	Open-Source-Hinweise konnten nicht geladen werden	No se pudieron cargar los avisos de código abierto	Impossible de charger les mentions des logiciels libres	オープンソースに関する表記を読み込めませんでした	오픈 소스 고지를 불러올 수 없습니다	Não foi possível carregar os avisos de código aberto	Не удалось загрузить уведомления открытого ПО	无法加载开源声明
+Loading open-source notices…	Open-Source-Hinweise werden geladen…	Cargando avisos de código abierto…	Chargement des mentions des logiciels libres…	オープンソースに関する表記を読み込み中…	오픈 소스 고지를 불러오는 중…	Carregando avisos de código aberto…	Загрузка уведомлений открытого ПО…	正在加载开源声明…
+No licenses match that search.	Keine passenden Lizenzen gefunden.	Ninguna licencia coincide con la búsqueda.	Aucune licence ne correspond à cette recherche.	検索に一致するライセンスはありません。	검색과 일치하는 라이선스가 없습니다.	Nenhuma licença corresponde à pesquisa.	По этому запросу лицензии не найдены.	没有与搜索条件匹配的许可证。
+{count} notices	Hinweise: {count}	Avisos: {count}	Mentions : {count}	{count} 件の表記	고지 {count}개	Avisos: {count}	Уведомления: {count}	共 {count} 条声明
+{matched} of {total}	{matched} von {total}	{matched} de {total}	{matched} sur {total}	{total} 件中 {matched} 件	{total}개 중 {matched}개	{matched} de {total}	{matched} из {total}	{matched} / {total}

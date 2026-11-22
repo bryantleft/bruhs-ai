@@ -22,6 +22,7 @@ pub(super) fn folder<'a>(thread: &'a DesktopThread, cx: &'a App) -> &'a str {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Default)]
 pub(super) struct FastCheckout {
     enabled: bool,
     saving: bool,
@@ -30,21 +31,24 @@ pub(super) struct FastCheckout {
 
 #[cfg(target_os = "macos")]
 impl FastCheckout {
-    pub(super) fn load() -> Self {
-        Self { enabled: bruhs_core::git::checkout_cache::enabled(), saving: false, error: None }
+    pub(super) fn refresh(&mut self) {
+        if !self.saving {
+            self.enabled = bruhs_core::git::checkout_cache::enabled();
+            self.error = None;
+        }
     }
 }
 
 impl Workspace {
     #[cfg(target_os = "macos")]
     fn toggle_fast_checkout(&mut self, cx: &mut Context<'_, Self>) {
-        if self.fast_checkout.saving { return; }
+        if self.fast_checkout.saving {
+            return;
+        }
         let enabled = !self.fast_checkout.enabled;
         self.fast_checkout.saving = true;
         self.fast_checkout.error = None;
-        let save = cx.background_spawn(async move {
-            bruhs_core::git::checkout_cache::set_enabled(enabled)
-        });
+        let save = crate::app_state::spawn_tokio(cx, bruhs_core::git::checkout_cache::set_enabled(enabled));
         cx.spawn(async move |this, cx| {
             let result = save.await;
             let _ = this.update(cx, |this, cx| {
@@ -53,17 +57,19 @@ impl Workspace {
                     Ok(()) => this.fast_checkout.enabled = enabled,
                     Err(error) => {
                         this.fast_checkout.enabled = bruhs_core::git::checkout_cache::enabled();
-                        this.fast_checkout.error = Some(format!("Could not change fast checkout. {error}"));
+                        this.fast_checkout.error =
+                            Some(format!("Could not change fast checkout. {error}"));
                     }
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
         cx.notify();
     }
 
     pub(super) fn labs_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
-        let mut rows = vec![self.settings_row(
+        let folder = self.settings_row(
             "labs-sidebar-folders",
             "Boring sidebar (group by project)",
             "Group active threads into project folders. Pinned threads stay above the folders.",
@@ -78,9 +84,10 @@ impl Workspace {
                     this.persist_and_notify(cx);
                 },
             ),
-        )];
+        );
+        let mut folder = div().child(folder);
         if self.labs_sidebar.enabled {
-            rows.push(self.settings_row(
+            let nested = self.settings_row(
                 "labs-sidebar-two-lines",
                 "Two-line folder rows",
                 "Show branch, pull request and agent below the thread title.",
@@ -95,8 +102,17 @@ impl Workspace {
                         this.persist_and_notify(cx);
                     },
                 ),
-            ));
+            );
+            folder = folder.child(
+                div()
+                    .ml_4()
+                    .mb_2()
+                    .border_l_2()
+                    .border_color(theme::longan_800())
+                    .child(nested),
+            );
         }
+        let mut rows = vec![folder.into_any_element()];
         rows.push(self.settings_row(
             "labs-suggest-next",
             "Suggest next prompt",

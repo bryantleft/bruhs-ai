@@ -108,7 +108,7 @@ impl Workspace {
                     this.clone_editor.generation == generation && this.project_picker_visible();
                 match result {
                     Ok(project) if same_picker => {
-                        this.remember_project(project.clone());
+                        this.remember_project(project.clone(), cx);
                         this.persist(cx);
                         this.clone_editor
                             .remote
@@ -117,7 +117,7 @@ impl Workspace {
                     }
                     Ok(project) => {
                         let path = project.path.clone();
-                        this.remember_project(project);
+                        this.remember_project(project, cx);
                         this.meetings_hub.update(cx, |hub, cx| {
                             hub.show_notice(format!("Cloned to {path}"), false, cx)
                         });

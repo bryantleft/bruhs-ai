@@ -487,6 +487,7 @@ mod tests {
         hub.update(&mut visual, |hub, cx| {
             hub.meetings[0].started_at_ms = EpochMs::now().as_f64() - 100.0 * 60.0 * 60.0 * 1000.0;
             hub.notice = Some(crate::views::meetings_hub::HubNotice {
+                show_in_settings: false,
                 message: "Synthetic warning".into(),
                 warning: true,
                 action: None,

@@ -254,6 +254,7 @@ impl AssetSource for DesktopAssets {
             HELP_CIRCLE_ICON_PATH => Ok(Some(Cow::Borrowed(HELP_CIRCLE_ICON))),
             PANEL_RIGHT_ICON_PATH => Ok(Some(Cow::Borrowed(PANEL_RIGHT_ICON))),
             REFRESH_ICON_PATH => Ok(Some(Cow::Borrowed(REFRESH_ICON))),
+            "icons/kiro.svg" => Ok(Some(Cow::Borrowed(include_bytes!("../assets/icons/kiro.svg")))),
             "icons/shield.svg" => Ok(Some(Cow::Borrowed(SHIELD_ICON))),
             "icons/shield-check.svg" => Ok(Some(Cow::Borrowed(SHIELD_CHECK_ICON))),
             "icons/clipboard-list.svg" => Ok(Some(Cow::Borrowed(CLIPBOARD_LIST_ICON))),
@@ -271,6 +272,7 @@ impl AssetSource for DesktopAssets {
                 "vercel.svg".into(),
             ]),
             "icons" => Ok(vec![
+                "kiro.svg".into(),
                 "activity.svg".into(),
                 "paperclip.svg".into(),
                 "camera.svg".into(),
