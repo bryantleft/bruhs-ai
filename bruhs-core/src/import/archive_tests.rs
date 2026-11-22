@@ -1258,6 +1258,48 @@ fn odd_names_and_case_never_open_what_is_refused() {
     );
 }
 
+/// A nested or found ZIP that is only an empty ZIP's end record, or an
+/// empty ZIP, holds nothing: it is left out and counted, and the read
+/// goes on (final review minor, M9).
+#[test]
+fn an_empty_nested_zip_is_skipped_and_counted() {
+    let place = Place::new();
+    let empty = zip_of(&[], false);
+    let outer = zip_of(
+        &[
+            ("magic.zip", b"PK\x05\x06"),
+            ("empty.zip", &empty),
+            ("conversations.json", br#"[{"n":1}]"#),
+        ],
+        true,
+    );
+    let input = place.file("export.zip", &outer);
+    let cancel = AtomicBool::new(false);
+    let report = walk(
+        &[input],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |_, _, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!((report.files_read, report.skipped), (1, 2));
+
+    let export = place.root.path().join("in").join("export");
+    std::fs::create_dir_all(&export).unwrap();
+    std::fs::write(export.join("magic.zip"), b"PK\x05\x06").unwrap();
+    std::fs::write(export.join("conversations.json"), br#"[{"n":2}]"#).unwrap();
+    let report = walk(
+        &[ExportInput::Folder(export)],
+        &place.scratch(),
+        &Limits::TEST,
+        &cancel,
+        &mut |_, _, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!((report.files_read, report.skipped), (1, 1));
+}
+
 #[test]
 fn a_zip_that_is_not_one_is_skipped_and_counted() {
     let place = Place::new();

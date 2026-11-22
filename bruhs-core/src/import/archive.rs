@@ -911,9 +911,11 @@ fn open_input(path: &Path) -> io::Result<Option<File>> {
     Ok(opened.metadata()?.is_file().then_some(opened))
 }
 
-/// A local file header, or the end record of an empty ZIP.
+/// A local file header: a ZIP with an entry to read. An empty ZIP's end
+/// record (`PK\x05\x06`) holds nothing, so a nested or found one is left
+/// out and counted like any `.zip` that isn't one (M9).
 fn is_zip_magic(head: &[u8]) -> bool {
-    head == b"PK\x03\x04" || head == b"PK\x05\x06"
+    head == b"PK\x03\x04"
 }
 
 /// Scratch copies are named `nested-<walk>-<n>.zip`.
@@ -1156,6 +1158,11 @@ fn check_end_records(file: &mut File, len: u64, limits: &Limits) -> Result<(), I
 
 /// The Zip64 end records a locator at `locator_at` could lead to:
 /// whether any is usable, after checking each against the caps.
+///
+/// Recorded limit (final review): each locator reads up to
+/// [`MAX_ZIP64_SEARCH`] before it is refused, and a forged 64 KiB tail
+/// can name about 2,900 locators, so a hostile ZIP can cost about 3 GB
+/// of reads. They are bounded, held one region at a time, and refuse.
 fn check_zip64(
     file: &mut File,
     locator_at: u64,
