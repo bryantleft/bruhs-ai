@@ -10,6 +10,8 @@ use bruhs_models::num::ToFloatLossy as _;
 
 use super::actions::*;
 use super::element::EditorElement;
+use super::text_layout::EditorText;
+use super::markdown::Mark;
 use super::state::{EditorState, FieldKind, InputContentType, InputState, TextareaState};
 use crate::icons::{Icon, IconName};
 use crate::theme;
@@ -82,6 +84,7 @@ struct Chrome {
     aria_label: Option<SharedString>,
     tab_index: isize,
     role: Option<Role>,
+    expanded: Option<bool>,
     content_type: Option<InputContentType>,
 }
 
@@ -98,6 +101,7 @@ impl Default for Chrome {
             aria_label: None,
             tab_index: 0,
             role: None,
+            expanded: None,
             content_type: None,
         }
     }
@@ -114,7 +118,7 @@ fn text_element<K: FieldKind>(
     chrome: &Chrome,
     window: &Window,
     cx: &App,
-) -> StyledText {
+) -> EditorText {
     let s = state.read(cx);
     let base = window.text_style();
     let mut font: Font = base.font();
@@ -129,20 +133,22 @@ fn text_element<K: FieldKind>(
             s.placeholder.clone()
         };
         let len = placeholder.len();
-        return StyledText::new(placeholder).with_runs(vec![TextRun {
+        return EditorText::Flow(StyledText::new(placeholder).with_runs(vec![TextRun {
             len,
             font,
             color: theme::rambutan_500(),
             background_color: None,
             underline: None,
             strikethrough: None,
-        }]);
+        }]));
     }
-    let map = s.display_map();
+    let map = s.display_map(window);
     let value: String = if s.masked {
         s.core.text.chars().map(|_| super::state::MASK).collect()
     } else {
-        s.core.text.clone()
+        map.projection
+            .as_ref()
+            .map_or_else(|| s.core.text.clone(), |p| p.text.clone())
     };
     let (display, ghost) = match (&s.inline_completion, map.ghost) {
         (Some(ghost), Some((at, _))) => {
@@ -167,6 +173,18 @@ fn text_element<K: FieldKind>(
     {
         cuts.extend([range.start, range.end]);
     }
+    if let Some(p) = &map.projection {
+        for run in &p.parts {
+            cuts.extend([
+                map.to_display(run.source.start),
+                map.to_display(run.source.end),
+            ]);
+        }
+    }
+    let syntax = s.syntax_colors();
+    for (range, _) in syntax {
+        cuts.extend([map.to_display(range.start), map.to_display(range.end)]);
+    }
     cuts.retain(|at| *at <= display.len());
     cuts.sort_unstable();
     cuts.dedup();
@@ -180,26 +198,70 @@ fn text_element<K: FieldKind>(
                     .is_some_and(|r| a >= r.start && b <= r.end && r.start < r.end)
             };
             let in_ghost = inside(&ghost);
+            let face = map
+                .projection
+                .as_ref()
+                .and_then(|p| {
+                    if in_ghost {
+                        return None;
+                    }
+                    let at = if let Some(g) = &ghost {
+                        if a >= g.end {
+                            a - g.len()
+                        } else {
+                            a
+                        }
+                    } else {
+                        a
+                    };
+                    p.parts
+                        .get(p.parts.partition_point(|run| run.drawn.end <= at))
+                        .map(|run| run.face)
+                })
+                .unwrap_or_default();
+            let mut font = font.clone();
+            if face.bold {
+                font.weight = gpui::FontWeight::BOLD
+            }
+            if face.italic {
+                font.style = gpui::FontStyle::Italic
+            }
+            if face.code {
+                font.family = crate::theme::FontFace::Code.into();
+            }
+            let source_offset = map.to_value(a);
+            let syntax_color = syntax
+                .get(syntax.partition_point(|(r, _)| r.end <= source_offset))
+                .filter(|(r, _)| r.contains(&source_offset))
+                .map(|(_, token)| token.color());
             TextRun {
                 len: b - a,
-                font: font.clone(),
-                color: if in_ghost {
+                font,
+                color: if in_ghost || face.muted {
                     theme::rambutan_500()
                 } else {
-                    color
+                    syntax_color.unwrap_or(color)
                 },
                 background_color: (!in_ghost && inside(&Some(selection.clone())))
-                    .then(|| theme::persimmon_500().opacity(0.3)),
+                    .then(|| theme::persimmon_500().opacity(0.3))
+                    .or_else(|| (face.code && !face.block).then(|| theme::longan_800())),
                 underline: inside(&marked).then_some(UnderlineStyle {
                     thickness: px(1.0),
                     color: Some(color),
                     wavy: false,
                 }),
-                strikethrough: None,
+                strikethrough: face.strike.then_some(gpui::StrikethroughStyle {
+                    thickness: px(1.),
+                    color: Some(color),
+                }),
             }
         })
         .collect();
-    StyledText::new(display).with_runs(runs)
+    let font_size = chrome.style.text.font_size.map_or_else(
+        || css_px(theme::APP_INPUT_TEXT_SIZE_PX),
+        |size| size.to_pixels(window.rem_size()),
+    );
+    EditorText::new(display, runs, &map, s.soft_wrap, &font, font_size, window)
 }
 
 /// The focusable frame both components draw: key context, actions, focus
@@ -245,13 +307,18 @@ fn frame<K: FieldKind>(
     });
     let mut el = div()
         .id(id)
-        .key_context(CONTEXT)
+        .key_context(if s.markdown_enabled() {
+            "Input RichComposer"
+        } else {
+            CONTEXT
+        })
         // A disabled field takes no focus, so its keys never resolve.
         .when(!chrome.disabled, |el| el.track_focus(&focus))
         .role(role)
         .aria_value(value)
         .aria_placeholder(placeholder)
         .when_some(label, |el, label| el.aria_label(label))
+        .when_some(chrome.expanded, |el, expanded| el.aria_expanded(expanded))
         .flex()
         .w_full()
         .line_height(rems(LINE_HEIGHT_REM))
@@ -269,6 +336,25 @@ fn frame<K: FieldKind>(
                 })
         })
         .when(chrome.disabled, |el| el.opacity(DISABLED_OPACITY));
+    if !chrome.disabled && !chrome.readonly && state.read(cx).markdown_enabled() {
+        el = el
+            .on_action(window.listener_for(state, |field, _: &ToggleBold, w, cx| {
+                field.format_mark(Mark::Bold, w, cx)
+            }))
+            .on_action(
+                window.listener_for(state, |field, _: &ToggleItalic, w, cx| {
+                    field.format_mark(Mark::Italic, w, cx)
+                }),
+            )
+            .on_action(
+                window.listener_for(state, |field, _: &ToggleStrike, w, cx| {
+                    field.format_mark(Mark::Strike, w, cx)
+                }),
+            )
+            .on_action(window.listener_for(state, |field, _: &ToggleCode, w, cx| {
+                field.format_mark(Mark::Code, w, cx)
+            }));
+    }
     // A read-only field keeps its moves, selection and copy, not its edits.
     if !chrome.disabled && !chrome.readonly {
         el = el
@@ -485,6 +571,11 @@ impl Input {
         self
     }
 
+    pub fn aria_expanded(mut self, expanded: bool) -> Self {
+        self.chrome.expanded = Some(expanded);
+        self
+    }
+
     pub fn role(mut self, role: Role) -> Self {
         self.chrome.role = Some(role);
         self
@@ -664,6 +755,7 @@ impl RenderOnce for Textarea {
         let state = self.state.clone();
         sync_readonly(&state, self.chrome.readonly, cx);
         let size = self.chrome.size;
+        let fences = state.update(cx, |field, cx| field.prepare_fences(window, cx));
         let text = text_element(&state, &self.chrome, window, cx);
         let editor = EditorElement {
             state: state.clone(),
@@ -687,7 +779,21 @@ impl RenderOnce for Textarea {
             .map(|(_, max)| line * max.to_f32_lossy() + vertical);
         let fixed_height = self.chrome.style.size.height.is_some();
         let scroll = s.scroll.clone();
-        let mut lines = div().w_full().child(editor);
+        let soft_wrap = s.soft_wrap;
+        let mut lines = div()
+            .when(soft_wrap, |el| el.w_full())
+            .when(!soft_wrap, |el| el.w_auto().min_w_full().flex_none())
+            .relative()
+            .child(editor);
+        for (index, fence) in fences.iter().enumerate() {
+            lines = lines.child(super::fence_header::header(
+                &state,
+                fence,
+                index,
+                !self.chrome.readonly && !self.chrome.disabled,
+                cx,
+            ));
+        }
         lines.style().padding = gpui::EdgesRefinement {
             top: Some(padding.top.into()),
             right: Some(padding.right.into()),
@@ -696,6 +802,7 @@ impl RenderOnce for Textarea {
         };
         let area = div()
             .id(("textarea-scroll", state.entity_id()))
+            .when(!soft_wrap, |el| el.flex().items_start().overflow_x_scroll())
             .relative()
             .w_full()
             .flex_1()
@@ -715,7 +822,10 @@ impl RenderOnce for Textarea {
                 }
             })
             .child(lines)
-            .child(crate::scroll::Scrollbar::vertical(&scroll));
+            .child(crate::scroll::Scrollbar::vertical(&scroll))
+            .when(!soft_wrap, |el| {
+                el.child(crate::scroll::Scrollbar::horizontal(&scroll))
+            });
         let mut el = frame(
             ("textarea", state.entity_id()).into(),
             &state,

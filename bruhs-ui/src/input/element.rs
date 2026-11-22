@@ -5,7 +5,7 @@ use gpui::{
     fill, point, px, size, App, Bounds, ContentMask, CursorStyle, Element, ElementId,
     ElementInputHandler, Entity, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Style, StyledText, Window,
+    Style, Window,
 };
 
 use super::state::{Drawn, EditorState, FieldKind};
@@ -14,7 +14,7 @@ const CARET_WIDTH_PX: f32 = 2.0;
 
 pub(super) struct EditorElement<K: FieldKind> {
     pub state: Entity<EditorState<K>>,
-    pub text: StyledText,
+    pub text: super::text_layout::EditorText,
     pub caret_color: Hsla,
     pub disabled: bool,
     /// No platform text input (typing, IME), but the mouse still selects.
@@ -34,7 +34,7 @@ impl<K: FieldKind> IntoElement for EditorElement<K> {
 }
 
 impl<K: FieldKind> Element for EditorElement<K> {
-    type RequestLayoutState = (LayoutId, <StyledText as Element>::RequestLayoutState);
+    type RequestLayoutState = LayoutId;
     type PrepaintState = Prepainted;
 
     fn id(&self) -> Option<ElementId> {
@@ -47,22 +47,20 @@ impl<K: FieldKind> Element for EditorElement<K> {
 
     fn request_layout(
         &mut self,
-        id: Option<&GlobalElementId>,
-        inspector: Option<&InspectorElementId>,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         // One line keeps its line: the text never wraps, the field scrolls.
-        let (text_id, text_state) = if K::MULTI_LINE {
-            self.text.request_layout(id, inspector, window, cx)
+        let text_id = if self.state.read(cx).soft_wrap {
+            self.text.request_layout(window, cx)
         } else {
             let nowrap = gpui::TextStyleRefinement {
                 white_space: Some(gpui::WhiteSpace::Nowrap),
                 ..Default::default()
             };
-            window.with_text_style(Some(nowrap), |window| {
-                self.text.request_layout(id, inspector, window, cx)
-            })
+            window.with_text_style(Some(nowrap), |window| self.text.request_layout(window, cx))
         };
         let mut style = Style::default();
         style.size.width = gpui::relative(1.).into();
@@ -71,15 +69,15 @@ impl<K: FieldKind> Element for EditorElement<K> {
             style.overflow.x = gpui::Overflow::Hidden;
         }
         let layout = window.request_layout(style, [text_id], cx);
-        (layout, (text_id, text_state))
+        (layout, text_id)
     }
 
     fn prepaint(
         &mut self,
-        id: Option<&GlobalElementId>,
-        inspector: Option<&InspectorElementId>,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        (text_id, text_state): &mut Self::RequestLayoutState,
+        text_id: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Prepainted {
@@ -96,13 +94,12 @@ impl<K: FieldKind> Element for EditorElement<K> {
                 laid_out.size.height,
             ),
         );
-        self.text
-            .prepaint(id, inspector, text_bounds, text_state, window, cx);
-        let layout = self.text.layout().clone();
+        self.text.prepaint(text_bounds, window, cx);
+        let layout = self.text.layout();
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
         self.state.update(cx, |state, cx| {
-            let map = state.display_map();
+            let map = state.display_map(window);
             let caret = map.to_display(state.core.selection.head);
             let caret_point = layout.position_for_index(caret);
             state.drawn = Some(Drawn {
@@ -129,13 +126,21 @@ impl<K: FieldKind> Element for EditorElement<K> {
                     } else {
                         Pixels::ZERO
                     };
-                    if shift != Pixels::ZERO {
-                        let max = state.scroll.max_offset().y;
-                        let y = (offset.y + shift).clamp(-max, Pixels::ZERO);
-                        if y != offset.y {
-                            state.scroll.set_offset(point(offset.x, y));
-                            cx.notify();
+                    let max = state.scroll.max_offset();
+                    let y = (offset.y + shift).clamp(-max.y, Pixels::ZERO);
+                    let mut x = offset.x;
+                    if !state.soft_wrap {
+                        let right = caret_point.x + px(CARET_WIDTH_PX);
+                        if right > viewport.right() {
+                            x -= right - viewport.right();
+                        } else if caret_point.x < viewport.left() {
+                            x += viewport.left() - caret_point.x;
                         }
+                        x = x.clamp(-max.x, Pixels::ZERO);
+                    }
+                    if point(x, y) != offset {
+                        state.scroll.set_offset(point(x, y));
+                        cx.notify();
                     }
                 }
             } else if state.reveal_pending {
@@ -161,8 +166,7 @@ impl<K: FieldKind> Element for EditorElement<K> {
             let scroll = self.state.read(cx).scroll_x;
             if scroll != scroll_x {
                 text_bounds.origin.x = laid_out.origin.x - scroll;
-                self.text
-                    .prepaint(id, inspector, text_bounds, text_state, window, cx);
+                self.text.prepaint(text_bounds, window, cx);
                 self.state.update(cx, |state, _| {
                     if let Some(drawn) = state.drawn.as_mut() {
                         drawn.text_bounds = text_bounds;
@@ -179,10 +183,10 @@ impl<K: FieldKind> Element for EditorElement<K> {
 
     fn paint(
         &mut self,
-        id: Option<&GlobalElementId>,
-        inspector: Option<&InspectorElementId>,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        (_, text_state): &mut Self::RequestLayoutState,
+        _: &mut Self::RequestLayoutState,
         prepainted: &mut Prepainted,
         window: &mut Window,
         cx: &mut App,
@@ -200,15 +204,30 @@ impl<K: FieldKind> Element for EditorElement<K> {
             window.set_cursor_style(CursorStyle::IBeam, &prepainted.hitbox);
         }
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            self.text.paint(
-                id,
-                inspector,
-                prepainted.text_bounds,
-                text_state,
-                &mut (),
-                window,
-                cx,
-            );
+            if let Some(drawn) = &self.state.read(cx).drawn {
+                if let Some(projection) = &drawn.map.projection {
+                    for fence in &projection.fences {
+                        let end = fence.body.end.saturating_sub(1).max(fence.header.end);
+                        // A code point may span several source bytes.
+                        let end = drawn.map.value.floor_char_boundary(end);
+                        let first = drawn
+                            .layout
+                            .position_for_index(drawn.map.to_display(fence.header.start));
+                        let last = drawn.layout.position_for_index(drawn.map.to_display(end));
+                        if let (Some(top), Some(bottom)) = (first, last) {
+                            let card = Bounds::from_corners(
+                                point(top.x, top.y),
+                                point(bounds.right(), bottom.y + drawn.layout.line_height()),
+                            );
+                            window.paint_quad(
+                                fill(card, crate::theme::longan_800())
+                                    .corner_radii(crate::zoom::px(8.)),
+                            );
+                        }
+                    }
+                }
+            }
+            self.text.paint(prepainted.text_bounds, window, cx);
             let state = self.state.read(cx);
             // A read-only field draws no caret, as a browser's doesn't.
             if focused && !self.readonly && state.caret_visible && state.core.selection.is_empty() {

@@ -32,6 +32,7 @@ pub mod checkbox;
 pub mod copy_feedback;
 pub mod dropdown;
 pub mod icons;
+mod language_icons;
 pub mod input;
 pub mod menu_popover;
 pub mod motion;

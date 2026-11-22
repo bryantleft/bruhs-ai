@@ -5,15 +5,18 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle, Focusable,
-    Pixels, Point, ScrollHandle, SharedString, Subscription, Task, TextLayout, UTF16Selection,
-    Window,
+    App, AppContext, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle,
+    Focusable, Pixels, Point, ScrollHandle, SharedString, Subscription, Task,
+    UTF16Selection, Window,
 };
 
-use bruhs_models::num::ToFloatLossy as _;
+use bruhs_models::{logic::composer_text::ComposerKey, num::ToFloatLossy as _};
 
 use super::actions::*;
+use super::code_fence::{self, Fence, Token};
 use super::core::{from_utf16, to_utf16, EditCore, EditKind, Selection};
+use super::markdown::{Mark, Projection};
+use std::{cell::RefCell, rc::Rc};
 
 const BLINK_INTERVAL: Duration = Duration::from_millis(500);
 /// Each masked character shows as a bullet.
@@ -67,7 +70,7 @@ pub type TextareaState = EditorState<MultiLine>;
 /// Where a frame drew the field's text, for the mouse and the platform.
 #[derive(Clone)]
 pub(super) struct Drawn {
-    pub layout: TextLayout,
+    pub layout: super::text_layout::FieldLayout,
     /// The text's bounds as drawn (shifted by any horizontal scroll).
     pub text_bounds: Bounds<Pixels>,
     pub map: DisplayMap,
@@ -78,6 +81,7 @@ pub(super) struct Drawn {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct DisplayMap {
     pub masked: bool,
+    pub projection: Option<Rc<Projection>>,
     /// The value offset the ghost follows and its drawn length.
     pub ghost: Option<(usize, usize)>,
     pub value: String,
@@ -92,7 +96,9 @@ impl DisplayMap {
         if self.masked {
             self.value[..offset].chars().count() * MASK.len_utf8()
         } else {
-            offset
+            self.projection
+                .as_ref()
+                .map_or(offset, |p| p.to_display(offset))
         }
     }
 
@@ -128,7 +134,11 @@ impl DisplayMap {
                 .nth(chars)
                 .map_or(self.value.len(), |(ix, _)| ix)
         } else {
-            let mut ix = display.min(self.value.len());
+            let mut ix = self
+                .projection
+                .as_ref()
+                .map_or(display, |p| p.to_value(display))
+                .min(self.value.len());
             while !self.value.is_char_boundary(ix) {
                 ix -= 1;
             }
@@ -137,13 +147,32 @@ impl DisplayMap {
     }
 }
 
+#[derive(Default)]
+struct MarkdownEditor {
+    projection: RefCell<Option<(String, Option<Range<usize>>, Rc<Projection>)>>,
+    pending: Vec<Mark>,
+    syntax_source: Option<String>,
+    colors: Vec<Token>,
+    highlighting: Option<Task<()>>,
+    picker: Option<LanguagePicker>,
+    ime_inserted_newline: bool,
+}
+
+struct LanguagePicker {
+    header: usize,
+    query: gpui::Entity<InputState>,
+    _subscription: Subscription,
+}
+
 /// The state of a text field.
 pub struct EditorState<K: FieldKind> {
     pub(super) core: EditCore,
+    markdown: Option<MarkdownEditor>,
     focus_handle: FocusHandle,
     pub(super) placeholder: SharedString,
     pub(super) masked: bool,
     pub(super) rows: usize,
+    pub(super) soft_wrap: bool,
     pub(super) auto_grow: Option<(usize, usize)>,
     pub(super) submit_on_enter: bool,
     /// IME composition in progress.
@@ -201,10 +230,12 @@ impl<K: FieldKind> EditorState<K> {
         ];
         Self {
             core: EditCore::default(),
+            markdown: None,
             focus_handle,
             placeholder: SharedString::default(),
             masked: false,
             rows: 1,
+            soft_wrap: K::MULTI_LINE,
             auto_grow: None,
             submit_on_enter: false,
             marked: None,
@@ -241,7 +272,8 @@ impl<K: FieldKind> EditorState<K> {
         self.core.text.clone().into()
     }
 
-    pub(crate) fn is_composing(&self) -> bool {
+    /// Whether the active input method is composing marked text.
+    pub fn is_composing(&self) -> bool {
         self.marked.is_some()
     }
 
@@ -261,6 +293,10 @@ impl<K: FieldKind> EditorState<K> {
         let value: SharedString = value.into();
         let value = Self::clean_text(&value);
         let caret = if K::MULTI_LINE { 0 } else { value.len() };
+        if let Some(editor) = &mut self.markdown {
+            editor.pending.clear();
+            editor.ime_inserted_newline = false;
+        }
         self.core.reset(&value, Selection::caret(caret));
         self.marked = None;
         self.inline_completion = None;
@@ -312,10 +348,119 @@ impl<K: FieldKind> EditorState<K> {
             return;
         }
         let text = Self::clean_text(text.as_ref());
+        if self.markdown_enabled() {
+            self.commit_text(&text, EditKind::Other, window, cx);
+            return;
+        }
         let range = self.core.selection.range();
         if self.core.replace(range, &text, EditKind::Other).is_some() {
             self.after_edit(window, cx);
         }
+    }
+
+    fn apply_markdown_edit(
+        &mut self,
+        edit: super::markdown::MarkdownEdit,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let reversed = self.core.selection.reversed();
+        let changed = self
+            .core
+            .replace(edit.range, &edit.text, EditKind::Other)
+            .is_some();
+        let (start, end) = (edit.selection.start, edit.selection.end);
+        self.core.set_selection(if reversed {
+            Selection {
+                anchor: end,
+                head: start,
+            }
+        } else {
+            Selection {
+                anchor: start,
+                head: end,
+            }
+        });
+        if changed {
+            self.after_edit(window, cx);
+        } else {
+            self.reveal_caret(cx);
+        }
+    }
+
+    /// Handle a structural editing key in rich Markdown before chat shortcuts.
+    pub fn edit_markdown_key(
+        &mut self,
+        key: ComposerKey,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        self.try_markdown_key(key, false, window, cx)
+    }
+
+    fn try_markdown_key(
+        &mut self,
+        key: ComposerKey,
+        enter_inserts_newline: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if key == ComposerKey::Backspace
+            || !self.markdown_enabled()
+            || self.readonly
+            || self.marked.is_some()
+        {
+            return false;
+        }
+        let Some(projection) = self.display_map(window).projection else {
+            return false;
+        };
+        let selection = self.core.selection.range();
+        let source = &self.core.text;
+        let edit = match key {
+            ComposerKey::Enter | ComposerKey::ShiftEnter => {
+                code_fence::newline(source, selection.clone(), &projection.fences).or_else(|| {
+                    (key == ComposerKey::ShiftEnter || enter_inserts_newline)
+                        .then(|| {
+                            super::list::newline(source, selection, key == ComposerKey::ShiftEnter)
+                        })
+                        .flatten()
+                })
+            }
+            ComposerKey::Tab | ComposerKey::ShiftTab => {
+                let outdent = key == ComposerKey::ShiftTab;
+                code_fence::indent(source, selection.clone(), &projection.fences, outdent)
+                    .or_else(|| super::list::indent(source, selection, outdent))
+            }
+            ComposerKey::Backspace => None,
+        };
+        if let Some(edit) = edit {
+            self.apply_markdown_edit(edit, window, cx);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn at_empty_code_body(&self, range: &Range<usize>, window: &Window) -> bool {
+        self.markdown_enabled()
+            && range.is_empty()
+            && self.display_map(window).projection.is_some_and(|p| {
+                p.fences.iter().any(|f| {
+                    f.body.is_empty() && !f.closing.is_empty() && f.body.start == range.start
+                })
+            })
+    }
+
+    /// Handle Enter after the composer has decided that this chord inserts a newline.
+    pub fn insert_line_break(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if !K::MULTI_LINE || self.readonly {
+            return;
+        }
+        if self.try_markdown_key(ComposerKey::Enter, true, window, cx) {
+            return;
+        }
+        self.type_text("\n", window, cx);
     }
 
     /// Replace the whole text as an edit (undoable, reported), unlike
@@ -339,7 +484,7 @@ impl<K: FieldKind> EditorState<K> {
     /// Where the last frame drew the text in `range` (on its first line).
     pub fn range_to_bounds(&self, range: &Range<usize>) -> Option<Bounds<Pixels>> {
         let drawn = self.drawn.as_ref()?;
-        let map = self.display_map();
+        let map = &drawn.map;
         let start = map.to_display(range.start);
         let end = map.to_display(range.end);
         let from = drawn.layout.position_for_index(start)?;
@@ -357,6 +502,9 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub fn set_selected_range(&mut self, range: Range<usize>, cx: &mut Context<'_, Self>) {
+        if let Some(m) = &mut self.markdown {
+            m.pending.clear();
+        }
         self.core.set_selection(Selection {
             anchor: range.start,
             head: range.end,
@@ -403,21 +551,190 @@ impl<K: FieldKind> EditorState<K> {
         }
     }
 
-    pub(super) fn display_map(&self) -> DisplayMap {
+    pub(super) fn display_map(&self, window: &Window) -> DisplayMap {
         let ghost = self
             .inline_completion
             .as_ref()
             .filter(|_| self.core.selection.is_empty() && self.marked.is_none())
             .map(|ghost| (self.core.selection.head, ghost.len()));
+        let projection = self
+            .markdown
+            .as_ref()
+            .filter(|_| !self.masked)
+            .map(|editor| {
+                let selection = self
+                    .focus_handle
+                    .is_focused(window)
+                    .then(|| self.core.selection.range());
+                let mut cached = editor.projection.borrow_mut();
+                if let Some((source, sel, projection)) = cached.as_ref() {
+                    if source == &self.core.text && sel == &selection {
+                        return projection.clone();
+                    }
+                }
+                let projection = Rc::new(Projection::new(&self.core.text, selection.clone()));
+                *cached = Some((self.core.text.clone(), selection, projection.clone()));
+                projection
+            });
         DisplayMap {
+            projection,
             masked: self.masked,
             ghost,
             value: self.core.text.clone(),
         }
     }
 
+    pub(super) fn prepare_fences(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Vec<Fence> {
+        if !self.markdown_enabled() {
+            return Vec::new();
+        }
+        let Some(projection) = self.display_map(window).projection else {
+            return Vec::new();
+        };
+        let fences = &projection.fences;
+        let editor = self.markdown.as_mut().expect("rich editor");
+        if fences.is_empty() {
+            editor.syntax_source = None;
+            editor.colors.clear();
+            editor.highlighting = None;
+            editor.picker = None;
+            return Vec::new();
+        }
+        if editor.syntax_source.as_deref() != Some(&self.core.text) {
+            editor.picker = None;
+            editor.colors.clear();
+            let source = self.core.text.clone();
+            editor.syntax_source = Some(source.clone());
+            let ranges = fences.clone();
+            editor.highlighting = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+                let (source, colors) = cx
+                    .background_spawn(async move {
+                        let colors = code_fence::highlight(&source, &ranges);
+                        (source, colors)
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(editor) =
+                        this.markdown.as_mut().filter(|_| this.core.text == source)
+                    {
+                        editor.colors = colors;
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+        fences.clone()
+    }
+
+    pub(super) fn syntax_colors(&self) -> &[Token] {
+        self.markdown
+            .as_ref()
+            .filter(|editor| editor.syntax_source.as_deref() == Some(&self.core.text))
+            .map_or(&[], |editor| editor.colors.as_slice())
+    }
+
+    pub fn code_language_menu_open(&self) -> bool {
+        self.markdown.as_ref().is_some_and(|e| e.picker.is_some())
+    }
+
+    pub(super) fn language_query(&self, header: usize) -> Option<&gpui::Entity<InputState>> {
+        self.markdown
+            .as_ref()?
+            .picker
+            .as_ref()
+            .filter(|p| p.header == header)
+            .map(|p| &p.query)
+    }
+
+    pub(super) fn toggle_language_menu(
+        &mut self,
+        header: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(editor) = &mut self.markdown else {
+            return;
+        };
+        if self.readonly {
+            return;
+        }
+        if !editor.picker.take().is_some_and(|p| p.header == header) {
+            let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search languages"));
+            let subscription = cx.subscribe(&query, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
+            query.focus_handle(cx).focus(window, cx);
+            editor.picker = Some(LanguagePicker {
+                header,
+                query,
+                _subscription: subscription,
+            });
+        }
+        cx.notify();
+    }
+
+    pub(super) fn choose_language(
+        &mut self,
+        header: usize,
+        value: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.readonly || self.language_query(header).is_none() {
+            return;
+        }
+        let Some(projection) = self.display_map(window).projection else {
+            return;
+        };
+        let Some(fence) = projection.fences.iter().find(|f| f.header.start == header) else {
+            return;
+        };
+        self.markdown.as_mut().unwrap().picker = None;
+        let value = value.unwrap_or(&self.core.text[fence.tag.clone()]);
+        let (range, value) = fence.language_edit(&self.core.text, value);
+        let value = value.to_owned();
+        let selection = self.core.selection;
+        if self
+            .core
+            .replace(range.clone(), &value, EditKind::Other)
+            .is_some()
+        {
+            let reposition = |offset: usize| {
+                if offset <= range.start {
+                    offset
+                } else if offset < range.end {
+                    range.start + value.len()
+                } else {
+                    offset - range.len() + value.len()
+                }
+            };
+            self.core.set_selection(Selection {
+                anchor: reposition(selection.anchor),
+                head: reposition(selection.head),
+            });
+            self.after_edit(window, cx);
+        }
+        // The dropdown restores its trigger focus when it handles selection.
+        let focus = self.focus_handle.clone();
+        window.defer(cx, move |window, cx| focus.focus(window, cx));
+        cx.notify();
+    }
+
     /// Report an edit the person made.
     fn after_edit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(m) = &mut self.markdown {
+            m.pending.clear();
+            m.ime_inserted_newline = false;
+        }
         // Any edit that is not the composition's own ends it: its range
         // would point into text that has changed.
         self.marked = None;
@@ -453,6 +770,102 @@ impl<K: FieldKind> EditorState<K> {
         cx.notify();
     }
 
+    pub fn markdown_enabled(&self) -> bool {
+        self.markdown.is_some()
+    }
+
+    pub fn set_markdown_enabled(&mut self, enabled: bool, cx: &mut Context<'_, Self>) {
+        if K::MULTI_LINE && enabled != self.markdown_enabled() {
+            self.markdown = enabled.then(MarkdownEditor::default);
+            self.drawn = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn format_mark(
+        &mut self,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.readonly || self.marked.is_some() || !self.markdown_enabled() {
+            return;
+        }
+        let selected = self.core.selection.range();
+        let projection = self.display_map(window).projection.unwrap();
+        if projection
+            .fences
+            .iter()
+            .any(|f| f.covers(&self.core.text, &selected))
+        {
+            return;
+        }
+        let existing = projection
+            .marks
+            .iter()
+            .filter(|m| {
+                m.kind == mark
+                    && ((m.inner.start <= selected.start && selected.end <= m.inner.end)
+                        || m.outer == selected)
+            })
+            .min_by_key(|m| m.outer.len());
+        if selected.is_empty() {
+            if let Some(m) = existing
+                .filter(|m| selected.start == m.inner.end || selected.start == m.inner.start)
+            {
+                let outside = if selected.start == m.inner.end {
+                    m.outer.end
+                } else {
+                    m.outer.start
+                };
+                self.move_to(outside, false, cx);
+                return;
+            }
+            let pending = &mut self.markdown.as_mut().unwrap().pending;
+            if let Some(i) = pending.iter().position(|m| *m == mark) {
+                pending.remove(i);
+            } else {
+                pending.push(mark);
+            }
+            return;
+        }
+        let reversed = self.core.selection.reversed();
+        let (replace, text, after) = if let Some(m) = existing {
+            let from = selected.start.max(m.inner.start);
+            let to = selected.end.min(m.inner.end);
+            let delimiter = &self.core.text[m.outer.start..m.inner.start];
+            let mut result = String::new();
+            if from > m.inner.start {
+                result.push_str(&self.core.text[m.outer.start..from]);
+                result.push_str(delimiter);
+            }
+            let start = m.outer.start + result.len();
+            result.push_str(&self.core.text[from..to]);
+            let end = m.outer.start + result.len();
+            if to < m.inner.end {
+                result.push_str(delimiter);
+                result.push_str(&self.core.text[to..m.outer.end]);
+            }
+            (m.outer.clone(), result, start..end)
+        } else {
+            let delimiter = mark.delimiter();
+            let start = selected.start + delimiter.len();
+            let text = format!(
+                "{delimiter}{}{delimiter}",
+                &self.core.text[selected.clone()]
+            );
+            (selected.clone(), text, start..start + selected.len())
+        };
+        self.core.replace(replace, &text, EditKind::Other);
+        let (anchor, head) = if reversed {
+            (after.end, after.start)
+        } else {
+            (after.start, after.end)
+        };
+        self.core.set_selection(Selection { anchor, head });
+        self.after_edit(window, cx);
+    }
+
     fn type_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.readonly {
             return;
@@ -463,20 +876,88 @@ impl<K: FieldKind> EditorState<K> {
         } else {
             EditKind::Other
         };
-        // Committing a composition replaces its text in place: the step was
-        // taken when the composition started.
-        if let Some(marked) = self.marked.take() {
-            self.core.replace_in_place(marked, &text);
-            self.after_edit(window, cx);
-            return;
-        }
-        let range = self.core.selection.range();
-        if self.core.replace(range, &text, kind).is_some() {
-            self.after_edit(window, cx);
+        self.commit_text(&text, kind, window, cx);
+    }
+
+    // A composition in a previously empty block inserted the separator before its
+    // closing fence. Cancelling that composition removes the separator too.
+    fn cancel_fence_padding(&mut self, range: &mut Range<usize>) {
+        if let Some(editor) = &mut self.markdown {
+            if std::mem::take(&mut editor.ime_inserted_newline)
+                && self.core.text.as_bytes().get(range.end) == Some(&b'\n')
+            {
+                range.end += 1;
+            }
         }
     }
 
+    fn commit_text(
+        &mut self,
+        text: &str,
+        kind: EditKind,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let marked = self.marked.take();
+        let composing = marked.is_some();
+        let mut range = marked.unwrap_or_else(|| self.core.selection.range());
+        if composing && text.is_empty() {
+            self.cancel_fence_padding(&mut range);
+        }
+        let mut formatted = None;
+        if !text.is_empty() && self.at_empty_code_body(&range, window) {
+            formatted = Some((format!("{text}\n"), range.start + text.len()));
+        } else if !text.is_empty() && self.has_pending_format() {
+            let marks = std::mem::take(&mut self.markdown.as_mut().unwrap().pending);
+            let projection = self.display_map(window).projection.expect("rich input");
+            let delimiters: Vec<_> = marks
+                .iter()
+                .map(|mark| {
+                    projection
+                        .marks
+                        .iter()
+                        .find(|m| m.kind == *mark && m.inner.contains(&range.start))
+                        .map_or(mark.delimiter(), |m| {
+                            &self.core.text[m.outer.start..m.inner.start]
+                        })
+                })
+                .collect();
+            let open = delimiters.concat();
+            let close: String = delimiters.into_iter().rev().collect();
+            let end = range.start + open.len() + text.len();
+            formatted = Some((format!("{open}{text}{close}"), end));
+        }
+
+        let replacement = formatted.as_ref().map_or(text, |(value, _)| value.as_str());
+        if composing {
+            // Starting the IME composition already created its undo step.
+            self.core.replace_in_place(range, replacement);
+        } else {
+            let kind = if formatted.is_some() {
+                EditKind::Other
+            } else {
+                kind
+            };
+            if self.core.replace(range, replacement, kind).is_none() {
+                return;
+            }
+        }
+        if let Some((_, caret)) = formatted {
+            self.core.set_selection(Selection::caret(caret));
+        }
+        self.after_edit(window, cx);
+    }
+
+    fn has_pending_format(&self) -> bool {
+        self.markdown
+            .as_ref()
+            .is_some_and(|m| !m.pending.is_empty())
+    }
+
     fn move_to(&mut self, offset: usize, select: bool, cx: &mut Context<'_, Self>) {
+        if let Some(m) = &mut self.markdown {
+            m.pending.clear();
+        }
         let offset = self.core.clamp_offset(offset);
         let selection = if select {
             Selection {
@@ -853,10 +1334,7 @@ impl<K: FieldKind> EditorState<K> {
         }
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             let text = Self::clean_text(&text);
-            let range = self.core.selection.range();
-            if self.core.replace(range, &text, EditKind::Other).is_some() {
-                self.after_edit(window, cx);
-            }
+            self.commit_text(&text, EditKind::Other, window, cx);
         }
     }
 
@@ -881,7 +1359,14 @@ impl<K: FieldKind> EditorState<K> {
         self.clear_inline_completion();
         let newline = K::MULTI_LINE && !action.secondary && (!self.submit_on_enter || action.shift);
         if newline {
-            self.type_text("\n", window, cx);
+            let key = if action.shift {
+                ComposerKey::ShiftEnter
+            } else {
+                ComposerKey::Enter
+            };
+            if !self.try_markdown_key(key, true, window, cx) {
+                self.type_text("\n", window, cx);
+            }
         } else {
             // A submit: whoever holds the field (a form, a chat) acts on it.
             cx.propagate();
@@ -958,20 +1443,30 @@ impl<K: FieldKind> EditorState<K> {
         self.page(1, cx);
     }
 
-    /// Tab never edits a field: focus moves on, like a web field's.
-    pub(super) fn tab(&mut self, _: &IndentInline, _: &mut Window, cx: &mut Context<'_, Self>) {
-        cx.propagate();
+    pub(super) fn tab(
+        &mut self,
+        _: &IndentInline,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.focus_handle.is_focused(window)
+            || !self.edit_markdown_key(ComposerKey::Tab, window, cx)
+        {
+            cx.propagate();
+        }
     }
-
     pub(super) fn shift_tab(
         &mut self,
         _: &OutdentInline,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        cx.propagate();
+        if !self.focus_handle.is_focused(window)
+            || !self.edit_markdown_key(ComposerKey::ShiftTab, window, cx)
+        {
+            cx.propagate();
+        }
     }
-
     /// The value offset under `point`, from the last frame's text.
     pub(super) fn offset_at(&self, point: Point<Pixels>) -> Option<usize> {
         let drawn = self.drawn.as_ref()?;
@@ -1001,6 +1496,36 @@ impl<K: FieldKind> EditorState<K> {
         let Some(at) = self.offset_at(point) else {
             return;
         };
+        if let Some(editor) = &mut self.markdown {
+            editor.pending.clear();
+        }
+        if click_count == 1 && !shift && !self.readonly {
+            let task = self
+                .drawn
+                .as_ref()
+                .filter(|d| d.map.value == self.core.text)
+                .and_then(|d| d.map.projection.as_ref())
+                .and_then(|p| {
+                    p.tasks
+                        .get(p.tasks.partition_point(|r| r.end < at))
+                        .filter(|r| r.start <= at && at <= r.end)
+                        .cloned()
+                });
+            if let Some(task) =
+                task.filter(|r| self.range_to_bounds(r).is_some_and(|b| b.contains(&point)))
+            {
+                let selection = self.core.selection;
+                let next = if self.core.text[task.clone()].eq_ignore_ascii_case("[x]") {
+                    "[ ]"
+                } else {
+                    "[x]"
+                };
+                self.core.replace(task, next, EditKind::Other);
+                self.core.set_selection(selection);
+                self.after_edit(window, cx);
+                return;
+            }
+        }
         let selection = match click_count {
             // A masked field is one word: its spaces stay hidden.
             2 if self.masked => Selection {
@@ -1117,6 +1642,12 @@ impl InputState {
 }
 
 impl TextareaState {
+    /// Wrap long lines to the field width. Disable for horizontally scrollable source text.
+    pub fn soft_wrap(mut self, enabled: bool) -> Self {
+        self.soft_wrap = enabled;
+        self
+    }
+
     /// The field's height, in lines.
     pub fn rows(mut self, rows: usize) -> Self {
         self.rows = rows.max(1);
@@ -1173,7 +1704,17 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
         Some(to_utf16(&self.core.text, marked.start)..to_utf16(&self.core.text, marked.end))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) {
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.has_pending_format() {
+            if let Some(range) = self.marked.clone() {
+                let text = self.core.text[range].to_owned();
+                self.commit_text(&text, EditKind::Other, window, cx);
+                return;
+            }
+        }
+        if let Some(editor) = &mut self.markdown {
+            editor.ime_inserted_newline = false;
+        }
         self.marked = None;
         cx.notify();
     }
@@ -1188,6 +1729,13 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
         if self.readonly {
             // Nothing is composed in a field that can't change.
             self.marked = None;
+            return;
+        }
+        // Some platform text services deliver Return as text directly.
+        if range.is_none()
+            && text == "\n"
+            && self.try_markdown_key(ComposerKey::Enter, true, window, cx)
+        {
             return;
         }
         if let Some(range) = range {
@@ -1210,14 +1758,31 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
             return;
         }
         let doc = &self.core.text;
-        let range = range
+        let mut range = range
             .map(|range| from_utf16(doc, range.start)..from_utf16(doc, range.end))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.core.selection.range());
         let new_text = Self::clean_text(new_text);
+        if self.marked.is_some() && new_text.is_empty() {
+            self.cancel_fence_padding(&mut range);
+        }
         // A composition is one undo step: taken when it starts, then its
         // text is updated in place.
-        let applied = if self.marked.is_some() {
+        let applied = if self.marked.is_none()
+            && !new_text.is_empty()
+            && self.at_empty_code_body(&range, window)
+        {
+            self.markdown
+                .as_mut()
+                .expect("empty rich code block")
+                .ime_inserted_newline = true;
+            let start = range.start;
+            self.core
+                .replace(range, &format!("{new_text}\n"), EditKind::Other);
+            self.core
+                .set_selection(Selection::caret(start + new_text.len()));
+            start..start + new_text.len()
+        } else if self.marked.is_some() {
             self.core.replace_in_place(range, &new_text)
         } else {
             let start = self.core.clamp_offset(range.start.min(range.end));
@@ -1250,7 +1815,7 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
     ) -> Option<Bounds<Pixels>> {
         let drawn = self.drawn.as_ref()?;
         let text = &self.core.text;
-        let map = self.display_map();
+        let map = &drawn.map;
         let start = map.to_display(from_utf16(text, range.start));
         let end = map.to_display(from_utf16(text, range.end));
         let line_height = drawn.layout.line_height();
@@ -1295,6 +1860,7 @@ mod tests {
     #[test]
     fn a_masked_ghosted_map_round_trips() {
         let map = DisplayMap {
+            projection: None,
             masked: true,
             ghost: None,
             value: "héllo".into(),
@@ -1302,6 +1868,7 @@ mod tests {
         assert_eq!(map.to_display(3), 2 * MASK.len_utf8());
         assert_eq!(map.to_value(2 * MASK.len_utf8()), 3);
         let ghost = DisplayMap {
+            projection: None,
             masked: false,
             ghost: Some((3, 4)),
             value: "abcdef".into(),

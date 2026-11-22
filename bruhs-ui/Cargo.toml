@@ -23,6 +23,9 @@ gpui = { workspace = true }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 serde = { workspace = true }
 tracing = { workspace = true }
+tree-sitter-highlight = "0.26"
+tree-sitter-powershell = "0.26"
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
@@ -32,4 +35,5 @@ objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 raw-window-handle = "0.6"
 
 [dev-dependencies]
+serde_json = { workspace = true }
 gpui = { workspace = true, features = ["test-support"] }

@@ -10,6 +10,10 @@ pub const CONTEXT: &str = "Input";
 actions!(
     text_field,
     [
+        ToggleBold,
+        ToggleItalic,
+        ToggleStrike,
+        ToggleCode,
         Backspace,
         Delete,
         DeleteToBeginningOfLine,
@@ -180,5 +184,36 @@ pub(super) fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-shift-z", Redo, ctx),
         ]);
     }
+    let rich = Some("RichComposer");
+    bindings.extend([
+        KeyBinding::new(if mac { "cmd-b" } else { "ctrl-b" }, ToggleBold, rich),
+        KeyBinding::new(if mac { "cmd-i" } else { "ctrl-i" }, ToggleItalic, rich),
+        KeyBinding::new(
+            if mac { "cmd-shift-s" } else { "ctrl-shift-s" },
+            ToggleStrike,
+            rich,
+        ),
+        KeyBinding::new(if mac { "cmd-e" } else { "ctrl-e" }, ToggleCode, rich),
+    ]);
     cx.bind_keys(bindings);
+}
+
+/// The formatting command owned by a focused rich composer.
+pub fn composer_format_action(stroke: &gpui::Keystroke) -> Option<Box<dyn gpui::Action>> {
+    let m = stroke.modifiers;
+    let command = if cfg!(target_os = "macos") {
+        m.platform && !m.control
+    } else {
+        m.control && !m.platform
+    };
+    if !command || m.alt || m.function {
+        return None;
+    }
+    match (stroke.key.as_str(), m.shift) {
+        ("b", false) => Some(Box::new(ToggleBold)),
+        ("i", false) => Some(Box::new(ToggleItalic)),
+        ("s", true) => Some(Box::new(ToggleStrike)),
+        ("e", false) => Some(Box::new(ToggleCode)),
+        _ => None,
+    }
 }

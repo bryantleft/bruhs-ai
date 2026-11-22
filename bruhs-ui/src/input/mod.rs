@@ -8,8 +8,14 @@
 //! [`InputEvent::Change`]; [`EditorState::set_value`] never does.
 
 mod actions;
+mod code_fence;
 mod core;
 mod element;
+mod fence_header;
+mod list;
+mod list_layout;
+mod text_layout;
+mod markdown;
 mod state;
 mod view;
 
@@ -18,12 +24,12 @@ use gpui::Pixels;
 use gpui::{App, FocusHandle, Global, WeakFocusHandle, Window};
 
 pub use actions::{
-    Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
-    DeleteToPreviousWordStart, Enter, Escape, IndentInline, MoveDown, MoveEnd, MoveHome, MoveLeft,
-    MoveRight, MoveToEnd, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveUp, OutdentInline,
-    Paste, Redo, SelectAll, SelectDown, SelectLeft, SelectRight, SelectToEnd, SelectToEndOfLine,
-    SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart, SelectToStartOfLine, SelectUp,
-    Undo, CONTEXT,
+    composer_format_action, Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine,
+    DeleteToEndOfLine, DeleteToNextWordEnd, DeleteToPreviousWordStart, Enter, Escape, IndentInline,
+    MoveDown, MoveEnd, MoveHome, MoveLeft, MoveRight, MoveToEnd, MoveToNextWord,
+    MoveToPreviousWord, MoveToStart, MoveUp, OutdentInline, Paste, Redo, SelectAll, SelectDown,
+    SelectLeft, SelectRight, SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd,
+    SelectToPreviousWordStart, SelectToStart, SelectToStartOfLine, SelectUp, Undo, CONTEXT,
 };
 pub use state::{
     EditorState, FieldKind, InputContentType, InputEvent, InputState, MultiLine, SingleLine,
@@ -127,6 +133,134 @@ mod tests {
     }
 
     #[gpui::test]
+    fn source_textarea_scrolls_long_lines_horizontally(cx: &mut TestAppContext) {
+        struct Code(Entity<TextareaState>);
+        impl Render for Code {
+            fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+                div().w(px(180.)).child(Textarea::new(&self.0).h(px(80.)))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx
+            .add_window_view(|w, cx| Code(cx.new(|cx| TextareaState::new(w, cx).soft_wrap(false))));
+        let field = cx.read(|cx| view.read(cx).0.clone());
+        cx.update(|w, cx| {
+            field.update(cx, |f, cx| {
+                f.focus(w, cx);
+                f.insert(format!("short\n{}", "x".repeat(100)), w, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let scroll = &field.read(cx).scroll;
+            assert!(
+                scroll.max_offset().x > px(100.),
+                "long line should overflow horizontally"
+            );
+            assert!(
+                scroll.offset().x < px(-100.),
+                "caret should be visible at end of line"
+            );
+            assert_eq!(scroll.max_offset().y, px(0.));
+        });
+    }
+
+    #[gpui::test]
+    fn rich_list_continuations_share_the_body_column_for_editing(cx: &mut TestAppContext) {
+        struct Draft(Entity<TextareaState>);
+        impl Render for Draft {
+            fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+                div().w(px(185.)).child(Textarea::new(&self.0).h(px(480.)))
+            }
+        }
+        let source = "- Parent alpha beta gamma delta café encore\n  + Nested alpha beta gamma delta café encore\n- [x] Done alpha beta gamma delta café encore\n  - [ ] Subtask\n\n9. Nine alpha beta gamma delta café encore\n10. Ten alpha beta gamma delta café encore\n\nAfter.";
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|w, cx| Draft(cx.new(|cx| TextareaState::new(w, cx))));
+        let field = cx.read(|cx| view.read(cx).0.clone());
+        cx.update(|w, cx| {
+            field.update(cx, |f, cx| {
+                f.set_markdown_enabled(true, cx);
+                f.set_value(source, w, cx);
+                f.focus(w, cx);
+            })
+        });
+        cx.run_until_parked();
+        let (click, at) = cx.read(|cx| {
+            let field = field.read(cx);
+            let drawn = field.drawn.as_ref().unwrap();
+            let mut columns = Vec::new();
+            let mut target = None;
+            for word in ["Parent", "Nested", "Done", "Nine", "Ten"] {
+                let start = source.find(word).unwrap();
+                let end = start + source[start..].find('\n').unwrap();
+                let first = drawn
+                    .layout
+                    .position_for_index(drawn.map.to_display(start))
+                    .unwrap();
+                columns.push(first.x);
+                let mut y = first.y;
+                let mut wraps = 0;
+                for (n, _) in source[start..end].char_indices() {
+                    let at = start + n;
+                    let pt = drawn
+                        .layout
+                        .position_for_index(drawn.map.to_display(at))
+                        .unwrap();
+                    if pt.y > y {
+                        assert!(
+                            (pt.x - first.x).abs() < px(1.),
+                            "{word}: {pt:?} vs {first:?}"
+                        );
+                        let click = gpui::point(pt.x - px(3.), pt.y + drawn.layout.line_height() / 2.);
+                        assert_eq!(field.offset_at(click), Some(at), "{word} wrap margin");
+                        if target.is_none() {
+                            target = Some((click, at));
+                        }
+                        wraps += 1;
+                        y = pt.y;
+                    }
+                }
+                assert!(wraps > 0, "{word} should wrap");
+            }
+            let child = source.find("Subtask").unwrap();
+            let child_x = field.range_to_bounds(&(child..child)).unwrap().left();
+            let rem = (columns[1] - columns[0]) / 1.25;
+            assert!((child_x - columns[2] - rem * (1.45 + 1.375)).abs() < px(1.));
+            assert!(columns[1] > columns[0]);
+            assert_eq!(columns[3], columns[4]);
+            target.unwrap()
+        });
+        cx.simulate_click(click, Default::default());
+        cx.simulate_input("Ω");
+        assert_eq!(
+            cx.read(|cx| field.read(cx).value().to_string()),
+            format!("{}Ω{}", &source[..at], &source[at..])
+        );
+        cx.simulate_keystrokes("cmd-z");
+        assert_eq!(cx.read(|cx| field.read(cx).value().to_string()), source);
+        cx.simulate_click(click, Default::default());
+        cx.simulate_keystrokes("shift-up");
+        assert_eq!(
+            cx.read(|cx| field.read(cx).selected_range()),
+            source.find("Parent").unwrap()..at
+        );
+        let task = source.find("[x]").unwrap();
+        let checkbox = cx.read(|cx| {
+            field.read(cx).range_to_bounds(&(task..task + 3)).unwrap().center()
+        });
+        cx.simulate_click(checkbox, Default::default());
+        assert_eq!(cx.read(|cx| field.read(cx).value().to_string()), source.replace("[x]", "[ ]"));
+        cx.simulate_click(click, Default::default());
+        cx.update(|w, cx| field.update(cx, |f, cx| {
+            f.replace_and_mark_text_in_range(None, "ni", None, w, cx);
+            f.replace_text_in_range(None, "你", w, cx);
+        }));
+        assert_eq!(cx.read(|cx| field.read(cx).value().to_string()),
+            format!("{}你{}", &source[..at], &source[at..]).replace("[x]", "[ ]"));
+
+    }
+
+    #[gpui::test]
     fn a_composition_undoes_in_one_step(cx: &mut TestAppContext) {
         let (field, _, cx) = form(cx);
         cx.update(|window, cx| {
@@ -140,6 +274,67 @@ mod tests {
                 field.undo(&Undo, window, cx);
                 assert_eq!(field.value(), "hi ");
             })
+        });
+    }
+
+    #[gpui::test]
+    fn empty_code_block_commits_or_cancels_an_ime_edit(cx: &mut TestAppContext) {
+        let (_, _, cx) = form(cx);
+        cx.update(|w, cx| {
+            let field = cx.new(|cx| TextareaState::new(w, cx));
+            field.update(cx, |f, cx| {
+                f.set_markdown_enabled(true, cx);
+                f.insert("```rust", w, cx);
+                assert!(f.edit_markdown_key(
+                    bruhs_models::logic::composer_text::ComposerKey::Enter,
+                    w,
+                    cx
+                ));
+                let empty = "```rust\n```";
+                assert_eq!(f.value(), empty);
+                for cancel_by_committing in [true, false] {
+                    f.replace_and_mark_text_in_range(None, "mao", None, w, cx);
+                    if cancel_by_committing {
+                        f.replace_text_in_range(None, "", w, cx);
+                    } else {
+                        f.replace_and_mark_text_in_range(None, "", None, w, cx);
+                    }
+                    assert_eq!(f.value(), empty);
+                }
+                f.replace_and_mark_text_in_range(None, "mao", None, w, cx);
+                f.replace_text_in_range(None, "猫", w, cx);
+                assert_eq!(f.value(), "```rust\n猫\n```");
+                f.undo(&Undo, w, cx);
+                assert_eq!(f.value(), empty);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn pending_format_survives_ime_commit_and_paste(cx: &mut TestAppContext) {
+        let (_, _, cx) = form(cx);
+        cx.update(|window, cx| {
+            let field = cx.new(|cx| TextareaState::new(window, cx));
+            field.update(cx, |f, cx| {
+                f.set_markdown_enabled(true, cx);
+                f.format_mark(markdown::Mark::Bold, window, cx);
+                f.replace_and_mark_text_in_range(None, "mao", None, window, cx);
+                f.replace_text_in_range(None, "猫", window, cx);
+                assert_eq!(f.value(), "**猫**");
+                f.undo(&Undo, window, cx);
+                assert_eq!(f.value(), "");
+                f.format_mark(markdown::Mark::Italic, window, cx);
+                f.replace_and_mark_text_in_range(None, "犬", None, window, cx);
+                f.unmark_text(window, cx);
+                assert_eq!(f.value(), "*犬*");
+                f.undo(&Undo, window, cx);
+                f.format_mark(markdown::Mark::Code, window, cx);
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string("one".to_owned()));
+                f.paste(&Paste, window, cx);
+                assert_eq!(f.value(), "`one`");
+                f.undo(&Undo, window, cx);
+                assert_eq!(f.value(), "");
+            });
         });
     }
 
@@ -182,7 +377,7 @@ mod tests {
         let (lines, scroll) = cx.read(|cx| {
             let state = field.read(cx);
             let drawn = state.drawn.as_ref().expect("drawn");
-            (drawn.layout.line_layouts().len(), state.scroll_x)
+            (drawn.layout.logical_line_count(), state.scroll_x)
         });
         assert_eq!(lines, 1);
         assert!(scroll > Pixels::ZERO, "the field scrolls to the caret");

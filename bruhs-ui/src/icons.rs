@@ -19,6 +19,7 @@ pub fn load(path: &str) -> Option<&'static [u8]> {
         CHECK => Some(CHECK_SVG),
         CHEVRON_DOWN => Some(CHEVRON_DOWN_SVG),
         ELLIPSIS => Some(ELLIPSIS_SVG),
+        _ if path.starts_with("bruhs-ui/language-icons/") => crate::language_icons::load(path),
         _ => IconName::ALL
             .into_iter()
             .find(|name| name.path() == path)
@@ -33,15 +34,19 @@ pub enum IconName {
     Delete,
     Eye,
     EyeOff,
+    Play,
+    Trash,
     TriangleAlert,
 }
 
 impl IconName {
-    const ALL: [IconName; 5] = [
+    const ALL: [IconName; 7] = [
         IconName::Close,
         IconName::Delete,
         IconName::Eye,
         IconName::EyeOff,
+        IconName::Play,
+        IconName::Trash,
         IconName::TriangleAlert,
     ];
 
@@ -52,6 +57,8 @@ impl IconName {
             IconName::Delete => "bruhs-ui/icons/delete.svg",
             IconName::Eye => "bruhs-ui/icons/eye.svg",
             IconName::EyeOff => "bruhs-ui/icons/eye-off.svg",
+            IconName::Play => "bruhs-ui/icons/play.svg",
+            IconName::Trash => "bruhs-ui/icons/trash-2.svg",
             IconName::TriangleAlert => "bruhs-ui/icons/triangle-alert.svg",
         }
     }
@@ -62,6 +69,8 @@ impl IconName {
             IconName::Delete => include_bytes!("../assets/icons/delete.svg"),
             IconName::Eye => include_bytes!("../assets/icons/eye.svg"),
             IconName::EyeOff => include_bytes!("../assets/icons/eye-off.svg"),
+            IconName::Play => include_bytes!("../assets/icons/play.svg"),
+            IconName::Trash => include_bytes!("../assets/icons/trash-2.svg"),
             IconName::TriangleAlert => include_bytes!("../assets/icons/triangle-alert.svg"),
         }
     }
