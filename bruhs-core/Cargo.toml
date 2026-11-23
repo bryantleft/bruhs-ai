@@ -59,7 +59,7 @@ toml = "0.8"
 zeroize = { workspace = true, features = ["serde"] }
 htmd = "0.6"
 dom_query = "0.27"
-html5ever = "0.27"
+html5ever = "0.40"
 markup5ever_rcdom = "0.3"
 mail-parser = { version = "=0.11.9", features = ["full_encoding"] }
 mail-builder = { version = "=0.4.4", default-features = false }
