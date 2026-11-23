@@ -29,7 +29,7 @@ directories = { workspace = true }
 cpal = { workspace = true }
 hound = "3.5"
 whisper-rs = { version = "0.12", default-features = false }
-rubato = "0.15"
+rubato = "5.1"
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "multipart"] }
 thiserror = { workspace = true }
