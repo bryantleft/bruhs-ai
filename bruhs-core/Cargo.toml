@@ -58,7 +58,7 @@ toml = "0.8"
 # `serde`: keychain items travel inside sealed sets and backups.
 zeroize = { workspace = true, features = ["serde"] }
 htmd = "0.6"
-dom_query = "0.27"
+dom_query = "0.28"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3"
 mail-parser = { version = "=0.11.9", features = ["full_encoding"] }
