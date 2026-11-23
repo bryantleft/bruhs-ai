@@ -24,6 +24,7 @@ mod paths;
 mod postprocess;
 mod recorder_start;
 mod recovery;
+mod resample;
 mod routes;
 mod state;
 mod subdiarize;

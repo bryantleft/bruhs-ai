@@ -96,7 +96,7 @@ pub enum EnrollError {
         bits: u16,
     },
     #[error("wav decode: resample: {0}")]
-    Resample(String),
+    Resample(#[from] crate::resample::ResampleError),
     #[error("empty audio after decode")]
     Empty,
     #[error("embedding: {0}")]
@@ -163,7 +163,6 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 #[cfg(target_os = "macos")]
 fn decode_wav_bytes_to_f32_mono_16k(bytes: &[u8]) -> Result<Vec<f32>, EnrollError> {
     use hound::{SampleFormat, WavReader};
-    use rubato::{FftFixedIn, Resampler};
     use std::io::Cursor;
 
     let cursor = Cursor::new(bytes);
@@ -209,31 +208,11 @@ fn decode_wav_bytes_to_f32_mono_16k(bytes: &[u8]) -> Result<Vec<f32>, EnrollErro
         return Ok(mono);
     }
 
-    // Resample to 16kHz.
-    let in_rate = spec.sample_rate as usize;
-    let out_rate = TARGET_SAMPLE_RATE as usize;
-    let chunk_size = (in_rate / 4).max(256).min(mono.len().max(256));
-    let exact_out = crate::mix::resampled_len(mono.len(), spec.sample_rate, TARGET_SAMPLE_RATE);
-
-    let mut resampler = FftFixedIn::<f32>::new(in_rate, out_rate, chunk_size, 2, 1)
-        .map_err(|e| EnrollError::Resample(e.to_string()))?;
-
-    let mut out: Vec<f32> = Vec::with_capacity(exact_out + chunk_size);
-    let mut cursor = 0;
-    while cursor < mono.len() {
-        let end = (cursor + chunk_size).min(mono.len());
-        let mut chunk = mono[cursor..end].to_vec();
-        if chunk.len() < chunk_size {
-            chunk.resize(chunk_size, 0.0);
-        }
-        let resampled = resampler
-            .process(&[chunk], None)
-            .map_err(|e| EnrollError::Resample(e.to_string()))?;
-        out.extend_from_slice(&resampled[0]);
-        cursor += chunk_size;
-    }
-    out.truncate(exact_out);
-    Ok(out)
+    Ok(crate::resample::resample_mono(
+        &mono,
+        spec.sample_rate,
+        TARGET_SAMPLE_RATE,
+    )?)
 }
 
 #[cfg(target_os = "macos")]
