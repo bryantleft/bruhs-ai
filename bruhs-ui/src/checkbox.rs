@@ -37,6 +37,7 @@ type ChangeHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
+    debug_selector: Option<SharedString>,
     label: Option<SharedString>,
     aria_label: Option<SharedString>,
     checked: bool,
@@ -48,12 +49,19 @@ impl Checkbox {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
+            debug_selector: None,
             label: None,
             aria_label: None,
             checked: false,
             disabled: false,
             on_click: None,
         }
+    }
+
+    /// Optional debug selector attached to the focusable checkbox control.
+    pub fn debug_selector(mut self, selector: impl Into<SharedString>) -> Self {
+        self.debug_selector = Some(selector.into());
+        self
     }
 
     /// Text beside the box, which also names it for assistive tech.
@@ -99,7 +107,9 @@ impl RenderOnce for Checkbox {
             .unwrap_or_default();
 
         let mut check = focusable_control(
-            div().id(self.id.clone()),
+            div().id(self.id.clone()).when_some(self.debug_selector, |el, selector| {
+                el.debug_selector(move || selector.to_string())
+            }),
             gpui::Role::CheckBox,
             label,
             state,

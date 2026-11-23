@@ -28,10 +28,13 @@
 
 pub mod actions;
 pub mod button;
+pub mod card;
 pub mod checkbox;
 pub mod copy_feedback;
+pub mod dialog;
 pub mod dropdown;
 pub mod icons;
+pub mod kbd;
 mod language_icons;
 pub mod input;
 pub mod menu_popover;
@@ -44,6 +47,7 @@ pub mod resize_handle;
 pub mod root;
 pub mod scroll;
 pub mod switch;
+pub mod tabs;
 pub mod text;
 pub mod text_field;
 pub mod theme;
