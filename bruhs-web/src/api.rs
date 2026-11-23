@@ -1116,13 +1116,6 @@ pub async fn import_thread(
     .await
 }
 
-/// `POST /api/export/t3`: start a T3 Code thread carrying a transcript.
-pub async fn export_to_t3(
-    request: &bruhs_models::logic::portable::ExportT3Request,
-) -> Result<bruhs_models::logic::portable::ExportT3Response, ApiError> {
-    send_json(Method::POST, "/api/export/t3", Some(request)).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

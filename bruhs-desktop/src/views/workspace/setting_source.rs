@@ -322,7 +322,7 @@ impl Workspace {
         let origin = match (project.as_ref(), has_environment) {
             (Some(_), _) => "Overridden for this project",
             (None, true) => "Environment setting",
-            _ if repo_effective => "Inherited from the repository’s t3.json",
+            _ if repo_effective => "Inherited from repository config",
             _ => "Built-in default",
         };
         let summary = match count {

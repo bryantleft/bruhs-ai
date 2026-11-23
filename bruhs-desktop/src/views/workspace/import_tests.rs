@@ -5,7 +5,7 @@
 use super::import_ui::export_tab::{export_lines, export_rows, ExportCalls};
 use super::import_ui::{
     import_place, import_row_detail, imported_message, imported_messages, portable_messages,
-    t3_failure, tilde_path, visible_candidates, ImportPlace, ImportTab,
+    tilde_path, visible_candidates, ImportPlace, ImportTab,
 };
 use super::persistence::restored_session;
 use super::{
@@ -13,13 +13,12 @@ use super::{
     TurnState, Workspace,
 };
 use crate::theme;
-use bruhs_core::import::ImportError;
 use bruhs_models::agent::{AgentProvider, Role};
 use bruhs_models::imports::{
     batch_lines, export_row_detail, import_key, imported_line, reading_line, BatchCounts,
     ImportBatch, ImportJob, ImportJobState, ALREADY_HERE, CHOOSE_ANOTHER, CHOOSE_EXPORT,
     EXPORT_HELP_CHATGPT, EXPORT_HELP_CLAUDE, EXPORT_HELP_GROK, GROK_BEST_EFFORT, IMPORT_ALL,
-    IMPORT_GONE, NOT_AN_EXPORT, T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED,
+    IMPORT_GONE, NOT_AN_EXPORT,
 };
 use bruhs_models::logic::portable::{
     ImportCandidate, ImportSource, ImportedThread, PortableMessage, PortablePart, PortableToolCall,
@@ -678,17 +677,6 @@ fn the_grok_note_shows_once_among_the_lines() {
         1
     );
     assert_eq!(lines.last(), Some(&(GROK_BEST_EFFORT.to_string(), true)));
-}
-
-#[test]
-fn t3_failures_name_t3_once() {
-    for copy in [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED] {
-        assert_eq!(t3_failure(&ImportError::Refused(copy)), copy);
-    }
-    assert_eq!(
-        t3_failure(&ImportError::Refused(NOT_AN_EXPORT)),
-        format!("T3: {NOT_AN_EXPORT}")
-    );
 }
 
 #[test]

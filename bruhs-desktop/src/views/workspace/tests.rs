@@ -5400,7 +5400,7 @@ fn command_actions_should_match_web_reference() {
                 "import-thread",
                 "Agent",
                 "Import thread...",
-                "Claude Code, Codex, T3, Cursor"
+                "Claude Code, Codex, Cursor"
             ),
             ("move-in", "Agent", "Move in...", "OpenClaw, Hermes Agent, a prompt"),
             ("pin-thread", "Actions", "Pin / unpin thread", "⌘⇧P"),
@@ -5422,12 +5422,6 @@ fn command_actions_should_match_web_reference() {
                 "Actions",
                 "Copy thread as Markdown",
                 "for Cursor and others"
-            ),
-            (
-                "continue-in-t3",
-                "Actions",
-                "Continue in T3 Code",
-                "new T3 thread"
             ),
             (
                 "continue-in-workbench",
@@ -5527,7 +5521,6 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Copy thread link",
             "Copy resume command",
             "Copy thread as Markdown",
-            "Continue in T3 Code",
             "Continue in workbench",
             "Copy pull request link",
             "Copy pull request number",

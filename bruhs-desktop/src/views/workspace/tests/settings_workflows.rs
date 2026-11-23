@@ -1099,6 +1099,12 @@ fn thread_details_menu_shares_choices_with_the_card_and_restores_defaults(
     cx.run_until_parked();
     assert_no_rendered_bounds(cx, "thread-details-menu");
     assert_rendered_bounds(cx, "detail-environment");
+    let env_row = rendered_bounds(cx, "detail-environment");
+    let measure_row = rendered_bounds(cx, "measure-thread-usage");
+    let side_chat_row = rendered_bounds(cx, "detail-new-side-chat");
+    assert!((f32::from(env_row.origin.x) - f32::from(measure_row.origin.x)).abs() <= 1.0);
+    assert!((f32::from(env_row.origin.x) - f32::from(side_chat_row.origin.x)).abs() <= 1.0);
+    assert!((f32::from(measure_row.size.width) - f32::from(side_chat_row.size.width)).abs() <= 1.0);
     workspace.update_in(cx, |w, _, cx| {
         w.active_thread().unwrap().chat.update(cx, |chat, _| {
             chat.import_context = Some("Frozen project context".to_owned())
@@ -1757,24 +1763,24 @@ async fn appearance_theme_halves_apply_independently_and_survive_restart(
     });
     cx.run_until_parked();
     click_debug_selector(cx, "settings-scheme-dark");
-    click_debug_selector(cx, "settings-theme-T3 Chat");
+    click_debug_selector(cx, "settings-theme-Grove");
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.appearance.light_theme, ThemeFamily::T3Chat);
-        assert_eq!(ws.appearance.dark_theme, ThemeFamily::T3Chat);
+        assert_eq!(ws.appearance.light_theme, ThemeFamily::Grove);
+        assert_eq!(ws.appearance.dark_theme, ThemeFamily::Grove);
     });
     cx.simulate_keystrokes("tab tab");
     super::keys::press(cx, "enter");
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.appearance.light_theme, ThemeFamily::Grove);
-        assert_eq!(ws.appearance.dark_theme, ThemeFamily::T3Chat);
+        assert_eq!(ws.appearance.light_theme, ThemeFamily::Ocean);
+        assert_eq!(ws.appearance.dark_theme, ThemeFamily::Grove);
     });
     click_debug_selector(cx, "settings-theme-Bruhs-Light");
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.appearance.light_theme, ThemeFamily::Bruhs);
-        assert_eq!(ws.appearance.dark_theme, ThemeFamily::T3Chat);
+        assert_eq!(ws.appearance.dark_theme, ThemeFamily::Grove);
         assert_eq!(
             cx.theme().background,
-            gpui::rgb(ThemeFamily::T3Chat.palette(ThemeMode::Dark).surface[0]).into()
+            gpui::rgb(ThemeFamily::Grove.palette(ThemeMode::Dark).surface[0]).into()
         );
     });
     click_debug_selector(cx, "settings-scheme-dark");
@@ -1794,12 +1800,12 @@ async fn appearance_theme_halves_apply_independently_and_survive_restart(
     workspace.update_in(cx, |ws, w, cx| {
         assert_eq!(ws.appearance.scheme, ColorScheme::System);
         assert_eq!(ws.appearance.light_theme, ThemeFamily::Bruhs);
-        assert_eq!(ws.appearance.dark_theme, ThemeFamily::T3Chat);
+        assert_eq!(ws.appearance.dark_theme, ThemeFamily::Grove);
         let (family, mode) = match w.appearance() {
             WindowAppearance::Light | WindowAppearance::VibrantLight => {
                 (ThemeFamily::Bruhs, ThemeMode::Light)
             }
-            _ => (ThemeFamily::T3Chat, ThemeMode::Dark),
+            _ => (ThemeFamily::Grove, ThemeMode::Dark),
         };
         assert_eq!(
             cx.theme().background,

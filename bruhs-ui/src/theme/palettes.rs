@@ -4,14 +4,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeFamily {
-    #[default]
-    Bruhs,
-    #[serde(rename = "t3-chat")]
-    T3Chat,
     Grove,
     Ocean,
     Ember,
     Iris,
+    #[default]
+    #[serde(other)]
+    Bruhs,
 }
 
 /// Native surface, foreground and action ramps, ordered as the bruhs design tokens.
@@ -23,9 +22,8 @@ pub struct Palette {
 }
 
 impl ThemeFamily {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Bruhs,
-        Self::T3Chat,
         Self::Grove,
         Self::Ocean,
         Self::Ember,
@@ -34,7 +32,6 @@ impl ThemeFamily {
     pub fn label(self) -> &'static str {
         match self {
             Self::Bruhs => "Bruhs",
-            Self::T3Chat => "T3 Chat",
             Self::Grove => "Grove",
             Self::Ocean => "Ocean",
             Self::Ember => "Ember",
@@ -52,16 +49,6 @@ impl ThemeFamily {
                 surface: [0x141210, 0x1d1916, 0x2f2922, 0x443a2c, 0x594a36],
                 text: [0xf5ede7, 0xede1d8, 0xdfcfc3, 0xc3afa1, 0xab998f, 0x8b7c74],
                 accent: [0xfbe1cc, 0xf7c194, 0xf29e58, 0xec7f2c, 0xdf6815, 0xbd5310],
-            },
-            (Self::T3Chat, ThemeMode::Light) => &Palette {
-                surface: [0xfdf7fd, 0xf2e1f4, 0xfdfafd, 0xeee1ed, 0xe7c1dc],
-                text: [0x501854, 0x571754, 0x651654, 0x7c1455, 0x8d1255, 0xac1668],
-                accent: [0x741c5d, 0x962066, 0xb7236e, 0xc12269, 0xc12269, 0xb42062],
-            },
-            (Self::T3Chat, ThemeMode::Dark) => &Palette {
-                surface: [0x1f1a24, 0x171018, 0x2c2631, 0x27242c, 0x302029],
-                text: [0xf9f8fb, 0xf7f3f7, 0xf3eaf0, 0xecdbe5, 0xe7d0dd, 0xd4c7e1],
-                accent: [0xe3b8ce, 0xce7ca4, 0xcc749e, 0xe5619c, 0xcc739d, 0xc17d9d],
             },
             (Self::Grove, ThemeMode::Light) => &Palette {
                 surface: [0xf3f7f4, 0xe2ede7, 0xecefed, 0xcbd5d1, 0xbecbc5],

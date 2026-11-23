@@ -49,13 +49,13 @@ impl ProjectSetting for WorktreeSetting {
     fn repository(self, ws: &Workspace) -> Option<(&'static str, Option<SharedString>)> {
         match self {
             Self::Placement => Some((
-                "t3.json",
+                "Repository config",
                 ws.checkout_defaults
                     .placement
                     .map(|choice| choice.label().into()),
             )),
             Self::Submodules => Some((
-                "t3.json",
+                "Repository config",
                 ws.checkout_defaults.submodules.map(|v| v.label().into()),
             )),
             Self::Cleanup => None,
@@ -251,6 +251,14 @@ impl Workspace {
             changed,
             cx,
         );
-        self.settings_row_with_reset(row,label,"Choose which Git submodules to initialize in a new worktree. A repository can set its preference in t3.json.",None,false,Some(control),Some(actions))
+        self.settings_row_with_reset(
+            row,
+            label,
+            "Git submodules to initialize in new worktrees.",
+            None,
+            false,
+            Some(control),
+            Some(actions),
+        )
     }
 }

@@ -47,7 +47,6 @@ enum ActionId {
     CopyThreadLink,
     CopyResumeCommand,
     CopyThreadMarkdown,
-    ContinueInT3,
     ContinueInWorkbench,
     CopyPullLink,
     CopyPullNumber,
@@ -192,7 +191,7 @@ const ACTIONS: &[Action] = &[
         id: ActionId::ImportThread,
         group: "Agent",
         label: "Import thread...",
-        hint: "Claude Code, Codex, T3, Cursor",
+        hint: "Claude Code, Codex, Cursor",
     },
     Action {
         id: ActionId::MoveIn,
@@ -229,12 +228,6 @@ const ACTIONS: &[Action] = &[
         group: "Actions",
         label: "Copy thread as Markdown",
         hint: "for Cursor and others",
-    },
-    Action {
-        id: ActionId::ContinueInT3,
-        group: "Actions",
-        label: "Continue in T3 Code",
-        hint: "new T3 thread",
     },
     Action {
         id: ActionId::ContinueInWorkbench,
@@ -426,45 +419,9 @@ fn clamp_selected_index(index: usize, count: usize) -> usize {
     }
 }
 
-/// A failed Continue in T3 Code as its notice. The server's own T3 copy
-/// already names T3 Code and shows as it is; any other failure gets the
-/// "T3: " prefix.
-fn t3_failure(error: &crate::api::ApiError) -> String {
-    use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
-    match error {
-        crate::api::ApiError::Http {
-            detail: Some(detail),
-            ..
-        } if [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED]
-            .contains(&detail.as_str()) =>
-        {
-            detail.clone()
-        }
-        other => format!("T3: {other}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn t3_failures_name_t3_once() {
-        use bruhs_models::imports::{T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED};
-        for copy in [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED] {
-            let refused =
-                crate::api::ApiError::http(500, &serde_json::json!({ "error": copy }).to_string());
-            assert_eq!(t3_failure(&refused), copy);
-        }
-        // Any other answer names T3 once, through the prefix, even when it
-        // happens to mention T3.
-        let other = crate::api::ApiError::http(409, r#"{"error":"T3 thread busy"}"#);
-        assert_eq!(t3_failure(&other), "T3: T3 thread busy");
-        assert_eq!(
-            t3_failure(&crate::api::ApiError::Network("Failed to fetch".into())),
-            "T3: Could not reach the server: Failed to fetch"
-        );
-    }
 
     #[test]
     fn command_action_filter_should_match_desktop_raw_query_behavior() {
@@ -502,7 +459,6 @@ mod tests {
                 "Copy thread link",
                 "Copy resume command",
                 "Copy thread as Markdown",
-                "Continue in T3 Code",
                 "Continue in workbench",
                 "Copy pull request link",
                 "Copy pull request number",
@@ -587,7 +543,6 @@ mod tests {
 pub enum ThreadExport {
     ResumeCommand,
     Markdown,
-    ContinueInT3,
     ContinueInWorkbench,
 }
 
@@ -597,7 +552,6 @@ impl ThreadExport {
         match command {
             "thread.copyResumeCommand" => Some(Self::ResumeCommand),
             "thread.copyMarkdown" => Some(Self::Markdown),
-            "thread.continueInT3" => Some(Self::ContinueInT3),
             "thread.continueInWorkbench" => Some(Self::ContinueInWorkbench),
             _ => None,
         }
@@ -678,7 +632,7 @@ fn export_thread(
     let notice = context.notice;
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::logic::portable::{
-        resume_command, transcript_markdown, ExportT3Request, IMPORT_CONTEXT_MAX_CHARS,
+        resume_command, transcript_markdown, IMPORT_CONTEXT_MAX_CHARS,
     };
     // Resume commands and missing-project notices need only thread metadata.
     // Project the transcript only when an export will actually consume it.
@@ -699,27 +653,6 @@ fn export_thread(
         ThreadExport::Markdown => {
             copy_to_clipboard(&markdown());
             notice.flash("Thread copied as Markdown");
-        }
-        ThreadExport::ContinueInT3 => {
-            let Some(project_path) = run_dir else {
-                notice.flash("Continue in T3 Code needs a thread with a project.");
-                return;
-            };
-            let request = ExportT3Request {
-                project_path,
-                title: thread.title.clone(),
-                model: thread
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| bruhs_models::agent::DEFAULT_AGENT_MODEL.to_string()),
-                markdown: markdown(),
-            };
-            leptos::task::spawn_local(async move {
-                match crate::api::export_to_t3(&request).await {
-                    Ok(_) => notice.flash("Started a T3 thread"),
-                    Err(error) => notice.flash(t3_failure(&error)),
-                }
-            });
         }
         ThreadExport::ContinueInWorkbench => {
             let path = thread.worktree_path.clone().or(run_dir).unwrap_or_default();
@@ -994,7 +927,6 @@ pub fn CommandBar() -> impl IntoView {
             })),
             ActionId::CopyResumeCommand => thread_export.run(ThreadExport::ResumeCommand),
             ActionId::CopyThreadMarkdown => thread_export.run(ThreadExport::Markdown),
-            ActionId::ContinueInT3 => thread_export.run(ThreadExport::ContinueInT3),
             ActionId::ContinueInWorkbench => thread_export.run(ThreadExport::ContinueInWorkbench),
             ActionId::PinThread => {
                 if let Some(id) = active_thread_id.get_untracked() {

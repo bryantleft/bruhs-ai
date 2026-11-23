@@ -36,7 +36,7 @@ use crate::views::chat::{FindInThread, StashDraft};
 use crate::views::diff_panel::FindInDiff;
 
 use super::{
-    CaptureWindow, CloseOverlays, ClosePanel, ContinueInT3, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
+    CaptureWindow, CloseOverlays, ClosePanel, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
     CopyResumeCommand, CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar,
     FocusCrew, ImportThread, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread,
     NextThread, OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
@@ -167,7 +167,6 @@ pub(super) fn binding_names(command: &str) -> &'static [&'static str] {
         "thread.import" => &["workspace::ImportThread"],
         "thread.copyResumeCommand" => &["workspace::CopyResumeCommand"],
         "thread.copyMarkdown" => &["workspace::CopyThreadMarkdown"],
-        "thread.continueInT3" => &["workspace::ContinueInT3"],
         "thread.continueInWorkbench" => &["workspace::ContinueInWorkbench"],
         "settings.open" => &["workspace::OpenSettings"],
         "terminal.toggle" => &["workspace::ToggleTerminal"],
@@ -1146,7 +1145,6 @@ fn push_rule_bindings(
             bind(&shortcut, CopyResumeCommand, name, None, add, installed)
         }
         "thread.copyMarkdown" => bind(&shortcut, CopyThreadMarkdown, name, None, add, installed),
-        "thread.continueInT3" => bind(&shortcut, ContinueInT3, name, None, add, installed),
         "thread.continueInWorkbench" => {
             bind(&shortcut, ContinueInWorkbench, name, None, add, installed)
         }

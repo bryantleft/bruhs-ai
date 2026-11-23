@@ -144,7 +144,6 @@ pub const UNBOUND_BY_DEFAULT: &[&str] = &[
     "thread.import",
     "thread.copyResumeCommand",
     "thread.copyMarkdown",
-    "thread.continueInT3",
     "thread.continueInWorkbench",
 ];
 

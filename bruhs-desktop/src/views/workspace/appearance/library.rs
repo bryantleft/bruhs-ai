@@ -191,20 +191,7 @@ pub(super) const ROLES: &str = "canvas chrome toolbar toolbarForeground toolbarB
 pub(super) fn reserved(id: &str) -> bool {
     matches!(
         id,
-        "bruhs"
-            | "system"
-            | "light"
-            | "dark"
-            | "t3-chat"
-            | "t3-chat-dark"
-            | "grove"
-            | "ocean"
-            | "ember"
-            | "iris"
-            | "t3-grove"
-            | "t3-ocean"
-            | "t3-ember"
-            | "t3-iris"
+        "bruhs" | "system" | "light" | "dark" | "grove" | "ocean" | "ember" | "iris"
     )
 }
 

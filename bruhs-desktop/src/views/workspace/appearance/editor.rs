@@ -1105,7 +1105,7 @@ impl Workspace {
                                 div()
                                     .text_xs()
                                     .text_color(theme::rambutan_400())
-                                    .child("Drop T3 Code or VS Code .json files"),
+                                    .child("Drop theme or VS Code .json files"),
                             ),
                         )
                         .child(

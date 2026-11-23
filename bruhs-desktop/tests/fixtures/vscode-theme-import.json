@@ -53,7 +53,7 @@
     },
     {
       "source": {
-        "name": "t3-chat",
+        "name": "Grove",
         "type": "light",
         "colors": {
           "editor.background": "#141310",
@@ -62,8 +62,8 @@
           "scrollbarSlider.background": "#fff4"
         }
       },
-      "id": "t3-chat-vscode",
-      "name": "T3 Chat",
+      "id": "grove-vscode",
+      "name": "Grove",
       "appearance": "light"
     },
     {

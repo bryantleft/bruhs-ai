@@ -456,6 +456,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
                 <div class="mt-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Import from">
                     {ImportSource::LOCAL
                         .into_iter()
+                        .filter(|source| *source != ImportSource::T3)
                         .map(ImportTab::Local)
                         .chain([ImportTab::Export])
                         .map(|each| {

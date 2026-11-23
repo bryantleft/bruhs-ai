@@ -112,7 +112,7 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         id: "import-thread",
         group: "Agent",
         label: "Import thread...",
-        hint: "Claude Code, Codex, T3, Cursor",
+        hint: "Claude Code, Codex, Cursor",
     },
     CommandAction { id: "move-in", group: "Agent", label: bruhs_models::imports::MOVE_IN_COMMAND, hint: bruhs_models::imports::MOVE_IN_COMMAND_HINT },
     CommandAction {
@@ -144,12 +144,6 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         group: "Actions",
         label: "Copy thread as Markdown",
         hint: "for Cursor and others",
-    },
-    CommandAction {
-        id: "continue-in-t3",
-        group: "Actions",
-        label: "Continue in T3 Code",
-        hint: "new T3 thread",
     },
     CommandAction {
         id: "continue-in-workbench",
@@ -607,10 +601,6 @@ impl Workspace {
             "copy-thread-markdown" => {
                 self.close_transient_surfaces();
                 self.copy_thread_markdown(cx);
-            }
-            "continue-in-t3" => {
-                self.close_transient_surfaces();
-                self.continue_in_t3(cx);
             }
             "continue-in-workbench" => {
                 self.close_transient_surfaces();

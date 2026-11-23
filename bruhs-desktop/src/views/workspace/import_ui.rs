@@ -10,11 +10,9 @@
 //! Claude.ai or Grok data export, which the server reads.
 
 use super::*;
-use bruhs_core::import::{ImportError, ImportRoots};
+use bruhs_core::import::ImportRoots;
 use bruhs_models::agent::Role as AgentRole;
-use bruhs_models::imports::{
-    import_key, EXPORT_TAB, T3_EXPORT_FAILED, T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED,
-};
+use bruhs_models::imports::{import_key, EXPORT_TAB};
 use bruhs_models::logic::portable::{
     IMPORT_CONTEXT_MAX_CHARS, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
     PortablePart, PortableToolCall, import_model, resume_command, transcript_markdown,
@@ -32,8 +30,6 @@ pub(super) const IMPORT_FOOTER_HINT: &str = "↑↓ to choose, enter to import";
 pub(super) const IMPORT_FOOTER_IMPORTING: &str = "Importing…";
 pub(super) const IMPORT_LOADING_LABEL: &str = "Loading…";
 pub(super) const IMPORT_NO_SESSION_NOTICE: &str = "This thread has no session to resume yet.";
-pub(super) const IMPORT_T3_NEEDS_PROJECT_NOTICE: &str =
-    "Continue in T3 Code needs a thread with a project.";
 /// How many candidates one listing asks for.
 pub(super) const IMPORT_LIST_LIMIT: usize = 100;
 /// Typing waits this long before searching again.
@@ -194,20 +190,6 @@ pub(super) fn visible_candidates<'a>(
                 && !known_keys.contains(&import_key(candidate.source, &candidate.id))
         })
         .collect()
-}
-
-/// A failed Continue in T3 Code as its notice. The import's own T3 copy
-/// already names T3 Code and shows as it is; any other failure gets the
-/// "T3: " prefix, as on the web.
-pub(super) fn t3_failure(error: &ImportError) -> String {
-    match error {
-        ImportError::Refused(copy)
-            if [T3_NOT_INSTALLED, T3_RUNTIME_UNSUPPORTED, T3_EXPORT_FAILED].contains(copy) =>
-        {
-            (*copy).to_owned()
-        }
-        other => format!("T3: {other}"),
-    }
 }
 
 /// An imported message as a desktop message: text parts become the content,
@@ -730,30 +712,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Start a T3 Code thread in this thread's project that carries its
-    /// transcript. The T3 CLI runs in the background.
-    pub(super) fn continue_in_t3(&mut self, cx: &mut Context<'_, Self>) {
-        let Some((title, project, model, markdown)) = self.active_thread_markdown(cx) else {
-            return;
-        };
-        if project.is_empty() {
-            self.show_thread_notice(IMPORT_T3_NEEDS_PROJECT_NOTICE, true, cx);
-            return;
-        }
-        let export = cx.background_spawn(async move {
-            bruhs_core::import::export_to_t3(Path::new(&project), &title, &model, &markdown)
-                .map_err(|error| t3_failure(&error))
-        });
-        cx.spawn(async move |this, cx| {
-            let exported = export.await;
-            let _closed = this.update(cx, |this, cx| match exported {
-                Ok(_) => this.show_thread_notice("Started a T3 thread", false, cx),
-                Err(error) => this.show_thread_notice(error, true, cx),
-            });
-        })
-        .detach();
-    }
-
     pub(super) fn copy_resume_command_action(
         &mut self,
         _: &CopyResumeCommand,
@@ -770,15 +728,6 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         self.copy_thread_markdown(cx);
-    }
-
-    pub(super) fn continue_in_t3_action(
-        &mut self,
-        _: &ContinueInT3,
-        _window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.continue_in_t3(cx);
     }
 
     pub(super) fn continue_in_workbench_action(
@@ -804,6 +753,7 @@ impl Workspace {
             .children(
                 ImportSource::LOCAL
                     .into_iter()
+                    .filter(|source| *source != ImportSource::T3)
                     .map(ImportTab::Local)
                     .chain([ImportTab::Export])
                     .enumerate()
