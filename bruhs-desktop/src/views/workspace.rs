@@ -504,6 +504,10 @@ enum TaskCreateMenu {
 /// one replaces another. Popovers that belong to a dialog live in its
 /// variant and close with it.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "at most one active modal overlay exists per workspace"
+)]
 enum Overlay {
     Capture,
     Welcome,
@@ -2159,7 +2163,7 @@ impl Workspace {
         let browser_prefs = persisted.as_ref().and_then(|p| p.browser_preferences.clone()).unwrap_or_default();
         let browser_search_url_input = Self::new_browser_settings(browser_prefs, window, cx, &mut subscriptions);
         let viewport_fields=Self::new_viewport_fields(window,cx,&mut subscriptions);
-        let health_interval=persisted.as_ref().map(|p|p.health_interval).unwrap_or(300);
+        let health_interval=persisted.as_ref().map_or(300, |p|p.health_interval);
         let health_interval=if health_interval==0{0}else{health_interval.clamp(30,86400)};
         let health_interval_input=Self::new_health_interval(health_interval,window,cx,&mut subscriptions);
         let branch_naming=persisted.as_ref().map(|p|p.branch_naming.clone()).unwrap_or_default();
@@ -2718,8 +2722,13 @@ impl Workspace {
             booking: booking_ui::BookingUi::new(window, cx),
             sidebar_undo: None,
             sidebar_undo_generation: 0,
-            archived_threads: persisted.as_mut().map(|state| std::mem::take(&mut state.archived_threads))
-                .unwrap_or_default().into_iter().map(archive::ArchivedThread::Stored).collect(),
+            archived_threads: persisted
+                .as_mut()
+                .map(|state| std::mem::take(&mut state.archived_threads))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|record| archive::ArchivedThread::Stored(Box::new(record)))
+                .collect(),
             threads,
             active_thread_id,
             current_model,
@@ -2863,7 +2872,7 @@ impl Workspace {
             pending_scratch_cleanups: persisted.as_mut().map(|s| std::mem::take(&mut s.pending_scratch_cleanups)).unwrap_or_default(),
             dispatched_scratch_cleanups: Default::default(),
             cleanup_deleted_worktrees:persisted.as_ref().is_some_and(|s|s.cleanup_deleted_worktrees),
-            maintenance:maintenance::Maintenance::new(persisted.as_ref().map(|state|state.maintenance.clone().unwrap_or_default()).unwrap_or_else(maintenance::MaintenancePreferences::for_new_install),window,cx,&mut subscriptions),
+            maintenance:maintenance::Maintenance::new(persisted.as_ref().map_or_else(maintenance::MaintenancePreferences::for_new_install, |state|state.maintenance.clone().unwrap_or_default()),window,cx,&mut subscriptions),
             idle_settle_days: persisted.as_ref().map_or(3, |state|state.idle_settle_days.unwrap_or(1)).min(365),
             clone_host_folders: persisted.as_ref().is_some_and(|p|p.clone_host_folders),
             clone_editor: clone_project::CloneEditor::new(window,cx),
@@ -3428,51 +3437,39 @@ impl Workspace {
 
     fn render_persistence_error(&self, error: String, cx: &Context<'_, Self>) -> AnyElement {
         let tooltip_error = error.clone();
-        div()
-            .id("desktop-persistence-error")
-            .debug_selector(|| "desktop-persistence-error".to_string())
-            .role(Role::Alert)
-            .aria_label(error.clone())
-            .w_full()
-            .min_h(px(40.0))
-            .flex_shrink_0()
-            .px_3()
-            .flex()
-            .items_center()
-            .gap_2()
-            .border_b_1()
-            .border_color(theme::durian_400().opacity(0.55))
-            .bg(theme::durian_500().opacity(0.16))
+        let message = div()
+            .id("desktop-persistence-error-message")
+            .min_w_0()
+            .flex_1()
+            .truncate()
             .text_size(px(12.0))
-            .text_color(theme::durian_100())
-            .child(Icon::new(IconName::TriangleAlert).size(px(16.0)))
-            .child(
-                div()
-                    .id("desktop-persistence-error-message")
-                    .min_w_0()
-                    .flex_1()
-                    .truncate()
-                    .tooltip(move |window, cx| {
-                        Tooltip::new(tooltip_error.clone()).build(window, cx)
-                    })
-                    .child(error),
-            )
-            .child(
-                web_button(
-                    "dismiss-persistence-error",
-                    WebButtonVariant::Ghost,
-                    WebButtonSize::IconSmall,
-                    ButtonState::Enabled,
-                )
-                .aria_label("Dismiss persistence error")
-                .on_click(cx.listener(|this, _event, _window, cx| {
-                    cx.stop_propagation();
-                    this.persistence_error = None;
-                    cx.notify();
-                }))
-                .child(Icon::new(IconName::Close).size(px(14.0))),
-            )
-            .into_any_element()
+            .tooltip(move |window, cx| Tooltip::new(tooltip_error.clone()).build(window, cx))
+            .child(error.clone());
+        let dismiss = web_button(
+            "dismiss-persistence-error",
+            WebButtonVariant::Ghost,
+            WebButtonSize::IconSmall,
+            ButtonState::Enabled,
+        )
+        .aria_label("Dismiss persistence error")
+        .on_click(cx.listener(|this, _event, _window, cx| {
+            cx.stop_propagation();
+            this.persistence_error = None;
+            cx.notify();
+        }))
+        .child(Icon::new(IconName::Close).size(px(14.0)));
+
+        bruhs_ui::banner::banner(
+            "desktop-persistence-error",
+            bruhs_ui::banner::BannerTone::Warning,
+            error.clone(),
+        )
+        .style(bruhs_ui::banner::BannerStyle::Strip)
+        .debug_selector("desktop-persistence-error")
+        .aria_label(error)
+        .title_element(message)
+        .action(dismiss)
+        .into_any_element()
     }
 
     /// With the sidebar hidden, the traffic lights still need a drag strip and

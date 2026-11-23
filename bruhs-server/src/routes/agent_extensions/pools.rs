@@ -72,6 +72,7 @@ fn remember(hub: &Hub, credit: &ResetCredit) -> Choice {
             seen: Instant::now(),
         },
     );
+    drop(targets);
     Choice {
         handle,
         hub: hub.label.clone(),

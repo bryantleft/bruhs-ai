@@ -287,23 +287,29 @@ fn power_sample() -> Power {
         fn IOPSCopyPowerSourcesInfo() -> CFTypeRef;
         fn IOPSGetProvidingPowerSourceType(info: CFTypeRef) -> CFStringRef;
     }
+    // SAFETY: CGSessionCopyCurrentDictionary takes no arguments and returns an owned CFDictionaryRef or null.
     let session = unsafe { CGSessionCopyCurrentDictionary() };
     let locked = if session.is_null() {
         false
     } else {
+        // SAFETY: `session` was checked non-null and follows the CoreFoundation Create Rule.
         let session: CFDictionary<CFString, CFType> =
             unsafe { TCFType::wrap_under_create_rule(session) };
         session
-            .find(&CFString::new("CGSSessionScreenIsLocked"))
+            .find(CFString::new("CGSSessionScreenIsLocked"))
             .and_then(|v| v.downcast::<CFBoolean>())
             .is_some_and(bool::from)
     };
+    // SAFETY: IOPSCopyPowerSourcesInfo takes no arguments and returns an owned CFTypeRef or null.
     let info = unsafe { IOPSCopyPowerSourcesInfo() };
     let battery = if info.is_null() {
         false
     } else {
+        // SAFETY: `info` was checked non-null and follows the CoreFoundation Create Rule.
         let info: CFType = unsafe { TCFType::wrap_under_create_rule(info) };
+        // SAFETY: `info` is a valid CFTypeRef returned by IOPSCopyPowerSourcesInfo.
         let raw = unsafe { IOPSGetProvidingPowerSourceType(info.as_CFTypeRef()) };
+        // SAFETY: `raw` is checked non-null and follows the CoreFoundation Get Rule.
         !raw.is_null()
             && unsafe { CFString::wrap_under_get_rule(raw) } == CFString::new("Battery Power")
     };

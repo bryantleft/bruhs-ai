@@ -263,8 +263,10 @@ async fn session(
         .ok()
         .and_then(|v| serde_json::from_slice::<User>(&v).ok())
         .filter(|u| !u.id.is_empty())
-        .map(|u| google_account(&u.id))
-        .unwrap_or_else(|| profile_key.iter().map(|b| format!("{b:02x}")).collect());
+        .map_or_else(
+            || profile_key.iter().map(|b| format!("{b:02x}")).collect(),
+            |u| google_account(&u.id),
+        );
     if let Some(expires) = Instant::now().checked_add(Duration::from_secs(token.expires_in)) {
         *slot = Some(Session {
             profile_key,
@@ -273,6 +275,7 @@ async fn session(
             expires,
         });
     }
+    drop(slot);
     Ok((access, account))
 }
 async fn read_profile(
@@ -334,6 +337,7 @@ async fn read_profile(
     if slot.as_ref().is_some_and(|s| s.access == access) {
         *slot = None;
     }
+    drop(slot);
     Err(failed())
 }
 pub(crate) async fn read() -> Option<AccountUsage> {

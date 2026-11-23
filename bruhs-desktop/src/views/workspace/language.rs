@@ -40,7 +40,10 @@ impl Workspace {
     }
     pub(super) fn language_row(&self, cx: &Context<'_, Self>) -> AnyElement {
         let language = self.appearance.language;
-        let current = LANGUAGES.iter().find(|(v, _, _)| *v == language).unwrap().1;
+        let current = LANGUAGES
+            .iter()
+            .find(|(v, _, _)| *v == language)
+            .map_or(LANGUAGES[0].1, |(_, l, _)| *l);
         let choices: Vec<_> = LANGUAGES
             .iter()
             .map(|(_, value, label)| (*value, *label))

@@ -490,6 +490,10 @@ impl RetentionHost {
             }
         }
     }
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "Check holds only shared references and is passed to unregister_with_policy below"
+    )]
     async fn try_remove(
         &self,
         file: &Path,

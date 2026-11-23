@@ -102,15 +102,13 @@ impl Workspace {
             LANGUAGES
                 .iter()
                 .find(|(value, _)| *value == code)
-                .map(|(_, name)| name.to_string())
-                .unwrap_or_else(|| code.to_owned())
+                .map_or_else(|| code.to_owned(), |(_, name)| name.to_string())
         };
         let effective = prefs.options().language;
         let unavailable = saved != "auto" && Some(saved) != effective.as_deref();
         let effective_label = effective
             .as_deref()
-            .map(name)
-            .unwrap_or_else(|| "Auto-detect".into());
+            .map_or_else(|| "Auto-detect".into(), name);
         let label = if unavailable {
             format!("{effective_label} ({} unavailable)", name(saved))
         } else if saved == "auto" && effective.is_some() {
@@ -320,7 +318,7 @@ impl Workspace {
         if destination == Destination::Local {
             transcription.push(self.settings_row("voice-row-streaming","Streaming transcription","Show provisional words in the composer as you speak. Stopping transcribes the complete recording.",
                 settings_ui::switch("voice-streaming",self.dictation_prefs.streaming,false,"Streaming transcription",cx,|this,_,cx|{
-                    this.dictation_prefs.streaming=!this.dictation_prefs.streaming;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);
+                    this.dictation_prefs.streaming = !this.dictation_prefs.streaming;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);
                 })));
             transcription.extend(self.voice_runtime_rows(cx));
         }

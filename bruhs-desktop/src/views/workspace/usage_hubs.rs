@@ -36,11 +36,13 @@ enum Dialog {
     Remove(Hub),
     Redeem(CreditChoice),
 }
+type LinkedUsageReport = (String, Option<Result<Vec<AccountUsage>, String>>);
+
 pub(super) struct UsageHubs {
     pub(super) open_workbench_usage: bool,
     rows: Vec<Hub>,
     device_accounts: Vec<AccountUsage>,
-    linked: Vec<(String, Option<Result<Vec<AccountUsage>, String>>)>,
+    linked: Vec<LinkedUsageReport>,
     linked_revision: u64,
     reports: BTreeMap<String, Result<Vec<AccountUsage>, String>>,
     generation: u64,
@@ -784,11 +786,9 @@ impl Workspace {
                             description: None,
                         });
                     }
-                    let selected = f
-                        .source
-                        .as_ref()
-                        .map(|s| saved_option_value(&format!("source:{s}")))
-                        .unwrap_or("value");
+                    let selected = f.source.as_ref().map_or("value", |s| {
+                        saved_option_value(&format!("source:{s}"))
+                    });
                     let id = "usage-hub-key-source";
                     let (toggle, select) = self.settings_dropdown_handlers(id, cx);
                     key = key.child(

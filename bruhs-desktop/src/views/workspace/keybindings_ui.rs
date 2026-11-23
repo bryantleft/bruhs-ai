@@ -1039,8 +1039,16 @@ impl Workspace {
 pub(super) fn shortcut_label(raw: &str) -> String {
     gpui_shortcut(raw)
         .and_then(|shortcut| Keystroke::parse_with_os(&shortcut, host_os()).ok())
-        .map(|key| key.display(host_os()).to_string())
-        .unwrap_or_else(|| if raw.is_empty() { "Unassigned".into() } else { raw.into() })
+        .map_or_else(
+            || {
+                if raw.is_empty() {
+                    "Unassigned".into()
+                } else {
+                    raw.into()
+                }
+            },
+            |key| key.display(host_os()).to_string(),
+        )
 }
 
 pub(super) fn command_label(command: &str) -> String {

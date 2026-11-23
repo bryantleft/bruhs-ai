@@ -24,8 +24,9 @@ impl Workspace {
                 let next = raw
                     .trim()
                     .parse::<u32>()
-                    .map(|n| if n == 0 { 0 } else { n.clamp(30, 86400) })
-                    .unwrap_or(this.health_interval);
+                    .map_or(this.health_interval, |n| {
+                        if n == 0 { 0 } else { n.clamp(30, 86400) }
+                    });
                 if raw != next.to_string() {
                     field.update(cx, |input, cx| {
                         input.set_value(next.to_string(), window, cx)
@@ -190,11 +191,14 @@ impl Workspace {
             } else {
                 row.map(|row| row.status)
             };
-            let status_text = status.map(Status::label).unwrap_or(if checking {
-                "Checking…"
-            } else {
-                "Not checked"
-            });
+            let status_text = status.map_or(
+                if checking {
+                    "Checking…"
+                } else {
+                    "Not checked"
+                },
+                Status::label,
+            );
             let color = match status {
                 Some(Status::Failed | Status::NotInstalled) => theme::lychee_400(),
                 Some(Status::TimedOut | Status::SignedOut) => theme::durian_400(),
@@ -487,6 +491,10 @@ impl Workspace {
             .into_any_element()
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "provider switch helper threads UI state and toggle callback"
+    )]
     fn provider_switch(
         &self,
         label: AnyElement,

@@ -327,7 +327,7 @@ impl Browser {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
-                                .debug_selector(move || id.clone())
+                                .debug_selector(move || id)
                                 .track_focus(&self.sort_options[i])
                                 .role(Role::MenuItemRadio)
                                 .aria_label(sort.label())
@@ -392,7 +392,7 @@ impl Browser {
                 WebButtonSize::IconSmall,
                 ButtonState::Enabled,
             )
-            .debug_selector(move || id.clone())
+            .debug_selector(move || id)
             .aria_label(title.clone())
             .tooltip(move |w, cx| Tooltip::new(title.clone()).build(w, cx))
             .child(
@@ -422,8 +422,12 @@ impl Browser {
             )
         };
         let count = match ext.downloads {
-            n if n >= 1_000_000 => format!("{:.1}M", n as f64 / 1e6),
-            n if n >= 1000 => format!("{:.1}K", n as f64 / 1000.),
+            n if n >= 1_000_000 => {
+                format!("{:.1}M", bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1e6)
+            }
+            n if n >= 1000 => {
+                format!("{:.1}K", bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1000.)
+            }
             n => n.to_string(),
         };
         div()

@@ -94,16 +94,16 @@ impl<T: Default> LinkedHost<T> {
     }
 
     fn name(&self) -> String {
-        self.tunnel
-            .as_ref()
-            .map(|t| t.name.clone())
-            .unwrap_or_else(|| self.endpoint.origin().ascii_serialization())
+        self.tunnel.as_ref().map_or_else(
+            || self.endpoint.origin().ascii_serialization(),
+            |t| t.name.clone(),
+        )
     }
     fn identity(&self) -> String {
-        self.tunnel
-            .as_ref()
-            .map(|t| t.profile.to_string())
-            .unwrap_or_else(|| self.endpoint.origin().ascii_serialization())
+        self.tunnel.as_ref().map_or_else(
+            || self.endpoint.origin().ascii_serialization(),
+            |t| t.profile.to_string(),
+        )
     }
     fn same_environment(&self, other: &Self) -> bool {
         match (&self.tunnel, &other.tunnel) {
@@ -279,8 +279,7 @@ impl Workspace {
         self.linked_keybindings
             .selected
             .and_then(|i| self.linked_keybindings.hosts.get(i))
-            .map(|h| h.data.rules.as_slice())
-            .unwrap_or(&self.keybindings)
+            .map_or(&self.keybindings, |h| h.data.rules.as_slice())
     }
     fn view_host_shortcuts(&mut self, index: Option<usize>, cx: &mut Context<'_, Self>) {
         if self.linked_keybindings.busy {

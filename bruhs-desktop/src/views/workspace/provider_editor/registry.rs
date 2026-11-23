@@ -275,7 +275,9 @@ impl Workspace {
     }
 
     pub(super) fn provider_source_choices(&self, wide: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let mut body = div()
             .flex()
             .flex_col()
@@ -387,7 +389,9 @@ impl Workspace {
     }
 
     fn registry_source_field(&self, wide: bool, cx: &Context<'_, Self>) -> Div {
-        let editor = self.provider_editor.as_ref().unwrap();
+        let Some(editor) = self.provider_editor.as_ref() else {
+            return div();
+        };
         let local = editor.registry.entry == Entry::Local;
         let value = if local { "local" } else { "registry" };
         let entity = cx.weak_entity();
@@ -455,7 +459,9 @@ impl Workspace {
     }
 
     pub(super) fn registry_override_fields(&self, wide: bool) -> Div {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div();
+        };
         div()
             .flex()
             .flex_col()
@@ -477,7 +483,9 @@ impl Workspace {
     }
 
     fn registry_refresh(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         editor_button(
             "acp-registry-refresh",
             "Refresh",
@@ -489,7 +497,9 @@ impl Workspace {
     }
 
     fn provider_registry_results(&self, wide: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let picker = &e.registry;
         let form = div()
             .flex()
@@ -754,13 +764,13 @@ impl ProviderEditor {
                 self.input_events.remove(&f.entity_id());
             }
         }
-        for f in self
+        let fields: Vec<_> = self
             .args
             .iter()
             .chain(self.variables.iter().flat_map(|v| [&v.name, &v.value]))
             .cloned()
-            .collect::<Vec<_>>()
-        {
+            .collect();
+        for f in fields {
             self.track_edits(&f, cx)
         }
         self.registry.origin = Some(a.origin());

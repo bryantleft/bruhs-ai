@@ -212,7 +212,7 @@ impl Workspace {
             WebButtonSize::IconSmall,
             ButtonState::Enabled,
         )
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .aria_label(label.clone())
         .tooltip(move |w, cx| Tooltip::new(label.clone()).build(w, cx))
         .child(
@@ -377,10 +377,10 @@ impl Workspace {
         let community = draft
             .is_none()
             .then(|| cx.new(|cx| super::community::Browser::new(owner, window, cx)));
-        let focus = match &community {
-            Some(browser) => browser.read(cx).query.focus_handle(cx),
-            None => draft.as_ref().unwrap().name.focus_handle(cx),
-        };
+        let focus = community
+            .as_ref()
+            .map(|browser| browser.read(cx).query.focus_handle(cx))
+            .or_else(|| draft.as_ref().map(|d| d.name.focus_handle(cx)));
         self.theme_navigation.return_focus = window.focused(cx);
         self.open_overlay(Overlay::ThemeEditor(ThemeEditor {
             json,
@@ -392,7 +392,9 @@ impl Workspace {
             reading: false,
         }));
         self.preview_theme_draft(window, cx);
-        cx.defer_in(window, move |_, w, cx| focus.focus(w, cx));
+        if let Some(focus) = focus {
+            cx.defer_in(window, move |_, w, cx| focus.focus(w, cx));
+        }
         cx.notify();
     }
     pub(in crate::views::workspace) fn restore_theme_preview(
@@ -851,13 +853,13 @@ impl Workspace {
             };
             if let Err(e) = result {
                 let _ = this.update_in(cx, |_, w, cx| {
-                    let _ = w.prompt(
+                    drop(w.prompt(
                         PromptLevel::Warning,
                         "Could not export theme",
                         Some(&e),
                         &[PromptButton::Ok("Close".into())],
                         cx,
-                    );
+                    ));
                 });
             }
         })

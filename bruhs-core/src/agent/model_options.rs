@@ -25,11 +25,8 @@ pub(crate) fn apply_claude(
         (OptionKind::FastMode, "fastMode"),
         (OptionKind::Ultracode, "ultracode"),
     ] {
-        match selected.configured(kind) {
-            Some(value @ ("on" | "off")) => {
-                flags.insert(key.into(), (value == "on").into());
-            }
-            _ => {}
+        if let Some(value @ ("on" | "off")) = selected.configured(kind) {
+            flags.insert(key.into(), (value == "on").into());
         }
     }
     if !flags.is_empty() {

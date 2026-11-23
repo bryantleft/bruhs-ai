@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_models::num::ToIntSaturating;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DaysRule {
@@ -96,7 +97,10 @@ impl Workspace {
                 .filter(|n| n.is_finite());
             this.retention_editor = None;
             if let Some(value) = value {
-                let days = value.round().clamp(f64::from(rule.minimum()), 3650.) as u16;
+                let days = value
+                    .round()
+                    .clamp(f64::from(rule.minimum()), 3650.)
+                    .to_u16_saturating();
                 if enter || days != rule.value(this.retention()).unwrap_or(8) {
                     this.set_retention(|r| rule.set(r, Some(days)), cx);
                 }
@@ -129,7 +133,8 @@ impl Workspace {
             .and_then(|field| field.read(cx).value().trim().parse().ok())
             .or(rule.value(self.retention()))
             .unwrap_or(8);
-        let days = (i32::from(value) + delta).clamp(i32::from(rule.minimum()), 3650) as u16;
+        let days = u16::try_from((i32::from(value) + delta).clamp(i32::from(rule.minimum()), 3650))
+            .unwrap_or(rule.minimum());
         if let Some(field) = field {
             field.update(cx, |field, cx| field.set_value(days.to_string(), w, cx));
             if rule.value(self.retention()).is_none() {
@@ -172,7 +177,7 @@ impl Workspace {
             WebButtonSize::Small,
             ButtonState::Enabled,
         )
-        .debug_selector(move || key.clone())
+        .debug_selector(move || key)
         .role(Role::SpinButton)
         .aria_label(format!("{label} in days"))
         .aria_numeric_value(f64::from(value))
@@ -205,7 +210,7 @@ impl Workspace {
                     ButtonState::Enabled,
                 )
                 .aria_label(format!("{action} {label}"))
-                .debug_selector(move || key.clone())
+                .debug_selector(move || key)
                 .child(sign);
                 on_press_view(button, cx, move |this, w, cx| {
                     this.step_days(rule, delta, w, cx)

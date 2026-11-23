@@ -165,7 +165,10 @@ impl EditorText {
                 .iter()
                 .map(|gutter| match gutter {
                     Gutter::Bullet => rem * 1.25,
-                    Gutter::Ordered(chars) => (ch * (*chars + 1) as f32).max(rem * 1.25),
+                    Gutter::Ordered(chars) => {
+                        let count = f32::from(u16::try_from(*chars + 1).unwrap_or(u16::MAX));
+                        (ch * count).max(rem * 1.25)
+                    }
                     Gutter::Task => {
                         // T3 adds list padding inside an ancestor task list, in
                         // addition to the checkbox and gap on each item.

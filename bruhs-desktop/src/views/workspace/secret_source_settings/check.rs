@@ -130,13 +130,13 @@ impl RenderOnce for CheckButton {
             WebButtonSize::IconSmall,
             ButtonState::disabled_if(disabled),
         )
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .aria_label(accessible)
         .tooltip(move |w, cx| Tooltip::new(hint.clone()).build(w, cx))
         .child(
             div()
                 .id("secret-check-mark")
-                .debug_selector(move || selector.clone())
+                .debug_selector(move || selector)
                 .flex()
                 .child(mark),
         );

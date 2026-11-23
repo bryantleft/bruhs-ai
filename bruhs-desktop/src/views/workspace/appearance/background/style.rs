@@ -27,7 +27,7 @@ impl Length {
         if !value.is_finite() {
             return None;
         }
-        let units = (value * 100.).round() as i32;
+        let units = bruhs_models::num::ToIntSaturating::to_i32_saturating((value * 100.).round());
         Some(if percent {
             Self::Percent(units)
         } else {
@@ -37,9 +37,13 @@ impl Length {
     pub(super) fn value(self, extent: f32, zoom: f32) -> Option<f32> {
         match self {
             Self::Auto => None,
-            Self::Px(n) => Some(n as f32 * zoom / 100.),
-            Self::FromEndPx(n) => Some(extent - n as f32 * zoom / 100.),
-            Self::Percent(n) => Some(extent * n as f32 / 10000.),
+            Self::Px(n) => Some(bruhs_models::num::ToFloatLossy::to_f32_lossy(n) * zoom / 100.),
+            Self::FromEndPx(n) => {
+                Some(extent - bruhs_models::num::ToFloatLossy::to_f32_lossy(n) * zoom / 100.)
+            }
+            Self::Percent(n) => {
+                Some(extent * bruhs_models::num::ToFloatLossy::to_f32_lossy(n) / 10000.)
+            }
         }
     }
 }

@@ -13,13 +13,14 @@ use bruhs_ui::zoom::px;
 /// A runtime's model listing as a future the desktop's tokio runtime drives.
 type ListingFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RuntimeModels> + Send>>;
 
+type RuntimeModelListerFn =
+    std::sync::Arc<dyn Fn(AgentProvider, std::path::PathBuf) -> ListingFuture + Send + Sync>;
+
 /// Lists a runtime's models for the picker: core's CLI listing in the app, or
 /// whatever a test installs, so tests run the real fetch path without a CLI.
 /// Without one installed, tests list nothing.
 #[derive(Clone)]
-pub(crate) struct RuntimeModelLister(
-    pub(crate) std::sync::Arc<dyn Fn(AgentProvider, std::path::PathBuf) -> ListingFuture + Send + Sync>,
-);
+pub(crate) struct RuntimeModelLister(pub(crate) RuntimeModelListerFn);
 
 impl gpui::Global for RuntimeModelLister {}
 

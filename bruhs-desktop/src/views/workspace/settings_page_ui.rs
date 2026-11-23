@@ -1149,6 +1149,10 @@ impl Workspace {
         self.settings_row_with_reset(selector, title, description, live_description, disabled, Some(control), None)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "settings row helper accepts optional live description and reset control"
+    )]
     pub(super) fn settings_row_with_reset(
         &self,
         selector: impl Into<SharedString>,
@@ -1240,9 +1244,7 @@ impl Workspace {
             rows.push(SettingsHit {
                 command: None,
                 source_title: translated_title.map(|_| title.clone()),
-                title: translated_title
-                    .map(SharedString::from)
-                    .unwrap_or_else(|| title.clone()),
+                title: translated_title.map_or_else(|| title.clone(), SharedString::from),
                 keywords,
                 section: self.settings_section,
                 selector: Some(selector.clone()),
@@ -2057,7 +2059,9 @@ impl Workspace {
         vec![
             self.settings_row("settings-row-tool-visibility","Tool calls in chat","How much tool activity appears in chat.",settings_ui::control_column(self.choice_control("settings-tool-visibility","Tool calls in chat",self.tool_visibility.key(),&[("all","Show all"),("failures","Hide successful"),("hide","Hide all"),("zen","Zen")],cx))),
             self.settings_row("desktop-settings-row-slash-skills","Show skills in slash menu","Include skills in /.",settings_ui::switch("settings-slash-skills",self.slash_skills,false,"Show skills in slash menu",cx,|this,_,cx|{
-                this.slash_skills=!this.slash_skills;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);
+                this.slash_skills = !this.slash_skills;
+                this.stamp_run_prefs_on_threads(cx);
+                this.persist_and_notify(cx);
             })),
             self.settings_row("desktop-settings-row-reader-announcements","Screen reader announcements",
                 "What to announce during a turn.",
@@ -2066,7 +2070,7 @@ impl Workspace {
             self.settings_row("desktop-settings-row-reader-title","Screen reader window title",
                 "Prefix window title with thread status and name.",
                 settings_ui::switch("settings-reader-title",self.screen_reader.window_title,false,"Screen reader window title",cx,|this,_,cx|{
-                    this.screen_reader.window_title=!this.screen_reader.window_title;
+                    this.screen_reader.window_title = !this.screen_reader.window_title;
                     this.persist_and_notify(cx);
                 })),
             self.rich_composer_row(cx),
@@ -2178,13 +2182,13 @@ impl Workspace {
             self.settings_row("desktop-settings-row-proactive-panels","Open pull requests and changes panels proactively",
                 "Open linked PRs or changes after large edits.",
                 settings_ui::switch("settings-proactive-panels",prefs.proactive_panels,false,"Open panels proactively",cx,|this,_,cx|{
-                    this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.proactive_panels=!prefs.proactive_panels;panel.set_preferences(prefs,cx)});
+                    this.diff_panel.update(cx,|panel,cx|{let mut prefs = panel.prefs; prefs.proactive_panels = !prefs.proactive_panels; panel.set_preferences(prefs,cx)});
                     this.persist_and_notify(cx);
                 })),
             self.settings_row("desktop-settings-row-open-pull-links","Open pull requests in bruhs",
                 "Open GitHub PR links inside bruhs.",
                 settings_ui::switch("settings-open-pull-links",prefs.open_pull_links_in_app,false,"Open pull requests in bruhs",cx,|this,_,cx|{
-                    this.diff_panel.update(cx,|panel,cx|{let mut prefs=panel.prefs;prefs.open_pull_links_in_app=!prefs.open_pull_links_in_app;panel.set_preferences(prefs,cx)});
+                    this.diff_panel.update(cx,|panel,cx|{let mut prefs = panel.prefs; prefs.open_pull_links_in_app = !prefs.open_pull_links_in_app; panel.set_preferences(prefs,cx)});
                     this.persist_and_notify(cx);
                 })),
         ]
@@ -2378,8 +2382,7 @@ impl Workspace {
             if scoped {
                 project
                     .and_then(|p| p.permissions)
-                    .map(|m| m.as_str())
-                    .unwrap_or("inherit")
+                    .map_or("inherit", |m| m.as_str())
             } else {
                 self.permission_mode.as_str()
             },
@@ -2474,7 +2477,8 @@ impl Workspace {
                     ),
                 ),self.settings_row("desktop-settings-row-clone-host-folders","Clone into host folders","Group clones by host and owner.",
                     settings_ui::switch("settings-clone-host-folders",self.clone_host_folders,false,"Clone into host folders",cx,|this,_,cx|{
-                        this.clone_host_folders=!this.clone_host_folders;this.persist_and_notify(cx);
+                        this.clone_host_folders = !this.clone_host_folders;
+                        this.persist_and_notify(cx);
                     }))],
             ))
             .child(self.settings_card("New threads", "", vec![self.defaults_scope_row(cx), self.new_thread_model_row(cx), placement,self.response_stream_row(cx)]))
@@ -3357,7 +3361,7 @@ mod ui_audit_tests {
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().expect("desktop state"));
         });
-        let (workspace, cx) = cx.add_window_view(|window, cx| Workspace::new(window, cx));
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
         for width in [1100., 650.] {
             cx.simulate_resize(size(px(width), px(700.)));
             workspace.update_in(cx, |workspace, window, cx| {
@@ -3455,7 +3459,7 @@ mod ui_audit_tests {
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().expect("desktop state"));
         });
-        let (workspace, cx) = cx.add_window_view(|window, cx| Workspace::new(window, cx));
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
         workspace.update_in(cx, |ws, window, cx| {
             ws.open_settings(&super::OpenSettings, window, cx);
             ws.keybindings.retain(|rule| rule.command != "chat.new");

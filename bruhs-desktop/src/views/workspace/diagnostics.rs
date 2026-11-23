@@ -1,5 +1,6 @@
 //! Sample the desktop and its descendants while Diagnostics is visible.
 use super::*;
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use std::{
     collections::{HashMap, VecDeque},
     time::{Duration, Instant},
@@ -91,8 +92,8 @@ impl Sampler {
                     .zip(seconds)
                     .map_or((0., 0.), |(&(r, w), s)| {
                         (
-                            bytes.0.saturating_sub(r) as f64 / s,
-                            bytes.1.saturating_sub(w) as f64 / s,
+                            bytes.0.saturating_sub(r).to_f64_lossy() / s,
+                            bytes.1.saturating_sub(w).to_f64_lossy() / s,
                         )
                     });
             counters.insert(key, bytes);
@@ -172,8 +173,8 @@ impl Metric {
     }
     fn number(self, u: Usage) -> f64 {
         match self {
-            Self::Cpu => u.cpu as f64,
-            Self::Memory => u.memory as f64,
+            Self::Cpu => f64::from(u.cpu),
+            Self::Memory => u.memory.to_f64_lossy(),
             Self::Read => u.read,
             Self::Write => u.write,
         }
@@ -328,7 +329,9 @@ impl Workspace {
             for (time, u) in &monitor.history {
                 let age = s.at.saturating_duration_since(*time).as_secs_f64();
                 if age < window {
-                    let i = buckets.len() - 1 - (age * buckets.len() as f64 / window) as usize;
+                    let i = buckets.len()
+                        - 1
+                        - (age * buckets.len().to_f64_lossy() / window).to_usize_saturating();
                     let n = monitor.metric.number(*u);
                     buckets[i] = Some(buckets[i].unwrap_or(0.).max(n));
                 }
@@ -351,7 +354,7 @@ impl Workspace {
                 .items_end()
                 .gap(px(2.))
                 .children(buckets.map(|v| {
-                    let height = v.map_or(0., |n| ((n / peak) as f32 * 74.).max(2.));
+                    let height = v.map_or(0., |n| ((n / peak).to_f32_lossy() * 74.).max(2.));
                     div().flex_1().h(px(height)).bg(theme::persimmon_400())
                 }));
             rows.push(
@@ -402,7 +405,7 @@ impl Workspace {
                             div()
                                 .min_w_0()
                                 .truncate()
-                                .pl(px((p.depth.min(8) * 10) as f32))
+                                .pl(px((p.depth.min(8) * 10).to_f32_lossy()))
                                 .child(format!("{}, PID {}", p.name, p.pid)),
                         )
                         .child(format!("{cpu}, {}", Metric::Memory.display(p.usage)))

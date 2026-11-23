@@ -87,7 +87,7 @@ impl Workspace {
         }
         for (offset, p) in self.recent_projects.iter().rev().enumerate() {
             // Legacy recents have relative order but no creation timestamp.
-            let created = offset as i64 - self.recent_projects.len() as i64;
+            let created = -i64::try_from(self.recent_projects.len() - offset).unwrap_or(i64::MAX);
             self.project_list.register(&p.path, &p.name, created, None);
         }
         for t in &self.threads {
@@ -271,7 +271,7 @@ impl Workspace {
                 for_terminal: false,
                 thread: None,
             });
-            let name = self.listed_projects().into_iter().find(|p| p.path == path).map(|p| p.name).unwrap_or(name);
+            let name = self.listed_projects().into_iter().find(|p| p.path == path).map_or(name, |p| p.name);
             self.select_project_location(path, name, window, cx);
         }
     }

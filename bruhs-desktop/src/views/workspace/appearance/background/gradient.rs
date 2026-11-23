@@ -1,6 +1,7 @@
 //! CSS gradient color stops, interpolation and native texture generation.
 mod geometry;
 use super::style::{Length, comma_list, words};
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use geometry::{Projection, Shape, angle};
 use image::{Rgba, RgbaImage};
 
@@ -22,7 +23,7 @@ impl StopPosition {
     fn value(self, span: f32, zoom: f32) -> Option<f32> {
         match self {
             Self::Length(length) => length.value(span, zoom),
-            Self::Angle(millidegrees) => Some(millidegrees as f32 / 1000.),
+            Self::Angle(millidegrees) => Some(millidegrees.to_f32_lossy() / 1000.),
         }
     }
 }
@@ -63,7 +64,7 @@ impl Gradient {
                 stops.push((color, Some(value)));
             }
         }
-        (colors >= 2).then(|| Self {
+        (colors >= 2).then_some(Self {
             shape,
             stops,
             repeating,
@@ -83,8 +84,9 @@ impl Gradient {
                 if i > last {
                     let start = result[last].0;
                     end = end.max(start);
-                    for j in last + 1..i {
-                        result[j].0 = start + (end - start) * (j - last) as f32 / (i - last) as f32;
+                    let denom = (i - last).to_f32_lossy();
+                    for (step, item) in result[last + 1..i].iter_mut().enumerate() {
+                        item.0 = start + (end - start) * (step + 1).to_f32_lossy() / denom;
                     }
                 }
                 result[i].0 = end;
@@ -99,7 +101,9 @@ impl Gradient {
     // even though absolute distances have collapsed.
     fn collapsed_radial(&self) -> RgbaImage {
         let stops = self.resolved(1., 0.);
-        let (last_pos, mut color) = *stops.last().unwrap();
+        let Some(&(last_pos, mut color)) = stops.last() else {
+            return RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]));
+        };
         let period = last_pos - stops[0].0;
         if self.repeating && period > 0. {
             let mut mean = [0.; 4];
@@ -107,10 +111,10 @@ impl Gradient {
                 let (a, b) = (pair[0], pair[1]);
                 let weight = (b.0 - a.0) / (2. * period);
                 for (i, channel) in mean.iter_mut().enumerate() {
-                    *channel += weight * (a.1[i] as f32 + b.1[i] as f32);
+                    *channel += weight * (f32::from(a.1[i]) + f32::from(b.1[i]));
                 }
             }
-            color = mean.map(|v| v.round() as u8);
+            color = mean.map(|v| v.round().to_u8_saturating());
         }
         let [r, g, b, a] = color;
         RgbaImage::from_pixel(1, 1, Rgba([b, g, r, a]))
@@ -127,37 +131,44 @@ impl Gradient {
         let width = if matches!(projection, Projection::Linear { dx: 0., .. }) {
             1
         } else {
-            (w * scale).ceil().clamp(1., 2048.) as u32
+            (w * scale).ceil().clamp(1., 2048.).to_u32_saturating()
         };
         let height = if matches!(projection, Projection::Linear { dy: 0., .. }) {
             1
         } else {
-            (h * scale).ceil().clamp(1., 2048.) as u32
+            (h * scale).ceil().clamp(1., 2048.).to_u32_saturating()
         };
         // Cache the ramp, including premultiplied alpha. Resolve the containing
         // segment first so adjacent stops at the same position keep a sharp edge.
         let ramps: Vec<_> = stops
             .windows(2)
             .map(|pair| {
-                (0..=255)
+                (0u8..=255)
                     .map(|i| {
-                        let t = i as f32 / 255.;
+                        let t = f32::from(i) / 255.;
                         let (a, b) = (pair[0].1, pair[1].1);
-                        let left = a[3] as f32 * (1. - t);
-                        let right = b[3] as f32 * t;
+                        let left = f32::from(a[3]) * (1. - t);
+                        let right = f32::from(b[3]) * t;
                         let alpha = left + right;
                         let channel = |j: usize| {
-                            ((left * a[j] as f32 + right * b[j] as f32) / alpha).round() as u8
+                            ((left * f32::from(a[j]) + right * f32::from(b[j])) / alpha)
+                                .round()
+                                .to_u8_saturating()
                         };
-                        Rgba([channel(2), channel(1), channel(0), alpha.round() as u8])
+                        Rgba([
+                            channel(2),
+                            channel(1),
+                            channel(0),
+                            alpha.round().to_u8_saturating(),
+                        ])
                     })
                     .collect::<Vec<_>>()
             })
             .collect();
         let bgra = |[r, g, b, a]: [u8; 4]| Rgba([b, g, r, a]);
         RgbaImage::from_fn(width, height, |x, y| {
-            let px = (x as f32 + 0.5) * (w / width as f32);
-            let py = (y as f32 + 0.5) * (h / height as f32);
+            let px = (x.to_f32_lossy() + 0.5) * (w / width.to_f32_lossy());
+            let py = (y.to_f32_lossy() + 0.5) * (h / height.to_f32_lossy());
             let mut at = projection.at(px, py);
             if self.repeating {
                 if last.0 == first.0 {
@@ -174,7 +185,7 @@ impl Gradient {
             let next = stops.partition_point(|(pos, _)| *pos <= at);
             let prev = next - 1;
             let fraction = (at - stops[prev].0) / (stops[next].0 - stops[prev].0);
-            ramps[prev][(fraction * 255.).round() as usize]
+            ramps[prev][(fraction * 255.).round().to_usize_saturating()]
         })
     }
 }

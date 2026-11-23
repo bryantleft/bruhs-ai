@@ -198,7 +198,7 @@ mod tests {
             let task = tokio::spawn(async move {
                 let (mut stream, _) = server.accept().await.unwrap();
                 let mut buf = [0; 2048];
-                stream.read(&mut buf).await.unwrap();
+                let _ = stream.read(&mut buf).await.unwrap();
                 let header = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()

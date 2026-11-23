@@ -132,7 +132,9 @@ impl ProviderEditor {
 
 impl Workspace {
     pub(super) fn provider_variables(&self, wide: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let editor = self.provider_editor.as_ref().unwrap();
+        let Some(editor) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let mut section = div().flex().flex_col().gap_2().child(
             div()
                 .flex()
@@ -371,8 +373,7 @@ impl Workspace {
                     e.variable_source_menu = None;
                     let source = value
                         .strip_prefix("source:")
-                        .map(|s| Source::Vault(s.to_owned()))
-                        .unwrap_or(Source::Device);
+                        .map_or(Source::Device, |s| Source::Vault(s.to_owned()));
                     if let Some(r) = e
                         .variables
                         .iter_mut()

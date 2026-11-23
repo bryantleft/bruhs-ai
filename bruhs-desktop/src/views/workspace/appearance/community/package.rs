@@ -166,8 +166,8 @@ fn check_directory(bytes: &[u8]) -> Result<(), String> {
         .ok_or("The extension has no readable ZIP directory.")?;
     let (end, tail) = footer;
     let count = u16::from_le_bytes([tail[10], tail[11]]);
-    let length = u32::from_le_bytes(tail[12..16].try_into().unwrap()) as usize;
-    let start = u32::from_le_bytes(tail[16..20].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes([tail[12], tail[13], tail[14], tail[15]]) as usize;
+    let start = u32::from_le_bytes([tail[16], tail[17], tail[18], tail[19]]) as usize;
     if count > 5000 || tail[4..8] != [0; 4] || start.checked_add(length) != Some(end) {
         return Err("The extension exceeds the supported ZIP directory limits.".into());
     }

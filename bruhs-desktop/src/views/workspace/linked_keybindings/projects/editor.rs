@@ -151,8 +151,7 @@ impl Workspace {
         self.linked_projects
             .editor
             .as_ref()
-            .map(|e| &e.panel)
-            .unwrap_or(&self.reactive_automations)
+            .map_or(&self.reactive_automations, |e| &e.panel)
     }
     pub(in crate::views::workspace) fn scheduled_editor_projects(
         &self,
@@ -194,8 +193,8 @@ impl Workspace {
             .into_iter()
             .map(|(path, label)| DropdownOption {
                 value: role_settings_ui::project_value(&path),
-                label: label.into(),
-                description: Some(path.into()),
+                label,
+                description: Some(path),
             })
             .collect()
     }
@@ -223,8 +222,7 @@ impl Workspace {
             .editor
             .as_ref()
             .and_then(|e| e.defaults.as_ref())
-            .map(|d| d.default_model.clone())
-            .unwrap_or_else(|| self.current_model.clone())
+            .map_or_else(|| self.current_model.clone(), |d| d.default_model.clone())
     }
     fn task_editor_scope(&self) -> Option<String> {
         self.linked_projects.scope.as_ref().map(ProjectView::key)

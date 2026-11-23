@@ -147,9 +147,11 @@ impl DisplayMap {
     }
 }
 
+type CachedProjection = (String, Option<Range<usize>>, Rc<Projection>);
+
 #[derive(Default)]
 struct MarkdownEditor {
-    projection: RefCell<Option<(String, Option<Range<usize>>, Rc<Projection>)>>,
+    projection: RefCell<Option<CachedProjection>>,
     pending: Vec<Mark>,
     syntax_source: Option<String>,
     colors: Vec<Token>,
@@ -698,7 +700,9 @@ impl<K: FieldKind> EditorState<K> {
         let Some(fence) = projection.fences.iter().find(|f| f.header.start == header) else {
             return;
         };
-        self.markdown.as_mut().unwrap().picker = None;
+        if let Some(markdown) = self.markdown.as_mut() {
+            markdown.picker = None;
+        }
         let value = value.unwrap_or(&self.core.text[fence.tag.clone()]);
         let (range, value) = fence.language_edit(&self.core.text, value);
         let value = value.to_owned();
@@ -792,7 +796,9 @@ impl<K: FieldKind> EditorState<K> {
             return;
         }
         let selected = self.core.selection.range();
-        let projection = self.display_map(window).projection.unwrap();
+        let Some(projection) = self.display_map(window).projection else {
+            return;
+        };
         if projection
             .fences
             .iter()
@@ -821,7 +827,10 @@ impl<K: FieldKind> EditorState<K> {
                 self.move_to(outside, false, cx);
                 return;
             }
-            let pending = &mut self.markdown.as_mut().unwrap().pending;
+            let Some(markdown) = self.markdown.as_mut() else {
+                return;
+            };
+            let pending = &mut markdown.pending;
             if let Some(i) = pending.iter().position(|m| *m == mark) {
                 pending.remove(i);
             } else {
@@ -908,7 +917,10 @@ impl<K: FieldKind> EditorState<K> {
         if !text.is_empty() && self.at_empty_code_body(&range, window) {
             formatted = Some((format!("{text}\n"), range.start + text.len()));
         } else if !text.is_empty() && self.has_pending_format() {
-            let marks = std::mem::take(&mut self.markdown.as_mut().unwrap().pending);
+            let marks = self
+                .markdown
+                .as_mut()
+                .map_or_else(Vec::new, |m| std::mem::take(&mut m.pending));
             let projection = self.display_map(window).projection.expect("rich input");
             let delimiters: Vec<_> = marks
                 .iter()

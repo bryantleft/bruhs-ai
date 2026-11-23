@@ -355,7 +355,7 @@ fn relative_next_run(due: bruhs_models::EpochMs, now: bruhs_models::EpochMs) -> 
             bruhs_models::time::RelativeTimeStyle::Ago,
         );
     }
-    let minutes = (remaining as u64).div_ceil(60_000);
+    let minutes = remaining.cast_unsigned().div_ceil(60_000);
     match minutes {
         1 => "in under a minute".into(),
         2..60 => format!("in {minutes}m"),
@@ -414,7 +414,7 @@ pub(crate) fn linked_scheduled_row(id: String, task: &ScheduledTaskSummary, cont
     let timing = task_timing_label(&id, &task.schedule, task.enabled, task.next_run_at, true);
     div()
         .id(SharedString::from(id.clone()))
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .role(Role::Group)
         .aria_label(format!("Scheduled task {}", task.title))
         .flex().items_center().justify_between().gap_3().px_4().py_3().min_w_0()
@@ -498,8 +498,10 @@ impl ReactiveAutomations {
         });
         let mut panel = Self::with_linked_task(session, false, cx);
         if let Some(session) = &panel.linked_task {
-            let mut snapshot = ReactiveSnapshot::default();
-            snapshot.selected_task_threads = session.host.shares_conversations().then(Default::default);
+            let snapshot = ReactiveSnapshot {
+                selected_task_threads: session.host.shares_conversations().then(Default::default),
+                ..Default::default()
+            };
             panel.snapshot = Some(snapshot);
         } else {
             panel.snapshot = local.read(cx).snapshot.clone();
@@ -1033,7 +1035,7 @@ impl ReactiveAutomations {
                 .child(
                     heading(setup.title().to_owned())
                         .id(SharedString::from(title_id.clone()))
-                        .debug_selector(move || title_id.clone())
+                        .debug_selector(move || title_id)
                         .role(Role::Heading)
                         .aria_level(3)
                         .aria_label(setup.title().to_owned()),
@@ -1076,7 +1078,7 @@ impl ReactiveAutomations {
                 info = info.child(bruhs_ui::press::on_press_view(
                     div()
                         .id(SharedString::from(selector.clone()))
-                        .debug_selector(move || selector.clone())
+                        .debug_selector(move || selector)
                         .role(Role::Link)
                         .tab_index(0)
                         .aria_label(format!("Open thread {}", location.title))

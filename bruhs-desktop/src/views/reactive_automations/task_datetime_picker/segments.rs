@@ -106,7 +106,7 @@ impl Values {
             // An explicitly pasted offset represents an instant on this device.
             if let Ok(at) = chrono::DateTime::parse_from_rfc3339(first) {
                 let local = at.with_timezone(&Local);
-                fields.0[Year as usize] = Some(local.year() as u32);
+                fields.0[Year as usize] = u32::try_from(local.year()).ok();
                 fields.0[Month as usize] = Some(local.month());
                 fields.0[Day as usize] = Some(local.day());
                 fields.set_clock(local.time());
@@ -193,7 +193,10 @@ impl Segments {
     pub(super) fn new(cx: &mut App) -> Self {
         Self {
             layout: DateLayout::from_pattern(&crate::clock_format::date_time_prefix_pattern())
-                .unwrap_or_else(|| DateLayout::from_pattern("yyyy-MM-dd").unwrap()),
+                .unwrap_or_else(|| DateLayout {
+                    order: [Year, Month, Day],
+                    literals: [String::new(), "-".into(), "-".into(), String::new()],
+                }),
             focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
             digits: None,
             text_mode: false,
@@ -274,7 +277,7 @@ impl ReactiveAutomations {
                     value.0[Period as usize] = value.0[Period as usize].map(|p| 1 - p);
                 }
                 Some(match current {
-                    None if part == Year => Local::now().year() as u32,
+                    None if part == Year => u32::try_from(Local::now().year()).unwrap_or(min),
                     None if up => min,
                     None => max,
                     Some(n) if up && n >= max => min,
@@ -333,7 +336,7 @@ impl ReactiveAutomations {
         let text = values.display(part);
         div()
             .id(SharedString::from(id.clone()))
-            .debug_selector(move || id.clone())
+            .debug_selector(move || id)
             .role(Role::SpinButton)
             .aria_label(part.name())
             .aria_value(text.clone())

@@ -107,9 +107,9 @@ pub fn group_accounts(readings: Vec<Reading<'_>>) -> Vec<AccountGroup<'_>> {
         let key = base
             .filter(|_| workspace.is_some() || !ambiguous)
             .map(|base| (base, workspace));
-        let index = key
-            .map(|key| *indices.entry(key).or_insert(groups.len()))
-            .unwrap_or(groups.len());
+        let index = key.map_or(groups.len(), |key| {
+            *indices.entry(key).or_insert(groups.len())
+        });
         if index == groups.len() {
             groups.push(AccountGroup {
                 readings: vec![],

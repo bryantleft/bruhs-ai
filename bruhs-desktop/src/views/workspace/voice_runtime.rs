@@ -78,7 +78,10 @@ impl Workspace {
     }
     pub(super) fn compatible_description(&self) -> String {
         match &self.voice_runtime.status {
-            Some(status)=>status.compatible_origin.as_ref().map(|origin|format!("Recordings are sent to {origin}. Enter a model ID supported by that server.")).unwrap_or_else(||"Configure BRUHS_TRANSCRIPTION_BASE_URL and BRUHS_TRANSCRIPTION_TIMEOUT_SECS on the capture host. Set BRUHS_TRANSCRIPTION_API_KEY if the service needs a key.".into()),
+            Some(status) => status.compatible_origin.as_ref().map_or_else(
+                || "Configure BRUHS_TRANSCRIPTION_BASE_URL and BRUHS_TRANSCRIPTION_TIMEOUT_SECS on the capture host. Set BRUHS_TRANSCRIPTION_API_KEY if the service needs a key.".into(),
+                |origin| format!("Recordings are sent to {origin}. Enter a model ID supported by that server."),
+            ),
             None=>self.voice_runtime.error.clone().unwrap_or_else(|| "Reading the capture host’s transcription server…".into()),
         }
     }
@@ -149,8 +152,7 @@ impl Workspace {
         let policy = Unload::CHOICES
             .iter()
             .find(|(policy, _)| *policy == status.settings.unload)
-            .map(|(_, name)| *name)
-            .unwrap_or("Immediately");
+            .map_or("Immediately", |(_, name)| *name);
         let unload: Vec<_> = Unload::CHOICES
             .iter()
             .map(|(_, name)| (*name, *name))

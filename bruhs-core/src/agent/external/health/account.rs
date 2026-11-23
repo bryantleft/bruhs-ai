@@ -132,8 +132,16 @@ impl Connection {
     async fn start(instance: &AcpInstance, cwd: &Path) -> io::Result<Self> {
         let mut cmd = command(instance, cwd).await?;
         let mut child = cmd.stdin(Stdio::piped()).stderr(Stdio::null()).spawn()?;
-        let input = child.stdin.take().unwrap();
-        let output = BufReader::new(child.stdout.take().unwrap());
+        let input = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("child stdin was not piped"))?;
+        let output = BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("child stdout was not piped"))?,
+        );
         let mut conn = Self {
             #[cfg(unix)]
             _group: super::process::ProcessGroup::of(&child),
@@ -496,10 +504,10 @@ pub async fn run(id: &str, action: Action, events: mpsc::Sender<Event>) -> io::R
                 Kind::Terminal => {
                     let raw = conn.initialized["authMethods"]
                         .as_array()
-                        .unwrap()
-                        .iter()
-                        .find(|m| m["id"] == id)
-                        .unwrap()
+                        .and_then(|methods| methods.iter().find(|m| m["id"] == id))
+                        .ok_or_else(|| {
+                            io::Error::other("The agent no longer advertises this sign-in method.")
+                        })?
                         .clone();
                     drop(conn);
                     terminal(&instance, cwd, &raw, &events).await?;

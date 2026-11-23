@@ -47,6 +47,8 @@ pub(in crate::reactive) fn lookup(
         |row| Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?)),
     )
     .optional()?
-    .map(|(payload, token, scope)| Ok((decode(payload)?, token, scope)))
-    .unwrap_or(Err(ReactiveError::Unauthorized))
+    .map_or(
+        Err(ReactiveError::Unauthorized),
+        |(payload, token, scope)| Ok((decode(payload)?, token, scope)),
+    )
 }

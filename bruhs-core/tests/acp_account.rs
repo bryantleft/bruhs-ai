@@ -1,4 +1,5 @@
 #![cfg(unix)]
+#![expect(clippy::unwrap_used, reason = "integration test helpers")]
 use bruhs_core::agent::health::account::{self, Account, Action, Event, Kind};
 use std::{io, os::unix::fs::PermissionsExt, path::Path, process::Command};
 use tokio::sync::mpsc;

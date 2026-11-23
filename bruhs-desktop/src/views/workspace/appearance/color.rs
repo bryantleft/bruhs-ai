@@ -1,5 +1,7 @@
 //! The converter uses sRGB for alpha composition and WCAG contrast, and OKLCH
 //! for lightness adjustments that retain the source palette's hue.
+use bruhs_models::num::ToIntSaturating;
+
 fn linear(v: f64) -> f64 {
     if v <= 0.04045 {
         v / 12.92
@@ -30,7 +32,7 @@ impl Rgb {
     }
 
     pub(super) fn css(self) -> String {
-        let [r, g, b] = self.0.map(|v| v.round() as u8);
+        let [r, g, b] = self.0.map(|v| v.round().to_u8_saturating());
         format!("#{r:02x}{g:02x}{b:02x}")
     }
 

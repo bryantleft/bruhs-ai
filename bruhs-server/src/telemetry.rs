@@ -218,6 +218,7 @@ async fn set(
             host.0.generation.fetch_add(1, Ordering::Release);
         }
         *stored = next;
+        drop(stored);
         host.0.enabled.store(
             settings.signals.iter().any(|e| !e.url.is_empty()),
             Ordering::Relaxed,
@@ -249,8 +250,7 @@ pub async fn observe(State(host): State<Telemetry>, request: Request, next: Next
     let template = request
         .extensions()
         .get::<MatchedPath>()
-        .map(|p| p.as_str())
-        .unwrap_or("");
+        .map_or("", |p| p.as_str());
     if !host.0.enabled.load(Ordering::Relaxed)
         || !template.starts_with("/api/")
         || template.starts_with("/api/diagnostics/export")
@@ -260,13 +260,16 @@ pub async fn observe(State(host): State<Telemetry>, request: Request, next: Next
     let generation = host.0.generation.load(Ordering::Acquire);
     let route = template.to_owned();
     let method = request.method().as_str().chars().take(20).collect();
-    let start = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
+    let start = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    )
+    .unwrap_or(u64::MAX);
     let clock = Instant::now();
     let response = next.run(request).await;
-    let end = start.saturating_add(clock.elapsed().as_nanos() as u64);
+    let end = start.saturating_add(u64::try_from(clock.elapsed().as_nanos()).unwrap_or(u64::MAX));
     let _ = host.0.events.try_send(Record {
         generation,
         start,
@@ -344,7 +347,7 @@ fn envelope(signal: Signal, batch: &[Record]) -> Value {
             let end = batch.iter().map(|r| r.end).max().unwrap_or(0);
             let duration = batch
                 .iter()
-                .map(|r| r.end.saturating_sub(r.start) as f64 / 1e9)
+                .map(|r| Duration::from_nanos(r.end.saturating_sub(r.start)).as_secs_f64())
                 .sum::<f64>();
             let point = json!({"startTimeUnixNano":start.to_string(),"timeUnixNano":end.to_string(),"count":batch.len().to_string(),"sum":duration,"bucketCounts":[batch.len().to_string()]});
             json!({"resourceMetrics":[{"resource":resource,"scopeMetrics":[{"scope":scope,"metrics":[{"name":"http.server.request.duration","unit":"s","histogram":{"aggregationTemporality":1,"dataPoints":[point]}}]}]}]})

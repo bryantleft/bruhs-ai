@@ -223,7 +223,7 @@ impl Workspace {
             if chat.project_scoped
                 && (scope.is_empty()
                     || scope == chat.settings_project_path()
-                    || scope == &chat.project_path)
+                    || scope == chat.project_path)
             {
                 return Some(
                     chat.worktree_path

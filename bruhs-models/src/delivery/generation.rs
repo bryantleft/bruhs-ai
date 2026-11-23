@@ -122,8 +122,7 @@ impl GenerationOptions {
     pub fn effective<'a>(&'a self, option: &ModelOption) -> &'a str {
         self.0
             .get(&option.kind)
-            .map(String::as_str)
-            .unwrap_or(option.default)
+            .map_or(option.default, String::as_str)
     }
     pub fn value(&self, model: &str, kind: OptionKind) -> Option<&str> {
         model_options(model)

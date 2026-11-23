@@ -268,8 +268,7 @@ pub(super) async fn stream_agent_response(
     }
     let claim = required_session.and_then(|r| r.claim);
     let desktop_turn = match claim
-        .map(Ok)
-        .unwrap_or_else(|| bruhs_core::reactive::desktop_turn_lock(&turn.thread_id))
+        .map_or_else(|| bruhs_core::reactive::desktop_turn_lock(&turn.thread_id), Ok)
     {
         Ok(lock) => Arc::new(lock),
         Err(error) => {

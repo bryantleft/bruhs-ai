@@ -87,10 +87,10 @@ impl SavedLinks {
 }
 impl<T> LinkedHost<T> {
     pub(super) fn destination(&self) -> Destination {
-        self.tunnel
-            .as_ref()
-            .map(|t| t.destination.clone())
-            .unwrap_or_else(|| Destination::Https(self.endpoint.origin().ascii_serialization()))
+        self.tunnel.as_ref().map_or_else(
+            || Destination::Https(self.endpoint.origin().ascii_serialization()),
+            |t| t.destination.clone(),
+        )
     }
 }
 
@@ -103,10 +103,13 @@ pub(super) struct Vault {
 }
 impl Vault {
     pub(super) fn projects() -> Self {
-        Self {
-            #[cfg(not(test))]
-            projects: true,
-            ..Self::default()
+        #[cfg(not(test))]
+        {
+            Self { projects: true }
+        }
+        #[cfg(test)]
+        {
+            Self::default()
         }
     }
     #[cfg(not(test))]

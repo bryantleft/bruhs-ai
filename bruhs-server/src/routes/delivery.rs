@@ -71,7 +71,7 @@ async fn preference_path(path: Option<&str>) -> Result<Option<HomePath>, AppErro
 
 async fn writer_models(Query(scope): Query<DeliveryPreferenceScope>) -> Result<Json<writer_catalog::WriterCatalog>, AppError> {
     let path = preference_path(scope.path.as_deref()).await?;
-    let project = path.as_ref().map(HomePath::as_path).unwrap_or_else(|| std::path::Path::new(""));
+    let project = path.as_ref().map_or_else(|| std::path::Path::new(""), HomePath::as_path);
     Ok(Json(bruhs_core::agent::writer_catalog_for_project(project).await))
 }
 

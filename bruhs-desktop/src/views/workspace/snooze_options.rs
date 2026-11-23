@@ -27,7 +27,7 @@ pub(super) enum Choice {
 fn defaults() -> Vec<Choice> {
     let at = |day: &str, hour| Choice::At {
         day: day.into(),
-        time: NaiveTime::from_hms_opt(hour, 0, 0).unwrap(),
+        time: NaiveTime::from_hms_opt(hour, 0, 0).expect("hardcoded default snooze hour is valid"),
     };
     vec![
         Choice::After { minutes: 60 },
@@ -66,8 +66,7 @@ impl Choice {
                 "{} at {}",
                 DAYS.iter()
                     .find(|(k, _)| *k == day)
-                    .map(|(_, d)| *d)
-                    .unwrap_or(day),
+                    .map_or(day.as_str(), |(_, d)| *d),
                 time.format(crate::clock_format::pattern())
             ),
         }
@@ -87,8 +86,10 @@ impl Choice {
                     "tomorrow" => 1,
                     "week" => 7,
                     weekday => {
-                        let offset =
-                            DAYS[3..10].iter().position(|(key, _)| *key == weekday)? as u32;
+                        let offset = u32::try_from(
+                            DAYS[3..10].iter().position(|(key, _)| *key == weekday)?,
+                        )
+                        .ok()?;
                         (offset + 6 - now.weekday().num_days_from_monday()) % 7 + 1
                     }
                 };
@@ -149,8 +150,9 @@ impl Workspace {
 
     fn edited_snooze_choices(&self) -> Vec<Choice> {
         self.snooze_choices(&self.settings_project_scope)
-            .map(|choices| choices.iter().take(MAX_OPTIONS).cloned().collect())
-            .unwrap_or_else(defaults)
+            .map_or_else(defaults, |choices| {
+                choices.iter().take(MAX_OPTIONS).cloned().collect()
+            })
     }
 
     fn set_snooze_choices(&mut self, choices: Option<Vec<Choice>>, cx: &mut Context<'_, Self>) {

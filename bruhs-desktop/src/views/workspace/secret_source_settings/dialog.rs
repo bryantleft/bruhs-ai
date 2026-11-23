@@ -73,7 +73,7 @@ impl SourceSettings {
         let selector = format!("toggle-secret-account-{id}");
         let toggle = div()
             .id(SharedString::from(selector.clone()))
-            .debug_selector(move || selector.clone())
+            .debug_selector(move || selector)
             .min_w_0()
             .truncate()
             .role(Role::Button)
@@ -227,9 +227,10 @@ impl SourceSettings {
                     .child(field("Name", name, errors.0, "secret-provider-name-error"))
                     .child(account_field);
                 (
-                    existing
-                        .map(|s| format!("Edit {}", s.name))
-                        .unwrap_or_else(|| "Add a 1Password provider".into()),
+                    existing.map_or_else(
+                        || "Add a 1Password provider".into(),
+                        |s| format!("Edit {}", s.name),
+                    ),
                     if existing.is_some() {
                         "Save changes"
                     } else {
@@ -250,11 +251,10 @@ impl SourceSettings {
                     .iter()
                     .filter(|b| b.source == *id)
                     .map(|b| {
-                        let target = b
+                        let target: &str = b
                             .target
                             .parse::<AgentProvider>()
-                            .map(|p| p.label())
-                            .unwrap_or(&b.target);
+                            .map_or(b.target.as_str(), |p| p.label());
                         format!("{target} · {}", b.variable)
                     })
                     .chain(consumers.iter().flatten().cloned())

@@ -263,6 +263,7 @@ mod tests {
         assert!(status.success());
     }
 
+    #[expect(clippy::unwrap_used, reason = "test helper")]
     async fn exercise() {
         let home = PathBuf::from(std::env::var_os("BRUHS_SCRATCH_TEST_HOME").unwrap());
         assert_eq!(std::env::var_os("HOME").unwrap(), home.as_os_str());

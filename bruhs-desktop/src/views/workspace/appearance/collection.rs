@@ -1,6 +1,7 @@
 use super::library::{InstalledTheme, ThemeLibrary};
 use super::picker::{picker_button, ThemeChoice};
 use super::*;
+use bruhs_models::num::ToFloatLossy;
 use bruhs_ui::press::{focusable_control, on_press, Interactivity};
 use bruhs_ui::theme::{Palette, ThemeMode};
 
@@ -174,7 +175,7 @@ impl RenderOnce for ModeSwatches {
             .p(px(2.))
             .rounded_full()
             .relative()
-            .child(color_disc(chosen.0.palette(mode).unwrap()))
+            .when_some(chosen.0.palette(mode), |el, p| el.child(color_disc(p)))
             .when(active, |el| {
                 el.child(
                     div()
@@ -226,7 +227,7 @@ impl RenderOnce for ModeSwatches {
             );
         if count > 1 {
             let hover_owner = owner.clone();
-            let hover_id = id.clone();
+            let hover_id = id;
             group = group.on_hover(move |hover, _, cx| {
                 let _ = hover_owner.update(cx, |ws, cx| {
                     ws.expand_theme_fan(&hover_id, mode, &handles, *hover, cx)
@@ -234,7 +235,7 @@ impl RenderOnce for ModeSwatches {
             });
             if expanded {
                 for (index, (t, label)) in options.iter().enumerate() {
-                    let position = index as f32 / (count - 1) as f32 - 0.5;
+                    let position = index.to_f32_lossy() / (count - 1).to_f32_lossy() - 0.5;
                     let active = selection.as_ref() == Some(&t.file.id);
                     let tip = format!("Use {label} for {mode_name} mode");
                     let option = picker_button(format!("{key}-{}", t.file.id), tip.clone(), active)
@@ -246,7 +247,7 @@ impl RenderOnce for ModeSwatches {
                         .p(px(2.))
                         .bg(theme::longan_900())
                         .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
-                        .child(color_disc(t.palette(mode).unwrap()));
+                        .when_some(t.palette(mode), |el, p| el.child(color_disc(p)));
                     let option = on_press(option, activate(t.clone()));
                     if crate::motion::reduce_motion(cx) {
                         group = group.child(option);
@@ -258,7 +259,9 @@ impl RenderOnce for ModeSwatches {
                             SharedString::from(format!("{key}-reveal-{}", t.file.id)),
                             animation,
                             move |el, elapsed| {
-                                let progress = ((elapsed * duration as f32 - delay as f32) / 200.)
+                                let progress = ((elapsed * duration.to_f32_lossy()
+                                    - delay.to_f32_lossy())
+                                    / 200.)
                                     .clamp(0., 1.);
                                 let ease = 1. - (1. - progress).powi(3);
                                 let size = 16. + 12. * ease;
@@ -321,7 +324,9 @@ impl Workspace {
         members: &[Arc<InstalledTheme>],
         cx: &Context<'_, Self>,
     ) -> Div {
-        let id = members[0].file.collection().unwrap();
+        let Some(id) = members.first().and_then(|t| t.file.collection()) else {
+            return div();
+        };
         let labels = variant_labels(members);
         let mut row = div().flex().justify_center().items_center();
         for mode in [ThemeMode::Light, ThemeMode::Dark] {
@@ -374,9 +379,11 @@ impl Workspace {
             return;
         }
         let first = &group[0].file;
-        self.theme_navigation
-            .last_used
-            .insert(first.collection().unwrap().to_owned(), first.id.clone());
+        if let Some(collection) = first.collection() {
+            self.theme_navigation
+                .last_used
+                .insert(collection.to_owned(), first.id.clone());
+        }
         let lib = Arc::make_mut(&mut self.custom_themes);
         for mode in [ThemeMode::Light, ThemeMode::Dark] {
             if let Some(t) = group.iter().find(|t| t.palette(mode).is_some()) {
@@ -437,7 +444,7 @@ impl Workspace {
                     t.file.name.clone(),
                     Interactivity::Enabled,
                 )
-                .debug_selector(move || key.clone())
+                .debug_selector(move || key)
                 .aria_toggled(if selected {
                     Toggled::True
                 } else {

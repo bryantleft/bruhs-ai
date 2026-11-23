@@ -164,7 +164,7 @@ impl Workspace {
         }
         self.quota_recoveries
             .contains_key(id)
-            .then(|| std::time::Duration::from_millis(delay.max(0) as u64))
+            .then(|| std::time::Duration::from_millis(delay.max(0).cast_unsigned()))
     }
 }
 

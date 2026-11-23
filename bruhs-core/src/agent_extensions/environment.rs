@@ -104,10 +104,10 @@ pub(super) fn persist(
             if previous.and_then(|p| p.environment.get(name)) == Some(variable) {
                 continue;
             }
-            if sources.is_none() {
-                sources = Some(crate::secret_sources::configured()?);
-            }
-            let settings = sources.as_ref().unwrap();
+            let settings = match &sources {
+                Some(settings) => settings,
+                None => sources.insert(crate::secret_sources::configured()?),
+            };
             let target = format!("acp/{}", agent.id);
             if settings
                 .bindings

@@ -565,7 +565,7 @@ mod tests {
             prefs.ordered_microphones(),
             [usb.clone(), None, headset.clone()]
         );
-        prefs.set_microphone_order(vec![usb.clone(), headset.clone(), None]);
+        prefs.set_microphone_order(vec![usb, headset, None]);
         let order = prefs.ordered_microphones();
         assert_eq!(preferred_input(&order, |id| id == "Headset", true), Some(1));
         assert_eq!(preferred_input(&order, |_| false, true), Some(2));

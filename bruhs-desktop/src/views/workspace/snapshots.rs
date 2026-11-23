@@ -88,7 +88,8 @@ fn visible_text(path: &std::path::Path, target: Option<WindowTarget>) -> Result<
         fn bruhs_free_snapshot_text(value: *mut c_char);
     }
     let path = CString::new(path.as_os_str().as_encoded_bytes()).map_err(|e| e.to_string())?;
-    // The native bridge returns an owned UTF-8 copy, independent of the autorelease pool.
+    // SAFETY: `path` is a valid NUL-terminated CString; returned pointers are checked non-null,
+    // converted to owned strings, and freed with `bruhs_free_snapshot_text`.
     unsafe {
         // A direct capture has a verified window identity. Picker output only
         // identifies the selected pixels, so use Vision on those pixels.
@@ -206,7 +207,7 @@ impl Workspace {
                             let _ = window.update(cx, |_, window, cx| {
                                 this.update(cx, |this, cx| {
                                     let mut target = WindowTarget::default();
-                                    // Resolve before changing the bruhs window or its focus.
+                                    // SAFETY: `target` is a valid mutable `WindowTarget` pointer for the FFI call.
                                     if unsafe { bruhs_front_snapshot_target(&mut target) } {
                                         this.start_window_capture(Some(target), window, cx);
                                     } else {
@@ -290,7 +291,7 @@ impl Workspace {
                 };
                 #[cfg(target_os = "macos")]
                 if self.active_thread_id.as_deref() == Some(thread_id) {
-                    // The system picker withholds the selected window's location.
+                    // SAFETY: `capture.image` is a valid byte slice whose pointer and length stay valid for the call.
                     unsafe {
                         bruhs_snapshot_feedback(
                             capture.target.unwrap_or_default(),

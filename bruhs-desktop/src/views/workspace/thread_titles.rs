@@ -206,7 +206,7 @@ impl Workspace {
             self.schedule_title_attempt(
                 id,
                 request.serial,
-                Duration::from_millis(remaining as u64),
+                Duration::from_millis(remaining.cast_unsigned()),
                 cx,
             );
         }
@@ -335,7 +335,9 @@ impl Workspace {
         {
             return;
         }
-        let mut request = self.title_requests.remove(id).unwrap();
+        let Some(mut request) = self.title_requests.remove(id) else {
+            return;
+        };
         let Some(thread) = self
             .threads
             .iter()
@@ -351,7 +353,9 @@ impl Workspace {
             .and_then(|error| request.retry_after(error))
         {
             request.failures += 1;
-            request.retry_at_ms = EpochMs::now().as_millis() + delay.as_millis() as i64;
+            request.retry_at_ms = EpochMs::now()
+                .as_millis()
+                .saturating_add(i64::try_from(delay.as_millis()).unwrap_or(i64::MAX));
             self.title_requests.insert(id.to_owned(), request);
             self.schedule_title_attempt(id, serial, delay, cx);
             self.persist_and_notify(cx);

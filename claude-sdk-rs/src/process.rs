@@ -176,10 +176,20 @@ impl CliProcess {
     }
 
     /// Wait for the start of a frame without consuming a partial line if the wait is cancelled.
-    #[allow(dead_code)] // The ACP adapter also compiles this shared process reader.
+    #[expect(
+        clippy::allow_attributes,
+        reason = "shared via #[path] across crates where only bruhs-core calls stdout_ready"
+    )]
+    #[allow(
+        dead_code,
+        reason = "The ACP adapter in bruhs-core calls this shared process reader."
+    )]
     pub(crate) async fn stdout_ready(&mut self) -> std::io::Result<()> {
         if self.stdout.fill_buf().await?.is_empty() {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Provider closed its output."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Provider closed its output.",
+            ));
         }
         Ok(())
     }

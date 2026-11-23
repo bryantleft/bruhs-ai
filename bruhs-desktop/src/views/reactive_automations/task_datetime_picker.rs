@@ -118,7 +118,7 @@ impl AutomationEditor {
         let times = value(&self.source.times, cx);
         let first = times.split(',').next().unwrap_or_default().trim();
         let time = task_schedule::parse_clock(first)
-            .unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+            .unwrap_or_else(|| NaiveTime::from_hms_opt(9, 0, 0).expect("09:00:00 is valid"));
         now.date().and_time(time)
     }
 
@@ -324,7 +324,7 @@ impl ReactiveAutomations {
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if matches!(key, "left" | "right") {
-                    let index = part.index() as isize + if key == "left" { -1 } else { 1 };
+                    let index = part.index().cast_signed() + if key == "left" { -1 } else { 1 };
                     let columns = if crate::clock_format::uses_24_hours() {
                         2
                     } else {
@@ -332,7 +332,7 @@ impl ReactiveAutomations {
                     };
                     if (0..columns).contains(&index) {
                         if let Some(editor) = this.schedule_editor_mut() {
-                            editor.date_time_picker.clock[index as usize].focus(window, cx);
+                            editor.date_time_picker.clock[index.cast_unsigned()].focus(window, cx);
                         }
                     }
                     window.prevent_default();
@@ -359,7 +359,7 @@ impl ReactiveAutomations {
                 let option = part.option(n);
                 div()
                     .id((id, n as usize))
-                    .debug_selector(move || key.clone())
+                    .debug_selector(move || key)
                     .role(Role::ListBoxOption)
                     .aria_label(format!("{label} {option}"))
                     .aria_selected(n == current)
@@ -481,7 +481,7 @@ impl ReactiveAutomations {
         for (row, names) in MONTHS.chunks(3).enumerate() {
             chooser = chooser.child(div().flex().gap_1().children(names.iter().enumerate().map(
                 |(col, &name)| {
-                    let m = (row * 3 + col + 1) as u32;
+                    let m = u32::try_from(row * 3 + col + 1).unwrap_or(1);
                     ghost_control(("schedule-month", m as usize), &name[..3], false)
                         .debug_selector(move || format!("schedule-month-{m}"))
                         .aria_label(format!("{name} {year}"))

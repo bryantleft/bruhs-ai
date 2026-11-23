@@ -84,7 +84,7 @@ zeroize = { workspace = true }
 block2 = "0.6"
 core-foundation = "0.10"
 # Embedded preview (WKWebView as a child of the gpui window).
-wry = { version = "0.55", default-features = false, features = ["fullscreen"] }
+wry = { version = "0.57", default-features = false }
 # Backdrop blur behind modal scrims (a Core Image filter on a native layer
 # above the Metal one).
 objc2 = "0.6"
@@ -94,7 +94,7 @@ raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # WebView2 attaches its owned child HWND to the GPUI Win32 window.
-wry = { version = "0.55", default-features = false }
+wry = { version = "0.57", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The shared platform dependency enables fonts only. Both window backends are
@@ -103,7 +103,7 @@ wry = { version = "0.55", default-features = false }
 gpui_platform = { workspace = true, features = ["x11", "wayland"] }
 # GPUI is not a GTK app. Its X11/XWayland window is the native parent; the
 # adapter initializes GTK and dispatches GLib events on GPUI's main thread.
-wry = { version = "0.55", default-features = false, features = ["os-webview", "x11"] }
+wry = { version = "0.57", default-features = false, features = ["os-webview", "x11"] }
 gtk = "0.18"
 gdkx11 = "0.18"
 x11-dl = "2.21"

@@ -240,7 +240,7 @@ impl Workspace {
             let id = format!("{row}-run-status");
             div()
                 .id(SharedString::from(id.clone()))
-                .debug_selector(move || id.clone())
+                .debug_selector(move || id)
                 .role(if error { Role::Alert } else { Role::Status })
                 .px_4()
                 .pb_2()

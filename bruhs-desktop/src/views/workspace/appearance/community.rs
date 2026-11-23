@@ -68,7 +68,8 @@ struct Registry {
 impl Default for Registry {
     fn default() -> Self {
         Self {
-            origin: Url::parse("https://open-vsx.org/").unwrap(),
+            origin: Url::parse("https://open-vsx.org/")
+                .expect("hardcoded Open VSX origin is a valid URL"),
         }
     }
 }
@@ -211,7 +212,7 @@ impl Registry {
     async fn details(&self, publisher: &str, name: &str) -> Result<Option<Extension>, String> {
         let mut url = self.origin.clone();
         url.path_segments_mut()
-            .unwrap()
+            .map_err(|()| "Open VSX origin cannot be a base URL.".to_owned())?
             .clear()
             .extend(["api", publisher, name]);
         let v = serde_json::from_slice(&get(&url, FILE_LIMIT).await?).map_err(|e| e.to_string())?;
@@ -239,7 +240,10 @@ impl Registry {
         )
     }
     async fn search(&self, query: &str, sort: Sort) -> Result<Vec<Extension>, String> {
-        let mut url = self.origin.join("api/-/search").unwrap();
+        let mut url = self
+            .origin
+            .join("api/-/search")
+            .map_err(|e| e.to_string())?;
         url.query_pairs_mut().extend_pairs([
             ("query", query),
             ("category", "Themes"),

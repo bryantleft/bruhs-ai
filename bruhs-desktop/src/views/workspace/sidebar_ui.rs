@@ -61,11 +61,13 @@ pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 16.0;
 const SIDEBAR_HEADER_GAP_PX: f32 = 8.0;
 const SIDEBAR_BRAND_LOGO_PX: f32 = 20.0;
 
+type BrandLogoCache = Option<(ParsedSvg, Vec<(i32, Arc<RenderImage>)>)>;
+
 /// Rasterize `bruhs.svg` at its exact display pixel size so Metal never
 /// downsamples the fine halftone dot grid without mipmaps (which causes Moiré).
 fn brand_logo_image(size_px: Pixels, scale_factor: f32, cx: &App) -> Option<Arc<RenderImage>> {
     thread_local! {
-        static CACHE: RefCell<Option<(ParsedSvg, Vec<(i32, Arc<RenderImage>)>)>> =
+        static CACHE: RefCell<BrandLogoCache> =
             const { RefCell::new(None) };
     }
     let device_px = (f32::from(size_px) * scale_factor)

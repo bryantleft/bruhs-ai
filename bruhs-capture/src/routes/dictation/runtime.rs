@@ -17,7 +17,7 @@ struct Job {
     model: bruhs_models::WhisperModel,
     samples: Vec<f32>,
     language: Option<String>,
-    _permit: SemaphorePermit<'static>,
+    _permit: Box<dyn Send>,
     reply: oneshot::Sender<Result<String, String>>,
 }
 enum Message {
@@ -144,14 +144,18 @@ impl Engine {
                 .map_err(|e| e.to_string())?;
             *worker = Some(send);
         }
-        if worker
+        let sent = worker
             .as_ref()
-            .is_some_and(|w| w.send(Message::Transcribe(job)).is_ok())
-        {
-            return Ok(());
+            .is_some_and(|w| w.send(Message::Transcribe(job)).is_ok());
+        if !sent {
+            *worker = None;
         }
-        *worker = None;
-        Err("The dictation worker stopped.".into())
+        drop(worker);
+        if sent {
+            Ok(())
+        } else {
+            Err("The dictation worker stopped.".into())
+        }
     }
 }
 fn run(
@@ -276,7 +280,7 @@ pub(super) async fn infer(
             model,
             samples,
             language,
-            _permit: permit,
+            _permit: Box::new(permit),
             reply,
         })
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;

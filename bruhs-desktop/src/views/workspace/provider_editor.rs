@@ -1061,7 +1061,9 @@ impl Workspace {
     }
 
     fn provider_list_fields(&self, models: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let (label, key, add, fields) = if models {
             ("Models", "model", "Add model", &e.models)
         } else {

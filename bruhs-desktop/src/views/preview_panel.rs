@@ -110,7 +110,9 @@ mod host {
         // AppKit exports these immutable names for the lifetime of the process.
         let named = match appearance {
             BrowserAppearance::System => None,
+            // SAFETY: NSAppearanceNameAqua is an immutable AppKit extern static constant.
             BrowserAppearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
+            // SAFETY: NSAppearanceNameDarkAqua is an immutable AppKit extern static constant.
             BrowserAppearance::Dark => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }),
         };
         webview.webview().setAppearance(named.as_deref());

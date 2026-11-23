@@ -926,7 +926,12 @@ mod tests {
         let before = ws.read_with(win, |ws, _| ws.linked_projects.hosts.len());
         ws.update_in(win, |ws, window, cx| {
             ws.open_project_link(Some(&host.host), window, cx);
-            ws.linked_projects.form.as_ref().unwrap().token.update(cx, |field, cx| {
+            ws.linked_projects
+                .form
+                .as_ref()
+                .expect("project link form open")
+                .token
+                .update(cx, |field, cx| {
                 field.set_value(token.repeat(64), window, cx);
             });
             ws.connect_project_host(cx);

@@ -110,8 +110,9 @@ pub(super) fn pair_variants(
     themes: Vec<InstalledTheme>,
     paired_id: impl Fn(&str, &str) -> String,
 ) -> Vec<InstalledTheme> {
-    static MODE: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"(?i-u)\b(?:light|dark)\b").unwrap());
+    static MODE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i-u)\b(?:light|dark)\b").expect("valid static regex")
+    });
     let mut groups = BTreeMap::<String, Vec<usize>>::new();
     for (index, theme) in themes.iter().enumerate() {
         if !theme.file.variants.is_empty() || !MODE.is_match(&theme.file.name) {
@@ -131,8 +132,10 @@ pub(super) fn pair_variants(
         let [first, second] = indices.as_slice() else {
             continue;
         };
-        let a = &result[*first].as_ref().unwrap().file;
-        let b = &result[*second].as_ref().unwrap().file;
+        let (Some(a), Some(b)) = (result[*first].as_ref(), result[*second].as_ref()) else {
+            continue;
+        };
+        let (a, b) = (&a.file, &b.file);
         if a.appearance == b.appearance {
             continue;
         }

@@ -195,7 +195,9 @@ pub(in crate::views::workspace) fn window_row(w: &QuotaWindow, now: i64) -> AnyE
     let remaining = w.resets_at.map(|end| end.saturating_sub(now).max(0));
     let time_fraction = remaining
         .zip(minutes.filter(|m| *m > 0))
-        .map(|(s, m)| (s as f64 / (f64::from(m) * 60.)).clamp(0., 1.));
+        .map(|(s, m)| {
+            (bruhs_models::num::ToFloatLossy::to_f64_lossy(s) / (f64::from(m) * 60.)).clamp(0., 1.)
+        });
     let pace = time_fraction.map(|f| {
         let delta = 100. - w.used_percent - f * 100.;
         if delta < -5. {
@@ -245,7 +247,9 @@ pub(in crate::views::workspace) fn window_row(w: &QuotaWindow, now: i64) -> AnyE
                 div()
                     .h_full()
                     .rounded_full()
-                    .w(relative((left / 100.) as f32))
+                    .w(relative(bruhs_models::num::ToFloatLossy::to_f32_lossy(
+                        left / 100.,
+                    )))
                     .bg(accent),
             )
         })
@@ -253,7 +257,9 @@ pub(in crate::views::workspace) fn window_row(w: &QuotaWindow, now: i64) -> AnyE
             el.child(
                 div()
                     .absolute()
-                    .left(relative(f.clamp(0., 0.99) as f32))
+                    .left(relative(bruhs_models::num::ToFloatLossy::to_f32_lossy(
+                        f.clamp(0., 0.99),
+                    )))
                     .top(px(-2.))
                     .w(px(2.))
                     .h(px(12.))

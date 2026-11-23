@@ -31,7 +31,7 @@ pub(crate) async fn default_branch(project: &Path) -> Result<DefaultBranch, GitE
         .lines()
         .find(|n| *n == "origin")
         .or_else(|| names.lines().next())
-        .unwrap();
+        .ok_or_else(|| GitError::Failed("No git remote configured.".into()))?;
     let description = value(project, &["ls-remote", "--symref", "--", remote, "HEAD"]).await?;
     let name = description
         .lines()

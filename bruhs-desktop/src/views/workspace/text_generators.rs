@@ -491,14 +491,13 @@ impl Workspace {
                             use bruhs_models::delivery::{DeliveryPreferenceChange, WriterModel};
                             self.queue_delivery_change(
                                 "",
-                                DeliveryPreferenceChange::WriterModel(Some(
-                                    model
-                                        .map(|model| WriterModel::Separate {
-                                            model,
-                                            options: Default::default(),
-                                        })
-                                        .unwrap_or(WriterModel::TextGeneration),
-                                )),
+                                DeliveryPreferenceChange::WriterModel(Some(model.map_or(
+                                    WriterModel::TextGeneration,
+                                    |model| WriterModel::Separate {
+                                        model,
+                                        options: Default::default(),
+                                    },
+                                ))),
                                 cx,
                             );
                         }
@@ -645,16 +644,13 @@ impl Workspace {
                         ws.generators.assignment_test = Some((
                             id,
                             model,
-                            result
-                                .map(|_| format!("{slug} answered."))
-                                .unwrap_or_else(|error| error),
+                            result.map_or_else(|error| error, |_| format!("{slug} answered.")),
                         ));
                     } else {
-                        ws.generators.notice = Some(
-                            result
-                                .map(|_| "Model responded successfully.".to_owned())
-                                .unwrap_or_else(|error| error),
-                        );
+                        ws.generators.notice = Some(result.map_or_else(
+                            |error| error,
+                            |_| "Model responded successfully.".to_owned(),
+                        ));
                     }
                 }
                 cx.notify();

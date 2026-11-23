@@ -26,7 +26,9 @@ pub(super) fn display_name(raw: &str) -> String {
                     return part.to_owned();
                 }
                 let mut chars = part.chars();
-                let first = chars.next().unwrap();
+                let Some(first) = chars.next() else {
+                    return String::new();
+                };
                 format!("{}{}", first.to_uppercase(), chars.as_str())
             })
             .collect::<Vec<_>>()

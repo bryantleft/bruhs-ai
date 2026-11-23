@@ -1,5 +1,6 @@
 //! Resolve author coordinates against the size of one CSS background tile.
 use super::super::style::{Length, position, words};
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 
 pub(super) fn angle(input: &str) -> Option<i64> {
     let degrees = if input.parse::<f64>() == Ok(0.) {
@@ -17,7 +18,7 @@ pub(super) fn angle(input: &str) -> Option<i64> {
     };
     degrees
         .is_finite()
-        .then(|| (degrees * 1000.).round() as i64)
+        .then(|| (degrees * 1000.).round().to_i64_saturating())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,16 +43,18 @@ impl Direction {
             }
             return ((x, y) != (0, 0)).then_some(Self::Corner(x, y));
         }
-        Some(Self::Angle(angle(input)?.rem_euclid(360000) as i32))
+        Some(Self::Angle(
+            i32::try_from(angle(input)?.rem_euclid(360000)).ok()?,
+        ))
     }
 
     pub(super) fn vector(&self, w: f32, h: f32) -> (f32, f32) {
         let (x, y) = match self {
             Self::Angle(angle) => {
-                let (s, c) = (*angle as f32 / 1000.).to_radians().sin_cos();
+                let (s, c) = (angle.to_f32_lossy() / 1000.).to_radians().sin_cos();
                 (s, -c)
             }
-            Self::Corner(x, y) => (*x as f32 * h, *y as f32 * w),
+            Self::Corner(x, y) => (f32::from(*x) * h, f32::from(*y) * w),
         };
         let len = x.hypot(y);
         let snap = |v: f32| if v.abs() < 1e-6 { 0. } else { v };
@@ -114,10 +117,17 @@ impl RadialSize {
     fn radii(self, x: f32, y: f32, w: f32, h: f32, zoom: f32) -> (f32, f32) {
         match self {
             Self::Radius(r) => {
-                let r = r.value(w, zoom).unwrap();
+                let r = r
+                    .value(w, zoom)
+                    .expect("parsed radial radius is a numeric length");
                 (r, r)
             }
-            Self::Radii(rx, ry) => (rx.value(w, zoom).unwrap(), ry.value(h, zoom).unwrap()),
+            Self::Radii(rx, ry) => (
+                rx.value(w, zoom)
+                    .expect("parsed radial x-radius is a numeric length"),
+                ry.value(h, zoom)
+                    .expect("parsed radial y-radius is a numeric length"),
+            ),
             Self::Extent {
                 circle,
                 farthest,
@@ -203,7 +213,14 @@ impl Shape {
     }
 
     pub fn resolve(&self, w: f32, h: f32, zoom: f32) -> Projection {
-        let center = |(x, y): Center| (x.value(w, zoom).unwrap(), y.value(h, zoom).unwrap());
+        let center = |(x, y): Center| {
+            (
+                x.value(w, zoom)
+                    .expect("parsed gradient center x is a numeric length"),
+                y.value(h, zoom)
+                    .expect("parsed gradient center y is a numeric length"),
+            )
+        };
         match self {
             Self::Linear(direction) => {
                 let (dx, dy) = direction.vector(w, h);
@@ -233,7 +250,7 @@ impl Shape {
                 Projection::Conic {
                     x,
                     y,
-                    from: *from as f32 / 1000.,
+                    from: from.to_f32_lossy() / 1000.,
                 }
             }
         }

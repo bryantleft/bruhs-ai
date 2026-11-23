@@ -20,7 +20,7 @@ pub(super) struct Shortcut {
 }
 impl Drop for Shortcut {
     fn drop(&mut self) {
-        // Unregister on the GPUI thread before releasing the callback's boxed sender.
+        // SAFETY: `self.handle` was returned by `bruhs_register_snapshot_shortcut` and is released once on drop before `_sender` drops.
         unsafe {
             bruhs_release_snapshot_shortcut(self.handle.as_ptr());
         }
@@ -28,6 +28,7 @@ impl Drop for Shortcut {
 }
 
 extern "C" fn pressed(context: *mut c_void) {
+    // SAFETY: `context` points to the pinned boxed `Sender<()>` owned by `Shortcut`, which unregisters before dropping it.
     let sender = unsafe { &*context.cast::<Sender<()>>() };
     let _ = sender.try_send(());
 }
@@ -45,6 +46,7 @@ impl Shortcut {
             | u32::from(chord.ctrl) << 1
             | u32::from(chord.alt) << 2
             | u32::from(chord.shift) << 3;
+        // SAFETY: `key` is a valid NUL-terminated CString and `sender` stays boxed at a stable address for the shortcut's lifetime.
         let raw = unsafe {
             bruhs_register_snapshot_shortcut(
                 key.as_ptr(),

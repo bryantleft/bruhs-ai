@@ -278,7 +278,7 @@ pub(super) fn render(
                             moving.update(cx, |p, cx| p.motion(e, w.viewport_size(), cx));
                         }
                     });
-                    let ending = ending.clone();
+                    let ending = ending;
                     w.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
                         if phase.capture() && e.button == MouseButton::Left {
                             ending.update(cx, |p, cx| {

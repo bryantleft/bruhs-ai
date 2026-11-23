@@ -1,6 +1,7 @@
 //! Paint theme background layers back to front and reload the active companion image on disk.
 mod gradient;
 mod style;
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use gpui::{prelude::*, *};
 use gradient::Gradient;
 use std::{
@@ -71,7 +72,7 @@ impl Picture {
         if !meta.is_file() || meta.len() != rev.len {
             return None;
         }
-        let mut bytes = Vec::with_capacity(rev.len as usize);
+        let mut bytes = Vec::with_capacity(usize::try_from(rev.len).ok()?);
         file.take(MAX_BYTES + 1).read_to_end(&mut bytes).ok()?;
         if bytes.len() as u64 != rev.len {
             return None;
@@ -139,7 +140,7 @@ impl Geometry {
                 _ => (bw, bh),
             };
         };
-        let (nw, nh) = (nw as f32 * zoom, nh as f32 * zoom);
+        let (nw, nh) = (nw.to_f32_lossy() * zoom, nh.to_f32_lossy() * zoom);
         match self.sizing {
             Sizing::Cover | Sizing::Contain => {
                 let k = if self.sizing == Sizing::Cover {
@@ -179,7 +180,7 @@ impl Picture {
             s.position.1.value(bh - h, zoom).unwrap_or_default(),
         );
         let axis = |extent: f32, tile: f32, origin: f32, repeated: bool, count: u32| {
-            let step = (tile * count as f32).max(1.);
+            let step = (tile * count.to_f32_lossy()).max(1.);
             if repeated {
                 let offset = origin.rem_euclid(step);
                 (
@@ -217,8 +218,8 @@ impl Picture {
                 while x < right {
                     let bounds = Bounds::new(at(x, y), size(px(dx), px(dy)));
                     let texture = if self.guard_texels {
-                        let gx = dx / (self.native.0 * self.tiles.0) as f32;
-                        let gy = dy / (self.native.1 * self.tiles.1) as f32;
+                        let gx = dx / (self.native.0 * self.tiles.0).to_f32_lossy();
+                        let gy = dy / (self.native.1 * self.tiles.1).to_f32_lossy();
                         Bounds::from_corners(at(x - gx, y - gy), at(x + dx + gx, y + dy + gy))
                     } else {
                         bounds
@@ -271,8 +272,11 @@ fn gradient_picture(
         zoom: bruhs_ui::zoom::zoom(),
     };
     let cache = &mut cx.default_global::<GradientCache>().0;
-    if let Some(i) = cache.iter().position(|(k, _, _)| k == &key) {
-        let entry = cache.remove(i).unwrap();
+    if let Some(entry) = cache
+        .iter()
+        .position(|(k, _, _)| k == &key)
+        .and_then(|i| cache.remove(i))
+    {
         let result = entry.1.clone();
         cache.push_front(entry);
         return result;
@@ -281,8 +285,8 @@ fn gradient_picture(
     // Pack small CSS tiles to keep a fine repeating pattern to a few draws.
     let tiles = if rgba.width() <= 256 && rgba.height() <= 256 {
         (
-            (64. / tile.0.max(1.)).ceil() as u32,
-            (64. / tile.1.max(1.)).ceil() as u32,
+            (64. / tile.0.max(1.)).ceil().to_u32_saturating(),
+            (64. / tile.1.max(1.)).ceil().to_u32_saturating(),
         )
     } else {
         (1, 1)
@@ -314,7 +318,9 @@ fn gradient_picture(
     let mut used = cache.iter().map(|(_, _, n)| n).sum::<usize>();
     let mut dropped = Vec::new();
     while cache.len() > 1 && (cache.len() > 64 || used > 24 * 1024 * 1024) {
-        let (_, old, n) = cache.pop_back().unwrap();
+        let Some((_, old, n)) = cache.pop_back() else {
+            break;
+        };
         used -= n;
         dropped.push(old.image.clone());
     }

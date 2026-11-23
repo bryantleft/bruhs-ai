@@ -46,7 +46,9 @@ impl KiroPicker {
 
 impl Workspace {
     pub(super) fn kiro_provider_tile(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let selected = e.kiro.active;
         let tile = web_button(
             "acp-source-kiro",

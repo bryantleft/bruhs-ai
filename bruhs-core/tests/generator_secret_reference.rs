@@ -1,5 +1,9 @@
 //! Exercise the desktop/host store and the 1Password CLI protocol without a user vault.
 #![cfg(unix)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration test assertions and fixtures"
+)]
 use bruhs_core::{
     secret_sources::{self, Change, SecretReference, Source},
     text_generators::{self as api, CredentialEdit, Draft, Preset},

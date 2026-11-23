@@ -51,12 +51,12 @@ impl AccentPicker {
                     }
                 }
                 InputEvent::Blur => picker.sync_hex(w, cx),
-                InputEvent::PressEnter { .. } => {
-                    if parse_accent_color(&input.read(cx).value()).is_some() {
-                        picker.selected = Some(picker.sliders.hsv.rgb());
-                        picker.close(w, cx);
-                        cx.notify();
-                    }
+                InputEvent::PressEnter { .. }
+                    if parse_accent_color(&input.read(cx).value()).is_some() =>
+                {
+                    picker.selected = Some(picker.sliders.hsv.rgb());
+                    picker.close(w, cx);
+                    cx.notify();
                 }
                 _ => {}
             }
@@ -107,7 +107,9 @@ impl SliderHost for Workspace {
 
 impl Workspace {
     pub(super) fn provider_accent_row(&self, wide: bool, cx: &Context<'_, Self>) -> Div {
-        let editor = self.provider_editor.as_ref().unwrap();
+        let Some(editor) = self.provider_editor.as_ref() else {
+            return div();
+        };
         let picker = &editor.accent;
         let label = format!(
             "{} accent color for {}",
@@ -136,7 +138,10 @@ impl Workspace {
         .when(picker.selected.is_none(), |el| el.child("+"));
         let trigger = button.when(!editor.busy, |el| {
             on_press_view(el, cx, |ws, w, cx| {
-                let p = &mut ws.provider_editor.as_mut().unwrap().accent;
+                let Some(editor) = ws.provider_editor.as_mut() else {
+                    return;
+                };
+                let p = &mut editor.accent;
                 p.open = !p.open;
                 p.sliders.dragging_hue = None;
                 if p.open {
@@ -232,7 +237,10 @@ impl Workspace {
     }
 
     fn provider_accent_panel(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let p = &self.provider_editor.as_ref().unwrap().accent;
+        let Some(editor) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let p = &editor.accent;
         let bounds = p.bounds.clone();
         let selected = p.selected.is_some();
         let label = if selected { "Clear color" } else { "Add color" };
@@ -280,7 +288,10 @@ impl Workspace {
             .child(color_surface(&p.sliders, true, cx))
             .child(Input::new(&p.hex).aria_label("Custom hex accent color"))
             .child(on_press_view(action, cx, move |ws, w, cx| {
-                let p = &mut ws.provider_editor.as_mut().unwrap().accent;
+                let Some(editor) = ws.provider_editor.as_mut() else {
+                    return;
+                };
+                let p = &mut editor.accent;
                 if selected {
                     p.selected = None;
                     p.sliders.hsv = Hsv::from_rgb(INITIAL, 0.);

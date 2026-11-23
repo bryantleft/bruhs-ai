@@ -16,9 +16,7 @@ impl Workspace {
                 .child("Runs on"),
         );
         let Some((open, loading)) = panel.read(cx).task_host_menu() else {
-            let name = current
-                .map(TaskEditorHost::name)
-                .unwrap_or_else(|| "This computer".into());
+            let name = current.map_or_else(|| "This computer".into(), TaskEditorHost::name);
             return field.child(
                 div()
                     .id("scheduled-task-fixed-environment")
@@ -47,7 +45,7 @@ impl Workspace {
             if h.data.can_edit_schedules && h.problem.is_none() {
                 options.push(DropdownOption {
                     value: saved_option_value(&h.credential.to_string()),
-                    label: h.name().into(),
+                    label: h.name(),
                     description: match h.tunnel.as_ref().map(|t| &t.destination) {
                         Some(Destination::Ssh {
                             host,
@@ -77,9 +75,7 @@ impl Workspace {
                 option.description = Some(option.value.to_owned());
             }
         }
-        let selected = current
-            .map(|h| h.0.credential.to_string())
-            .unwrap_or_else(|| "local".into());
+        let selected = current.map_or_else(|| "local".into(), |h| h.0.credential.to_string());
         let toggle = panel.downgrade();
         let select = cx.weak_entity();
         field

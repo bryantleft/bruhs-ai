@@ -181,9 +181,9 @@ impl Workspace {
                     && (!links.updates.reports.contains_key(&h.credential)
                         || links.updates.checked.get(&h.credential).is_none_or(|t| {
                             t.elapsed()
-                                >= Duration::from_millis(
-                                    bruhs_models::updates::POLL_INTERVAL_MS as u64,
-                                )
+                                >= Duration::from_millis(u64::from(
+                                    bruhs_models::updates::POLL_INTERVAL_MS,
+                                ))
                         }))
             })
             .map(|h| h.credential)

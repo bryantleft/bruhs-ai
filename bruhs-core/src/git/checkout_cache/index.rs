@@ -57,27 +57,27 @@ pub(super) fn for_clone(source: &Path, root: &Path) -> Option<Vec<u8>> {
         } else {
             return None;
         };
-        let mut bytes = stat.size() as u32;
+        let mut bytes = git_u32_u64(stat.size());
         if bytes == 0 && stat.size() != 0 {
             bytes = 0x80000000;
         }
         if kind != number(fixed, 24)?
             || (kind != 0o160000
                 && (bytes != number(fixed, 36)?
-                    || stat.mtime() as u32 != number(fixed, 8)?
-                    || stat.mtime_nsec() as u32 != number(fixed, 12)?))
+                    || git_u32_i64(stat.mtime()) != number(fixed, 8)?
+                    || git_u32_i64(stat.mtime_nsec()) != number(fixed, 12)?))
         {
             return None;
         }
         // Clonefile preserves the content, mode and mtime verified above.
         for (field, value) in [
-            (0, stat.ctime() as u32),
-            (4, stat.ctime_nsec() as u32),
-            (8, stat.mtime() as u32),
-            (12, stat.mtime_nsec() as u32),
+            (0, git_u32_i64(stat.ctime())),
+            (4, git_u32_i64(stat.ctime_nsec())),
+            (8, git_u32_i64(stat.mtime())),
+            (12, git_u32_i64(stat.mtime_nsec())),
             (36, bytes),
-            (16, stat.dev() as u32),
-            (20, stat.ino() as u32),
+            (16, git_u32_u64(stat.dev())),
+            (20, git_u32_u64(stat.ino())),
             (28, stat.uid()),
             (32, stat.gid()),
         ] {
@@ -98,4 +98,21 @@ pub(super) fn for_clone(source: &Path, root: &Path) -> Option<Vec<u8>> {
     }
     checksum.copy_from_slice(&Sha1::digest(&*body));
     Some(index)
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Git index v2 stat fields store the low 32 bits"
+)]
+fn git_u32_u64(value: u64) -> u32 {
+    value as u32
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Git index v2 stat fields store the low 32 bits as unsigned"
+)]
+fn git_u32_i64(value: i64) -> u32 {
+    value as u32
 }

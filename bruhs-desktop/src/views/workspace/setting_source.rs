@@ -287,6 +287,10 @@ impl Workspace {
             .child(projects)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "renders scoped setting source badge with explicit ids, labels, and fallback values"
+    )]
     pub(super) fn setting_source(
         &self,
         setting: impl ProjectSetting,
@@ -440,6 +444,10 @@ impl Workspace {
         source.into_any_element()
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "renders a scoped switch row with explicit setting descriptors and environment value"
+    )]
     pub(super) fn scoped_switch_row(
         &self,
         setting: ScopedSwitch,
@@ -522,6 +530,10 @@ impl Workspace {
 }
 
 impl Workspace {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "renders source badge and reset action with explicit setting descriptors"
+    )]
     pub(super) fn setting_source_actions(
         &self,
         setting: impl ProjectSetting,

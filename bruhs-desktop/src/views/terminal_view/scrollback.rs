@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 
 /// The emulator counts lines up from the bottom. The thumb counts down from the top.
 #[derive(Clone, Copy)]
@@ -10,21 +11,23 @@ struct Scrollback {
 }
 impl Scrollback {
     fn thumb_top(self) -> Pixels {
-        (self.track - self.thumb) * (self.from_top as f32 / self.history as f32)
+        (self.track - self.thumb) * (self.from_top.to_f32_lossy() / self.history.to_f32_lossy())
     }
     fn target(self, position: Pixels) -> i32 {
         let travel = self.track - self.thumb;
         if travel <= Pixels::ZERO {
             return self.from_top;
         }
-        ((position / travel).clamp(0., 1.) * self.history as f32).round() as i32
+        ((position / travel).clamp(0., 1.) * self.history.to_f32_lossy())
+            .round()
+            .to_i32_saturating()
     }
 }
 
 impl TerminalView {
     fn scrollback(&self) -> Option<Scrollback> {
-        let history = self.term.grid().history_size() as i32;
-        let rows = self.term.screen_lines() as f32;
+        let history = i32::try_from(self.term.grid().history_size()).unwrap_or(i32::MAX);
+        let rows = self.term.screen_lines().to_f32_lossy();
         let track = self.bounds.size.height;
         if history == 0 || track <= Pixels::ZERO || self.term.mode().contains(TermMode::ALT_SCREEN)
         {
@@ -32,9 +35,10 @@ impl TerminalView {
         }
         Some(Scrollback {
             history,
-            from_top: history - self.term.grid().display_offset() as i32,
+            from_top: history
+                .saturating_sub(i32::try_from(self.term.grid().display_offset()).unwrap_or(i32::MAX)),
             track,
-            thumb: (track * (rows / (rows + history as f32)))
+            thumb: (track * (rows / (rows + history.to_f32_lossy())))
                 .max(px(18.))
                 .min(track),
         })

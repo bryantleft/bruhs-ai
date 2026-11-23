@@ -65,7 +65,9 @@ impl DeliveryService {
             prefs.review_guide_instructions
         ]);
         if let Some(options) = generation {
-            identity.as_array_mut().unwrap().push(json!(options));
+            if let Some(arr) = identity.as_array_mut() {
+                arr.push(json!(options));
+            }
         }
         let key = format!("{:x}", Sha256::digest(identity.to_string()));
         let directory = self.root.join("review-guides");
@@ -74,11 +76,13 @@ impl DeliveryService {
             let mut locks = self.guide_locks.lock().await;
             locks.retain(|_, lock| lock.strong_count() > 0);
             let entry = locks.entry(key).or_default();
-            entry.upgrade().unwrap_or_else(|| {
+            let lock = entry.upgrade().unwrap_or_else(|| {
                 let lock = Arc::new(Mutex::new(()));
                 *entry = Arc::downgrade(&lock);
                 lock
-            })
+            });
+            drop(locks);
+            lock
         };
         let _guard = lock.lock().await;
         if !request.generate || !request.refresh {
@@ -620,8 +624,14 @@ async fn generate(
         // Keep recent evidence available across steps within the CLI argument
         // budget. An agent can reread a previous page by its path and offset.
         let mut input = prompt.to_string();
-        while input.len() > 112_000 && prompt["reads"].as_array().unwrap().len() > 1 {
-            prompt["reads"].as_array_mut().unwrap().remove(0);
+        while input.len() > 112_000
+            && prompt["reads"]
+                .as_array()
+                .is_some_and(|reads| reads.len() > 1)
+        {
+            if let Some(reads) = prompt["reads"].as_array_mut() {
+                reads.remove(0);
+            }
             input = prompt.to_string();
         }
         if input.len() > 112_000 {
@@ -662,7 +672,9 @@ async fn generate(
                         json!({"offset":list.offset,"total_files":paths.len(),"manifest":patch.manifest(list.offset)})
                     }
                 };
-                prompt["reads"].as_array_mut().unwrap().push(page);
+                if let Some(reads) = prompt["reads"].as_array_mut() {
+                    reads.push(page);
+                }
             }
             AgentStep::Source { source: query } => {
                 if !patch.files.contains_key(&query.path) || query.start == 0 {
@@ -688,7 +700,9 @@ async fn generate(
                         json!({"path":query.path,"error":"Source unavailable at this revision. Read the changed hunks."})
                     }
                 };
-                prompt["reads"].as_array_mut().unwrap().push(evidence);
+                if let Some(reads) = prompt["reads"].as_array_mut() {
+                    reads.push(evidence);
+                }
             }
             AgentStep::Read { read } => {
                 let mut evidence = Vec::new();
@@ -703,7 +717,9 @@ async fn generate(
                     }
                 }
                 has_read |= !evidence.is_empty();
-                prompt["reads"].as_array_mut().unwrap().extend(evidence);
+                if let Some(reads) = prompt["reads"].as_array_mut() {
+                    reads.extend(evidence);
+                }
             }
             AgentStep::Finish { stops } => {
                 if !has_read && patch.files.values().any(|f| !f.hunks.is_empty()) {

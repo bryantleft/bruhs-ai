@@ -407,27 +407,23 @@ impl Workspace {
                 ),
             );
         }
-        let templates = state
-            .value
-            .as_ref()
-            .map(|prefs| {
-                let enabled = prefs.follow_templates;
-                settings_ui::switch(
-                    "settings-delivery-templates",
-                    enabled,
-                    state.saving,
-                    "Follow pull request templates",
-                    cx,
-                    move |this, _, cx| {
-                        this.save_delivery_preference(
-                            "settings-delivery-templates",
-                            if enabled { "off" } else { "on" },
-                            cx,
-                        )
-                    },
-                )
-            })
-            .unwrap_or_else(waiting);
+        let templates = state.value.as_ref().map_or_else(waiting, |prefs| {
+            let enabled = prefs.follow_templates;
+            settings_ui::switch(
+                "settings-delivery-templates",
+                enabled,
+                state.saving,
+                "Follow pull request templates",
+                cx,
+                move |this, _, cx| {
+                    this.save_delivery_preference(
+                        "settings-delivery-templates",
+                        if enabled { "off" } else { "on" },
+                        cx,
+                    )
+                },
+            )
+        });
         let reset_templates = state.value.as_ref().is_some_and(|p| {
             if scoped {
                 p.overrides.follow_templates.is_some()

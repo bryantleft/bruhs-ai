@@ -225,8 +225,10 @@ impl Workspace {
             .listed_projects()
             .into_iter()
             .find(|p| p.path == *path)
-            .map(|p| p.name)
-            .unwrap_or_else(|| project_picker_ui::path_display_name(Path::new(path)));
+            .map_or_else(
+                || project_picker_ui::path_display_name(Path::new(path)),
+                |p| p.name,
+            );
         self.project_name_row(
             self.name_target(None, [(None, path.clone())]),
             "settings-project-name".into(),

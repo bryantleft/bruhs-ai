@@ -244,7 +244,7 @@ fn text_element<K: FieldKind>(
                 },
                 background_color: (!in_ghost && inside(&Some(selection.clone())))
                     .then(|| theme::persimmon_500().opacity(0.3))
-                    .or_else(|| (face.code && !face.block).then(|| theme::longan_800())),
+                    .or_else(|| (face.code && !face.block).then(theme::longan_800)),
                 underline: inside(&marked).then_some(UnderlineStyle {
                     thickness: px(1.0),
                     color: Some(color),

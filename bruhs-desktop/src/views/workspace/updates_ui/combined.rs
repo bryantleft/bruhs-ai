@@ -442,8 +442,7 @@ impl DesktopUpdates {
     }
 
     fn defer_combined_restart(&mut self, cx: &mut Context<'_, Self>) {
-        if self.combined.as_ref().is_some_and(|r| r.seconds.is_some()) {
-            let run = self.combined.take().unwrap();
+        if let Some(run) = self.combined.take_if(|r| r.seconds.is_some()) {
             self.combined_timer = None;
             cx.emit(CombinedEvent::Finished(
                 format!("Restart deferred. {}", run.summary()),

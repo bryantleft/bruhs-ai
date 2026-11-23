@@ -149,10 +149,10 @@ impl SourceSettings {
             return;
         }
         self.submitted = false;
-        self.trigger_id = id
-            .as_ref()
-            .map(|id| format!("edit-source-{id}"))
-            .unwrap_or_else(|| "add-secret-provider".into());
+        self.trigger_id = id.as_ref().map_or_else(
+            || "add-secret-provider".into(),
+            |id| format!("edit-source-{id}"),
+        );
         let id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let source = self.data.sources.get(&id);
         let name = Self::field(
@@ -171,12 +171,11 @@ impl SourceSettings {
         self.form_events = [&name, &account]
             .into_iter()
             .map(|field| {
-                cx.subscribe(field, |this, _, event: &InputEvent, cx| match event {
-                    InputEvent::Change => {
+                cx.subscribe(field, |this, _, event: &InputEvent, cx| {
+                    if *event == InputEvent::Change {
                         this.error = None;
                         cx.notify();
                     }
-                    _ => {}
                 })
             })
             .collect();
@@ -197,7 +196,7 @@ impl SourceSettings {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let target = existing.map(|b| b.target.as_str()).unwrap_or("claude");
+        let target = existing.map_or("claude", |b| b.target.as_str());
         let runtime = target
             .split('/')
             .next()
@@ -332,7 +331,7 @@ impl SourceSettings {
             WebButtonSize::Small,
             ButtonState::disabled_if(self.busy),
         )
-        .debug_selector(move || selector.clone())
+        .debug_selector(move || selector)
         .when(track, |el| el.track_focus(&self.trigger))
         .aria_label(label.to_owned())
         .child(caption);

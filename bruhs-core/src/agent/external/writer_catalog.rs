@@ -93,15 +93,17 @@ fn choices(rows: &Value, id: &str, label: &str) -> Vec<WriterChoice> {
         let title = row[label]
             .as_str()
             .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| match value {
-                "xhigh" => "Extra High".into(),
-                s => {
-                    let mut label = s.to_owned();
-                    label[..1].make_ascii_uppercase();
-                    label
-                }
-            });
+            .map_or_else(
+                || match value {
+                    "xhigh" => "Extra High".into(),
+                    s => {
+                        let mut label = s.to_owned();
+                        label[..1].make_ascii_uppercase();
+                        label
+                    }
+                },
+                str::to_owned,
+            );
         let mut choice = WriterChoice::new(value, &title.chars().take(160).collect::<String>());
         choice.description = row["description"]
             .as_str()

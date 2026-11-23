@@ -116,6 +116,7 @@ pub(crate) async fn provider_observation(
         checked_at: checked_at.timestamp_millis(),
     };
     *cache = Some((Instant::now(), observation.clone()));
+    drop(cache);
     Ok(observation)
 }
 

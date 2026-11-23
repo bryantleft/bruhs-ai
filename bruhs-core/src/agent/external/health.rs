@@ -160,10 +160,15 @@ async fn output(cmd: &mut Command) -> io::Result<(bool, String, String)> {
     let mut child = cmd.spawn()?;
     #[cfg(unix)]
     let mut group = process::ProcessGroup::of(&child);
-    let (stdout, stderr) = tokio::try_join!(
-        read_output(child.stdout.take().unwrap()),
-        read_output(child.stderr.take().unwrap())
-    )?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("child stdout was not piped"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
+    let (stdout, stderr) = tokio::try_join!(read_output(stdout), read_output(stderr))?;
     let success = child.wait().await?.success();
     #[cfg(unix)]
     group.release();
@@ -374,9 +379,16 @@ async fn probe_acp(
     #[cfg(unix)]
     let _group = process::ProcessGroup::of(&child);
     let request = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"bruhs","version":env!("CARGO_PKG_VERSION")},"clientCapabilities":{}}});
-    let mut stdin = child.stdin.take().unwrap();
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("child stdin was not piped"))?;
     stdin.write_all(format!("{request}\n").as_bytes()).await?;
-    let mut lines = BufReader::new(child.stdout.take().unwrap().take(MAX_BYTES + 1)).lines();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("child stdout was not piped"))?;
+    let mut lines = BufReader::new(stdout.take(MAX_BYTES + 1)).lines();
     while let Some(line) = lines.next_line().await? {
         let Ok(frame) = serde_json::from_str::<Value>(&line) else {
             continue;

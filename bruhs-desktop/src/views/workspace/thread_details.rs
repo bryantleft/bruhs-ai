@@ -289,7 +289,7 @@ impl Workspace {
             let key = format!("thread-details-option-{id}");
             let row = div()
                 .id(SharedString::from(key.clone()))
-                .debug_selector(move || key.clone())
+                .debug_selector(move || key)
                 .h(px(28.))
                 .flex_shrink_0()
                 .role(if item.is_some() {
@@ -459,7 +459,6 @@ impl Workspace {
                         let fits = bruhs_ui::zoom::css_px(bounds.size.width) >= 1012.
                             && bruhs_ui::zoom::css_px(bounds.size.height) >= 228.;
                         if fits != inline {
-                            let workspace = workspace.clone();
                             cx.defer(move |cx| {
                                 let _ = workspace.update(cx, |ws, cx| {
                                     if ws.details.inline != fits {
@@ -890,11 +889,16 @@ impl Workspace {
                 if reset.is_none_or(|ms| ms > EpochMs::now().as_millis()) {
                     let text = reset
                         .and_then(chrono::DateTime::from_timestamp_millis)
-                        .map(|t| {
-                            let local = t.with_timezone(&chrono::Local);
-                            format!("Usage limit resets {}", local.format(crate::clock_format::pattern()))
-                        })
-                        .unwrap_or_else(|| "Usage limit reached".into());
+                        .map_or_else(
+                            || "Usage limit reached".into(),
+                            |t| {
+                                let local = t.with_timezone(&chrono::Local);
+                                format!(
+                                    "Usage limit resets {}",
+                                    local.format(crate::clock_format::pattern())
+                                )
+                            },
+                        );
                     usage_rows.push(detail_meta(
                         "detail-turn-limit",
                         assets::CIRCLE_ALERT_ICON_PATH,

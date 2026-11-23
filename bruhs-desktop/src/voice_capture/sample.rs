@@ -1,5 +1,6 @@
 //! An in-memory ten-second microphone test with resampling for the output device.
 use super::*;
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
@@ -29,7 +30,7 @@ pub fn record(
                     .fold(0.0_f32, |acc, v| acc.max(v.abs()));
                 meter
                     .peak_percent
-                    .store((peak.clamp(0.0, 1.0) * 100.) as u32, Ordering::Relaxed);
+                    .store((peak.clamp(0.0, 1.0) * 100.).to_u32_saturating(), Ordering::Relaxed);
             }
             if started.elapsed() >= Duration::from_secs(10) {
                 return true;
@@ -63,9 +64,11 @@ impl Clip {
             .get(bruhs_models::logic::wav::WAV_HEADER_LEN..)
             .ok_or("Incomplete microphone recording.")?;
         let samples: Vec<_> = audio
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .take(rate as usize * 10)
-            .map(|v| i16::from_le_bytes([v[0], v[1]]))
+            .map(|&v| i16::from_le_bytes(v))
             .collect();
         if samples.is_empty() {
             return Err("No microphone sample was recorded.".into());
@@ -76,7 +79,7 @@ impl Clip {
         })
     }
     pub fn duration_ms(&self) -> u32 {
-        (self.samples.len() as u64 * 1000 / u64::from(self.rate)) as u32
+        u32::try_from(self.samples.len() as u64 * 1000 / u64::from(self.rate)).unwrap_or(u32::MAX)
     }
 }
 
@@ -124,7 +127,7 @@ pub fn play(clip: Clip, cursor: Arc<Cursor>, stop: Receiver<()>) -> Result<(), S
                 }
                 let end = clip.samples.len() as u64 * output_rate;
                 for frame in buffer.chunks_mut(channels) {
-                    let index = (position / output_rate) as usize;
+                    let index = usize::try_from(position / output_rate).unwrap_or(usize::MAX);
                     let value = clip
                         .samples
                         .get(index)
@@ -133,7 +136,7 @@ pub fn play(clip: Clip, cursor: Arc<Cursor>, stop: Receiver<()>) -> Result<(), S
                     position = (position + ratio).min(end);
                 }
                 cursor.ms.store(
-                    (position * 1000 / (ratio * output_rate)) as u32,
+                    u32::try_from(position * 1000 / (ratio * output_rate)).unwrap_or(u32::MAX),
                     Ordering::Relaxed,
                 );
                 if position == end && !complete {
@@ -144,7 +147,7 @@ pub fn play(clip: Clip, cursor: Arc<Cursor>, stop: Receiver<()>) -> Result<(), S
                         .duration_since(&stamp.callback)
                         .unwrap_or_default();
                     let span = Duration::from_secs_f64(
-                        (buffer.len() / channels) as f64 / output_rate as f64,
+                        (buffer.len() / channels).to_f64_lossy() / output_rate.to_f64_lossy(),
                     );
                     let _ = done.send(Ok(Instant::now() + latency + span));
                 }

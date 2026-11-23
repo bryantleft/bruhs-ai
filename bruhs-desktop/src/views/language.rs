@@ -41,7 +41,7 @@ static MESSAGES: LazyLock<HashMap<&'static str, [&'static str; 8]>> = LazyLock::
         .lines()
         .map(|line| {
             let mut cells = line.split('\t');
-            let source = cells.next().unwrap();
+            let source = cells.next().expect("non-empty translation row");
             let values = std::array::from_fn(|_| cells.next().expect("missing translation"));
             assert!(cells.next().is_none(), "extra translation for {source}");
             (source, values)

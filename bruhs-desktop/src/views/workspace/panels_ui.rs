@@ -1318,7 +1318,10 @@ impl Workspace {
         };
         let generation = self.pull_generation;
         let lookup_started=std::time::Instant::now();
-        let source_path=self.active_thread().map(|t|t.chat.read(cx).settings_project_path().to_owned()).unwrap_or_else(||path.clone());
+        let source_path = self.active_thread().map_or_else(
+            || path.clone(),
+            |t| t.chat.read(cx).settings_project_path().to_owned(),
+        );
         let lookup_branch = branch.clone();
         let loaded = spawn_tokio(cx, async move {
             bruhs_core::pulls::pull_for_branch(Path::new(&path), &lookup_branch).await

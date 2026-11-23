@@ -25,8 +25,7 @@ impl Workspace {
         let selected = form
             .source
             .as_ref()
-            .map(|id| saved_option_value(&format!("source:{id}")))
-            .unwrap_or("value");
+            .map_or("value", |id| saved_option_value(&format!("source:{id}")));
         let missing = form
             .source
             .as_ref()
@@ -255,10 +254,10 @@ impl Workspace {
                         cx,
                         |ws, _, cx| ws.save_generator(cx),
                     ));
-                f.previous
-                    .as_ref()
-                    .map(|g| format!("Edit {}", g.label))
-                    .unwrap_or_else(|| "Add a text generator".into())
+                f.previous.as_ref().map_or_else(
+                    || "Add a text generator".into(),
+                    |g| format!("Edit {}", g.label),
+                )
             }
             Page::Connected(g) => {
                 body = body.child(format!(
@@ -572,7 +571,7 @@ impl Workspace {
                         .id("generator-dialog")
                         .debug_selector(|| "generator-dialog".into())
                         .role(Role::Dialog)
-                        .aria_label(title.clone())
+                        .aria_label(title)
                         .track_focus(&self.generators.start)
                         .tab_group()
                         .on_key_down(cx.listener(Self::trap_modal_tab_focus))

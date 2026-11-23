@@ -390,8 +390,7 @@ impl Projection {
         let mut replace = replacements.into_iter().peekable();
         let mut indents = code_lines.into_iter().peekable();
         while pos < source.len() {
-            while changes.peek().is_some_and(|c| c.at == pos) {
-                let c = changes.next().unwrap();
+            while let Some(c) = changes.next_if(|c| c.at == pos) {
                 levels[c.effect as usize] += c.delta;
             }
             if indents.next_if_eq(&pos).is_some() {

@@ -73,7 +73,7 @@ impl ColorPicker {
         let mut value = format!("#{:06x}", self.sliders.hsv.rgb());
         if let Some(alpha) = self.alpha {
             use std::fmt::Write;
-            write!(value, "{alpha:02x}").unwrap();
+            let _ = write!(value, "{alpha:02x}");
         }
         cx.emit(Edit::Change(value));
         cx.notify();
@@ -312,8 +312,7 @@ impl Workspace {
         let raw = field.input.read(cx).value();
         let literal = raw.trim();
         let [r, g, b, a] = csscolorparser::parse(literal)
-            .map(|color| color.to_rgba8())
-            .unwrap_or([0, 0, 0, 255]);
+            .map_or([0, 0, 0, 255], |color| color.to_rgba8());
         let color = u32::from_be_bytes([0, r, g, b]);
         let picker = cx.new(|cx| {
             let picker = ColorPicker {

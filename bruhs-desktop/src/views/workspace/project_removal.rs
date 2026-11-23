@@ -112,7 +112,7 @@ impl Workspace {
                 .text_color(theme::lychee_400())
                 .child(Icon::new(IconName::Delete).size(px(14.)))
         })
-        .debug_selector(move || id.clone())
+        .debug_selector(move || id)
         .aria_label(accessible)
         .child(label);
         on_press_view(button, cx, move |ws, w, cx| {

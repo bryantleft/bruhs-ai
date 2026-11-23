@@ -387,12 +387,14 @@ impl BackgroundTaskRegistry {
 
     /// Distinct thread ids that currently have at least one running task.
     pub fn running_thread_ids(&self) -> Vec<String> {
-        let tasks = self.lock_tasks();
-        let mut ids: Vec<String> = tasks
-            .values()
-            .filter(|t| t.status == TaskStatus::Running)
-            .map(|t| t.thread_id.clone())
-            .collect();
+        let mut ids: Vec<String> = {
+            let tasks = self.lock_tasks();
+            tasks
+                .values()
+                .filter(|t| t.status == TaskStatus::Running)
+                .map(|t| t.thread_id.clone())
+                .collect()
+        };
         ids.sort();
         ids.dedup();
         ids

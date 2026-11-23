@@ -36,7 +36,10 @@ impl Cache {
     }
 
     fn lock(&self) -> io::Result<File> {
-        let data = self.flag.parent().unwrap();
+        let data = self
+            .flag
+            .parent()
+            .ok_or_else(|| io::Error::other("missing cache data directory"))?;
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -55,7 +58,11 @@ impl Cache {
         if on {
             if self.generation().is_none() {
                 use std::io::Write;
-                let mut pending = tempfile::NamedTempFile::new_in(self.flag.parent().unwrap())?;
+                let parent = self
+                    .flag
+                    .parent()
+                    .ok_or_else(|| io::Error::other("missing cache data directory"))?;
+                let mut pending = tempfile::NamedTempFile::new_in(parent)?;
                 pending.write_all(uuid::Uuid::new_v4().to_string().as_bytes())?;
                 pending.as_file().sync_all()?;
                 pending.persist(&self.flag)?;
@@ -67,9 +74,13 @@ impl Cache {
             }
             // Hide the old generation before another process can enable caching.
             if self.root.try_exists()? {
+                let parent = self
+                    .root
+                    .parent()
+                    .ok_or_else(|| io::Error::other("missing cache root parent directory"))?;
                 let retired = tempfile::Builder::new()
                     .prefix("retired-checkouts-")
-                    .tempdir_in(self.root.parent().unwrap())?;
+                    .tempdir_in(parent)?;
                 fs::rename(&self.root, retired.path().join("entries"))?;
                 drop(lock);
                 retired.close()?;
@@ -312,17 +323,22 @@ fn seal(entry: &Path) -> io::Result<String> {
     let mut paths = vec![entry.join("files"), entry.join("index")];
     while let Some(path) = paths.pop() {
         let meta = path.symlink_metadata()?;
-        hash.update(path.strip_prefix(entry).unwrap().as_os_str().as_bytes());
+        hash.update(
+            path.strip_prefix(entry)
+                .map_err(io::Error::other)?
+                .as_os_str()
+                .as_bytes(),
+        );
         hash.update([0]);
         for n in [
-            meta.dev() as u64,
+            meta.dev(),
             meta.ino(),
             u64::from(meta.mode()),
             meta.size(),
-            meta.mtime() as u64,
-            meta.mtime_nsec() as u64,
-            meta.ctime() as u64,
-            meta.ctime_nsec() as u64,
+            u64::from_ne_bytes(meta.mtime().to_ne_bytes()),
+            u64::from_ne_bytes(meta.mtime_nsec().to_ne_bytes()),
+            u64::from_ne_bytes(meta.ctime().to_ne_bytes()),
+            u64::from_ne_bytes(meta.ctime_nsec().to_ne_bytes()),
         ] {
             hash.update(n.to_le_bytes());
         }
@@ -382,7 +398,7 @@ fn entries(tree: &Tree) -> io::Result<Vec<(SystemTime, String, PathBuf)>> {
             list.push((item.metadata()?.modified()?, id.to_owned(), item.path()));
         }
     }
-    list.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    list.sort_unstable_by_key(|item| std::cmp::Reverse(item.0));
     Ok(list)
 }
 
@@ -817,7 +833,10 @@ mod tests {
         let index_stat = value(&warm, &["ls-files", "--debug", "--", "README.md"])
             .await
             .unwrap();
-        let inode = warm.join("README.md").symlink_metadata().unwrap().ino() as u32;
+        let inode = u32::try_from(
+            warm.join("README.md").symlink_metadata().unwrap().ino() & u64::from(u32::MAX),
+        )
+        .unwrap();
         assert!(
             index_stat
                 .lines()

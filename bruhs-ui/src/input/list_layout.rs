@@ -44,7 +44,9 @@ impl ListLayout {
                 self.lists.pop();
             }
             Event::Start(Tag::Item) => {
-                let group = *self.lists.last().unwrap();
+                let Some(&group) = self.lists.last() else {
+                    return;
+                };
                 let marker = source[range.start..].split('\n').next().unwrap_or_default();
                 let width = marker.bytes().take_while(u8::is_ascii_digit).count() + 1;
                 let after = &marker[width..];
@@ -61,7 +63,9 @@ impl ListLayout {
             Event::TaskListMarker(_) if !self.items.is_empty() => {
                 let group = self.groups.len();
                 self.groups.push(Gutter::Task);
-                *self.items.last_mut().unwrap() = group;
+                if let Some(last) = self.items.last_mut() {
+                    *last = group;
+                }
                 self.record(source, range.start, skip_space(source, range.end));
             }
             Event::End(TagEnd::Item) => {

@@ -568,7 +568,7 @@ impl Workspace {
                     .collect(),
             },
             DropdownGroup {
-                label: Some("Standard".into()),
+                label: Some("Standard"),
                 mark: None,
                 options: BrowserViewport::PRESETS
                     .iter()

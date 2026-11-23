@@ -83,8 +83,7 @@ impl Workspace {
         let current = modes
             .iter()
             .find(|(mode, _, _)| *mode == self.thread_notifications.mode)
-            .unwrap()
-            .1;
+            .map_or(modes[0].1, |(_, value, _)| *value);
         let options = modes
             .into_iter()
             .map(|(_, value, label)| DropdownOption {

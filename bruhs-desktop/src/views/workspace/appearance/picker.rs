@@ -49,7 +49,7 @@ pub(super) fn picker_button(id: String, label: String, selected: bool) -> Statef
         label,
         Interactivity::Enabled,
     )
-    .debug_selector(move || id.clone())
+    .debug_selector(move || id)
     .aria_toggled(if selected {
         Toggled::True
     } else {
@@ -198,11 +198,14 @@ impl Workspace {
         width: f32,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let columns = (((width + 8.) / 264.).floor() as usize).clamp(1, ThemeFamily::ALL.len());
+        let columns = bruhs_models::num::ToIntSaturating::to_usize_saturating(
+            ((width + 8.) / 264.).floor(),
+        )
+        .clamp(1, ThemeFamily::ALL.len());
         let mut cards = div()
             .w_full()
             .grid()
-            .grid_cols(columns as u16)
+            .grid_cols(u16::try_from(columns).unwrap_or(u16::MAX))
             .gap_2()
             .children(
                 ThemeFamily::ALL
@@ -316,8 +319,7 @@ impl Workspace {
             .to_string();
         let key = collection
             .and_then(ThemeFile::collection)
-            .map(|id| format!("collection-{id}"))
-            .unwrap_or_else(|| choice.key());
+            .map_or_else(|| choice.key(), |id| format!("collection-{id}"));
         let swatches = if collection.is_some() {
             self.collection_preview(&group, cx)
         } else {

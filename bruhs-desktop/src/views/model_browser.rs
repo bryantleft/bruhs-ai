@@ -54,7 +54,7 @@ impl Browser {
         let active = selected
             .filter(|s| tabs.iter().any(|name| name == *s))
             .or_else(|| tabs.iter().any(|name| name == initial).then_some(initial))
-            .unwrap_or_else(|| tabs.get(1).map(String::as_str).unwrap_or(FAVORITES))
+            .unwrap_or_else(|| tabs.get(1).map_or(FAVORITES, String::as_str))
             .to_owned();
         Self { tabs, active }
     }
@@ -114,7 +114,7 @@ impl Browser {
                         let provider = AgentProvider::ALL
                             .into_iter()
                             .find(|p| p.as_str() == tab)
-                            .unwrap();
+                            .expect("model browser tab matches a known provider");
                         (provider_label(provider).to_owned(), provider, None)
                     };
                     let icon = match (provider, accent) {

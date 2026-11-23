@@ -293,13 +293,13 @@ impl Workspace {
                 .iter()
                 .flat_map(|g| &g.options)
                 .find(|o| o.value == id)
-                .map(|o| o.label.clone())
-                .unwrap_or_else(|| model_info(id).map_or(id, |m| m.label).to_owned())
+                .map_or_else(
+                    || model_info(id).map_or(id, |m| m.label).to_owned(),
+                    |o| o.label.clone(),
+                )
         };
         let env_label = environment.map(label);
-        let effective_label = effective
-            .map(label)
-            .unwrap_or_else(|| "Automatic".to_owned());
+        let effective_label = effective.map_or_else(|| "Automatic".to_owned(), label);
         let saved_here = if scoped { project } else { environment };
         let control = if any_providers {
             let inherit = if scoped {
@@ -328,8 +328,7 @@ impl Workspace {
                         self.acp_models
                             .iter()
                             .find(|i| i.id == id)
-                            .map(|i| (i.name.clone(), i.accent))
-                            .unwrap_or_else(|| (id.to_owned(), None))
+                            .map_or_else(|| (id.to_owned(), None), |i| (i.name.clone(), i.accent))
                     },
                     move |tab, window, cx| {
                         let _ = ws.update(cx, |ws, cx| {

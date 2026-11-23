@@ -154,7 +154,7 @@ impl Patch {
                 let h = hunks
                     .last_mut()
                     .expect("a hunk owns the remaining line counts");
-                if h.rows % PAGE == 0 {
+                if h.rows.is_multiple_of(PAGE) {
                     h.pages.push(Position { byte: start, ..pos });
                 }
                 h.rows += 1;

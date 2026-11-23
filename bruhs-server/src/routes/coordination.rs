@@ -390,7 +390,12 @@ async fn remote_projects(
     };
     Ok((
         [("x-bruhs-provider-updates", grant.provider_updates.to_string()), ("x-bruhs-edit-project-names", editable.to_string()), ("x-bruhs-read-scheduled-tasks", schedules.to_string()), ("x-bruhs-toggle-scheduled-tasks", toggle.to_string()), ("x-bruhs-run-scheduled-tasks", run.to_string()), ("x-bruhs-delete-scheduled-tasks", delete.to_string()), ("x-bruhs-webhook-deliveries", deliveries.to_string()), ("x-bruhs-read-usage", usage.to_string()), ("x-bruhs-edit-scheduled-tasks", task_edit.to_string()), ("x-bruhs-task-conversations", conversations.to_string()), ("x-bruhs-read-task-threads", read_threads.to_string()), ("x-bruhs-reply-task-threads", reply_threads.to_string())],
-        Json(cached.as_ref().unwrap().1.clone()),
+        Json(
+            cached
+                .as_ref()
+                .map(|(_, projects)| projects.clone())
+                .unwrap_or_default(),
+        ),
     ))
 }
 
@@ -536,6 +541,7 @@ async fn rename_remote_projects(
         _ => AppError::Unavailable("Could not save the project name on this host.".into()),
     })?;
     *cache = None;
+    drop(cache);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -680,6 +686,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "test runtime stays alive until the server task is aborted"
+    )]
     async fn paired_projects_only_return_saved_checkout_metadata() {
         let root = tempfile::tempdir().unwrap();
         let checkout = root.path().join("source");
@@ -972,6 +982,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "test runtime stays alive until the worker task is aborted"
+    )]
     async fn paired_shortcut_grants_preserve_local_rules_and_enforce_access() {
         use bruhs_models::logic::keybindings::Keybinding;
         let root = tempfile::tempdir().unwrap();

@@ -187,8 +187,7 @@ impl setup::AutomationEditor {
                     self.set_task_model(
                         defaults
                             .get(&selected)
-                            .map(String::as_str)
-                            .unwrap_or(default_model),
+                            .map_or(default_model, String::as_str),
                         window,
                         cx,
                     );
@@ -485,6 +484,10 @@ impl ReactiveAutomations {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "renders project and model pickers for scheduled task editors"
+    )]
     pub(super) fn render_task_choices(
         &self,
         editor: &setup::AutomationEditor,

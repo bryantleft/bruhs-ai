@@ -1,4 +1,5 @@
 //! Task-host discovery and binding against an isolated desktop profile.
+#![expect(clippy::unwrap_used, reason = "integration test helpers")]
 use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_models::{ids::ThreadId, reactive::*};
 use serde_json::json;

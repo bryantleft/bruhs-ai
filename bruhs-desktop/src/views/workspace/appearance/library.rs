@@ -214,7 +214,9 @@ pub(super) fn identifier(name: &str) -> String {
     let mut n = hash;
     let mut digits = Vec::new();
     loop {
-        digits.push(char::from_digit(n % 36, 36).unwrap());
+        if let Some(ch) = char::from_digit(n % 36, 36) {
+            digits.push(ch);
+        }
         n /= 36;
         if n == 0 {
             break;
@@ -566,7 +568,7 @@ mod tests {
         let dark = theme("night", ThemeMode::Dark, "#122331");
         let light = theme("day", ThemeMode::Light, "#fdfbf8");
         let mut lib = ThemeLibrary::default();
-        lib.replace_collection(collection, &[], vec![dark.clone(), light.clone()])
+        lib.replace_collection(collection, &[], vec![dark, light.clone()])
             .unwrap();
         lib.select(ThemeMode::Dark, Some("night".into()));
         lib.select(ThemeMode::Light, Some("day".into()));

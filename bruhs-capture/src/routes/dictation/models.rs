@@ -34,13 +34,16 @@ async fn inventory(state: &CaptureState) -> Vec<ModelEntry> {
         let installed = tokio::fs::metadata(state.models.path(&artifact))
             .await
             .is_ok_and(|meta| meta.is_file() && meta.len() == artifact.len);
-        let transfers = state.dictation_models.lock();
-        let transfer = transfers.get(model.key());
+        let (downloaded_bytes, error) = state
+            .dictation_models
+            .lock()
+            .get(model.key())
+            .map_or((None, None), |t| (t.received, t.error.clone()));
         rows.push(ModelEntry {
             model,
             installed,
-            downloaded_bytes: transfer.and_then(|t| t.received),
-            error: transfer.and_then(|t| t.error.clone()),
+            downloaded_bytes,
+            error,
         });
     }
     rows
@@ -61,6 +64,7 @@ fn download(state: Arc<CaptureState>, model: WhisperModel) {
             cancel: Some(cancel),
             error: None,
         };
+        drop(entries);
     }
     tokio::spawn(async move {
         let result = tokio::select! {

@@ -65,8 +65,7 @@ impl Maintenance {
                     .value()
                     .trim()
                     .parse::<u32>()
-                    .map(|s| if s == 0 { 0 } else { s.clamp(5, 86400) })
-                    .unwrap_or(previous);
+                    .map_or(previous, |s| if s == 0 { 0 } else { s.clamp(5, 86400) });
                 if previous != value {
                     this.custom_background();
                     this.maintenance.prefs.fetch_seconds = value;

@@ -205,7 +205,16 @@ impl Dashboard {
             .zip(self.billing_cycle_start.and_then(Millis::positive))
             .map(|(end, start)| ((end - start) / 60000.).round())
             .filter(|n| (1. ..=f64::from(u32::MAX)).contains(n))
-            .map(|n| n as u32);
+            .map(|n| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "filtered to finite values within 1..=u32::MAX"
+                )]
+                {
+                    n as u32
+                }
+            });
         let plan = self.plan_usage.unwrap_or_default();
         [
             ("totalPercentUsed", "Overall", plan.total_percent_used),
@@ -221,7 +230,15 @@ impl Dashboard {
                 account: "Cursor".into(),
                 observed_at,
                 used_percent: value?.clamp(0., 100.),
-                resets_at: end.map(|ms| (ms / 1000.) as i64),
+                resets_at: end.map(|ms| {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "positive millisecond epoch divided by 1000 fits in i64"
+                    )]
+                    {
+                        (ms / 1000.) as i64
+                    }
+                }),
                 duration_minutes,
             })
         })

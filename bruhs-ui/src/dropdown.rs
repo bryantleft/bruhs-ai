@@ -150,6 +150,13 @@ struct ListNavigation {
     max_height: Pixels,
 }
 
+type FocusTargets = (
+    FocusHandle,
+    Rc<[OptionFocus]>,
+    ScrollHandle,
+    Rc<Cell<Bounds<Pixels>>>,
+);
+
 fn focus_targets(
     id: &'static str,
     groups: &[DropdownGroup],
@@ -157,12 +164,7 @@ fn focus_targets(
     reveal: Option<&str>,
     window: &mut Window,
     cx: &mut App,
-) -> (
-    FocusHandle,
-    Rc<[OptionFocus]>,
-    ScrollHandle,
-    Rc<Cell<Bounds<Pixels>>>,
-) {
+) -> FocusTargets {
     let state = window.use_keyed_state(SharedString::from(format!("{id}-focus")), cx, |_, cx| {
         DropdownFocus {
             selection_revealed: false,
@@ -514,7 +516,7 @@ impl RenderOnce for Dropdown {
         let action_rows = targets.clone();
         let action_select = on_select.clone();
         let action_toggle = toggle_for_close.clone();
-        let action_trigger = trigger_focus.clone();
+        let action_trigger = trigger_focus;
         div()
             .relative()
             .on_children_prepainted(move |children, _, _| {
@@ -628,8 +630,16 @@ impl RenderOnce for Dropdown {
                                 return;
                             };
                             match event.keystroke.key.as_str() {
-                                "down" => focus_option(down_key.as_ref().unwrap(), &scroll, window, cx),
-                                "up" => focus_option(up_key.as_ref().unwrap(), &scroll, window, cx),
+                                "down" => {
+                                    if let Some(row) = &down_key {
+                                        focus_option(row, &scroll, window, cx);
+                                    }
+                                }
+                                "up" => {
+                                    if let Some(row) = &up_key {
+                                        focus_option(row, &scroll, window, cx);
+                                    }
+                                }
                                 "enter" if !input_for_key.read(cx).is_composing() => {
                                     choose(initial.value, window, cx)
                                 }

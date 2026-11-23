@@ -1,6 +1,7 @@
 //! Capture and playback stay in memory for the lifetime of the Voice pane.
 use super::*;
 use crate::voice_capture::sample::{self, Clip, Cursor, Meter};
+use bruhs_models::num::ToIntSaturating;
 use std::sync::{atomic::Ordering, mpsc, Arc};
 
 #[derive(Default)]
@@ -33,7 +34,9 @@ impl MicrophoneTest {
     pub(super) fn seek(&self, percent: f64) {
         if let Some(clip) = &self.clip {
             self.cursor.seek(
-                (percent.clamp(0., 100.) * f64::from(clip.duration_ms()) / 100.).round() as u32,
+                (percent.clamp(0., 100.) * f64::from(clip.duration_ms()) / 100.)
+                    .round()
+                    .to_u32_saturating(),
             );
         }
     }

@@ -1,5 +1,6 @@
 //! A separate process keeps provider settings and CLI credentials out of the user's profile.
 #![cfg(unix)]
+#![expect(clippy::unwrap_used, reason = "integration test helpers")]
 
 use bruhs_core::{
     agent::{health, AgentOrchestrator, AgentTurn},

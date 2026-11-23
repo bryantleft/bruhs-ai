@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "test fixture helpers")]
+
 use super::*;
 use ::core::prelude::v1::test;
 use bruhs_models::remote_hosts::{RemoteHost, RemoteHostProfile, RemoteHostState};

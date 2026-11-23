@@ -14,7 +14,7 @@ pub(super) struct ArchivedRecord {
 
 pub(super) enum ArchivedThread {
     Live(Box<DesktopThread>, EpochMs),
-    Stored(ArchivedRecord),
+    Stored(Box<ArchivedRecord>),
 }
 
 impl ArchivedThread {
@@ -50,7 +50,7 @@ impl ArchivedThread {
 
     pub(super) fn snapshot(&self, cx: &App) -> ArchivedRecord {
         match self {
-            Self::Stored(record) => record.clone(),
+            Self::Stored(record) => (**record).clone(),
             Self::Live(thread, at) => ArchivedRecord {
                 archived_at: Some(*at),
                 thread: thread.snapshot(cx),
@@ -141,18 +141,23 @@ impl Workspace {
         let thread = match self.archived_threads.remove(index) {
             ArchivedThread::Live(thread, _) => *thread,
             ArchivedThread::Stored(record) => {
+                let ArchivedRecord {
+                    thread: persisted,
+                    draft,
+                    ..
+                } = *record;
                 let thread = Self::create_thread_from_persisted(
-                    record.thread,
+                    persisted,
                     &self.current_model,
                     self.permission_mode,
                     window,
                     cx,
                 );
-                if !record.draft.is_empty() {
+                if !draft.is_empty() {
                     thread.chat.update(cx, |chat, cx| {
                         chat.input_state.update(cx, |input, cx| {
-                            let end = record.draft.len();
-                            input.set_value(record.draft, window, cx);
+                            let end = draft.len();
+                            input.set_value(draft, window, cx);
                             input.set_selected_range(end..end, cx);
                         });
                     });
@@ -278,7 +283,7 @@ impl Workspace {
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
-                .debug_selector(move || selector.clone())
+                .debug_selector(move || selector)
                 .aria_label(label)
                 .child("Restore");
                 let restore = on_press_view(restore, cx, move |this, window, cx| {

@@ -349,27 +349,25 @@ impl Workspace {
         ));
         if self.show_settings_advanced("source-writer-advanced") {
             rows.push(template_row);
-            let control = prefs
-                .map(|p| {
-                    let model = match &p.writer_model {
-                        WriterModel::Separate { model, options }
-                            if !self.generator_unavailable(model) =>
-                        {
-                            Some((model.as_str(), options))
-                        }
-                        _ => None,
-                    };
-                    self.source_model_control(
-                        "settings-writer-model",
-                        "settings-writer-model-switch",
-                        "Source control writer model",
-                        model,
-                        self.active_settings_writer_default(true),
-                        "text_generation",
-                        cx,
-                    )
-                })
-                .unwrap_or_else(loading);
+            let control = prefs.map_or_else(loading, |p| {
+                let model = match &p.writer_model {
+                    WriterModel::Separate { model, options }
+                        if !self.generator_unavailable(model) =>
+                    {
+                        Some((model.as_str(), options))
+                    }
+                    _ => None,
+                };
+                self.source_model_control(
+                    "settings-writer-model",
+                    "settings-writer-model-switch",
+                    "Source control writer model",
+                    model,
+                    self.active_settings_writer_default(true),
+                    "text_generation",
+                    cx,
+                )
+            });
             let reset_model = !self.settings_project_scope.is_empty()
                 && prefs.is_some_and(|p| p.overrides.writer_model.is_some());
             rows.push(self.settings_row_with_reset(
@@ -385,6 +383,10 @@ impl Workspace {
         self.settings_card("Commits & pull requests", "", rows)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "renders a separate-model toggle and picker with explicit ids, labels, and fallback key"
+    )]
     fn source_model_control(
         &self,
         id: &'static str,

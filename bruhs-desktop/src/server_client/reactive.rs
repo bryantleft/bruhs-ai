@@ -205,6 +205,14 @@ impl ServerClient {
         Self::decode(response, request).await
     }
 
+    #[expect(
+        clippy::allow_attributes,
+        reason = "shared via #[path] between bruhs-desktop and bruhs-server tests"
+    )]
+    #[allow(
+        dead_code,
+        reason = "called from bruhs-desktop; bruhs-server tests also include server_client"
+    )]
     pub(crate) async fn remove_checkout_task_threads(
         &self,
         threads: std::collections::BTreeMap<

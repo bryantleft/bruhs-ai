@@ -131,6 +131,7 @@ async fn models() -> Result<Vec<SpeechModel>, Error> {
         .collect();
     list.sort_by(|a, b| a.name.cmp(&b.name));
     *cache = Some((Instant::now(), list.clone()));
+    drop(cache);
     Ok(list)
 }
 pub async fn catalog() -> Result<Json<Vec<SpeechModel>>, Error> {

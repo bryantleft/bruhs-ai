@@ -81,9 +81,10 @@ pub(super) fn format_local_minute(dt: chrono::NaiveDateTime) -> String {
 }
 
 fn local_minute(at: bruhs_models::EpochMs) -> String {
-    chrono::DateTime::from_timestamp_millis(at.as_millis())
-        .map(|t| format_local_minute(t.with_timezone(&chrono::Local).naive_local()))
-        .unwrap_or_else(|| once_time(at))
+    chrono::DateTime::from_timestamp_millis(at.as_millis()).map_or_else(
+        || once_time(at),
+        |t| format_local_minute(t.with_timezone(&chrono::Local).naive_local()),
+    )
 }
 
 fn format_times(text: &str, pattern: &str) -> String {
@@ -136,7 +137,7 @@ impl AutomationEditor {
             source.value.set_value("", window, cx);
         }
         let interval = match source.source.kind {
-            SourceKind::Schedule { every_ms } if minutes => (every_ms as f64 / 60_000.).to_string(),
+            SourceKind::Schedule { every_ms } if minutes => (bruhs_models::num::ToFloatLossy::to_f64_lossy(every_ms) / 60_000.).to_string(),
             SourceKind::Schedule { every_ms } => seconds(every_ms),
             _ => "15".into(),
         };
@@ -219,18 +220,18 @@ fn schedule_occurrence(
 
 pub(super) fn interval_milliseconds(text: &str, original: &SourceKind) -> Result<u64, String> {
     if let SourceKind::Schedule { every_ms } = original {
-        if text.trim() == (*every_ms as f64 / 60_000.).to_string() {
+        if text.trim() == (bruhs_models::num::ToFloatLossy::to_f64_lossy(*every_ms) / 60_000.).to_string() {
             return Ok(*every_ms);
         }
     }
     let millis = text.trim().parse::<f64>().unwrap_or(f64::NAN) * 60_000.;
     let millis = millis.round();
-    if !(60_000. ..=MAX_EXACT_MS as f64).contains(&millis) {
+    if !(60_000. ..=bruhs_models::num::ToFloatLossy::to_f64_lossy(MAX_EXACT_MS)).contains(&millis) {
         return Err(
             "Enter an interval of at least one minute within the supported clock range.".into(),
         );
     }
-    Ok(millis as u64)
+    Ok(bruhs_models::num::ToIntSaturating::to_u64_saturating(millis))
 }
 
 impl ReactiveAutomations {
@@ -322,14 +323,15 @@ impl ReactiveAutomations {
                         DAYS[index].0,
                         DAYS[index].1,
                         editor.source.weekdays.is_empty()
-                            || editor.source.weekdays.contains(&(index as u8 + 1)),
+                            || u8::try_from(index)
+                                .is_ok_and(|i| editor.source.weekdays.contains(&(i + 1))),
                     ),
                 };
                 let stop = cursor == index && !self.busy;
                 let key = format!("{id}-{index}");
                 div()
                     .id(SharedString::from(key.clone()))
-                    .debug_selector(move || key.clone())
+                    .debug_selector(move || key)
                     .role(Role::Button)
                     .aria_label(name)
                     .aria_toggled(selected.into())
@@ -365,7 +367,7 @@ impl ReactiveAutomations {
                         match group {
                             Group::Mode => editor.select_trigger(MODES[index].0, window, cx),
                             Group::Day => {
-                                let day = index as u8 + 1;
+                                let day = u8::try_from(index).unwrap_or(0) + 1;
                                 let days = &mut editor.source.weekdays;
                                 if days.is_empty() {
                                     *days = (1..=7).collect();

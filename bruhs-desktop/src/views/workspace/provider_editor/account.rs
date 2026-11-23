@@ -26,6 +26,10 @@ impl Drop for Pending {
     }
 }
 impl SignIn {
+    #[expect(
+        clippy::wrong_self_convention,
+        reason = "reports whether sign-in was opened from the edit page, not a constructor"
+    )]
     pub(super) fn from_edit(&self) -> bool {
         self.from_edit
     }
@@ -197,14 +201,16 @@ impl Workspace {
         if e.account.pending.is_some() {
             return;
         }
+        let Some(original) = e.original.as_ref() else {
+            return;
+        };
         let names = e
-            .original
-            .as_ref()
-            .and_then(|i| e.account.method(i))
+            .account
+            .method(original)
             .map(|m| m.variables.clone())
             .unwrap_or_default();
         let sources = self.credential_settings.read(cx).secret_sources();
-        let target = format!("acp/{}", e.original.as_ref().unwrap().id);
+        let target = format!("acp/{}", original.id);
         let mut first = None;
         for name in names {
             if e.variables
@@ -237,8 +243,12 @@ impl Workspace {
         cx.notify();
     }
     fn account_method_picker(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
-        let list = &e.account.state.as_ref().unwrap().methods;
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let Some(list) = e.account.state.as_ref().map(|s| &s.methods) else {
+            return div().into_any_element();
+        };
         let selected = e
             .account
             .selected
@@ -286,7 +296,7 @@ impl Workspace {
             .child(bruhs_ui::dropdown::Dropdown::new(
                 "acp-account-method",
                 "Sign-in method",
-                selected.map(value).unwrap_or("default"),
+                selected.map_or("default", value),
                 vec![DropdownGroup {
                     label: None,
                     mark: None,
@@ -303,9 +313,13 @@ impl Workspace {
             .into_any_element()
     }
     pub(super) fn account_body(&self, wide: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let e = self.provider_editor.as_ref().unwrap();
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
         let a = &e.account;
-        let instance = e.original.as_ref().unwrap();
+        let Some(instance) = e.original.as_ref() else {
+            return div().into_any_element();
+        };
         let busy = a.pending.is_some();
         let confirmed = a.state.as_ref().is_some_and(|s| s.confirmed);
         let method = a.method(instance);
@@ -530,7 +544,10 @@ impl Workspace {
         body.into_any_element()
     }
     pub(super) fn account_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let a = &self.provider_editor.as_ref().unwrap().account;
+        let Some(e) = self.provider_editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let a = &e.account;
         let done = a.from_edit || a.state.as_ref().is_some_and(|s| s.confirmed);
         editor_button(
             "acp-account-done",

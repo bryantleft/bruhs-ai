@@ -393,7 +393,11 @@ pub(in crate::reactive) fn turns(
     after: i64,
 ) -> Result<Vec<DesktopTaskTurn>, ReactiveError> {
     let mut statement=db.prepare("SELECT seq,title,model,payload FROM desktop_task_turns WHERE thread_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?;
-    let mut rows = statement.query(params![thread.as_str(), after, HISTORY_LIMIT as i64])?;
+    let mut rows = statement.query(params![
+        thread.as_str(),
+        after,
+        i64::try_from(HISTORY_LIMIT).unwrap_or(i64::MAX)
+    ])?;
     let mut turns = Vec::new();
     while let Some(row) = rows.next()? {
         turns.push(DesktopTaskTurn {

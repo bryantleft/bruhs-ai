@@ -37,8 +37,7 @@ impl Workspace {
                 state
                     .selected
                     .and_then(|i| state.hosts.get(i))
-                    .map(LinkedHost::name)
-                    .unwrap_or_else(|| "this machine".into()),
+                    .map_or_else(|| "this machine".into(), LinkedHost::name),
                 1 + state.hosts.len()
             )
         };

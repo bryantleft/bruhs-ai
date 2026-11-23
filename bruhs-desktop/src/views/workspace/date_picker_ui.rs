@@ -182,7 +182,9 @@ pub(crate) fn month_grid<V: 'static>(
     let first = NaiveDate::from_ymd_opt(year, month, 1);
     let cells: Vec<_> = (0..slots)
         .map(|i| {
-            let date = first?.checked_add_signed(chrono::Duration::days(i as i64 - lead as i64))?;
+            let date = first?.checked_add_signed(chrono::Duration::days(
+                i64::try_from(i).ok()? - i64::try_from(lead).ok()?,
+            ))?;
             if navigation.is_some() {
                 (1..=9999).contains(&date.year()).then_some(date)
             } else {

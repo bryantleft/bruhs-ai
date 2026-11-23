@@ -19,7 +19,7 @@ impl Hold {
         let released = Rc::new(Cell::new(false));
         let up = released.clone();
         let callback = RcBlock::new(move |raw: NonNull<NSEvent>| {
-            // AppKit owns the event throughout the callback. Return it for normal dispatch.
+            // SAFETY: AppKit owns the NSEvent for the duration of the monitor callback.
             let e = unsafe { raw.as_ref() };
             let kind = e.r#type();
             if (kind == NSEventType::FlagsChanged
@@ -32,6 +32,7 @@ impl Hold {
             raw.as_ptr()
         });
         let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
+        // SAFETY: Called on the main thread (verified by MainThreadMarker) with a valid RcBlock.
         let monitor =
             unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &callback) }?;
         Some(Self { monitor, released })
@@ -42,6 +43,7 @@ impl Hold {
 }
 impl Drop for Hold {
     fn drop(&mut self) {
+        // SAFETY: `self.monitor` was returned by `addLocalMonitorForEventsMatchingMask_handler` and is removed once.
         unsafe { NSEvent::removeMonitor(&self.monitor) }
     }
 }

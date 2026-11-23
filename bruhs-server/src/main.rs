@@ -50,6 +50,10 @@ const UPLOAD_BODY_BYTES: usize = 50 << 20;
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "RetentionHost is moved into the router Extension layer"
+)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if bruhs_core::api_client_tools::is_mcp_helper() {
         bruhs_core::api_client_tools::run_mcp_helper().await?;
@@ -219,7 +223,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _delivery_watcher = delivery.start_watcher(state.clone(), Some(coordination.clone()))?;
     // Removing a worktree refuses one a pull-request watch still reads.
     bruhs_core::worktrees::register_watch_source(std::sync::Arc::new(delivery.clone()));
-    let retention = bruhs_core::worktrees::retention::RetentionHost::new(state.clone(), coordination.clone(), delivery.clone());
+    let retention = bruhs_core::worktrees::retention::RetentionHost::new(
+        state.clone(),
+        coordination.clone(),
+        delivery.clone(),
+    );
     if let Some(file) = bruhs_core::delivery::writer::desktop_state_file() {
         tokio::spawn(retention.clone().run(file));
     }

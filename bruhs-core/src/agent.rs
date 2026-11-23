@@ -1154,8 +1154,11 @@ impl AgentOrchestrator {
     /// Active local CLI, identified by turn generation and host PID.
     pub fn thread_process(&self, thread_id: &ThreadId) -> Option<(u64, u32)> {
         let sessions = lock_sessions(&self.sessions);
-        let session = sessions.get(thread_id)?;
-        Some((session.turn, session.process_id?))
+        let result = sessions
+            .get(thread_id)
+            .and_then(|session| Some((session.turn, session.process_id?)));
+        drop(sessions);
+        result
     }
 
     /// Whether `thread_id` has a turn in flight.

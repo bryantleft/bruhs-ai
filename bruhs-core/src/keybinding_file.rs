@@ -38,7 +38,7 @@ fn read(path: &Path, known: Option<[u8; 32]>) -> io::Result<ResultState> {
             "Use a regular keybindings file smaller than 128 KB.",
         ));
     }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(128 * 1024));
     fs::File::open(path)?
         .take(128 * 1024 + 1)
         .read_to_end(&mut bytes)?;

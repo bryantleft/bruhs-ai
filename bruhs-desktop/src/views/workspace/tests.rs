@@ -2757,7 +2757,11 @@ fn settings_restores_an_archived_thread_and_draft_after_restart(cx: &mut gpui::T
         assert_eq!(saved.confirm_thread_archive, Some(true));
         assert!(saved.threads.iter().all(|thread| thread.id != id));
         assert_eq!(saved.archived_threads.len(), 1);
-        workspace.archived_threads = saved.archived_threads.into_iter().map(super::archive::ArchivedThread::Stored).collect();
+        workspace.archived_threads = saved
+            .archived_threads
+            .into_iter()
+            .map(|record| super::archive::ArchivedThread::Stored(Box::new(record)))
+            .collect();
         workspace.open_settings(&super::OpenSettings, window, cx);
         workspace.set_settings_section(super::SettingsSection::Archived, cx);
     });

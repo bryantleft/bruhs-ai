@@ -133,7 +133,7 @@ impl Workspace {
                     break;
                 }
                 // Recheck the wall clock after sleep or a time change.
-                let delay = at.saturating_sub(now).min(60_000) as u64;
+                let delay = u64::try_from(at.saturating_sub(now).min(60_000)).unwrap_or(0);
                 cx.background_executor()
                     .timer(Duration::from_millis(delay))
                     .await;
