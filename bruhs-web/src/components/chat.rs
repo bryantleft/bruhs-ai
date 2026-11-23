@@ -2083,7 +2083,6 @@ pub fn ChatPage() -> impl IntoView {
                             />
                         })}
 
-                        <AuthBanner />
                         <crate::thread_history::ThreadHistoryStatus />
 
                         {move || {
@@ -2092,6 +2091,7 @@ pub fn ChatPage() -> impl IntoView {
                                 // composer centered in the column.
                                 view! {
                                     <div class="flex flex-1 flex-col items-center justify-center gap-3 overflow-y-auto px-3 py-6 sm:px-5">
+                                        <AuthBanner />
                                         <Composer
                                             value=input_value
                                             set_value=set_input_value
@@ -2270,6 +2270,7 @@ pub fn ChatPage() -> impl IntoView {
                                             })
                                         }}
                                         <crate::components::secret_prompt::SecretPrompts />
+                                        <AuthBanner />
                                         <Composer
                                             value=input_value
                                             set_value=set_input_value

@@ -27,6 +27,7 @@
 //! [`gpui::AssetSource`]; serve [`icons::load`] from yours.
 
 pub mod actions;
+pub mod banner;
 pub mod button;
 pub mod card;
 pub mod checkbox;

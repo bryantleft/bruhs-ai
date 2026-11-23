@@ -429,10 +429,10 @@ impl Message {
         if self.content == labels {
             return "";
         }
-        self.content.strip_suffix(&labels)
+        self.content
+            .strip_suffix(&labels)
             .and_then(|prefix| prefix.strip_suffix('\n'))
-            .map(str::trim_end)
-            .unwrap_or(&self.content)
+            .map_or(&self.content, str::trim_end)
     }
 
     pub fn assistant_streaming(started_at_ms: i64, model: Option<String>) -> Self {
@@ -672,7 +672,10 @@ impl SendShortcut {
     }
 
     pub fn id(self) -> &'static str {
-        Self::OPTIONS.iter().find(|(mode, _)| *mode == self).unwrap().1
+        Self::OPTIONS
+            .iter()
+            .find(|(mode, _)| *mode == self)
+            .map_or("enter", |(_, id)| *id)
     }
 }
 
@@ -2572,7 +2575,6 @@ impl Render for ChatView {
                     .when(self.details_inline_open, |lane| lane.pr(px(312.)))
                     .children(self.render_fork_source(cx))
                     .when(self.find_open, |el| el.child(self.render_find_bar(cx)))
-                    .child(self.render_auth_banner(cx))
                     .when(hero, |el| {
                         el.child(
                             div()

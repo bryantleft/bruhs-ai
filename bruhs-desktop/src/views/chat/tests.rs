@@ -13,12 +13,7 @@ use super::{
     turn_duration_ms, turn_fold_label, AgentProvider, ChatView, ComposerHintDirection,
     DesktopAssistantContentBlock, DesktopAuthStatus, DesktopDiffLineKind, DesktopMathRender,
     DesktopMermaidRender, DesktopPermissionRequest, DesktopToolCall, Message, MessageRole,
-    PermissionMode, TurnState, AUTH_BANNER_ACTION_GAP_PX, AUTH_BANNER_ACTION_TOP_MARGIN_PX,
-    AUTH_BANNER_BG_OPACITY, AUTH_BANNER_BORDER_OPACITY, AUTH_BANNER_CONTENT_GAP_PX,
-    AUTH_BANNER_FONT_FAMILY, AUTH_BANNER_ICON_SIZE_PX, AUTH_BANNER_ICON_TOP_OFFSET_PX,
-    AUTH_BANNER_MESSAGE_BOTTOM_MARGIN_PX, AUTH_BANNER_MESSAGE_OPACITY, AUTH_BANNER_PADDING_PX,
-    AUTH_BANNER_RADIUS_PX, AUTH_BANNER_TEXT_SIZE_PX, AUTH_BANNER_TITLE_BOTTOM_MARGIN_PX,
-    AUTH_BANNER_X_MARGIN_PX, AUTH_BANNER_Y_MARGIN_PX, CHAT_COMPOSER_BOTTOM_PADDING_PX,
+    PermissionMode, TurnState, CHAT_COMPOSER_BOTTOM_PADDING_PX,
     CHAT_COMPOSER_MAX_ROWS, CHAT_COMPOSER_MIN_ROWS, CHAT_CONTENT_BLOCK_MAX_WIDTH,
     CHAT_DIAGRAM_ERROR_BORDER_OPACITY, CHAT_DIAGRAM_ERROR_FONT_FAMILY,
     CHAT_DIAGRAM_ERROR_LINE_HEIGHT, CHAT_DIAGRAM_ERROR_RADIUS_PX, CHAT_DIAGRAM_ERROR_TEXT_SIZE_PX,
@@ -304,22 +299,7 @@ fn desktop_git_branch_switcher_copy_should_match_web_reference() {
 
 #[test]
 fn desktop_auth_banner_copy_should_match_web_reference() {
-    assert_eq!(AUTH_BANNER_FONT_FAMILY, "Monaspace Neon");
-    assert_eq!(AUTH_BANNER_TEXT_SIZE_PX, 14.0);
-    assert_eq!(AUTH_BANNER_RADIUS_PX, 8.0);
-    assert_eq!(AUTH_BANNER_X_MARGIN_PX, 16.0);
-    assert_eq!(AUTH_BANNER_Y_MARGIN_PX, 12.0);
-    assert_eq!(AUTH_BANNER_PADDING_PX, 12.0);
-    assert_eq!(AUTH_BANNER_CONTENT_GAP_PX, 12.0);
-    assert_eq!(AUTH_BANNER_TITLE_BOTTOM_MARGIN_PX, 4.0);
-    assert_eq!(AUTH_BANNER_MESSAGE_BOTTOM_MARGIN_PX, 8.0);
-    assert_eq!(AUTH_BANNER_ACTION_GAP_PX, 8.0);
-    assert_eq!(AUTH_BANNER_ACTION_TOP_MARGIN_PX, 4.0);
-    assert_eq!(AUTH_BANNER_BORDER_OPACITY, 0.30);
-    assert_eq!(AUTH_BANNER_BG_OPACITY, 0.10);
-    assert_eq!(AUTH_BANNER_MESSAGE_OPACITY, 0.80);
-    assert_eq!(AUTH_BANNER_ICON_SIZE_PX, 16.0);
-    assert_eq!(AUTH_BANNER_ICON_TOP_OFFSET_PX, 2.0);
+    assert_eq!(bruhs_ui::banner::BANNER_ICON_SIZE_PX, 16.0);
     assert_eq!(
         CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL,
         bruhs_models::logic::cli_login::sign_in_banner_title("Claude", None)

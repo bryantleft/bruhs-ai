@@ -1,25 +1,9 @@
 //! Claude CLI sign-in: status checks, the login flow with polling, and the banner.
 
 use super::*;
+use bruhs_ui::banner::{banner, BannerTone};
 use bruhs_ui::press::on_press_view;
-use bruhs_ui::zoom::px;
 use std::borrow::Cow;
-pub(super) const AUTH_BANNER_FONT_FAMILY: &str = "Monaspace Neon";
-pub(super) const AUTH_BANNER_TEXT_SIZE_PX: f32 = 14.0;
-pub(super) const AUTH_BANNER_RADIUS_PX: f32 = 8.0;
-pub(super) const AUTH_BANNER_X_MARGIN_PX: f32 = 16.0;
-pub(super) const AUTH_BANNER_Y_MARGIN_PX: f32 = 12.0;
-pub(super) const AUTH_BANNER_PADDING_PX: f32 = 12.0;
-pub(super) const AUTH_BANNER_CONTENT_GAP_PX: f32 = 12.0;
-pub(super) const AUTH_BANNER_TITLE_BOTTOM_MARGIN_PX: f32 = 4.0;
-pub(super) const AUTH_BANNER_MESSAGE_BOTTOM_MARGIN_PX: f32 = 8.0;
-pub(super) const AUTH_BANNER_ACTION_GAP_PX: f32 = 8.0;
-pub(super) const AUTH_BANNER_ACTION_TOP_MARGIN_PX: f32 = 4.0;
-pub(super) const AUTH_BANNER_BORDER_OPACITY: f32 = 0.30;
-pub(super) const AUTH_BANNER_BG_OPACITY: f32 = 0.10;
-pub(super) const AUTH_BANNER_MESSAGE_OPACITY: f32 = 0.80;
-pub(super) const AUTH_BANNER_ICON_SIZE_PX: f32 = 16.0;
-pub(super) const AUTH_BANNER_ICON_TOP_OFFSET_PX: f32 = 2.0;
 /// Web's wording: `cli_login::sign_in_banner_title("Claude", None)`.
 pub(super) const CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL: &str = "Claude is not authenticated.";
 pub(super) const CLAUDE_LOGIN_ACTION_LABEL: &str = "Log in with Claude";
@@ -477,12 +461,13 @@ impl ChatView {
         cx.notify();
     }
 
-    /// The sign-in banner for the selected model's CLI, as on the web: Claude
-    /// and Codex offer a login here; other runtimes manage it in their CLI.
-    pub(super) fn render_auth_banner(&self, cx: &Context<'_, Self>) -> AnyElement {
+    /// The sign-in banner for the selected model's CLI, anchored directly above
+    /// the composer: Claude and Codex offer a login here; other runtimes manage
+    /// it in their CLI.
+    pub(super) fn render_auth_banner(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
         match AgentProvider::for_model(&self.model_id) {
             AgentProvider::Claude => match &self.auth_status {
-                DesktopAuthStatus::SignedOut(signed_out) => self.render_cli_auth_banner(
+                DesktopAuthStatus::SignedOut(signed_out) => Some(self.render_cli_auth_banner(
                     CliAuthBanner {
                         provider: AgentProvider::Claude,
                         title: signed_out.error.as_ref().map_or_else(
@@ -501,33 +486,35 @@ impl ChatView {
                         recheck_label: "Check Claude authentication again",
                     },
                     cx,
-                ),
-                DesktopAuthStatus::SignedIn(_) => div().into_any_element(),
+                )),
+                DesktopAuthStatus::SignedIn(_) => None,
             },
             AgentProvider::Codex => match &self.codex_auth {
-                Some(DesktopAuthStatus::SignedOut(signed_out)) => self.render_cli_auth_banner(
-                    CliAuthBanner {
-                        provider: AgentProvider::Codex,
-                        title: signed_out.error.as_ref().map_or_else(
-                            || codex_auth::CODEX_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
-                            |error| {
-                                bruhs_models::logic::cli_login::sign_in_banner_title(
-                                    "Codex",
-                                    Some(error),
-                                )
-                            },
-                        ),
-                        signed_out,
-                        login_label: codex_auth::CODEX_LOGIN_ACTION_LABEL,
-                        login_id: "desktop-codex-login",
-                        recheck_id: "desktop-codex-auth-recheck",
-                        recheck_label: "Check Codex authentication again",
-                    },
-                    cx,
-                ),
-                _ => div().into_any_element(),
+                Some(DesktopAuthStatus::SignedOut(signed_out)) => {
+                    Some(self.render_cli_auth_banner(
+                        CliAuthBanner {
+                            provider: AgentProvider::Codex,
+                            title: signed_out.error.as_ref().map_or_else(
+                                || codex_auth::CODEX_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
+                                |error| {
+                                    bruhs_models::logic::cli_login::sign_in_banner_title(
+                                        "Codex",
+                                        Some(error),
+                                    )
+                                },
+                            ),
+                            signed_out,
+                            login_label: codex_auth::CODEX_LOGIN_ACTION_LABEL,
+                            login_id: "desktop-codex-login",
+                            recheck_id: "desktop-codex-auth-recheck",
+                            recheck_label: "Check Codex authentication again",
+                        },
+                        cx,
+                    ))
+                }
+                _ => None,
             },
-            _ => div().into_any_element(),
+            _ => None,
         }
     }
 
@@ -547,7 +534,7 @@ impl ChatView {
 
     fn render_cli_auth_banner(
         &self,
-        banner: CliAuthBanner<'_>,
+        cli_banner: CliAuthBanner<'_>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let CliAuthBanner {
@@ -558,7 +545,7 @@ impl ChatView {
             login_id,
             recheck_id,
             recheck_label,
-        } = banner;
+        } = cli_banner;
         let message = signed_out.message.clone();
         let login_in_flight = signed_out.login_in_flight;
         let login_label = if login_in_flight {
@@ -567,111 +554,51 @@ impl ChatView {
             login_label
         };
 
+        let login_btn = web_button(
+            login_id,
+            WebButtonVariant::Primary,
+            WebButtonSize::Small,
+            ButtonState::disabled_if(login_in_flight),
+        )
+        .aria_label(login_label)
+        .child(login_label)
+        .when(!login_in_flight, |el| {
+            el.tab_index(0)
+                .role(Role::Button)
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _window, cx| {
+                        this.start_cli_login(provider, cx);
+                    })
+                })
+        });
+
+        let recheck_btn = web_button(
+            recheck_id,
+            WebButtonVariant::Outline,
+            WebButtonSize::Small,
+            ButtonState::Enabled,
+        )
+        .aria_label(recheck_label)
+        .child("Check again")
+        .tab_index(0)
+        .role(Role::Button)
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .map(|el| {
+            on_press_view(el, cx, move |this, _window, cx| {
+                this.start_cli_auth_check(provider, cx);
+            })
+        });
+
         div()
-            .debug_selector(|| "desktop-auth-banner".to_string())
-            .mx(px(AUTH_BANNER_X_MARGIN_PX))
-            .my(px(AUTH_BANNER_Y_MARGIN_PX))
-            .rounded(px(AUTH_BANNER_RADIUS_PX))
-            .border_1()
-            .border_color(theme::durian_400().opacity(AUTH_BANNER_BORDER_OPACITY))
-            .bg(theme::durian_500().opacity(AUTH_BANNER_BG_OPACITY))
-            .p(px(AUTH_BANNER_PADDING_PX))
-            .font_family(crate::theme::FontFace::Code.with_default(AUTH_BANNER_FONT_FAMILY))
-            .text_size(px(AUTH_BANNER_TEXT_SIZE_PX))
-            .text_color(theme::durian_100())
+            .w_full()
+            .mb_2()
             .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap(px(AUTH_BANNER_CONTENT_GAP_PX))
-                    .child(
-                        svg()
-                            .path(assets::ALERT_TRIANGLE_ICON_PATH)
-                            .size(px(AUTH_BANNER_ICON_SIZE_PX))
-                            .mt(px(AUTH_BANNER_ICON_TOP_OFFSET_PX))
-                            .text_color(theme::durian_300())
-                            .flex_shrink_0(),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::durian_100())
-                                    .mb(px(AUTH_BANNER_TITLE_BOTTOM_MARGIN_PX))
-                                    .child(title),
-                            )
-                            .when_some(message, |el, message| {
-                                el.child(
-                                    div()
-                                        .mb(px(AUTH_BANNER_MESSAGE_BOTTOM_MARGIN_PX))
-                                        .text_size(px(AUTH_BANNER_TEXT_SIZE_PX))
-                                        .text_color(
-                                            theme::durian_200()
-                                                .opacity(AUTH_BANNER_MESSAGE_OPACITY),
-                                        )
-                                        .child(message),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(AUTH_BANNER_ACTION_GAP_PX))
-                                    .mt(px(AUTH_BANNER_ACTION_TOP_MARGIN_PX))
-                                    .child(
-                                        web_button(
-                                            login_id,
-                                            WebButtonVariant::Primary,
-                                            WebButtonSize::Small,
-                                            ButtonState::disabled_if(login_in_flight),
-                                        )
-                                        .aria_label(login_label)
-                                        .child(login_label)
-                                        .when(
-                                            !login_in_flight,
-                                            |el| {
-                                                el.tab_index(0)
-                                                    .role(Role::Button)
-                                                    .focus_visible(|el| {
-                                                        el.border_color(theme::persimmon_400())
-                                                    })
-                                                    .map(|el| {
-                                                        on_press_view(
-                                                            el,
-                                                            cx,
-                                                            move |this, _window, cx| {
-                                                                this.start_cli_login(provider, cx);
-                                                            },
-                                                        )
-                                                    })
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        web_button(
-                                            recheck_id,
-                                            WebButtonVariant::Outline,
-                                            WebButtonSize::Small,
-                                            ButtonState::Enabled,
-                                        )
-                                        .aria_label(recheck_label)
-                                        .child("Check again")
-                                        .tab_index(0)
-                                        .role(Role::Button)
-                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .map(|el| {
-                                            on_press_view(el, cx, move |this, _window, cx| {
-                                                this.start_cli_auth_check(provider, cx);
-                                            })
-                                        }),
-                                    ),
-                            ),
-                    ),
+                banner("desktop-auth-banner", BannerTone::Warning, title)
+                    .debug_selector("desktop-auth-banner")
+                    .detail_opt(message)
+                    .action(login_btn)
+                    .action(recheck_btn),
             )
             .into_any_element()
     }

@@ -1,6 +1,7 @@
 // shadcn-style UI primitives for bruhs-web
 // Each primitive uses bruhs design tokens from @bruhs-ai/ui (longan/rambutan/persimmon/...)
 
+pub mod banner;
 pub mod braille;
 pub mod button;
 pub mod checkbox;
@@ -21,6 +22,7 @@ pub mod switch;
 pub mod textarea;
 pub mod tooltip;
 
+pub use banner::*;
 pub use braille::*;
 pub use button::*;
 pub use checkbox::*;

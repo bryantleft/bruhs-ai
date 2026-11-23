@@ -13,7 +13,7 @@ use crate::auth::{fetch_auth_status_for, trigger_login_for, AuthStatus};
 use bruhs_models::agent::{provider_for_model_id, AgentProvider};
 
 use crate::state::{CodexAuthSignal, SetCodexAuthSignal};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Icon};
+use crate::ui::{Banner, BannerTone, Button, ButtonSize, ButtonVariant};
 
 const POLL_INTERVAL_MS: u32 = 2000;
 const POLL_ATTEMPTS: u32 = 30; // 30 × 2s = 60s
@@ -135,48 +135,45 @@ pub fn AuthBanner() -> impl IntoView {
             when=move || offers_in_app_login(&current_model.get()) && !current_status().authenticated
             fallback=|| ()
         >
-            <div class="mx-4 my-3 rounded-grape bg-durian-500/10 inset-ring inset-ring-durian-400/30 p-3 text-body-sm text-durian-100">
-                <div class="flex items-start gap-3">
-                    <span class="text-durian-300 pt-0.5">
-                        <Icon name="alert-triangle" size=16 />
-                    </span>
-                    <div class="flex-1 min-w-0">
-                        <div class="font-medium text-durian-100 mb-1">
-                            {move || {
-                                let status = current_status();
-                                let name = provider_name(&current_provider());
-                                bruhs_models::logic::cli_login::sign_in_banner_title(
-                                    name,
-                                    status.error.as_deref(),
-                                )
+            <div class="mx-auto mb-2 w-full max-w-3xl">
+                <Banner
+                    tone=BannerTone::Warning
+                    actions=Box::new(move || view! {
+                        <Button
+                            variant=ButtonVariant::Primary
+                            size=ButtonSize::Small
+                            disabled=Signal::derive(move || polling.get())
+                            on_click=Callback::new(move |_| do_login())
+                        >
+                            {move || if polling.get() {
+                                "Waiting…".to_string()
+                            } else {
+                                format!("Log in with {}", provider_name(&current_provider()))
                             }}
-                        </div>
-                        {move || message.get().map(|m| view! {
-                            <div class="text-durian-200/80 mb-2">{m}</div>
-                        })}
-                        <div class="flex items-center gap-2 mt-1">
-                            <Button
-                                variant=ButtonVariant::Primary
-                                size=ButtonSize::Small
-                                disabled=Signal::derive(move || polling.get())
-                                on_click=Callback::new(move |_| do_login())
-                            >
-                                {move || if polling.get() {
-                                    "Waiting…".to_string()
-                                } else {
-                                    format!("Log in with {}", provider_name(&current_provider()))
-                                }}
-                            </Button>
-                            <Button
-                                variant=ButtonVariant::Outline
-                                size=ButtonSize::Small
-                                on_click=Callback::new(move |_| do_recheck())
-                            >
-                                "Check again"
-                            </Button>
-                        </div>
+                        </Button>
+                        <Button
+                            variant=ButtonVariant::Outline
+                            size=ButtonSize::Small
+                            on_click=Callback::new(move |_| do_recheck())
+                        >
+                            "Check again"
+                        </Button>
+                    }.into_any())
+                >
+                    <div class="font-medium text-durian-100">
+                        {move || {
+                            let status = current_status();
+                            let name = provider_name(&current_provider());
+                            bruhs_models::logic::cli_login::sign_in_banner_title(
+                                name,
+                                status.error.as_deref(),
+                            )
+                        }}
                     </div>
-                </div>
+                    {move || message.get().map(|m| view! {
+                        <div class="mt-0.5 text-label-sm text-durian-200/80">{m}</div>
+                    })}
+                </Banner>
             </div>
         </Show>
     }

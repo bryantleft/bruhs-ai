@@ -894,6 +894,7 @@ impl ChatView {
             .font_family(theme::UI_FONT_FAMILY)
             .when(hero, |el| el.child(self.render_hero_heading(cx)))
             .when_some(self.render_goal_row(), |el, row| el.child(row))
+            .when_some(self.render_auth_banner(cx), |el, banner| el.child(banner))
             .child(self.render_composer_surface(window, cx))
             .children(self.render_context_strip(window, cx))
             .when(hero, |el| el.child(self.render_hints()))
@@ -1268,8 +1269,10 @@ impl ChatView {
                 .child(
                     self.effort_spec()
                         .and_then(|s| s.choices.iter().find(|c| Some(c.value.as_str()) == effort))
-                        .map(|c| c.label.clone())
-                        .unwrap_or_else(|| effort.unwrap_or("Auto").to_owned()),
+                        .map_or_else(
+                            || effort.unwrap_or("Auto").to_owned(),
+                            |c| c.label.clone(),
+                        ),
                 )
                 .into_any_element();
         }
@@ -1294,7 +1297,7 @@ impl ChatView {
             .children((0..levels.len()).map(|i| {
                 div()
                     .w(px(2.))
-                    .h(px(3. + 2. * i as f32))
+                    .h(px(3. + 2. * bruhs_models::num::ToFloatLossy::to_f32_lossy(i)))
                     .rounded(px(1.))
                     .bg(if i < strength {
                         theme::rambutan_300()
@@ -1308,7 +1311,7 @@ impl ChatView {
     fn render_composer_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         let draft_empty = self.input_state.read(cx).value().trim().is_empty();
         let separate_stop = self.is_streaming && !draft_empty;
-        let model = self.native_model().map(|m| m.label.clone()).unwrap_or_else(||model_label(&self.model_id));
+        let model = self.native_model().map_or_else(|| model_label(&self.model_id), |m| m.label.clone());
         let model_tooltip = format!("Change model: {model} (⌘⇧M)");
         let compact_model = model.strip_prefix("Claude ").unwrap_or(&model).to_string();
         let effort = self.claude_send_effort().or_else(||self.effort_spec().map(|s|s.default.clone()));
