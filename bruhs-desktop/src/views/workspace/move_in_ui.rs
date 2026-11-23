@@ -16,7 +16,6 @@ use super::import_ui::live_line::{
 };
 use super::import_ui::{
     IMPORT_DIALOG_WIDTH_PX, IMPORT_LABEL_SM_TEXT_SIZE_PX, IMPORT_RADIUS_PX,
-    IMPORT_TAB_HOVER_BG_OPACITY, IMPORT_TAB_SELECTED_BG_OPACITY, IMPORT_TAB_SELECTED_RING_OPACITY,
 };
 use super::*;
 use bruhs_models::imports::{
@@ -603,60 +602,29 @@ impl Workspace {
     }
 
     fn render_move_in_tabs(&self, open: &MoveIn, cx: &Context<'_, Self>) -> AnyElement {
-        div()
-            .id("desktop-move-in-tabs")
-            .role(Role::TabList)
-            .aria_label(MOVE_IN_TITLE)
-            .mt_2()
-            .flex()
-            .gap_1()
-            .overflow_x_scroll()
-            .children(TABS.into_iter().zip(&open.tabs).map(|(tab, focus)| {
-                let selected = tab == open.tab;
-                let label = tab_label(tab);
-                div()
-                    .id(SharedString::from(format!("desktop-move-in-tab-{label}")))
-                    .debug_selector(move || format!("desktop-move-in-tab:{label}"))
-                    .track_focus(focus)
-                    .role(Role::Tab)
-                    .aria_label(label)
-                    .aria_selected(selected)
-                    .flex_shrink_0()
-                    .whitespace_nowrap()
-                    .rounded(px(IMPORT_RADIUS_PX))
-                    .border_1()
-                    .px(px(10.0))
-                    .py_1()
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-                    .cursor_pointer()
-                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .map(|el| {
-                        if selected {
-                            el.bg(theme::blueberry_600().opacity(IMPORT_TAB_SELECTED_BG_OPACITY))
-                                .border_color(
-                                    theme::blueberry_500()
-                                        .opacity(IMPORT_TAB_SELECTED_RING_OPACITY),
-                                )
-                                .text_color(theme::blueberry_200())
-                        } else {
-                            el.border_color(gpui::transparent_black())
-                                .text_color(theme::rambutan_400())
-                                .hover(|el| {
-                                    el.bg(theme::longan_800().opacity(IMPORT_TAB_HOVER_BG_OPACITY))
-                                        .text_color(theme::rambutan_200())
-                                })
-                        }
-                    })
-                    .map(|el| {
-                        on_press_view(el, cx, move |this, window, cx| {
-                            this.show_move_in_tab(tab, window, cx);
-                        })
-                    })
-                    .child(label)
-            }))
-            .into_any_element()
+        bruhs_ui::tabs::tab_list(
+            "desktop-move-in-tabs",
+            MOVE_IN_TITLE,
+            bruhs_ui::tabs::TabStyle::Pill,
+        )
+        .mt_2()
+        .children(TABS.into_iter().zip(&open.tabs).map(|(tab, focus)| {
+            let selected = tab == open.tab;
+            let label = tab_label(tab);
+            let trigger = bruhs_ui::tabs::tab_trigger(
+                SharedString::from(format!("desktop-move-in-tab-{label}")),
+                label,
+                selected,
+                bruhs_ui::tabs::TabStyle::Pill,
+            )
+            .debug_selector(move || format!("desktop-move-in-tab:{label}"))
+            .track_focus(focus)
+            .child(label);
+            on_press_view(trigger, cx, move |this, window, cx| {
+                this.show_move_in_tab(tab, window, cx);
+            })
+        }))
+        .into_any_element()
     }
 
     /// An agent tab: where it reads from, the folder, the personas found,
@@ -963,41 +931,25 @@ impl Workspace {
             .pb_3()
             .when(pinned.drawn, |el| el.pt_1())
             .children(pinned.items);
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-move-in-overlay")
-            .debug_selector(|| "desktop-move-in-overlay".to_string())
-            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
-            .on_click(cx.listener(|this, _event, _window, cx| this.close_move_in(cx)))
-            .child(
-                div()
-                    .id("desktop-move-in-dialog")
-                    .debug_selector(|| "desktop-move-in-dialog".to_string())
-                    .role(Role::Dialog)
-                    .aria_label(MOVE_IN_TITLE)
-                    .child(self.blur_scrim.backdrop())
-                    .w(px(IMPORT_DIALOG_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::picker_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
-                    .text_color(cx.theme().popover_foreground)
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-move-in-overlay",
+            bruhs_ui::dialog::DialogPlacement::Top,
+        )
+        .debug_selector(|| "desktop-move-in-overlay".to_string())
+        .on_click(cx.listener(|this, _event, _window, cx| this.close_move_in(cx)))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-move-in-dialog",
+                MOVE_IN_TITLE,
+                Role::Dialog,
+                cx,
+            )
+            .debug_selector(|| "desktop-move-in-dialog".to_string())
+            .child(self.blur_scrim.backdrop())
+            .w(px(IMPORT_DIALOG_WIDTH_PX))
+            .max_h(modal_ui::picker_max_height(window))
+            .bg(theme::longan_800())
+            .track_focus(&self.modal_start_focus_handle)
                     .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if event.keystroke.key.as_str() != "escape"
                             || event.keystroke.modifiers != Modifiers::default()

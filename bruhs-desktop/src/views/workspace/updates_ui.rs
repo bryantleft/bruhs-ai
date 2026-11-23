@@ -1218,44 +1218,35 @@ impl Workspace {
         } else {
             "Provider and desktop updates".into()
         };
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-modal-overlay")
-            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
-            .flex()
-            .when(compact, |el| el.items_end().justify_center())
-            .when(!compact, |el| el.items_center().justify_center().py(px(DESKTOP_DIALOG_EDGE_GAP_PX)))
-            .on_click(cx.listener(|this, _ev, window, cx| {
-                if this.dismiss_update_confirm(window, cx) {
-                    return;
-                }
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-modal-dialog")
-                    .debug_selector(|| "desktop-modal-dialog".to_string())
-                    .role(Role::Dialog)
-                    .aria_label(title.clone())
-                    .child(self.blur_scrim.backdrop())
-                    .when(compact, |el| el.w_full().rounded_t(px(16.0)))
-                    .when(!compact, |el| el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0)))
-                    .max_h(dialog_max_height(window))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::glass_surface(theme::longan_800()))
-                    .text_color(cx.theme().popover_foreground)
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-modal-overlay",
+            bruhs_ui::dialog::DialogPlacement::Centered,
+        )
+        .when(compact, |el| el.items_end().py_0())
+        .on_click(cx.listener(|this, _ev, window, cx| {
+            if this.dismiss_update_confirm(window, cx) {
+                return;
+            }
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-modal-dialog",
+                title.clone(),
+                Role::Dialog,
+                cx,
+            )
+            .debug_selector(|| "desktop-modal-dialog".to_string())
+            .child(self.blur_scrim.backdrop())
+            .when(compact, |el| {
+                el.w_full().max_w_full().rounded_none().rounded_t(px(16.0))
+            })
+            .when(!compact, |el| {
+                el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0))
+            })
+            .max_h(dialog_max_height(window))
+            .track_focus(&self.modal_start_focus_handle)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx);
                     }))

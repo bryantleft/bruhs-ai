@@ -1643,24 +1643,7 @@ impl Workspace {
                             ),
                         )
                         .when(!has_query && !search_focused, |el| {
-                            el.child(
-                                div()
-                                    .h(px(18.))
-                                    .min_w(px(18.))
-                                    .px_1()
-                                    .flex_shrink_0()
-                                    .rounded(px(4.))
-                                    .bg(theme::longan_800().opacity(0.9))
-                                    .border_1()
-                                    .border_color(gpui::white().opacity(0.08))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(11.))
-                                    .font_family(theme::CODE_FONT_FAMILY)
-                                    .text_color(theme::rambutan_400())
-                                    .child("/"),
-                            )
+                            el.child(bruhs_ui::kbd::kbd("/"))
                         })
                         .when(has_query, |el| {
                             let button = web_button(

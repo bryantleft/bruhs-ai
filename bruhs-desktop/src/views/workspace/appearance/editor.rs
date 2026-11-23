@@ -180,7 +180,6 @@ impl Workspace {
                 .border_1()
                 .border_color(theme::ring_modal())
                 .rounded_lg()
-                .shadow_md()
                 .px_3()
                 .py_2()
                 .text_sm()

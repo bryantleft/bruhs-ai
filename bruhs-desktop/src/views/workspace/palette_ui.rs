@@ -375,7 +375,8 @@ pub(super) const COMMAND_BAR_INPUT_X_PADDING_PX: f32 = 16.0;
 pub(super) const COMMAND_BAR_INPUT_Y_PADDING_PX: f32 = 12.0;
 /// The web input's line box: its text at the page's 1.5 line height.
 pub(super) const COMMAND_BAR_INPUT_LINE_HEIGHT_PX: f32 = COMMAND_BAR_INPUT_TEXT_SIZE_PX * 1.5;
-pub(super) const COMMAND_BAR_OVERLAY_OPACITY: f32 = 0.70;
+#[cfg(test)]
+pub(super) const COMMAND_BAR_OVERLAY_OPACITY: f32 = bruhs_ui::dialog::DIALOG_OVERLAY_OPACITY;
 pub(super) const COMMAND_BAR_LIST_MAX_HEIGHT_PX: f32 = 576.0;
 pub(super) const COMMAND_BAR_LIST_X_PADDING_PX: f32 = 8.0;
 pub(super) const COMMAND_BAR_LIST_Y_PADDING_PX: f32 = 8.0;
@@ -1114,44 +1115,27 @@ impl Workspace {
     }
 
     pub(super) fn render_command_bar(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-command-bar-overlay")
-            .debug_selector(|| "desktop-command-bar-overlay".to_string())
-            .bg(theme::longan_950().opacity(COMMAND_BAR_OVERLAY_OPACITY))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-command-bar")
-                    .role(Role::Dialog)
-                    .aria_label("Command palette")
-                    .child(self.blur_scrim.backdrop())
-                    .debug_selector(|| "desktop-command-bar".to_string())
-                    .w(px(DESKTOP_DIALOG_LG_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::picker_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::glass_surface(theme::longan_800()))
-                    .text_color(cx.theme().popover_foreground)
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-command-bar-overlay",
+            bruhs_ui::dialog::DialogPlacement::Top,
+        )
+        .debug_selector(|| "desktop-command-bar-overlay".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-command-bar",
+                "Command palette",
+                Role::Dialog,
+                cx,
+            )
+            .child(self.blur_scrim.backdrop())
+            .debug_selector(|| "desktop-command-bar".to_string())
+            .w(px(DESKTOP_DIALOG_LG_WIDTH_PX))
+            .max_h(modal_ui::picker_max_height(window))
+            .track_focus(&self.modal_start_focus_handle)
                     .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if event.keystroke.modifiers == Modifiers::default()

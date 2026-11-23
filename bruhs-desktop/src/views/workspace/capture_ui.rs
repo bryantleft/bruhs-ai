@@ -186,68 +186,43 @@ impl Workspace {
         let editing = self.capture_edit_id.is_some();
         let selected = self.capture_kind;
         let empty = self.capture_input.read(cx).value().trim().is_empty();
-        let type_tabs = div()
-            .id("capture-type-tabs")
-            .role(Role::TabList)
-            .aria_label("Capture type")
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .flex()
-            .gap_1()
-            .rounded(px(8.0))
-            .bg(theme::longan_900().opacity(0.5))
-            .p_1()
-            .children(
-                CaptureKind::ALL
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, kind)| {
-                        let is_selected = kind == selected;
-                        let group = SharedString::from(format!("capture-kind-{index}"));
-                        let color = if is_selected {
-                            theme::rambutan_100()
-                        } else {
-                            theme::rambutan_500()
-                        };
-                        div()
-                            .id(("capture-kind", index))
-                            .group(group.clone())
-                            .debug_selector(move || {
-                                format!("desktop-capture-kind-{}", kind.label().to_lowercase())
-                            })
-                            .role(Role::Tab)
-                            .aria_label(kind.label())
-                            .aria_selected(is_selected)
-                            .tab_index(0)
-                            .border_1()
-                            .border_color(gpui::transparent_black())
-                            .focus_visible(|element| element.border_color(theme::persimmon_400()))
-                            .flex_1()
-                            .min_w_0()
-                            .rounded(px(6.0))
-                            .px_1()
-                            .py_2()
-                            // Web: the destination's icon above its label.
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_1()
-                            .text_xs()
-                            .text_center()
-                            .text_color(color)
-                            .when(is_selected, |element| element.bg(theme::longan_700()))
-                            .cursor_pointer()
-                            .hover(|element| {
-                                element
-                                    .bg(theme::longan_800())
-                                    .text_color(theme::rambutan_200())
-                            })
-                            .map(|el| {
-                                on_press_view(el, cx, move |this, window, cx| {
-                                    if this.capture_edit_id.is_none() {
-                                        this.select_capture_kind(kind, window, cx);
-                                    }
+        let type_tabs = bruhs_ui::tabs::tab_list(
+            "capture-type-tabs",
+            "Capture type",
+            bruhs_ui::tabs::TabStyle::Segmented,
+        )
+        .children(
+            CaptureKind::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| {
+                    let is_selected = kind == selected;
+                    let group = SharedString::from(format!("capture-kind-{index}"));
+                    let color = if is_selected {
+                        theme::rambutan_100()
+                    } else {
+                        theme::rambutan_500()
+                    };
+                    bruhs_ui::tabs::tab_trigger(
+                        ("capture-kind", index),
+                        kind.label(),
+                        is_selected,
+                        bruhs_ui::tabs::TabStyle::Segmented,
+                    )
+                    .group(group.clone())
+                    .debug_selector(move || {
+                        format!("desktop-capture-kind-{}", kind.label().to_lowercase())
+                    })
+                    // Web: the destination's icon above its label.
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            if this.capture_edit_id.is_none() {
+                                this.select_capture_kind(kind, window, cx);
+                            }
                                 })
                             })
                             .child(

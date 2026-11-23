@@ -434,7 +434,6 @@ impl Workspace {
                     .border_1()
                     .border_color(theme::ring_floating())
                     .bg(theme::longan_900())
-                    .shadow_md()
                     .p_3()
                     .flex()
                     .flex_col()

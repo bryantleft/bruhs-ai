@@ -245,7 +245,6 @@ impl RenderOnce for ModeSwatches {
                         .rounded_full()
                         .p(px(2.))
                         .bg(theme::longan_900())
-                        .shadow_sm()
                         .tooltip(move |w, cx| Tooltip::new(tip.clone()).build(w, cx))
                         .child(color_disc(t.palette(mode).unwrap()));
                     let option = on_press(option, activate(t.clone()));

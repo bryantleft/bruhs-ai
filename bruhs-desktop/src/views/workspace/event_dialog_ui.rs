@@ -24,10 +24,8 @@ pub(super) const EVENT_RECORD_MEETING_LABEL: &str = "Record meeting";
 /// Shown for a provider event without its own color: it uses its
 /// calendar's color, not one of the local choices.
 pub(super) const EVENT_PROVIDER_DEFAULT_COLOR_LABEL: &str = "Calendar color";
-/// Web `disabled:opacity-60` on fields and `disabled:opacity-50` on the
-/// all-day checkbox.
+/// Web `disabled:opacity-60` on fields.
 pub(super) const EVENT_FIELD_DISABLED_OPACITY: f32 = 0.6;
-pub(super) const EVENT_CHECK_DISABLED_OPACITY: f32 = 0.5;
 pub(super) const EVENT_CREATE_SUBMIT_LABEL: &str = "Create";
 pub(super) const EVENT_SAVE_SUBMIT_LABEL: &str = "Save";
 pub(super) const EVENT_DELETE_LABEL: &str = "Delete";
@@ -36,7 +34,8 @@ pub(super) const EVENT_DIALOG_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const EVENT_DIALOG_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const EVENT_DIALOG_TITLE_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const EVENT_FORM_LABEL_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const EVENT_CREATE_OVERLAY_OPACITY: f32 = 0.70;
+#[cfg(test)]
+pub(super) const EVENT_CREATE_OVERLAY_OPACITY: f32 = bruhs_ui::dialog::DIALOG_OVERLAY_OPACITY;
 pub(super) const EVENT_CREATE_HEADER_Y_PADDING_PX: f32 = 12.0;
 pub(super) const EVENT_CREATE_BODY_Y_PADDING_PX: f32 = 12.0;
 pub(super) const EVENT_CREATE_BODY_GAP_PX: f32 = 12.0;
@@ -49,9 +48,13 @@ pub(super) const EVENT_CREATE_DELETE_Y_PADDING_PX: f32 = 8.0;
 pub(super) const EVENT_CREATE_DELETE_HOVER_BG_OPACITY: f32 = 0.10;
 pub(super) const EVENT_COLOR_OPTION_X_PADDING_PX: f32 = 12.0;
 pub(super) const EVENT_COLOR_OPTION_Y_PADDING_PX: f32 = 6.0;
+#[cfg(test)]
 pub(super) const EVENT_ALL_DAY_GAP_PX: f32 = 8.0;
+#[cfg(test)]
 pub(super) const EVENT_ALL_DAY_CHECK_SIZE_PX: f32 = 14.0;
+#[cfg(test)]
 pub(super) const EVENT_ALL_DAY_CHECK_RADIUS_PX: f32 = 4.0;
+#[cfg(test)]
 pub(super) const EVENT_ALL_DAY_CHECK_TEXT_SIZE_PX: f32 = 12.0;
 
 impl Workspace {
@@ -335,77 +338,19 @@ impl Workspace {
     }
 
     pub(super) fn render_event_all_day_toggle(&self, cx: &Context<'_, Self>) -> AnyElement {
-        div()
-            .id("event-create-all-day")
-            .debug_selector(|| "desktop-event-create-all-day".to_string())
-            .flex()
-            .items_center()
-            .gap(px(EVENT_ALL_DAY_GAP_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_LABEL_FONT_FAMILY))
-            .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
-            .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(theme::rambutan_300())
-            .role(Role::CheckBox)
-            .aria_label("All day")
-            .aria_toggled(if self.event_create_all_day {
-                Toggled::True
-            } else {
-                Toggled::False
+        let entity = cx.entity().downgrade();
+        bruhs_ui::checkbox::Checkbox::new("event-create-all-day")
+            .debug_selector("desktop-event-create-all-day")
+            .label("All day")
+            .checked(self.event_create_all_day)
+            .disabled(self.event_dialog_read_only())
+            .on_click(move |checked, _window, cx| {
+                let checked = *checked;
+                let _ = entity.update(cx, |this, cx| {
+                    this.event_create_all_day = checked;
+                    cx.notify();
+                });
             })
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .when(self.event_dialog_read_only(), |el| {
-                el.opacity(EVENT_CHECK_DISABLED_OPACITY)
-            })
-            .when(!self.event_dialog_read_only(), |el| {
-                el.tab_index(0)
-                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .cursor_pointer()
-                    // Space toggles on key down; gpui's keyboard click
-                    // would toggle it back.
-                    .on_click(cx.listener(|this, ev: &ClickEvent, _window, cx| {
-                        if !ev.is_keyboard() {
-                            this.event_create_all_day = !this.event_create_all_day;
-                            cx.notify();
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_checkbox_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.event_create_all_day = !this.event_create_all_day;
-                            cx.notify();
-                        }
-                    }))
-            })
-            .child(
-                div()
-                    .size(px(EVENT_ALL_DAY_CHECK_SIZE_PX))
-                    .flex_shrink_0()
-                    .rounded(px(EVENT_ALL_DAY_CHECK_RADIUS_PX))
-                    .border_1()
-                    .border_color(if self.event_create_all_day {
-                        theme::persimmon_500()
-                    } else {
-                        theme::rambutan_500()
-                    })
-                    .bg(if self.event_create_all_day {
-                        theme::persimmon_500()
-                    } else {
-                        theme::longan_900()
-                    })
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .text_size(px(EVENT_ALL_DAY_CHECK_TEXT_SIZE_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .text_color(theme::longan_950())
-                            .child(if self.event_create_all_day { "✓" } else { "" }),
-                    ),
-            )
-            .child("All day")
             .into_any_element()
     }
 
@@ -645,45 +590,29 @@ impl Workspace {
                     ),
             );
 
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-event-create-overlay")
-            .debug_selector(|| "desktop-event-create-overlay".to_string())
-            .bg(theme::longan_950().opacity(EVENT_CREATE_OVERLAY_OPACITY))
-            .flex()
-            .items_center()
-            .justify_center()
-            .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-event-create-dialog")
-                    .role(Role::Dialog)
-                    .aria_label(dialog_label)
-                    .child(self.blur_scrim.backdrop())
-                    .debug_selector(|| "desktop-event-create-dialog".to_string())
-                    .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(px(dialog_height))
-                    .overflow_hidden()
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
-                    .text_color(cx.theme().popover_foreground)
-                    .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_BODY_FONT_FAMILY))
-                    .flex()
-                    .flex_col()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-event-create-overlay",
+            bruhs_ui::dialog::DialogPlacement::Centered,
+        )
+        .debug_selector(|| "desktop-event-create-overlay".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-event-create-dialog",
+                dialog_label,
+                Role::Dialog,
+                cx,
+            )
+            .child(self.blur_scrim.backdrop())
+            .debug_selector(|| "desktop-event-create-dialog".to_string())
+            .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
+            .max_h(px(dialog_height))
+            .bg(theme::longan_800())
+            .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_BODY_FONT_FAMILY))
+            .track_focus(&self.modal_start_focus_handle)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx);
                     }))

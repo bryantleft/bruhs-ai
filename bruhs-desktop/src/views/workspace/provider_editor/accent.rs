@@ -267,7 +267,6 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_2()
-            .shadow_lg()
             .on_mouse_down_out(cx.listener(move |ws, event: &MouseDownEvent, _, cx| {
                 if !bounds.get().contains(&event.position) {
                     if let Some(e) = &mut ws.provider_editor {

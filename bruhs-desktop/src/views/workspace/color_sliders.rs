@@ -223,8 +223,7 @@ pub(super) fn color_surface<T: SliderHost>(
                 .size(px(10.))
                 .rounded_full()
                 .border_2()
-                .border_color(gpui::white())
-                .shadow_sm(),
+                .border_color(gpui::white()),
         )
 }
 

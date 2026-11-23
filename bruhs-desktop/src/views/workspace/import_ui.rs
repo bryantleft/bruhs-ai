@@ -45,9 +45,6 @@ pub(super) const IMPORT_LABEL_TEXT_SIZE_PX: f32 = 14.0;
 pub(super) const IMPORT_RADIUS_PX: f32 = 8.0;
 pub(super) const IMPORT_SELECTED_ROW_BG_OPACITY: f32 = 0.60;
 pub(super) const IMPORT_HOVER_ROW_BG_OPACITY: f32 = 0.40;
-pub(super) const IMPORT_TAB_SELECTED_BG_OPACITY: f32 = 0.20;
-pub(super) const IMPORT_TAB_SELECTED_RING_OPACITY: f32 = 0.30;
-pub(super) const IMPORT_TAB_HOVER_BG_OPACITY: f32 = 0.50;
 pub(super) const IMPORT_FOOTER_BORDER_OPACITY: f32 = 0.50;
 
 pub(super) mod export_tab;
@@ -741,74 +738,40 @@ impl Workspace {
 
     fn render_import_source_tabs(&self, cx: &Context<'_, Self>) -> AnyElement {
         let current = self.import_picker.tab;
-        // Five tabs scroll sideways inside the dialog, never wrap (F25).
-        div()
-            .mt_2()
-            .flex()
-            .gap_1()
-            .id("desktop-import-sources")
-            .role(Role::TabList)
-            .aria_label("Import from")
-            .overflow_x_scroll()
-            .children(
-                ImportSource::LOCAL
-                    .into_iter()
-                    .filter(|source| *source != ImportSource::T3)
-                    .map(ImportTab::Local)
-                    .chain([ImportTab::Export])
-                    .enumerate()
-                    .map(|(index, tab)| {
-                        let selected = tab == current;
-                        let (name, label) = match tab {
-                            ImportTab::Local(source) => (source.as_str(), source.label()),
-                            ImportTab::Export => ("export", EXPORT_TAB),
-                        };
-                        div()
-                            .id(("desktop-import-source", index))
-                            .debug_selector(move || format!("desktop-import-source-{name}"))
-                            .role(Role::Tab)
-                            .aria_label(label)
-                            .aria_selected(selected)
-                            .tab_index(0)
-                            .flex_shrink_0()
-                            .whitespace_nowrap()
-                            .rounded(px(IMPORT_RADIUS_PX))
-                            .border_1()
-                            .px(px(10.0))
-                            .py_1()
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-                            .cursor_pointer()
-                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .map(|el| {
-                                if selected {
-                                    el.bg(theme::blueberry_600()
-                                        .opacity(IMPORT_TAB_SELECTED_BG_OPACITY))
-                                        .border_color(
-                                            theme::blueberry_500()
-                                                .opacity(IMPORT_TAB_SELECTED_RING_OPACITY),
-                                        )
-                                        .text_color(theme::blueberry_200())
-                                } else {
-                                    el.border_color(gpui::transparent_black())
-                                        .text_color(theme::rambutan_400())
-                                        .hover(|el| {
-                                            el.bg(theme::longan_800()
-                                                .opacity(IMPORT_TAB_HOVER_BG_OPACITY))
-                                                .text_color(theme::rambutan_200())
-                                        })
-                                }
-                            })
-                            .map(|el| {
-                                on_press_view(el, cx, move |this, window, cx| {
-                                    this.set_import_tab(tab, window, cx);
-                                })
-                            })
-                            .child(label)
-                    }),
-            )
-            .into_any_element()
+        // Tabs scroll sideways inside the dialog, never wrap (F25).
+        bruhs_ui::tabs::tab_list(
+            "desktop-import-sources",
+            "Import from",
+            bruhs_ui::tabs::TabStyle::Pill,
+        )
+        .mt_2()
+        .children(
+            ImportSource::LOCAL
+                .into_iter()
+                .filter(|source| *source != ImportSource::T3)
+                .map(ImportTab::Local)
+                .chain([ImportTab::Export])
+                .enumerate()
+                .map(|(index, tab)| {
+                    let selected = tab == current;
+                    let (name, label) = match tab {
+                        ImportTab::Local(source) => (source.as_str(), source.label()),
+                        ImportTab::Export => ("export", EXPORT_TAB),
+                    };
+                    let trigger = bruhs_ui::tabs::tab_trigger(
+                        ("desktop-import-source", index),
+                        label,
+                        selected,
+                        bruhs_ui::tabs::TabStyle::Pill,
+                    )
+                    .debug_selector(move || format!("desktop-import-source-{name}"))
+                    .child(label);
+                    on_press_view(trigger, cx, move |this, window, cx| {
+                        this.set_import_tab(tab, window, cx);
+                    })
+                }),
+        )
+        .into_any_element()
     }
 
     fn render_import_rows(
@@ -942,44 +905,28 @@ impl Workspace {
         } else {
             self.import_picker.error.is_none() && !local_rows.is_empty()
         };
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-import-thread-overlay")
-            .debug_selector(|| "desktop-import-thread-overlay".to_string())
-            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-import-thread-dialog")
-                    .role(Role::Dialog)
-                    .aria_label(IMPORT_DIALOG_LABEL)
-                    .child(self.blur_scrim.backdrop())
-                    .debug_selector(|| "desktop-import-thread-dialog".to_string())
-                    .w(px(IMPORT_DIALOG_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::picker_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
-                    .text_color(cx.theme().popover_foreground)
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-import-thread-overlay",
+            bruhs_ui::dialog::DialogPlacement::Top,
+        )
+        .debug_selector(|| "desktop-import-thread-overlay".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-import-thread-dialog",
+                IMPORT_DIALOG_LABEL,
+                Role::Dialog,
+                cx,
+            )
+            .child(self.blur_scrim.backdrop())
+            .debug_selector(|| "desktop-import-thread-dialog".to_string())
+            .w(px(IMPORT_DIALOG_WIDTH_PX))
+            .max_h(modal_ui::picker_max_height(window))
+            .bg(theme::longan_800())
+            .track_focus(&self.modal_start_focus_handle)
                     .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         let navigates = Self::move_command_selected_index(0, 0, key).is_some();

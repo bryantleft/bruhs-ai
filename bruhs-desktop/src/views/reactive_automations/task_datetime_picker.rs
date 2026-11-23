@@ -726,7 +726,6 @@ impl ReactiveAutomations {
                     .border_1()
                     .border_color(theme::ring_floating())
                     .bg(theme::longan_900())
-                    .shadow_md()
                     .flex()
                     .flex_col()
                     .gap_1()

@@ -202,7 +202,6 @@ impl Render for ColorPicker {
                 .color_role("surfaceOverlay")
                 .unwrap_or_else(theme::longan_900))
             .text_color(cx.theme().popover_foreground)
-            .shadow_lg()
             .flex()
             .flex_col()
             .child(

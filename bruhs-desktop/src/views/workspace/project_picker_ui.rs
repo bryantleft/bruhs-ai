@@ -15,7 +15,8 @@ pub(super) const PROJECT_PICKER_CONTENT_MAX_HEIGHT_PX: f32 = 288.0;
 pub(super) const PROJECT_PICKER_LABEL_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const PROJECT_PICKER_SECTION_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const PROJECT_PICKER_FOOTER_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const PROJECT_PICKER_OVERLAY_OPACITY: f32 = 0.70;
+#[cfg(test)]
+pub(super) const PROJECT_PICKER_OVERLAY_OPACITY: f32 = bruhs_ui::dialog::DIALOG_OVERLAY_OPACITY;
 pub(super) const PROJECT_PICKER_HEADER_X_PADDING_PX: f32 = 16.0;
 pub(super) const PROJECT_PICKER_HEADER_Y_PADDING_PX: f32 = 12.0;
 pub(super) const PROJECT_PICKER_HEADER_GAP_PX: f32 = 12.0;
@@ -686,45 +687,28 @@ impl Workspace {
             );
         }
 
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-project-picker-overlay")
-            .debug_selector(|| "desktop-project-picker-overlay".to_string())
-            .bg(theme::longan_950().opacity(PROJECT_PICKER_OVERLAY_OPACITY))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-project-picker-dialog")
-                    .role(Role::Dialog)
-                    .aria_label("Choose project folder")
-                    .child(self.blur_scrim.backdrop())
-                    .debug_selector(|| "desktop-project-picker-dialog".to_string())
-                    .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::picker_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::glass_surface(theme::longan_800()))
-                    .text_color(cx.theme().popover_foreground)
-                    .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_BODY_FONT_FAMILY))
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-project-picker-overlay",
+            bruhs_ui::dialog::DialogPlacement::Top,
+        )
+        .debug_selector(|| "desktop-project-picker-overlay".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-project-picker-dialog",
+                "Choose project folder",
+                Role::Dialog,
+                cx,
+            )
+            .child(self.blur_scrim.backdrop())
+            .debug_selector(|| "desktop-project-picker-dialog".to_string())
+            .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
+            .max_h(modal_ui::picker_max_height(window))
+            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_PICKER_BODY_FONT_FAMILY))
+            .track_focus(&self.modal_start_focus_handle)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx);
                     }))

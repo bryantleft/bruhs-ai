@@ -569,34 +569,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
         action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
     ) -> AnyElement {
-        let id = id.into();
-        let selector = id.to_string();
-        let label = label.into();
-        let button = web_button(
-            id,
-            WebButtonVariant::Ghost,
-            WebButtonSize::Small,
-            ButtonState::Enabled,
-        )
-        .debug_selector(move || selector.clone())
-        .aria_label(label.clone())
-        .h(px(28.))
-        .w_full()
-        .min_w_0()
-        .px_2()
-        .rounded(px(6.))
-        .justify_start()
-        .gap_2()
-        .text_size(px(12.5))
-        .text_color(theme::rambutan_200())
-        .child(
-            svg()
-                .path(icon)
-                .size(px(14.))
-                .flex_shrink_0()
-                .text_color(theme::rambutan_400()),
-        )
-        .child(div().min_w_0().truncate().child(label));
+        let button = bruhs_ui::card::menu_row(id, icon, label, ButtonState::Enabled);
         on_press_view(button, cx, move |this, win, cx| {
             this.details.close();
             action(this, win, cx);
@@ -722,31 +695,12 @@ impl Workspace {
             if let Some((_, _, text)) = matching {
                 env_rows.push(detail_sample("detail-resource-sample", text.clone()));
             }
-            let button = web_button(
+            let button = bruhs_ui::card::menu_row(
                 "measure-thread-usage",
-                WebButtonVariant::Ghost,
-                WebButtonSize::Small,
+                assets::ACTIVITY_ICON_PATH,
+                "Measure resource usage",
                 ButtonState::disabled_if(self.details.measuring),
-            )
-            .debug_selector(|| "measure-thread-usage".into())
-            .aria_label("Measure resource usage")
-            .h(px(28.))
-            .w_full()
-            .min_w_0()
-            .px_2()
-            .rounded(px(6.))
-            .justify_start()
-            .gap_2()
-            .text_size(px(12.5))
-            .text_color(theme::rambutan_200())
-            .child(
-                svg()
-                    .path(assets::ACTIVITY_ICON_PATH)
-                    .size(px(14.))
-                    .flex_shrink_0()
-                    .text_color(theme::rambutan_400()),
-            )
-            .child(div().min_w_0().truncate().child("Measure resource usage"));
+            );
             env_rows.push(
                 on_press_view(button, cx, move |this, _, cx| {
                     this.measure_thread_usage(id.clone(), path.clone(), cx);
@@ -1009,8 +963,7 @@ impl Workspace {
             .w(px(280.))
             .max_w_full()
             .child(
-                div()
-                    .id("thread-details-card")
+                bruhs_ui::card::popover_card("thread-details-card")
                     .debug_selector(|| "thread-details-card".into())
                     .track_focus(&self.details.card)
                     .role(if self.details.inline {
@@ -1019,18 +972,9 @@ impl Workspace {
                         Role::Dialog
                     })
                     .aria_label("Thread details")
-                    .occlude()
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(if self.details.inline {
-                        theme::longan_800().opacity(0.9)
-                    } else {
-                        theme::ring_floating()
+                    .when(self.details.inline, |el| {
+                        el.border_color(theme::longan_800().opacity(0.9))
                     })
-                    .bg(theme::longan_900())
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
                     .on_mouse_down_out(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                         if this.details.inline || this.details.menu.is_some() {
                             return;
@@ -1057,23 +1001,7 @@ impl Workspace {
                         }),
                     )
                     .child(
-                        div()
-                            .relative()
-                            .h(px(36.))
-                            .pl_3()
-                            .pr_2()
-                            .border_b_1()
-                            .border_color(theme::longan_800().opacity(0.75))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(12.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::rambutan_300())
-                                    .child("Thread details"),
-                            )
+                        bruhs_ui::card::popover_header("Thread details")
                             .child(configure)
                             .when(menu_open, |el| {
                                 if let Some(position) = self.details.context_position {

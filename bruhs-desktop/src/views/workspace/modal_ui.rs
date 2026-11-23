@@ -814,44 +814,36 @@ impl Workspace {
         // The header carries the dialog's one title; the content does not
         // repeat it (web: the visible heading is the only title).
         let title: SharedString = title.into();
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-modal-overlay")
-            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
-            .flex()
-            .items_center()
-            .justify_center()
-            .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
-            .on_click(cx.listener(|this, _ev, window, cx| {
-                if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) || this.dismiss_update_confirm(window, cx) { return; }
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-modal-dialog")
-                    .debug_selector(|| "desktop-modal-dialog".to_string())
-                    .role(if matches!(self.overlay, Some(Overlay::RemoveThemeVariants(_))) { Role::AlertDialog } else { Role::Dialog })
-                    .aria_label(title.clone())
-                    .child(self.blur_scrim.backdrop())
-                    .w(px(width_px))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(dialog_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::glass_surface(theme::longan_800()))
-                    .text_color(cx.theme().popover_foreground)
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-modal-overlay",
+            bruhs_ui::dialog::DialogPlacement::Centered,
+        )
+        .on_click(cx.listener(|this, _ev, window, cx| {
+            if this.dismiss_theme_editor(window, cx)
+                || this.dismiss_restart_confirm(window, cx)
+                || this.dismiss_update_confirm(window, cx)
+            {
+                return;
+            }
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-modal-dialog",
+                title.clone(),
+                if matches!(self.overlay, Some(Overlay::RemoveThemeVariants(_))) {
+                    Role::AlertDialog
+                } else {
+                    Role::Dialog
+                },
+                cx,
+            )
+            .debug_selector(|| "desktop-modal-dialog".to_string())
+            .child(self.blur_scrim.backdrop())
+            .w(px(width_px))
+            .max_h(dialog_max_height(window))
+            .track_focus(&self.modal_start_focus_handle)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx);
                     }))

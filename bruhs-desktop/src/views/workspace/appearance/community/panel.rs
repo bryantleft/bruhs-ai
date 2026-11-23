@@ -289,7 +289,6 @@ impl Browser {
                             .border_1()
                             .border_color(theme::ring_modal())
                             .bg(theme::longan_900())
-                            .shadow_md()
                             .flex()
                             .flex_col()
                             .on_mouse_down_out(cx.listener(

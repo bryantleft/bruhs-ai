@@ -875,6 +875,7 @@ enum DesktopFilePreview {
     Ready(DesktopReadyFile),
 }
 
+#[cfg(test)]
 fn is_web_checkbox_activation_key(key: &str) -> bool {
     key == "space"
 }
@@ -1317,10 +1318,13 @@ const DESKTOP_DIALOG_MD_WIDTH_PX: f32 = 448.0;
 const DESKTOP_DIALOG_LG_WIDTH_PX: f32 = 576.0;
 /// Web `max-w-2xl` (New bruh).
 const DESKTOP_DIALOG_2XL_WIDTH_PX: f32 = 672.0;
+#[cfg(test)]
 const DESKTOP_DIALOG_MAX_WIDTH_RATIO: f32 = 0.9;
-const DESKTOP_DIALOG_RADIUS_PX: f32 = 14.0;
+#[cfg(test)]
+const DESKTOP_DIALOG_RADIUS_PX: f32 = bruhs_ui::dialog::DIALOG_RADIUS_PX;
 const DESKTOP_MODAL_TITLE_TEXT_SIZE_PX: f32 = 16.0;
-const DESKTOP_MODAL_OVERLAY_OPACITY: f32 = 0.70;
+#[cfg(test)]
+const DESKTOP_MODAL_OVERLAY_OPACITY: f32 = bruhs_ui::dialog::DIALOG_OVERLAY_OPACITY;
 const DESKTOP_MODAL_HEADER_X_PADDING_PX: f32 = 16.0;
 const DESKTOP_MODAL_HEADER_Y_PADDING_PX: f32 = 10.0;
 /// Where top-anchored overlays hang: the command bar and the pickers whose

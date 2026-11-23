@@ -280,42 +280,27 @@ impl Workspace {
             .collect();
         let page_count = count.div_ceil(PAGE_SIZE);
         let page = current / PAGE_SIZE;
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-record-picker-overlay")
-            .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
-            .flex()
-            .items_start()
-            .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-record-picker")
-                    .debug_selector(|| "desktop-record-picker".to_string())
-                    .role(Role::Dialog)
-                    .aria_label(target.label())
-                    .child(self.blur_scrim.backdrop())
-                    .w(px(RECORD_PICKER_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::picker_max_height(window))
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-record-picker-overlay",
+            bruhs_ui::dialog::DialogPlacement::Top,
+        )
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-record-picker",
+                target.label(),
+                Role::Dialog,
+                cx,
+            )
+            .debug_selector(|| "desktop-record-picker".to_string())
+            .child(self.blur_scrim.backdrop())
+            .w(px(RECORD_PICKER_WIDTH_PX))
+            .max_h(modal_ui::picker_max_height(window))
+            .bg(theme::longan_800())
+            .track_focus(&self.modal_start_focus_handle)
                     .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         let step = navigate(current, count, key);

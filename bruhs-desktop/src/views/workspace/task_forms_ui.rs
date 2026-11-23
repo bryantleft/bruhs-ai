@@ -10,7 +10,8 @@ pub(super) const TASK_DIALOG_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const TASK_DIALOG_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const TASK_DIALOG_TITLE_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const TASK_FORM_LABEL_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const TASK_CREATE_OVERLAY_OPACITY: f32 = 0.70;
+#[cfg(test)]
+pub(super) const TASK_CREATE_OVERLAY_OPACITY: f32 = bruhs_ui::dialog::DIALOG_OVERLAY_OPACITY;
 pub(super) const TASK_CREATE_HEADER_Y_PADDING_PX: f32 = 12.0;
 pub(super) const TASK_CREATE_BODY_Y_PADDING_PX: f32 = 12.0;
 pub(super) const TASK_CREATE_BODY_GAP_PX: f32 = 12.0;
@@ -1401,45 +1402,29 @@ impl Workspace {
                     ),
             );
 
-        div()
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .left_0()
-            .occlude()
-            .id("desktop-task-create-overlay")
-            .debug_selector(|| "desktop-task-create-overlay".to_string())
-            .bg(theme::longan_950().opacity(TASK_CREATE_OVERLAY_OPACITY))
-            .flex()
-            .items_center()
-            .justify_center()
-            .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.close_transient_surfaces();
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("desktop-task-create-dialog")
-                    .role(Role::Dialog)
-                    .aria_label("New task")
-                    .child(self.blur_scrim.backdrop())
-                    .debug_selector(|| "desktop-task-create-dialog".to_string())
-                    .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
-                    .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(px(dialog_height))
-                    .overflow_hidden()
-                    .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
-                    .border_1()
-                    .border_color(theme::ring_modal())
-                    .bg(theme::longan_800())
-                    .text_color(cx.theme().popover_foreground)
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
-                    .flex()
-                    .flex_col()
-                    .track_focus(&self.modal_start_focus_handle)
-                    .tab_group()
+        bruhs_ui::dialog::dialog_backdrop(
+            "desktop-task-create-overlay",
+            bruhs_ui::dialog::DialogPlacement::Centered,
+        )
+        .debug_selector(|| "desktop-task-create-overlay".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.close_transient_surfaces();
+            cx.notify();
+        }))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "desktop-task-create-dialog",
+                "New task",
+                Role::Dialog,
+                cx,
+            )
+            .child(self.blur_scrim.backdrop())
+            .debug_selector(|| "desktop-task-create-dialog".to_string())
+            .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
+            .max_h(px(dialog_height))
+            .bg(theme::longan_800())
+            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
+            .track_focus(&self.modal_start_focus_handle)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         this.trap_modal_tab_focus(event, window, cx);
                     }))
