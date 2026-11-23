@@ -11,14 +11,13 @@
 //!
 //! "me" segments pass through unchanged.
 
+use crate::resample::ResampleError;
 use bruhs_models::num::ToFloatLossy;
 use bruhs_models::{ClusterCentroid, SpeakerId, TranscriptSegment};
 #[cfg(target_os = "macos")]
 use hound::{SampleFormat, WavReader};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-#[cfg(target_os = "macos")]
-use rubato::{FftFixedIn, Resampler};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -49,7 +48,7 @@ pub enum SubdiarizeError {
     #[error("hound: {0}")]
     Hound(#[from] hound::Error),
     #[error("resample: {0}")]
-    Resample(String),
+    Resample(#[from] ResampleError),
     #[error("sherpa: {0}")]
     Sherpa(String),
 }
@@ -202,38 +201,11 @@ fn load_wav_mono_16k(path: &Path) -> Result<Vec<f32>, SubdiarizeError> {
     if spec.sample_rate == TARGET_SAMPLE_RATE {
         return Ok(mono);
     }
-    resample_mono(mono, spec.sample_rate, TARGET_SAMPLE_RATE)
-}
-
-#[cfg(target_os = "macos")]
-fn resample_mono(
-    input: Vec<f32>,
-    in_rate: u32,
-    out_rate: u32,
-) -> Result<Vec<f32>, SubdiarizeError> {
-    let chunk_size = (in_rate as usize / 4).max(256).min(input.len().max(256));
-    let mut resampler =
-        FftFixedIn::<f32>::new(in_rate as usize, out_rate as usize, chunk_size, 2, 1)
-            .map_err(|e| SubdiarizeError::Resample(format!("{e}")))?;
-
-    let exact_out = crate::mix::resampled_len(input.len(), in_rate, out_rate);
-    let mut out: Vec<f32> = Vec::with_capacity(exact_out + chunk_size);
-    let mut cursor = 0;
-    while cursor < input.len() {
-        let end = (cursor + chunk_size).min(input.len());
-        let mut chunk: Vec<f32> = input[cursor..end].to_vec();
-        if chunk.len() < chunk_size {
-            chunk.resize(chunk_size, 0.0);
-        }
-        let frames = vec![chunk];
-        let resampled = resampler
-            .process(&frames, None)
-            .map_err(|e| SubdiarizeError::Resample(format!("{e}")))?;
-        out.extend_from_slice(&resampled[0]);
-        cursor += chunk_size;
-    }
-    out.truncate(exact_out);
-    Ok(out)
+    Ok(crate::resample::resample_mono(
+        &mono,
+        spec.sample_rate,
+        TARGET_SAMPLE_RATE,
+    )?)
 }
 
 /// Extract a contiguous slice of mono samples for the half-open window

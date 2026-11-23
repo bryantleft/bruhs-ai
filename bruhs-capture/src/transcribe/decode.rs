@@ -1,12 +1,9 @@
 //! Convert a recorded WAV file into Whisper's expected input: f32
 //! samples, mono, 16 kHz. We do all of: read i16 PCM via hound, mix to
 //! mono, resample to 16 kHz via rubato.
-//!
-//! rubato 0.15: `FftFixedIn::new(in_rate, out_rate, chunk_size, sub_chunks, channels)`
-//! Input/output are non-interleaved `Vec<Vec<f32>>` (one inner Vec per channel).
 
+use crate::resample::{resample_mono, ResampleError};
 use bruhs_models::num::ToFloatLossy;
-use rubato::{FftFixedIn, Resampler};
 use std::path::Path;
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -16,7 +13,7 @@ pub enum DecodeError {
     #[error("hound: {0}")]
     Hound(#[from] hound::Error),
     #[error("resample: {0}")]
-    Resample(String),
+    Resample(#[from] ResampleError),
     #[error("unsupported wav format: {0}")]
     UnsupportedFormat(String),
 }
@@ -81,7 +78,7 @@ pub fn decode_wav_from_sample(
     if spec.sample_rate == TARGET_SAMPLE_RATE {
         return Ok((mono, new_offset));
     }
-    let resampled = resample_mono(mono, spec.sample_rate, TARGET_SAMPLE_RATE)?;
+    let resampled = resample_mono(&mono, spec.sample_rate, TARGET_SAMPLE_RATE)?;
     // The new offset is still in source-rate mono samples (not resampled),
     // because the caller tracks source-rate watermarks.
     Ok((resampled, new_offset))
@@ -123,50 +120,7 @@ pub fn decode_wav_to_whisper_input(path: &Path) -> Result<Vec<f32>, DecodeError>
     if spec.sample_rate == TARGET_SAMPLE_RATE {
         return Ok(mono);
     }
-    resample_mono(mono, spec.sample_rate, TARGET_SAMPLE_RATE)
-}
-
-fn resample_mono(input: Vec<f32>, in_rate: u32, out_rate: u32) -> Result<Vec<f32>, DecodeError> {
-    // rubato 0.15: FftFixedIn::new(in_rate, out_rate, chunk_size, sub_chunks, nbr_channels)
-    // Input is non-interleaved: &[Vec<f32>] with one Vec per channel.
-    //
-    // We clamp chunk_size to the input length so we never produce output for
-    // zero-padded frames beyond what the actual audio contains.
-    let chunk_size = (in_rate as usize / 4).max(256).min(input.len().max(256));
-    let mut resampler = FftFixedIn::<f32>::new(
-        in_rate as usize,
-        out_rate as usize,
-        chunk_size,
-        2,
-        1, // mono
-    )
-    .map_err(|e| DecodeError::Resample(format!("{e}")))?;
-
-    // How many output samples correspond to exactly `input.len()` input frames.
-    let exact_out = bruhs_models::logic::wav::resampled_len(input.len(), in_rate, out_rate);
-    let mut out: Vec<f32> = Vec::with_capacity(exact_out + chunk_size);
-
-    let mut cursor = 0;
-    while cursor < input.len() {
-        let end = (cursor + chunk_size).min(input.len());
-        let mut chunk: Vec<f32> = input[cursor..end].to_vec();
-        if chunk.len() < chunk_size {
-            chunk.resize(chunk_size, 0.0);
-        }
-        // Non-interleaved: one Vec per channel; we have 1 channel.
-        let frames = vec![chunk];
-        let resampled = resampler
-            .process(&frames, None)
-            .map_err(|e| DecodeError::Resample(format!("{e}")))?;
-        // resampled[0] is the single mono channel output.
-        out.extend_from_slice(&resampled[0]);
-        cursor += chunk_size;
-    }
-
-    // Trim to the exact frame count so callers get a buffer that matches the
-    // original audio duration rather than a padded one.
-    out.truncate(exact_out);
-    Ok(out)
+    Ok(resample_mono(&mono, spec.sample_rate, TARGET_SAMPLE_RATE)?)
 }
 
 #[cfg(test)]

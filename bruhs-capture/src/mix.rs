@@ -7,10 +7,10 @@
 //! the meeting was. The output is written to a temporary file and renamed into
 //! place only when complete.
 
-pub(crate) use bruhs_models::logic::wav::resampled_len;
+use crate::resample::{MonoResampler, ResampleError};
+use bruhs_models::logic::wav::resampled_len;
 use bruhs_models::num::{clamp_to_i16, ToIntSaturating};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
-use rubato::{FftFixedIn, Resampler};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -24,7 +24,7 @@ pub enum MixError {
     #[error("unsupported format: {0:?}")]
     UnsupportedFormat(WavSpec),
     #[error("resample: {0}")]
-    Resample(String),
+    Resample(#[from] ResampleError),
 }
 
 /// Mix two WAVs into one mono WAV at the mic's rate. If `sys_path` doesn't
@@ -133,15 +133,10 @@ impl Iterator for MonoFrames {
     }
 }
 
-/// Streaming `FftFixedIn` resampling of mono i16 frames, chunk by chunk.
-/// `FftFixedIn` is ~5–10× faster than `SincFixedIn` for speech-grade audio
-/// at the cost of some high-frequency accuracy — imperceptible for Whisper.
-/// The chunking (size, zero-padded last chunk, output truncated to the exact
-/// length) matches the original whole-file resampler sample for sample.
+/// Resample mono PCM with bounded memory, one chunk at a time.
 struct Resampled {
     input: MonoFrames,
-    resampler: FftFixedIn<f32>,
-    chunk_size: usize,
+    resampler: MonoResampler,
     chunk: Vec<f32>,
     output: Vec<i16>,
     position: usize,
@@ -152,23 +147,12 @@ struct Resampled {
 impl Resampled {
     fn new(input: MonoFrames, to_rate: u32) -> Result<Self, MixError> {
         let from_rate = input.spec.sample_rate;
-        // FFT-friendly chunk, clamped to the input length so tiny clips are
-        // not over-padded.
-        let chunk_size = (from_rate as usize / 4).max(256).min(input.frames.max(256));
-        let resampler = FftFixedIn::<f32>::new(
-            from_rate as usize,
-            to_rate as usize,
-            chunk_size,
-            2, // sub_chunks
-            1, // channels (mono)
-        )
-        .map_err(|e| MixError::Resample(e.to_string()))?;
+        let resampler = MonoResampler::new(input.frames, from_rate, to_rate)?;
         let remaining = resampled_len(input.frames, from_rate, to_rate);
         Ok(Self {
             input,
+            chunk: Vec::with_capacity(resampler.chunk_size()),
             resampler,
-            chunk_size,
-            chunk: Vec::with_capacity(chunk_size),
             output: Vec::new(),
             position: 0,
             remaining,
@@ -178,27 +162,23 @@ impl Resampled {
     /// Resample the next input chunk. `false` when the input is exhausted.
     fn refill(&mut self) -> Result<bool, MixError> {
         self.chunk.clear();
-        for sample in self.input.by_ref().take(self.chunk_size) {
+        for sample in self.input.by_ref().take(self.resampler.chunk_size()) {
             self.chunk.push(f32::from(sample?) / f32::from(i16::MAX));
         }
         if self.chunk.is_empty() {
             return Ok(false);
         }
-        self.chunk.resize(self.chunk_size, 0.0);
-        let resampled = self
-            .resampler
-            .process(std::slice::from_ref(&self.chunk), None)
-            .map_err(|e| MixError::Resample(e.to_string()))?;
+        let resampled = self.resampler.process(&self.chunk)?;
         self.output.clear();
         self.output
-            .extend(resampled.first().into_iter().flatten().map(|&s| {
-                (s * f32::from(i16::MAX))
-                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
-                    .to_i16_saturating()
-            }));
+            .extend(resampled.iter().map(|&sample| to_pcm(sample)));
         self.position = 0;
         Ok(true)
     }
+}
+
+fn to_pcm(sample: f32) -> i16 {
+    (sample * f32::from(i16::MAX)).to_i16_saturating()
 }
 
 impl Iterator for Resampled {
@@ -310,61 +290,15 @@ mod tests {
         Ok(WavData { spec, data })
     }
 
-    /// Resample `input` from `from_rate` to `to_rate` using `FftFixedIn`.
-    /// `FftFixedIn` is ~5–10× faster than `SincFixedIn` for speech-grade audio
-    /// at the cost of some high-frequency accuracy — imperceptible for Whisper.
-    /// Mirrors the approach used in `transcribe/decode.rs`.
     fn resample(input: &[i16], from_rate: u32, to_rate: u32) -> Result<Vec<i16>, MixError> {
-        use rubato::{FftFixedIn, Resampler};
-
-        // Choose a chunk size compatible with the FFT resampler (power-of-2 friendly,
-        // clamped to the input length so we don't over-pad tiny clips).
-        let chunk_size = (from_rate as usize / 4).max(256).min(input.len().max(256));
-        let mut resampler = FftFixedIn::<f32>::new(
-            from_rate as usize,
-            to_rate as usize,
-            chunk_size,
-            2, // sub_chunks
-            1, // channels (mono)
-        )
-        .map_err(|e| MixError::Resample(e.to_string()))?;
-
-        let exact_out = resampled_len(input.len(), from_rate, to_rate);
-        let mut out_f32: Vec<f32> = Vec::with_capacity(exact_out + chunk_size);
-
-        // Convert i16 to f32 in [-1, 1].
-        let input_f32: Vec<f32> = input
+        let input: Vec<f32> = input
             .iter()
-            .map(|&s| f32::from(s) / f32::from(i16::MAX))
+            .map(|&sample| f32::from(sample) / f32::from(i16::MAX))
             .collect();
-
-        let mut cursor = 0;
-        while cursor < input_f32.len() {
-            let end = (cursor + chunk_size).min(input_f32.len());
-            let mut chunk = input_f32[cursor..end].to_vec();
-            if chunk.len() < chunk_size {
-                chunk.resize(chunk_size, 0.0);
-            }
-            let frames = vec![chunk];
-            let resampled = resampler
-                .process(&frames, None)
-                .map_err(|e| MixError::Resample(e.to_string()))?;
-            out_f32.extend_from_slice(&resampled[0]);
-            cursor += chunk_size;
-        }
-
-        // Trim to exact expected length (rubato may produce slightly more due to padding).
-        out_f32.truncate(exact_out);
-
-        let out_i16: Vec<i16> = out_f32
-            .iter()
-            .map(|&s| {
-                (s * f32::from(i16::MAX))
-                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
-                    .to_i16_saturating()
-            })
-            .collect();
-        Ok(out_i16)
+        Ok(crate::resample::resample_mono(&input, from_rate, to_rate)?
+            .into_iter()
+            .map(to_pcm)
+            .collect())
     }
 
     fn write_test_wav(path: &Path, rate: u32, samples: &[i16]) {
