@@ -263,7 +263,7 @@ fn recipients(
         if seen.insert(key) {
             result.push(MailAddress {
                 name: display_name(address.display_part()),
-                address: address.email(),
+                address: address.email().to_owned(),
             });
         }
     }
