@@ -418,7 +418,9 @@ impl ComputerView {
             return;
         }
         let address = self.address.read(cx).value();
-        if let Some(url) = crate::views::browser_preferences::BrowserPreferences::get(cx).address(&address) {
+        if let Some(url) =
+            crate::views::browser_preferences::BrowserPreferences::get(cx).address(&address)
+        {
             self.send(ComputerInput::Navigate { url }, cx);
         }
     }

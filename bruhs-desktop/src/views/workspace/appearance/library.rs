@@ -243,7 +243,7 @@ pub(super) fn native_palette(
             .to_rgba8();
         parsed.insert(role.clone(), rgba);
     }
-    let images=super::stylesheet::apply(css, mode, &mut parsed);
+    let images = super::stylesheet::apply(css, mode, &mut parsed);
     let mut palette = *ThemeFamily::Bruhs.palette(mode);
     let resolve = |roles: &[&str], fallback: u32, canvas: u32| {
         let Some([r, g, b, a]) = roles.iter().find_map(|role| parsed.get(*role).copied()) else {

@@ -1817,7 +1817,10 @@ impl Workspace {
                                         .border_color(theme::longan_600())
                                         .px_1()
                                         .py(px(2.0))
-                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
+                                        .font_family(
+                                            crate::theme::FontFace::Interface
+                                                .with_default(LABEL_FONT),
+                                        )
                                         .text_size(px(LABEL_SM_PX))
                                         .text_color(theme::rambutan_300())
                                         .child("NOT TRACKED"),

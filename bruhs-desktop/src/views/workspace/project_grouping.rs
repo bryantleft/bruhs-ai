@@ -1,7 +1,7 @@
 //! Repository grouping is a display preference. Commands keep their physical checkout.
 use super::*;
 use bruhs_core::git::ProjectIdentity;
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,9 @@ impl Preferences {
     pub(super) fn is_default(&self) -> bool {
         self == &Self::default()
     }
-    pub(super) fn forget_checkout(&mut self, path: &str) { self.overrides.remove(path); }
+    pub(super) fn forget_checkout(&mut self, path: &str) {
+        self.overrides.remove(path);
+    }
     pub(super) fn forget_host(&mut self, host: uuid::Uuid) {
         let prefix = format!("linked:{host}:");
         self.overrides
@@ -295,9 +297,15 @@ impl Workspace {
             })
             .into_any_element()
         });
-        self.settings_row_with_reset("desktop-settings-row-project-grouping","Project grouping",
+        self.settings_row_with_reset(
+            "desktop-settings-row-project-grouping",
+            "Project grouping",
             "Combine checkouts of the same repository.",
-            None,false,Some(toggle),reset)
+            None,
+            false,
+            Some(toggle),
+            reset,
+        )
     }
 
     pub(super) fn project_grouping_override_row(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -420,14 +428,12 @@ mod tests {
             let dir = temp.path().join(clone);
             std::fs::create_dir_all(dir.join("src")).unwrap();
             for args in [vec!["init", "-q"], vec!["remote", "add", "origin", remote]] {
-                assert!(
-                    std::process::Command::new("git")
-                        .args(args)
-                        .current_dir(&dir)
-                        .status()
-                        .unwrap()
-                        .success()
-                );
+                assert!(std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success());
             }
             paths.push(dir.join("src").to_str().unwrap().to_owned());
         }
@@ -526,10 +532,9 @@ mod tests {
         let selector = |prefix: &str, key: &str| -> &'static str {
             Box::leak(format!("{prefix}-{key}").into_boxed_str())
         };
-        assert!(
-            cx.debug_bounds(selector("desktop-sidebar-folder", &key))
-                .is_some()
-        );
+        assert!(cx
+            .debug_bounds(selector("desktop-sidebar-folder", &key))
+            .is_some());
         ws.update_in(cx, |ws, window, cx| {
             ws.open_project_picker(&OpenProjectPicker, window, cx)
         });

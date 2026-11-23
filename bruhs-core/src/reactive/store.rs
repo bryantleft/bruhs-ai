@@ -6,18 +6,18 @@ use serde_json::Value;
 use std::{collections::HashSet, path::Path};
 
 mod always_on;
+pub(in crate::reactive) mod crew;
+pub(in crate::reactive) mod desktop_tasks;
 pub(super) mod linked_tasks;
 pub(super) mod linked_threads;
-pub(super) mod task_conversations;
-pub(in crate::reactive) mod desktop_tasks;
-pub(super) mod webhook_deliveries;
-pub(super) mod webhook_windows;
-pub(super) mod webhook_security;
-pub(super) mod task_webhooks;
-pub(in crate::reactive) mod crew;
 #[cfg(all(test, unix))]
 mod ownership_tests;
 pub(super) mod reports;
+pub(super) mod task_conversations;
+pub(super) mod task_webhooks;
+pub(super) mod webhook_deliveries;
+pub(super) mod webhook_security;
+pub(super) mod webhook_windows;
 // The backup's restore is macOS and Linux only (D27).
 #[cfg(unix)]
 pub(in crate::reactive) mod restore;
@@ -234,11 +234,19 @@ fn save<T: Serialize>(
     Ok(())
 }
 
-fn source_deadline(connection: &Connection, source: &EventSource) -> Result<Option<EpochMs>, ReactiveError> {
-    let Some(key) = super::sources::schedule_cursor_key(&source.kind) else { return Ok(None); };
-    let saved: Option<String> = connection.prepare_cached(
-        "SELECT payload FROM reactive_cursors WHERE source_id=?1 AND cursor_key=?2",
-    )?.query_row(params![source.id, key], |row| row.get(0)).optional()?;
+fn source_deadline(
+    connection: &Connection,
+    source: &EventSource,
+) -> Result<Option<EpochMs>, ReactiveError> {
+    let Some(key) = super::sources::schedule_cursor_key(&source.kind) else {
+        return Ok(None);
+    };
+    let saved: Option<String> = connection
+        .prepare_cached(
+            "SELECT payload FROM reactive_cursors WHERE source_id=?1 AND cursor_key=?2",
+        )?
+        .query_row(params![source.id, key], |row| row.get(0))
+        .optional()?;
     let checkpoint = match saved {
         None => Value::Null,
         Some(json) => match serde_json::from_str(&json) {
@@ -269,7 +277,11 @@ fn schedule_summaries(
          WHERE (?1 IS NULL OR t.id = ?1) ORDER BY t.id",
     )?;
     let rows = query.query_map([id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     })?;
     let mut tasks = Vec::new();
     for row in rows {
@@ -279,7 +291,11 @@ fn schedule_summaries(
         let source: EventSource = decode(source)?;
         if source.kind.is_scheduled_task() {
             let enabled = subscription.enabled && source.enabled && agent.enabled;
-            let next_run_at = if enabled { source_deadline(connection, &source)? } else { None };
+            let next_run_at = if enabled {
+                source_deadline(connection, &source)?
+            } else {
+                None
+            };
             tasks.push(ScheduledTaskSummary {
                 title: subscription.title(&agent).to_owned(),
                 enabled,
@@ -294,10 +310,15 @@ fn schedule_summaries(
     Ok(tasks)
 }
 
-pub(super) fn delete_linked_schedule(connection: &mut Connection, id: String) -> Result<(), ReactiveError> {
+pub(super) fn delete_linked_schedule(
+    connection: &mut Connection,
+    id: String,
+) -> Result<(), ReactiveError> {
     transaction(connection, |db| {
         if schedule_summaries(db, Some(&id))?.is_empty() {
-            return Err(ReactiveError::NotFound("Scheduled task unavailable.".into()));
+            return Err(ReactiveError::NotFound(
+                "Scheduled task unavailable.".into(),
+            ));
         }
         reports::guard_managed_identity(db, &id)?;
         apply(db, &ReactiveChange::DeleteSubscription { id })
@@ -311,7 +332,8 @@ pub(super) fn set_linked_schedule_enabled(
 ) -> Result<ScheduledTaskSummary, ReactiveError> {
     transaction(connection, |db| {
         let lookup = || {
-            schedule_summaries(db, Some(id))?.pop()
+            schedule_summaries(db, Some(id))?
+                .pop()
                 .ok_or_else(|| ReactiveError::NotFound("Scheduled task unavailable.".into()))
         };
         let current = lookup()?;
@@ -375,7 +397,11 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         subscriptions,
         task_threads: task_conversations::destinations(connection)?,
         selected_task_threads: Some(task_conversations::selected(connection)?),
-        desktop_task_store: connection.query_row("SELECT identity FROM desktop_task_store WHERE id=1",[],|r|r.get(0))?,
+        desktop_task_store: connection.query_row(
+            "SELECT identity FROM desktop_task_store WHERE id=1",
+            [],
+            |r| r.get(0),
+        )?,
         desktop_task_activity: desktop_tasks::activity(connection)?,
         can_delete_task_threads: true,
         can_address_task_webhooks: true,
@@ -632,29 +658,48 @@ fn validate_task_options(
     subscription: &Subscription,
     kind: &SourceKind,
 ) -> Result<(), ReactiveError> {
-    subscription.task_checkout.validate().map_err(ReactiveError::Invalid)?;
+    subscription
+        .task_checkout
+        .validate()
+        .map_err(ReactiveError::Invalid)?;
     if let TaskCheckout::Existing { path } = &subscription.task_checkout {
         if !Path::new(path).is_absolute() {
-            return Err(ReactiveError::Invalid("Enter an absolute checkout path on the task host.".into()));
+            return Err(ReactiveError::Invalid(
+                "Enter an absolute checkout path on the task host.".into(),
+            ));
         }
     }
     if !subscription.task_checkout.is_project() && subscription.task_conversation.is_agent() {
-        return Err(ReactiveError::Invalid("Choose a dedicated task thread to use a separate checkout.".into()));
+        return Err(ReactiveError::Invalid(
+            "Choose a dedicated task thread to use a separate checkout.".into(),
+        ));
     }
     if !subscription.webhook_dedupe.is_empty() && *kind != SourceKind::Webhook {
-        return Err(ReactiveError::Invalid("Duplicate and coalesce keys require a webhook trigger.".into()));
+        return Err(ReactiveError::Invalid(
+            "Duplicate and coalesce keys require a webhook trigger.".into(),
+        ));
     }
     if let Some(prompt) = &subscription.webhook_prompt {
         if *kind != SourceKind::Webhook {
-            return Err(ReactiveError::Invalid("Request placeholders require a webhook trigger.".into()));
+            return Err(ReactiveError::Invalid(
+                "Request placeholders require a webhook trigger.".into(),
+            ));
         }
         text(prompt, "Webhook prompt", true)?;
     }
     if !subscription.webhook_security.is_empty() && *kind != SourceKind::Webhook {
-        return Err(ReactiveError::Invalid("Signature and delivery age settings require a webhook trigger.".into()));
+        return Err(ReactiveError::Invalid(
+            "Signature and delivery age settings require a webhook trigger.".into(),
+        ));
     }
-    subscription.webhook_security.validate().map_err(ReactiveError::Invalid)?;
-    subscription.webhook_dedupe.validate().map_err(ReactiveError::Invalid)?;
+    subscription
+        .webhook_security
+        .validate()
+        .map_err(ReactiveError::Invalid)?;
+    subscription
+        .webhook_dedupe
+        .validate()
+        .map_err(ReactiveError::Invalid)?;
     if !subscription.webhook_filters.is_empty() && *kind != SourceKind::Webhook {
         return Err(ReactiveError::Invalid(
             "Only webhook sources support request filters.".into(),
@@ -730,7 +775,11 @@ fn validate_automation(
         },
     )?;
     validate_source(connection, &automation.source)?;
-    validate_subscription_fields(connection, &automation.subscription, &automation.source.kind)?;
+    validate_subscription_fields(
+        connection,
+        &automation.subscription,
+        &automation.source.kind,
+    )?;
     let others = records::<Subscription>(connection, "reactive_subscriptions")?
         .into_iter()
         .filter(|subscription| subscription.id != automation.subscription.id)
@@ -859,7 +908,10 @@ fn save_scheduled_task(
         None => {}
     }
     apply(db, &ReactiveChange::SaveAutomation { automation })?;
-    if let Some(TaskDestinationEdit::Existing { thread_id } | TaskDestinationEdit::Desktop { thread_id }) = destination {
+    if let Some(
+        TaskDestinationEdit::Existing { thread_id } | TaskDestinationEdit::Desktop { thread_id },
+    ) = destination
+    {
         task_conversations::bind(db, &id, thread_id)?;
     }
     if activate_parents {
@@ -1130,9 +1182,15 @@ fn apply_validated(connection: &Connection, change: &ReactiveChange) -> Result<(
             }) {
                 cancel_where(connection, "agent_id", &agent.id)?;
             }
-            if old.as_ref().is_some_and(|old| old.project_path != agent.project_path) {
-                connection.execute("DELETE FROM task_destinations WHERE thread_id IN
-                    (SELECT thread_id FROM task_conversations WHERE agent_id=?1)", [&agent.id])?;
+            if old
+                .as_ref()
+                .is_some_and(|old| old.project_path != agent.project_path)
+            {
+                connection.execute(
+                    "DELETE FROM task_destinations WHERE thread_id IN
+                    (SELECT thread_id FROM task_conversations WHERE agent_id=?1)",
+                    [&agent.id],
+                )?;
             }
             if reset {
                 connection.execute(
@@ -1170,21 +1228,42 @@ fn apply_validated(connection: &Connection, change: &ReactiveChange) -> Result<(
                 get(connection, "reactive_subscriptions", &subscription.id)?;
             let mut subscription = subscription.clone();
             // Older editors omit the title when saving other subscription changes.
-            subscription.task_title = subscription.task_title.as_deref()
+            subscription.task_title = subscription
+                .task_title
+                .as_deref()
                 .map(|title| title.trim().to_owned())
                 .or_else(|| old.as_ref().and_then(|old| old.task_title.clone()));
             if subscription.webhook_security.signature.is_none() {
-                connection.execute("DELETE FROM webhook_signing_keys WHERE task=?1", [&subscription.id])?;
+                connection.execute(
+                    "DELETE FROM webhook_signing_keys WHERE task=?1",
+                    [&subscription.id],
+                )?;
             }
-            if old.as_ref().is_some_and(|old| old.source_id != subscription.source_id || old.agent_id != subscription.agent_id) {
-                connection.execute("DELETE FROM task_webhook_addresses WHERE task=?1", [&subscription.id])?;
-                connection.execute("DELETE FROM webhook_replay WHERE task=?1", [&subscription.id])?;
-                connection.execute("DELETE FROM webhook_deliveries WHERE task=?1", [&subscription.id])?;
-                connection.execute("DELETE FROM webhook_retry_tasks WHERE task=?1", [&subscription.id])?;
+            if old.as_ref().is_some_and(|old| {
+                old.source_id != subscription.source_id || old.agent_id != subscription.agent_id
+            }) {
+                connection.execute(
+                    "DELETE FROM task_webhook_addresses WHERE task=?1",
+                    [&subscription.id],
+                )?;
+                connection.execute(
+                    "DELETE FROM webhook_replay WHERE task=?1",
+                    [&subscription.id],
+                )?;
+                connection.execute(
+                    "DELETE FROM webhook_deliveries WHERE task=?1",
+                    [&subscription.id],
+                )?;
+                connection.execute(
+                    "DELETE FROM webhook_retry_tasks WHERE task=?1",
+                    [&subscription.id],
+                )?;
             }
-            if old.as_ref().is_some_and(|old|
-                old.agent_id != subscription.agent_id || !subscription.task_conversation.has_destination() || old.task_checkout != subscription.task_checkout
-            ) {
+            if old.as_ref().is_some_and(|old| {
+                old.agent_id != subscription.agent_id
+                    || !subscription.task_conversation.has_destination()
+                    || old.task_checkout != subscription.task_checkout
+            }) {
                 connection.execute(
                     "DELETE FROM task_destinations WHERE subscription_id=?1",
                     [&subscription.id],
@@ -1268,7 +1347,12 @@ pub(super) fn command(
             ReactiveCommand::RunScheduledTask { id, run_id } => {
                 run_scheduled_task(connection, &id, &run_id)?;
             }
-            ReactiveCommand::SaveScheduledTask { automation, enabled, signing_secret, destination } => {
+            ReactiveCommand::SaveScheduledTask {
+                automation,
+                enabled,
+                signing_secret,
+                destination,
+            } => {
                 if let Some(secret) = signing_secret {
                     webhook_security::replace_key(connection, &automation.subscription, secret)?;
                 }
@@ -1376,8 +1460,11 @@ pub(super) fn command(
                 run.owner_message = Some(message);
                 save_run(connection, &run)?;
             }
-            ReactiveCommand::DeleteTaskThread {thread_id,linked_tasks} => {
-                task_conversations::delete(connection,&thread_id,&linked_tasks)?;
+            ReactiveCommand::DeleteTaskThread {
+                thread_id,
+                linked_tasks,
+            } => {
+                task_conversations::delete(connection, &thread_id, &linked_tasks)?;
             }
             ReactiveCommand::DeleteCheckoutTaskThreads { threads } => {
                 for (id, tasks) in threads {
@@ -1385,12 +1472,17 @@ pub(super) fn command(
                         task_conversations::delete(connection, &id, &tasks)?;
                     } else if !tasks.is_empty() {
                         return Err(ReactiveError::Conflict(
-                            "The schedules linked to this checkout changed. Review them again.".into(),
+                            "The schedules linked to this checkout changed. Review them again."
+                                .into(),
                         ));
                     }
                 }
             }
-            ReactiveCommand::ChatInTaskThread { task_id, thread_id, message } => {
+            ReactiveCommand::ChatInTaskThread {
+                task_id,
+                thread_id,
+                message,
+            } => {
                 task_conversations::reply(connection, &task_id, &thread_id, &message)?;
             }
             ReactiveCommand::MarkOutboxRead { ids } => always_on::mark_read(connection, &ids)?,
@@ -1608,7 +1700,9 @@ fn new_run(
         result: None,
         error: None,
         trigger: None,
-        task_checkout: subscription.map(|sub| sub.task_checkout.clone()).unwrap_or_default(),
+        task_checkout: subscription
+            .map(|sub| sub.task_checkout.clone())
+            .unwrap_or_default(),
         merged_runs: Vec::new(),
         merged_into: None,
         report: None,
@@ -1635,7 +1729,11 @@ pub(super) fn check_run_enabled(
             params![id,run.thread_id.as_str()], |r| r.get::<_,bool>(0))? {
             return Err(ReactiveError::Conflict("The task now uses another conversation.".into()));
         }
-        if (!subscription.enabled && !matches!(run.trigger, Some(RunTrigger::ManualTask | RunTrigger::Chat | RunTrigger::Answer { .. })))
+        if (!subscription.enabled
+            && !matches!(
+                run.trigger,
+                Some(RunTrigger::ManualTask | RunTrigger::Chat | RunTrigger::Answer { .. })
+            ))
             || subscription.task_checkout != run.task_checkout
             || subscription.agent_id != run.agent_id
             || run.source_id.as_deref() != Some(subscription.source_id.as_str())
@@ -1668,7 +1766,11 @@ pub(super) fn publish(
         payload,
         &WebhookMetadata::default(),
         None,
-        TaskAdmission { subscriptions: tasks, denied: &denied, scope: None },
+        TaskAdmission {
+            subscriptions: tasks,
+            denied: &denied,
+            scope: None,
+        },
     )
 }
 
@@ -1697,7 +1799,11 @@ pub(super) fn publish_with_metadata(
     mut receipt: Option<&mut webhook_deliveries::Receipt>,
     admission: TaskAdmission<'_>,
 ) -> Result<ReactiveEvent, ReactiveError> {
-    let TaskAdmission { mut subscriptions, denied, scope } = admission;
+    let TaskAdmission {
+        mut subscriptions,
+        denied,
+        scope,
+    } = admission;
     let source = enabled_source(connection, source_id)?;
     // Event keys can include full file paths, but never grow without a bound.
     if key.is_empty() || key.len() > 4096 || key.contains('\0') {
@@ -1708,7 +1814,12 @@ pub(super) fn publish_with_metadata(
     let event_json = encode(&payload)?;
     // HTTP payloads are derived from the bounded wire body. JSON quoting a raw
     // string or encoding form fields can use more bytes than the request itself.
-    if metadata.raw_body.as_ref().map_or(event_json.len(), Vec::len) > MAX_PAYLOAD_BYTES {
+    if metadata
+        .raw_body
+        .as_ref()
+        .map_or(event_json.len(), Vec::len)
+        > MAX_PAYLOAD_BYTES
+    {
         return Err(ReactiveError::Invalid(format!(
             "Event payload exceeds {MAX_PAYLOAD_BYTES} bytes."
         )));
@@ -1763,7 +1874,8 @@ pub(super) fn publish_with_metadata(
     let body_hash = webhook_deliveries::body_hash(metadata, &payload);
     if let Some(saved) = existing {
         let original: ReactiveEvent = decode(saved)?;
-        let original_matches = webhook_deliveries::same_body(connection, &original, &payload, body_hash.as_ref())?;
+        let original_matches =
+            webhook_deliveries::same_body(connection, &original, &payload, body_hash.as_ref())?;
         let conflict = "This event identity already has different content. Use a new key for a new observation.";
         let mut retry = Vec::new();
         let mut duplicate =
@@ -1793,7 +1905,12 @@ pub(super) fn publish_with_metadata(
                 }
                 Some(Some(id)) => {
                     let bound = required(connection, "reactive_events", &id, "event")?;
-                    let matches = webhook_deliveries::same_body(connection, &bound, &payload, body_hash.as_ref())?;
+                    let matches = webhook_deliveries::same_body(
+                        connection,
+                        &bound,
+                        &payload,
+                        body_hash.as_ref(),
+                    )?;
                     (bound, matches)
                 }
                 None => (original.clone(), original_matches),
@@ -1845,7 +1962,11 @@ pub(super) fn publish_with_metadata(
                     connection,
                     &sub,
                     WebhookOutcome::Filtered,
-                    Some(format!("Filter {} ({}) did not match.", index + 1, filter.path)),
+                    Some(format!(
+                        "Filter {} ({}) did not match.",
+                        index + 1,
+                        filter.path
+                    )),
                 )?;
             }
             filtered.push(sub.id);
@@ -1863,7 +1984,10 @@ pub(super) fn publish_with_metadata(
     };
     connection.execute("INSERT INTO reactive_events(id,source_id,event_key,payload,created) VALUES(?1,?2,?3,?4,?5)", params![event.id,event.source_id,stored_key,encode(&event)?,event.created_at.as_millis()])?;
     if let Some(digest) = body_hash {
-        connection.execute("INSERT INTO webhook_body_hashes(event,digest) VALUES(?1,?2)", params![event.id, digest.as_slice()])?;
+        connection.execute(
+            "INSERT INTO webhook_body_hashes(event,digest) VALUES(?1,?2)",
+            params![event.id, digest.as_slice()],
+        )?;
     }
     for subscription in matched {
         let agent: ReactiveAgent = required(
@@ -1923,13 +2047,19 @@ pub(super) fn publish_with_metadata(
             let rendered = if let Some(receipt) = &mut receipt {
                 receipt.prepare_prompt(template, &event.payload, metadata)
             } else {
-                render_webhook_prompt(template, &event.payload, metadata, uuid::Uuid::new_v4()).map(|p| p.text)
+                render_webhook_prompt(template, &event.payload, metadata, uuid::Uuid::new_v4())
+                    .map(|p| p.text)
             };
             match rendered {
                 Ok(prompt) => Some(prompt),
                 Err(reason) => {
                     if let Some(receipt) = &mut receipt {
-                        receipt.record(connection, &subscription, WebhookOutcome::Rejected, Some(reason.into()))?;
+                        receipt.record(
+                            connection,
+                            &subscription,
+                            WebhookOutcome::Rejected,
+                            Some(reason.into()),
+                        )?;
                     }
                     continue;
                 }
@@ -1943,8 +2073,14 @@ pub(super) fn publish_with_metadata(
                 &event.payload,
                 metadata,
             ) {
-                let window =
-                    webhook_windows::hold(connection, &subscription, &key, &event, template_prompt.as_deref(), receipt)?;
+                let window = webhook_windows::hold(
+                    connection,
+                    &subscription,
+                    &key,
+                    &event,
+                    template_prompt.as_deref(),
+                    receipt,
+                )?;
                 if let Some(replay) = replay {
                     webhook_windows::remember(
                         connection,
@@ -1960,7 +2096,8 @@ pub(super) fn publish_with_metadata(
         if let Some(key) = replay {
             webhook_windows::remember(connection, &subscription.id, &key, None, event.created_at)?;
         }
-        let prompt = template_prompt.unwrap_or_else(|| event_prompt(source_id, &subscription.instructions, &event_json));
+        let prompt = template_prompt
+            .unwrap_or_else(|| event_prompt(source_id, &subscription.instructions, &event_json));
         let status = if subscription.auto_run {
             RunStatus::Queued
         } else {
@@ -2210,7 +2347,11 @@ fn absorb(primary: &mut ReactiveRun, merged: &mut ReactiveRun, reason: &str) {
 /// Runs that are never combined with another: weekly reports, and room
 /// runs, whose reply is posted where they were asked.
 fn ungrouped(run: &ReactiveRun) -> bool {
-    matches!(run.trigger, Some(RunTrigger::ManualTask | RunTrigger::WebhookWindow)) || reports::ungrouped(run) || run.trigger.as_ref().and_then(RunTrigger::room_id).is_some()
+    matches!(
+        run.trigger,
+        Some(RunTrigger::ManualTask | RunTrigger::WebhookWindow)
+    ) || reports::ungrouped(run)
+        || run.trigger.as_ref().and_then(RunTrigger::room_id).is_some()
 }
 
 /// `on_busy: restart`: stop the agent's current run and redo its work with the new event.
@@ -2223,7 +2364,11 @@ fn restart_running(connection: &Connection, run: &mut ReactiveRun) -> Result<(),
     .pop() else {
         return Ok(());
     };
-    if running.thread_id != run.thread_id || ungrouped(&running) || ungrouped(run) || !task_conversations::uses_agent_thread(connection, run)? {
+    if running.thread_id != run.thread_id
+        || ungrouped(&running)
+        || ungrouped(run)
+        || !task_conversations::uses_agent_thread(connection, run)?
+    {
         return Ok(());
     }
     let combined = combine(&[&running, run]);
@@ -2332,14 +2477,19 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
         } else {
             run.session_id = task_conversations::session(connection, &agent, &run)?;
         }
-        let desktop_thread = !agent_thread && desktop_tasks::is_desktop(connection, &run.thread_id)?;
+        let desktop_thread =
+            !agent_thread && desktop_tasks::is_desktop(connection, &run.thread_id)?;
         run.fresh_session = run.session_id.is_none();
         // A room run reads the room as it is now; a resumed one keeps the
         // owner's decision it was queued with.
         if matches!(run.trigger, Some(RunTrigger::Room { resumed: false, .. })) {
             run.prompt = rooms::prompt_for(connection, &run)?;
         }
-        let context = if agent_thread { always_on::run_context(connection, &run)? } else { String::new() };
+        let context = if agent_thread {
+            always_on::run_context(connection, &run)?
+        } else {
+            String::new()
+        };
         let bruh = crew::profile(connection, &agent.id)?;
         run.status = RunStatus::Running;
         run.updated_at = EpochMs::now();

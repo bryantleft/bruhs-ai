@@ -422,9 +422,23 @@ pub(super) async fn prepare(
     } else {
         commands
     };
-    if let (DeliveryAction::Merge { number, head_oid, method, .. }, Some(repo), [command]) = (&request.action, &repository, commands.as_mut_slice()) {
-        if *method != MergeMethod::Rebase && service.preferences(Some(&path)).await.remove_agent_credits {
-            service.clean_merge_message(&path, repo, *number, head_oid, *method, command).await?;
+    if let (
+        DeliveryAction::Merge {
+            number,
+            head_oid,
+            method,
+            ..
+        },
+        Some(repo),
+        [command],
+    ) = (&request.action, &repository, commands.as_mut_slice())
+    {
+        if *method != MergeMethod::Rebase
+            && service.preferences(Some(&path)).await.remove_agent_credits
+        {
+            service
+                .clean_merge_message(&path, repo, *number, head_oid, *method, command)
+                .await?;
         }
     }
     if commands.is_empty() && stack.is_none() && native_stack.is_none() {

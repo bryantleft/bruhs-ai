@@ -132,7 +132,11 @@ impl ProjectSetting for ScopedSwitch {
 }
 
 fn display_value(value: bool) -> &'static str {
-    if value { "On" } else { "Off" }
+    if value {
+        "On"
+    } else {
+        "Off"
+    }
 }
 
 fn source_value(value: SharedString) -> Stateful<Div> {
@@ -344,12 +348,15 @@ impl Workspace {
             WebButtonSize::IconSmall,
             ButtonState::Enabled,
         )
-        .when(!open && project.is_none() && !repo_effective && count == 0, |button| {
-            button
-                .opacity(0.)
-                .group_hover(row, |style| style.opacity(1.))
-                .focus_visible(|style| style.opacity(1.))
-        })
+        .when(
+            !open && project.is_none() && !repo_effective && count == 0,
+            |button| {
+                button
+                    .opacity(0.)
+                    .group_hover(row, |style| style.opacity(1.))
+                    .focus_visible(|style| style.opacity(1.))
+            },
+        )
         .debug_selector(move || trigger_id.to_string())
         .aria_label(format!("{summary}. Show where this value comes from"))
         .aria_expanded(open)

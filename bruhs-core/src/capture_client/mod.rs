@@ -392,25 +392,41 @@ pub async fn enroll_voice(
 }
 
 /// Read or change local Whisper hardware and model residency on the capture host.
-pub async fn dictation_runtime(change: Option<bruhs_models::dictation_runtime::Change>) -> Result<bruhs_models::dictation_runtime::Status,CaptureClientError>{
-    match change {Some(change)=>daemon_post(&["dictation","runtime"],|request|request.json(&change)).await,None=>daemon_get_json(&["dictation","runtime"]).await}
+pub async fn dictation_runtime(
+    change: Option<bruhs_models::dictation_runtime::Change>,
+) -> Result<bruhs_models::dictation_runtime::Status, CaptureClientError> {
+    match change {
+        Some(change) => {
+            daemon_post(&["dictation", "runtime"], |request| request.json(&change)).await
+        }
+        None => daemon_get_json(&["dictation", "runtime"]).await,
+    }
 }
 
 pub async fn dictation_models(
     action: Option<bruhs_models::dictation_runtime::ModelAction>,
 ) -> Result<Vec<bruhs_models::dictation_runtime::ModelEntry>, CaptureClientError> {
     match action {
-        Some(action) => daemon_post(&["dictation", "models"], |request| request.json(&action)).await,
+        Some(action) => {
+            daemon_post(&["dictation", "models"], |request| request.json(&action)).await
+        }
         None => daemon_get_json(&["dictation", "models"]).await,
     }
 }
 
-pub async fn speech_key(provider:bruhs_models::cloud_speech::Provider,change:Option<bruhs_models::cloud_speech::KeyChange>)->Result<bruhs_models::cloud_speech::KeyStatus,CaptureClientError>{
-    let route=["dictation","cloud",provider.id(),"key"];
-    match change{Some(value)=>daemon_post(&route,|r|r.json(&value)).await,None=>daemon_get_json(&route).await}
+pub async fn speech_key(
+    provider: bruhs_models::cloud_speech::Provider,
+    change: Option<bruhs_models::cloud_speech::KeyChange>,
+) -> Result<bruhs_models::cloud_speech::KeyStatus, CaptureClientError> {
+    let route = ["dictation", "cloud", provider.id(), "key"];
+    match change {
+        Some(value) => daemon_post(&route, |r| r.json(&value)).await,
+        None => daemon_get_json(&route).await,
+    }
 }
-pub async fn cloud_speech_models()->Result<Vec<bruhs_models::cloud_speech::SpeechModel>,CaptureClientError>{
-    daemon_get_json(&["dictation","cloud","models"]).await
+pub async fn cloud_speech_models(
+) -> Result<Vec<bruhs_models::cloud_speech::SpeechModel>, CaptureClientError> {
+    daemon_get_json(&["dictation", "cloud", "models"]).await
 }
 
 pub async fn transcribe_dictation(

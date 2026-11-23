@@ -114,7 +114,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         label: "Import thread...",
         hint: "Claude Code, Codex, Cursor",
     },
-    CommandAction { id: "move-in", group: "Agent", label: bruhs_models::imports::MOVE_IN_COMMAND, hint: bruhs_models::imports::MOVE_IN_COMMAND_HINT },
+    CommandAction {
+        id: "move-in",
+        group: "Agent",
+        label: bruhs_models::imports::MOVE_IN_COMMAND,
+        hint: bruhs_models::imports::MOVE_IN_COMMAND_HINT,
+    },
     CommandAction {
         id: "pin-thread",
         group: "Actions",
@@ -542,7 +547,15 @@ impl Workspace {
             "open-project" => self.open_project_picker(&OpenProjectPicker, window, cx),
             "new-thread" => self.new_thread(&NewThread, window, cx),
             "import-thread" => self.open_import_thread(&ImportThread, window, cx),
-            "move-in" => self.open_move_in(move_in_ui::MoveInStart { tab: move_in_ui::MoveInTab::OpenClaw, text: None, from: None }, window, cx),
+            "move-in" => self.open_move_in(
+                move_in_ui::MoveInStart {
+                    tab: move_in_ui::MoveInTab::OpenClaw,
+                    text: None,
+                    from: None,
+                },
+                window,
+                cx,
+            ),
             "open-terminal" => self.open_terminal(&OpenTerminal, window, cx),
             "toggle-terminal" => self.toggle_terminal(&ToggleTerminal, window, cx),
             "new-terminal" => self.open_new_terminal(window, cx),
@@ -713,7 +726,10 @@ impl Workspace {
         let place = if thread.project_name.is_empty() {
             "Chat".to_string()
         } else {
-            self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name).to_owned()
+            self.project_list
+                .title(chat.settings_project_path())
+                .unwrap_or(&thread.project_name)
+                .to_owned()
         };
         PaletteItem::Thread {
             id: thread.id.clone(),
@@ -736,7 +752,12 @@ impl Workspace {
                 }
                 let chat = thread.chat.read(cx);
                 text_matches_query(&chat.thread_title, query)
-                    || text_matches_query(self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name), query)
+                    || text_matches_query(
+                        self.project_list
+                            .title(chat.settings_project_path())
+                            .unwrap_or(&thread.project_name),
+                        query,
+                    )
                     || chat
                         .messages
                         .iter()
@@ -909,7 +930,9 @@ impl Workspace {
                 .flex()
                 .items_center()
                 .gap_2()
-                .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY),
+                )
                 .text_size(px(COMMAND_BAR_GROUP_TEXT_SIZE_PX))
                 .text_color(theme::rambutan_500())
                 .child(
@@ -941,7 +964,9 @@ impl Workspace {
                 .px(px(COMMAND_BAR_EMPTY_X_PADDING_PX))
                 .py(px(COMMAND_BAR_EMPTY_Y_PADDING_PX))
                 .text_center()
-                .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY),
+                )
                 .font_weight(FontWeight::MEDIUM)
                 .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
                 .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -1009,7 +1034,9 @@ impl Workspace {
             .rounded(px(COMMAND_BAR_ACTION_RADIUS_PX))
             .px(px(COMMAND_BAR_ACTION_X_PADDING_PX))
             .py(px(COMMAND_BAR_ACTION_Y_PADDING_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY),
+            )
             .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
@@ -1072,7 +1099,9 @@ impl Workspace {
             .rounded(px(COMMAND_BAR_ACTION_RADIUS_PX))
             .px(px(COMMAND_BAR_ACTION_X_PADDING_PX))
             .py(px(COMMAND_BAR_ACTION_Y_PADDING_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(COMMAND_BAR_LABEL_FONT_FAMILY),
+            )
             .text_size(px(COMMAND_BAR_ACTION_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
@@ -1136,132 +1165,138 @@ impl Workspace {
             .w(px(DESKTOP_DIALOG_LG_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))
             .track_focus(&self.modal_start_focus_handle)
-                    .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        let key = event.keystroke.key.as_str();
-                        if event.keystroke.modifiers == Modifiers::default()
-                            && (matches!(key, "escape" | "enter")
-                                || Self::move_command_selected_index(0, 0, key).is_some())
-                        {
-                            let composing = this.command_input.update(cx, |input, cx| {
-                                input.marked_text_range(window, cx).is_some()
-                            });
-                            if composing {
-                                if key == "enter" {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                }
-                                return;
-                            }
-                            if key == "enter" {
-                                // Consume activation before a command changes focus;
-                                // otherwise Enter can be delivered as text to its editor.
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.execute_first_command(window, cx);
-                                return;
-                            }
-                            if key == "escape" {
-                                this.close_transient_surfaces();
-                                cx.notify();
-                            } else {
-                                this.move_command_selection(key, cx);
-                            }
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                if event.keystroke.modifiers == Modifiers::default()
+                    && (matches!(key, "escape" | "enter")
+                        || Self::move_command_selected_index(0, 0, key).is_some())
+                {
+                    let composing = this.command_input.update(cx, |input, cx| {
+                        input.marked_text_range(window, cx).is_some()
+                    });
+                    if composing {
+                        if key == "enter" {
                             window.prevent_default();
                             cx.stop_propagation();
                         }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
+                        return;
+                    }
+                    if key == "enter" {
+                        // Consume activation before a command changes focus;
+                        // otherwise Enter can be delivered as text to its editor.
+                        window.prevent_default();
                         cx.stop_propagation();
-                    }))
-                    .child(
-                        div()
-                            .debug_selector(|| "desktop-command-bar-input".to_string())
-                            .flex_shrink_0()
-                            .px(px(COMMAND_BAR_INPUT_X_PADDING_PX))
-                            .py(px(COMMAND_BAR_INPUT_Y_PADDING_PX))
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .child({
-                                let input = Input::new(&self.command_input)
-                                    .aria_label("Command search")
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false)
-                                    .cleanable(false)
-                                    .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
-                                    .text_size(px(COMMAND_BAR_INPUT_TEXT_SIZE_PX))
-                                    // Web `px-4 py-3` belong to the wrapper:
-                                    // the field is only its line of text.
-                                    .p_0()
-                                    .line_height(px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX));
-                                // `Input::h` sizes only multi-line fields.
-                                Styled::h(input, px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX))
-                            }),
-                    )
-                    .children(self.render_palette_mode_chip())
-                    .child(self.render_command_action_list(cx))
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px(px(COMMAND_BAR_FOOTER_X_PADDING_PX))
-                            .py(px(COMMAND_BAR_FOOTER_Y_PADDING_PX))
-                            .border_t_1()
-                            .border_color(
-                                theme::longan_800().opacity(COMMAND_BAR_FOOTER_BORDER_OPACITY),
+                        this.execute_first_command(window, cx);
+                        return;
+                    }
+                    if key == "escape" {
+                        this.close_transient_surfaces();
+                        cx.notify();
+                    } else {
+                        this.move_command_selection(key, cx);
+                    }
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .debug_selector(|| "desktop-command-bar-input".to_string())
+                    .flex_shrink_0()
+                    .px(px(COMMAND_BAR_INPUT_X_PADDING_PX))
+                    .py(px(COMMAND_BAR_INPUT_Y_PADDING_PX))
+                    .border_b_1()
+                    .border_color(theme::longan_800())
+                    .child({
+                        let input = Input::new(&self.command_input)
+                            .aria_label("Command search")
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            .cleanable(false)
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(COMMAND_BAR_BODY_FONT_FAMILY),
                             )
+                            .text_size(px(COMMAND_BAR_INPUT_TEXT_SIZE_PX))
+                            // Web `px-4 py-3` belong to the wrapper:
+                            // the field is only its line of text.
+                            .p_0()
+                            .line_height(px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX));
+                        // `Input::h` sizes only multi-line fields.
+                        Styled::h(input, px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX))
+                    }),
+            )
+            .children(self.render_palette_mode_chip())
+            .child(self.render_command_action_list(cx))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(COMMAND_BAR_FOOTER_X_PADDING_PX))
+                    .py(px(COMMAND_BAR_FOOTER_Y_PADDING_PX))
+                    .border_t_1()
+                    .border_color(theme::longan_800().opacity(COMMAND_BAR_FOOTER_BORDER_OPACITY))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(COMMAND_BAR_BODY_FONT_FAMILY),
+                    )
+                    .text_size(px(COMMAND_BAR_FOOTER_TEXT_SIZE_PX))
+                    .text_color(theme::rambutan_500())
+                    .child(
+                        div()
                             .flex()
                             .items_center()
-                            .justify_between()
-                            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
-                            .text_size(px(COMMAND_BAR_FOOTER_TEXT_SIZE_PX))
-                            .text_color(theme::rambutan_500())
+                            .gap(px(COMMAND_BAR_FOOTER_HINT_GAP_PX))
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(COMMAND_BAR_FOOTER_HINT_GAP_PX))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme::rambutan_500())
-                                            .child("↑↓"),
-                                    )
-                                    .child("navigate")
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme::rambutan_500())
-                                            .child("↵"),
-                                    )
-                                    .child("select"),
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_500())
+                                    .child("↑↓"),
                             )
+                            .child("navigate")
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(COMMAND_BAR_FOOTER_HINT_GAP_PX))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme::rambutan_500())
-                                            .child("esc"),
-                                    )
-                                    .child("close"),
-                            ),
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_500())
+                                    .child("↵"),
+                            )
+                            .child("select"),
                     )
-                    .child(self.render_modal_focus_sentinel()),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(COMMAND_BAR_FOOTER_HINT_GAP_PX))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_500())
+                                    .child("esc"),
+                            )
+                            .child("close"),
+                    ),
             )
-            .into_any_element()
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 
     pub(super) fn command_group_label(&self, label: &'static str) -> Div {
         div()
             .px(px(COMMAND_BAR_GROUP_X_PADDING_PX))
             .pb(px(COMMAND_BAR_GROUP_BOTTOM_PADDING_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(COMMAND_BAR_BODY_FONT_FAMILY),
+            )
             .text_size(px(COMMAND_BAR_GROUP_TEXT_SIZE_PX))
             .font_weight(FontWeight::MEDIUM)
             .text_color(theme::rambutan_300())

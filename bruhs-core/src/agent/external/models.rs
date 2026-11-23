@@ -222,7 +222,9 @@ async fn list_antigravity_acp(program: &OsStr, timeout: Duration) -> RuntimeMode
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return failed("Antigravity CLI not found. Install it, then run `agy` to sign in.".into());
+            return failed(
+                "Antigravity CLI not found. Install it, then run `agy` to sign in.".into(),
+            );
         }
         Err(error) => return failed(format!("Antigravity could not be started: {error}")),
     };
@@ -478,6 +480,9 @@ printf '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1","configOptions":[{"id
         let listed = list_antigravity_acp(program.as_os_str(), LIST_TIMEOUT).await;
         assert_eq!(listed.error, None);
         let ids: Vec<&str> = listed.models.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["antigravity/gemini-4-neon", "antigravity/gemini-4-argon"]);
+        assert_eq!(
+            ids,
+            ["antigravity/gemini-4-neon", "antigravity/gemini-4-argon"]
+        );
     }
 }

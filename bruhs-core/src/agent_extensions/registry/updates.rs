@@ -156,7 +156,9 @@ fn upgraded(previous: &AcpInstance, agent: &Agent, prepared: Prepared) -> AcpIns
     next.command = prepared.command.to_string_lossy().into_owned();
     let mut origin = agent.origin();
     if let Some(previous) = &previous.registry {
-        origin.executable_override.clone_from(&previous.executable_override);
+        origin
+            .executable_override
+            .clone_from(&previous.executable_override);
         origin.auth_method_id.clone_from(&previous.auth_method_id);
     }
     next.registry = Some(origin);
@@ -293,7 +295,10 @@ mod tests {
         let n = upgrade(&i);
         assert_eq!(n.executable(), "custom-agent");
         assert_eq!(n.command, "new-launcher");
-        assert_eq!(n.registry.as_ref().unwrap().auth_method_id.as_deref(), Some("work"));
+        assert_eq!(
+            n.registry.as_ref().unwrap().auth_method_id.as_deref(),
+            Some("work")
+        );
         let plain = |s: &str| AcpVariable::Plain { value: s.into() };
         assert_eq!(n.args, ["new"]);
         assert_eq!(

@@ -397,7 +397,9 @@ impl SourceSettings {
                 bruhs_core::agent_extensions::environment::source_consumers(&source)
                     .map_err(|e| e.to_string())?,
             );
-            uses.extend(bruhs_core::usage_hubs::source_consumers(&source).map_err(|e| e.to_string())?);
+            uses.extend(
+                bruhs_core::usage_hubs::source_consumers(&source).map_err(|e| e.to_string())?,
+            );
             Ok::<_, String>(uses)
         });
         cx.spawn(async move |this, cx| {

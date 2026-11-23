@@ -184,9 +184,10 @@ pub(super) fn next_deadline(kind: &SourceKind, checkpoint: &Value) -> Option<u64
             (checkpoint.is_null() || checkpoint.as_u64().is_some_and(|fired| fired != due))
                 .then_some(due)
         }
-        SourceKind::Schedule { .. } | SourceKind::Calendar { .. } => {
-            checkpoint.get("next_due_ms")?.as_u64().filter(|due| *due > 0)
-        }
+        SourceKind::Schedule { .. } | SourceKind::Calendar { .. } => checkpoint
+            .get("next_due_ms")?
+            .as_u64()
+            .filter(|due| *due > 0),
         _ => None,
     }
 }

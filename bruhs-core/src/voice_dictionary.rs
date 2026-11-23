@@ -1,6 +1,6 @@
 //! Preferred spellings owned by a host, with project-specific overrides.
 use bruhs_models::voice_dictionary::*;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -120,13 +120,11 @@ mod tests {
                 },
             })
         };
-        assert!(
-            execute_in(&path, request(Some(&project), None))
-                .unwrap()
-                .project
-                .0
-                .is_empty()
-        );
+        assert!(execute_in(&path, request(Some(&project), None))
+            .unwrap()
+            .project
+            .0
+            .is_empty());
         assert!(!path.exists());
         assert!(matches!(
             execute_in(&path, request(None, add(true, "Apple"))),
@@ -142,12 +140,10 @@ mod tests {
         let local = execute_in(&path, request(Some(&project), None)).unwrap();
         assert!(local.project.0.contains_key("Apple"));
         assert!(local.environment.0.contains_key("Orchard"));
-        assert!(
-            execute_in(&path, request(None, None))
-                .unwrap()
-                .project
-                .0
-                .is_empty()
-        );
+        assert!(execute_in(&path, request(None, None))
+            .unwrap()
+            .project
+            .0
+            .is_empty());
     }
 }

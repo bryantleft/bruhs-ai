@@ -29,18 +29,29 @@ impl ServerClient {
         let path = "/api/maintenance/browser-captures";
         match days {
             None => self.get_json(path).await,
-            Some(days) => self.send_json(reqwest::Method::POST, path, Some(&days)).await,
+            Some(days) => {
+                self.send_json(reqwest::Method::POST, path, Some(&days))
+                    .await
+            }
         }
     }
     pub async fn prune_browser_captures(&self) -> Result<usize, ServerError> {
-        self.send_json(reqwest::Method::POST, "/api/maintenance/browser-captures/prune", None::<&()>).await
+        self.send_json(
+            reqwest::Method::POST,
+            "/api/maintenance/browser-captures/prune",
+            None::<&()>,
+        )
+        .await
     }
     pub async fn quota_windows(
         &self,
         provider: bruhs_models::agent::AgentProvider,
     ) -> Result<Vec<bruhs_models::agent_extensions::QuotaWindow>, ServerError> {
-        self.get_json(&format!("/api/agent-extensions/usage/windows/{}", provider.as_str()))
-            .await
+        self.get_json(&format!(
+            "/api/agent-extensions/usage/windows/{}",
+            provider.as_str()
+        ))
+        .await
     }
 
     pub async fn writer_models(
@@ -50,7 +61,12 @@ impl ServerClient {
         let scope = bruhs_models::delivery::DeliveryPreferenceScope {
             path: (!project.is_empty()).then(|| project.to_owned()),
         };
-        let response = self.http()?.get(self.url("/api/delivery/writer-models")).query(&scope).send().await;
+        let response = self
+            .http()?
+            .get(self.url("/api/delivery/writer-models"))
+            .query(&scope)
+            .send()
+            .await;
         let response = Self::check(response, "Read writer models").await?;
         Self::decode(response, "Read writer models").await
     }
@@ -222,7 +238,9 @@ impl ServerClient {
         )
         .await?;
         if response.status() != reqwest::StatusCode::NO_CONTENT {
-            return Err(ServerError::Invalid("The host did not confirm worktree cleanup."));
+            return Err(ServerError::Invalid(
+                "The host did not confirm worktree cleanup.",
+            ));
         }
         Ok(())
     }

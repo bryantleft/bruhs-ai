@@ -6,8 +6,8 @@ mod clock_format;
 mod helpers;
 #[cfg(unix)]
 mod instance_lock;
-mod logging;
 mod launcher;
+mod logging;
 mod motion;
 #[cfg(feature = "native-performance")]
 mod native_performance;
@@ -28,9 +28,9 @@ mod webview_platform;
 mod whiteboard_performance;
 mod zoom;
 
-use gpui::*;
 use bruhs_ui::zoom::px;
 use bruhs_ui::{Root, TitleBar};
+use gpui::*;
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
@@ -95,7 +95,9 @@ const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 actions!(bruhs, [Quit]);
 
 fn main() {
-    if let Some(code) = launcher::cli() { std::process::exit(code); }
+    if let Some(code) = launcher::cli() {
+        std::process::exit(code);
+    }
     if bruhs_core::workbench_tools::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -233,7 +235,11 @@ fn main() {
             // Native selectors route editing to an embedded WebKit first
             // responder; gpui-component handles the same actions in its inputs.
             cx.set_menus([
-                Menu::new("bruhs.ai").items([MenuItem::action("Settings…", OpenSettings), MenuItem::separator(), MenuItem::action("Quit bruhs.ai", Quit)]),
+                Menu::new("bruhs.ai").items([
+                    MenuItem::action("Settings…", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit bruhs.ai", Quit),
+                ]),
                 Menu::new("Edit").items([
                     MenuItem::os_action("Undo", bruhs_ui::input::Undo, OsAction::Undo),
                     MenuItem::os_action("Redo", bruhs_ui::input::Redo, OsAction::Redo),
@@ -324,8 +330,15 @@ fn main() {
             // Cmd+F: chat searches the open thread. A focused diff
             // searches that diff. The terminal keeps the key (its own context).
             bindings.push(KeyBinding::new(
-                if cfg!(target_os = "macos") { "cmd-shift-enter" } else { "ctrl-shift-enter" },
-                bruhs_ui::input::Enter { secondary: true, shift: true },
+                if cfg!(target_os = "macos") {
+                    "cmd-shift-enter"
+                } else {
+                    "ctrl-shift-enter"
+                },
+                bruhs_ui::input::Enter {
+                    secondary: true,
+                    shift: true,
+                },
                 Some("ChatComposer"),
             ));
             bindings.push(KeyBinding::new("cmd-f", FindInThread, Some("Chat")));

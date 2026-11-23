@@ -352,14 +352,12 @@ mod tests {
         let sibling = temp.path().join("review");
         std::fs::create_dir(&root).unwrap();
         let git = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .args(args)
-                    .current_dir(&root)
-                    .status()
-                    .unwrap()
-                    .success()
-            )
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success())
         };
         git(&["init", "-q"]);
         git(&[
@@ -475,11 +473,10 @@ mod tests {
             assert!(ws.removal_error().is_none(), "{:?}", ws.removal_error());
             assert!(!ws.archived_threads.iter().any(|t| t.id() == archived));
             assert!(ws.threads.iter().any(|t| t.id == keep));
-            assert!(
-                ws.threads
-                    .iter()
-                    .all(|t| t.chat.read(cx).settings_project_path() != local)
-            );
+            assert!(ws
+                .threads
+                .iter()
+                .all(|t| t.chat.read(cx).settings_project_path() != local));
             assert!(ws.listed_projects().iter().all(|p| p.path != local));
             assert!(ws.project_list.title(&local).is_none());
             assert!(ws.pending_scratch_cleanups.is_empty());

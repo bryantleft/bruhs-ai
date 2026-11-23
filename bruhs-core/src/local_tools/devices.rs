@@ -189,7 +189,8 @@ async fn ios(
                 "The simulator screenshot exceeds the capture budget.".into(),
             ));
         }
-        return super::screenshot(tokio::fs::read(&path).await?, crate::uploads::write_upload).await;
+        return super::screenshot(tokio::fs::read(&path).await?, crate::uploads::write_upload)
+            .await;
     }
     let operation = match action {
         DeviceAction::Boot => vec!["boot".into(), id.into()],

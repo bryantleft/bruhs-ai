@@ -124,12 +124,19 @@ impl ReactiveAutomations {
             choices: None,
         });
         let client = self.client.clone();
-        let host=self.linked_task.as_ref().map(|edit|edit.host.clone());
-        let result = spawn_tokio(cx, async move { if let Some(host)=host {host.branches(&project).await} else {client.task_base_branches(&project).await.map_err(reactive_error)} });
+        let host = self.linked_task.as_ref().map(|edit| edit.host.clone());
+        let result = spawn_tokio(cx, async move {
+            if let Some(host) = host {
+                host.branches(&project).await
+            } else {
+                client
+                    .task_base_branches(&project)
+                    .await
+                    .map_err(reactive_error)
+            }
+        });
         cx.spawn(async move |this, cx| {
-            let choices = result
-                .await
-                .map(|response| response.branches);
+            let choices = result.await.map(|response| response.branches);
             let _ = this.update(cx, |this, cx| {
                 if let Some(Editor::Automation(editor)) = &mut this.editor {
                     if let Some(menu) = editor
@@ -205,7 +212,7 @@ impl ReactiveAutomations {
             .gap_2()
             .child(muted("Workspace"))
             .child(picker);
-        let mut body=div().flex().flex_col().gap_2();
+        let mut body = div().flex().flex_col().gap_2();
         match draft.selected {
             "existing" => body = body.child(field("Checkout path", &draft.path, false, self.busy)),
             "worktree" => {

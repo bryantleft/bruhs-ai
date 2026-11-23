@@ -1,8 +1,8 @@
 //! The project-list grant exposes the desktop's saved checkouts and their Git identities.
-pub mod names;
 pub mod connection;
-use crate::git::{ProjectIdentity, project_identity};
-use futures_util::{StreamExt, stream};
+pub mod names;
+use crate::git::{project_identity, ProjectIdentity};
+use futures_util::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -31,7 +31,9 @@ struct Desktop {
 }
 
 #[derive(Deserialize)]
-struct ProjectModel { model: Option<String> }
+struct ProjectModel {
+    model: Option<String>,
+}
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -127,14 +129,11 @@ pub async fn task_projects(file: PathBuf) -> io::Result<TaskProjects> {
         let model = desktop.current_model.take();
         let preferences = std::mem::take(&mut desktop.project_defaults);
         Ok(TaskProjects {
-            default_model: model
-                .unwrap_or_else(|| bruhs_models::agent::DEFAULT_AGENT_MODEL.into()),
+            default_model: model.unwrap_or_else(|| bruhs_models::agent::DEFAULT_AGENT_MODEL.into()),
             projects: checkouts(desktop)
                 .into_iter()
                 .map(|p| {
-                    let model = preferences
-                        .get(&p.path)
-                        .and_then(|v| v.model.clone());
+                    let model = preferences.get(&p.path).and_then(|v| v.model.clone());
                     (p.path, model)
                 })
                 .collect(),

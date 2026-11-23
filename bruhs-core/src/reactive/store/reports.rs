@@ -247,7 +247,10 @@ pub(super) fn guard_generic_command(
     connection: &Connection,
     command: &ReactiveCommand,
 ) -> Result<(), ReactiveError> {
-    fn automation_ids(connection: &Connection, automation: &AutomationSetup) -> Result<(), ReactiveError> {
+    fn automation_ids(
+        connection: &Connection,
+        automation: &AutomationSetup,
+    ) -> Result<(), ReactiveError> {
         guard_managed_identity(connection, &automation.agent.id)?;
         guard_managed_identity(connection, &automation.source.id)?;
         guard_managed_identity(connection, &automation.subscription.id)
@@ -271,11 +274,17 @@ pub(super) fn guard_generic_command(
         }
     }
     match command {
-        ReactiveCommand::SaveScheduledTask { automation, .. } => automation_ids(connection, automation),
+        ReactiveCommand::SaveScheduledTask { automation, .. } => {
+            automation_ids(connection, automation)
+        }
         ReactiveCommand::Apply { change: value } | ReactiveCommand::Propose { change: value } => {
             change(connection, value)
         }
-        ReactiveCommand::ChatInTaskThread { task_id: id, .. } | ReactiveCommand::RunScheduledTask { id, .. } | ReactiveCommand::SetAutomationEnabled { id, .. } => guard_managed_identity(connection, id),
+        ReactiveCommand::ChatInTaskThread { task_id: id, .. }
+        | ReactiveCommand::RunScheduledTask { id, .. }
+        | ReactiveCommand::SetAutomationEnabled { id, .. } => {
+            guard_managed_identity(connection, id)
+        }
         ReactiveCommand::Publish { source_id, .. } => guard_managed_identity(connection, source_id),
         ReactiveCommand::DecideProposal { id, approve: true } => {
             let proposal: ReactiveProposal =

@@ -224,10 +224,17 @@ pub(super) fn save_desktop_state(
         write_desktop_state_bytes(&path, bytes, generation)?;
         let ack = bruhs_core::linked_projects::names::acknowledge(&path, |p| {
             state.project_list.saved_title(p).or_else(|| {
-                let known = state.recent_projects.iter().chain(&state.active_project)
-                    .any(|entry| entry.path == p) || state.threads.iter().any(|thread| {
-                        !thread.project_name.is_empty() &&
-                            thread.project_settings_root.as_ref().or(thread.project_path.as_ref())
+                let known = state
+                    .recent_projects
+                    .iter()
+                    .chain(&state.active_project)
+                    .any(|entry| entry.path == p)
+                    || state.threads.iter().any(|thread| {
+                        !thread.project_name.is_empty()
+                            && thread
+                                .project_settings_root
+                                .as_ref()
+                                .or(thread.project_path.as_ref())
                                 .is_some_and(|root| root == p)
                     });
                 known.then(|| state.project_list.title(p).map(str::to_owned))
@@ -624,8 +631,8 @@ impl Workspace {
                     ))
                     .await;
                 // Snapshot once per batch, not once per keystroke or fragment.
-                let Ok((state, meeting_action_receipts, quota_receipts, coordinator, generation)) = workspace
-                    .update(cx, |this, cx| {
+                let Ok((state, meeting_action_receipts, quota_receipts, coordinator, generation)) =
+                    workspace.update(cx, |this, cx| {
                         this.save_queue.begin_write();
                         let generation = this
                             .persistence
@@ -664,7 +671,7 @@ impl Workspace {
                     });
                     if saved {
                         this.dispatch_saved_scratch(scratch, cx);
-                        this.dispatch_saved_quota(quota_receipts,cx);
+                        this.dispatch_saved_quota(quota_receipts, cx);
                     }
                     if saved && dirty {
                         this.persist(cx);

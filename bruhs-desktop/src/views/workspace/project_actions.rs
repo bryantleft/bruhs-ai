@@ -276,7 +276,12 @@ impl Workspace {
             .map(|a| (a.clone(), cwd))
     }
 
-    pub(super) fn show_action_preview(&mut self, url: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn show_action_preview(
+        &mut self,
+        url: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if !valid_preview_url(url) {
             return;
         }
@@ -320,7 +325,10 @@ impl Workspace {
                 Some(ProjectCommand {
                     name: action.name.clone(),
                     command: action.command.clone(),
-                    preview: owner.clone().zip(action.preview_url.clone()).filter(|(_, url)| valid_preview_url(url)),
+                    preview: owner
+                        .clone()
+                        .zip(action.preview_url.clone())
+                        .filter(|(_, url)| valid_preview_url(url)),
                     stop_on_settle_for: owner.filter(|_| action.lifecycle.stop_on_settle),
                 }),
                 !action.auto_open_preview,
@@ -423,7 +431,11 @@ impl Workspace {
             .map(|a| ProjectCommand {
                 name: a.name.clone(),
                 command: a.command.clone(),
-                preview: a.preview_url.clone().filter(|url| valid_preview_url(url)).map(|url| (id.to_owned(), url)),
+                preview: a
+                    .preview_url
+                    .clone()
+                    .filter(|url| valid_preview_url(url))
+                    .map(|url| (id.to_owned(), url)),
                 stop_on_settle_for: (!settle && a.lifecycle.stop_on_settle).then(|| id.to_owned()),
             })
             .collect();
@@ -760,7 +772,14 @@ impl Workspace {
             .gap(px(24.0))
             .child(self.settings_card("Project overview", "", overview))
             .children(self.linked_checkout_cards(cx))
-            .child(self.settings_card("New threads", "", vec![self.new_thread_model_row(cx), self.new_thread_placement_row(cx)]))
+            .child(self.settings_card(
+                "New threads",
+                "",
+                vec![
+                    self.new_thread_model_row(cx),
+                    self.new_thread_placement_row(cx),
+                ],
+            ))
             .child(self.settings_card("Actions", "", rows))
             .when(
                 !scope.is_empty() && self.listed_projects().iter().any(|p| &p.path == scope),
@@ -772,12 +791,16 @@ impl Workspace {
                         true,
                         cx,
                     );
-                    view.child(self.settings_card("Danger", "", vec![self.settings_row(
-                        "settings-remove-checkout-row",
-                        "Remove checkout",
-                        "Remove this checkout and its conversations. Files stay on disk.",
-                        remove,
-                    )]))
+                    view.child(self.settings_card(
+                        "Danger",
+                        "",
+                        vec![self.settings_row(
+                            "settings-remove-checkout-row",
+                            "Remove checkout",
+                            "Remove this checkout and its conversations. Files stay on disk.",
+                            remove,
+                        )],
+                    ))
                 },
             )
             .into_any_element()

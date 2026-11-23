@@ -1,6 +1,6 @@
 //! AppKit receives command-key releases before the focused GPUI view sees them.
 use block2::RcBlock;
-use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
+use objc2::{rc::Retained, runtime::AnyObject, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use std::{cell::Cell, ptr::NonNull, rc::Rc};
 

@@ -309,7 +309,7 @@ impl Dropdown {
             trigger_icon: None,
             destructive_command: None,
             group_selection: None,
-            empty_label:"No matches",
+            empty_label: "No matches",
             trigger_label: None,
             unavailable: None,
         }
@@ -362,8 +362,17 @@ impl Dropdown {
     }
 
     /// Show a summary on the trigger and mark the selections in the other groups.
-    pub fn group_selection(mut self, summary: String, checked: Vec<&'static str>, defaults: Vec<&'static str>) -> Self {
-        self.group_selection = Some(GroupSelection { summary, checked, defaults });
+    pub fn group_selection(
+        mut self,
+        summary: String,
+        checked: Vec<&'static str>,
+        defaults: Vec<&'static str>,
+    ) -> Self {
+        self.group_selection = Some(GroupSelection {
+            summary,
+            checked,
+            defaults,
+        });
         self
     }
 
@@ -383,7 +392,11 @@ impl Dropdown {
         self
     }
 
-    pub fn option_accessories(mut self, sidebar: Option<(AnyElement, FocusHandle)>, build: impl Fn(&str) -> Option<AnyElement> + 'static) -> Self {
+    pub fn option_accessories(
+        mut self,
+        sidebar: Option<(AnyElement, FocusHandle)>,
+        build: impl Fn(&str) -> Option<AnyElement> + 'static,
+    ) -> Self {
         self.sidebar = sidebar;
         self.accessory = Some(Rc::new(build));
         self
@@ -401,8 +414,8 @@ impl Dropdown {
         self
     }
 
-    pub fn empty_label(mut self, text:&'static str) -> Self {
-        self.empty_label=text;
+    pub fn empty_label(mut self, text: &'static str) -> Self {
+        self.empty_label = text;
         self
     }
 
@@ -415,14 +428,19 @@ impl Dropdown {
 impl RenderOnce for Dropdown {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let grouped = self.group_selection.take();
-        let summary = self.trigger_label.take().or_else(|| grouped.as_ref().map(|g| g.summary.clone()));
-        let label = summary.or_else(|| current_label(&self.groups, &self.value)).unwrap_or_else(|| {
-            if self.value.is_empty() {
-                self.placeholder.unwrap_or_default().to_owned()
-            } else {
-                self.value.clone()
-            }
-        });
+        let summary = self
+            .trigger_label
+            .take()
+            .or_else(|| grouped.as_ref().map(|g| g.summary.clone()));
+        let label = summary
+            .or_else(|| current_label(&self.groups, &self.value))
+            .unwrap_or_else(|| {
+                if self.value.is_empty() {
+                    self.placeholder.unwrap_or_default().to_owned()
+                } else {
+                    self.value.clone()
+                }
+            });
         if let Some((query, _, _)) = &self.search {
             let text = query.read(cx).value().to_lowercase();
             if self.listbox != Listbox::Closed && !text.trim().is_empty() {
@@ -447,8 +465,12 @@ impl RenderOnce for Dropdown {
             .iter()
             .position(|target| target.value == self.value)
             .unwrap_or(0);
-        let search_start = if self.start_at_selection && self.search.as_ref()
-            .is_some_and(|(field, _, _)| field.read(cx).value().trim().is_empty()) {
+        let search_start = if self.start_at_selection
+            && self
+                .search
+                .as_ref()
+                .is_some_and(|(field, _, _)| field.read(cx).value().trim().is_empty())
+        {
             selected
         } else {
             0
@@ -473,34 +495,46 @@ impl RenderOnce for Dropdown {
         let selection_focus = trigger_focus.clone();
         let trigger_targets = targets.clone();
         let trigger_scroll = scroll.clone();
-        let trigger = dropdown_trigger(self.id, self.label.clone(), label, self.trigger_icon, self.option_mark.filter(|_| !action_menu).map(|draw| draw(&self.value)), open, &trigger_focus)
-            .when(self.compact && !action_menu, |el| el.w_auto().max_w_full().px_2().gap_1())
-            .on_click(move |_, window, cx| on_toggle(window, cx))
-            .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                let key = event.keystroke.key.as_str();
-                if event.keystroke.modifiers.modified() {
-                    return;
-                }
-                if is_web_button_activation_key(key) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+        let trigger = dropdown_trigger(
+            self.id,
+            self.label.clone(),
+            label,
+            self.trigger_icon,
+            self.option_mark
+                .filter(|_| !action_menu)
+                .map(|draw| draw(&self.value)),
+            open,
+            &trigger_focus,
+        )
+        .when(self.compact && !action_menu, |el| {
+            el.w_auto().max_w_full().px_2().gap_1()
+        })
+        .on_click(move |_, window, cx| on_toggle(window, cx))
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            let key = event.keystroke.key.as_str();
+            if event.keystroke.modifiers.modified() {
+                return;
+            }
+            if is_web_button_activation_key(key) {
+                window.prevent_default();
+                cx.stop_propagation();
+                toggle_for_key(window, cx);
+            } else if navigation_index(selected, trigger_targets.len(), key).is_some() {
+                window.prevent_default();
+                cx.stop_propagation();
+                if !open {
                     toggle_for_key(window, cx);
-                } else if navigation_index(selected, trigger_targets.len(), key).is_some() {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    if !open {
-                        toggle_for_key(window, cx);
-                    }
-                    let index = match key {
-                        "home" | "Home" => 0,
-                        "end" | "End" => trigger_targets.len() - 1,
-                        _ => selected,
-                    };
-                    if let Some(target) = trigger_targets.get(index) {
-                        focus_option(target, &trigger_scroll, window, cx);
-                    }
                 }
-            });
+                let index = match key {
+                    "home" | "Home" => 0,
+                    "end" | "End" => trigger_targets.len() - 1,
+                    _ => selected,
+                };
+                if let Some(target) = trigger_targets.get(index) {
+                    focus_option(target, &trigger_scroll, window, cx);
+                }
+            }
+        });
         let on_select: SelectHandler = Rc::new(move |value, window, cx| {
             if action_menu {
                 // A command can open a prompt that needs to take keyboard focus.
@@ -537,10 +571,14 @@ impl RenderOnce for Dropdown {
                 if action_trigger.is_focused(window) {
                     action_toggle(window, cx);
                 } else if open {
-                    let row = action_rows.iter().find(|row| row.handle.is_focused(window))
+                    let row = action_rows
+                        .iter()
+                        .find(|row| row.handle.is_focused(window))
                         .or_else(|| {
                             let field = action_search.as_ref()?;
-                            if field.focus_handle(cx).is_focused(window) && !field.read(cx).is_composing() {
+                            if field.focus_handle(cx).is_focused(window)
+                                && !field.read(cx).is_composing()
+                            {
                                 action_rows.get(search_start)
                             } else {
                                 None
@@ -548,7 +586,11 @@ impl RenderOnce for Dropdown {
                         });
                     if let Some(row) = row {
                         action_select(row.value, window, cx);
-                    } else if has_accessories && !action_search.as_ref().is_some_and(|field| field.focus_handle(cx).is_focused(window)) {
+                    } else if has_accessories
+                        && !action_search
+                            .as_ref()
+                            .is_some_and(|field| field.focus_handle(cx).is_focused(window))
+                    {
                         cx.propagate();
                         return;
                     }
@@ -599,33 +641,53 @@ impl RenderOnce for Dropdown {
                     let choose = on_select.clone();
                     let input_for_key = input.clone();
                     let initial = rows.get(search_start).cloned();
-                    let step_from_selection = |key| navigation_index(search_start, rows.len(), key)
-                        .and_then(|index| rows.get(index)).cloned();
-                    let down = if self.start_at_selection { step_from_selection("down") } else { rows.first().cloned() };
-                    let up = if self.start_at_selection { step_from_selection("up") } else { rows.last().cloned() };
+                    let step_from_selection = |key| {
+                        navigation_index(search_start, rows.len(), key)
+                            .and_then(|index| rows.get(index))
+                            .cloned()
+                    };
+                    let down = if self.start_at_selection {
+                        step_from_selection("down")
+                    } else {
+                        rows.first().cloned()
+                    };
+                    let up = if self.start_at_selection {
+                        step_from_selection("up")
+                    } else {
+                        rows.last().cloned()
+                    };
                     let down_key = down.clone();
                     let up_key = up.clone();
                     let down_scroll = scroll.clone();
                     let up_scroll = scroll.clone();
                     div()
                         .p_1()
-                        .when(self.accessory.is_some() || self.start_at_selection, |el| el
-                            .capture_action(move |_: &crate::input::MoveDown, window,cx| {
-                                if let Some(row) = &down {focus_option(row,&down_scroll,window,cx);}
+                        .when(self.accessory.is_some() || self.start_at_selection, |el| {
+                            el.capture_action(move |_: &crate::input::MoveDown, window, cx| {
+                                if let Some(row) = &down {
+                                    focus_option(row, &down_scroll, window, cx);
+                                }
                                 cx.stop_propagation();
                             })
-                            .capture_action(move |_: &crate::input::MoveUp, window,cx| {
-                                if let Some(row) = &up {focus_option(row,&up_scroll,window,cx);}
-                                cx.stop_propagation();
-                            }))
+                            .capture_action(
+                                move |_: &crate::input::MoveUp, window, cx| {
+                                    if let Some(row) = &up {
+                                        focus_option(row, &up_scroll, window, cx);
+                                    }
+                                    cx.stop_propagation();
+                                },
+                            )
+                        })
                         .when_some(rail_focus, |el, rail| {
-                            el.capture_action(move |_: &crate::input::MoveLeft,window,cx| {
-                                rail.focus(window,cx);
+                            el.capture_action(move |_: &crate::input::MoveLeft, window, cx| {
+                                rail.focus(window, cx);
                                 cx.stop_propagation();
                             })
                         })
                         .capture_key_down(move |event: &KeyDownEvent, window, cx| {
-                            if event.keystroke.modifiers.modified() { return; }
+                            if event.keystroke.modifiers.modified() {
+                                return;
+                            }
                             let Some(initial) = &initial else {
                                 return;
                             };
@@ -656,12 +718,24 @@ impl RenderOnce for Dropdown {
                     use bruhs_models::logic::menu::{MENU_GAP_PX, MENU_WINDOW_MARGIN_PX};
                     use bruhs_models::num::ToFloatLossy;
                     let trigger = bounds.get();
-                    let room = trigger.top().max(window.viewport_size().height - trigger.bottom());
-                    let inset = crate::zoom::window_px((MENU_GAP_PX + MENU_WINDOW_MARGIN_PX).to_f32_lossy());
+                    let room = trigger
+                        .top()
+                        .max(window.viewport_size().height - trigger.bottom());
+                    let inset = crate::zoom::window_px(
+                        (MENU_GAP_PX + MENU_WINDOW_MARGIN_PX).to_f32_lossy(),
+                    );
                     // The search field and its padding share the popover with the list.
-                    let search_height = if search.is_some() { px(theme::CONTROL_PX + 8.) } else { Pixels::ZERO };
+                    let search_height = if search.is_some() {
+                        px(theme::CONTROL_PX + 8.)
+                    } else {
+                        Pixels::ZERO
+                    };
                     let available = (room - inset - search_height).max(px(TRIGGER_HEIGHT_PX));
-                    if model_options_menu { available } else { available.min(px(LIST_MAX_HEIGHT_PX)) }
+                    if model_options_menu {
+                        available
+                    } else {
+                        available.min(px(LIST_MAX_HEIGHT_PX))
+                    }
                 } else {
                     px(LIST_MAX_HEIGHT_PX)
                 };
@@ -704,19 +778,38 @@ impl RenderOnce for Dropdown {
                 } else {
                     list
                 };
-                let list = if let Some((sidebar,_)) = self.sidebar {
-                    div().flex().rounded(px(LIST_RADIUS_PX)).bg(theme::longan_900()).child(sidebar)
-                        .child(div().flex_1().min_w_0().child(list)).into_any_element()
-                } else { list };
+                let list = if let Some((sidebar, _)) = self.sidebar {
+                    div()
+                        .flex()
+                        .rounded(px(LIST_RADIUS_PX))
+                        .bg(theme::longan_900())
+                        .child(sidebar)
+                        .child(div().flex_1().min_w_0().child(list))
+                        .into_any_element()
+                } else {
+                    list
+                };
                 if floating {
                     let size = bounds.get().size;
-                    let min_width = self.end_aligned_min_width.unwrap_or_else(|| px(if model_options_menu { 224. } else { 192. }));
+                    let min_width = self
+                        .end_aligned_min_width
+                        .unwrap_or_else(|| px(if model_options_menu { 224. } else { 192. }));
                     let width = size.width.max(min_width).min(window.viewport_size().width);
-                    let left = if self.end_aligned_min_width.is_some() { size.width - width } else { Pixels::ZERO };
+                    let left = if self.end_aligned_min_width.is_some() {
+                        size.width - width
+                    } else {
+                        Pixels::ZERO
+                    };
                     let content = div()
                         .id(SharedString::from(format!("{}-popover", self.id)))
                         .occlude()
-                        .when(has_accessories, |el| el.rounded(px(LIST_RADIUS_PX)).overflow_hidden().border_1().border_color(theme::ring_floating()).bg(theme::longan_900()))
+                        .when(has_accessories, |el| {
+                            el.rounded(px(LIST_RADIUS_PX))
+                                .overflow_hidden()
+                                .border_1()
+                                .border_color(theme::ring_floating())
+                                .bg(theme::longan_900())
+                        })
                         .w(width)
                         .on_mouse_down_out(move |event, window, cx| {
                             if !bounds.get().contains(&event.position) {
@@ -763,9 +856,17 @@ fn dropdown_trigger(
         .text_color(theme::rambutan_100())
         .tab_index(0)
         .track_focus(focus)
-        .when(action_menu, |el| el.role(Role::Button).size(px(28.)).px_0()
-            .justify_center().bg(gpui::transparent_black()).border_color(gpui::transparent_black()))
-        .when(!action_menu, |el| el.role(Role::ComboBox).aria_value(label.clone()))
+        .when(action_menu, |el| {
+            el.role(Role::Button)
+                .size(px(28.))
+                .px_0()
+                .justify_center()
+                .bg(gpui::transparent_black())
+                .border_color(gpui::transparent_black())
+        })
+        .when(!action_menu, |el| {
+            el.role(Role::ComboBox).aria_value(label.clone())
+        })
         .aria_label(aria_label.clone())
         .aria_expanded(open)
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -774,24 +875,39 @@ fn dropdown_trigger(
         .children(mark)
         .map(|el| match icon {
             Some(icon) => {
-                let (TriggerIcon::Only(path) | TriggerIcon::Leading(path) | TriggerIcon::Actions(path)) = icon;
-                let el = el.child(svg().path(path).size(px(theme::ICON_PX))
-                    .flex_shrink_0().text_color(theme::rambutan_400()));
+                let (TriggerIcon::Only(path)
+                | TriggerIcon::Leading(path)
+                | TriggerIcon::Actions(path)) = icon;
+                let el = el.child(
+                    svg()
+                        .path(path)
+                        .size(px(theme::ICON_PX))
+                        .flex_shrink_0()
+                        .text_color(theme::rambutan_400()),
+                );
                 match icon {
-                    TriggerIcon::Leading(_) => el.child(div().min_w_0().flex_1().truncate().child(label)),
-                    TriggerIcon::Actions(_) => el.tooltip(move |window, cx| crate::tooltip::Tooltip::new(aria_label.clone()).build(window, cx)),
-                    TriggerIcon::Only(_) => el.tooltip(move |window, cx| crate::tooltip::Tooltip::new(label.clone()).build(window, cx)),
+                    TriggerIcon::Leading(_) => {
+                        el.child(div().min_w_0().flex_1().truncate().child(label))
+                    }
+                    TriggerIcon::Actions(_) => el.tooltip(move |window, cx| {
+                        crate::tooltip::Tooltip::new(aria_label.clone()).build(window, cx)
+                    }),
+                    TriggerIcon::Only(_) => el.tooltip(move |window, cx| {
+                        crate::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                    }),
                 }
             }
             None => el.child(div().min_w_0().truncate().child(label)),
         })
-        .when(!action_menu, |el| el.child(
-            svg()
-                .path(icons::CHEVRON_DOWN)
-                .size(px(theme::ICON_PX))
-                .flex_shrink_0()
-                .text_color(theme::rambutan_500()),
-        ))
+        .when(!action_menu, |el| {
+            el.child(
+                svg()
+                    .path(icons::CHEVRON_DOWN)
+                    .size(px(theme::ICON_PX))
+                    .flex_shrink_0()
+                    .text_color(theme::rambutan_500()),
+            )
+        })
 }
 
 /// The open listbox with group headers and options; callers decide where
@@ -888,7 +1004,8 @@ fn render_dropdown_list(
             );
         }
         for option in group.options {
-            let is_current = option.value == value || grouped.is_some_and(|g| g.checked.contains(&option.value));
+            let is_current =
+                option.value == value || grouped.is_some_and(|g| g.checked.contains(&option.value));
             if Some(option.value) == unavailable {
                 rows.push(
                     div()
@@ -932,7 +1049,9 @@ fn render_dropdown_list(
                         format!("{id}-option-{}", option.value).into(),
                     ))
                     .debug_selector(move || selector)
-                    .when(has_action, |el| el.group(format!("{id}-row-{option_value}")))
+                    .when(has_action, |el| {
+                        el.group(format!("{id}-row-{option_value}"))
+                    })
                     .mx_1()
                     .px_2()
                     .py_1p5()
@@ -953,10 +1072,17 @@ fn render_dropdown_list(
                     .tab_stop(tab_stops)
                     .track_focus(&focus)
                     .aria_label(option.label.clone())
-                    .when(grouped.is_some(), |row| row.role(Role::MenuItemRadio)
-                        .aria_toggled(if is_current { gpui::Toggled::True } else { gpui::Toggled::False }))
+                    .when(grouped.is_some(), |row| {
+                        row.role(Role::MenuItemRadio).aria_toggled(if is_current {
+                            gpui::Toggled::True
+                        } else {
+                            gpui::Toggled::False
+                        })
+                    })
                     .when(action_menu, |row| row.role(Role::MenuItem))
-                    .when(!action_menu && grouped.is_none(), |row| row.role(Role::ListBoxOption).aria_selected(is_current))
+                    .when(!action_menu && grouped.is_none(), |row| {
+                        row.role(Role::ListBoxOption).aria_selected(is_current)
+                    })
                     .border_1()
                     .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -989,11 +1115,25 @@ fn render_dropdown_list(
                             .flex_1()
                             .flex()
                             .flex_col()
-                            .child(div().flex().items_center().gap_1()
-                                .child(div().truncate().child(option.label))
-                                .when(is_default, |row| row.child(div().flex_shrink_0()
-                                    .px_1().rounded(px(3.)).bg(theme::longan_800())
-                                    .text_size(px(10.)).text_color(theme::rambutan_400()).child("Default"))))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(div().truncate().child(option.label))
+                                    .when(is_default, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .px_1()
+                                                .rounded(px(3.))
+                                                .bg(theme::longan_800())
+                                                .text_size(px(10.))
+                                                .text_color(theme::rambutan_400())
+                                                .child("Default"),
+                                        )
+                                    }),
+                            )
                             .children(
                                 option
                                     .description
@@ -1014,8 +1154,10 @@ fn render_dropdown_list(
                     .children(action)
                     .map(|row| {
                         if index > 0 && destructive_command == Some(option_value) {
-                            div().child(div().h(px(1.)).my_1().bg(theme::ring_modal()))
-                                .child(row).into_any_element()
+                            div()
+                                .child(div().h(px(1.)).my_1().bg(theme::ring_modal()))
+                                .child(row)
+                                .into_any_element()
                         } else {
                             row.into_any_element()
                         }
@@ -1027,17 +1169,26 @@ fn render_dropdown_list(
     div()
         .id(ElementId::Name(format!("{id}-list").into()))
         .debug_selector(move || format!("{id}-list"))
-        .role(if grouped.is_some() || action_menu { Role::Menu } else { Role::ListBox })
+        .role(if grouped.is_some() || action_menu {
+            Role::Menu
+        } else {
+            Role::ListBox
+        })
         .aria_label(aria_label)
         .w_full()
         .max_h(max_height)
         .track_scroll(&scroll)
         .overflow_y_scroll()
-        .when(accessory.is_none(), |el| el.rounded(px(LIST_RADIUS_PX))
-            .border_1().border_color(theme::ring_floating())
-            .bg(theme::glass_surface(theme::longan_700())))
+        .when(accessory.is_none(), |el| {
+            el.rounded(px(LIST_RADIUS_PX))
+                .border_1()
+                .border_color(theme::ring_floating())
+                .bg(theme::glass_surface(theme::longan_700()))
+        })
         .when(action_menu, |el| el.occlude().bg(theme::longan_800()))
-        .when(accessory.is_some(), |el| el.border_t_1().border_color(theme::longan_700()))
+        .when(accessory.is_some(), |el| {
+            el.border_t_1().border_color(theme::longan_700())
+        })
         .py_1()
         .children(rows)
         .when(!action_menu, |el| el.vertical_scrollbar(&scroll))

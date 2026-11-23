@@ -310,12 +310,12 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{Overlay, ThemeEditor, indent_edit};
+    use super::{indent_edit, Overlay, ThemeEditor};
     use crate::views::workspace::{
-        OpenSettings, SettingsSection, Workspace, tests::thread_menu_workspace,
+        tests::thread_menu_workspace, OpenSettings, SettingsSection, Workspace,
     };
     use bruhs_ui::ActiveTheme;
-    use gpui::{Focusable, px};
+    use gpui::{px, Focusable};
 
     #[test]
     fn css_editor_indents_a_selection_and_unindents_the_caret() {

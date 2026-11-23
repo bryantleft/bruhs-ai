@@ -22,7 +22,10 @@ struct Gesture {
 
 impl Panel {
     pub(super) fn new(capture: crate::views::theme_regions::Capture) -> Self {
-        Self { capture, ..Default::default() }
+        Self {
+            capture,
+            ..Default::default()
+        }
     }
     fn position(&self, width: Pixels, viewport: Size<Pixels>) -> Option<Point<Pixels>> {
         let edge = px(8.);

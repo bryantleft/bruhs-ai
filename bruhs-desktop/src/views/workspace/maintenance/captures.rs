@@ -160,7 +160,11 @@ impl Workspace {
             "desktop-settings-row-browser-captures",
             label,
             help,
-            match state.days {Some(0)=>"Off".into(),Some(days)=>format!("{days} days"),None=>"Unavailable".into()},
+            match state.days {
+                Some(0) => "Off".into(),
+                Some(days) => format!("{days} days"),
+                None => "Unavailable".into(),
+            },
             controls.into_any_element(),
         )
     }

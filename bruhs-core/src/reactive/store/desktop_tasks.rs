@@ -17,7 +17,7 @@ struct Workspace<M> {
 #[derive(Deserialize)]
 struct Chat<M> {
     #[serde(skip)]
-    delivered: BTreeMap<String,i64>,
+    delivered: BTreeMap<String, i64>,
     id: String,
     title: String,
     project_path: Option<String>,
@@ -70,7 +70,7 @@ fn workspace<M: DeserializeOwned>(only: Option<&ThreadId>) -> Result<Vec<Chat<M>
         #[derive(Deserialize)]
         struct Records<'a> {
             #[serde(default)]
-            desktop_task_cursors: BTreeMap<String,i64>,
+            desktop_task_cursors: BTreeMap<String, i64>,
             #[serde(default)]
             thread_origins: BTreeMap<String, Origin>,
             current_model: Option<String>,
@@ -96,7 +96,10 @@ fn workspace<M: DeserializeOwned>(only: Option<&ThreadId>) -> Result<Vec<Chat<M>
                 == id.as_str()
             {
                 return serde_json::from_str::<Chat<M>>(raw.get())
-                    .map(|mut chat| { chat.delivered = records.desktop_task_cursors; vec![chat.with_defaults(records.current_model.as_deref())] })
+                    .map(|mut chat| {
+                        chat.delivered = records.desktop_task_cursors;
+                        vec![chat.with_defaults(records.current_model.as_deref())]
+                    })
                     .map_err(parse_error);
             }
         }
@@ -146,8 +149,14 @@ impl<M> Chat<M> {
         (!self.fresh_session && self.session_provider.as_deref() == Some(provider.as_str()))
             .then_some(self.session_id.as_deref())
             .flatten()
-            .filter(|id| !id.is_empty() && (provider != bruhs_models::agent::AgentProvider::Acp ||
-                bruhs_models::agent_extensions::acp_session_matches_model(id, &self.model_id)))
+            .filter(|id| {
+                !id.is_empty()
+                    && (provider != bruhs_models::agent::AgentProvider::Acp
+                        || bruhs_models::agent_extensions::acp_session_matches_model(
+                            id,
+                            &self.model_id,
+                        ))
+            })
     }
 }
 
@@ -198,13 +207,34 @@ fn project_chat<M: DeserializeOwned>(
     Ok(chat)
 }
 
-pub(super) fn linked_messages(id: &ThreadId, project: &str, store: &str) -> Result<(String, i64, Vec<LinkedThreadMessage>), ReactiveError> {
+pub(super) fn linked_messages(
+    id: &ThreadId,
+    project: &str,
+    store: &str,
+) -> Result<(String, i64, Vec<LinkedThreadMessage>), ReactiveError> {
     let chat = project_chat::<Line>(id, project)?;
-    let cursor = chat.delivered.get(&format!("{store}/{id}")).copied().unwrap_or_default();
-    let messages = chat.messages.into_iter().enumerate().filter_map(|(index, line)| {
-        let assistant = match line.role.as_str() { "user" => false, "assistant" => true, _ => return None };
-        Some(LinkedThreadMessage { key: format!("d{index}"), assistant, text: line.content })
-    }).collect();
+    let cursor = chat
+        .delivered
+        .get(&format!("{store}/{id}"))
+        .copied()
+        .unwrap_or_default();
+    let messages = chat
+        .messages
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let assistant = match line.role.as_str() {
+                "user" => false,
+                "assistant" => true,
+                _ => return None,
+            };
+            Some(LinkedThreadMessage {
+                key: format!("d{index}"),
+                assistant,
+                text: line.content,
+            })
+        })
+        .collect();
     Ok((chat.title, cursor, messages))
 }
 

@@ -301,120 +301,120 @@ impl Workspace {
             .max_h(modal_ui::picker_max_height(window))
             .bg(theme::longan_800())
             .track_focus(&self.modal_start_focus_handle)
-                    .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        let key = event.keystroke.key.as_str();
-                        let step = navigate(current, count, key);
-                        if event.keystroke.modifiers != Modifiers::default()
-                            || !(matches!(key, "escape" | "enter") || step.is_some())
-                        {
-                            return;
-                        }
-                        let composing = this.record_picker.input.update(cx, |input, cx| {
-                            input.marked_text_range(window, cx).is_some()
-                        });
-                        if composing {
-                            return;
-                        }
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        match (key, step) {
-                            ("enter", _) => this.choose_record(current, cx),
-                            ("escape", _) => {
-                                this.close_transient_surfaces();
-                                cx.notify();
-                            }
-                            (_, Some(next)) => this.set_record_picker_highlight(next, cx),
-                            _ => {}
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
-                    .child(self.render_record_picker_header(target, cx))
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px_3()
-                            .py_2()
-                            .text_size(px(RECORD_PICKER_META_TEXT_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .text_color(theme::rambutan_400())
-                            .debug_selector(|| "desktop-record-picker-count".to_string())
-                            .child(match_count_label(count)),
-                    )
-                    .child(
-                        div()
-                            .id("desktop-record-picker-list")
-                            .debug_selector(|| "desktop-record-picker-list".to_string())
-                            .role(Role::ListBox)
-                            .aria_label(target.label())
-                            .min_h_0()
-                            .flex_1()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.record_picker.scroll)
-                            .px_1()
-                            .pb_1()
-                            .flex()
-                            .flex_col()
-                            .children(rows)
-                            .when(count == 0, |el| {
-                                el.child(
-                                    div()
-                                        .px_3()
-                                        .py_5()
-                                        .text_size(px(RECORD_PICKER_ROW_TEXT_PX))
-                                        .text_color(theme::rambutan_400())
-                                        .child(PICKER_EMPTY),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .border_t_1()
-                            .border_color(theme::longan_700())
-                            .px_3()
-                            .py_2()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .text_size(px(RECORD_PICKER_META_TEXT_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .text_color(theme::rambutan_400())
-                            .child(PICKER_KEY_HINT)
-                            .when(count > PAGE_SIZE, |el| {
-                                el.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .child(self.render_record_page_button(
-                                            "desktop-record-picker-previous",
-                                            "Previous",
-                                            "Previous results",
-                                            page > 0,
-                                            page.saturating_sub(1) * PAGE_SIZE,
-                                            cx,
-                                        ))
-                                        .child(page_label(count, current))
-                                        .child(self.render_record_page_button(
-                                            "desktop-record-picker-next",
-                                            "Next",
-                                            "Next results",
-                                            page + 1 < page_count,
-                                            (page + 1) * PAGE_SIZE,
-                                            cx,
-                                        )),
-                                )
-                            }),
-                    ),
+            .capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                let step = navigate(current, count, key);
+                if event.keystroke.modifiers != Modifiers::default()
+                    || !(matches!(key, "escape" | "enter") || step.is_some())
+                {
+                    return;
+                }
+                let composing = this.record_picker.input.update(cx, |input, cx| {
+                    input.marked_text_range(window, cx).is_some()
+                });
+                if composing {
+                    return;
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+                match (key, step) {
+                    ("enter", _) => this.choose_record(current, cx),
+                    ("escape", _) => {
+                        this.close_transient_surfaces();
+                        cx.notify();
+                    }
+                    (_, Some(next)) => this.set_record_picker_highlight(next, cx),
+                    _ => {}
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(self.render_record_picker_header(target, cx))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px_3()
+                    .py_2()
+                    .text_size(px(RECORD_PICKER_META_TEXT_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::rambutan_400())
+                    .debug_selector(|| "desktop-record-picker-count".to_string())
+                    .child(match_count_label(count)),
             )
-            .into_any_element()
+            .child(
+                div()
+                    .id("desktop-record-picker-list")
+                    .debug_selector(|| "desktop-record-picker-list".to_string())
+                    .role(Role::ListBox)
+                    .aria_label(target.label())
+                    .min_h_0()
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.record_picker.scroll)
+                    .px_1()
+                    .pb_1()
+                    .flex()
+                    .flex_col()
+                    .children(rows)
+                    .when(count == 0, |el| {
+                        el.child(
+                            div()
+                                .px_3()
+                                .py_5()
+                                .text_size(px(RECORD_PICKER_ROW_TEXT_PX))
+                                .text_color(theme::rambutan_400())
+                                .child(PICKER_EMPTY),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(theme::longan_700())
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .text_size(px(RECORD_PICKER_META_TEXT_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::rambutan_400())
+                    .child(PICKER_KEY_HINT)
+                    .when(count > PAGE_SIZE, |el| {
+                        el.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(self.render_record_page_button(
+                                    "desktop-record-picker-previous",
+                                    "Previous",
+                                    "Previous results",
+                                    page > 0,
+                                    page.saturating_sub(1) * PAGE_SIZE,
+                                    cx,
+                                ))
+                                .child(page_label(count, current))
+                                .child(self.render_record_page_button(
+                                    "desktop-record-picker-next",
+                                    "Next",
+                                    "Next results",
+                                    page + 1 < page_count,
+                                    (page + 1) * PAGE_SIZE,
+                                    cx,
+                                )),
+                        )
+                    }),
+            ),
+        )
+        .into_any_element()
     }
 
     fn render_record_picker_header(

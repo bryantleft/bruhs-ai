@@ -185,7 +185,8 @@ fn arriving_cursor_models_keep_a_moved_highlight_on_its_model(cx: &mut TestAppCo
     chat.update_in(cx, |chat, window, cx| {
         chat.set_model("gpt-5.5", cx);
         chat.open_model_picker(window, cx);
-        chat.model_picker_query.update(cx, |field,cx| field.set_value("default",window,cx));
+        chat.model_picker_query
+            .update(cx, |field, cx| field.set_value("default", window, cx));
         let grok = chat
             .model_picker_matches(cx)
             .iter()
@@ -560,10 +561,14 @@ fn compact_options_preserve_effort_and_saved_prompt_workflows(cx: &mut TestAppCo
         chat.toggle_effort_menu(window, cx);
     });
     cx.run_until_parked();
-    let panel=cx.debug_bounds("desktop-model-picker").unwrap();
-    let column=cx.debug_bounds("model-options-column").unwrap();
+    let panel = cx.debug_bounds("desktop-model-picker").unwrap();
+    let column = cx.debug_bounds("model-options-column").unwrap();
     let effort = cx.debug_bounds("desktop-effort-option-high").unwrap();
-    assert!(effort.top()>=column.top() && effort.bottom()<=column.bottom() && column.right()<=panel.right());
+    assert!(
+        effort.top() >= column.top()
+            && effort.bottom() <= column.bottom()
+            && column.right() <= panel.right()
+    );
     cx.simulate_click(effort.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     chat.read_with(cx, |chat, _| {
@@ -572,8 +577,8 @@ fn compact_options_preserve_effort_and_saved_prompt_workflows(cx: &mut TestAppCo
     });
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
-    let trigger=cx.debug_bounds("desktop-composer-options").unwrap();
-    cx.simulate_click(trigger.center(),gpui::Modifiers::default());
+    let trigger = cx.debug_bounds("desktop-composer-options").unwrap();
+    cx.simulate_click(trigger.center(), gpui::Modifiers::default());
     chat.update_in(cx, |chat, window, cx| {
         chat.input_state.update(cx, |input, cx| {
             input.set_value("Saved local draft", window, cx)

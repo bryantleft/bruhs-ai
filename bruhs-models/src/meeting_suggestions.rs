@@ -68,7 +68,8 @@ impl Proactivity {
     }
 }
 
-pub const PROACTIVITY_HELP: &str = "Live meeting suggestions in the dock. Uses an extra model request and pauses at usage limits.";
+pub const PROACTIVITY_HELP: &str =
+    "Live meeting suggestions in the dock. Uses an extra model request and pauses at usage limits.";
 
 /// Lowest and highest score a thought needs before it is shown. Scores are
 /// the model's 1 to 5 rating of how strongly it should speak up now.

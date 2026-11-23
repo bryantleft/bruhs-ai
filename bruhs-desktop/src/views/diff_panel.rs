@@ -937,7 +937,9 @@ impl DiffPanelView {
                     .min_w_0()
                     .truncate()
                     .text_size(px(TOOLBAR_TEXT_SIZE_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY),
+                    )
                     .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(format!("{viewed_n} of {total} viewed")),
@@ -1061,7 +1063,9 @@ impl DiffPanelView {
                     .flex_1()
                     .min_w_0()
                     .text_size(px(14.0))
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY),
+                    )
                     .text_color(if self.find_query.is_empty() {
                         theme::rambutan_500()
                     } else {
@@ -1077,7 +1081,9 @@ impl DiffPanelView {
                 div()
                     .flex_shrink_0()
                     .text_size(px(12.0))
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY),
+                    )
                     .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(count_label),
@@ -1093,7 +1099,9 @@ impl DiffPanelView {
                     .justify_center()
                     .rounded(px(4.0))
                     .text_size(px(12.0))
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY),
+                    )
                     .text_color(theme::rambutan_400())
                     .cursor_pointer()
                     .hover(|el| {
@@ -1297,7 +1305,9 @@ impl DiffPanelView {
                     div()
                         .flex_shrink_0()
                         .text_size(px(12.0))
-                        .font_family(crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY))
+                        .font_family(
+                            crate::theme::FontFace::Interface.with_default(PANEL_LABEL_FONT_FAMILY),
+                        )
                         .text_color(theme::durian_400())
                         .child("Changed"),
                 )
@@ -1321,7 +1331,9 @@ impl DiffPanelView {
                     .min_w_0()
                     .flex_1()
                     .flex()
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -1449,7 +1461,10 @@ impl DiffPanelView {
                             .bg(theme::longan_800().opacity(0.4))
                             .px_3()
                             .py(px(2.0))
-                            .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(PANEL_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(GAP_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .child(header)
@@ -1474,7 +1489,9 @@ impl DiffPanelView {
                     .w_full()
                     .h_auto()
                     .py_1()
-                    .font_family(crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(PANEL_BODY_FONT_FAMILY),
+                    )
                     .children(blocks)
                     .map(|body| {
                         if self.wrap {

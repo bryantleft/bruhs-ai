@@ -107,9 +107,11 @@ impl RenderOnce for Checkbox {
             .unwrap_or_default();
 
         let mut check = focusable_control(
-            div().id(self.id.clone()).when_some(self.debug_selector, |el, selector| {
-                el.debug_selector(move || selector.to_string())
-            }),
+            div()
+                .id(self.id.clone())
+                .when_some(self.debug_selector, |el, selector| {
+                    el.debug_selector(move || selector.to_string())
+                }),
             gpui::Role::CheckBox,
             label,
             state,

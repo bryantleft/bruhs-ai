@@ -1,6 +1,6 @@
 //! Small, portable project artwork shared by Settings, project selection and sidebar folders.
 use super::*;
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::{
     io::{self, Cursor, Read},
     path::Path,
@@ -290,7 +290,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{Artwork, BTreeMap, STANDARD, SettingsSection, project_defaults};
+    use super::{project_defaults, Artwork, BTreeMap, SettingsSection, STANDARD};
     use base64::Engine as _;
     #[gpui::test]
     async fn project_icon_picker_keeps_a_portable_thumbnail_and_resets_only_the_selected_project(

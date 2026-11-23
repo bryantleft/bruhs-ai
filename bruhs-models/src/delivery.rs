@@ -715,7 +715,11 @@ pub enum WritingStyle {
 }
 impl WritingStyle {
     pub fn key(self) -> &'static str {
-        match self { Self::Repository => "repository", Self::Conventional => "conventional", Self::Custom => "custom" }
+        match self {
+            Self::Repository => "repository",
+            Self::Conventional => "conventional",
+            Self::Custom => "custom",
+        }
     }
 }
 
@@ -735,8 +739,15 @@ pub enum WriterModel {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WriterDraft {
-    Commit { files: Vec<String> },
-    Pull { base: String, head: String, #[serde(default)] files: Vec<String> },
+    Commit {
+        files: Vec<String>,
+    },
+    Pull {
+        base: String,
+        head: String,
+        #[serde(default)]
+        files: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -770,7 +781,7 @@ pub struct DeliveryOverrides {
     pub writer_instructions: Option<String>,
     pub merge_method: Option<MergeMethod>,
     pub follow_templates: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remove_agent_credits: Option<bool>,
 }
 
@@ -795,12 +806,19 @@ pub struct DeliveryPreferences {
     pub overrides: DeliveryOverrides,
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeliveryPreferenceScope {pub path:Option<String>}
+pub struct DeliveryPreferenceScope {
+    pub path: Option<String>,
+}
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
-#[serde(tag="setting",content="value",rename_all="snake_case",deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "setting",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum DeliveryPreferenceChange {
     ReviewGuidesEnabled(Option<bool>),
     ReviewGuideModel(Option<GuideModel>),
@@ -820,9 +838,12 @@ pub enum DeliveryPreferenceChange {
     RemoveAgentCredits(Option<bool>),
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SetDeliveryPreference {pub path:Option<String>,pub change:DeliveryPreferenceChange}
+pub struct SetDeliveryPreference {
+    pub path: Option<String>,
+    pub change: DeliveryPreferenceChange,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

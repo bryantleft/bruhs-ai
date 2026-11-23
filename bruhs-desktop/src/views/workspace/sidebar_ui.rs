@@ -258,7 +258,9 @@ impl ThreadMenuItem {
 
     /// Index into `Workspace::thread_menu_items`.
     fn slot(self) -> usize {
-        if let Self::UserSnooze(index)=self {return Self::ALL.len()+index;}
+        if let Self::UserSnooze(index) = self {
+            return Self::ALL.len() + index;
+        }
         Self::ALL
             .iter()
             .position(|item| *item == self)
@@ -268,7 +270,16 @@ impl ThreadMenuItem {
     /// Element id and debug selector.
     fn id(self) -> &'static str {
         match self {
-            Self::UserSnooze(i) => ["desktop-thread-snooze-0","desktop-thread-snooze-1","desktop-thread-snooze-2","desktop-thread-snooze-3","desktop-thread-snooze-4","desktop-thread-snooze-5","desktop-thread-snooze-6","desktop-thread-snooze-7"][i],
+            Self::UserSnooze(i) => [
+                "desktop-thread-snooze-0",
+                "desktop-thread-snooze-1",
+                "desktop-thread-snooze-2",
+                "desktop-thread-snooze-3",
+                "desktop-thread-snooze-4",
+                "desktop-thread-snooze-5",
+                "desktop-thread-snooze-6",
+                "desktop-thread-snooze-7",
+            ][i],
             Self::Archive => "desktop-thread-menu-archive",
             Self::Pin => "desktop-thread-menu-pin",
             Self::Settle => "desktop-thread-menu-settle",
@@ -344,9 +355,18 @@ impl Workspace {
             .min_h_0()
             .flex()
             .flex_col()
-            .when_some(theme.color_role("cssSidebarInnerBackground"), |el, color| el.bg(color))
-            .children(crate::views::workspace::appearance::background_layer("SidebarInner", cx))
-            .when_some(theme.color_role("cssSidebarInnerForeground"), |el, color| el.text_color(color))
+            .when_some(
+                theme.color_role("cssSidebarInnerBackground"),
+                |el, color| el.bg(color),
+            )
+            .children(crate::views::workspace::appearance::background_layer(
+                "SidebarInner",
+                cx,
+            ))
+            .when_some(
+                theme.color_role("cssSidebarInnerForeground"),
+                |el, color| el.text_color(color),
+            )
             .child(self.render_sidebar_header(window, cx))
             .child(self.render_sidebar_controls(cx))
             .children(self.render_crew_rail(window, cx))
@@ -360,15 +380,30 @@ impl Workspace {
             .relative()
             .debug_selector(|| "desktop-workspace-sidebar".to_string())
             .key_context("Sidebar")
-            .bg(theme.color_role("cssSidebarBackground").or_else(|| theme.color_role("sidebar")).unwrap_or_else(theme::longan_900))
-            .when(theme.color_role("cssSidebarBackground").is_none() && theme.color_role("cssSidebarInnerBackground").is_none(), |el| el.theme_region("sidebar", cx))
+            .bg(theme
+                .color_role("cssSidebarBackground")
+                .or_else(|| theme.color_role("sidebar"))
+                .unwrap_or_else(theme::longan_900))
+            .when(
+                theme.color_role("cssSidebarBackground").is_none()
+                    && theme.color_role("cssSidebarInnerBackground").is_none(),
+                |el| el.theme_region("sidebar", cx),
+            )
             .border_r_1()
-            .children(crate::views::workspace::appearance::background_layer("Sidebar", cx))
-            .border_color(theme.color_role("cssSidebarBorder").unwrap_or_else(|| {
-                theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY)
-            }))
+            .children(crate::views::workspace::appearance::background_layer(
+                "Sidebar", cx,
+            ))
+            .border_color(
+                theme.color_role("cssSidebarBorder").unwrap_or_else(|| {
+                    theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY)
+                }),
+            )
             .font_family(theme::UI_FONT_FAMILY)
-            .text_color(theme.color_role("cssSidebarForeground").unwrap_or_else(theme::rambutan_300))
+            .text_color(
+                theme
+                    .color_role("cssSidebarForeground")
+                    .unwrap_or_else(theme::rambutan_300),
+            )
             .flex()
             .flex_col()
             .child(inner)
@@ -523,34 +558,74 @@ impl Workspace {
                 let row = rows[index].clone();
                 let element = match row {
                     viewport::SidebarRow::Thread {
-                        index: thread_index, folder,
+                        index: thread_index,
+                        folder,
                         ..
-                    } => this.render_thread_card(&this.threads[thread_index], folder, &focus[index], cx),
-                    viewport::SidebarRow::Folder {path,checkout,name,count,open} => {
-                        let tooltip=checkout.clone();
-                        let debug_path=path.clone();
-                        let searching=!this.sidebar_query(cx).trim().is_empty();
-                        let folder=div().id(SharedString::from(format!("sidebar-folder-{path}")))
-                            .debug_selector(move||format!("desktop-sidebar-folder-{debug_path}"))
-                            .track_focus(&focus[index].card).tab_index(0).role(Role::Button)
-                            .aria_expanded(open).aria_label(format!("{name}, {count} threads")).cursor_pointer()
-                            .border_1().border_color(gpui::transparent_black()).rounded(px(6.))
-                            .focus_visible(|el|el.border_color(theme::persimmon_400()))
-                            .flex().items_center().gap_2().px_2().py_1().text_size(px(SIDEBAR_LABEL_TEXT_PX))
+                    } => this.render_thread_card(
+                        &this.threads[thread_index],
+                        folder,
+                        &focus[index],
+                        cx,
+                    ),
+                    viewport::SidebarRow::Folder {
+                        path,
+                        checkout,
+                        name,
+                        count,
+                        open,
+                    } => {
+                        let tooltip = checkout.clone();
+                        let debug_path = path.clone();
+                        let searching = !this.sidebar_query(cx).trim().is_empty();
+                        let folder = div()
+                            .id(SharedString::from(format!("sidebar-folder-{path}")))
+                            .debug_selector(move || format!("desktop-sidebar-folder-{debug_path}"))
+                            .track_focus(&focus[index].card)
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_expanded(open)
+                            .aria_label(format!("{name}, {count} threads"))
+                            .cursor_pointer()
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .rounded(px(6.))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .py_1()
+                            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
                             .text_color(theme::rambutan_400())
-                            .when(!tooltip.is_empty(),|el|el.tooltip(move|w,cx|bruhs_ui::tooltip::Tooltip::new(tooltip.clone()).build(w,cx)))
-                            .child(this.project_icon(checkout.as_ref(),SIDEBAR_SMALL_ICON_PX))
-                            .child(div().min_w_0().flex_1().truncate().child(name)).child(count.to_string())
-                            .child(icon(assets::CHEVRON_DOWN_ICON_PATH,SIDEBAR_SMALL_ICON_PX,theme::rambutan_500())
-                                .when(!open,|el|el.with_transformation(Transformation::rotate(Radians(-std::f32::consts::FRAC_PI_2)))));
-                        on_press_view(folder,cx,move|this,_,cx|{
+                            .when(!tooltip.is_empty(), |el| {
+                                el.tooltip(move |w, cx| {
+                                    bruhs_ui::tooltip::Tooltip::new(tooltip.clone()).build(w, cx)
+                                })
+                            })
+                            .child(this.project_icon(checkout.as_ref(), SIDEBAR_SMALL_ICON_PX))
+                            .child(div().min_w_0().flex_1().truncate().child(name))
+                            .child(count.to_string())
+                            .child(
+                                icon(
+                                    assets::CHEVRON_DOWN_ICON_PATH,
+                                    SIDEBAR_SMALL_ICON_PX,
+                                    theme::rambutan_500(),
+                                )
+                                .when(!open, |el| {
+                                    el.with_transformation(Transformation::rotate(Radians(
+                                        -std::f32::consts::FRAC_PI_2,
+                                    )))
+                                }),
+                            );
+                        on_press_view(folder, cx, move |this, _, cx| {
                             if !searching {
                                 if !this.labs_sidebar.collapsed.remove(path.as_ref()) {
                                     this.labs_sidebar.collapsed.insert(path.to_string());
                                 }
                                 this.persist_and_notify(cx);
                             }
-                        }).into_any_element()
+                        })
+                        .into_any_element()
                     }
                     viewport::SidebarRow::Shelf {
                         section,
@@ -734,7 +809,10 @@ impl Workspace {
         } else if thread.project_name.is_empty() {
             SIDEBAR_NO_PROJECT_LABEL.to_string()
         } else {
-            self.project_list.title(chat.settings_project_path()).unwrap_or(&thread.project_name).to_owned()
+            self.project_list
+                .title(chat.settings_project_path())
+                .unwrap_or(&thread.project_name)
+                .to_owned()
         };
         let provider = bruhs_models::agent::AgentProvider::for_model(&thread.model_id);
         let id_for_select = thread.id.clone();
@@ -820,15 +898,14 @@ impl Workspace {
                 )
             });
         let status_line = div()
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
-                    .group_hover(row_group.clone(), |el| el.invisible())
-                    .when(menu_open, |el| el.invisible())
-                    .child(status_slot);
-
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_end()
+            .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
+            .group_hover(row_group.clone(), |el| el.invisible())
+            .when(menu_open, |el| el.invisible())
+            .child(status_slot);
 
         let title_line = div()
             .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
@@ -841,11 +918,18 @@ impl Workspace {
             .truncate()
             .debug_selector(move || format!("desktop-thread-card-title-{debug_key}"))
             .child(title)
-            .when(self.title_requests.contains_key(&thread.id), |row| row.child(
-                div().id(("regenerating-title", key)).absolute().role(Role::Status)
-                    .aria_label("Regenerating title")
-                    .a11y_synthetic_children(|tree| tree.parent_node().set_live(gpui::accesskit::Live::Polite))
-            ));
+            .when(self.title_requests.contains_key(&thread.id), |row| {
+                row.child(
+                    div()
+                        .id(("regenerating-title", key))
+                        .absolute()
+                        .role(Role::Status)
+                        .aria_label("Regenerating title")
+                        .a11y_synthetic_children(|tree| {
+                            tree.parent_node().set_live(gpui::accesskit::Live::Polite)
+                        }),
+                )
+            });
 
         let branch = thread.branch.clone();
         // Web: the third line exists once the thread has a branch or a turn
@@ -855,7 +939,12 @@ impl Workspace {
         // role leaves the name out (web).
         let role = chat.role_profile.as_ref().map(|role| role.name.clone());
         let has_meta = branch.is_some() || has_turns || chat.role.is_some();
-        let meta_line = (if folder {self.labs_sidebar.two_lines} else {has_meta}).then(|| {
+        let meta_line = (if folder {
+            self.labs_sidebar.two_lines
+        } else {
+            has_meta
+        })
+        .then(|| {
             div()
                 .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
                 .h(px(SIDEBAR_CARD_META_HEIGHT_PX))
@@ -894,9 +983,19 @@ impl Workspace {
                             .child(role),
                     )
                 })
-                .when_some(folder.then(|| self.known_thread_pulls.get(&thread.id)).flatten()
-                    .filter(|p| thread.branch.as_ref() == Some(&p.branch) && super::labs::folder(thread,cx) == p.project), |el,p|el.child(format!("#{}",p.number)))
-                .when(folder || has_turns, |el| el.child(provider_mark(provider, cx)))
+                .when_some(
+                    folder
+                        .then(|| self.known_thread_pulls.get(&thread.id))
+                        .flatten()
+                        .filter(|p| {
+                            thread.branch.as_ref() == Some(&p.branch)
+                                && super::labs::folder(thread, cx) == p.project
+                        }),
+                    |el, p| el.child(format!("#{}", p.number)),
+                )
+                .when(folder || has_turns, |el| {
+                    el.child(provider_mark(provider, cx))
+                })
         });
 
         let delete_button = div()
@@ -1042,8 +1141,15 @@ impl Workspace {
                 })
             })
             .child(if folder {
-                div().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(title_line)).child(status_line)
-            } else {div().child(top_line.child(status_line)).child(title_line)})
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().flex_1().min_w_0().child(title_line))
+                    .child(status_line)
+            } else {
+                div().child(top_line.child(status_line)).child(title_line)
+            })
             .children(meta_line)
             .child(menu_button)
             .child(delete_button)
@@ -1122,19 +1228,32 @@ impl Workspace {
         let mut enabled: Vec<ThreadMenuItem> = Vec::new();
         let mut rows: Vec<AnyElement> = Vec::new();
         for entry in thread_menu(facts, now, threads_ui::utc_offset_minutes_east()) {
-            if let Some(choices)=self.snooze_choices(chat.settings_project_path()) {
+            if let Some(choices) = self.snooze_choices(chat.settings_project_path()) {
                 if let ThreadMenuEntry::Snooze(preset) = &entry {
                     if preset.when == SnoozeWhen::InAnHour {
-                        let mut available: Vec<_> = choices.iter().take(super::snooze_options::MAX_OPTIONS).enumerate()
-                            .filter_map(|(i,c)|c.until(now).map(|t|(t,i,c))).collect();
-                        available.sort_by_key(|(time,_,_)|*time);
-                        for (_,index,choice) in available {
-                            let item=ThreadMenuItem::UserSnooze(index);
-                            let choice=choice.clone();
+                        let mut available: Vec<_> = choices
+                            .iter()
+                            .take(super::snooze_options::MAX_OPTIONS)
+                            .enumerate()
+                            .filter_map(|(i, c)| c.until(now).map(|t| (t, i, c)))
+                            .collect();
+                        available.sort_by_key(|(time, _, _)| *time);
+                        for (_, index, choice) in available {
+                            let item = ThreadMenuItem::UserSnooze(index);
+                            let choice = choice.clone();
                             enabled.push(item);
-                            rows.push(self.thread_menu_item(item,choice.label(),true,&id,cx,menu_action(move|this,id,_,cx|{
-                                if let Some(until)=choice.until(EpochMs::now().as_millis()){this.snooze_thread_by_id(id,until,cx);}
-                            })));
+                            rows.push(self.thread_menu_item(
+                                item,
+                                choice.label(),
+                                true,
+                                &id,
+                                cx,
+                                menu_action(move |this, id, _, cx| {
+                                    if let Some(until) = choice.until(EpochMs::now().as_millis()) {
+                                        this.snooze_thread_by_id(id, until, cx);
+                                    }
+                                }),
+                            ));
                         }
                     }
                     continue;
@@ -1150,13 +1269,19 @@ impl Workspace {
             }
             let label = if matches!(entry, ThreadMenuEntry::RegenerateTitle { enabled: false }) {
                 "Regenerating…"
-            } else { entry.label() };
+            } else {
+                entry.label()
+            };
             rows.push(self.thread_menu_item(item, label, on, &id, cx, thread_menu_action(entry)));
         }
         let can_archive = !chat.is_streaming;
         rows.push(thread_menu_separator());
         rows.push(self.thread_menu_item(
-            ThreadMenuItem::Archive, "Archive thread", can_archive, &id, cx,
+            ThreadMenuItem::Archive,
+            "Archive thread",
+            can_archive,
+            &id,
+            cx,
             menu_action(|this, id, window, cx| this.request_thread_archive(id, window, cx)),
         ));
         if can_archive {
@@ -1211,7 +1336,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
         action: ThreadMenuAction,
     ) -> AnyElement {
-        let label=label.into();
+        let label = label.into();
         let id = item.id();
         let thread_id = thread_id.to_string();
         let run =
@@ -1617,8 +1742,9 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
     ) -> Entity<InputState> {
-        let sidebar_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder(language.text(SIDEBAR_SEARCH_PLACEHOLDER)));
+        let sidebar_search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(language.text(SIDEBAR_SEARCH_PLACEHOLDER))
+        });
         subscriptions.push(redraw_on_edit(&sidebar_search, window, cx));
         sidebar_search
     }
@@ -1676,7 +1802,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{CardStatus, status_pulse_opacity, thread_matches};
+    use super::{status_pulse_opacity, thread_matches, CardStatus};
     use crate::app_state::DesktopState;
 
     /// Web `bruhs-status-pulse`'s keyframes.
@@ -1732,7 +1858,12 @@ mod tests {
         let (workspace, cx) = fixture(cx);
         cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
         let (id, task_id) = workspace.update_in(cx, |workspace, window, cx| {
-            workspace.new_thread_in_project("proj".into(), "/tmp/bruhs-teamwork".into(), window, cx);
+            workspace.new_thread_in_project(
+                "proj".into(),
+                "/tmp/bruhs-teamwork".into(),
+                window,
+                cx,
+            );
             let thread = workspace.threads.last().expect("a thread");
             let id = thread.id.clone();
             let task = cx.global::<DesktopState>().app.registry().register(

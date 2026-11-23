@@ -1,11 +1,13 @@
 use super::*;
 use bruhs_ui::theme::ThemeFamily;
+mod background;
 mod collection;
 mod color;
 mod palette;
 mod stylesheet;
-mod background;
-pub(crate) use background::{layer as background_layer, layer_with_radius as rounded_background_layer};
+pub(crate) use background::{
+    layer as background_layer, layer_with_radius as rounded_background_layer,
+};
 mod color_families;
 mod community;
 mod editor;
@@ -82,7 +84,10 @@ impl Workspace {
         self.custom_themes.find(id).map(Arc::as_ref)
     }
 
-    fn selected_custom_palette(&self, mode: theme::ThemeMode) -> Option<&library::InstalledPalette> {
+    fn selected_custom_palette(
+        &self,
+        mode: theme::ThemeMode,
+    ) -> Option<&library::InstalledPalette> {
         self.selected_custom_theme(mode)?.installed_palette(mode)
     }
 

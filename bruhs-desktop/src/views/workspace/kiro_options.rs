@@ -43,10 +43,10 @@ impl Workspace {
         let model = thread.chat.read(cx).model_id.clone();
         let used_fallback = model != *requested && self.model_for_new_thread(requested) == model;
         let options = self.kiro_defaults_for(path, &model, used_fallback);
-        let native = self.thread_options_for(path,&model);
-        thread.chat.update(cx, |chat,_| {
-            chat.model_options=native;
-            chat.model_catalog=self.thread_catalog.clone();
+        let native = self.thread_options_for(path, &model);
+        thread.chat.update(cx, |chat, _| {
+            chat.model_options = native;
+            chat.model_catalog = self.thread_catalog.clone();
         });
         if !options.is_empty() {
             thread.chat.update(cx, |chat, cx| {
@@ -65,7 +65,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let Some((agents, slug)) = self.kiro_model_options(model) else {
-            return self.native_model_control(model,fallback,picker,cx);
+            return self.native_model_control(model, fallback, picker, cx);
         };
         let (levels, default_level) = effort_levels(slug);
         if levels.is_empty() && agents.choices.len() < 2 {

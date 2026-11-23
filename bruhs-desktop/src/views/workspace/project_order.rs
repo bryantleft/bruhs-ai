@@ -31,7 +31,10 @@ pub(super) struct ProjectList {
 
 impl ProjectList {
     pub(super) fn empty(&self) -> bool {
-        self.mode == Order::default() && self.entries.is_empty() && self.grouping.is_default() && self.titles.is_empty()
+        self.mode == Order::default()
+            && self.entries.is_empty()
+            && self.grouping.is_default()
+            && self.titles.is_empty()
     }
     pub(super) fn forget(&mut self, path: &str) {
         self.entries.retain(|entry| entry.path != path);
@@ -39,7 +42,10 @@ impl ProjectList {
         self.grouping.forget_checkout(path);
     }
     pub(super) fn saved_title(&self, path: &str) -> Option<Option<String>> {
-        self.entries.iter().any(|e| e.path == path).then(|| self.titles.get(path).cloned())
+        self.entries
+            .iter()
+            .any(|e| e.path == path)
+            .then(|| self.titles.get(path).cloned())
     }
 
     pub(super) fn title(&self, path: &str) -> Option<&str> {
@@ -122,7 +128,11 @@ impl Workspace {
             );
         }
     }
-    pub(super) fn remember_project(&mut self, project: DesktopProjectLocation, cx: &mut Context<'_, Self>) {
+    pub(super) fn remember_project(
+        &mut self,
+        project: DesktopProjectLocation,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.project_list.register(
             &project.path,
             &project.name,
@@ -145,7 +155,11 @@ impl Workspace {
             .into_iter()
             .map(|p| DesktopProjectLocation {
                 path: p.path.clone(),
-                name: self.project_list.title(&p.path).unwrap_or(&p.name).to_owned(),
+                name: self
+                    .project_list
+                    .title(&p.path)
+                    .unwrap_or(&p.name)
+                    .to_owned(),
             })
             .collect();
         for p in &self.recent_projects {
@@ -233,7 +247,10 @@ impl Workspace {
                 rows.push(
                     self.settings_row(
                         "desktop-settings-row-project-position",
-                        self.project_list.title(&p.path).unwrap_or(&p.name).to_owned(),
+                        self.project_list
+                            .title(&p.path)
+                            .unwrap_or(&p.name)
+                            .to_owned(),
                         p.path.clone(),
                         div()
                             .flex()
@@ -271,7 +288,11 @@ impl Workspace {
                 for_terminal: false,
                 thread: None,
             });
-            let name = self.listed_projects().into_iter().find(|p| p.path == path).map_or(name, |p| p.name);
+            let name = self
+                .listed_projects()
+                .into_iter()
+                .find(|p| p.path == path)
+                .map_or(name, |p| p.name);
             self.select_project_location(path, name, window, cx);
         }
     }

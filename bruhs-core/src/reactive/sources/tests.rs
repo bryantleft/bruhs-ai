@@ -376,7 +376,10 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
     let stored_due = |snapshot: bruhs_models::reactive::ReactiveSnapshot| {
         snapshot.next_run_by_source.unwrap()["weekly-clock"].as_millis()
     };
-    assert_eq!(stored_due(runtime.snapshot().await.unwrap()), i64::try_from(due).unwrap());
+    assert_eq!(
+        stored_due(runtime.snapshot().await.unwrap()),
+        i64::try_from(due).unwrap()
+    );
     let mut changes = runtime.watch_changes();
     let worker = tokio::spawn(drive(runtime.clone(), source, reqwest::Client::new()));
     let event = tokio::time::timeout(Duration::from_secs(5), async {
@@ -397,7 +400,10 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
     let _ = worker.await;
     let event=event.expect("A resumed weekly source must wake for its saved due time rather than sleep another seven days");
     assert_eq!(event.payload["scheduled_at_ms"], due);
-    assert_eq!(stored_due(runtime.snapshot().await.unwrap()), i64::try_from(due + every_ms).unwrap());
+    assert_eq!(
+        stored_due(runtime.snapshot().await.unwrap()),
+        i64::try_from(due + every_ms).unwrap()
+    );
 }
 
 #[test]

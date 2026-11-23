@@ -86,10 +86,9 @@ impl Choice {
                     "tomorrow" => 1,
                     "week" => 7,
                     weekday => {
-                        let offset = u32::try_from(
-                            DAYS[3..10].iter().position(|(key, _)| *key == weekday)?,
-                        )
-                        .ok()?;
+                        let offset =
+                            u32::try_from(DAYS[3..10].iter().position(|(key, _)| *key == weekday)?)
+                                .ok()?;
                         (offset + 6 - now.weekday().num_days_from_monday()) % 7 + 1
                     }
                 };

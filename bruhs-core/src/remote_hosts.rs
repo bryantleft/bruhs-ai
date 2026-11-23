@@ -230,11 +230,14 @@ impl RemoteHostManager {
             .running
             .lock()
             .map_err(|_| conflict("The tunnel process registry is unavailable. Restart Bruhs."))?
-            .insert(id, Control {
-                generation,
-                cancel,
-                socket: None,
-            });
+            .insert(
+                id,
+                Control {
+                    generation,
+                    cancel,
+                    socket: None,
+                },
+            );
         drop(data);
         let manager = self.clone();
         tokio::spawn(async move {

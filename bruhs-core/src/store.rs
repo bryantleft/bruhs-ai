@@ -390,7 +390,9 @@ impl AppState {
             .await
             .get(&turn.thread_id)
             .and_then(|t| t.system_prompt.clone());
-        let mut stream = self.orchestrator.send_message(turn, system_prompt.as_deref())?;
+        let mut stream = self
+            .orchestrator
+            .send_message(turn, system_prompt.as_deref())?;
         stream.scratch_lease = scratch_lease;
         Ok(stream)
     }

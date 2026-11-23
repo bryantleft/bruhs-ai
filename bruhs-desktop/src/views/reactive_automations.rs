@@ -29,19 +29,21 @@ mod room_dialog;
 mod room_page;
 mod runs;
 mod scheduled_tasks;
+mod setup;
 mod task_checkout;
+mod task_choices;
 mod task_deliveries;
 mod task_webhook_url;
-mod task_choices;
-mod setup;
-pub(crate) use scheduled_tasks::{linked_scheduled_row, ScheduledTaskDialog, ScheduledTaskSettings};
+pub(crate) use scheduled_tasks::{
+    linked_scheduled_row, ScheduledTaskDialog, ScheduledTaskSettings,
+};
 mod transcript_list;
 mod updates;
 mod vault_grants;
-mod weekly_reports;
-mod webhook_filters;
 mod webhook_dedupe;
+mod webhook_filters;
 mod webhook_security;
+mod weekly_reports;
 pub(crate) use bruh_page::{ReactiveOpenAutomations, TaskThreadDeletion, TaskThreadLocation};
 use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_ui::text_field::{TextField, TextInput};
@@ -67,18 +69,30 @@ pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
 }
 
 fn once_time(at: bruhs_models::EpochMs) -> String {
-    chrono::DateTime::from_timestamp_millis(at.as_millis()).map(|t| t.with_timezone(&chrono::Local).to_rfc3339()).unwrap_or_default()
+    chrono::DateTime::from_timestamp_millis(at.as_millis())
+        .map(|t| t.with_timezone(&chrono::Local).to_rfc3339())
+        .unwrap_or_default()
 }
 
 fn once_source(text: &str) -> Result<SourceKind, String> {
     use chrono::TimeZone;
     let text = text.trim();
-    let time = chrono::DateTime::parse_from_rfc3339(text).ok().map(|time| time.timestamp_millis())
+    let time = chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|time| time.timestamp_millis())
         .or_else(|| {
             let local = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").ok()?;
-            chrono::Local.from_local_datetime(&local).single().map(|time| time.timestamp_millis())
-        }).ok_or("Enter a local date and time as YYYY-MM-DD HH:MM, or include an explicit UTC offset.")?;
-    Ok(SourceKind::Once { due_at: bruhs_models::EpochMs::new(time).map_err(|e| e.to_string())? })
+            chrono::Local
+                .from_local_datetime(&local)
+                .single()
+                .map(|time| time.timestamp_millis())
+        })
+        .ok_or(
+            "Enter a local date and time as YYYY-MM-DD HH:MM, or include an explicit UTC offset.",
+        )?;
+    Ok(SourceKind::Once {
+        due_at: bruhs_models::EpochMs::new(time).map_err(|e| e.to_string())?,
+    })
 }
 
 /// Why ⌘. stopped nothing before the service ever answered.
@@ -470,7 +484,12 @@ fn heading(text: impl Into<SharedString>) -> Div {
         .text_color(theme::rambutan_100())
         .child(text.into())
 }
-fn field(label: impl Into<SharedString>, input: &impl TextInput, multiline: bool, disabled: bool) -> Div {
+fn field(
+    label: impl Into<SharedString>,
+    input: &impl TextInput,
+    multiline: bool,
+    disabled: bool,
+) -> Div {
     let label = label.into();
     div()
         .min_w_0()
@@ -524,7 +543,9 @@ enum Effect {
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
-            ReactiveCommand::DeleteTaskThread {thread_id,..} => Self::DeletedThread(thread_id.clone()),
+            ReactiveCommand::DeleteTaskThread { thread_id, .. } => {
+                Self::DeletedThread(thread_id.clone())
+            }
             ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
             ReactiveCommand::CreateRoom { room } | ReactiveCommand::UpdateRoom { room } => {
                 Self::RoomDone(room.id.clone())
@@ -533,7 +554,8 @@ impl Effect {
             ReactiveCommand::PostRoom { .. } => Self::RoomPosted,
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
-            } | ReactiveCommand::SaveScheduledTask { .. } => Self::CloseAutomation,
+            }
+            | ReactiveCommand::SaveScheduledTask { .. } => Self::CloseAutomation,
             ReactiveCommand::AnswerOutbox { id, .. } => Self::CloseReply(id.clone()),
             ReactiveCommand::EditMemory { agent_id, key, .. }
             | ReactiveCommand::ForgetMemory { agent_id, key } => Self::CloseMemory {
@@ -611,7 +633,11 @@ impl ReactiveAutomations {
         Self::with_linked_task(None, true, cx)
     }
 
-    fn with_linked_task(linked_task: Option<scheduled_tasks::LinkedEdit>, background: bool, cx: &mut Context<'_, Self>) -> Self {
+    fn with_linked_task(
+        linked_task: Option<scheduled_tasks::LinkedEdit>,
+        background: bool,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
         let client =
             ServerClient::from_env().unwrap_or_else(|error| ServerClient::unavailable(&error));
         let mut panel = Self {
@@ -681,9 +707,12 @@ impl ReactiveAutomations {
                     .update(cx, |this, cx| {
                         if this.last_render.elapsed() < REFRESH.saturating_mul(2) {
                             this.refresh(cx);
-                        } else if this.last_scheduled_render.is_some_and(|render| render.elapsed() < REFRESH.saturating_mul(2))
-                            || this.last_refresh
-                            .is_none_or(|at| at.elapsed() >= BACKGROUND_REFRESH)
+                        } else if this
+                            .last_scheduled_render
+                            .is_some_and(|render| render.elapsed() < REFRESH.saturating_mul(2))
+                            || this
+                                .last_refresh
+                                .is_none_or(|at| at.elapsed() >= BACKGROUND_REFRESH)
                         {
                             this.refresh_snapshot(cx);
                         }
@@ -771,15 +800,30 @@ impl ReactiveAutomations {
             asking.focus_new_agent = true;
         }
         if !snapshot.desktop_task_store.is_empty() {
-            let mut links = snapshot.desktop_task_activity.keys().map(|id| (id.clone(), std::collections::BTreeMap::new()))
-                .collect::<std::collections::BTreeMap<_,_>>();
+            let mut links = snapshot
+                .desktop_task_activity
+                .keys()
+                .map(|id| (id.clone(), std::collections::BTreeMap::new()))
+                .collect::<std::collections::BTreeMap<_, _>>();
             for sub in &snapshot.subscriptions {
-                if let Some(tasks) = snapshot.task_threads.get(&sub.id).and_then(|id|links.get_mut(id.as_str())) {
-                    let title = sub.task_title.as_deref().or_else(|| self.agent_names.get(&sub.agent_id).map(String::as_str)).unwrap_or(&sub.id);
-                    tasks.insert(sub.id.clone(),title.to_owned());
+                if let Some(tasks) = snapshot
+                    .task_threads
+                    .get(&sub.id)
+                    .and_then(|id| links.get_mut(id.as_str()))
+                {
+                    let title = sub
+                        .task_title
+                        .as_deref()
+                        .or_else(|| self.agent_names.get(&sub.agent_id).map(String::as_str))
+                        .unwrap_or(&sub.id);
+                    tasks.insert(sub.id.clone(), title.to_owned());
                 }
             }
-            cx.emit(DesktopTaskActivity { store:snapshot.desktop_task_store.clone(), threads:snapshot.desktop_task_activity.clone(), links });
+            cx.emit(DesktopTaskActivity {
+                store: snapshot.desktop_task_store.clone(),
+                threads: snapshot.desktop_task_activity.clone(),
+                links,
+            });
         }
         self.reconcile_task_deliveries(&snapshot);
         let changed = self.snapshot.as_ref() != Some(&snapshot);
@@ -889,7 +933,7 @@ impl ReactiveAutomations {
                         if matches!(effect, Effect::DeletedThread(_)) {
                             cx.emit(TaskThreadDeletion::Failed(message.clone()));
                         }
-                        this.command_failed(scope,message);
+                        this.command_failed(scope, message);
                     }
                 }
                 cx.notify();
@@ -1229,7 +1273,10 @@ impl ReactiveAutomations {
                 editor.weekdays.clone_from(weekdays);
                 ("calendar", "")
             }
-            SourceKind::Once { due_at } => { once_text = once_time(*due_at); ("once", once_text.as_str()) }
+            SourceKind::Once { due_at } => {
+                once_text = once_time(*due_at);
+                ("once", once_text.as_str())
+            }
             SourceKind::Webhook => ("webhook", ""),
             SourceKind::AppEvent { topic } => ("app_event", topic.as_str()),
             SourceKind::Custom => ("custom", ""),
@@ -1530,9 +1577,12 @@ impl ReactiveAutomations {
                                             if editor.subscription.source_id != id {
                                                 editor.subscription.webhook_filters.clear();
                                                 editor.subscription.webhook_prompt = None;
-                                                editor.subscription.webhook_dedupe = Default::default();
-                                                editor.subscription.task_conversation = TaskConversation::Agent;
-                                                editor.subscription.task_checkout = TaskCheckout::Project;
+                                                editor.subscription.webhook_dedupe =
+                                                    Default::default();
+                                                editor.subscription.task_conversation =
+                                                    TaskConversation::Agent;
+                                                editor.subscription.task_checkout =
+                                                    TaskCheckout::Project;
                                                 editor.subscription.source_id = id.clone();
                                             }
                                         }
@@ -2161,8 +2211,8 @@ impl EventEmitter<TaskThreadDeletion> for ReactiveAutomations {}
 impl EventEmitter<TaskThreadLocation> for ReactiveAutomations {}
 pub(crate) struct DesktopTaskActivity {
     pub store: String,
-    pub threads: std::collections::BTreeMap<String,i64>,
-    pub links: std::collections::BTreeMap<String,std::collections::BTreeMap<String,String>>,
+    pub threads: std::collections::BTreeMap<String, i64>,
+    pub links: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 impl EventEmitter<DesktopTaskActivity> for ReactiveAutomations {}
 

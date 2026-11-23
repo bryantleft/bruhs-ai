@@ -18,7 +18,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use bruhs_models::coordination::worktree::{KeepWhen, ManagedWorktree, RemovedRecord, WorktreeState};
+use bruhs_models::coordination::worktree::{
+    KeepWhen, ManagedWorktree, RemovedRecord, WorktreeState,
+};
 use bruhs_models::EpochMs;
 use tokio::io::AsyncReadExt;
 
@@ -443,7 +445,9 @@ pub async fn restore_branch(
         );
     }
     if !path.exists() {
-        let registered = crate::git::worktree_branch(project, path).await.map_err(|e| e.to_string())?;
+        let registered = crate::git::worktree_branch(project, path)
+            .await
+            .map_err(|e| e.to_string())?;
         let pending = pending_path(path)?;
         if pending.try_exists().map_err(|e| e.to_string())? {
             if registered.as_ref().and_then(Option::as_deref) != Some(branch)
@@ -498,7 +502,7 @@ pub async fn restore_for_turn(folder: &Path) -> Result<(), String> {
     if folder.exists() {
         return Ok(());
     }
-    let Some(root) = locations::for_path(folder).map_err(|e|e.to_string())? else {
+    let Some(root) = locations::for_path(folder).map_err(|e| e.to_string())? else {
         return Ok(());
     };
     restore_for_turn_in(&root, folder).await
@@ -679,7 +683,11 @@ fn working_directories() -> std::io::Result<Vec<Program>> {
         return Ok(Vec::new());
     }
     // -b avoids kernel calls that block on network mounts; -w hides warnings.
-    let program=if cfg!(target_os="macos"){"/usr/sbin/lsof"}else{"lsof"};
+    let program = if cfg!(target_os = "macos") {
+        "/usr/sbin/lsof"
+    } else {
+        "lsof"
+    };
     let mut child = std::process::Command::new(program)
         .args(["-nP", "-b", "-w", "-d", "cwd", "-F", "pcn"])
         .stdin(std::process::Stdio::null())

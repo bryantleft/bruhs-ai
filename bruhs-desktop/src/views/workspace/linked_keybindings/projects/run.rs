@@ -256,7 +256,13 @@ impl Workspace {
         let name = format!("Actions for {}", task.title);
         let trigger = role_settings_ui::project_value(&format!("{row}-actions"));
         let mut options = Vec::new();
-        if host.data.can_edit_schedules {options.push(DropdownOption{value:"edit",label:"Edit task".into(),description:None});}
+        if host.data.can_edit_schedules {
+            options.push(DropdownOption {
+                value: "edit",
+                label: "Edit task".into(),
+                description: None,
+            });
+        }
         if can_run {
             options.push(DropdownOption {
                 value: "run",
@@ -265,7 +271,11 @@ impl Workspace {
             });
         }
         if host.data.can_read_deliveries && task.schedule == SourceKind::Webhook {
-            options.push(DropdownOption { value: "deliveries", label: "Deliveries".into(), description: None });
+            options.push(DropdownOption {
+                value: "deliveries",
+                label: "Deliveries".into(),
+                description: None,
+            });
         }
         if host.data.can_delete_schedules {
             options.push(DropdownOption {
@@ -282,7 +292,9 @@ impl Workspace {
                 let _ = ws.update(cx, |ws, cx| match command {
                     "run" => ws.request_linked_run(host_id, &task_id, cx),
                     "deliveries" => ws.open_linked_deliveries(host_id, &task_id, window, cx),
-                    "edit" => ws.open_linked_task_editor(host_id,Some(task_id.clone()),window,cx),
+                    "edit" => {
+                        ws.open_linked_task_editor(host_id, Some(task_id.clone()), window, cx)
+                    }
                     "delete" => ws.confirm_delete_linked_schedule(host_id, &task_id, window, cx),
                     _ => {}
                 });
@@ -304,12 +316,22 @@ impl Workspace {
                 bruhs_ui::icons::ELLIPSIS,
                 |action| {
                     let (icon, color) = match action {
-                        "edit" => (assets::TOOL_PENCIL_ICON_PATH,theme::rambutan_300()),
+                        "edit" => (assets::TOOL_PENCIL_ICON_PATH, theme::rambutan_300()),
                         "delete" => (bruhs_ui::icons::IconName::Trash.path(), theme::lychee_300()),
-                        "deliveries" => (crate::assets::CLIPBOARD_LIST_ICON_PATH, theme::rambutan_400()),
-                        _ => (bruhs_ui::icons::IconName::Play.path(), theme::rambutan_400()),
+                        "deliveries" => (
+                            crate::assets::CLIPBOARD_LIST_ICON_PATH,
+                            theme::rambutan_400(),
+                        ),
+                        _ => (
+                            bruhs_ui::icons::IconName::Play.path(),
+                            theme::rambutan_400(),
+                        ),
                     };
-                    svg().path(icon).size(px(14.)).text_color(color).into_any_element()
+                    svg()
+                        .path(icon)
+                        .size(px(14.))
+                        .text_color(color)
+                        .into_any_element()
                 },
                 Some("delete"),
             )

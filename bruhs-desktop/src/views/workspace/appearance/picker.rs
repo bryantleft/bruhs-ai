@@ -198,10 +198,9 @@ impl Workspace {
         width: f32,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let columns = bruhs_models::num::ToIntSaturating::to_usize_saturating(
-            ((width + 8.) / 264.).floor(),
-        )
-        .clamp(1, ThemeFamily::ALL.len());
+        let columns =
+            bruhs_models::num::ToIntSaturating::to_usize_saturating(((width + 8.) / 264.).floor())
+                .clamp(1, ThemeFamily::ALL.len());
         let mut cards = div()
             .w_full()
             .grid()

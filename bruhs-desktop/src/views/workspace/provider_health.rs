@@ -1,6 +1,6 @@
 //! Local CLI sign-in health, independent of release and package-registry checks.
-use super::*;
 use super::updates_ui::icon_svg;
+use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_core::agent_extensions::availability::ProviderAvailability;
 use std::time::Duration;
@@ -21,12 +21,13 @@ impl Workspace {
                     return;
                 }
                 let raw = field.read(cx).value().to_string();
-                let next = raw
-                    .trim()
-                    .parse::<u32>()
-                    .map_or(this.health_interval, |n| {
-                        if n == 0 { 0 } else { n.clamp(30, 86400) }
-                    });
+                let next = raw.trim().parse::<u32>().map_or(this.health_interval, |n| {
+                    if n == 0 {
+                        0
+                    } else {
+                        n.clamp(30, 86400)
+                    }
+                });
                 if raw != next.to_string() {
                     field.update(cx, |input, cx| {
                         input.set_value(next.to_string(), window, cx)
@@ -43,12 +44,16 @@ impl Workspace {
         field
     }
     pub(super) fn check_provider_health(&mut self, cx: &mut Context<'_, Self>) {
-        if self.settings_visible() && self.settings_section == SettingsSection::Updates { self.load_usage_hubs(cx); }
+        if self.settings_visible() && self.settings_section == SettingsSection::Updates {
+            self.load_usage_hubs(cx);
+        }
         if self.health_check.is_some() || self.provider_change_pending {
             return;
         }
         self.acp_models = crate::views::acp_models::load().unwrap_or_default();
-        self.provider_availability = ProviderAvailability::load_for_project(self.settings_project_scope.as_ref()).map_err(|err| err.to_string());
+        self.provider_availability =
+            ProviderAvailability::load_for_project(self.settings_project_scope.as_ref())
+                .map_err(|err| err.to_string());
         let Ok(prefs) = self.provider_availability.clone() else {
             cx.notify();
             return;
@@ -137,33 +142,36 @@ impl Workspace {
         )
         .aria_label("Refresh provider status")
         .child(if checking { "Refreshing…" } else { "Refresh" });
-        let mut rows = vec![self.defaults_scope_row(cx), self.settings_row(
-            "settings-row-provider-health",
-            "Provider status",
-            "Versions, models, and sign-in status.",
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .child(on_press_view(refresh, cx, |this, _, cx| {
-                    this.check_provider_health(cx)
-                }))
-                .child(on_press_view(
-                    web_button(
-                        "acp-add-provider",
-                        WebButtonVariant::Outline,
-                        WebButtonSize::Small,
-                        ButtonState::disabled_if(self.provider_change_pending),
-                    )
-                    .track_focus(&self.provider_add_focus)
-                    .aria_label("Add provider")
-                    .debug_selector(|| "acp-add-provider".into())
-                    .child("Add provider"),
-                    cx,
-                    |this, w, cx| this.open_provider_editor(None, w, cx),
-                ))
-                .into_any_element(),
-        )];
+        let mut rows = vec![
+            self.defaults_scope_row(cx),
+            self.settings_row(
+                "settings-row-provider-health",
+                "Provider status",
+                "Versions, models, and sign-in status.",
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(on_press_view(refresh, cx, |this, _, cx| {
+                        this.check_provider_health(cx)
+                    }))
+                    .child(on_press_view(
+                        web_button(
+                            "acp-add-provider",
+                            WebButtonVariant::Outline,
+                            WebButtonSize::Small,
+                            ButtonState::disabled_if(self.provider_change_pending),
+                        )
+                        .track_focus(&self.provider_add_focus)
+                        .aria_label("Add provider")
+                        .debug_selector(|| "acp-add-provider".into())
+                        .child("Add provider"),
+                        cx,
+                        |this, w, cx| this.open_provider_editor(None, w, cx),
+                    ))
+                    .into_any_element(),
+            ),
+        ];
         if let Some(error) = self
             .provider_change_error
             .as_ref()
@@ -556,22 +564,23 @@ impl Workspace {
                 )
                 .aria_label(format!("Reset {name} to inherited setting"))
                 .child("Reset");
-                row.child(self.provider_source_button(id, enabled, environment_enabled, cx)).child(reset.when(!disabled, |el| {
-                    on_press_view(el, cx, move |ws, _, cx| {
-                        let scope = scope.clone();
-                        let target = target.clone();
-                        ws.change_provider(
-                            move || {
-                                ProviderAvailability::set_project_override(
-                                    scope.as_ref(),
-                                    &target,
-                                    None,
-                                )
-                            },
-                            cx,
-                        );
-                    })
-                }))
+                row.child(self.provider_source_button(id, enabled, environment_enabled, cx))
+                    .child(reset.when(!disabled, |el| {
+                        on_press_view(el, cx, move |ws, _, cx| {
+                            let scope = scope.clone();
+                            let target = target.clone();
+                            ws.change_provider(
+                                move || {
+                                    ProviderAvailability::set_project_override(
+                                        scope.as_ref(),
+                                        &target,
+                                        None,
+                                    )
+                                },
+                                cx,
+                            );
+                        })
+                    }))
             })
             .child(switch)
             .into_any_element()

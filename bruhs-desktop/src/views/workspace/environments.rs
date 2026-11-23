@@ -130,7 +130,9 @@ impl Workspace {
                         this.linked_keybindings.update_tunnels(&snapshot);
                         this.linked_projects.update_tunnels(&snapshot);
                         state.snapshot = Some(snapshot);
-                        if delete_profile { state.deleting = None; }
+                        if delete_profile {
+                            state.deleting = None;
+                        }
                         if save_form {
                             state.editing = None;
                         }
@@ -260,7 +262,15 @@ impl Workspace {
                 #[cfg(unix)]
                 if h.forwarding_socket.is_some() {
                     let project_host = h.clone();
-                    controls = controls.child(on_press_view(button(format!("environment-link-projects-{id}").into(), "Link projects", false),cx,move|this,w,cx|this.open_project_link(Some(&project_host),w,cx)));
+                    controls = controls.child(on_press_view(
+                        button(
+                            format!("environment-link-projects-{id}").into(),
+                            "Link projects",
+                            false,
+                        ),
+                        cx,
+                        move |this, w, cx| this.open_project_link(Some(&project_host), w, cx),
+                    ));
                     let host = h.clone();
                     controls = controls.child(on_press_view(
                         button(
@@ -416,12 +426,22 @@ impl Workspace {
                 ),
             );
         } else {
-            rows.push(self.settings_row("settings-remote-environments","Remote environments","Connect to a remote bruhs host over SSH.",
-                on_press_view(button("environment-add".into(),"Add environment",state.saving),cx,|this,w,cx|this.edit_environment(None,w,cx)).into_any_element()));
+            rows.push(
+                self.settings_row(
+                    "settings-remote-environments",
+                    "Remote environments",
+                    "Connect to a remote bruhs host over SSH.",
+                    on_press_view(
+                        button("environment-add".into(), "Add environment", state.saving),
+                        cx,
+                        |this, w, cx| this.edit_environment(None, w, cx),
+                    )
+                    .into_any_element(),
+                ),
+            );
         }
         rows.extend(self.project_environment_rows(cx));
         rows.extend(self.shortcut_environment_rows(cx));
         rows
     }
-
 }

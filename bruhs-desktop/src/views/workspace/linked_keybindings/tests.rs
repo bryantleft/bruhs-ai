@@ -8,8 +8,8 @@ use std::{
     os::unix::net::UnixListener,
     path::PathBuf,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 
@@ -96,7 +96,11 @@ impl HostFixture {
                 let run = token == format!("Bearer {}", "d".repeat(64));
                 let delete = token == format!("Bearer {}", "9".repeat(64));
                 let deliveries = token == format!("Bearer {}", "8".repeat(64));
-                let schedules = deliveries || delete || run || toggle || token == format!("Bearer {}", "e".repeat(64));
+                let schedules = deliveries
+                    || delete
+                    || run
+                    || toggle
+                    || token == format!("Bearer {}", "e".repeat(64));
                 let (status, body) = if revocation.load(Ordering::SeqCst)
                     || (first.starts_with("POST") && (!editable || denied.load(Ordering::SeqCst)))
                 {
@@ -113,18 +117,31 @@ impl HostFixture {
                 } else if first.starts_with("GET /api/projects/scheduled-tasks ") && schedules {
                     let daily = serde_json::json!({"id":"daily","title":"Daily review","project_path":"/srv/editor","enabled":true,"schedule":{"type":"calendar","times":["09:00"],"weekdays":[],"time_zone":"UTC"},"next_run_at":null});
                     let mut tasks = vec![daily];
-                    if !deleted.load(Ordering::SeqCst) { tasks.push(report.clone()); }
+                    if !deleted.load(Ordering::SeqCst) {
+                        tasks.push(report.clone());
+                    }
                     ("200 OK", serde_json::to_vec(&tasks).unwrap())
                 } else if first.starts_with("GET /api/projects/scheduled-tasks/report/deliveries") {
                     let summary = serde_json::json!({"id":delivery_id,"received_at":1700000000000_i64,"outcome":"filtered"});
-                    if !deliveries { ("403 Forbidden",Vec::new()) }
-                    else if first.starts_with("GET /api/projects/scheduled-tasks/report/deliveries ") {
+                    if !deliveries {
+                        ("403 Forbidden", Vec::new())
+                    } else if first
+                        .starts_with("GET /api/projects/scheduled-tasks/report/deliveries ")
+                    {
                         delivery_reads += 1;
-                        let rows = if delivery_reads == 1 { vec![] } else { vec![summary] };
-                        ("200 OK",serde_json::to_vec(&rows).unwrap())
-                    } else if first.starts_with(&format!("GET /api/projects/scheduled-tasks/report/deliveries/{delivery_id} ")) {
+                        let rows = if delivery_reads == 1 {
+                            vec![]
+                        } else {
+                            vec![summary]
+                        };
+                        ("200 OK", serde_json::to_vec(&rows).unwrap())
+                    } else if first.starts_with(&format!(
+                        "GET /api/projects/scheduled-tasks/report/deliveries/{delivery_id} "
+                    )) {
                         ("200 OK",serde_json::to_vec(&serde_json::json!({"summary":summary,"body":delivery_id,"headers":"x-source: fixture","query":"","body_truncated":false})).unwrap())
-                    } else { ("404 Not Found",Vec::new()) }
+                    } else {
+                        ("404 Not Found", Vec::new())
+                    }
                 } else if first.starts_with("DELETE /api/projects/scheduled-tasks/report ") {
                     if delete {
                         deleted.store(true, Ordering::SeqCst);
@@ -132,23 +149,34 @@ impl HostFixture {
                     } else {
                         ("403 Forbidden", Vec::new())
                     }
-                } else if let Some(path) = first.strip_prefix("PUT /api/projects/scheduled-tasks/daily/runs/") {
+                } else if let Some(path) =
+                    first.strip_prefix("PUT /api/projects/scheduled-tasks/daily/runs/")
+                {
                     let mut runs = runs.lock().unwrap();
                     let id = path.split_whitespace().next().unwrap();
                     uuid::Uuid::parse_str(id).unwrap();
                     runs.push(id.to_owned());
-                    if !run { ("403 Forbidden",Vec::new()) }
-                    else if runs.len() == 1 { ("503 Service Unavailable",Vec::new()) }
-                    else { ("204 No Content",Vec::new()) }
+                    if !run {
+                        ("403 Forbidden", Vec::new())
+                    } else if runs.len() == 1 {
+                        ("503 Service Unavailable", Vec::new())
+                    } else {
+                        ("204 No Content", Vec::new())
+                    }
                 } else if first.starts_with("PUT /api/projects/scheduled-tasks/report/enabled ") {
                     let attempt = attempts.fetch_add(1, Ordering::SeqCst);
                     if !toggle {
-                        ("403 Forbidden",Vec::new())
+                        ("403 Forbidden", Vec::new())
                     } else if attempt == 0 {
-                        ("409 Conflict", br#"{"error":"Another automation would also start."}"#.to_vec())
+                        (
+                            "409 Conflict",
+                            br#"{"error":"Another automation would also start."}"#.to_vec(),
+                        )
                     } else {
-                        report["enabled"] = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["enabled"].clone();
-                        ("200 OK",serde_json::to_vec(&report).unwrap())
+                        report["enabled"] = serde_json::from_slice::<serde_json::Value>(&body)
+                            .unwrap()["enabled"]
+                            .clone();
+                        ("200 OK", serde_json::to_vec(&report).unwrap())
                     }
                 } else if first.starts_with("POST /api/keybindings/open ") {
                     open.store(true, Ordering::SeqCst);
@@ -169,7 +197,9 @@ impl HostFixture {
             }
         });
         Self {
-            report_deleted, run_attempts, schedule_attempts,
+            report_deleted,
+            run_attempts,
+            schedule_attempts,
             host: RemoteHost {
                 profile: RemoteHostProfile {
                     id: uuid::Uuid::new_v4(),
@@ -333,16 +363,14 @@ async fn linked_keybindings_restore_and_refresh_from_the_selected_host(
     let metadata = std::fs::read_to_string(&path).unwrap();
     assert!(metadata.contains("shortcut_links") && metadata.contains("Development"));
     assert!(!metadata.contains(&token));
-    assert!(
-        !metadata.contains(
-            host.host
-                .forwarding_socket
-                .as_ref()
-                .unwrap()
-                .to_str()
-                .unwrap()
-        )
-    );
+    assert!(!metadata.contains(
+        host.host
+            .forwarding_socket
+            .as_ref()
+            .unwrap()
+            .to_str()
+            .unwrap()
+    ));
     let vault = ws.read_with(win, |ws, _| ws.linked_keybindings.vault.clone());
     launch::quit(&ws, win);
 
@@ -368,14 +396,12 @@ async fn linked_keybindings_restore_and_refresh_from_the_selected_host(
         changed.profile.remote_port += 1;
         state.update_tunnels(&snapshot(changed.clone()));
         assert!(state.hosts[0].tunnel.as_ref().unwrap().socket.is_none());
-        assert!(
-            vault
-                .read(
-                    state.hosts[0].credential,
-                    &Destination::from_profile(&changed.profile)
-                )
-                .is_err()
-        );
+        assert!(vault
+            .read(
+                state.hosts[0].credential,
+                &Destination::from_profile(&changed.profile)
+            )
+            .is_err());
         state.update_tunnels(&snapshot(host.host.clone()));
         ws.open_settings(&OpenSettings, w, cx);
         ws.set_settings_section(SettingsSection::Keyboard, cx);
@@ -418,13 +444,11 @@ async fn linked_keybindings_restore_and_refresh_from_the_selected_host(
     reopened.update_in(win, |ws, _w, cx| {
         assert!(!ws.linked_keybindings.editable() && !ws.keybinding_edit_open);
         assert!(ws.settings_keybindings().is_empty());
-        assert!(
-            ws.linked_keybindings.hosts[0]
-                .problem
-                .as_ref()
-                .unwrap()
-                .contains("denied shortcut access")
-        );
+        assert!(ws.linked_keybindings.hosts[0]
+            .problem
+            .as_ref()
+            .unwrap()
+            .contains("denied shortcut access"));
         ws.view_host_shortcuts(None, cx);
         assert!(ws.linked_keybindings.editable());
         let local_rule = Keybinding {
@@ -460,14 +484,10 @@ async fn linked_keybindings_restore_and_refresh_from_the_selected_host(
     });
     win.run_until_parked();
     launch::saved(&reopened, win).await;
-    assert!(
-        !std::fs::read_to_string(&path)
-            .unwrap()
-            .contains("shortcut_links")
-    );
-    assert!(
-        vault
-            .read(id, &Destination::from_profile(&host.host.profile))
-            .is_err()
-    );
+    assert!(!std::fs::read_to_string(&path)
+        .unwrap()
+        .contains("shortcut_links"));
+    assert!(vault
+        .read(id, &Destination::from_profile(&host.host.profile))
+        .is_err());
 }

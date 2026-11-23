@@ -183,11 +183,16 @@ async fn run_config(
             "ACP unattended runs are unavailable: isolate inherited plugins/hooks with an enforced runtime before enabling them.",
         ));
     }
-    let availability = crate::agent_extensions::availability::ProviderAvailability::load_for_project(&options.cwd)?;
+    let availability =
+        crate::agent_extensions::availability::ProviderAvailability::load_for_project(
+            &options.cwd,
+        )?;
     let (instance, model) = selected(&options.model, &config.acp, &availability)?;
     let kiro = instance.driver == Some(bruhs_models::agent_extensions::AcpDriver::Kiro);
     if kiro && !instance.modes.contains_key(options.mode.as_str()) {
-        return Err(io::Error::other("Kiro supports Default (Supervised) and Full access. Choose one of those access modes."));
+        return Err(io::Error::other(
+            "Kiro supports Default (Supervised) and Full access. Choose one of those access modes.",
+        ));
     }
     let mut command = tokio::process::Command::new(instance.executable());
     command
@@ -200,7 +205,8 @@ async fn run_config(
         &crate::connections::PRIVATE_ENV.map(String::from),
         &[],
     );
-    crate::agent_extensions::environment::apply(&mut command, instance, &options.secret_env).await?;
+    crate::agent_extensions::environment::apply(&mut command, instance, &options.secret_env)
+        .await?;
     let mut child = process::CliProcess::spawn("ACP agent", &mut command)?;
     turn.register_process(child.pid());
     let mut stdin = child
@@ -227,16 +233,48 @@ async fn run_config(
             }
             None => ("session/new", json!({"cwd":options.cwd,"mcpServers":mcp})),
         };
-        let opened = rpc(&mut child, &mut stdin, turn, options.mode, 2, method, params.clone()).await;
+        let opened = rpc(
+            &mut child,
+            &mut stdin,
+            turn,
+            options.mode,
+            2,
+            method,
+            params.clone(),
+        )
+        .await;
         let session = match opened {
-            Err(err) if !kiro && err.get_ref().is_some_and(|e| e.is::<AuthenticationRequired>()) => {
-                let preferred = instance.registry.as_ref().and_then(|origin| origin.auth_method_id.as_deref());
+            Err(err)
+                if !kiro
+                    && err
+                        .get_ref()
+                        .is_some_and(|e| e.is::<AuthenticationRequired>()) =>
+            {
+                let preferred = instance
+                    .registry
+                    .as_ref()
+                    .and_then(|origin| origin.auth_method_id.as_deref());
                 let method_id = agent_auth_method(&initialized, preferred)?.ok_or(err)?;
                 rpc(
-                    &mut child, &mut stdin, turn, options.mode, 6, "authenticate",
+                    &mut child,
+                    &mut stdin,
+                    turn,
+                    options.mode,
+                    6,
+                    "authenticate",
                     json!({"methodId": method_id}),
-                ).await?;
-                rpc(&mut child, &mut stdin, turn, options.mode, 7, method, params).await?
+                )
+                .await?;
+                rpc(
+                    &mut child,
+                    &mut stdin,
+                    turn,
+                    options.mode,
+                    7,
+                    method,
+                    params,
+                )
+                .await?
             }
             result => result?,
         };
@@ -266,14 +304,18 @@ async fn run_config(
                     json!({"sessionId":session_id,"configId":"mode","value":agent}),
                 )
                 .await?;
-                configuration =
-                    updated_configuration(configuration, updated, Some(("mode".into(), agent.into())))?;
+                configuration = updated_configuration(
+                    configuration,
+                    updated,
+                    Some(("mode".into(), agent.into())),
+                )?;
                 agent_switched = true;
             }
         }
         let model_option = kiro_model_option(&configuration);
         let catalog;
-        let requested = if kiro && model == "default" && (agent_switched || model_option.is_some()) {
+        let requested = if kiro && model == "default" && (agent_switched || model_option.is_some())
+        {
             catalog = crate::agent_extensions::kiro::Catalog::load(instance);
             catalog.default_id()
         } else {
@@ -358,7 +400,9 @@ async fn run_config(
                 )
                 .await
                 {
-                    Ok(update) => configuration = updated_configuration(configuration, update, None)?,
+                    Ok(update) => {
+                        configuration = updated_configuration(configuration, update, None)?
+                    }
                     Err(e) if e.get_ref().is_some_and(|cause| cause.is::<RpcRejection>()) => {
                         tracing::debug!("Kiro declined the selected reasoning level")
                     }
@@ -598,9 +642,18 @@ async fn rpc(
                     .cloned()
                     .ok_or_else(|| io::Error::other("ACP result is missing."))?;
                 if let Some(options) = latest {
-                    let confirms_write = |list: &Value| list.as_array().is_some_and(|rows| rows.iter().any(|option|
-                        option["id"] == params["configId"] && option["currentValue"] == params["value"]));
-                    if result.is_object() && !confirms_write(&result["configOptions"]) && confirms_write(&options) {
+                    let confirms_write = |list: &Value| {
+                        list.as_array().is_some_and(|rows| {
+                            rows.iter().any(|option| {
+                                option["id"] == params["configId"]
+                                    && option["currentValue"] == params["value"]
+                            })
+                        })
+                    };
+                    if result.is_object()
+                        && !confirms_write(&result["configOptions"])
+                        && confirms_write(&options)
+                    {
                         result["configOptions"] = options;
                     }
                 }
@@ -792,7 +845,8 @@ mod tests {
             tokio::time::advance(super::super::CONFIG_TIMEOUT).await;
             let still_pending = std::future::poll_fn(|cx| {
                 std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
-            }).await;
+            })
+            .await;
             drop(events);
             let result =
                 tokio::time::timeout(std::time::Duration::from_secs(1), request.as_mut()).await;
@@ -802,7 +856,10 @@ mod tests {
             // Always kill/reap the owned fixture before asserting the result.
             let cleanup = child.finish(process::Ending::ConsumerGone).await;
             assert!(cleanup.is_none());
-            assert!(still_pending, "{method} timed out while waiting for the user");
+            assert!(
+                still_pending,
+                "{method} timed out while waiting for the user"
+            );
             assert!(pending, "the pipe did not exercise write backpressure");
             assert!(
                 matches!(result, Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted),
@@ -1019,7 +1076,11 @@ for line in sys.stdin:
         let calls = directory.path().join("calls");
         for (scenario, preferred, expected) in [
             ("ready", "device", "initialize session/new session/prompt"),
-            ("local", "", "initialize session/new authenticate session/new session/prompt"),
+            (
+                "local",
+                "",
+                "initialize session/new authenticate session/new session/prompt",
+            ),
             (
                 "challenge",
                 "",

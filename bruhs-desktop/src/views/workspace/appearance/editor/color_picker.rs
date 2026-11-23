@@ -311,8 +311,8 @@ impl Workspace {
         };
         let raw = field.input.read(cx).value();
         let literal = raw.trim();
-        let [r, g, b, a] = csscolorparser::parse(literal)
-            .map_or([0, 0, 0, 255], |color| color.to_rgba8());
+        let [r, g, b, a] =
+            csscolorparser::parse(literal).map_or([0, 0, 0, 255], |color| color.to_rgba8());
         let color = u32::from_be_bytes([0, r, g, b]);
         let picker = cx.new(|cx| {
             let picker = ColorPicker {

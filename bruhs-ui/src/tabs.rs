@@ -100,10 +100,7 @@ pub fn tab_trigger(
                 theme::rambutan_500()
             })
             .when(selected, |el| el.bg(theme::longan_700()))
-            .hover(|el| {
-                el.bg(theme::longan_800())
-                    .text_color(theme::rambutan_200())
-            }),
+            .hover(|el| el.bg(theme::longan_800()).text_color(theme::rambutan_200())),
     }
 }
 

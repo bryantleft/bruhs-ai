@@ -313,7 +313,9 @@ impl Workspace {
 
     pub(super) fn event_create_field_label(&self, label: &'static str) -> Div {
         div()
-            .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_LABEL_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_LABEL_FONT_FAMILY),
+            )
             .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_400())
@@ -371,7 +373,10 @@ impl Workspace {
                     .items_center()
                     .px(px(EVENT_COLOR_OPTION_X_PADDING_PX))
                     .py(px(EVENT_COLOR_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -421,7 +426,10 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .role(Role::ComboBox)
@@ -532,7 +540,10 @@ impl Workspace {
                                 .debug_selector(|| "desktop-event-create-title-error".to_string())
                                 .role(Role::Alert)
                                 .aria_label(error.clone())
-                                .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_LABEL_FONT_FAMILY))
+                                .font_family(
+                                    crate::theme::FontFace::Interface
+                                        .with_default(EVENT_DIALOG_LABEL_FONT_FAMILY),
+                                )
                                 .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
                                 .font_family(theme::UI_SMALL_FONT_FAMILY)
                                 .text_color(theme::lychee_300())
@@ -611,200 +622,192 @@ impl Workspace {
             .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
             .max_h(px(dialog_height))
             .bg(theme::longan_800())
-            .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_BODY_FONT_FAMILY),
+            )
             .track_focus(&self.modal_start_focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                    .py(px(EVENT_CREATE_HEADER_Y_PADDING_PX))
+                    .border_b_1()
+                    .border_color(theme::longan_800())
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(EVENT_CREATE_HEADER_Y_PADDING_PX))
-                            .border_b_1()
-                            .border_color(theme::longan_800())
+                            .text_size(px(EVENT_DIALOG_TITLE_TEXT_SIZE_PX))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::rambutan_100())
+                            .child(dialog_label),
+                    )
+                    .child(
+                        web_button(
+                            "event-create-close",
+                            WebButtonVariant::Ghost,
+                            WebButtonSize::IconSmall,
+                            ButtonState::Enabled,
+                        )
+                        .debug_selector(|| "desktop-event-create-close".to_string())
+                        .aria_label("Close event dialog")
+                        .child(
+                            svg()
+                                .path(assets::CLOSE_ICON_PATH)
+                                .size(px(14.0))
+                                .text_color(theme::rambutan_400()),
+                        )
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| {
+                                this.close_event_create(window, cx);
+                            })
+                        }),
+                    ),
+            )
+            .child(self.render_modal_content_start())
+            .child(
+                div()
+                    .id("event-create-body")
+                    .debug_selector(|| "desktop-event-create-body".to_string())
+                    .relative()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.modal_scroll)
+                    .child(fields)
+                    .vertical_scrollbar(&self.modal_scroll),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "desktop-event-create-footer".to_string())
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(theme::longan_800())
+                    .bg(theme::longan_900().opacity(EVENT_CREATE_FOOTER_BG_OPACITY))
+                    .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                    .py(px(EVENT_CREATE_FOOTER_Y_PADDING_PX))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(EVENT_CREATE_FOOTER_GAP_PX))
+                    .child(
+                        div()
                             .flex()
                             .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(EVENT_DIALOG_TITLE_TEXT_SIZE_PX))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::rambutan_100())
-                                    .child(dialog_label),
-                            )
+                            .gap(px(EVENT_CREATE_ACTION_GAP_PX))
+                            .when_some(provider_link, |el, link| {
+                                el.child(self.render_event_provider_link(link, cx))
+                            })
+                            .when_some(source_task_id, |el, task_id| {
+                                el.child(self.render_event_open_task(task_id, cx))
+                            })
+                            .when_some(record_id, |el, event_id| {
+                                el.child(self.render_event_record_meeting(event_id, cx))
+                            })
+                            .when_some(delete_id, |el, delete_id| {
+                                el.child(
+                                    div()
+                                        .id("event-create-delete")
+                                        .debug_selector(|| {
+                                            "desktop-event-create-delete".to_string()
+                                        })
+                                        .rounded(px(FORM_CONTROL_RADIUS_PX))
+                                        .px(px(EVENT_CREATE_DELETE_X_PADDING_PX))
+                                        .py(px(EVENT_CREATE_DELETE_Y_PADDING_PX))
+                                        .font_family(
+                                            crate::theme::FontFace::Interface
+                                                .with_default(EVENT_DIALOG_LABEL_FONT_FAMILY),
+                                        )
+                                        .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
+                                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme::lychee_400())
+                                        .tab_index(0)
+                                        .role(Role::Button)
+                                        .aria_label(EVENT_DELETE_LABEL)
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                        .cursor_pointer()
+                                        .hover(|el| {
+                                            el.bg(theme::lychee_500()
+                                                .opacity(EVENT_CREATE_DELETE_HOVER_BG_OPACITY))
+                                        })
+                                        .map(|el| {
+                                            on_press_view(el, cx, move |this, window, cx| {
+                                                this.delete_calendar_event_by_id(&delete_id, cx);
+                                                this.close_event_create(window, cx);
+                                            })
+                                        })
+                                        .child(EVENT_DELETE_LABEL),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap(px(EVENT_CREATE_ACTION_GAP_PX))
                             .child(
                                 web_button(
-                                    "event-create-close",
+                                    "event-create-cancel",
                                     WebButtonVariant::Ghost,
-                                    WebButtonSize::IconSmall,
+                                    WebButtonSize::Default,
                                     ButtonState::Enabled,
                                 )
-                                .debug_selector(|| "desktop-event-create-close".to_string())
-                                .aria_label("Close event dialog")
-                                .child(
-                                    svg()
-                                        .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(14.0))
-                                        .text_color(theme::rambutan_400()),
-                                )
+                                .aria_label(EVENT_CANCEL_LABEL)
+                                .debug_selector(|| "desktop-event-create-cancel".to_string())
+                                .child(EVENT_CANCEL_LABEL)
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .map(|el| {
                                     on_press_view(el, cx, |this, window, cx| {
-                                        this.close_event_create(window, cx);
+                                        this.close_event_create(window, cx)
+                                    })
+                                }),
+                            )
+                            .child(
+                                // A read-only provider event has
+                                // nothing to save: neutral, disabled.
+                                web_button(
+                                    "event-create-submit",
+                                    if read_only {
+                                        WebButtonVariant::Outline
+                                    } else {
+                                        WebButtonVariant::Primary
+                                    },
+                                    WebButtonSize::Default,
+                                    ButtonState::disabled_if(read_only),
+                                )
+                                .aria_label(if editing {
+                                    EVENT_SAVE_SUBMIT_LABEL
+                                } else {
+                                    EVENT_CREATE_SUBMIT_LABEL
+                                })
+                                .debug_selector(|| "desktop-event-create-submit".to_string())
+                                .child(if editing {
+                                    EVENT_SAVE_SUBMIT_LABEL
+                                } else {
+                                    EVENT_CREATE_SUBMIT_LABEL
+                                })
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.save_event_from_form(window, cx)
                                     })
                                 }),
                             ),
-                    )
-                    .child(self.render_modal_content_start())
-                    .child(
-                        div()
-                            .id("event-create-body")
-                            .debug_selector(|| "desktop-event-create-body".to_string())
-                            .relative()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.modal_scroll)
-                            .child(fields)
-                            .vertical_scrollbar(&self.modal_scroll),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "desktop-event-create-footer".to_string())
-                            .flex_shrink_0()
-                            .border_t_1()
-                            .border_color(theme::longan_800())
-                            .bg(theme::longan_900().opacity(EVENT_CREATE_FOOTER_BG_OPACITY))
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(EVENT_CREATE_FOOTER_Y_PADDING_PX))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(EVENT_CREATE_FOOTER_GAP_PX))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(EVENT_CREATE_ACTION_GAP_PX))
-                                    .when_some(provider_link, |el, link| {
-                                        el.child(self.render_event_provider_link(link, cx))
-                                    })
-                                    .when_some(source_task_id, |el, task_id| {
-                                        el.child(self.render_event_open_task(task_id, cx))
-                                    })
-                                    .when_some(record_id, |el, event_id| {
-                                        el.child(self.render_event_record_meeting(event_id, cx))
-                                    })
-                                    .when_some(delete_id, |el, delete_id| {
-                                        el.child(
-                                            div()
-                                                .id("event-create-delete")
-                                                .debug_selector(|| {
-                                                    "desktop-event-create-delete".to_string()
-                                                })
-                                                .rounded(px(FORM_CONTROL_RADIUS_PX))
-                                                .px(px(EVENT_CREATE_DELETE_X_PADDING_PX))
-                                                .py(px(EVENT_CREATE_DELETE_Y_PADDING_PX))
-                                                .font_family(crate::theme::FontFace::Interface.with_default(EVENT_DIALOG_LABEL_FONT_FAMILY))
-                                                .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme::lychee_400())
-                                                .tab_index(0)
-                                                .role(Role::Button)
-                                                .aria_label(EVENT_DELETE_LABEL)
-                                                .border_1()
-                                                .border_color(gpui::transparent_black())
-                                                .focus_visible(|el| {
-                                                    el.border_color(theme::persimmon_400())
-                                                })
-                                                .cursor_pointer()
-                                                .hover(|el| {
-                                                    el.bg(theme::lychee_500().opacity(
-                                                        EVENT_CREATE_DELETE_HOVER_BG_OPACITY,
-                                                    ))
-                                                })
-                                                .map(|el| {
-                                                    on_press_view(
-                                                        el,
-                                                        cx,
-                                                        move |this, window, cx| {
-                                                            this.delete_calendar_event_by_id(
-                                                                &delete_id, cx,
-                                                            );
-                                                            this.close_event_create(window, cx);
-                                                        },
-                                                    )
-                                                })
-                                                .child(EVENT_DELETE_LABEL),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .justify_end()
-                                    .gap(px(EVENT_CREATE_ACTION_GAP_PX))
-                                    .child(
-                                        web_button(
-                                            "event-create-cancel",
-                                            WebButtonVariant::Ghost,
-                                            WebButtonSize::Default,
-                                            ButtonState::Enabled,
-                                        )
-                                        .aria_label(EVENT_CANCEL_LABEL)
-                                        .debug_selector(|| {
-                                            "desktop-event-create-cancel".to_string()
-                                        })
-                                        .child(EVENT_CANCEL_LABEL)
-                                        .tab_index(0)
-                                        .role(Role::Button)
-                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .map(|el| {
-                                            on_press_view(el, cx, |this, window, cx| {
-                                                this.close_event_create(window, cx)
-                                            })
-                                        }),
-                                    )
-                                    .child(
-                                        // A read-only provider event has
-                                        // nothing to save: neutral, disabled.
-                                        web_button(
-                                            "event-create-submit",
-                                            if read_only {
-                                                WebButtonVariant::Outline
-                                            } else {
-                                                WebButtonVariant::Primary
-                                            },
-                                            WebButtonSize::Default,
-                                            ButtonState::disabled_if(read_only),
-                                        )
-                                        .aria_label(if editing {
-                                            EVENT_SAVE_SUBMIT_LABEL
-                                        } else {
-                                            EVENT_CREATE_SUBMIT_LABEL
-                                        })
-                                        .debug_selector(|| {
-                                            "desktop-event-create-submit".to_string()
-                                        })
-                                        .child(if editing {
-                                            EVENT_SAVE_SUBMIT_LABEL
-                                        } else {
-                                            EVENT_CREATE_SUBMIT_LABEL
-                                        })
-                                        .map(|el| {
-                                            on_press_view(el, cx, |this, window, cx| {
-                                                this.save_event_from_form(window, cx)
-                                            })
-                                        }),
-                                    ),
-                            ),
-                    )
-                    .child(self.render_modal_focus_sentinel()),
+                    ),
             )
-            .into_any_element()
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 }
 

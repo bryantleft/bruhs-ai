@@ -4,17 +4,17 @@
 //! the task's `remove_worktree` command, so task rules still apply.
 use crate::error::AppError;
 use axum::{
-    Extension, Json,
     extract::Query,
     http::header,
     response::{Html, IntoResponse},
+    Extension, Json,
 };
 use bruhs_core::coordination::CoordinationRuntime;
 use bruhs_core::worktrees as host;
-use bruhs_models::coordination::CoordinationCommand;
 use bruhs_models::coordination::worktree::{
     ManagedWorktree, WorktreeFrees, WorktreeState, WorktreeTask,
 };
+use bruhs_models::coordination::CoordinationCommand;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

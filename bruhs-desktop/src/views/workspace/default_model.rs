@@ -175,7 +175,9 @@ impl Workspace {
         } else {
             let scope = &self.settings_project_scope;
             let prefs = self.project_defaults.entry(scope.clone()).or_default();
-            if prefs.model != model {prefs.model_options=Default::default();}
+            if prefs.model != model {
+                prefs.model_options = Default::default();
+            }
             prefs.model = model;
             if *prefs == Default::default() {
                 self.project_defaults.remove(scope);
@@ -204,8 +206,15 @@ impl Workspace {
         let mut groups = self.catalog_model_groups(cx, |_| true);
         for model in &self.thread_catalog.models {
             if model_info(&model.id).is_none() && self.model_enabled(&model.id) {
-                if let Some(group)=groups.iter_mut().find(|g|g.label==Some(provider_label(model.provider))) {
-                    group.options.push(DropdownOption {value:saved_option_value(&model.id),label:model.label.clone(),description:Some(model.id.clone())});
+                if let Some(group) = groups
+                    .iter_mut()
+                    .find(|g| g.label == Some(provider_label(model.provider)))
+                {
+                    group.options.push(DropdownOption {
+                        value: saved_option_value(&model.id),
+                        label: model.label.clone(),
+                        description: Some(model.id.clone()),
+                    });
                 }
             }
         }

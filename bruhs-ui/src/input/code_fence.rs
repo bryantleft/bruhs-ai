@@ -156,7 +156,11 @@ impl Fence {
     }
 }
 
-pub(super) fn newline(source: &str, selection: Range<usize>, fences: &[Fence]) -> Option<MarkdownEdit> {
+pub(super) fn newline(
+    source: &str,
+    selection: Range<usize>,
+    fences: &[Fence],
+) -> Option<MarkdownEdit> {
     let at = selection.start;
     let line_start = source[..at].rfind('\n').map_or(0, |p| p + 1);
     let before = &source[line_start..at];

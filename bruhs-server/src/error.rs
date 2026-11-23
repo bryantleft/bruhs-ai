@@ -182,7 +182,8 @@ impl From<bruhs_core::SteerError> for AppError {
 impl From<bruhs_core::SendMessageError> for AppError {
     fn from(e: bruhs_core::SendMessageError) -> Self {
         match e {
-            bruhs_core::SendMessageError::ProviderUnavailable(_) | bruhs_core::SendMessageError::WorktreeUnavailable(_) => {
+            bruhs_core::SendMessageError::ProviderUnavailable(_)
+            | bruhs_core::SendMessageError::WorktreeUnavailable(_) => {
                 AppError::Conflict(e.to_string())
             }
             bruhs_core::SendMessageError::ThreadBusy(_) => AppError::Conflict(e.to_string()),

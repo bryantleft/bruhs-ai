@@ -59,7 +59,13 @@ impl Workspace {
             .split_once(':')
             .map_or((key, None), |(id, path)| (id, Some(path)));
         if let Ok(host) = uuid::Uuid::parse_str(id) {
-            self.select_inventory_view(ProjectView::OnHost { host, path: path.map(str::to_owned) }, cx);
+            self.select_inventory_view(
+                ProjectView::OnHost {
+                    host,
+                    path: path.map(str::to_owned),
+                },
+                cx,
+            );
         }
         true
     }
@@ -127,11 +133,20 @@ impl Workspace {
             for checkout in &host.data.projects {
                 add(Some(checkout.path.clone()), checkout.name.clone());
             }
-            if let Some(Ok(tasks)) = host.data.schedules.as_ref().filter(|_| self.settings_section == SettingsSection::ScheduledTasks) {
-                let mut paths: BTreeSet<_> = host.data.projects.iter().map(|c| c.path.as_str()).collect();
+            if let Some(Ok(tasks)) = host
+                .data
+                .schedules
+                .as_ref()
+                .filter(|_| self.settings_section == SettingsSection::ScheduledTasks)
+            {
+                let mut paths: BTreeSet<_> =
+                    host.data.projects.iter().map(|c| c.path.as_str()).collect();
                 for task in tasks {
                     if !task.project_path.is_empty() && paths.insert(&task.project_path) {
-                        add(Some(task.project_path.clone()), project_picker_ui::path_display_name(Path::new(&task.project_path)));
+                        add(
+                            Some(task.project_path.clone()),
+                            project_picker_ui::path_display_name(Path::new(&task.project_path)),
+                        );
                     }
                 }
             }
@@ -156,7 +171,12 @@ impl Workspace {
             let environment = links.hosts.iter().find(|h| h.credential == *host);
             let label = match path {
                 Some(path) => environment
-                    .and_then(|h| h.data.projects.iter().find(|checkout| &checkout.path == path))
+                    .and_then(|h| {
+                        h.data
+                            .projects
+                            .iter()
+                            .find(|checkout| &checkout.path == path)
+                    })
                     .map_or_else(
                         || project_picker_ui::path_display_name(Path::new(path)),
                         |p| p.name.clone(),

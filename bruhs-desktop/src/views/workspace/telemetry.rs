@@ -157,10 +157,24 @@ impl Workspace {
     }
     pub(super) fn render_export_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         let editor = &self.telemetry;
-        let mut rows=vec![self.settings_row("settings-diagnostic-export","OpenTelemetry export",
+        let mut rows = vec![self.settings_row(
+            "settings-diagnostic-export",
+            "OpenTelemetry export",
             "Send host traces, metrics, and logs to OTLP HTTP receivers.",
-            on_press_view(web_button("diagnostic-export-refresh",WebButtonVariant::Outline,WebButtonSize::Small,ButtonState::disabled_if(editor.loading))
-                .aria_label("Refresh export settings").child("Refresh"),cx,|this,_,cx|this.read_export_settings(cx)).into_any_element())];
+            on_press_view(
+                web_button(
+                    "diagnostic-export-refresh",
+                    WebButtonVariant::Outline,
+                    WebButtonSize::Small,
+                    ButtonState::disabled_if(editor.loading),
+                )
+                .aria_label("Refresh export settings")
+                .child("Refresh"),
+                cx,
+                |this, _, cx| this.read_export_settings(cx),
+            )
+            .into_any_element(),
+        )];
         if let Some(error) = &editor.error {
             rows.push(div().px_3().py_2().child(error.clone()).into_any_element());
         }

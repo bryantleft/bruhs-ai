@@ -219,7 +219,11 @@ impl SecretSources {
         target: &str,
         name: &str,
     ) -> io::Result<Option<String>> {
-        match self.bindings.iter().find(|b| b.target == target && b.variable == name) {
+        match self
+            .bindings
+            .iter()
+            .find(|b| b.target == target && b.variable == name)
+        {
             Some(binding) => self.read_binding(binding, Path::new("op")).await.map(Some),
             None => Ok(std::env::var(name).ok()),
         }

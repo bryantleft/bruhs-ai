@@ -1,8 +1,8 @@
 //! Subscription readings shared by a paired desktop. Only the owning machine's providers are queried.
-use super::{AccountUsage, grouping::Identity};
+use super::{grouping::Identity, AccountUsage};
 use crate::linked_projects::connection::{self, Destination, SavedHost};
 use bruhs_models::remote_hosts::RemoteHostSnapshot;
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use std::{
     io,
     path::{Path, PathBuf},
@@ -215,8 +215,8 @@ mod tests {
     use super::*;
     use serde_json::json;
     use wiremock::{
-        Mock, MockServer, ResponseTemplate,
         matchers::{header, method, path},
+        Mock, MockServer, ResponseTemplate,
     };
 
     #[cfg(unix)]

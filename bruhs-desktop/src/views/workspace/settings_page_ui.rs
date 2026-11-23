@@ -1,7 +1,7 @@
 //! The settings dialog shell: section nav, scroll spy, rows, cards, and the General, Keyboard and About sections.
 
-use crate::views::theme_regions::ThemeRegion as _;
 use super::*;
+use crate::views::theme_regions::ThemeRegion as _;
 use bruhs_ui::input::{Input, Textarea};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
@@ -84,19 +84,21 @@ impl SettingsSection {
 
     fn group_heading(self) -> Option<&'static str> {
         match self {
-                SettingsSection::Updates => Some("Agents"),
-                SettingsSection::Projects => Some("Code"),
-                SettingsSection::Environments => Some("Connections"),
-                SettingsSection::Maintenance => Some("Application"),
-                _ => None,
-            }
+            SettingsSection::Updates => Some("Agents"),
+            SettingsSection::Projects => Some("Code"),
+            SettingsSection::Environments => Some("Connections"),
+            SettingsSection::Maintenance => Some("Application"),
+            _ => None,
+        }
     }
 
     fn nav_index(self) -> usize {
         let mut row = 0;
         for section in Self::ALL {
             row += usize::from(section.group_heading().is_some());
-            if section == self { break; }
+            if section == self {
+                break;
+            }
             row += 1;
         }
         row
@@ -322,12 +324,16 @@ pub(super) const SETTINGS_CLOSE_LABEL: &str = "Close settings";
 pub(super) const SETTINGS_DESIGN_SYSTEM_URL: &str = "https://design.bruhs.dev";
 
 fn settings_row_padding(viewport_width: f32) -> f32 {
-    if viewport_width < 640.0 { 11.0 } else { SETTINGS_ROW_X_PADDING_PX }
+    if viewport_width < 640.0 {
+        11.0
+    } else {
+        SETTINGS_ROW_X_PADDING_PX
+    }
 }
 
 fn settings_rows_stack(viewport_width: f32) -> bool {
-    let content_width = settings_cards_width(viewport_width)
-        - 2.0 * (settings_row_padding(viewport_width) + 1.0);
+    let content_width =
+        settings_cards_width(viewport_width) - 2.0 * (settings_row_padding(viewport_width) + 1.0);
     content_width < theme::SETTINGS_INLINE_CONTENT_WIDTH_PX
 }
 
@@ -367,14 +373,26 @@ impl SettingsHit {
         if titles.iter().any(|t| t.contains(query)) {
             return Some(2);
         }
-        if titles.iter().any(|t| query.split_whitespace().all(|word| t.contains(word))) {
+        if titles
+            .iter()
+            .any(|t| query.split_whitespace().all(|word| t.contains(word)))
+        {
             return Some(3);
         }
-        let terms = normalize_search(&format!("{} {} {} {}", titles.join(" "), section_label, self.section.label(), self.keywords));
+        let terms = normalize_search(&format!(
+            "{} {} {} {}",
+            titles.join(" "),
+            section_label,
+            self.section.label(),
+            self.keywords
+        ));
         if terms.contains(query) {
             Some(4)
         } else {
-            query.split_whitespace().all(|word| terms.contains(word)).then_some(5)
+            query
+                .split_whitespace()
+                .all(|word| terms.contains(word))
+                .then_some(5)
         }
     }
 }
@@ -466,7 +484,9 @@ impl RenderOnce for SettingsRow {
                             .font_weight(FontWeight::MEDIUM)
                             .line_height(px(20.0))
                             .theme_foreground("text", theme::rambutan_100(), cx)
-                            .when(self.reset.is_some(), |title| title.flex().items_center().gap_1())
+                            .when(self.reset.is_some(), |title| {
+                                title.flex().items_center().gap_1()
+                            })
                             .child(self.title)
                             .children(self.reset),
                     )
@@ -476,19 +496,21 @@ impl RenderOnce for SettingsRow {
                     .when_some(self.live_description, |el, live| el.child(meta(live)))
                     .into_any_element()
             }))
-            .when_some(self.control, |row, control| row.child(
-                div()
-                    .debug_selector(move || format!("{control_selector}-control"))
-                    .min_w_0()
-                    .max_w_full()
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .when(stacked, |el| el.w_full().flex_wrap())
-                    .when(!stacked, |el| el.justify_end())
-                    .gap_2()
-                    .child(control),
-            ))
+            .when_some(self.control, |row, control| {
+                row.child(
+                    div()
+                        .debug_selector(move || format!("{control_selector}-control"))
+                        .min_w_0()
+                        .max_w_full()
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .when(stacked, |el| el.w_full().flex_wrap())
+                        .when(!stacked, |el| el.justify_end())
+                        .gap_2()
+                        .child(control),
+                )
+            })
     }
 }
 
@@ -499,7 +521,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.usage_hubs.bounds().is_some() || self.provider_editor.is_some() || self.scheduled_task_dialog_visible(cx) || self.secret_provider_dialog_visible(cx) {
+        if self.usage_hubs.bounds().is_some()
+            || self.provider_editor.is_some()
+            || self.scheduled_task_dialog_visible(cx)
+            || self.secret_provider_dialog_visible(cx)
+        {
             return;
         }
         if !self.settings_visible() {
@@ -550,28 +576,58 @@ impl Workspace {
         self.settings_search_open = false;
         self.settings_search_catalog.clear();
         self.settings_search_anchor = None;
-        self.provider_availability = self.provider_availability.as_ref()
-            .map(|p| p.for_project(self.settings_project_scope.as_ref())).map_err(Clone::clone);
-        if self.settings_section == SettingsSection::Voice && section != SettingsSection::Voice {self.microphone_test.clear(); self.voice_models.close(); self.voice_cloud.dismiss();}
-        let section_changed = self.settings_section != section;
-        if section_changed && (section == SettingsSection::ScheduledTasks || self.settings_section == SettingsSection::ScheduledTasks) {
-            self.reactive_automations.update(cx, |panel, _| panel.cancel_schedule_delete());
+        self.provider_availability = self
+            .provider_availability
+            .as_ref()
+            .map(|p| p.for_project(self.settings_project_scope.as_ref()))
+            .map_err(Clone::clone);
+        if self.settings_section == SettingsSection::Voice && section != SettingsSection::Voice {
+            self.microphone_test.clear();
+            self.voice_models.close();
+            self.voice_cloud.dismiss();
         }
-        if section_changed { self.usage_hubs.close(); self.settings_advanced.clear(); self.theme_navigation=Default::default(); }
+        let section_changed = self.settings_section != section;
+        if section_changed
+            && (section == SettingsSection::ScheduledTasks
+                || self.settings_section == SettingsSection::ScheduledTasks)
+        {
+            self.reactive_automations
+                .update(cx, |panel, _| panel.cancel_schedule_delete());
+        }
+        if section_changed {
+            self.usage_hubs.close();
+            self.settings_advanced.clear();
+            self.theme_navigation = Default::default();
+        }
         self.settings_section = section;
-        if section != SettingsSection::Projects {self.action_editor.open=false;}
+        if section != SettingsSection::Projects {
+            self.action_editor.open = false;
+        }
         self.settings_nav_reveal.set(true);
-        self.diagnostics.poll=None;
-        let local_project_settings = section == SettingsSection::Projects && !self.linked_projects.viewing_inventory();
+        self.diagnostics.poll = None;
+        let local_project_settings =
+            section == SettingsSection::Projects && !self.linked_projects.viewing_inventory();
         if local_project_settings || section == SettingsSection::Threads {
             self.refresh_thread_models(cx);
         }
-        if section == SettingsSection::Updates {self.refresh_linked_projects(false, cx);self.check_provider_health(cx);self.load_generators(cx);self.load_delivery_preferences(cx);}
-        if section == SettingsSection::Maintenance {self.refresh_capture_retention(None,cx);}
+        if section == SettingsSection::Updates {
+            self.refresh_linked_projects(false, cx);
+            self.check_provider_health(cx);
+            self.load_generators(cx);
+            self.load_delivery_preferences(cx);
+        }
+        if section == SettingsSection::Maintenance {
+            self.refresh_capture_retention(None, cx);
+        }
         if section == SettingsSection::Worktrees {
             self.read_worktree_location(cx);
         }
-        if local_project_settings || matches!(section, SettingsSection::Worktrees | SettingsSection::Threads) {
+        if local_project_settings
+            || matches!(
+                section,
+                SettingsSection::Worktrees | SettingsSection::Threads
+            )
+        {
             self.watch_checkout_defaults(cx);
         } else {
             self.checkout_defaults_watch = None;
@@ -581,16 +637,30 @@ impl Workspace {
         if section == SettingsSection::Labs {
             self.fast_checkout.refresh();
         }
-        if section == SettingsSection::Keyboard {self.refresh_keymap_file(cx);}
+        if section == SettingsSection::Keyboard {
+            self.refresh_keymap_file(cx);
+        }
         self.watch_linked_shortcuts(section, cx);
         self.watch_linked_projects(section, cx);
-        if section != SettingsSection::Environments { self.linked_keybindings.dismiss_form(); }
-        if section == SettingsSection::About {self.refresh_launcher(false,cx);}
-        if section==SettingsSection::Diagnostics {self.open_diagnostics(cx);}
+        if section != SettingsSection::Environments {
+            self.linked_keybindings.dismiss_form();
+        }
+        if section == SettingsSection::About {
+            self.refresh_launcher(false, cx);
+        }
+        if section == SettingsSection::Diagnostics {
+            self.open_diagnostics(cx);
+        }
         self.environments.poll = None;
-        if matches!(section, SettingsSection::Devices | SettingsSection::Browser) { self.refresh_tool_access(cx); }
-        if section == SettingsSection::Environments { self.open_environments(cx); }
-        if section_changed && section == SettingsSection::SourceControl { self.load_delivery_preferences(cx); }
+        if matches!(section, SettingsSection::Devices | SettingsSection::Browser) {
+            self.refresh_tool_access(cx);
+        }
+        if section == SettingsSection::Environments {
+            self.open_environments(cx);
+        }
+        if section_changed && section == SettingsSection::SourceControl {
+            self.load_delivery_preferences(cx);
+        }
         if section == SettingsSection::Voice {
             self.reload_voice_dictionary(cx);
             self.refresh_voice_runtime(None, cx);
@@ -614,7 +684,9 @@ impl Workspace {
         } else {
             Some(id)
         };
-        if open.is_some() && id.starts_with("settings-font-"){self.load_font_names(cx);}
+        if open.is_some() && id.starts_with("settings-font-") {
+            self.load_font_names(cx);
+        }
         self.set_settings_open_dropdown(open);
         cx.notify();
     }
@@ -638,27 +710,52 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if self.select_generator_option(id,value,window,cx) || self.select_worktree_cleanup(id, value, cx) || self.select_model_filter(id,value,cx) || self.select_cleanup(id,value,cx) || self.select_voice_runtime(id,value,cx) || self.select_project_default(id, value, cx) {
+        if self.select_generator_option(id, value, window, cx)
+            || self.select_worktree_cleanup(id, value, cx)
+            || self.select_model_filter(id, value, cx)
+            || self.select_cleanup(id, value, cx)
+            || self.select_voice_runtime(id, value, cx)
+            || self.select_project_default(id, value, cx)
+        {
             self.set_settings_open_dropdown(None);
             return;
         }
         match id {
             "usage-hub-key-source" => self.select_hub_key_source(value),
             "settings-project-defaults-scope" => {
-                if matches!(self.settings_section, SettingsSection::Projects | SettingsSection::ScheduledTasks) && self.select_linked_project_scope(value, cx) {
+                if matches!(
+                    self.settings_section,
+                    SettingsSection::Projects | SettingsSection::ScheduledTasks
+                ) && self.select_linked_project_scope(value, cx)
+                {
                     return;
                 }
                 self.settings_search_catalog.clear();
-                self.commit_writer_instructions(window,cx);
+                self.commit_writer_instructions(window, cx);
                 self.commit_branch_fields(window, cx);
                 self.retention_editor = None;
                 self.settings_project_scope = value.to_owned();
-                if matches!(self.settings_section,SettingsSection::Projects | SettingsSection::Threads) {self.refresh_thread_models(cx);}
+                if matches!(
+                    self.settings_section,
+                    SettingsSection::Projects | SettingsSection::Threads
+                ) {
+                    self.refresh_thread_models(cx);
+                }
                 self.settings_models_load = None;
                 self.settings_model_listings.clear();
-                if matches!(self.settings_section, SettingsSection::Worktrees | SettingsSection::Projects | SettingsSection::Threads) { self.watch_checkout_defaults(cx); }
-                self.provider_availability = self.provider_availability.as_ref()
-                    .map(|p| p.for_project(value.as_ref())).map_err(Clone::clone);
+                if matches!(
+                    self.settings_section,
+                    SettingsSection::Worktrees
+                        | SettingsSection::Projects
+                        | SettingsSection::Threads
+                ) {
+                    self.watch_checkout_defaults(cx);
+                }
+                self.provider_availability = self
+                    .provider_availability
+                    .as_ref()
+                    .map(|p| p.for_project(value.as_ref()))
+                    .map_err(Clone::clone);
                 if self.settings_section == SettingsSection::Updates {
                     self.health_check = None;
                     self.health_result = None;
@@ -668,9 +765,12 @@ impl Workspace {
                 self.load_branch_fields(window, cx);
                 self.worktree_cleanup_status = None;
                 self.settings_advanced.clear();
-                if self.settings_section==SettingsSection::SourceControl {self.load_delivery_preferences(cx);}
+                if self.settings_section == SettingsSection::SourceControl {
+                    self.load_delivery_preferences(cx);
+                }
                 self.action_editor.open = false;
-                self.action_editor.art_open=false; self.action_editor.art_error=None;
+                self.action_editor.art_open = false;
+                self.action_editor.art_error = None;
                 self.snooze_editor.open = false;
             }
             SETTINGS_ACCESS_MODE_DROPDOWN_ID => {
@@ -720,51 +820,83 @@ impl Workspace {
                 self.persist(cx);
             }
             "settings-response-streaming" => {
-                if let Some(mode)=crate::views::chat::response_stream::Mode::parse(value) {self.response_stream=mode;self.stamp_run_prefs_on_threads(cx);self.persist_and_notify(cx);}
+                if let Some(mode) = crate::views::chat::response_stream::Mode::parse(value) {
+                    self.response_stream = mode;
+                    self.stamp_run_prefs_on_threads(cx);
+                    self.persist_and_notify(cx);
+                }
             }
-            "settings-writing-style" | "settings-writer-options" | "settings-guide-options" | "settings-writer-model" | "settings-guide-model" | "settings-delivery-merge" | "settings-delivery-templates" | "settings-delivery-credits" => self.save_delivery_preference(id,value,cx),
+            "settings-writing-style"
+            | "settings-writer-options"
+            | "settings-guide-options"
+            | "settings-writer-model"
+            | "settings-guide-model"
+            | "settings-delivery-merge"
+            | "settings-delivery-templates"
+            | "settings-delivery-credits" => self.save_delivery_preference(id, value, cx),
             "settings-update-track" => {
                 let track = match value {
                     "stable" => updates_ui::UpdateTrack::Stable,
                     "nightly" => updates_ui::UpdateTrack::Nightly,
                     _ => return,
                 };
-                self.updates.update(cx, |updates, cx| updates.set_track(track, cx));
+                self.updates
+                    .update(cx, |updates, cx| updates.set_track(track, cx));
                 self.persist(cx);
             }
-            "settings-text-generation-model" => self.choose_title_model(value,cx),
-            "diagnostic-metric" | "diagnostic-range" => self.choose_diagnostic(id,value,cx),
+            "settings-text-generation-model" => self.choose_title_model(value, cx),
+            "diagnostic-metric" | "diagnostic-range" => self.choose_diagnostic(id, value, cx),
             "settings-effort-display" => {
                 self.appearance.effort_label = value == "label";
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist_and_notify(cx);
             }
             "settings-tool-visibility" => {
-                if let Some(mode)=crate::views::chat::tool_visibility::Visibility::parse(value) {
-                    self.tool_visibility=mode;self.stamp_run_prefs_on_threads(cx);self.persist_and_notify(cx);
+                if let Some(mode) = crate::views::chat::tool_visibility::Visibility::parse(value) {
+                    self.tool_visibility = mode;
+                    self.stamp_run_prefs_on_threads(cx);
+                    self.persist_and_notify(cx);
                 }
             }
-            "background-profile" | "background-active" | "background-idle" => self.set_background_option(id,value,window,cx),
-            "settings-quit-shortcut" => self.choose_quit_mode(value,cx),
-            "settings-thread-model-options" | "settings-fallback-model-options" => self.set_native_model_option(id,value,cx),
-            "settings-kiro-options" | "settings-fallback-kiro-options"=> self.choose_kiro_default(id,value,cx),
-            "settings-fallback-model" => self.choose_fallback_model(value,cx),
-            "settings-branch-naming" => self.choose_branch_naming(value,cx),
-            "settings-settle-merged" | "settings-keep-pull" => self.choose_pull_policy(id,value,cx),
-            "settings-project-grouping-override" => self.set_grouping_override(value,cx),
-            "settings-project-order" => self.choose_project_order(value,cx),
-            "settings-quota-snooze" | "settings-quota-resume" => self.choose_quota_preference(id,value,cx),
-            "settings-snooze-day" => self.choose_snooze_day(value,window,cx),
+            "background-profile" | "background-active" | "background-idle" => {
+                self.set_background_option(id, value, window, cx)
+            }
+            "settings-quit-shortcut" => self.choose_quit_mode(value, cx),
+            "settings-thread-model-options" | "settings-fallback-model-options" => {
+                self.set_native_model_option(id, value, cx)
+            }
+            "settings-kiro-options" | "settings-fallback-kiro-options" => {
+                self.choose_kiro_default(id, value, cx)
+            }
+            "settings-fallback-model" => self.choose_fallback_model(value, cx),
+            "settings-branch-naming" => self.choose_branch_naming(value, cx),
+            "settings-settle-merged" | "settings-keep-pull" => {
+                self.choose_pull_policy(id, value, cx)
+            }
+            "settings-project-grouping-override" => self.set_grouping_override(value, cx),
+            "settings-project-order" => self.choose_project_order(value, cx),
+            "settings-quota-snooze" | "settings-quota-resume" => {
+                self.choose_quota_preference(id, value, cx)
+            }
+            "settings-snooze-day" => self.choose_snooze_day(value, window, cx),
             "settings-capture-sound" => {
-                let Some(sound) = snapshots::CaptureSound::from_key(value) else { return };
+                let Some(sound) = snapshots::CaptureSound::from_key(value) else {
+                    return;
+                };
                 self.snapshots.sound = sound;
                 self.persist(cx);
             }
-            "settings-word-wrap"=>{
-                let wrap=match value {"default"=>None,"on"=>Some(true),"off"=>Some(false),_=>return};
-                self.fonts.wrap=wrap;
+            "settings-word-wrap" => {
+                let wrap = match value {
+                    "default" => None,
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    _ => return,
+                };
+                self.fonts.wrap = wrap;
                 self.fonts.apply(cx);
-                self.diff_panel.update(cx,|panel,cx|panel.set_default_wrap(wrap,cx));
+                self.diff_panel
+                    .update(cx, |panel, cx| panel.set_default_wrap(wrap, cx));
                 self.persist_and_notify(cx);
             }
             "settings-log-retention" => {
@@ -775,7 +907,7 @@ impl Workspace {
                 self.schedule_log_cleanup(cx);
                 self.persist_and_notify(cx);
             }
-            id if id.starts_with("settings-font-")=>self.select_typeface(id,value,cx),
+            id if id.starts_with("settings-font-") => self.select_typeface(id, value, cx),
             "settings-language" => self.set_ui_language(value, window, cx),
             "settings-clock-format" => {
                 use crate::clock_format::ClockFormat;
@@ -816,21 +948,28 @@ impl Workspace {
             }
             "settings-voice-destination" => {
                 use crate::voice_capture::Destination;
-                if let Some(provider)=voice_cloud::provider(value) {
-                    self.open_voice_cloud(provider,window,cx);
+                if let Some(provider) = voice_cloud::provider(value) {
+                    self.open_voice_cloud(provider, window, cx);
                     self.set_settings_open_dropdown(None);
                     return;
                 }
-                self.voice_cloud.close(window,cx);
-                self.dictation_prefs.destination=match value {"off"=>Destination::Off,"local"=>Destination::Local,"compatible"=>Destination::Compatible,_=>return};
+                self.voice_cloud.close(window, cx);
+                self.dictation_prefs.destination = match value {
+                    "off" => Destination::Off,
+                    "local" => Destination::Local,
+                    "compatible" => Destination::Compatible,
+                    _ => return,
+                };
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist(cx);
             }
             "settings-voice-shortcut-mode" => {
                 use crate::voice_capture::ShortcutMode;
                 self.dictation_prefs.shortcut_mode = match value {
-                    "Auto" => ShortcutMode::Auto, "Hold" => ShortcutMode::Hold,
-                    "Toggle" => ShortcutMode::Toggle, _ => return,
+                    "Auto" => ShortcutMode::Auto,
+                    "Hold" => ShortcutMode::Hold,
+                    "Toggle" => ShortcutMode::Toggle,
+                    _ => return,
                 };
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist(cx);
@@ -849,13 +988,18 @@ impl Workspace {
             }
             "settings-worktree-submodules" => {
                 use bruhs_models::logic::run_place::WorktreeSubmodules;
-                self.worktree_prefs.submodules = if value == "inherit" {WorktreeSubmodules::FromProject}
-                    else if let Some(mode) = WorktreeSubmodules::parse_choice(value) { mode } else { return };
+                self.worktree_prefs.submodules = if value == "inherit" {
+                    WorktreeSubmodules::FromProject
+                } else if let Some(mode) = WorktreeSubmodules::parse_choice(value) {
+                    mode
+                } else {
+                    return;
+                };
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist(cx);
             }
             "settings-new-thread-placement" => {
-                self.choose_default_placement(value,cx);
+                self.choose_default_placement(value, cx);
             }
             "settings-chat-width" => {
                 self.chat_width = match value {
@@ -1146,7 +1290,15 @@ impl Workspace {
         disabled: bool,
         control: AnyElement,
     ) -> AnyElement {
-        self.settings_row_with_reset(selector, title, description, live_description, disabled, Some(control), None)
+        self.settings_row_with_reset(
+            selector,
+            title,
+            description,
+            live_description,
+            disabled,
+            Some(control),
+            None,
+        )
     }
 
     #[expect(
@@ -1280,7 +1432,10 @@ impl Workspace {
         if title.is_empty() && description.is_empty() {
             return self.settings_card_body(rows).into_any_element();
         }
-        self.settings_card_with_heading(self.settings_heading(title, description).into_any_element(), rows)
+        self.settings_card_with_heading(
+            self.settings_heading(title, description).into_any_element(),
+            rows,
+        )
     }
 
     fn settings_card_body(&self, rows: Vec<AnyElement>) -> Div {
@@ -1305,7 +1460,11 @@ impl Workspace {
         body
     }
 
-    pub(super) fn settings_card_with_heading(&self, heading: AnyElement, rows: Vec<AnyElement>) -> AnyElement {
+    pub(super) fn settings_card_with_heading(
+        &self,
+        heading: AnyElement,
+        rows: Vec<AnyElement>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_col()
@@ -1337,13 +1496,19 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn clear_focused_settings_query(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
-        if !self.settings_visible() || !self.settings_search.focus_handle(cx).is_focused(window)
+    pub(super) fn clear_focused_settings_query(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if !self.settings_visible()
+            || !self.settings_search.focus_handle(cx).is_focused(window)
             || self.settings_search.read(cx).value().is_empty()
         {
             return false;
         }
-        self.settings_search.update(cx, |input, cx| input.set_value("", window, cx));
+        self.settings_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.refresh_settings_search(cx);
         true
     }
@@ -1369,7 +1534,8 @@ impl Workspace {
                     if let Some(hit) = entries.iter_mut().find(|hit| {
                         hit.selector.as_deref() == Some("desktop-settings-row-rich-composer")
                     }) {
-                        hit.keywords = format!("{} bold italic strikethrough WYSIWYG", hit.keywords).into();
+                        hit.keywords =
+                            format!("{} bold italic strikethrough WYSIWYG", hit.keywords).into();
                     }
                 }
                 if section == SettingsSection::Appearance {
@@ -1379,7 +1545,9 @@ impl Workspace {
                                 hit.keywords = "system light dark appearance mode".into();
                             }
                             Some("desktop-settings-row-themes") => {
-                                let names = theme::ThemeFamily::ALL.map(|family| family.label()).join(" ");
+                                let names = theme::ThemeFamily::ALL
+                                    .map(|family| family.label())
+                                    .join(" ");
                                 hit.keywords = format!("palette light dark {names}").into();
                             }
                             _ => {}
@@ -1387,26 +1555,45 @@ impl Workspace {
                     }
                 }
                 if section == SettingsSection::Updates {
-                    if let Some(hit) = entries.iter_mut().find(|hit| hit.selector.as_deref() == Some("settings-row-usage-providers")) {
+                    if let Some(hit) = entries
+                        .iter_mut()
+                        .find(|hit| hit.selector.as_deref() == Some("settings-row-usage-providers"))
+                    {
                         hit.keywords = "CLIProxyAPI CLI Proxy hub quota subscription limits management key usage sources add remove".into();
                     }
                 }
                 if section == SettingsSection::Maintenance {
-                    if let Some(hit) = entries.iter_mut().find(|hit|hit.selector.as_deref() == Some("desktop-settings-row-continue-threads")) {
+                    if let Some(hit) = entries.iter_mut().find(|hit| {
+                        hit.selector.as_deref() == Some("desktop-settings-row-continue-threads")
+                    }) {
                         hit.keywords = "resume running active interrupted work restart reboot machine crash desktop update automatically".into();
                     }
                 }
                 if section == SettingsSection::SourceControl {
                     // T3 keeps both search entries available while guides are off.
                     // Both lead to the switch that reveals their controls.
-                    entries.retain(|hit| !matches!(hit.selector.as_deref(), Some("settings-row-guide-model" | "settings-row-guide-instructions")));
+                    entries.retain(|hit| {
+                        !matches!(
+                            hit.selector.as_deref(),
+                            Some("settings-row-guide-model" | "settings-row-guide-instructions")
+                        )
+                    });
                     for (title, keywords) in [
-                        ("Review guide model", "pull request PR guided review coding agent maintainer"),
-                        ("Review guide instructions", "pull request PR guided review preferences prompt custom"),
+                        (
+                            "Review guide model",
+                            "pull request PR guided review coding agent maintainer",
+                        ),
+                        (
+                            "Review guide instructions",
+                            "pull request PR guided review preferences prompt custom",
+                        ),
                     ] {
                         entries.push(SettingsHit {
                             command: None,
-                            source_title: None, title: title.into(), keywords: keywords.into(), section,
+                            source_title: None,
+                            title: title.into(),
+                            keywords: keywords.into(),
+                            section,
                             selector: Some("settings-row-review-guides".into()),
                         });
                     }
@@ -1447,16 +1634,25 @@ impl Workspace {
                 shortcuts.push(rule.key.clone());
             }
         }
-        let command_hits = commands.into_iter().map(|(command, shortcuts)| SettingsHit {
-            title: keybindings_ui::command_label(&command).into(),
-            source_title: None,
-            keywords: format!("{command} {}", shortcuts.join(" ")).into(),
-            section: SettingsSection::Keyboard,
-            command: Some(command),
-            selector: None,
-        });
-        let mut matches: Vec<_> = self.settings_search_catalog.iter().cloned().chain(command_hits)
-            .filter_map(|hit| hit.rank(&query, language.text(hit.section.label())).map(|rank| (rank, hit)))
+        let command_hits = commands
+            .into_iter()
+            .map(|(command, shortcuts)| SettingsHit {
+                title: keybindings_ui::command_label(&command).into(),
+                source_title: None,
+                keywords: format!("{command} {}", shortcuts.join(" ")).into(),
+                section: SettingsSection::Keyboard,
+                command: Some(command),
+                selector: None,
+            });
+        let mut matches: Vec<_> = self
+            .settings_search_catalog
+            .iter()
+            .cloned()
+            .chain(command_hits)
+            .filter_map(|hit| {
+                hit.rank(&query, language.text(hit.section.label()))
+                    .map(|rank| (rank, hit))
+            })
             .collect();
         matches.sort_by_key(|(rank, hit)| (hit.command.is_some(), *rank));
         self.settings_search_results = matches.into_iter().map(|(_, hit)| hit).collect();
@@ -1506,8 +1702,12 @@ impl Workspace {
         };
         self.set_settings_section(hit.section, cx);
         if let Some(command) = hit.command {
-            let assigned = self.settings_keybindings().iter().any(|rule| rule.command == command);
-            self.keybinding_filter.update(cx, |input, cx| input.set_value(command.clone(), window, cx));
+            let assigned = self
+                .settings_keybindings()
+                .iter()
+                .any(|rule| rule.command == command);
+            self.keybinding_filter
+                .update(cx, |input, cx| input.set_value(command.clone(), window, cx));
             if !assigned {
                 self.open_new_binding_for(Some(command), window, cx);
             }
@@ -1533,8 +1733,7 @@ impl Workspace {
         let rail = compact && !expanded;
         let has_query = !self.settings_search.read(cx).value().trim().is_empty();
         let search_focused = self.settings_search.focus_handle(cx).is_focused(window);
-        let search_header_border =
-            theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY);
+        let search_header_border = theme::longan_800().opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY);
         let search = if rail {
             div()
                 .debug_selector(|| "desktop-settings-search-header".to_owned())
@@ -1693,15 +1892,16 @@ impl Workspace {
         let pending = self.settings_nav_reveal.clone();
         let scroll = self.settings_nav_scroll.clone();
         let view = cx.entity_id();
-        let mut nav = div().on_children_prepainted(move |_, _, cx| {
-            if show_sections && pending.replace(false) {
-                let scroll = scroll.clone();
-                cx.defer(move |cx| {
-                    scroll.scroll_to_item(index);
-                    cx.notify(view);
-                });
-            }
-        })
+        let mut nav = div()
+            .on_children_prepainted(move |_, _, cx| {
+                if show_sections && pending.replace(false) {
+                    let scroll = scroll.clone();
+                    cx.defer(move |cx| {
+                        scroll.scroll_to_item(index);
+                        cx.notify(view);
+                    });
+                }
+            })
             .id("desktop-settings-links")
             .debug_selector(|| "desktop-settings-links".to_owned())
             .flex_1()
@@ -1713,8 +1913,14 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap(px(2.0))
-            .when(show_sections, |nav| nav.role(Role::TabList).aria_label(self.ui_language().text("Settings sections")))
-            .when(has_query, |nav| nav.role(Role::ListBox).aria_label(self.ui_language().text("Settings search results")));
+            .when(show_sections, |nav| {
+                nav.role(Role::TabList)
+                    .aria_label(self.ui_language().text("Settings sections"))
+            })
+            .when(has_query, |nav| {
+                nav.role(Role::ListBox)
+                    .aria_label(self.ui_language().text("Settings search results"))
+            });
         if has_query {
             for (index, hit) in self.settings_search_results.iter().enumerate() {
                 nav = nav.child(
@@ -1732,7 +1938,11 @@ impl Workspace {
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .role(Role::ListBoxOption)
                         .aria_selected(index == self.settings_search_index)
-                        .aria_label(format!("{} in {}", hit.title, self.ui_language().text(hit.section.label())))
+                        .aria_label(format!(
+                            "{} in {}",
+                            hit.title,
+                            self.ui_language().text(hit.section.label())
+                        ))
                         .cursor_pointer()
                         .flex()
                         .items_start()
@@ -1744,12 +1954,26 @@ impl Workspace {
                             el.bg(theme::longan_800())
                         })
                         .hover(|el| el.bg(theme::longan_800()))
-                        .child(svg().path(hit.section.icon_path()).mt_1().size(px(theme::ICON_PX))
-                            .flex_shrink_0().text_color(theme::rambutan_500()))
-                        .child(div().min_w_0().flex_1()
-                            .child(div().truncate().child(hit.title.clone()))
-                            .child(div().text_xs().text_color(theme::rambutan_500())
-                                .child(self.ui_language().text(hit.section.label()))))
+                        .child(
+                            svg()
+                                .path(hit.section.icon_path())
+                                .mt_1()
+                                .size(px(theme::ICON_PX))
+                                .flex_shrink_0()
+                                .text_color(theme::rambutan_500()),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .child(div().truncate().child(hit.title.clone()))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme::rambutan_500())
+                                        .child(self.ui_language().text(hit.section.label())),
+                                ),
+                        )
                         .map(|el| {
                             on_press_view(el, cx, move |this, window, cx| {
                                 this.open_settings_hit(index, window, cx)
@@ -1758,14 +1982,16 @@ impl Workspace {
                 );
             }
             if self.settings_search_results.is_empty() {
-                nav = nav.child(div()
-                    .id("settings-no-results")
-                    .debug_selector(|| "desktop-settings-no-results".to_owned())
-                    .px_2()
-                    .text_xs()
-                    .role(Role::Status)
-                    .aria_label(self.ui_language().text("No settings found"))
-                    .child(self.ui_language().text("No settings found")));
+                nav = nav.child(
+                    div()
+                        .id("settings-no-results")
+                        .debug_selector(|| "desktop-settings-no-results".to_owned())
+                        .px_2()
+                        .text_xs()
+                        .role(Role::Status)
+                        .aria_label(self.ui_language().text("No settings found"))
+                        .child(self.ui_language().text("No settings found")),
+                );
             }
             return shell.child(nav).into_any_element();
         }
@@ -1808,7 +2034,13 @@ impl Workspace {
                     } else {
                         theme::rambutan_400()
                     })
-                    .when(active, |el| el.theme_background("sidebarRowSelected", theme::longan_800().opacity(0.6), cx))
+                    .when(active, |el| {
+                        el.theme_background(
+                            "sidebarRowSelected",
+                            theme::longan_800().opacity(0.6),
+                            cx,
+                        )
+                    })
                     .when(!active, |el| {
                         el.hover(|el| {
                             el.bg(theme::longan_800().opacity(0.4))
@@ -1830,13 +2062,15 @@ impl Workspace {
                             _ => return,
                         };
                         this.settings_nav_focus[next].focus(window, cx);
-                        this.settings_nav_scroll.scroll_to_item(SettingsSection::ALL[next].nav_index());
+                        this.settings_nav_scroll
+                            .scroll_to_item(SettingsSection::ALL[next].nav_index());
                         window.prevent_default();
                         cx.stop_propagation();
                     }))
                     .role(Role::Tab)
                     .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
-                        let _ = target.update(cx, |this, cx| this.set_settings_section(section, cx));
+                        let _ =
+                            target.update(cx, |this, cx| this.set_settings_section(section, cx));
                     })
                     .aria_label(section_label)
                     .aria_selected(active)
@@ -1856,7 +2090,9 @@ impl Workspace {
                             .text_color(theme::rambutan_500())
                             .flex_shrink_0(),
                     )
-                    .when(!rail, |el| el.child(div().min_w_0().flex_1().truncate().child(section_label))),
+                    .when(!rail, |el| {
+                        el.child(div().min_w_0().flex_1().truncate().child(section_label))
+                    }),
             );
         }
         shell.child(nav).into_any_element()
@@ -1957,22 +2193,25 @@ impl Workspace {
             .child(self.settings_card(
                 "Display",
                 "",
-                vec![self.language_row(cx), self.settings_row(
-                    "desktop-settings-row-clock",
-                    "Time format",
-                    "",
-                    settings_ui::control_column(self.choice_control(
-                        "settings-clock-format",
+                vec![
+                    self.language_row(cx),
+                    self.settings_row(
+                        "desktop-settings-row-clock",
                         "Time format",
-                        self.appearance.clock.key(),
-                        &[
-                            ("system", "System default"),
-                            ("12h", "12-hour"),
-                            ("24h", "24-hour"),
-                        ],
-                        cx,
-                    )),
-                )],
+                        "",
+                        settings_ui::control_column(self.choice_control(
+                            "settings-clock-format",
+                            "Time format",
+                            self.appearance.clock.key(),
+                            &[
+                                ("system", "System default"),
+                                ("12h", "12-hour"),
+                                ("24h", "24-hour"),
+                            ],
+                            cx,
+                        )),
+                    ),
+                ],
             ))
             .child(self.settings_card("External editor", "", editor))
             .child(
@@ -2057,28 +2296,86 @@ impl Workspace {
         }];
         let (toggle, select) = self.settings_dropdown_handlers(SETTINGS_SEND_SHORTCUT, cx);
         vec![
-            self.settings_row("settings-row-tool-visibility","Tool calls in chat","How much tool activity appears in chat.",settings_ui::control_column(self.choice_control("settings-tool-visibility","Tool calls in chat",self.tool_visibility.key(),&[("all","Show all"),("failures","Hide successful"),("hide","Hide all"),("zen","Zen")],cx))),
-            self.settings_row("desktop-settings-row-slash-skills","Show skills in slash menu","Include skills in /.",settings_ui::switch("settings-slash-skills",self.slash_skills,false,"Show skills in slash menu",cx,|this,_,cx|{
-                this.slash_skills = !this.slash_skills;
-                this.stamp_run_prefs_on_threads(cx);
-                this.persist_and_notify(cx);
-            })),
-            self.settings_row("desktop-settings-row-reader-announcements","Screen reader announcements",
+            self.settings_row(
+                "settings-row-tool-visibility",
+                "Tool calls in chat",
+                "How much tool activity appears in chat.",
+                settings_ui::control_column(self.choice_control(
+                    "settings-tool-visibility",
+                    "Tool calls in chat",
+                    self.tool_visibility.key(),
+                    &[
+                        ("all", "Show all"),
+                        ("failures", "Hide successful"),
+                        ("hide", "Hide all"),
+                        ("zen", "Zen"),
+                    ],
+                    cx,
+                )),
+            ),
+            self.settings_row(
+                "desktop-settings-row-slash-skills",
+                "Show skills in slash menu",
+                "Include skills in /.",
+                settings_ui::switch(
+                    "settings-slash-skills",
+                    self.slash_skills,
+                    false,
+                    "Show skills in slash menu",
+                    cx,
+                    |this, _, cx| {
+                        this.slash_skills = !this.slash_skills;
+                        this.stamp_run_prefs_on_threads(cx);
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-reader-announcements",
+                "Screen reader announcements",
                 "What to announce during a turn.",
-                settings_ui::control_column(self.choice_control("settings-reader-announcements","Screen reader announcements",self.screen_reader.announcements.key(),
-                    &[("status","Status only"),("messages","Status and messages"),("everything","Everything")],cx))),
-            self.settings_row("desktop-settings-row-reader-title","Screen reader window title",
+                settings_ui::control_column(self.choice_control(
+                    "settings-reader-announcements",
+                    "Screen reader announcements",
+                    self.screen_reader.announcements.key(),
+                    &[
+                        ("status", "Status only"),
+                        ("messages", "Status and messages"),
+                        ("everything", "Everything"),
+                    ],
+                    cx,
+                )),
+            ),
+            self.settings_row(
+                "desktop-settings-row-reader-title",
+                "Screen reader window title",
                 "Prefix window title with thread status and name.",
-                settings_ui::switch("settings-reader-title",self.screen_reader.window_title,false,"Screen reader window title",cx,|this,_,cx|{
-                    this.screen_reader.window_title = !this.screen_reader.window_title;
-                    this.persist_and_notify(cx);
-                })),
+                settings_ui::switch(
+                    "settings-reader-title",
+                    self.screen_reader.window_title,
+                    false,
+                    "Screen reader window title",
+                    cx,
+                    |this, _, cx| {
+                        this.screen_reader.window_title = !this.screen_reader.window_title;
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
             self.rich_composer_row(cx),
             self.settings_row(
                 "desktop-settings-row-send-shortcut",
                 "Send shortcut",
                 "Shift + Enter adds a new line.",
-                settings_ui::control_column(dropdown(SETTINGS_SEND_SHORTCUT, "Send shortcut", self.send_shortcut.id(), groups, self.settings_listbox(SETTINGS_SEND_SHORTCUT), toggle, select)),
+                settings_ui::control_column(dropdown(
+                    SETTINGS_SEND_SHORTCUT,
+                    "Send shortcut",
+                    self.send_shortcut.id(),
+                    groups,
+                    self.settings_listbox(SETTINGS_SEND_SHORTCUT),
+                    toggle,
+                    select,
+                )),
             ),
             self.settings_row(
                 "desktop-settings-row-follow-up",
@@ -2094,7 +2391,10 @@ impl Workspace {
                     div()
                         .w_full()
                         .h(px(theme::CONTROL_PX))
-                        .child(Input::new(&self.autocompact_input).aria_label("Automatic compaction token count"))
+                        .child(
+                            Input::new(&self.autocompact_input)
+                                .aria_label("Automatic compaction token count"),
+                        )
                         .into_any_element(),
                 ),
             ),
@@ -2179,18 +2479,46 @@ impl Workspace {
                     cx,
                 )),
             ),
-            self.settings_row("desktop-settings-row-proactive-panels","Open pull requests and changes panels proactively",
+            self.settings_row(
+                "desktop-settings-row-proactive-panels",
+                "Open pull requests and changes panels proactively",
                 "Open linked PRs or changes after large edits.",
-                settings_ui::switch("settings-proactive-panels",prefs.proactive_panels,false,"Open panels proactively",cx,|this,_,cx|{
-                    this.diff_panel.update(cx,|panel,cx|{let mut prefs = panel.prefs; prefs.proactive_panels = !prefs.proactive_panels; panel.set_preferences(prefs,cx)});
-                    this.persist_and_notify(cx);
-                })),
-            self.settings_row("desktop-settings-row-open-pull-links","Open pull requests in bruhs",
+                settings_ui::switch(
+                    "settings-proactive-panels",
+                    prefs.proactive_panels,
+                    false,
+                    "Open panels proactively",
+                    cx,
+                    |this, _, cx| {
+                        this.diff_panel.update(cx, |panel, cx| {
+                            let mut prefs = panel.prefs;
+                            prefs.proactive_panels = !prefs.proactive_panels;
+                            panel.set_preferences(prefs, cx)
+                        });
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "desktop-settings-row-open-pull-links",
+                "Open pull requests in bruhs",
                 "Open GitHub PR links inside bruhs.",
-                settings_ui::switch("settings-open-pull-links",prefs.open_pull_links_in_app,false,"Open pull requests in bruhs",cx,|this,_,cx|{
-                    this.diff_panel.update(cx,|panel,cx|{let mut prefs = panel.prefs; prefs.open_pull_links_in_app = !prefs.open_pull_links_in_app; panel.set_preferences(prefs,cx)});
-                    this.persist_and_notify(cx);
-                })),
+                settings_ui::switch(
+                    "settings-open-pull-links",
+                    prefs.open_pull_links_in_app,
+                    false,
+                    "Open pull requests in bruhs",
+                    cx,
+                    |this, _, cx| {
+                        this.diff_panel.update(cx, |panel, cx| {
+                            let mut prefs = panel.prefs;
+                            prefs.open_pull_links_in_app = !prefs.open_pull_links_in_app;
+                            panel.set_preferences(prefs, cx)
+                        });
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
         ]
     }
 
@@ -2254,9 +2582,24 @@ impl Workspace {
             ),
         ];
         let interface = vec![
-            self.settings_row("desktop-settings-row-panel-animations","Panel animations","Duration in ms. 0 disables animation.",
-                settings_ui::control_column(div().w_full().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(self.render_settings_slider(settings_ui::SettingsSlider::PanelDuration,cx))).child(format!("{} ms",self.appearance.panel_duration_ms)).into_any_element())),
-
+            self.settings_row(
+                "desktop-settings-row-panel-animations",
+                "Panel animations",
+                "Duration in ms. 0 disables animation.",
+                settings_ui::control_column(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().flex_1().min_w_0().child(self.render_settings_slider(
+                            settings_ui::SettingsSlider::PanelDuration,
+                            cx,
+                        )))
+                        .child(format!("{} ms", self.appearance.panel_duration_ms))
+                        .into_any_element(),
+                ),
+            ),
             self.settings_row(
                 "desktop-settings-row-chat-width",
                 "Chat width",
@@ -2275,11 +2618,20 @@ impl Workspace {
             ),
             self.thread_detail_settings_row(cx),
             self.settings_row(
-                "desktop-settings-row-effort-display", "Effort display",
+                "desktop-settings-row-effort-display",
+                "Effort display",
                 "",
-                settings_ui::control_column(self.choice_control("settings-effort-display", "Effort display",
-                    if self.appearance.effort_label { "label" } else { "bars" },
-                    &[("label", "Word (default)"), ("bars", "Bars")], cx)),
+                settings_ui::control_column(self.choice_control(
+                    "settings-effort-display",
+                    "Effort display",
+                    if self.appearance.effort_label {
+                        "label"
+                    } else {
+                        "bars"
+                    },
+                    &[("label", "Word (default)"), ("bars", "Bars")],
+                    cx,
+                )),
             ),
             self.settings_row(
                 "desktop-settings-row-render-math",
@@ -2319,15 +2671,34 @@ impl Workspace {
             .child(self.scheme_picker(cx))
             .child(self.theme_library(width, cx))
             .child(self.settings_card("Contrast & opacity", "", colors))
-            .child(self.settings_card("Interface", "", interface.into_iter().chain(self.text_layout_rows(cx)).collect()))
-            .child(self.settings_card("Fonts","",self.render_font_rows(cx)))
+            .child(
+                self.settings_card(
+                    "Interface",
+                    "",
+                    interface
+                        .into_iter()
+                        .chain(self.text_layout_rows(cx))
+                        .collect(),
+                ),
+            )
+            .child(self.settings_card("Fonts", "", self.render_font_rows(cx)))
             .into_any_element()
     }
 
-    pub(super) fn catalog_model_groups(&self, cx:&Context<'_,Self>, include:impl Fn(AgentProvider)->bool)->Vec<DropdownGroup> {
+    pub(super) fn catalog_model_groups(
+        &self,
+        cx: &Context<'_, Self>,
+        include: impl Fn(AgentProvider) -> bool,
+    ) -> Vec<DropdownGroup> {
         desktop_model_provider_groups_like_web()
             .into_iter()
-            .filter(|(provider,_)| include(*provider) && self.provider_availability.as_ref().is_ok_and(|prefs| prefs.enabled(*provider)))
+            .filter(|(provider, _)| {
+                include(*provider)
+                    && self
+                        .provider_availability
+                        .as_ref()
+                        .is_ok_and(|prefs| prefs.enabled(*provider))
+            })
             .map(|(provider, models)| DropdownGroup {
                 label: Some(provider_label(provider)),
                 mark: Some(provider_mark(provider, cx)),
@@ -2355,7 +2726,6 @@ impl Workspace {
         }
     }
 
-
     fn render_settings_threads(&self, cx: &Context<'_, Self>) -> AnyElement {
         let scoped = !self.settings_project_scope.is_empty();
         let project = self.project_defaults.get(&self.settings_project_scope);
@@ -2372,7 +2742,10 @@ impl Workspace {
                 .collect(),
         }];
         if scoped {
-            mode_groups.insert(0, Self::inherited_group(self.permission_mode.label().to_owned()));
+            mode_groups.insert(
+                0,
+                Self::inherited_group(self.permission_mode.label().to_owned()),
+            );
         }
         let (mode_toggle, mode_select) =
             self.settings_dropdown_handlers(SETTINGS_ACCESS_MODE_DROPDOWN_ID, cx);
@@ -2393,15 +2766,15 @@ impl Workspace {
         );
 
         let placement = self.new_thread_placement_row(cx);
-        let mut defaults = vec![
-            self.settings_row(
-                "desktop-settings-row-access-mode",
-                "Access mode",
-                "Default file and command permissions.",
-                settings_ui::control_column(mode_control),
-            ),
-        ];
-        if !scoped {defaults.insert(0,self.fallback_row(cx));}
+        let mut defaults = vec![self.settings_row(
+            "desktop-settings-row-access-mode",
+            "Access mode",
+            "Default file and command permissions.",
+            settings_ui::control_column(mode_control),
+        )];
+        if !scoped {
+            defaults.insert(0, self.fallback_row(cx));
+        }
         let messages = vec![
             self.settings_row(
                 "desktop-settings-row-thread-access",
@@ -2466,22 +2839,45 @@ impl Workspace {
             .child(self.settings_card(
                 "New projects",
                 "",
-                vec![self.settings_row(
-                    "desktop-settings-row-project-start-folder",
-                    "Add project starts in",
-                    "Default folder for Add project.",
-                    settings_ui::control_column(
-                        Input::new(&self.project_start_folder_input)
-                            .aria_label("Add project starts in")
-                            .into_any_element(),
-                    ),
-                ),self.settings_row("desktop-settings-row-clone-host-folders","Clone into host folders","Group clones by host and owner.",
-                    settings_ui::switch("settings-clone-host-folders",self.clone_host_folders,false,"Clone into host folders",cx,|this,_,cx|{
-                        this.clone_host_folders = !this.clone_host_folders;
-                        this.persist_and_notify(cx);
-                    }))],
+                vec![
+                        self.settings_row(
+                            "desktop-settings-row-project-start-folder",
+                            "Add project starts in",
+                            "Default folder for Add project.",
+                            settings_ui::control_column(
+                                Input::new(&self.project_start_folder_input)
+                                    .aria_label("Add project starts in")
+                                    .into_any_element(),
+                            ),
+                        ),
+                        self.settings_row(
+                            "desktop-settings-row-clone-host-folders",
+                            "Clone into host folders",
+                            "Group clones by host and owner.",
+                            settings_ui::switch(
+                                "settings-clone-host-folders",
+                                self.clone_host_folders,
+                                false,
+                                "Clone into host folders",
+                                cx,
+                                |this, _, cx| {
+                                    this.clone_host_folders = !this.clone_host_folders;
+                                    this.persist_and_notify(cx);
+                                },
+                            ),
+                        ),
+                    ],
             ))
-            .child(self.settings_card("New threads", "", vec![self.defaults_scope_row(cx), self.new_thread_model_row(cx), placement,self.response_stream_row(cx)]))
+            .child(self.settings_card(
+                "New threads",
+                "",
+                vec![
+                    self.defaults_scope_row(cx),
+                    self.new_thread_model_row(cx),
+                    placement,
+                    self.response_stream_row(cx),
+                ],
+            ))
             .child(self.settings_card("New thread defaults", "", defaults))
             .child(self.settings_card("Thread lifecycle", "", self.render_settlement_rows(cx)))
             .child(self.render_snooze_settings(cx))
@@ -2533,7 +2929,10 @@ impl Workspace {
         if self.appearance.scheme != appearance::ColorScheme::default() {
             changed.push("Color scheme");
         }
-        if self.custom_themes.has_selection() || self.appearance.light_theme != Default::default() || self.appearance.dark_theme != Default::default() {
+        if self.custom_themes.has_selection()
+            || self.appearance.light_theme != Default::default()
+            || self.appearance.dark_theme != Default::default()
+        {
             changed.push("Themes");
         }
         if self.appearance.language != Default::default() {
@@ -2542,16 +2941,24 @@ impl Workspace {
         if self.appearance.clock != Default::default() {
             changed.push("Time format");
         }
-        if self.snapshots != Default::default() {changed.push("SnapShots");}
-        if self.fonts!=Default::default(){changed.push("Fonts");}
+        if self.snapshots != Default::default() {
+            changed.push("SnapShots");
+        }
+        if self.fonts != Default::default() {
+            changed.push("Fonts");
+        }
         if self.appearance.contrast != 100 {
             changed.push("Contrast");
         }
         if self.appearance.glass_opacity != 100 {
             changed.push("Glass opacity");
         }
-        if self.appearance.thread_details != Default::default() {changed.push("Thread details");}
-        if !self.appearance.effort_label { changed.push("Effort display"); }
+        if self.appearance.thread_details != Default::default() {
+            changed.push("Thread details");
+        }
+        if !self.appearance.effort_label {
+            changed.push("Effort display");
+        }
         if !self.appearance.render_math {
             changed.push("Render math");
         }
@@ -2567,7 +2974,9 @@ impl Workspace {
         if self.screen_reader != Default::default() {
             changed.push("Screen reader preferences");
         }
-        if !self.composer_rich_text { changed.push("Rich text composer"); }
+        if !self.composer_rich_text {
+            changed.push("Rich text composer");
+        }
         if self.send_shortcut != SendShortcut::default() {
             changed.push("Send shortcut");
         }
@@ -2586,7 +2995,9 @@ impl Workspace {
         if !self.confirm_thread_delete {
             changed.push("Delete confirmation");
         }
-        if self.project_list.grouping.mode != Default::default() { changed.push("Project grouping"); }
+        if self.project_list.grouping.mode != Default::default() {
+            changed.push("Project grouping");
+        }
         if !self.sidebar_working_section {
             changed.push("Working section");
         }
@@ -2612,8 +3023,13 @@ impl Workspace {
         }
         let language = self.ui_language();
         let detail = format!(
-            "{} {}",language.text("Restore these device preferences to their defaults?"),
-            changed.into_iter().map(|key|language.text(key)).collect::<Vec<_>>().join(", ")
+            "{} {}",
+            language.text("Restore these device preferences to their defaults?"),
+            changed
+                .into_iter()
+                .map(|key| language.text(key))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         let answer = window.prompt(
             gpui::PromptLevel::Info,
@@ -2634,8 +3050,9 @@ impl Workspace {
                     this.refresh_language_ui(window, cx);
                     this.snapshots = Default::default();
                     this.sync_capture_shortcut(cx);
-                    this.fonts=Default::default();
-                    this.diff_panel.update(cx,|p,cx|p.set_default_wrap(None,cx));
+                    this.fonts = Default::default();
+                    this.diff_panel
+                        .update(cx, |p, cx| p.set_default_wrap(None, cx));
                     this.apply_device_appearance(window, cx);
                     cx.default_global::<crate::views::browser_preferences::BrowserPreferences>()
                         .restore_defaults();
@@ -2643,8 +3060,9 @@ impl Workspace {
                     this.browser_search_url_input
                         .update(cx, |field, cx| field.set_value("", window, cx));
                     this.dictation_prefs.restore_defaults();
-                    this.voice_cleanup_fields.reset(window,cx);
-                    this.voice_model_input.update(cx,|field,cx|field.set_value("",window,cx));
+                    this.voice_cleanup_fields.reset(window, cx);
+                    this.voice_model_input
+                        .update(cx, |field, cx| field.set_value("", window, cx));
                     this.composer_rich_text = true;
                     this.send_shortcut = Default::default();
                     this.screen_reader = Default::default();
@@ -2708,7 +3126,12 @@ impl Workspace {
             .and_then(|report| report.installed_release().map(str::to_owned))
             .unwrap_or_else(|| {
                 let release = env!("BRUHS_RELEASE_VERSION");
-                if release.is_empty() { env!("CARGO_PKG_VERSION") } else { release }.to_owned()
+                if release.is_empty() {
+                    env!("CARGO_PKG_VERSION")
+                } else {
+                    release
+                }
+                .to_owned()
             });
         let muted = |text: &'static str| {
             div()
@@ -2749,64 +3172,121 @@ impl Workspace {
             )
             .into_any_element();
         let action = |id: &'static str, label: &'static str| {
-            web_button(id, WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
-                .aria_label(label)
-                .child(label)
+            web_button(
+                id,
+                WebButtonVariant::Outline,
+                WebButtonSize::Small,
+                ButtonState::Enabled,
+            )
+            .aria_label(label)
+            .child(label)
         };
-        let packaged = !env!("BRUHS_RELEASE_VERSION").is_empty() ||
-            self.updates.read(cx).report.as_ref().is_some_and(|r| r.app.release.is_some());
+        let packaged = !env!("BRUHS_RELEASE_VERSION").is_empty()
+            || self
+                .updates
+                .read(cx)
+                .report
+                .as_ref()
+                .is_some_and(|r| r.app.release.is_some());
         let mut app = self.render_app_update_row(updates_ui::UpdateRow::About(&version), cx);
         app.extend([
-                self.settings_row(
-                    "settings-update-track", "Update track",
-                    if packaged { "" } else { "Follows this Git checkout." },
-                    if packaged { settings_ui::control_column(self.choice_control("settings-update-track", "Update track", self.updates.read(cx).track.key(), &[("stable", "Stable"), ("nightly", "Nightly")], cx)) } else { muted("Source checkout") },
-                ),
-                self.launcher_row(cx),
-                self.settings_row(
-                    "settings-about-mobile", "Mobile app", "Pair a phone with this host.",
-                    on_press_view(action("about-open-mobile", "Pair a device"), cx,
-                        |this, _, cx| this.set_settings_section(SettingsSection::Access, cx)).into_any_element(),
-                ),
-                self.settings_row(
-                    "settings-about-welcome", "Welcome page", "Reopen the setup overview.",
-                    on_press_view(action("about-open-welcome", "Open welcome page"), cx, |this, window, cx| {
+            self.settings_row(
+                "settings-update-track",
+                "Update track",
+                if packaged {
+                    ""
+                } else {
+                    "Follows this Git checkout."
+                },
+                if packaged {
+                    settings_ui::control_column(self.choice_control(
+                        "settings-update-track",
+                        "Update track",
+                        self.updates.read(cx).track.key(),
+                        &[("stable", "Stable"), ("nightly", "Nightly")],
+                        cx,
+                    ))
+                } else {
+                    muted("Source checkout")
+                },
+            ),
+            self.launcher_row(cx),
+            self.settings_row(
+                "settings-about-mobile",
+                "Mobile app",
+                "Pair a phone with this host.",
+                on_press_view(
+                    action("about-open-mobile", "Pair a device"),
+                    cx,
+                    |this, _, cx| this.set_settings_section(SettingsSection::Access, cx),
+                )
+                .into_any_element(),
+            ),
+            self.settings_row(
+                "settings-about-welcome",
+                "Welcome page",
+                "Reopen the setup overview.",
+                on_press_view(
+                    action("about-open-welcome", "Open welcome page"),
+                    cx,
+                    |this, window, cx| {
                         this.open_overlay(Overlay::Welcome);
                         this.focus_first_modal_tab_stop(window, cx);
                         cx.notify();
-                    }).into_any_element(),
-                ),
+                    },
+                )
+                .into_any_element(),
+            ),
         ]);
         let legal = vec![
-                self.settings_row(
-                    "settings-about-privacy", "Privacy policy", "",
-                    on_press_view(action("about-open-privacy", "Read policy"), cx,
-                        |_, _, cx| cx.open_url("https://bruhs.ai/privacy")).into_any_element(),
-                ),
-                self.settings_row(
-                    "settings-about-licenses", "Open source licenses",
-                    "",
-                    on_press_view(action("about-open-licenses", self.ui_language().text("View licenses"))
-                        .track_focus(&self.license_trigger).debug_selector(|| "about-open-licenses".into()), cx, |this, window, cx| {
-                        this.open_license_browser(window,cx);
-                    }).into_any_element(),
-                ),
+            self.settings_row(
+                "settings-about-privacy",
+                "Privacy policy",
+                "",
+                on_press_view(
+                    action("about-open-privacy", "Read policy"),
+                    cx,
+                    |_, _, cx| cx.open_url("https://bruhs.ai/privacy"),
+                )
+                .into_any_element(),
+            ),
+            self.settings_row(
+                "settings-about-licenses",
+                "Open source licenses",
+                "",
+                on_press_view(
+                    action(
+                        "about-open-licenses",
+                        self.ui_language().text("View licenses"),
+                    )
+                    .track_focus(&self.license_trigger)
+                    .debug_selector(|| "about-open-licenses".into()),
+                    cx,
+                    |this, window, cx| {
+                        this.open_license_browser(window, cx);
+                    },
+                )
+                .into_any_element(),
+            ),
         ];
         let more = vec![
-                self.settings_row(
-                    "desktop-settings-about-mcp",
-                    "MCP servers",
-                    "Configured via Claude Code.",
-                    muted("Managed by Claude Code"),
-                ),
-                self.settings_row(
-                    "desktop-settings-about-design",
-                    "Design system",
-                    "",
-                    design_link,
-                ),
+            self.settings_row(
+                "desktop-settings-about-mcp",
+                "MCP servers",
+                "Configured via Claude Code.",
+                muted("Managed by Claude Code"),
+            ),
+            self.settings_row(
+                "desktop-settings-about-design",
+                "Design system",
+                "",
+                design_link,
+            ),
         ];
-        div().flex().flex_col().gap(px(24.))
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
             .child(self.settings_card("App", "", app))
             .child(self.settings_card("Legal", "", legal))
             .child(self.settings_card("bruhs", "", more))
@@ -2840,7 +3320,24 @@ impl Workspace {
                     .child(self.render_settings_general(cx))
                     .into_any_element()
             }
-            SettingsSection::Updates => return container.child(div().flex().flex_col().gap(px(24.)).child(self.settings_card("Updates", "", self.render_settings_updates_rows(cx))).child(self.provider_health_card(cx)).child(self.usage_hubs_card(cx)).child(self.generators_card(cx))).into_any_element(),
+            SettingsSection::Updates => {
+                return container
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(24.))
+                            .child(self.settings_card(
+                                "Updates",
+                                "",
+                                self.render_settings_updates_rows(cx),
+                            ))
+                            .child(self.provider_health_card(cx))
+                            .child(self.usage_hubs_card(cx))
+                            .child(self.generators_card(cx)),
+                    )
+                    .into_any_element()
+            }
             SettingsSection::Archived => self.render_archived_threads(cx),
             SettingsSection::Projects => {
                 return container
@@ -2858,25 +3355,29 @@ impl Workspace {
                     .into_any_element()
             }
             SettingsSection::Worktrees => {
-                return container.child(self.worktree_settings(cx)).into_any_element();
+                return container
+                    .child(self.worktree_settings(cx))
+                    .into_any_element();
             }
-            SettingsSection::ScheduledTasks => {
-                self.scheduled_task_settings_rows(width, cx)
-            }
+            SettingsSection::ScheduledTasks => self.scheduled_task_settings_rows(width, cx),
             SettingsSection::Diagnostics => self.diagnostic_rows(cx),
             SettingsSection::Environments => self.environment_rows(cx),
             SettingsSection::Devices => self.device_rows(cx),
             SettingsSection::Labs => {
-                return container.child(self.settings_card("Beta", "", self.labs_rows(cx))).into_any_element();
+                return container
+                    .child(self.settings_card("Beta", "", self.labs_rows(cx)))
+                    .into_any_element();
             }
             SettingsSection::Access => {
-                return container
-                    .child(self.render_mobile(cx))
-                    .into_any_element()
+                return container.child(self.render_mobile(cx)).into_any_element()
             }
             SettingsSection::Browser => self.render_browser_rows(cx),
             SettingsSection::SnapShots => self.render_snapshot_rows(cx),
-            SettingsSection::Voice => return container.child(self.render_voice_settings(cx)).into_any_element(),
+            SettingsSection::Voice => {
+                return container
+                    .child(self.render_voice_settings(cx))
+                    .into_any_element()
+            }
             SettingsSection::Diffs => self.render_diff_rows(cx),
             SettingsSection::Chat => self.render_chat_rows(cx),
             SettingsSection::Appearance => {
@@ -2930,7 +3431,11 @@ impl Workspace {
             }
         };
         let description = section.description();
-        let title = if description.is_empty() { "" } else { section.label() };
+        let title = if description.is_empty() {
+            ""
+        } else {
+            section.label()
+        };
         container
             .child(self.settings_card(title, description, rows))
             .into_any_element()
@@ -2990,7 +3495,11 @@ impl Workspace {
                     .rounded(px(14.0))
                     .border_1()
                     .border_color(theme::ring_modal())
-                    .bg(theme::glass_surface(cx.theme().color_role("canvas").unwrap_or_else(theme::longan_950)))
+                    .bg(theme::glass_surface(
+                        cx.theme()
+                            .color_role("canvas")
+                            .unwrap_or_else(theme::longan_950),
+                    ))
                     .h(px((bruhs_ui::zoom::css_px(window.viewport_size().height)
                         - 2.0 * inset
                         - titlebar_clearance)
@@ -3002,9 +3511,14 @@ impl Workspace {
                     .font_family(theme::UI_FONT_FAMILY)
                     .flex()
                     .overflow_hidden()
-                    .when(self.settings_visible(), |dialog| dialog.track_focus(&self.modal_start_focus_handle).tab_group())
+                    .when(self.settings_visible(), |dialog| {
+                        dialog
+                            .track_focus(&self.modal_start_focus_handle)
+                            .tab_group()
+                    })
                     .capture_action(cx.listener(|this, _: &FocusChatInput, window, cx| {
-                        if window.has_focused_input(cx) || !this.settings_find_available(window, cx) {
+                        if window.has_focused_input(cx) || !this.settings_find_available(window, cx)
+                        {
                             cx.propagate();
                         } else {
                             this.focus_settings_search(window, cx);
@@ -3015,7 +3529,8 @@ impl Workspace {
                         let query_focused =
                             this.settings_search.focus_handle(cx).is_focused(window);
                         if !this.settings_find_available(window, cx)
-                            || (query_focused && this.settings_search.read(cx).is_composing()) {
+                            || (query_focused && this.settings_search.read(cx).is_composing())
+                        {
                             return;
                         }
                         let mods = event.keystroke.modifiers;
@@ -3058,172 +3573,226 @@ impl Workspace {
                         this.trap_modal_tab_focus(event, window, cx)
                     }))
                     .child(self.render_settings_nav(width, window, cx))
-                    .when(width >= 768.0 || !self.settings_search_open, |dialog| dialog.child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .id("desktop-settings-header")
-                                    .debug_selector(|| "desktop-settings-header".to_string())
-                                    .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
-                                    .pl(px(SETTINGS_PAGE_X_PADDING_PX))
-                                    .pr(px(SETTINGS_PAGE_X_PADDING_PX))
-                                    .flex_shrink_0()
-                                    .border_b_1()
-                                    .border_color(
-                                        theme::longan_800()
-                                            .opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY),
-                                    )
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
+                    .when(width >= 768.0 || !self.settings_search_open, |dialog| {
+                        dialog.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .id("desktop-settings-header")
+                                        .debug_selector(|| "desktop-settings-header".to_string())
+                                        .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
+                                        .pl(px(SETTINGS_PAGE_X_PADDING_PX))
+                                        .pr(px(SETTINGS_PAGE_X_PADDING_PX))
+                                        .flex_shrink_0()
+                                        .border_b_1()
+                                        .border_color(
+                                            theme::longan_800()
+                                                .opacity(WORKSPACE_SIDEBAR_BORDER_OPACITY),
+                                        )
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_size(px(SETTINGS_PAGE_TITLE_TEXT_SIZE_PX))
+                                                .text_color(theme::rambutan_100())
+                                                .child(self.ui_language().text("Settings")),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
+                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                                .text_color(theme::rambutan_600())
+                                                .child("/"),
+                                        )
+                                        .when(self.license_browser.is_some(), |header| {
+                                            header
+                                                .child(on_press_view(
+                                                    web_button(
+                                                        "license-back-about",
+                                                        WebButtonVariant::Ghost,
+                                                        WebButtonSize::Small,
+                                                        ButtonState::Enabled,
+                                                    )
+                                                    .debug_selector(|| "license-back-about".into())
+                                                    .aria_label(
+                                                        self.ui_language().text("Back to About"),
+                                                    )
+                                                    .child(section_label),
+                                                    cx,
+                                                    |this, window, cx| {
+                                                        this.return_to_about(window, cx);
+                                                    },
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .text_color(theme::rambutan_600())
+                                                        .child("/"),
+                                                )
+                                        })
+                                        .child(
+                                            div()
+                                                .debug_selector(|| {
+                                                    "desktop-settings-crumb".to_string()
+                                                })
+                                                .flex_1()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
+                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                                .text_color(theme::rambutan_400())
+                                                .child(if self.license_browser.is_some() {
+                                                    self.ui_language().text("Open source licenses")
+                                                } else {
+                                                    section_label
+                                                }),
+                                        )
+                                        .when(
+                                            self.settings_section == SettingsSection::General,
+                                            |el| {
+                                                el.child(
+                                                    web_button(
+                                                        "desktop-settings-restore",
+                                                        WebButtonVariant::Ghost,
+                                                        WebButtonSize::Small,
+                                                        ButtonState::disabled_if(
+                                                            self.changed_device_settings(cx)
+                                                                .is_empty(),
+                                                        ),
+                                                    )
+                                                    .debug_selector(|| {
+                                                        "desktop-settings-restore".to_owned()
+                                                    })
+                                                    .aria_label(
+                                                        self.ui_language()
+                                                            .text("Restore device defaults"),
+                                                    )
+                                                    .child(
+                                                        svg()
+                                                            .path(assets::ROTATE_CCW_ICON_PATH)
+                                                            .size(px(14.))
+                                                            .text_color(theme::rambutan_400()),
+                                                    )
+                                                    .when(width >= 768., |el| {
+                                                        el.child(
+                                                            self.ui_language()
+                                                                .text("Restore device defaults"),
+                                                        )
+                                                    })
+                                                    .on_click(cx.listener(|this, _, window, cx| {
+                                                        this.confirm_restore_device_settings(
+                                                            window, cx,
+                                                        )
+                                                    })),
+                                                )
+                                            },
+                                        )
+                                        .child(
+                                            div()
+                                                .id("desktop-settings-close")
+                                                .debug_selector(|| {
+                                                    "desktop-settings-close".to_string()
+                                                })
+                                                .flex_shrink_0()
+                                                .size(px(SETTINGS_CLOSE_BUTTON_SIZE_PX))
+                                                .rounded(px(SETTINGS_CONTROL_RADIUS_PX))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .text_color(theme::rambutan_500())
+                                                .tab_index(0)
+                                                .role(Role::Button)
+                                                .aria_label(
+                                                    self.ui_language().text(SETTINGS_CLOSE_LABEL),
+                                                )
+                                                .border_1()
+                                                .border_color(gpui::transparent_black())
+                                                .focus_visible(|el| {
+                                                    el.border_color(theme::persimmon_400())
+                                                })
+                                                .cursor_pointer()
+                                                .hover(|el| {
+                                                    el.bg(theme::longan_800()
+                                                        .opacity(SETTINGS_CLOSE_HOVER_BG_OPACITY))
+                                                        .text_color(theme::rambutan_100())
+                                                })
+                                                .tooltip(|window, cx| {
+                                                    Tooltip::new(SETTINGS_CLOSE_LABEL)
+                                                        .build(window, cx)
+                                                })
+                                                .map(|el| {
+                                                    on_press_view(el, cx, |this, _window, cx| {
+                                                        this.close_transient_surfaces();
+                                                        cx.notify();
+                                                    })
+                                                })
+                                                .child(
+                                                    svg()
+                                                        .path(assets::CLOSE_ICON_PATH)
+                                                        .size(px(SETTINGS_PAGE_CLOSE_ICON_PX))
+                                                        .text_color(theme::rambutan_500()),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    div().flex_1().min_h_0().flex().child(
                                         div()
-                                            .text_size(px(SETTINGS_PAGE_TITLE_TEXT_SIZE_PX))
-                                            .text_color(theme::rambutan_100())
-                                            .child(self.ui_language().text("Settings")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                            .text_color(theme::rambutan_600())
-                                            .child("/"),
-                                    )
-                                    .when(self.license_browser.is_some(), |header| header
-                                        .child(on_press_view(web_button("license-back-about", WebButtonVariant::Ghost,
-                                            WebButtonSize::Small, ButtonState::Enabled).debug_selector(||"license-back-about".into())
-                                            .aria_label(self.ui_language().text("Back to About")).child(section_label), cx, |this,window,cx| {
-                                                this.return_to_about(window,cx);
-                                            }))
-                                        .child(div().text_color(theme::rambutan_600()).child("/")))
-                                    .child(
-                                        div()
-                                            .debug_selector(|| "desktop-settings-crumb".to_string())
+                                            .id("desktop-settings-content")
+                                            .debug_selector(|| {
+                                                "desktop-settings-content".to_string()
+                                            })
+                                            .relative()
                                             .flex_1()
                                             .min_w_0()
-                                            .truncate()
-                                            .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                            .text_color(theme::rambutan_400())
-                                            .child(if self.license_browser.is_some() {self.ui_language().text("Open source licenses")} else {section_label}),
-                                    )
-                                    .when(self.settings_section == SettingsSection::General, |el| {
-                                        el.child(
-                                            web_button(
-                                                "desktop-settings-restore",
-                                                WebButtonVariant::Ghost,
-                                                WebButtonSize::Small,
-                                                ButtonState::disabled_if(
-                                                    self.changed_device_settings(cx).is_empty(),
-                                                ),
+                                            .min_h_0()
+                                            .when_some(
+                                                self.license_browser.as_ref(),
+                                                |body, browser| body.child(browser.clone()),
                                             )
-                                            .debug_selector(|| {
-                                                "desktop-settings-restore".to_owned()
-                                            })
-                                            .aria_label(self.ui_language().text("Restore device defaults"))
-                                            .child(
-                                                svg()
-                                                    .path(assets::ROTATE_CCW_ICON_PATH)
-                                                    .size(px(14.))
-                                                    .text_color(theme::rambutan_400()),
-                                            )
-                                            .when(width >= 768., |el| {
-                                                el.child(self.ui_language().text("Restore device defaults"))
-                                            })
-                                            .on_click(
-                                                cx.listener(|this, _, window, cx| {
-                                                    this.confirm_restore_device_settings(window, cx)
-                                                }),
-                                            ),
-                                        )
-                                    })
-                                    .child(
-                                        div()
-                                            .id("desktop-settings-close")
-                                            .debug_selector(|| "desktop-settings-close".to_string())
-                                            .flex_shrink_0()
-                                            .size(px(SETTINGS_CLOSE_BUTTON_SIZE_PX))
-                                            .rounded(px(SETTINGS_CONTROL_RADIUS_PX))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_color(theme::rambutan_500())
-                                            .tab_index(0)
-                                            .role(Role::Button)
-                                            .aria_label(self.ui_language().text(SETTINGS_CLOSE_LABEL))
-                                            .border_1()
-                                            .border_color(gpui::transparent_black())
-                                            .focus_visible(|el| {
-                                                el.border_color(theme::persimmon_400())
-                                            })
-                                            .cursor_pointer()
-                                            .hover(|el| {
-                                                el.bg(theme::longan_800()
-                                                    .opacity(SETTINGS_CLOSE_HOVER_BG_OPACITY))
-                                                    .text_color(theme::rambutan_100())
-                                            })
-                                            .tooltip(|window, cx| {
-                                                Tooltip::new(SETTINGS_CLOSE_LABEL).build(window, cx)
-                                            })
-                                            .map(|el| {
-                                                on_press_view(el, cx, |this, _window, cx| {
-                                                    this.close_transient_surfaces();
-                                                    cx.notify();
-                                                })
-                                            })
-                                            .child(
-                                                svg()
-                                                    .path(assets::CLOSE_ICON_PATH)
-                                                    .size(px(SETTINGS_PAGE_CLOSE_ICON_PX))
-                                                    .text_color(theme::rambutan_500()),
-                                            ),
+                                            .when(self.license_browser.is_none(), |body| {
+                                                body.child(
+                                                    div()
+                                                        .id("desktop-settings-scroll")
+                                                        .relative()
+                                                        .size_full()
+                                                        .overflow_y_scroll()
+                                                        .track_scroll(&self.settings_scroll)
+                                                        .px(px(SETTINGS_BODY_X_PADDING_PX))
+                                                        .py(px(SETTINGS_BODY_Y_PADDING_PX))
+                                                        .flex()
+                                                        .flex_col()
+                                                        .items_center()
+                                                        .gap(px(SETTINGS_BODY_GAP_PX))
+                                                        .child(self.render_settings_section(
+                                                            self.settings_section,
+                                                            cards_width,
+                                                            cx,
+                                                        ))
+                                                        .vertical_scrollbar(&self.settings_scroll),
+                                                )
+                                            }),
                                     ),
-                            )
-                            .child(
-                                div().flex_1().min_h_0().flex().child(
-                                    div()
-                                        .id("desktop-settings-content")
-                                        .debug_selector(|| "desktop-settings-content".to_string())
-                                        .relative()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .min_h_0()
-                                        .when_some(self.license_browser.as_ref(), |body, browser| body.child(browser.clone()))
-                                        .when(self.license_browser.is_none(), |body| body.child(
-                                            div()
-                                                .id("desktop-settings-scroll")
-                                                .relative()
-                                                .size_full()
-                                                .overflow_y_scroll()
-                                                .track_scroll(&self.settings_scroll)
-                                                .px(px(SETTINGS_BODY_X_PADDING_PX))
-                                                .py(px(SETTINGS_BODY_Y_PADDING_PX))
-                                                .flex()
-                                                .flex_col()
-                                                .items_center()
-                                                .gap(px(SETTINGS_BODY_GAP_PX))
-                                                .child(self.render_settings_section(
-                                                    self.settings_section,
-                                                    cards_width,
-                                                    cx,
-                                                ))
-                                                .vertical_scrollbar(&self.settings_scroll),
-                                        )),
                                 ),
-                            ),
-                    ))
-                    .when(self.settings_visible(), |dialog| dialog
-                        .when(self.settings_has_notice(cx), |el| el.children(self.render_hub_notice(window, cx)))
-                        .children(self.floating_update_progress(cx))
-                        .child(self.render_modal_focus_sentinel())),
+                        )
+                    })
+                    .when(self.settings_visible(), |dialog| {
+                        dialog
+                            .when(self.settings_has_notice(cx), |el| {
+                                el.children(self.render_hub_notice(window, cx))
+                            })
+                            .children(self.floating_update_progress(cx))
+                            .child(self.render_modal_focus_sentinel())
+                    }),
             )
-            .when(self.settings_section == SettingsSection::ScheduledTasks
-                && self.scheduled_panel().read(cx).scheduled_editor_open(), |layer| {
+            .when(
+                self.settings_section == SettingsSection::ScheduledTasks
+                    && self.scheduled_panel().read(cx).scheduled_editor_open(),
+                |layer| {
                     layer.child(crate::views::reactive_automations::ScheduledTaskDialog {
                         panel: self.scheduled_panel().clone(),
                         host_field: self.scheduled_host_field(cx),
@@ -3233,18 +3802,27 @@ impl Workspace {
                         favorites: self.favorite_models.clone(),
                         toggle_favorite: {
                             let ws = cx.weak_entity();
-                            Rc::new(move |id, cx| { let _ = ws.update(cx, |ws, cx| ws.toggle_favorite_model(id, cx)); })
+                            Rc::new(move |id, cx| {
+                                let _ = ws.update(cx, |ws, cx| ws.toggle_favorite_model(id, cx));
+                            })
                         },
                     })
-                })
+                },
+            )
             .when(self.secret_provider_dialog_visible(cx), |layer| {
-                layer.child(div().absolute().inset_0()
-                    .on_key_down(cx.listener(Self::trap_modal_tab_focus))
-                    .child(secret_source_settings::SecretProviderDialog(self.vault_settings.read(cx).secret_sources())))
+                layer.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .on_key_down(cx.listener(Self::trap_modal_tab_focus))
+                        .child(secret_source_settings::SecretProviderDialog(
+                            self.vault_settings.read(cx).secret_sources(),
+                        )),
+                )
             })
-            .children(self.render_generator_dialog(window,cx))
-            .children(self.render_provider_editor(window,cx))
-            .children(self.render_hub_dialog(window,cx))
+            .children(self.render_generator_dialog(window, cx))
+            .children(self.render_provider_editor(window, cx))
+            .children(self.render_hub_dialog(window, cx))
             .into_any_element()
     }
 
@@ -3286,10 +3864,20 @@ mod ui_audit_tests {
     fn settings_rows_stack_when_labels_and_controls_cannot_fit() {
         // Switching from the icon rail to the full navigation reduces the row width.
         for (viewport, stacked) in [
-            (640., true), (697., true), (698., false), (767., false),
-            (768., true), (913., true), (914., false), (1920., false),
+            (640., true),
+            (697., true),
+            (698., false),
+            (767., false),
+            (768., true),
+            (913., true),
+            (914., false),
+            (1920., false),
         ] {
-            assert_eq!(settings_rows_stack(viewport), stacked, "{viewport}px viewport");
+            assert_eq!(
+                settings_rows_stack(viewport),
+                stacked,
+                "{viewport}px viewport"
+            );
         }
     }
 
@@ -3369,7 +3957,9 @@ mod ui_audit_tests {
                 workspace.set_settings_section(SettingsSection::General, cx);
             });
             cx.run_until_parked();
-            let general = cx.debug_bounds(SettingsSection::General.selector()).expect("General tab");
+            let general = cx
+                .debug_bounds(SettingsSection::General.selector())
+                .expect("General tab");
             cx.simulate_click(general.center(), gpui::Modifiers::default());
             cx.simulate_keystrokes("down end down");
             workspace.update_in(cx, |ws, window, _| {
@@ -3378,16 +3968,24 @@ mod ui_audit_tests {
             });
             cx.simulate_keystrokes("home up down enter");
             cx.run_until_parked();
-            workspace.read_with(cx, |ws, _| assert_eq!(ws.settings_section, SettingsSection::Appearance));
+            workspace.read_with(cx, |ws, _| {
+                assert_eq!(ws.settings_section, SettingsSection::Appearance)
+            });
             if width < 768. {
-                let search = cx.debug_bounds("desktop-settings-show-search").expect("compact search button");
+                let search = cx
+                    .debug_bounds("desktop-settings-show-search")
+                    .expect("compact search button");
                 cx.simulate_click(search.center(), gpui::Modifiers::default());
             } else {
                 cx.simulate_keystrokes("/");
             }
             cx.run_until_parked();
-            let nav = cx.debug_bounds("desktop-settings-nav").expect("search navigation");
-            let dialog = cx.debug_bounds("desktop-settings-dialog").expect("settings dialog");
+            let nav = cx
+                .debug_bounds("desktop-settings-nav")
+                .expect("search navigation");
+            let dialog = cx
+                .debug_bounds("desktop-settings-dialog")
+                .expect("settings dialog");
             if width < 768. {
                 assert!(nav.size.width >= dialog.size.width - px(2.));
                 assert!(cx.debug_bounds("desktop-settings-content").is_none());
@@ -3403,19 +4001,27 @@ mod ui_audit_tests {
                 let links = cx
                     .debug_bounds("desktop-settings-links")
                     .expect("settings links");
-                assert!((f32::from(search_header.bottom()) - f32::from(pane_header.bottom())).abs() <= 1.0);
+                assert!(
+                    (f32::from(search_header.bottom()) - f32::from(pane_header.bottom())).abs()
+                        <= 1.0
+                );
                 assert!(links.top() >= search_header.bottom() - px(1.0));
             }
             cx.simulate_input("project");
             cx.run_until_parked();
-            let count = workspace.read_with(cx, |workspace, _| workspace.settings_search_results.len());
+            let count =
+                workspace.read_with(cx, |workspace, _| workspace.settings_search_results.len());
             assert!(count > 1);
             cx.simulate_keystrokes("up");
             cx.run_until_parked();
-            workspace.read_with(cx, |workspace, _| assert_eq!(workspace.settings_search_index, count - 1));
+            workspace.read_with(cx, |workspace, _| {
+                assert_eq!(workspace.settings_search_index, count - 1)
+            });
             cx.simulate_keystrokes("down");
             cx.run_until_parked();
-            workspace.read_with(cx, |workspace, _| assert_eq!(workspace.settings_search_index, 0));
+            workspace.read_with(cx, |workspace, _| {
+                assert_eq!(workspace.settings_search_index, 0)
+            });
             cx.simulate_keystrokes("escape");
             cx.run_until_parked();
             workspace.read_with(cx, |workspace, cx| {
@@ -3425,7 +4031,9 @@ mod ui_audit_tests {
             cx.simulate_input("no such setting exists");
             cx.run_until_parked();
             assert!(cx.debug_bounds("desktop-settings-no-results").is_some());
-            let clear = cx.debug_bounds("settings-clear-search").expect("clear search button");
+            let clear = cx
+                .debug_bounds("settings-clear-search")
+                .expect("clear search button");
             cx.simulate_click(clear.center(), gpui::Modifiers::default());
             cx.run_until_parked();
             cx.simulate_input("project title instructions");
@@ -3453,7 +4061,9 @@ mod ui_audit_tests {
     }
 
     #[gpui::test]
-    fn settings_search_finds_current_shortcuts_and_opens_unassigned_commands(cx: &mut TestAppContext) {
+    fn settings_search_finds_current_shortcuts_and_opens_unassigned_commands(
+        cx: &mut TestAppContext,
+    ) {
         cx.update(|cx| {
             bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
@@ -3463,7 +4073,11 @@ mod ui_audit_tests {
         workspace.update_in(cx, |ws, window, cx| {
             ws.open_settings(&super::OpenSettings, window, cx);
             ws.keybindings.retain(|rule| rule.command != "chat.new");
-            let palette = ws.keybindings.iter_mut().find(|rule| rule.command == "command.palette").unwrap();
+            let palette = ws
+                .keybindings
+                .iter_mut()
+                .find(|rule| rule.command == "command.palette")
+                .unwrap();
             palette.key = "mod+alt+f12".into();
         });
         cx.run_until_parked();
@@ -3472,7 +4086,10 @@ mod ui_audit_tests {
         cx.simulate_input("mod+alt+f12");
         cx.run_until_parked();
         workspace.read_with(cx, |ws, _| {
-            assert_eq!(ws.settings_search_results[0].command.as_deref(), Some("command.palette"));
+            assert_eq!(
+                ws.settings_search_results[0].command.as_deref(),
+                Some("command.palette")
+            );
         });
         cx.simulate_keystrokes("ctrl-f");
         cx.run_until_parked();
@@ -3480,15 +4097,26 @@ mod ui_audit_tests {
         cx.run_until_parked();
         workspace.read_with(cx, |ws, cx| {
             assert_eq!(ws.settings_search.read(cx).value().as_ref(), "chát.new");
-            assert_eq!(ws.settings_search_results[0].command.as_deref(), Some("chat.new"));
+            assert_eq!(
+                ws.settings_search_results[0].command.as_deref(),
+                Some("chat.new")
+            );
         });
         cx.simulate_keystrokes("enter");
         cx.run_until_parked();
         workspace.read_with(cx, |ws, cx| {
             assert_eq!(ws.settings_section, SettingsSection::Keyboard);
             assert_eq!(ws.keybinding_filter.read(cx).value().as_ref(), "chat.new");
-            assert_eq!(ws.keybinding_draft.as_ref().and_then(|draft| draft.command.as_deref()), Some("chat.new"));
-            assert!(ws.settings_keybindings().iter().all(|rule| rule.command != "chat.new"));
+            assert_eq!(
+                ws.keybinding_draft
+                    .as_ref()
+                    .and_then(|draft| draft.command.as_deref()),
+                Some("chat.new")
+            );
+            assert!(ws
+                .settings_keybindings()
+                .iter()
+                .all(|rule| rule.command != "chat.new"));
         });
     }
 
@@ -3540,9 +4168,13 @@ mod ui_audit_tests {
         for (width, stacked) in [(913., true), (914., false), (767., false), (768., true)] {
             cx.simulate_resize(size(px(width), px(850.)));
             cx.run_until_parked();
-            let label = cx.debug_bounds("desktop-settings-row-transcription-provider-label").unwrap();
+            let label = cx
+                .debug_bounds("desktop-settings-row-transcription-provider-label")
+                .unwrap();
             let control = cx.debug_bounds("desktop-transcription-provider").unwrap();
-            let row = cx.debug_bounds("desktop-settings-row-transcription-provider").unwrap();
+            let row = cx
+                .debug_bounds("desktop-settings-row-transcription-provider")
+                .unwrap();
             assert_eq!(control.size.width, px(320.));
             assert!(control.right() <= row.right());
             if stacked {
@@ -3555,14 +4187,20 @@ mod ui_audit_tests {
             if width == 913. {
                 cx.simulate_click(control.center(), gpui::Modifiers::default());
                 cx.run_until_parked();
-                assert!(cx.debug_bounds("desktop-transcription-provider-list").is_some());
+                assert!(cx
+                    .debug_bounds("desktop-transcription-provider-list")
+                    .is_some());
             }
             if width == 914. {
-                let menu = cx.debug_bounds("desktop-transcription-provider-list").unwrap();
+                let menu = cx
+                    .debug_bounds("desktop-transcription-provider-list")
+                    .unwrap();
                 assert!((menu.left() - control.left()).abs() <= px(1.));
                 cx.simulate_keystrokes("escape");
                 cx.run_until_parked();
-                assert!(cx.debug_bounds("desktop-transcription-provider-list").is_none());
+                assert!(cx
+                    .debug_bounds("desktop-transcription-provider-list")
+                    .is_none());
                 assert!(cx.debug_bounds("desktop-settings-dialog").is_some());
             }
         }
@@ -3571,13 +4209,18 @@ mod ui_audit_tests {
         workspace.update_in(cx, |ws, window, cx| ws.set_zoom(2.0, window, cx));
         cx.run_until_parked();
         let control = cx.debug_bounds("desktop-transcription-provider").unwrap();
-        let row = cx.debug_bounds("desktop-settings-row-transcription-provider").unwrap();
+        let row = cx
+            .debug_bounds("desktop-settings-row-transcription-provider")
+            .unwrap();
         let pane = cx.debug_bounds("desktop-settings-content").unwrap();
         let close = cx.debug_bounds("desktop-settings-close").unwrap();
         assert!(close.left() >= pane.left() && close.right() <= pane.right());
         assert!(row.left() >= pane.left() && row.right() <= pane.right());
         assert!(control.left() >= row.left() && control.right() <= row.right());
-        assert!(control.size.width < px(320. * 2.), "the wide selector shrinks with its column");
+        assert!(
+            control.size.width < px(320. * 2.),
+            "the wide selector shrinks with its column"
+        );
         workspace.update_in(cx, |ws, window, cx| ws.set_zoom(1.0, window, cx));
     }
 }

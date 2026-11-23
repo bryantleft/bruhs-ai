@@ -10,8 +10,8 @@ use std::{
 use tokio::sync::{watch, Mutex};
 
 mod branches;
-mod credits;
 mod command;
+mod credits;
 #[cfg(test)]
 mod fingerprint_tests;
 mod forge;
@@ -20,9 +20,9 @@ mod gitlab;
 mod native_stack;
 mod plan;
 mod preferences;
-mod review_guide;
 #[cfg(all(test, unix))]
 mod repository_tests;
+mod review_guide;
 mod stack;
 mod storage;
 #[cfg(test)]
@@ -82,8 +82,8 @@ pub struct DeliveryService {
 #[serde(deny_unknown_fields)]
 struct Journal {
     version: u32,
-    #[serde(default,skip_serializing_if="std::collections::BTreeMap::is_empty")]
-    preferences:std::collections::BTreeMap<String,DeliveryOverrides>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    preferences: std::collections::BTreeMap<String, DeliveryOverrides>,
     actions: Vec<ActionReceipt>,
     watches: Vec<PullWatch>,
     events: Vec<WatchEvent>,
@@ -93,7 +93,7 @@ impl Default for Journal {
     fn default() -> Self {
         Self {
             version: 1,
-            preferences:Default::default(),
+            preferences: Default::default(),
             actions: Vec::new(),
             watches: Vec::new(),
             events: Vec::new(),

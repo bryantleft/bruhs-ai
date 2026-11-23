@@ -1,7 +1,7 @@
 //! Route newly created threads when the selected provider reports an exhausted quota window.
 use super::*;
 use crate::app_state::spawn_tokio;
-use bruhs_models::agent::{MODEL_CATALOG, model_info, provider_for_model_id};
+use bruhs_models::agent::{model_info, provider_for_model_id, MODEL_CATALOG};
 
 impl Workspace {
     pub(super) fn model_for_new_thread<'a>(&'a self, requested: &'a str) -> &'a str {
@@ -36,9 +36,17 @@ impl Workspace {
                     description: None,
                 }),
         );
-        options.extend(self.thread_catalog.models.iter().filter(|m|model_info(&m.id).is_none()).map(|m|DropdownOption{
-            value:bruhs_ui::dropdown::saved_option_value(&m.id),label:m.label.clone(),description:None,
-        }));
+        options.extend(
+            self.thread_catalog
+                .models
+                .iter()
+                .filter(|m| model_info(&m.id).is_none())
+                .map(|m| DropdownOption {
+                    value: bruhs_ui::dropdown::saved_option_value(&m.id),
+                    label: m.label.clone(),
+                    description: None,
+                }),
+        );
         for instance in self.acp_models.iter().filter(|i| {
             self.provider_availability
                 .as_ref()
@@ -69,8 +77,12 @@ impl Workspace {
             "settings-row-fallback-model",
             "Fallback model",
             "Used when the selected provider hits a usage limit.",
-            div().w(px(self.model_control_width(Some(model)))).max_w_full().min_w_0()
-                .child(self.with_model_options(model, true, picker, cx)).into_any_element(),
+            div()
+                .w(px(self.model_control_width(Some(model))))
+                .max_w_full()
+                .min_w_0()
+                .child(self.with_model_options(model, true, picker, cx))
+                .into_any_element(),
         )
     }
 
@@ -88,7 +100,9 @@ impl Workspace {
         {
             return;
         }
-        if self.fallback_model.as_deref()!=Some(value) {self.fallback_options=Default::default();}
+        if self.fallback_model.as_deref() != Some(value) {
+            self.fallback_options = Default::default();
+        }
         self.fallback_model = (value != "off").then(|| value.to_owned());
         self.monitor_provider_capacity(cx);
         self.persist_and_notify(cx);
@@ -102,49 +116,47 @@ impl Workspace {
         if cfg!(test) {
             return;
         }
-        self.capacity_task = Some(cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(probe) = this.update(cx, |_, cx| {
-                    spawn_tokio(cx, async {
-                        let (claude, codex) = tokio::join!(
-                            bruhs_core::coordination::provider_quota_reset("claude"),
-                            bruhs_core::coordination::provider_quota_reset("codex")
-                        );
-                        [("claude", claude), ("codex", codex)]
-                    })
-                }) else {
-                    return;
-                };
-                let readings = probe.await;
-                if this
-                    .update(cx, |this, cx| {
-                        let previous = this.provider_resets.clone();
-                        for (provider, reading) in readings {
-                            match reading {
-                                Ok(Some(at)) => {
-                                    this.provider_resets
-                                        .insert(provider.to_owned(), at.as_millis());
-                                }
-                                Ok(None) => {
-                                    this.provider_resets.remove(provider);
-                                }
-                                Err(_) => {}
+        self.capacity_task = Some(cx.spawn(async move |this, cx| loop {
+            let Ok(probe) = this.update(cx, |_, cx| {
+                spawn_tokio(cx, async {
+                    let (claude, codex) = tokio::join!(
+                        bruhs_core::coordination::provider_quota_reset("claude"),
+                        bruhs_core::coordination::provider_quota_reset("codex")
+                    );
+                    [("claude", claude), ("codex", codex)]
+                })
+            }) else {
+                return;
+            };
+            let readings = probe.await;
+            if this
+                .update(cx, |this, cx| {
+                    let previous = this.provider_resets.clone();
+                    for (provider, reading) in readings {
+                        match reading {
+                            Ok(Some(at)) => {
+                                this.provider_resets
+                                    .insert(provider.to_owned(), at.as_millis());
                             }
+                            Ok(None) => {
+                                this.provider_resets.remove(provider);
+                            }
+                            Err(_) => {}
                         }
-                        this.provider_resets
-                            .retain(|_, at| *at > EpochMs::now().as_millis());
-                        if previous != this.provider_resets {
-                            this.persist_and_notify(cx);
-                        }
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(120))
-                    .await;
+                    }
+                    this.provider_resets
+                        .retain(|_, at| *at > EpochMs::now().as_millis());
+                    if previous != this.provider_resets {
+                        this.persist_and_notify(cx);
+                    }
+                })
+                .is_err()
+            {
+                return;
             }
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(120))
+                .await;
         }));
     }
 }

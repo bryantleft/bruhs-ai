@@ -272,19 +272,26 @@ pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
         busy.set(true);
         wasm_bindgen_futures::spawn_local(async move {
             let result = async {
-                let mut url = format!("{}/api/local-tools/dictation?model=base_en&language=en", crate::api::BASE_URL);
+                let mut url = format!(
+                    "{}/api/local-tools/dictation?model=base_en&language=en",
+                    crate::api::BASE_URL
+                );
                 if let Some(project) = project {
                     url.push_str("&project=");
-                    url.push_str(&js_sys::encode_uri_component(&project).as_string().unwrap_or_default());
+                    url.push_str(
+                        &js_sys::encode_uri_component(&project)
+                            .as_string()
+                            .unwrap_or_default(),
+                    );
                 }
                 let response = gloo_net::http::Request::post(&url)
-                .header("Content-Type", "audio/wav")
-                .header("x-bruhs-tool-grant", &id)
-                .body(audio)
-                .map_err(|error| error.to_string())?
-                .send()
-                .await
-                .map_err(|error| error.to_string())?;
+                    .header("Content-Type", "audio/wav")
+                    .header("x-bruhs-tool-grant", &id)
+                    .body(audio)
+                    .map_err(|error| error.to_string())?
+                    .send()
+                    .await
+                    .map_err(|error| error.to_string())?;
                 if !response.ok() {
                     return Err(response
                         .text()
@@ -328,7 +335,7 @@ pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
         error.set(None);
         let source_thread = thread.get_untracked();
         owner.set_value(source_thread.clone());
-        recorded_project.set_value(active_project.get_untracked().map(|project|project.path));
+        recorded_project.set_value(active_project.get_untracked().map(|project| project.path));
         wasm_bindgen_futures::spawn_local(async move {
             let result = async {
                 let permission: ToolGrant = request(

@@ -532,7 +532,10 @@ pub struct AgentRequest {
     /// Claude `--effort`. Omitted for Codex and when the CLI default should stand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    #[serde(default, skip_serializing_if = "crate::agent_extensions::KiroSelection::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::agent_extensions::KiroSelection::is_empty"
+    )]
     pub kiro_selection: crate::agent_extensions::KiroSelection,
     /// Claude `--autocompact`. Omitted when unset, and never sent to Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]

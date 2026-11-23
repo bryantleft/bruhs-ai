@@ -34,14 +34,19 @@ fn read(default: &Path) -> io::Result<Registry> {
     }
 }
 fn verify(e: &Entry) -> bool {
-    let marker=e.path.join(MARKER);
-    e.path.canonicalize().is_ok_and(|canonical|canonical==e.path)
-        && fs::symlink_metadata(&marker).is_ok_and(|meta|meta.is_file() && meta.len()==e.marker.len() as u64)
-        && fs::read_to_string(marker).is_ok_and(|text|text==e.marker)
+    let marker = e.path.join(MARKER);
+    e.path
+        .canonicalize()
+        .is_ok_and(|canonical| canonical == e.path)
+        && fs::symlink_metadata(&marker)
+            .is_ok_and(|meta| meta.is_file() && meta.len() == e.marker.len() as u64)
+        && fs::read_to_string(marker).is_ok_and(|text| text == e.marker)
 }
 /// The owner-selected parent, including when a removable volume is disconnected.
 pub fn selected_parent() -> io::Result<Option<PathBuf>> {
-    Ok(read(&default_root()?)?.active.and_then(|p|p.parent().map(Path::to_owned)))
+    Ok(read(&default_root()?)?
+        .active
+        .and_then(|p| p.parent().map(Path::to_owned)))
 }
 pub fn active() -> io::Result<PathBuf> {
     active_in(&default_root()?)

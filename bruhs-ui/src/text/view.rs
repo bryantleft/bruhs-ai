@@ -228,35 +228,37 @@ impl RenderOnce for TextView {
                                     },
                                 );
                                 let (up_state, up_registry) = (state.clone(), registry.clone());
-                                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
-                                    if !phase.bubble()
-                                        || event.button != MouseButton::Left
-                                        || !up_state.read(cx).selecting
-                                    {
-                                        return;
-                                    }
-                                    let click = up_state.update(cx, |state, cx| {
-                                        state.selecting = false;
-                                        let click = state
-                                            .selection
-                                            .is_some_and(|(anchor, head)| anchor == head);
-                                        if click {
-                                            state.selection = None;
+                                window.on_mouse_event(
+                                    move |event: &MouseUpEvent, phase, window, cx| {
+                                        if !phase.bubble()
+                                            || event.button != MouseButton::Left
+                                            || !up_state.read(cx).selecting
+                                        {
+                                            return;
                                         }
-                                        cx.notify();
-                                        click
-                                    });
-                                    if click {
-                                        open_link(
-                                            &up_state,
-                                            &up_registry,
-                                            link_filter.as_ref(),
-                                            event.position,
-                                            window,
-                                            cx,
-                                        );
-                                    }
-                                });
+                                        let click = up_state.update(cx, |state, cx| {
+                                            state.selecting = false;
+                                            let click = state
+                                                .selection
+                                                .is_some_and(|(anchor, head)| anchor == head);
+                                            if click {
+                                                state.selection = None;
+                                            }
+                                            cx.notify();
+                                            click
+                                        });
+                                        if click {
+                                            open_link(
+                                                &up_state,
+                                                &up_registry,
+                                                link_filter.as_ref(),
+                                                event.position,
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                    },
+                                );
                             },
                         )
                         .absolute()
@@ -484,12 +486,16 @@ fn render_blocks(
                     let padding = std::mem::take(&mut refinement.padding);
                     let mut block = gap(div(), BLOCK_GAP_REM).w_full();
                     block.style().refine(&refinement);
-                    let wrap=crate::theme::wrap_code();
-                    let mut lines = div().when(!wrap,|el|el.whitespace_nowrap());
+                    let wrap = crate::theme::wrap_code();
+                    let mut lines = div().when(!wrap, |el| el.whitespace_nowrap());
                     lines.style().padding = padding;
-                    let lines=lines.child(code_segment(code,frame,font,code_color,cx));
-                    if wrap {block.child(lines).into_any_element()}else{
-                        block.child(div().w_full().overflow_x_scrollbar().child(lines)).into_any_element()
+                    let lines = lines.child(code_segment(code, frame, font, code_color, cx));
+                    if wrap {
+                        block.child(lines).into_any_element()
+                    } else {
+                        block
+                            .child(div().w_full().overflow_x_scrollbar().child(lines))
+                            .into_any_element()
                     }
                 }
                 Block::List { start, items } => {

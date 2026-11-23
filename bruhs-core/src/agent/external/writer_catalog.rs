@@ -27,7 +27,9 @@ pub async fn writer_catalog() -> WriterCatalog {
 }
 
 pub async fn writer_catalog_for_project(project: &std::path::Path) -> WriterCatalog {
-    let Ok(prefs) = crate::agent_extensions::availability::ProviderAvailability::load_for_project(project) else {
+    let Ok(prefs) =
+        crate::agent_extensions::availability::ProviderAvailability::load_for_project(project)
+    else {
         return WriterCatalog { models: Vec::new() };
     };
     let (claude, codex) = tokio::join!(
@@ -90,20 +92,17 @@ fn choices(rows: &Value, id: &str, label: &str) -> Vec<WriterChoice> {
         {
             continue;
         }
-        let title = row[label]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map_or_else(
-                || match value {
-                    "xhigh" => "Extra High".into(),
-                    s => {
-                        let mut label = s.to_owned();
-                        label[..1].make_ascii_uppercase();
-                        label
-                    }
-                },
-                str::to_owned,
-            );
+        let title = row[label].as_str().filter(|s| !s.is_empty()).map_or_else(
+            || match value {
+                "xhigh" => "Extra High".into(),
+                s => {
+                    let mut label = s.to_owned();
+                    label[..1].make_ascii_uppercase();
+                    label
+                }
+            },
+            str::to_owned,
+        );
         let mut choice = WriterChoice::new(value, &title.chars().take(160).collect::<String>());
         choice.description = row["description"]
             .as_str()

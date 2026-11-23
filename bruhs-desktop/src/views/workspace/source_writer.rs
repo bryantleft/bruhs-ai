@@ -272,7 +272,14 @@ impl Workspace {
             None,
             false,
             Some(guide_switch),
-            reset_guides.then(|| self.writer_reset("reset-review-guides", "Use the environment review guide setting", "settings-review-guides", cx)),
+            reset_guides.then(|| {
+                self.writer_reset(
+                    "reset-review-guides",
+                    "Use the environment review guide setting",
+                    "settings-review-guides",
+                    cx,
+                )
+            }),
         );
         let mut rows = vec![writing.into_any_element(), guide_row];
         if let Some(p) = prefs.filter(|p| p.review_guides_enabled) {
@@ -305,7 +312,14 @@ impl Workspace {
                 None,
                 false,
                 Some(control),
-                reset_model.then(|| self.writer_reset("reset-guide-model", "Use the environment review guide model", "settings-guide-model", cx)),
+                reset_model.then(|| {
+                    self.writer_reset(
+                        "reset-guide-model",
+                        "Use the environment review guide model",
+                        "settings-guide-model",
+                        cx,
+                    )
+                }),
             ));
             let reset = if scoped {
                 p.overrides.review_guide_instructions.is_some()
@@ -377,7 +391,14 @@ impl Workspace {
                 None,
                 false,
                 Some(control),
-                reset_model.then(|| self.writer_reset("reset-writer-model", "Use the environment writer model", "settings-writer-model", cx)),
+                reset_model.then(|| {
+                    self.writer_reset(
+                        "reset-writer-model",
+                        "Use the environment writer model",
+                        "settings-writer-model",
+                        cx,
+                    )
+                }),
             ));
         }
         self.settings_card("Commits & pull requests", "", rows)
@@ -424,7 +445,13 @@ impl Workspace {
             } else {
                 "settings-writer-options"
             };
-            if let Some(control) = self.generation_options_control(options_id, &self.delivery_preferences.catalog,model, options, cx) {
+            if let Some(control) = self.generation_options_control(
+                options_id,
+                &self.delivery_preferences.catalog,
+                model,
+                options,
+                cx,
+            ) {
                 controls = controls.child(div().min_w_0().max_w(px(224.)).child(control));
             }
         }
@@ -496,7 +523,7 @@ impl Workspace {
     pub(super) fn generation_options_control(
         &self,
         id: &'static str,
-        catalog:&bruhs_models::delivery::writer_catalog::WriterCatalog,
+        catalog: &bruhs_models::delivery::writer_catalog::WriterCatalog,
         model: &str,
         options: &GenerationOptions,
         cx: &Context<'_, Self>,
@@ -513,7 +540,12 @@ impl Workspace {
             for choice in &spec.choices {
                 let (value, label) = (choice.value.as_str(), choice.label.as_str());
                 let token = saved_option_value(&format!("{}={value}", spec.kind.key()));
-                if options.configured(spec.kind).filter(|v| spec.accepts(v)).unwrap_or(&spec.default) == value {
+                if options
+                    .configured(spec.kind)
+                    .filter(|v| spec.accepts(v))
+                    .unwrap_or(&spec.default)
+                    == value
+                {
                     selected.push(token);
                     if spec.kind == OptionKind::Thinking {
                         summary.push(format!("Thinking {label}"));
@@ -549,7 +581,11 @@ impl Workspace {
         }
         let (primary, others) = selected.split_first()?;
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
-        let label = if id == "settings-thread-model-options" { "Default model options" } else if id == "settings-fallback-model-options" { "Fallback model options" } else if id == "settings-guide-options" {
+        let label = if id == "settings-thread-model-options" {
+            "Default model options"
+        } else if id == "settings-fallback-model-options" {
+            "Fallback model options"
+        } else if id == "settings-guide-options" {
             "Review guide model options"
         } else {
             "Source control writer model options"

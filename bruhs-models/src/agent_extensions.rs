@@ -62,12 +62,23 @@ impl AcpInstance {
             driver: Some(AcpDriver::Kiro),
             id,
             name,
-            command: if binary.trim().is_empty() { "kiro-cli" } else { binary.trim() }.into(),
-            args: ["acp", "--agent-engine=v3", "--auth-method=cli"].map(String::from).into(),
+            command: if binary.trim().is_empty() {
+                "kiro-cli"
+            } else {
+                binary.trim()
+            }
+            .into(),
+            args: ["acp", "--agent-engine=v3", "--auth-method=cli"]
+                .map(String::from)
+                .into(),
             modes: [
                 (PermissionMode::Default.as_str().into(), "off".into()),
-                (PermissionMode::BypassPermissions.as_str().into(), "on".into()),
-            ].into(),
+                (
+                    PermissionMode::BypassPermissions.as_str().into(),
+                    "on".into(),
+                ),
+            ]
+            .into(),
             mode_config_id: Some("autopilot".into()),
             model_config_id: None,
             models: Vec::new(),
@@ -113,8 +124,12 @@ pub enum AcpVariable {
 
 /// An ACP session ID is local to the instance that issued it.
 pub fn acp_session_matches_model(session: &str, model: &str) -> bool {
-    let selected = model.strip_prefix("acp/").and_then(|value| value.split_once('/'));
-    let owner = session.strip_prefix("acp:").and_then(|value| value.split_once(':'));
+    let selected = model
+        .strip_prefix("acp/")
+        .and_then(|value| value.split_once('/'));
+    let owner = session
+        .strip_prefix("acp:")
+        .and_then(|value| value.split_once(':'));
     matches!((selected, owner), (Some((id, _)), Some((source, native))) if id == source && !native.is_empty())
 }
 
@@ -177,9 +192,11 @@ impl AcpInstance {
             }) {
                 return Err("Enter an executable name or path for the registry override.".into());
             }
-            if origin.auth_method_id.as_ref().is_some_and(|id| {
-                id.trim().is_empty() || id.chars().any(char::is_control)
-            }) {
+            if origin
+                .auth_method_id
+                .as_ref()
+                .is_some_and(|id| id.trim().is_empty() || id.chars().any(char::is_control))
+            {
                 return Err("Enter an ACP authentication method ID.".into());
             }
         }
@@ -221,9 +238,15 @@ impl AcpInstance {
         }
         if self.driver == Some(AcpDriver::Kiro) {
             let defaults = Self::kiro(String::new(), String::new(), "");
-            if self.registry.is_some() || self.args != defaults.args || self.modes != defaults.modes
-                || self.mode_config_id != defaults.mode_config_id || self.model_config_id.is_some() {
-                return Err("Kiro instances require the Kiro V3 launch and access settings.".into());
+            if self.registry.is_some()
+                || self.args != defaults.args
+                || self.modes != defaults.modes
+                || self.mode_config_id != defaults.mode_config_id
+                || self.model_config_id.is_some()
+            {
+                return Err(
+                    "Kiro instances require the Kiro V3 launch and access settings.".into(),
+                );
             }
         }
         for model in &self.models {

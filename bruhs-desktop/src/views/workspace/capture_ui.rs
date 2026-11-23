@@ -223,29 +223,24 @@ impl Workspace {
                             if this.capture_edit_id.is_none() {
                                 this.select_capture_kind(kind, window, cx);
                             }
-                                })
+                        })
+                    })
+                    .child(
+                        svg()
+                            .debug_selector(move || {
+                                format!("desktop-capture-kind-{}-icon", kind.label().to_lowercase())
                             })
-                            .child(
-                                svg()
-                                    .debug_selector(move || {
-                                        format!(
-                                            "desktop-capture-kind-{}-icon",
-                                            kind.label().to_lowercase()
-                                        )
-                                    })
-                                    .path(SharedString::from(format!("icons/{}.svg", kind.icon())))
-                                    .size(px(theme::ICON_INLINE_PX))
-                                    .flex_shrink_0()
-                                    .text_color(color)
-                                    .when(!is_selected, |el| {
-                                        el.group_hover(group, |el| {
-                                            el.text_color(theme::rambutan_200())
-                                        })
-                                    }),
-                            )
-                            .child(div().max_w_full().truncate().child(kind.label()))
-                    }),
-            );
+                            .path(SharedString::from(format!("icons/{}.svg", kind.icon())))
+                            .size(px(theme::ICON_INLINE_PX))
+                            .flex_shrink_0()
+                            .text_color(color)
+                            .when(!is_selected, |el| {
+                                el.group_hover(group, |el| el.text_color(theme::rambutan_200()))
+                            }),
+                    )
+                    .child(div().max_w_full().truncate().child(kind.label()))
+                }),
+        );
 
         let body = div()
             .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))

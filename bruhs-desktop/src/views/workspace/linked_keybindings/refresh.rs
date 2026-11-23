@@ -129,7 +129,9 @@ impl Workspace {
                     .and_then(|h| h.data.rules.get(this.keybinding_index))
                     .cloned();
                 let changed = state.hosts.iter().zip(&refreshed).any(|(a, b)| {
-                    a.data.rules != b.data.rules || a.data.editable != b.data.editable || a.problem != b.problem
+                    a.data.rules != b.data.rules
+                        || a.data.editable != b.data.editable
+                        || a.problem != b.problem
                 });
                 state.hosts = refreshed;
                 if !changed {

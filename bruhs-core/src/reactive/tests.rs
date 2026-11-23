@@ -1029,48 +1029,120 @@ async fn webhook_filters_route_individual_tasks_and_retain_the_delivery_decision
     filtered.id = "filtered".into();
     filtered.source_id = hook.id.clone();
     filtered.webhook_filters = vec![
-        WebhookFilter { path: "body.items.[].name".into(), test: WebhookTest::In(vec!["apple".into(), "pear".into()]) },
-        WebhookFilter { path: "headers.X-Event".into(), test: WebhookTest::StartsWith("ready".into()) },
-        WebhookFilter { path: "query.queue".into(), test: WebhookTest::Equals("local".into()) },
-        WebhookFilter { path: "body.items[].name".into(), test: WebhookTest::NotEquals("skip".into()) },
-        WebhookFilter { path: "body.details".into(), test: WebhookTest::Exists },
+        WebhookFilter {
+            path: "body.items.[].name".into(),
+            test: WebhookTest::In(vec!["apple".into(), "pear".into()]),
+        },
+        WebhookFilter {
+            path: "headers.X-Event".into(),
+            test: WebhookTest::StartsWith("ready".into()),
+        },
+        WebhookFilter {
+            path: "query.queue".into(),
+            test: WebhookTest::Equals("local".into()),
+        },
+        WebhookFilter {
+            path: "body.items[].name".into(),
+            test: WebhookTest::NotEquals("skip".into()),
+        },
+        WebhookFilter {
+            path: "body.details".into(),
+            test: WebhookTest::Exists,
+        },
     ];
     let mut always = filtered.clone();
     always.id = "always".into();
     always.webhook_filters.clear();
-    for change in [ReactiveChange::SaveSource { source: hook }, ReactiveChange::SaveSubscription { subscription: filtered.clone() }, ReactiveChange::SaveSubscription { subscription: always }] {
-        runtime.command(ReactiveCommand::Apply { change }).await.unwrap();
+    for change in [
+        ReactiveChange::SaveSource { source: hook },
+        ReactiveChange::SaveSubscription {
+            subscription: filtered.clone(),
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: always,
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
     }
     let token = runtime.webhook_token("hook").await.unwrap();
     drop(runtime);
-    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3")).await.unwrap();
+    let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
+        .await
+        .unwrap();
     let request = || WebhookMetadata {
-        headers: [("x-event".into(), vec!["ready.fixture-only".into()])].into_iter().collect(),
-        query: [("queue".into(), vec!["first".into(),"local".into()])].into_iter().collect(),
+        headers: [("x-event".into(), vec!["ready.fixture-only".into()])]
+            .into_iter()
+            .collect(),
+        query: [("queue".into(), vec!["first".into(), "local".into()])]
+            .into_iter()
+            .collect(),
         ..Default::default()
     };
     let payload = json!({"items":[{"name":"pear"},{"name":"berry"}],"details":{}});
-    let matched = runtime.publish_hook_request("hook",&token,"accepted",payload.clone(),request()).await.unwrap();
+    let matched = runtime
+        .publish_hook_request("hook", &token, "accepted", payload.clone(), request())
+        .await
+        .unwrap();
     assert!(matched.filtered_subscriptions.is_empty());
-    let skipped = runtime.publish_hook("hook",&token,"missing-header",payload.clone()).await.unwrap();
+    let skipped = runtime
+        .publish_hook("hook", &token, "missing-header", payload.clone())
+        .await
+        .unwrap();
     assert_eq!(skipped.filtered_subscriptions, ["filtered"]);
-    let retried = runtime.publish_hook_request("hook",&token,"missing-header",payload,request()).await.unwrap();
-    assert_eq!(skipped,retried);
-    let excluded = runtime.publish_hook_request("hook",&token,"excluded",json!({"items":[{"name":"pear"},{"name":"skip"}],"details":{}}),request()).await.unwrap();
+    let retried = runtime
+        .publish_hook_request("hook", &token, "missing-header", payload, request())
+        .await
+        .unwrap();
+    assert_eq!(skipped, retried);
+    let excluded = runtime
+        .publish_hook_request(
+            "hook",
+            &token,
+            "excluded",
+            json!({"items":[{"name":"pear"},{"name":"skip"}],"details":{}}),
+            request(),
+        )
+        .await
+        .unwrap();
     assert_eq!(excluded.filtered_subscriptions, ["filtered"]);
-    let snapshot=runtime.snapshot().await.unwrap();
-    assert_eq!(snapshot.runs.len(),4);
-    assert!(!serde_json::to_string(&snapshot).unwrap().contains("ready.fixture-only"));
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(), 4);
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains("ready.fixture-only"));
     let mut changed_source = source("hook");
     changed_source.kind = SourceKind::Custom;
-    let change = ReactiveChange::SaveSource { source: changed_source };
-    assert!(runtime.command(ReactiveCommand::Apply { change }).await.is_err());
+    let change = ReactiveChange::SaveSource {
+        source: changed_source,
+    };
+    assert!(runtime
+        .command(ReactiveCommand::Apply { change })
+        .await
+        .is_err());
     assert_eq!(
-        runtime.snapshot().await.unwrap().sources.into_iter().find(|source| source.id == "hook").unwrap().kind,
+        runtime
+            .snapshot()
+            .await
+            .unwrap()
+            .sources
+            .into_iter()
+            .find(|source| source.id == "hook")
+            .unwrap()
+            .kind,
         SourceKind::Webhook,
     );
-    filtered.webhook_filters[0].path="invalid.root".into();
-    assert!(runtime.command(ReactiveCommand::Apply { change: ReactiveChange::SaveSubscription {subscription: filtered}}).await.is_err());
+    filtered.webhook_filters[0].path = "invalid.root".into();
+    assert!(runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription {
+                subscription: filtered
+            }
+        })
+        .await
+        .is_err());
 }
 
 #[tokio::test]

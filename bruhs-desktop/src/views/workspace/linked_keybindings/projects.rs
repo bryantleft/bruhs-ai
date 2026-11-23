@@ -6,12 +6,12 @@ use bruhs_core::linked_projects::Checkout;
 mod deliveries;
 mod updates;
 pub(in crate::views::workspace) use updates::PeerUpdate;
-mod thread;
 mod editor;
-pub(crate) use editor::TaskEditorHost;
+mod thread;
 pub(crate) use deliveries::LinkedDeliveries;
-mod schedules;
+pub(crate) use editor::TaskEditorHost;
 mod run;
+mod schedules;
 mod scope;
 use scope::ProjectView;
 
@@ -71,7 +71,10 @@ impl LinkedProjects {
             revision: 0,
             rule_scope: None,
             scope: None,
-            editor: None, thread: None, opening_editor: None, editor_error: None,
+            editor: None,
+            thread: None,
+            opening_editor: None,
+            editor_error: None,
             runs: run::ScheduleRuns::restore(saved),
             schedule_writes: Default::default(),
             error: None,
@@ -154,9 +157,10 @@ impl LinkedProjects {
     ) -> impl Iterator<
         Item = (
             String,
-            impl std::future::Future<Output = Result<Vec<bruhs_core::usage_hubs::AccountUsage>, String>>
-            + Send
-            + use<>,
+            impl std::future::Future<
+                    Output = Result<Vec<bruhs_core::usage_hubs::AccountUsage>, String>,
+                > + Send
+                + use<>,
         ),
     > + '_ {
         self.hosts.iter().filter(|h| h.share_usage).map(|h| {
@@ -231,21 +235,54 @@ impl ProjectHost {
                 ));
             }
         }
-        let provider_updates = response.headers().get("x-bruhs-provider-updates").is_some_and(|v| v=="true");
+        let provider_updates = response
+            .headers()
+            .get("x-bruhs-provider-updates")
+            .is_some_and(|v| v == "true");
         let rename = response
             .headers()
             .get("x-bruhs-edit-project-names")
             .is_some_and(|v| v == "true");
-        let usage = response.headers().get("x-bruhs-read-usage").is_some_and(|v| v == "true");
-        let read_threads = response.headers().get("x-bruhs-read-task-threads").is_some_and(|v| v=="true");
-        let reply_threads = response.headers().get("x-bruhs-reply-task-threads").is_some_and(|v| v=="true");
-        let task_conversations = response.headers().get("x-bruhs-task-conversations").is_some_and(|v| v == "true");
-        let can_edit_schedules = response.headers().get("x-bruhs-edit-scheduled-tasks").is_some_and(|v| v == "true");
-        let can_read_deliveries = response.headers().get("x-bruhs-webhook-deliveries").is_some_and(|v| v == "true");
-        let can_delete_schedules = response.headers().get("x-bruhs-delete-scheduled-tasks").is_some_and(|v| v == "true");
-        let can_run_schedules = response.headers().get("x-bruhs-run-scheduled-tasks").is_some_and(|v| v == "true");
-        let can_toggle_schedules = response.headers().get("x-bruhs-toggle-scheduled-tasks").is_some_and(|v| v == "true");
-        let schedules_allowed = response.headers().get("x-bruhs-read-scheduled-tasks").is_some_and(|v| v == "true");
+        let usage = response
+            .headers()
+            .get("x-bruhs-read-usage")
+            .is_some_and(|v| v == "true");
+        let read_threads = response
+            .headers()
+            .get("x-bruhs-read-task-threads")
+            .is_some_and(|v| v == "true");
+        let reply_threads = response
+            .headers()
+            .get("x-bruhs-reply-task-threads")
+            .is_some_and(|v| v == "true");
+        let task_conversations = response
+            .headers()
+            .get("x-bruhs-task-conversations")
+            .is_some_and(|v| v == "true");
+        let can_edit_schedules = response
+            .headers()
+            .get("x-bruhs-edit-scheduled-tasks")
+            .is_some_and(|v| v == "true");
+        let can_read_deliveries = response
+            .headers()
+            .get("x-bruhs-webhook-deliveries")
+            .is_some_and(|v| v == "true");
+        let can_delete_schedules = response
+            .headers()
+            .get("x-bruhs-delete-scheduled-tasks")
+            .is_some_and(|v| v == "true");
+        let can_run_schedules = response
+            .headers()
+            .get("x-bruhs-run-scheduled-tasks")
+            .is_some_and(|v| v == "true");
+        let can_toggle_schedules = response
+            .headers()
+            .get("x-bruhs-toggle-scheduled-tasks")
+            .is_some_and(|v| v == "true");
+        let schedules_allowed = response
+            .headers()
+            .get("x-bruhs-read-scheduled-tasks")
+            .is_some_and(|v| v == "true");
         let mut bytes = Vec::new();
         while let Some(chunk) = response
             .chunk()
@@ -271,7 +308,22 @@ impl ProjectHost {
         } else {
             None
         };
-        Ok(ProjectInventory { projects, provider_updates, rename, schedules_allowed: Some(schedules_allowed), can_toggle_schedules, can_run_schedules, can_delete_schedules, can_read_deliveries, can_edit_schedules, task_conversations, read_threads, reply_threads, usage, schedules })
+        Ok(ProjectInventory {
+            projects,
+            provider_updates,
+            rename,
+            schedules_allowed: Some(schedules_allowed),
+            can_toggle_schedules,
+            can_run_schedules,
+            can_delete_schedules,
+            can_read_deliveries,
+            can_edit_schedules,
+            task_conversations,
+            read_threads,
+            reply_threads,
+            usage,
+            schedules,
+        })
     }
 }
 
@@ -332,7 +384,9 @@ impl Workspace {
                 state.busy = false;
                 match result {
                     Ok(host) => {
-                        state.schedule_writes.retain(|(id, _), _| *id != host.credential);
+                        state
+                            .schedule_writes
+                            .retain(|(id, _), _| *id != host.credential);
                         state.runs.relinked(host.credential, changed_destination);
                         if changed_destination {
                             this.project_list.grouping.forget_host(host.credential);
@@ -396,7 +450,10 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         self.linked_projects.watch = None;
-        if !matches!(section, SettingsSection::Projects | SettingsSection::ScheduledTasks) {
+        if !matches!(
+            section,
+            SettingsSection::Projects | SettingsSection::ScheduledTasks
+        ) {
             self.linked_projects.leave_project_view();
         }
         if section != SettingsSection::Environments {
@@ -404,29 +461,29 @@ impl Workspace {
         }
         if !matches!(
             section,
-            SettingsSection::Projects | SettingsSection::Environments | SettingsSection::ScheduledTasks
+            SettingsSection::Projects
+                | SettingsSection::Environments
+                | SettingsSection::ScheduledTasks
         ) {
             return;
         }
         self.refresh_linked_projects(true, cx);
-        self.linked_projects.watch = Some(cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(15))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if !this.settings_visible() || this.settings_section != section {
-                            return false;
-                        }
-                        this.refresh_linked_projects(false, cx);
-                        true
-                    })
-                    .ok()
-                    != Some(true)
-                {
-                    break;
-                }
+        self.linked_projects.watch = Some(cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_secs(15))
+                .await;
+            if this
+                .update(cx, |this, cx| {
+                    if !this.settings_visible() || this.settings_section != section {
+                        return false;
+                    }
+                    this.refresh_linked_projects(false, cx);
+                    true
+                })
+                .ok()
+                != Some(true)
+            {
+                break;
             }
         }));
     }
@@ -501,7 +558,9 @@ impl Workspace {
             let _ = this.update(cx, |this, cx| {
                 let state = &mut this.linked_projects;
                 state.reading = false;
-                if state.revision == revision && load_schedules == (this.settings_section == SettingsSection::ScheduledTasks) {
+                if state.revision == revision
+                    && load_schedules == (this.settings_section == SettingsSection::ScheduledTasks)
+                {
                     let changed = state
                         .hosts
                         .iter()
@@ -859,7 +918,9 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[gpui::test]
-    async fn linked_run_menu_retries_the_saved_request_after_relaunch(cx: &mut gpui::TestAppContext) {
+    async fn linked_run_menu_retries_the_saved_request_after_relaunch(
+        cx: &mut gpui::TestAppContext,
+    ) {
         launch::init(cx);
         let mut next_launch = cx.clone();
         let host = HostFixture::new("Studio", "alt+6");
@@ -867,30 +928,49 @@ mod tests {
         let path = dir.path().join("state.json");
         let (ws, win) = launch::launch(cx, &path);
         ws.update_in(win, |ws, w, cx| {
-            ws.open_settings(&OpenSettings,w,cx);
-            ws.set_settings_section(SettingsSection::Environments,cx);
-            ws.open_project_link(Some(&host.host),w,cx);
-            ws.linked_projects.form.as_ref().unwrap().token.update(cx, |input,cx|
-                input.set_value("d".repeat(64),w,cx));
+            ws.open_settings(&OpenSettings, w, cx);
+            ws.set_settings_section(SettingsSection::Environments, cx);
+            ws.open_project_link(Some(&host.host), w, cx);
+            ws.linked_projects
+                .form
+                .as_ref()
+                .unwrap()
+                .token
+                .update(cx, |input, cx| input.set_value("d".repeat(64), w, cx));
             ws.connect_project_host(cx);
         });
-        win.condition(&ws, |ws,_| ws.linked_projects.hosts.len()==1).await;
-        let (host_id,vault) = ws.read_with(win, |ws,_| (ws.linked_projects.hosts[0].credential,ws.linked_projects.vault.clone()));
+        win.condition(&ws, |ws, _| ws.linked_projects.hosts.len() == 1)
+            .await;
+        let (host_id, vault) = ws.read_with(win, |ws, _| {
+            (
+                ws.linked_projects.hosts[0].credential,
+                ws.linked_projects.vault.clone(),
+            )
+        });
         let show = |ws: &Entity<Workspace>, win: &mut gpui::VisualTestContext| {
-            ws.update_in(win,|ws,w,cx|{
-                ws.open_settings(&OpenSettings,w,cx);
-                ws.set_settings_section(SettingsSection::ScheduledTasks,cx);
-                ws.select_settings_option("settings-project-defaults-scope",role_settings_ui::project_value(&format!("linked:{host_id}:/srv/editor")),w,cx);
+            ws.update_in(win, |ws, w, cx| {
+                ws.open_settings(&OpenSettings, w, cx);
+                ws.set_settings_section(SettingsSection::ScheduledTasks, cx);
+                ws.select_settings_option(
+                    "settings-project-defaults-scope",
+                    role_settings_ui::project_value(&format!("linked:{host_id}:/srv/editor")),
+                    w,
+                    cx,
+                );
             });
         };
         let select = |win: &mut gpui::VisualTestContext, keyboard: bool| {
             let selector = format!("linked-scheduled-task-{host_id}-daily-actions");
             win.run_until_parked();
-            let trigger = win.debug_bounds(role_settings_ui::project_value(&selector)).expect("actions");
+            let trigger = win
+                .debug_bounds(role_settings_ui::project_value(&selector))
+                .expect("actions");
             win.simulate_click(trigger.center(), gpui::Modifiers::default());
             win.run_until_parked();
             let item = format!("{selector}-option-run");
-            let bounds = win.debug_bounds(role_settings_ui::project_value(&item)).expect("Run now");
+            let bounds = win
+                .debug_bounds(role_settings_ui::project_value(&item))
+                .expect("Run now");
             if keyboard {
                 win.simulate_keystrokes("enter");
             } else {
@@ -898,31 +978,50 @@ mod tests {
             }
             win.run_until_parked();
         };
-        show(&ws,win);
-        win.condition(&ws, |ws,_| ws.linked_projects.hosts[0].data.schedules.is_some()).await;
+        show(&ws, win);
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects.hosts[0].data.schedules.is_some()
+        })
+        .await;
         select(win, true);
-        win.condition(&ws, |_,_|host.run_attempts.lock().unwrap().len()==1).await;
-        launch::saved(&ws,win).await;
+        win.condition(&ws, |_, _| host.run_attempts.lock().unwrap().len() == 1)
+            .await;
+        launch::saved(&ws, win).await;
         let persisted = std::fs::read_to_string(&path).unwrap();
         let request = host.run_attempts.lock().unwrap()[0].clone();
         assert!(persisted.contains(&request) && !persisted.contains("/srv/editor"));
-        launch::quit(&ws,win);
-        let (ws,win)=launch::launch(&mut next_launch,&path);
-        ws.update_in(win,|ws,_,_|{
-            ws.linked_projects.vault=vault;
-            ws.linked_projects.update_tunnels(&RemoteHostSnapshot{hosts:vec![host.host.clone()],error:None});
+        launch::quit(&ws, win);
+        let (ws, win) = launch::launch(&mut next_launch, &path);
+        ws.update_in(win, |ws, _, _| {
+            ws.linked_projects.vault = vault;
+            ws.linked_projects.update_tunnels(&RemoteHostSnapshot {
+                hosts: vec![host.host.clone()],
+                error: None,
+            });
         });
-        show(&ws,win);
-        win.condition(&ws, |ws,_|ws.linked_projects.hosts[0].data.schedules.is_some()).await;
-        assert_eq!(host.run_attempts.lock().unwrap().len(),1);
+        show(&ws, win);
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects.hosts[0].data.schedules.is_some()
+        })
+        .await;
+        assert_eq!(host.run_attempts.lock().unwrap().len(), 1);
         select(win, false);
-        win.condition(&ws,|ws,_|ws.linked_projects.runs.pending.is_empty()).await;
-        assert_eq!(host.run_attempts.lock().unwrap().as_slice(),[request.clone(),request.clone()]);
-        launch::saved(&ws,win).await;
+        win.condition(&ws, |ws, _| ws.linked_projects.runs.pending.is_empty())
+            .await;
+        assert_eq!(
+            host.run_attempts.lock().unwrap().as_slice(),
+            [request.clone(), request.clone()]
+        );
+        launch::saved(&ws, win).await;
         assert!(!std::fs::read_to_string(&path).unwrap().contains(&request));
     }
 
-    async fn pair_schedule_fixture(ws: &Entity<Workspace>, win: &mut gpui::VisualTestContext, host: &HostFixture, token: &str) {
+    async fn pair_schedule_fixture(
+        ws: &Entity<Workspace>,
+        win: &mut gpui::VisualTestContext,
+        host: &HostFixture,
+        token: &str,
+    ) {
         let before = ws.read_with(win, |ws, _| ws.linked_projects.hosts.len());
         ws.update_in(win, |ws, window, cx| {
             ws.open_project_link(Some(&host.host), window, cx);
@@ -932,40 +1031,69 @@ mod tests {
                 .expect("project link form open")
                 .token
                 .update(cx, |field, cx| {
-                field.set_value(token.repeat(64), window, cx);
-            });
+                    field.set_value(token.repeat(64), window, cx);
+                });
             ws.connect_project_host(cx);
         });
-        win.condition(ws, |ws, _| ws.linked_projects.hosts.len() == before + 1).await;
+        win.condition(ws, |ws, _| ws.linked_projects.hosts.len() == before + 1)
+            .await;
     }
 
     #[gpui::test]
-    async fn linked_webhook_history_refreshes_and_closes_on_revocation(cx: &mut gpui::TestAppContext) {
+    async fn linked_webhook_history_refreshes_and_closes_on_revocation(
+        cx: &mut gpui::TestAppContext,
+    ) {
         launch::init(cx);
-        let hosts = [HostFixture::new("Build", "alt+5"), HostFixture::new("Studio", "alt+6")];
+        let hosts = [
+            HostFixture::new("Build", "alt+5"),
+            HostFixture::new("Studio", "alt+6"),
+        ];
         let dir = tempfile::tempdir().unwrap();
         let (ws, win) = launch::launch(cx, &dir.path().join("state.json"));
         ws.update_in(win, |ws, w, cx| {
             ws.open_settings(&OpenSettings, w, cx);
             ws.set_settings_section(SettingsSection::Environments, cx);
         });
-        for host in &hosts { pair_schedule_fixture(&ws, win, host, "8").await; }
-        ws.update_in(win, |ws, _, cx| ws.set_settings_section(SettingsSection::ScheduledTasks, cx));
-        win.condition(&ws, |ws, _| ws.linked_projects.hosts.iter().all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))).await;
+        for host in &hosts {
+            pair_schedule_fixture(&ws, win, host, "8").await;
+        }
+        ws.update_in(win, |ws, _, cx| {
+            ws.set_settings_section(SettingsSection::ScheduledTasks, cx)
+        });
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects
+                .hosts
+                .iter()
+                .all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))
+        })
+        .await;
         let click = |win: &mut gpui::VisualTestContext, id: &'static str| {
             win.run_until_parked();
             let bounds = win.debug_bounds(id).expect(id);
             win.simulate_click(bounds.center(), gpui::Modifiers::default());
             win.run_until_parked();
         };
-        for (index, selector) in ["delivery-row-build-request", "delivery-row-studio-request"].into_iter().enumerate() {
+        for (index, selector) in ["delivery-row-build-request", "delivery-row-studio-request"]
+            .into_iter()
+            .enumerate()
+        {
             let trigger = ws.update_in(win, |ws, w, cx| {
                 let host = ws.linked_projects.hosts[index].credential;
-                ws.select_settings_option("settings-project-defaults-scope", role_settings_ui::project_value(&format!("linked:{host}:/srv/reports")), w, cx);
-                role_settings_ui::project_value(&format!("linked-scheduled-task-{host}-report-actions"))
+                ws.select_settings_option(
+                    "settings-project-defaults-scope",
+                    role_settings_ui::project_value(&format!("linked:{host}:/srv/reports")),
+                    w,
+                    cx,
+                );
+                role_settings_ui::project_value(&format!(
+                    "linked-scheduled-task-{host}-report-actions"
+                ))
             });
             click(win, trigger);
-            click(win, role_settings_ui::project_value(&format!("{trigger}-option-deliveries")));
+            click(
+                win,
+                role_settings_ui::project_value(&format!("{trigger}-option-deliveries")),
+            );
             assert!(win.debug_bounds("delivery-empty").is_some());
             click(win, "reactive-Refresh");
             click(win, selector);
@@ -976,12 +1104,22 @@ mod tests {
                 click(win, "reactive-Done");
                 win.simulate_keystrokes("enter");
                 win.run_until_parked();
-                assert!(win.debug_bounds(role_settings_ui::project_value(&format!("{trigger}-option-deliveries"))).is_some());
+                assert!(win
+                    .debug_bounds(role_settings_ui::project_value(&format!(
+                        "{trigger}-option-deliveries"
+                    )))
+                    .is_some());
                 win.simulate_keystrokes("escape");
             } else {
                 hosts[index].revoked.store(true, Ordering::SeqCst);
                 ws.update_in(win, |ws, _, cx| ws.refresh_linked_projects(true, cx));
-                win.condition(&ws, |ws, cx| ws.reactive_automations.read(cx).linked_delivery_origin().is_none()).await;
+                win.condition(&ws, |ws, cx| {
+                    ws.reactive_automations
+                        .read(cx)
+                        .linked_delivery_origin()
+                        .is_none()
+                })
+                .await;
             }
         }
         win.run_until_parked();
@@ -991,7 +1129,10 @@ mod tests {
     #[gpui::test]
     async fn linked_schedule_delete_confirms_and_targets_its_host(cx: &mut gpui::TestAppContext) {
         launch::init(cx);
-        let hosts = [HostFixture::new("Build", "alt+5"), HostFixture::new("Studio", "alt+6")];
+        let hosts = [
+            HostFixture::new("Build", "alt+5"),
+            HostFixture::new("Studio", "alt+6"),
+        ];
         let dir = tempfile::tempdir().unwrap();
         let (ws, win) = launch::launch(cx, &dir.path().join("state.json"));
         ws.update_in(win, |ws, window, cx| {
@@ -1000,14 +1141,24 @@ mod tests {
         });
         pair_schedule_fixture(&ws, win, &hosts[0], "e").await;
         pair_schedule_fixture(&ws, win, &hosts[1], "9").await;
-        ws.update_in(win, |ws, _, cx| ws.set_settings_section(SettingsSection::ScheduledTasks, cx));
-        win.condition(&ws, |ws, _| ws.linked_projects.hosts.iter().all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))).await;
+        ws.update_in(win, |ws, _, cx| {
+            ws.set_settings_section(SettingsSection::ScheduledTasks, cx)
+        });
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects
+                .hosts
+                .iter()
+                .all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))
+        })
+        .await;
         let select_host = |win: &mut gpui::VisualTestContext, index: usize| {
             ws.update_in(win, |ws, w, cx| {
                 let host = ws.linked_projects.hosts[index].credential;
                 let scope = role_settings_ui::project_value(&format!("linked:{host}:/srv/reports"));
                 ws.select_settings_option("settings-project-defaults-scope", scope, w, cx);
-                role_settings_ui::project_value(&format!("linked-scheduled-task-{host}-report-actions"))
+                role_settings_ui::project_value(&format!(
+                    "linked-scheduled-task-{host}-report-actions"
+                ))
             })
         };
         let click = |win: &mut gpui::VisualTestContext, id: &'static str| {
@@ -1018,13 +1169,21 @@ mod tests {
         };
         let readonly = select_host(win, 0);
         click(win, readonly);
-        assert!(win.debug_bounds(role_settings_ui::project_value(&format!("{readonly}-option-delete"))).is_none());
+        assert!(win
+            .debug_bounds(role_settings_ui::project_value(&format!(
+                "{readonly}-option-delete"
+            )))
+            .is_none());
         let writable = select_host(win, 1);
         let delete = role_settings_ui::project_value(&format!("{writable}-option-delete"));
         for choice in ["Cancel", "Delete"] {
             click(win, writable);
             assert!(win.debug_bounds(delete).is_some());
-            assert!(win.debug_bounds(role_settings_ui::project_value(&format!("{writable}-option-run"))).is_none());
+            assert!(win
+                .debug_bounds(role_settings_ui::project_value(&format!(
+                    "{writable}-option-run"
+                )))
+                .is_none());
             win.simulate_keystrokes("enter");
             win.run_until_parked();
             assert!(win.debug_bounds("scheduled-task-dialog").is_some());
@@ -1048,7 +1207,10 @@ mod tests {
     #[gpui::test]
     async fn linked_schedules_filter_by_owning_host_and_project(cx: &mut gpui::TestAppContext) {
         launch::init(cx);
-        let hosts = [HostFixture::new("Build", "alt+5"), HostFixture::new("Studio", "alt+6")];
+        let hosts = [
+            HostFixture::new("Build", "alt+5"),
+            HostFixture::new("Studio", "alt+6"),
+        ];
         let dir = tempfile::tempdir().unwrap();
         let (ws, win) = launch::launch(cx, &dir.path().join("state.json"));
         ws.update_in(win, |ws, w, cx| {
@@ -1058,45 +1220,98 @@ mod tests {
         for (i, host) in hosts.iter().enumerate() {
             ws.update_in(win, |ws, w, cx| {
                 ws.open_project_link(Some(&host.host), w, cx);
-                ws.linked_projects.form.as_ref().unwrap().token.update(cx, |field, cx|
-                    field.set_value(if i == 0 { "e" } else { "f" }.repeat(64), w, cx));
+                ws.linked_projects
+                    .form
+                    .as_ref()
+                    .unwrap()
+                    .token
+                    .update(cx, |field, cx| {
+                        field.set_value(if i == 0 { "e" } else { "f" }.repeat(64), w, cx)
+                    });
                 ws.connect_project_host(cx);
             });
-            win.condition(&ws, |ws, _| ws.linked_projects.hosts.len() == i + 1).await;
+            win.condition(&ws, |ws, _| ws.linked_projects.hosts.len() == i + 1)
+                .await;
         }
-        ws.update_in(win, |ws, _, cx| ws.set_settings_section(SettingsSection::ScheduledTasks, cx));
-        win.condition(&ws, |ws, _| ws.linked_projects.hosts.iter().all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))).await;
-        let ids = ws.read_with(win, |ws, _| ws.linked_projects.hosts.iter().map(|h| h.credential).collect::<Vec<_>>());
+        ws.update_in(win, |ws, _, cx| {
+            ws.set_settings_section(SettingsSection::ScheduledTasks, cx)
+        });
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects
+                .hosts
+                .iter()
+                .all(|h| matches!(&h.data.schedules, Some(Ok(tasks)) if tasks.len() == 2))
+        })
+        .await;
+        let ids = ws.read_with(win, |ws, _| {
+            ws.linked_projects
+                .hosts
+                .iter()
+                .map(|h| h.credential)
+                .collect::<Vec<_>>()
+        });
         let select = |win: &mut gpui::VisualTestContext, scope: &str| {
             win.run_until_parked();
-            let trigger = win.debug_bounds("settings-project-defaults-scope").expect("scope picker");
+            let trigger = win
+                .debug_bounds("settings-project-defaults-scope")
+                .expect("scope picker");
             win.simulate_click(trigger.center(), gpui::Modifiers::default());
             win.run_until_parked();
             let selector = format!("settings-project-defaults-scope-option-{scope}");
-            let option = win.debug_bounds(role_settings_ui::project_value(&selector)).expect("scope option");
+            let option = win
+                .debug_bounds(role_settings_ui::project_value(&selector))
+                .expect("scope option");
             win.simulate_click(option.center(), gpui::Modifiers::default());
             win.run_until_parked();
         };
-        let row = |i: usize, task: &str| role_settings_ui::project_value(&format!("linked-scheduled-task-{}-{task}", ids[i]));
+        let row = |i: usize, task: &str| {
+            role_settings_ui::project_value(&format!("linked-scheduled-task-{}-{task}", ids[i]))
+        };
         select(win, "projects:all");
-        assert!(win.debug_bounds(row(0, "daily")).is_some() && win.debug_bounds(row(1, "daily")).is_some());
+        assert!(
+            win.debug_bounds(row(0, "daily")).is_some()
+                && win.debug_bounds(row(1, "daily")).is_some()
+        );
         select(win, &format!("linked:{}:/srv/reports", ids[1]));
         assert!(win.debug_bounds(row(1, "report")).is_some());
-        assert!(win.debug_bounds(row(1, "daily")).is_none() && win.debug_bounds(row(0, "report")).is_none());
+        assert!(
+            win.debug_bounds(row(1, "daily")).is_none()
+                && win.debug_bounds(row(0, "report")).is_none()
+        );
         let click_switch = |win: &mut gpui::VisualTestContext, i: usize| {
             let selector = format!("{}-enabled", row(i, "report"));
-            let bounds = win.debug_bounds(role_settings_ui::project_value(&selector)).expect("task switch");
+            let bounds = win
+                .debug_bounds(role_settings_ui::project_value(&selector))
+                .expect("task switch");
             win.simulate_click(bounds.center(), gpui::Modifiers::default());
             win.run_until_parked();
         };
         let key = (ids[1], "report".to_owned());
         click_switch(win, 1);
-        win.condition(&ws, |ws, _| matches!(ws.linked_projects.schedule_writes.get(&key), Some(schedules::ScheduleWrite::Failed(_)))).await;
+        win.condition(&ws, |ws, _| {
+            matches!(
+                ws.linked_projects.schedule_writes.get(&key),
+                Some(schedules::ScheduleWrite::Failed(_))
+            )
+        })
+        .await;
         win.run_until_parked();
-        assert!(win.debug_bounds(role_settings_ui::project_value(&format!("{}-error", row(1,"report")))).is_some());
+        assert!(win
+            .debug_bounds(role_settings_ui::project_value(&format!(
+                "{}-error",
+                row(1, "report")
+            )))
+            .is_some());
         click_switch(win, 1);
-        win.condition(&ws, |ws, _| ws.linked_projects.hosts[1].data.schedules.as_ref()
-            .and_then(|tasks| tasks.as_ref().ok()).is_some_and(|tasks| tasks.iter().any(|t| t.id == "report" && t.enabled))).await;
+        win.condition(&ws, |ws, _| {
+            ws.linked_projects.hosts[1]
+                .data
+                .schedules
+                .as_ref()
+                .and_then(|tasks| tasks.as_ref().ok())
+                .is_some_and(|tasks| tasks.iter().any(|t| t.id == "report" && t.enabled))
+        })
+        .await;
         assert_eq!(hosts[1].schedule_attempts.load(Ordering::SeqCst), 2);
         select(win, &format!("linked:{}:/srv/reports", ids[0]));
         click_switch(win, 0);
@@ -1104,10 +1319,16 @@ mod tests {
         select(win, &format!("linked:{}:/srv/reports", ids[1]));
         hosts[1].revoked.store(true, Ordering::SeqCst);
         ws.update_in(win, |ws, _, cx| ws.refresh_linked_projects(true, cx));
-        win.condition(&ws, |ws, _| ws.linked_projects.hosts[1].problem.is_some()).await;
+        win.condition(&ws, |ws, _| ws.linked_projects.hosts[1].problem.is_some())
+            .await;
         win.run_until_parked();
         assert!(win.debug_bounds(row(1, "report")).is_none());
-        assert!(win.debug_bounds(role_settings_ui::project_value(&format!("linked-schedules-status-{}",ids[1]))).is_some());
+        assert!(win
+            .debug_bounds(role_settings_ui::project_value(&format!(
+                "linked-schedules-status-{}",
+                ids[1]
+            )))
+            .is_some());
         select(win, "projects:all");
         assert!(win.debug_bounds(row(0, "daily")).is_some());
     }
@@ -1146,11 +1367,10 @@ mod tests {
             let state = &ws.linked_projects;
             assert!(state.error.is_none(), "{:?}", state.error);
             assert_eq!(state.hosts[0].data.projects[0].path, "/srv/editor");
-            assert!(
-                ws.grouped_projects()
-                    .iter()
-                    .any(|g| g.label == "Build editor" && g.members[0].has_custom_name)
-            );
+            assert!(ws
+                .grouped_projects()
+                .iter()
+                .any(|g| g.label == "Build editor" && g.members[0].has_custom_name));
             (state.hosts[0].credential, state.vault.clone())
         });
         launch::saved(&ws, win).await;
@@ -1184,18 +1404,16 @@ mod tests {
         );
         ws.read_with(win, |ws, _| {
             assert!(ws.settings_visible() && ws.settings_section == SettingsSection::Projects);
-            assert!(
-                ws.active_project
-                    .as_ref()
-                    .is_none_or(|p| p.path != "/srv/editor")
-            );
+            assert!(ws
+                .active_project
+                .as_ref()
+                .is_none_or(|p| p.path != "/srv/editor"));
         });
         assert!(win.debug_bounds("linked-project-view").is_some());
         assert!(win.debug_bounds("settings-project-action-add").is_none());
-        assert!(
-            win.debug_bounds("desktop-settings-project-folder")
-                .is_none()
-        );
+        assert!(win
+            .debug_bounds("desktop-settings-project-folder")
+            .is_none());
 
         // Scroll the rendered row into reach, as in a small Settings window.
         let reveal = |win: &mut gpui::VisualTestContext, ws: &Entity<Workspace>, row: &str| {
@@ -1259,21 +1477,18 @@ mod tests {
         assert!(win.debug_bounds("linked-checkout-name").is_none());
         assert!(win.debug_bounds("settings-project-action-add").is_none());
         ws.update_in(win, |ws, _, cx| {
-            assert!(
-                !ws.grouped_projects()
-                    .iter()
-                    .any(|g| g.members.iter().any(|m| m.host.is_some()))
-            );
+            assert!(!ws
+                .grouped_projects()
+                .iter()
+                .any(|g| g.members.iter().any(|m| m.host.is_some())));
             ws.unlink_project_host(id, cx);
         });
         win.run_until_parked();
         launch::saved(&ws, win).await;
         let disk = std::fs::read_to_string(&path).unwrap();
         assert!(!disk.contains("project_links") && !disk.contains(&scope));
-        assert!(
-            vault
-                .read(id, &Destination::from_profile(&host.host.profile))
-                .is_err()
-        );
+        assert!(vault
+            .read(id, &Destination::from_profile(&host.host.profile))
+            .is_err());
     }
 }

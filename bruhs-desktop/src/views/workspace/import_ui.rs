@@ -14,13 +14,13 @@ use bruhs_core::import::ImportRoots;
 use bruhs_models::agent::Role as AgentRole;
 use bruhs_models::imports::{import_key, EXPORT_TAB};
 use bruhs_models::logic::portable::{
-    IMPORT_CONTEXT_MAX_CHARS, ImportCandidate, ImportSource, ImportedThread, PortableMessage,
-    PortablePart, PortableToolCall, import_model, resume_command, transcript_markdown,
+    import_model, resume_command, transcript_markdown, ImportCandidate, ImportSource,
+    ImportedThread, PortableMessage, PortablePart, PortableToolCall, IMPORT_CONTEXT_MAX_CHARS,
 };
-use bruhs_models::time::{RelativeTimeStyle, format_relative_ms};
-use bruhs_ui::Sizable as _;
+use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
+use bruhs_ui::Sizable as _;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -622,7 +622,11 @@ impl Workspace {
         let thread = self.active_thread()?;
         let chat = thread.chat.read(cx);
         let local = portable_messages(&chat.messages);
-        let inherited = chat.fork.as_ref().into_iter().flat_map(|fork|&fork.history);
+        let inherited = chat
+            .fork
+            .as_ref()
+            .into_iter()
+            .flat_map(|fork| &fork.history);
         let markdown = transcript_markdown(
             &chat.thread_title,
             "bruhs",
@@ -927,147 +931,145 @@ impl Workspace {
             .max_h(modal_ui::picker_max_height(window))
             .bg(theme::longan_800())
             .track_focus(&self.modal_start_focus_handle)
-                    .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        let key = event.keystroke.key.as_str();
-                        let navigates = Self::move_command_selected_index(0, 0, key).is_some();
-                        if event.keystroke.modifiers != Modifiers::default()
-                            || !(matches!(key, "escape" | "enter") || navigates)
-                        {
-                            return;
-                        }
-                        // On the Export file tab, arrows and Enter belong to the
-                        // search and the rows; its buttons take their own Enter.
-                        if key != "escape" && !this.import_keys_reach_rows(window, cx) {
-                            return;
-                        }
-                        let input = this.active_import_input();
-                        let composing = input.update(cx, |input, cx| {
-                            input.marked_text_range(window, cx).is_some()
-                        });
-                        if composing {
-                            if key == "enter" {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                            }
-                            return;
-                        }
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                let navigates = Self::move_command_selected_index(0, 0, key).is_some();
+                if event.keystroke.modifiers != Modifiers::default()
+                    || !(matches!(key, "escape" | "enter") || navigates)
+                {
+                    return;
+                }
+                // On the Export file tab, arrows and Enter belong to the
+                // search and the rows; its buttons take their own Enter.
+                if key != "escape" && !this.import_keys_reach_rows(window, cx) {
+                    return;
+                }
+                let input = this.active_import_input();
+                let composing = input.update(cx, |input, cx| {
+                    input.marked_text_range(window, cx).is_some()
+                });
+                if composing {
+                    if key == "enter" {
                         window.prevent_default();
                         cx.stop_propagation();
-                        match key {
-                            "enter" => this.import_selected(window, cx),
-                            "escape" => {
-                                this.close_transient_surfaces();
-                                cx.notify();
-                            }
-                            _ => this.move_import_selection(key, cx),
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
+                    }
+                    return;
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+                match key {
+                    "enter" => this.import_selected(window, cx),
+                    "escape" => {
+                        this.close_transient_surfaces();
+                        cx.notify();
+                    }
+                    _ => this.move_import_selection(key, cx),
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(theme::longan_800())
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .px_4()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .child(
-                                div()
-                                    .id("desktop-import-title")
-                                    .role(Role::Heading)
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-                                    .text_color(theme::rambutan_200())
-                                    .child(IMPORT_DIALOG_LABEL),
-                            )
-                            .child(self.render_import_source_tabs(cx))
-                            .when(!on_export, |header| {
-                                header.child(
-                                    div()
-                                        .debug_selector(|| "desktop-import-search".to_string())
-                                        .mt_2()
-                                        .w_full()
-                                        .rounded(px(IMPORT_RADIUS_PX))
-                                        .bg(theme::longan_900())
-                                        .border_1()
-                                        .border_color(theme::longan_700())
-                                        // Web `px-2.5`, less the 1px border.
-                                        .px(px(9.0))
-                                        // A small (24px) input in 2px padding and a
-                                        // 1px border: 30px, the web's py-1.5 field.
-                                        .py(px(2.0))
-                                        .child(
-                                            Input::new(&self.import_input)
-                                                .small()
-                                                .aria_label("Search threads")
-                                                .appearance(false)
-                                                .px_0()
-                                                .bordered(false)
-                                                .focus_bordered(false)
-                                                .cleanable(false)
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
-                                        ),
-                                )
-                            }),
+                            .id("desktop-import-title")
+                            .role(Role::Heading)
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
+                            .text_color(theme::rambutan_200())
+                            .child(IMPORT_DIALOG_LABEL),
                     )
-                    .child(match self.import_picker.tab {
-                        ImportTab::Export => {
-                            self.render_export_tab(&export_rows, export_left, window, cx)
-                        }
-                        ImportTab::Local(source) => self.render_import_rows(source, local_rows, cx),
+                    .child(self.render_import_source_tabs(cx))
+                    .when(!on_export, |header| {
+                        header.child(
+                            div()
+                                .debug_selector(|| "desktop-import-search".to_string())
+                                .mt_2()
+                                .w_full()
+                                .rounded(px(IMPORT_RADIUS_PX))
+                                .bg(theme::longan_900())
+                                .border_1()
+                                .border_color(theme::longan_700())
+                                // Web `px-2.5`, less the 1px border.
+                                .px(px(9.0))
+                                // A small (24px) input in 2px padding and a
+                                // 1px border: 30px, the web's py-1.5 field.
+                                .py(px(2.0))
+                                .child(
+                                    Input::new(&self.import_input)
+                                        .small()
+                                        .aria_label("Search threads")
+                                        .appearance(false)
+                                        .px_0()
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .cleanable(false)
+                                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                        .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX)),
+                                ),
+                        )
+                    }),
+            )
+            .child(match self.import_picker.tab {
+                ImportTab::Export => self.render_export_tab(&export_rows, export_left, window, cx),
+                ImportTab::Local(source) => self.render_import_rows(source, local_rows, cx),
+            })
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px_4()
+                    .py(px(10.0))
+                    .border_t_1()
+                    .border_color(theme::longan_800().opacity(IMPORT_FOOTER_BORDER_OPACITY))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .font_family(theme::UI_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(IMPORT_LABEL_TEXT_SIZE_PX))
+                    .text_color(theme::rambutan_300())
+                    .child(if importing {
+                        IMPORT_FOOTER_IMPORTING
+                    } else if choosable {
+                        IMPORT_FOOTER_HINT
+                    } else {
+                        ""
                     })
                     .child(
                         div()
+                            .id("desktop-import-cancel")
+                            .debug_selector(|| "desktop-import-cancel".to_string())
                             .flex_shrink_0()
-                            .px_4()
-                            .py(px(10.0))
-                            .border_t_1()
-                            .border_color(theme::longan_800().opacity(IMPORT_FOOTER_BORDER_OPACITY))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .font_family(theme::UI_FONT_FAMILY)
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_size(px(IMPORT_LABEL_TEXT_SIZE_PX))
-                            .text_color(theme::rambutan_300())
-                            .child(if importing {
-                                IMPORT_FOOTER_IMPORTING
-                            } else if choosable {
-                                IMPORT_FOOTER_HINT
-                            } else {
-                                ""
+                            .text_color(theme::rambutan_500())
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_label("Cancel")
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .cursor_pointer()
+                            .hover(|el| el.text_color(theme::rambutan_300()))
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
+                                    this.close_transient_surfaces();
+                                    cx.notify();
+                                })
                             })
-                            .child(
-                                div()
-                                    .id("desktop-import-cancel")
-                                    .debug_selector(|| "desktop-import-cancel".to_string())
-                                    .flex_shrink_0()
-                                    .text_color(theme::rambutan_500())
-                                    .tab_index(0)
-                                    .role(Role::Button)
-                                    .aria_label("Cancel")
-                                    .border_1()
-                                    .border_color(gpui::transparent_black())
-                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                    .cursor_pointer()
-                                    .hover(|el| el.text_color(theme::rambutan_300()))
-                                    .map(|el| {
-                                        on_press_view(el, cx, |this, _window, cx| {
-                                            this.close_transient_surfaces();
-                                            cx.notify();
-                                        })
-                                    })
-                                    .child("Cancel"),
-                            ),
-                    )
-                    .child(self.render_modal_focus_sentinel()),
+                            .child("Cancel"),
+                    ),
             )
-            .into_any_element()
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 }

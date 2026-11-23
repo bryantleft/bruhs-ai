@@ -65,30 +65,50 @@ async fn scheduled_task_inventory_projects_only_shared_metadata() {
     let mut automation = setup();
     save(&runtime, automation.clone()).await;
     assert!(runtime.scheduled_task_inventory().await.unwrap().is_empty());
-    assert!(matches!(runtime.set_linked_schedule_enabled("paperwork".into(), false).await, Err(ReactiveError::NotFound(_))));
-    assert!(matches!(runtime.delete_linked_schedule("paperwork".into()).await, Err(ReactiveError::NotFound(_))));
+    assert!(matches!(
+        runtime
+            .set_linked_schedule_enabled("paperwork".into(), false)
+            .await,
+        Err(ReactiveError::NotFound(_))
+    ));
+    assert!(matches!(
+        runtime.delete_linked_schedule("paperwork".into()).await,
+        Err(ReactiveError::NotFound(_))
+    ));
     assert!(runtime.snapshot().await.unwrap().subscriptions[0].enabled);
     automation.source.kind = SourceKind::Webhook;
     automation.source.enabled = false;
     automation.subscription.task_title = Some("Daily review".into());
     save(&runtime, automation.clone()).await;
     let tasks = runtime.scheduled_task_inventory().await.unwrap();
-    assert_eq!(serde_json::to_value(tasks).unwrap(), json!([{
-        "id": "paperwork", "title": "Daily review", "schedule": {"type": "webhook"}, "next_run_at": null,
-        "project_path": automation.agent.project_path, "enabled": false
-    }]));
+    assert_eq!(
+        serde_json::to_value(tasks).unwrap(),
+        json!([{
+            "id": "paperwork", "title": "Daily review", "schedule": {"type": "webhook"}, "next_run_at": null,
+            "project_path": automation.agent.project_path, "enabled": false
+        }])
+    );
     let id = automation.subscription.id.clone();
     for enabled in [true, true, false, false] {
-        let summary = runtime.set_linked_schedule_enabled(id.clone(), enabled).await.unwrap();
+        let summary = runtime
+            .set_linked_schedule_enabled(id.clone(), enabled)
+            .await
+            .unwrap();
         assert_eq!(summary.enabled, enabled);
-        assert_eq!(runtime.scheduled_task_inventory().await.unwrap(), vec![summary]);
+        assert_eq!(
+            runtime.scheduled_task_inventory().await.unwrap(),
+            vec![summary]
+        );
     }
     runtime.delete_linked_schedule(id.clone()).await.unwrap();
     let snapshot = runtime.snapshot().await.unwrap();
     assert!(snapshot.subscriptions.is_empty());
     assert_eq!(snapshot.agents[0].id, automation.agent.id);
     assert_eq!(snapshot.sources[0].id, automation.source.id);
-    assert!(matches!(runtime.delete_linked_schedule(id).await, Err(ReactiveError::NotFound(_))));
+    assert!(matches!(
+        runtime.delete_linked_schedule(id).await,
+        Err(ReactiveError::NotFound(_))
+    ));
 }
 
 #[tokio::test]
@@ -332,7 +352,12 @@ async fn activation_never_wakes_another_enabled_subscription_through_shared_depe
                 .unwrap();
         }
         let before = runtime.snapshot().await.unwrap();
-        assert!(matches!(runtime.set_linked_schedule_enabled("paperwork".into(), true).await, Err(ReactiveError::Conflict(_))));
+        assert!(matches!(
+            runtime
+                .set_linked_schedule_enabled("paperwork".into(), true)
+                .await,
+            Err(ReactiveError::Conflict(_))
+        ));
         let error = runtime
             .command(ReactiveCommand::SetAutomationEnabled {
                 id: "paperwork".into(),
@@ -379,7 +404,8 @@ async fn scheduled_task_edit_and_activation_commit_together() {
     let (dir, runtime) = empty_runtime().await;
     let mut task = setup();
     task.source.kind = SourceKind::Webhook;
-    let set = |automation: AutomationSetup, enabled| ReactiveCommand::SaveScheduledTask { destination: None,
+    let set = |automation: AutomationSetup, enabled| ReactiveCommand::SaveScheduledTask {
+        destination: None,
         automation: Box::new(automation),
         enabled,
         signing_secret: None,
@@ -431,7 +457,11 @@ async fn scheduled_task_edit_and_activation_commit_together() {
     let renamed = runtime.command(set(task.clone(), true)).await.unwrap();
     assert_eq!(renamed.runs[0], queued);
     for sub in &renamed.subscriptions {
-        let title = if sub.id == task.subscription.id { "Morning receipts" } else { "Paperwork" };
+        let title = if sub.id == task.subscription.id {
+            "Morning receipts"
+        } else {
+            "Paperwork"
+        };
         assert_eq!(sub.title(&renamed.agents[0]), title);
     }
     assert_eq!(renamed.agents[0], task.agent);
@@ -440,7 +470,12 @@ async fn scheduled_task_edit_and_activation_commit_together() {
     assert_eq!(legacy_save.subscriptions, renamed.subscriptions);
     assert_eq!(legacy_save.runs[0], queued);
     task.subscription.task_title = Some("   ".into());
-    assert!(runtime.command(set(task.clone(), true)).await.unwrap_err().to_string().contains("Task name"));
+    assert!(runtime
+        .command(set(task.clone(), true))
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("Task name"));
     task.subscription.task_title = None;
 
     task.agent.enabled = false;
@@ -565,7 +600,8 @@ async fn webhook_security_survives_restart_and_expires_from_trusted_arrival() {
         max_delivery_age_minutes: Some(1),
     };
     let save_task =
-        |task: &AutomationSetup, secret: Option<&str>| ReactiveCommand::SaveScheduledTask { destination: None,
+        |task: &AutomationSetup, secret: Option<&str>| ReactiveCommand::SaveScheduledTask {
+            destination: None,
             automation: Box::new(task.clone()),
             enabled: true,
             signing_secret: secret.map(|s| WebhookSigningSecret(s.into())),
@@ -671,11 +707,10 @@ async fn linked_task_editor_confines_components_and_retries_and_detects_stale_ed
         signing_secret: None,
         destination: None,
     };
-    assert!(
-        host.save_linked_task(id.clone(), create.clone(), vec![])
-            .await
-            .is_err()
-    );
+    assert!(host
+        .save_linked_task(id.clone(), create.clone(), vec![])
+        .await
+        .is_err());
     let first = host
         .save_linked_task(id.clone(), create.clone(), paths.clone())
         .await
@@ -700,11 +735,10 @@ async fn linked_task_editor_confines_components_and_retries_and_detects_stale_ed
     };
     let mut invalid = edited.clone();
     invalid.setup.source.id.clone_from(&unrelated.source.id);
-    assert!(
-        host.save_linked_task(id.clone(), invalid, paths.clone())
-            .await
-            .is_err()
-    );
+    assert!(host
+        .save_linked_task(id.clone(), invalid, paths.clone())
+        .await
+        .is_err());
     edited.setup.subscription.task_title = Some("Renamed on host".into());
     let saved = host
         .save_linked_task(id.clone(), edited.clone(), paths.clone())
@@ -723,11 +757,10 @@ async fn linked_task_editor_confines_components_and_retries_and_detects_stale_ed
         host.save_linked_task(id.clone(), edited, paths).await,
         Err(ReactiveError::Conflict(_))
     ));
-    assert!(
-        host.linked_task_definition(unrelated.subscription.id.clone())
-            .await
-            .is_err()
-    );
+    assert!(host
+        .linked_task_definition(unrelated.subscription.id.clone())
+        .await
+        .is_err());
     let snapshot = host.snapshot().await.unwrap();
     assert!(
         snapshot.agents.contains(&unrelated.agent) && snapshot.sources.contains(&unrelated.source)
@@ -777,11 +810,10 @@ async fn linked_task_conversation_resolves_the_host_agent_and_detaches_without_c
         }),
     };
     edit.setup.agent.project_path = "/other".into();
-    assert!(
-        host.save_linked_task(id.clone(), edit.clone(), vec!["/other".into()])
-            .await
-            .is_err()
-    );
+    assert!(host
+        .save_linked_task(id.clone(), edit.clone(), vec!["/other".into()])
+        .await
+        .is_err());
     edit.setup.agent.project_path = project.clone();
     host.save_linked_task(id.clone(), edit.clone(), vec![project.clone()])
         .await
@@ -790,14 +822,13 @@ async fn linked_task_conversation_resolves_the_host_agent_and_detaches_without_c
         .await
         .unwrap();
     host.command(run(&id)).await.unwrap();
-    assert!(
-        host.snapshot()
-            .await
-            .unwrap()
-            .runs
-            .iter()
-            .any(|r| r.subscription_id.as_ref() == Some(&id) && r.thread_id == thread.thread_id)
-    );
+    assert!(host
+        .snapshot()
+        .await
+        .unwrap()
+        .runs
+        .iter()
+        .any(|r| r.subscription_id.as_ref() == Some(&id) && r.thread_id == thread.thread_id));
     drop(host);
     let host = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
         .await
@@ -810,16 +841,44 @@ async fn linked_task_conversation_resolves_the_host_agent_and_detaches_without_c
             && saved.setup.agent.instructions.is_empty()
     );
     assert_eq!(saved.conversation.unwrap().thread_id, thread.thread_id);
-    assert!(host.linked_schedule_inventory(false).await.unwrap().iter().all(|t| t.thread.is_none()));
-    let linked = host.linked_schedule_inventory(true).await.unwrap().into_iter().find(|t| t.id == id).unwrap();
+    assert!(host
+        .linked_schedule_inventory(false)
+        .await
+        .unwrap()
+        .iter()
+        .all(|t| t.thread.is_none()));
+    let linked = host
+        .linked_schedule_inventory(true)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == id)
+        .unwrap();
     assert_eq!(linked.thread.unwrap().id, thread.thread_id);
-    let reply = LinkedThreadReply { request_id: uuid::Uuid::new_v4(), message: "Reply after restart".into() };
+    let reply = LinkedThreadReply {
+        request_id: uuid::Uuid::new_v4(),
+        message: "Reply after restart".into(),
+    };
     for _ in 0..2 {
-        host.reply_to_linked_thread(id.clone(), thread.thread_id.clone(), reply.clone()).await.unwrap();
+        host.reply_to_linked_thread(id.clone(), thread.thread_id.clone(), reply.clone())
+            .await
+            .unwrap();
     }
-    let page = host.linked_thread(id.clone(), thread.thread_id.clone(), None).await.unwrap();
-    assert_eq!(page.messages.iter().filter(|m| !m.assistant && m.text == reply.message).count(), 1);
-    assert!(!page.messages.iter().any(|m| m.text.contains("Private notes")));
+    let page = host
+        .linked_thread(id.clone(), thread.thread_id.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.messages
+            .iter()
+            .filter(|m| !m.assistant && m.text == reply.message)
+            .count(),
+        1
+    );
+    assert!(!page
+        .messages
+        .iter()
+        .any(|m| m.text.contains("Private notes")));
     edit.setup = saved.setup;
     edit.expected = Some(saved.revision);
     edit.request_id = uuid::Uuid::new_v4();
@@ -829,8 +888,14 @@ async fn linked_task_conversation_resolves_the_host_agent_and_detaches_without_c
     host.save_linked_task(id.clone(), edit, vec![project])
         .await
         .unwrap();
-    assert!(host.linked_thread(id.clone(), thread.thread_id.clone(), None).await.is_err());
-    assert!(host.reply_to_linked_thread(id.clone(), thread.thread_id, reply).await.is_err());
+    assert!(host
+        .linked_thread(id.clone(), thread.thread_id.clone(), None)
+        .await
+        .is_err());
+    assert!(host
+        .reply_to_linked_thread(id.clone(), thread.thread_id, reply)
+        .await
+        .is_err());
     let detached = host.linked_task_definition(id).await.unwrap();
     assert!(detached.conversation.is_none());
     assert_ne!(detached.setup.agent.id, owner.agent.id);

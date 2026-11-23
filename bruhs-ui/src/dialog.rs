@@ -7,7 +7,7 @@
 use crate::theme::{self, ActiveTheme};
 use crate::zoom::px;
 use gpui::prelude::*;
-use gpui::{relative, div, App, Div, ElementId, Role, SharedString, Stateful};
+use gpui::{div, relative, App, Div, ElementId, Role, SharedString, Stateful};
 
 /// Modal scrim opacity (`bg-longan-950/70`).
 pub const DIALOG_OVERLAY_OPACITY: f32 = 0.70;

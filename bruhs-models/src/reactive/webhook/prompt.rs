@@ -7,9 +7,11 @@ use uuid::Uuid;
 
 pub const DEFAULT_WEBHOOK_PROMPT: &str = "Handle this webhook:\n{{body}}";
 const MAX_PROMPT_UNITS: usize = 120_000;
-static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{([^{}]*)\}\}").expect("valid webhook placeholder pattern"));
-static MENTION: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)[\p{Sc}@]|webhook-data|t3-context:|/").expect("valid webhook marker pattern"));
+static PLACEHOLDER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{([^{}]*)\}\}").expect("valid webhook placeholder pattern"));
+static MENTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)[\p{Sc}@]|webhook-data|t3-context:|/").expect("valid webhook marker pattern")
+});
 
 pub struct RenderedWebhookPrompt {
     pub text: String,
@@ -71,7 +73,9 @@ pub fn render_webhook_prompt(
     let mut end = 0;
     let mut framed = false;
     for capture in PLACEHOLDER.captures_iter(template) {
-        let marker = capture.get(0).expect("regex capture includes the whole match");
+        let marker = capture
+            .get(0)
+            .expect("regex capture includes the whole match");
         append(&template[end..marker.start()])?;
         let expression = capture[1].trim();
         match request_value(expression, body, request) {

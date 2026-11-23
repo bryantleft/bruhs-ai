@@ -90,28 +90,55 @@ pub(super) fn sidebar_rows(
     if workspace.labs_sidebar.enabled {
         let mut folders = std::collections::BTreeMap::<String, Vec<&DesktopThread>>::new();
         for thread in &shelves.active {
-            folders.entry(workspace.project_group_key(labs::folder(thread, cx))).or_default().push(thread);
+            folders
+                .entry(workspace.project_group_key(labs::folder(thread, cx)))
+                .or_default()
+                .push(thread);
         }
-        let ranks: HashMap<_, _> = workspace.listed_projects().into_iter().enumerate()
-            .map(|(i, p)| (p.path, i)).collect();
-        let rank = |thread: &DesktopThread| ranks.get(labs::folder(thread,cx)).copied().unwrap_or(usize::MAX);
-        let mut ordered: Vec<_> = folders.into_iter().map(|(key, threads)| {
-            let first = threads.iter().copied().min_by_key(|thread| rank(thread)).expect("nonempty folder");
-            (key, first, threads)
-        }).collect();
+        let ranks: HashMap<_, _> = workspace
+            .listed_projects()
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| (p.path, i))
+            .collect();
+        let rank = |thread: &DesktopThread| {
+            ranks
+                .get(labs::folder(thread, cx))
+                .copied()
+                .unwrap_or(usize::MAX)
+        };
+        let mut ordered: Vec<_> = folders
+            .into_iter()
+            .map(|(key, threads)| {
+                let first = threads
+                    .iter()
+                    .copied()
+                    .min_by_key(|thread| rank(thread))
+                    .expect("nonempty folder");
+                (key, first, threads)
+            })
+            .collect();
         ordered.sort_by_key(|(_, first, _)| rank(first));
         let searching = !workspace.sidebar_query(cx).trim().is_empty();
         for (key, first, threads) in ordered {
             let open = searching || !workspace.labs_sidebar.collapsed.contains(&key);
             let path = labs::folder(first, cx);
-            let merged = threads.iter().any(|t| labs::folder(t,cx) != path);
+            let merged = threads.iter().any(|t| labs::folder(t, cx) != path);
             let name = if first.chat.read(cx).scratch_folder().is_some() {
                 "Scratch".to_owned()
             } else if merged {
-                threads.iter().filter_map(|thread| {
-                    workspace.project_list.title(labs::folder(thread,cx)).map(|title| (rank(thread), title))
-                }).min_by_key(|(rank, _)| *rank).map(|(_, title)| title.to_owned())
-                    .or_else(|| workspace.group_label(path)).unwrap_or_else(|| first.project_name.clone())
+                threads
+                    .iter()
+                    .filter_map(|thread| {
+                        workspace
+                            .project_list
+                            .title(labs::folder(thread, cx))
+                            .map(|title| (rank(thread), title))
+                    })
+                    .min_by_key(|(rank, _)| *rank)
+                    .map(|(_, title)| title.to_owned())
+                    .or_else(|| workspace.group_label(path))
+                    .unwrap_or_else(|| first.project_name.clone())
             } else if let Some(title) = workspace.project_list.title(path) {
                 title.to_owned()
             } else if first.project_name.is_empty() {

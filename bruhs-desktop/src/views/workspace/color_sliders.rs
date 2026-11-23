@@ -34,7 +34,8 @@ impl Hsv {
             (self.value - lightness) / lightness.min(1. - lightness)
         };
         let c = gpui::hsla(self.hue % 1., saturation.clamp(0., 1.), lightness, 1.).to_rgb();
-        let channel = |v: f32| bruhs_models::num::ToIntSaturating::to_u32_saturating((v * 255.).round());
+        let channel =
+            |v: f32| bruhs_models::num::ToIntSaturating::to_u32_saturating((v * 255.).round());
         channel(c.r) << 16 | channel(c.g) << 8 | channel(c.b)
     }
 }

@@ -25,8 +25,10 @@ pub(super) fn load() -> std::io::Result<Vec<Instance>> {
         .map(|agent| {
             let mut kiro_agents = None;
             let models = if agent.driver == Some(bruhs_models::agent_extensions::AcpDriver::Kiro) {
-                let catalog=bruhs_core::agent_extensions::kiro::Catalog::load(&agent);
-                let choices=catalog.choices(&agent);kiro_agents=Some(catalog.agents);choices
+                let catalog = bruhs_core::agent_extensions::kiro::Catalog::load(&agent);
+                let choices = catalog.choices(&agent);
+                kiro_agents = Some(catalog.agents);
+                choices
             } else {
                 let ids = if agent.models.is_empty() {
                     vec!["default".to_owned()]

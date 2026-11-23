@@ -26,10 +26,10 @@ pub(crate) fn opencode_executable() -> std::io::Result<std::path::PathBuf> {
     external::executable(AgentProvider::OpenCode)
 }
 pub use external::health;
+pub(crate) use external::metadata::claude_usage_metadata;
 #[cfg(unix)]
 pub(crate) use external::process::ProcessGroup;
 pub use external::writer_catalog::{writer_catalog, writer_catalog_for_project};
-pub(crate) use external::metadata::claude_usage_metadata;
 
 /// The models `provider`'s CLI lists for the signed-in account (Cursor's
 /// `--list-models`), cached for a few minutes. Other runtimes, and a CLI that
@@ -40,9 +40,17 @@ pub async fn list_runtime_models(
     list_runtime_models_for_project(provider, std::path::Path::new("")).await
 }
 
-pub async fn list_runtime_models_for_project(provider: AgentProvider, project: &std::path::Path) -> bruhs_models::runtime_models::RuntimeModels {
-    if let Err(error) = crate::agent_extensions::availability::require_enabled_for_project(provider, project) {
-        return bruhs_models::runtime_models::RuntimeModels { models: Vec::new(), error: Some(error) };
+pub async fn list_runtime_models_for_project(
+    provider: AgentProvider,
+    project: &std::path::Path,
+) -> bruhs_models::runtime_models::RuntimeModels {
+    if let Err(error) =
+        crate::agent_extensions::availability::require_enabled_for_project(provider, project)
+    {
+        return bruhs_models::runtime_models::RuntimeModels {
+            models: Vec::new(),
+            error: Some(error),
+        };
     }
     external::models::list(provider).await
 }
@@ -799,8 +807,11 @@ impl AgentOrchestrator {
             hidden_folders,
             bruh_secrets: _,
         } = turn;
-        crate::agent_extensions::availability::require_enabled_for_project(provider, project_path.as_ref())
-            .map_err(SendMessageError::ProviderUnavailable)?;
+        crate::agent_extensions::availability::require_enabled_for_project(
+            provider,
+            project_path.as_ref(),
+        )
+        .map_err(SendMessageError::ProviderUnavailable)?;
         let deadline = budget::deadline(execution_timeout_seconds)?;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -832,16 +843,19 @@ impl AgentOrchestrator {
             if fresh_session {
                 session.session = None;
             }
-            let remembered = (!fresh_session)
-                .then(|| {
-                    session
-                        .session
-                        .as_ref()
-                        .filter(|(owner, id)| *owner == provider && (provider != AgentProvider::Acp ||
-                            bruhs_models::agent_extensions::acp_session_matches_model(id, &model)))
-                        .map(|(_, id)| id.clone())
-                })
-                .flatten();
+            let remembered =
+                (!fresh_session)
+                    .then(|| {
+                        session
+                            .session
+                            .as_ref()
+                            .filter(|(owner, id)| {
+                                *owner == provider && (provider != AgentProvider::Acp ||
+                            bruhs_models::agent_extensions::acp_session_matches_model(id, &model))
+                            })
+                            .map(|(_, id)| id.clone())
+                    })
+                    .flatten();
             let claimed = (
                 session.turn,
                 session_to_resume(fresh_session, session_id, remembered),
@@ -883,7 +897,7 @@ impl AgentOrchestrator {
             .then_some(lean_file)
             .flatten();
         apply_lean_context(&mut query_options, lean);
-        model_options::apply(&mut query_options,&model_options);
+        model_options::apply(&mut query_options, &model_options);
         // Only an unattended turn gets a bruh's tools.
         let bruh_helper = if unattended {
             restrict_bruh_turn(
@@ -958,8 +972,10 @@ impl AgentOrchestrator {
                 let _secrets = producer_secrets;
                 let _threads = producer_threads;
                 if let Some(Err(error)) = bruh_helper {
-                    turn.send_start_error(bruhs_models::crew::bruh_tools_failed(&error.to_string()))
-                        .await;
+                    turn.send_start_error(bruhs_models::crew::bruh_tools_failed(
+                        &error.to_string(),
+                    ))
+                    .await;
                     return;
                 }
                 if !unattended {
@@ -970,7 +986,8 @@ impl AgentOrchestrator {
                             ProviderQueryOptions::External(options) => options.secret_env = vars,
                         },
                         Err(error) => {
-                            turn.send_start_error(format!("Could not start the provider. {error}")).await;
+                            turn.send_start_error(format!("Could not start the provider. {error}"))
+                                .await;
                             return;
                         }
                     }
@@ -1050,7 +1067,10 @@ impl AgentOrchestrator {
                 }
                 if !unattended && app_tools {
                     if let Err(error) = crate::website_reader::configure(&mut query_options) {
-                        turn.send_start_error(format!("Could not configure website reading: {error}")).await;
+                        turn.send_start_error(format!(
+                            "Could not configure website reading: {error}"
+                        ))
+                        .await;
                         return;
                     }
                     if let Err(error) =
@@ -2297,37 +2317,39 @@ impl TurnContext {
                                 },
                             );
                     }
-                    "manage_task" => match input.get("Action").and_then(serde_json::Value::as_str) {
-                        Some("kill") => {
-                            if let Some(ext_id) =
-                                input.get("TaskId").and_then(serde_json::Value::as_str)
-                            {
-                                for task_id in self.registry.find_running_by_meta(
-                                    thread_id,
-                                    "external_task_id",
-                                    ext_id,
-                                ) {
-                                    self.registry.complete_task(
-                                        &task_id,
-                                        TaskStatus::Killed,
-                                        None,
-                                        Some("Background task killed."),
-                                    );
+                    "manage_task" => {
+                        match input.get("Action").and_then(serde_json::Value::as_str) {
+                            Some("kill") => {
+                                if let Some(ext_id) =
+                                    input.get("TaskId").and_then(serde_json::Value::as_str)
+                                {
+                                    for task_id in self.registry.find_running_by_meta(
+                                        thread_id,
+                                        "external_task_id",
+                                        ext_id,
+                                    ) {
+                                        self.registry.complete_task(
+                                            &task_id,
+                                            TaskStatus::Killed,
+                                            None,
+                                            Some("Background task killed."),
+                                        );
+                                    }
                                 }
                             }
-                        }
-                        Some("status") => {
-                            if let Some(ext_id) =
-                                input.get("TaskId").and_then(serde_json::Value::as_str)
-                            {
-                                self.task_status_checks
-                                    .lock()
-                                    .unwrap_or_else(PoisonError::into_inner)
-                                    .insert(id.clone(), ext_id.to_string());
+                            Some("status") => {
+                                if let Some(ext_id) =
+                                    input.get("TaskId").and_then(serde_json::Value::as_str)
+                                {
+                                    self.task_status_checks
+                                        .lock()
+                                        .unwrap_or_else(PoisonError::into_inner)
+                                        .insert(id.clone(), ext_id.to_string());
+                                }
                             }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     "schedule" => {
                         let is_daemon = input
                             .get("IsDaemon")
@@ -2370,21 +2392,31 @@ impl TurnContext {
                             .or_else(|| input.get("subagent_type"))
                             .and_then(serde_json::Value::as_str)
                             .filter(|s| !s.trim().is_empty())
-                            .unwrap_or(if async_bg { "Background agent" } else { "Subagent" })
+                            .unwrap_or(if async_bg {
+                                "Background agent"
+                            } else {
+                                "Subagent"
+                            })
                             .to_string();
                         let mut meta = serde_json::json!({
                             "tool": tool,
                             "tool_call_id": id,
                             "persists_after_turn": async_bg,
                         });
-                        if let Some(sub) = input.get("subagent_type").and_then(serde_json::Value::as_str) {
+                        if let Some(sub) = input
+                            .get("subagent_type")
+                            .and_then(serde_json::Value::as_str)
+                        {
                             meta["role"] = serde_json::json!(sub);
                         }
-                        if let Some(model) = input.get("model").and_then(serde_json::Value::as_str) {
+                        if let Some(model) = input.get("model").and_then(serde_json::Value::as_str)
+                        {
                             meta["model"] = serde_json::json!(model);
                         }
                         let task = self.registry.register(thread_id, kind, label, meta);
-                        if let Some(prompt) = input.get("prompt").and_then(serde_json::Value::as_str) {
+                        if let Some(prompt) =
+                            input.get("prompt").and_then(serde_json::Value::as_str)
+                        {
                             self.registry.append_log(&task.id, prompt);
                         }
                         created.push(task);
@@ -2403,16 +2435,20 @@ impl TurnContext {
                             "role": role,
                             "persists_after_turn": true,
                         });
-                        if let Some(model) = input.get("Model").and_then(serde_json::Value::as_str) {
+                        if let Some(model) = input.get("Model").and_then(serde_json::Value::as_str)
+                        {
                             meta["model"] = serde_json::json!(model);
                         }
-                        if let Some(ws) = input.get("Workspace").and_then(serde_json::Value::as_str) {
+                        if let Some(ws) = input.get("Workspace").and_then(serde_json::Value::as_str)
+                        {
                             meta["workspace"] = serde_json::json!(ws);
                         }
-                        let task = self
-                            .registry
-                            .register(thread_id, TaskKind::Subagent, role, meta);
-                        if let Some(prompt) = input.get("Prompt").and_then(serde_json::Value::as_str) {
+                        let task =
+                            self.registry
+                                .register(thread_id, TaskKind::Subagent, role, meta);
+                        if let Some(prompt) =
+                            input.get("Prompt").and_then(serde_json::Value::as_str)
+                        {
                             self.registry.append_log(&task.id, prompt);
                         }
                         created.push(task);
@@ -2430,9 +2466,9 @@ impl TurnContext {
                             "role": label,
                             "persists_after_turn": true,
                         });
-                        let task = self
-                            .registry
-                            .register(thread_id, TaskKind::Subagent, label, meta);
+                        let task =
+                            self.registry
+                                .register(thread_id, TaskKind::Subagent, label, meta);
                         if let Some(prompt) = input
                             .get("prompt")
                             .or_else(|| input.get("message"))
@@ -2443,10 +2479,8 @@ impl TurnContext {
                         created.push(task);
                     }
                     "delegate_task" | "mcp__t3-code__delegate_task" => {
-                        let wait = input
-                            .get("mode")
-                            .and_then(serde_json::Value::as_str)
-                            == Some("wait");
+                        let wait =
+                            input.get("mode").and_then(serde_json::Value::as_str) == Some("wait");
                         let kind = if wait {
                             TaskKind::Subagent
                         } else {
@@ -2571,12 +2605,14 @@ impl TurnContext {
                             }
                         }
                         Some("kill") => {
-                            if let Some(name) = input.get("name").and_then(serde_json::Value::as_str)
+                            if let Some(name) =
+                                input.get("name").and_then(serde_json::Value::as_str)
                             {
-                                for task_id in
-                                    self.registry
-                                        .find_running_by_meta(thread_id, "worker_name", name)
-                                {
+                                for task_id in self.registry.find_running_by_meta(
+                                    thread_id,
+                                    "worker_name",
+                                    name,
+                                ) {
                                     self.registry.complete_task(
                                         &task_id,
                                         TaskStatus::Killed,
@@ -2849,10 +2885,7 @@ fn reconcile_swarm_status(registry: &BackgroundTaskRegistry, thread_id: &str, co
             .or_else(|| value.as_array());
         if let Some(members) = members {
             for member in members {
-                let Some(name) = member
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                else {
+                let Some(name) = member.get("name").and_then(serde_json::Value::as_str) else {
                     continue;
                 };
                 let state = member
@@ -2912,7 +2945,9 @@ fn parse_background_command_result(content: &str) -> Option<(String, Option<Stri
             .get("status")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
-        if status.eq_ignore_ascii_case("running") || value.get("background").and_then(serde_json::Value::as_bool) == Some(true) {
+        if status.eq_ignore_ascii_case("running")
+            || value.get("background").and_then(serde_json::Value::as_bool) == Some(true)
+        {
             if let Some(id) = value
                 .get("taskId")
                 .or_else(|| value.get("task_id"))
@@ -4744,10 +4779,7 @@ mod tests {
             .collect();
         assert_eq!(running.len(), 3);
         assert_eq!(
-            running
-                .iter()
-                .filter(|t| t.kind == TaskKind::Swarm)
-                .count(),
+            running.iter().filter(|t| t.kind == TaskKind::Swarm).count(),
             2
         );
         assert_eq!(

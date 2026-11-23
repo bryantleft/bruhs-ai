@@ -1,8 +1,8 @@
 //! CSS gradient color stops, interpolation and native texture generation.
 mod geometry;
-use super::style::{Length, comma_list, words};
+use super::style::{comma_list, words, Length};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
-use geometry::{Projection, Shape, angle};
+use geometry::{angle, Projection, Shape};
 use image::{Rgba, RgbaImage};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

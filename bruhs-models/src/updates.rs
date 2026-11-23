@@ -1238,7 +1238,12 @@ pub struct LinkedProviderRun {
 
 impl From<&ProviderRun> for LinkedProviderRun {
     fn from(run: &ProviderRun) -> Self {
-        Self { id: run.id, provider: run.provider, phase: run.phase, outcome: run.outcome }
+        Self {
+            id: run.id,
+            provider: run.provider,
+            phase: run.phase,
+            outcome: run.outcome,
+        }
     }
 }
 

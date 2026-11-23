@@ -448,7 +448,7 @@ pub(crate) fn layer_with_radius(surface: &str, radius: Pixels, cx: &App) -> Opti
 #[cfg(test)]
 mod tests {
     use super::style::{Geometry, Length, Sizing, Source};
-    use super::{MAX_BYTES, Picture, discover};
+    use super::{discover, Picture, MAX_BYTES};
     use crate::views::workspace::appearance::stylesheet;
     use bruhs_ui::ThemeMode;
     use std::{collections::BTreeMap, fs};

@@ -3,9 +3,9 @@
 use super::library::ROLES;
 use bruhs_ui::theme::ThemeMode;
 use cssparser::{
-    AtRuleParser, CowRcStr, DeclarationParser, Delimiter, ParseError, Parser, ParserInput,
-    ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, StyleSheetParser,
-    parse_important,
+    parse_important, AtRuleParser, CowRcStr, DeclarationParser, Delimiter, ParseError, Parser,
+    ParserInput, ParserState, QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser,
+    StyleSheetParser,
 };
 use std::collections::BTreeMap;
 
@@ -415,7 +415,7 @@ pub(super) fn apply(
 
 #[cfg(test)]
 mod tests {
-    use super::{BTreeMap, ThemeMode, apply};
+    use super::{apply, BTreeMap, ThemeMode};
 
     #[test]
     fn native_css_cascades_for_each_variant_and_surface() {

@@ -42,20 +42,24 @@ pub(super) const TASK_DELETE_LABEL: &str = "Delete task";
 
 impl Workspace {
     fn cancel_picker_tasks(&mut self) {
-        self.clone_editor.generation=self.clone_editor.generation.wrapping_add(1);
-        self.clone_editor.open=false;
+        self.clone_editor.generation = self.clone_editor.generation.wrapping_add(1);
+        self.clone_editor.open = false;
         self.project_picker_task = None;
         self.import_picker.cancel();
     }
 
     pub(super) fn close_transient_surfaces(&mut self) {
-        self.license_browser=None;
+        self.license_browser = None;
         self.settings_dropdown_trigger = None;
         self.details.close();
         self.provider_editor = None;
         self.usage_hubs.close();
         self.reset_generator_dialog();
-        if self.settings_visible() {self.microphone_test.clear();self.voice_cloud.dismiss();self.voice_models.close();}
+        if self.settings_visible() {
+            self.microphone_test.clear();
+            self.voice_cloud.dismiss();
+            self.voice_models.close();
+        }
         self.cancel_picker_tasks();
         self.action_editor.open = false;
         self.keybinding_recording = None;
@@ -176,26 +180,49 @@ impl Workspace {
     }
 
     pub(super) fn secret_provider_dialog_visible(&self, cx: &App) -> bool {
-        self.top_layer.is_none() && self.settings_visible() && self.settings_section == SettingsSection::Vault
-            && self.vault_settings.read(cx).secret_sources().read(cx).dialog_open()
+        self.top_layer.is_none()
+            && self.settings_visible()
+            && self.settings_section == SettingsSection::Vault
+            && self
+                .vault_settings
+                .read(cx)
+                .secret_sources()
+                .read(cx)
+                .dialog_open()
     }
 
     pub(super) fn active_modal_focus_bounds(&self, cx: &App) -> (FocusHandle, FocusHandle) {
-        if let Some(bounds) = self.usage_hubs.bounds() { return bounds; }
-        if let Some(editor) = &self.provider_editor {return (editor.start.clone(), editor.end.clone());}
-        if self.secret_provider_dialog_visible(cx) {
-            return self.vault_settings.read(cx).secret_sources().read(cx).focus_bounds();
+        if let Some(bounds) = self.usage_hubs.bounds() {
+            return bounds;
         }
-        if let Some(bounds)=self.generators.focus_bounds(){return bounds;}
+        if let Some(editor) = &self.provider_editor {
+            return (editor.start.clone(), editor.end.clone());
+        }
+        if self.secret_provider_dialog_visible(cx) {
+            return self
+                .vault_settings
+                .read(cx)
+                .secret_sources()
+                .read(cx)
+                .focus_bounds();
+        }
+        if let Some(bounds) = self.generators.focus_bounds() {
+            return bounds;
+        }
         if self.scheduled_task_dialog_visible(cx) {
             self.scheduled_panel().read(cx).scheduled_focus_bounds()
         } else {
-            (self.modal_start_focus_handle.clone(), self.modal_end_focus_handle.clone())
+            (
+                self.modal_start_focus_handle.clone(),
+                self.modal_end_focus_handle.clone(),
+            )
         }
     }
 
     pub(super) fn modal_contains_focus(&self, window: &Window, cx: &App) -> bool {
-        self.active_modal_focus_bounds(cx).0.contains_focused(window, cx)
+        self.active_modal_focus_bounds(cx)
+            .0
+            .contains_focused(window, cx)
             || self.accent_panel_has_focus(window, cx)
             || self.theme_picker_has_focus(window, cx)
     }
@@ -206,14 +233,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.step_theme_picker_focus(reverse, window, cx) || self.step_accent_focus(reverse, window, cx) {
+        if self.step_theme_picker_focus(reverse, window, cx)
+            || self.step_accent_focus(reverse, window, cx)
+        {
             return;
         }
         if self.scheduled_task_dialog_visible(cx) {
-            self.scheduled_panel().clone().update(cx, |panel, cx| panel.close_task_picker_for_tab(window, cx));
+            self.scheduled_panel()
+                .clone()
+                .update(cx, |panel, cx| panel.close_task_picker_for_tab(window, cx));
         }
         if self.settings_visible() && self.settings_section == SettingsSection::ScheduledTasks {
-            self.reactive_automations.update(cx, |panel,cx| panel.dismiss_task_menu(window,cx));
+            self.reactive_automations
+                .update(cx, |panel, cx| panel.dismiss_task_menu(window, cx));
         }
         let (start, end) = self.active_modal_focus_bounds(cx);
         if reverse {
@@ -230,7 +262,9 @@ impl Workspace {
             }
         }
         if self.scheduled_task_dialog_visible(cx) {
-            self.reactive_automations.update(cx, |panel, cx| panel.dismiss_unfocused_schedule_picker(window, cx));
+            self.reactive_automations.update(cx, |panel, cx| {
+                panel.dismiss_unfocused_schedule_picker(window, cx)
+            });
         }
     }
 
@@ -282,7 +316,9 @@ impl Workspace {
     pub(super) fn open_top_layer(&mut self, top_layer: TopLayer) {
         self.cancel_picker_tasks();
         self.close_sidebar_menus();
-        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. } | Overlay::Welcome));
+        self.dismiss_overlay(|overlay| {
+            matches!(overlay, Overlay::Settings { .. } | Overlay::Welcome)
+        });
         self.leave_import_dialog();
         self.top_layer = Some(top_layer);
     }
@@ -346,7 +382,11 @@ impl Workspace {
     }
 
     pub(super) fn settings_listbox(&self, dropdown: &'static str) -> Listbox {
-        if self.settings_open_dropdown() == Some(dropdown) { Listbox::Popover } else { Listbox::Closed }
+        if self.settings_open_dropdown() == Some(dropdown) {
+            Listbox::Popover
+        } else {
+            Listbox::Closed
+        }
     }
 
     pub(super) fn set_settings_open_dropdown(&mut self, dropdown: Option<&'static str>) {
@@ -390,7 +430,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.settings_visible() && self.settings_section == SettingsSection::Keyboard && self.dismiss_binding_editor(window,cx) {
+        if self.settings_visible()
+            && self.settings_section == SettingsSection::Keyboard
+            && self.dismiss_binding_editor(window, cx)
+        {
             cx.stop_propagation();
             return;
         }
@@ -398,21 +441,29 @@ impl Workspace {
             cx.stop_propagation();
             return;
         }
-        if self.settings_visible() && self.license_browser.as_ref().is_some_and(|browser|
-            browser.update(cx, |panel,cx|panel.escape_search(window,cx))) {
+        if self.settings_visible()
+            && self.license_browser.as_ref().is_some_and(|browser| {
+                browser.update(cx, |panel, cx| panel.escape_search(window, cx))
+            })
+        {
             cx.stop_propagation();
             return;
         }
         if self.settings_visible() && self.usage_hubs.bounds().is_some() {
-            self.dismiss_hub(window,cx);cx.stop_propagation();return;
+            self.dismiss_hub(window, cx);
+            cx.stop_propagation();
+            return;
         }
         if self.settings_visible() && self.provider_editor.is_some() {
-            self.dismiss_provider_editor(window,cx);
+            self.dismiss_provider_editor(window, cx);
             cx.stop_propagation();
             return;
         }
         if self.secret_provider_dialog_visible(cx) {
-            self.vault_settings.read(cx).secret_sources().update(cx, |view, cx| view.dismiss(cx));
+            self.vault_settings
+                .read(cx)
+                .secret_sources()
+                .update(cx, |view, cx| view.dismiss(cx));
             cx.stop_propagation();
             return;
         }
@@ -420,13 +471,14 @@ impl Workspace {
             if self.settings_open_dropdown().is_some() {
                 self.set_settings_open_dropdown(None);
             } else if self.dismiss_generator() {
-                self.focus_modal_dialog(window,cx);
+                self.focus_modal_dialog(window, cx);
             }
             cx.stop_propagation();
             cx.notify();
             return;
         }
-        if self.settings_visible() && self.settings_section == SettingsSection::Worktrees
+        if self.settings_visible()
+            && self.settings_section == SettingsSection::Worktrees
             && self.retention_editor.take().is_some()
         {
             self.focus_modal_dialog(window, cx);
@@ -434,13 +486,19 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if self.settings_visible() && self.settings_section == SettingsSection::ScheduledTasks
-            && self.reactive_automations.update(cx, |panel,cx| panel.dismiss_task_menu(window,cx)) {
+        if self.settings_visible()
+            && self.settings_section == SettingsSection::ScheduledTasks
+            && self
+                .reactive_automations
+                .update(cx, |panel, cx| panel.dismiss_task_menu(window, cx))
+        {
             cx.stop_propagation();
             return;
         }
         if self.scheduled_task_dialog_visible(cx) {
-            self.scheduled_panel().clone().update(cx, |panel, cx| panel.close_scheduled_overlay(window, cx));
+            self.scheduled_panel()
+                .clone()
+                .update(cx, |panel, cx| panel.close_scheduled_overlay(window, cx));
             cx.stop_propagation();
             return;
         }
@@ -454,19 +512,26 @@ impl Workspace {
             cx.notify();
             return;
         }
-        if self.dismiss_thread_details(window,cx) || self.clear_focused_settings_query(window, cx) {
+        if self.dismiss_thread_details(window, cx) || self.clear_focused_settings_query(window, cx)
+        {
             cx.stop_propagation();
             return;
         }
-        if self.top_layer.is_none() && (self.dismiss_theme_fan(window,cx) || self.dismiss_community_sort(window, cx)) {
+        if self.top_layer.is_none()
+            && (self.dismiss_theme_fan(window, cx) || self.dismiss_community_sort(window, cx))
+        {
             cx.stop_propagation();
             return;
         }
-        if self.top_layer.is_none() && self.cancel_theme_color_picker(window,cx) {
+        if self.top_layer.is_none() && self.cancel_theme_color_picker(window, cx) {
             cx.stop_propagation();
             return;
         }
-        if self.top_layer.is_none() && (self.dismiss_theme_editor(window,cx) || self.dismiss_restart_confirm(window, cx) || self.dismiss_update_confirm(window, cx)) {
+        if self.top_layer.is_none()
+            && (self.dismiss_theme_editor(window, cx)
+                || self.dismiss_restart_confirm(window, cx)
+                || self.dismiss_update_confirm(window, cx))
+        {
             cx.stop_propagation();
             return;
         }
@@ -844,83 +909,88 @@ impl Workspace {
             .w(px(width_px))
             .max_h(dialog_max_height(window))
             .track_focus(&self.modal_start_focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(DESKTOP_MODAL_HEADER_X_PADDING_PX))
+                    .py(px(DESKTOP_MODAL_HEADER_Y_PADDING_PX))
+                    .border_b_1()
+                    .border_color(theme::longan_800())
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .px(px(DESKTOP_MODAL_HEADER_X_PADDING_PX))
-                            .py(px(DESKTOP_MODAL_HEADER_Y_PADDING_PX))
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .font_family(theme::HEADING_FONT_FAMILY)
-                                    .text_size(px(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .line_height(relative(1.5))
-                                    .text_color(theme::rambutan_100())
-                                    .child(title),
-                            )
-                            .child(
-                                web_button(
-                                    "close-modal",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::IconSmall,
-                                    ButtonState::Enabled,
-                                )
-                                .debug_selector(|| "desktop-modal-close".to_string())
-                                .aria_label("Close dialog")
-                                .child(
-                                    svg()
-                                        .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(theme::ICON_PX))
-                                        .text_color(theme::rambutan_400()),
-                                )
-                                .track_focus(&self.modal_focus.close)
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, window, cx| {
-                                        if this.dismiss_theme_editor(window,cx) || this.dismiss_restart_confirm(window, cx) || this.dismiss_update_confirm(window, cx) { return; }
-                                        this.close_transient_surfaces();
-                                        cx.notify();
-                                    })
-                                }),
-                            ),
+                            .font_family(theme::HEADING_FONT_FAMILY)
+                            .text_size(px(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX))
+                            .font_weight(FontWeight::MEDIUM)
+                            .line_height(relative(1.5))
+                            .text_color(theme::rambutan_100())
+                            .child(title),
                     )
-                    .child(self.render_modal_content_start())
                     .child(
-                        div()
-                            .id("desktop-modal-body")
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.modal_scroll)
-                            .child(content)
-                            .vertical_scrollbar(&self.modal_scroll),
-                    )
-                    .when_some(footer, |dialog, footer| {
-                        dialog.child(
-                            div()
-                                .id("desktop-modal-footer")
-                                .debug_selector(|| "desktop-modal-footer".into())
-                                .flex_shrink_0()
-                                .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                                .pb_3()
-                                .child(footer),
+                        web_button(
+                            "close-modal",
+                            WebButtonVariant::Ghost,
+                            WebButtonSize::IconSmall,
+                            ButtonState::Enabled,
                         )
-                    })
-                    .child(self.render_modal_focus_sentinel()),
+                        .debug_selector(|| "desktop-modal-close".to_string())
+                        .aria_label("Close dialog")
+                        .child(
+                            svg()
+                                .path(assets::CLOSE_ICON_PATH)
+                                .size(px(theme::ICON_PX))
+                                .text_color(theme::rambutan_400()),
+                        )
+                        .track_focus(&self.modal_focus.close)
+                        .tab_index(0)
+                        .role(Role::Button)
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| {
+                                if this.dismiss_theme_editor(window, cx)
+                                    || this.dismiss_restart_confirm(window, cx)
+                                    || this.dismiss_update_confirm(window, cx)
+                                {
+                                    return;
+                                }
+                                this.close_transient_surfaces();
+                                cx.notify();
+                            })
+                        }),
+                    ),
             )
-            .into_any_element()
+            .child(self.render_modal_content_start())
+            .child(
+                div()
+                    .id("desktop-modal-body")
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.modal_scroll)
+                    .child(content)
+                    .vertical_scrollbar(&self.modal_scroll),
+            )
+            .when_some(footer, |dialog, footer| {
+                dialog.child(
+                    div()
+                        .id("desktop-modal-footer")
+                        .debug_selector(|| "desktop-modal-footer".into())
+                        .flex_shrink_0()
+                        .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                        .pb_3()
+                        .child(footer),
+                )
+            })
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 }
 

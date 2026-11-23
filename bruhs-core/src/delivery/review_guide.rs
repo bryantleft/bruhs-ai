@@ -36,7 +36,11 @@ impl DeliveryService {
         let (model, generation) = match &prefs.review_guide_model {
             GuideModel::Separate { model, options } => (model.clone(), Some(options)),
             GuideModel::Writer => match &prefs.writer_model {
-                WriterModel::Separate { model, options } if crate::text_generators::split_selection(model).is_none() => (model.clone(), Some(options)),
+                WriterModel::Separate { model, options }
+                    if crate::text_generators::split_selection(model).is_none() =>
+                {
+                    (model.clone(), Some(options))
+                }
                 _ => {
                     let parent = super::writer::main_checkout(path).await?;
                     let path = path.to_owned();

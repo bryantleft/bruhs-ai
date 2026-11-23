@@ -190,8 +190,7 @@ impl ServerClient {
     }
 
     async fn local_owner_http(&self) -> Result<&reqwest::Client, ServerError> {
-        self
-            .local_context_http
+        self.local_context_http
             .get_or_try_init(|| async {
                 reqwest::Client::builder()
                     .no_proxy()
@@ -401,7 +400,9 @@ impl ServerClient {
     ) -> Result<bruhs_models::voice_dictionary::HostDictionaries, ServerError> {
         let mut url = self.local_owner_base()?;
         url.set_path("/api/voice/dictionaries");
-        let request = self.local_owner_http().await?
+        let request = self
+            .local_owner_http()
+            .await?
             .post(url)
             .timeout(Duration::from_secs(5))
             .json(req);

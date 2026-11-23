@@ -417,8 +417,17 @@ mod tests {
     #[test]
     fn raw_json_previews_check_shadowed_keys_and_escaped_values() {
         let token = "owner-credential";
-        assert!(can_show_json_wire(r#"{ "status": "\"done\"", "state": 3 }"#, token));
-        assert!(!can_show_json_wire(r#"{"row":{"pass\u0077ord":"private"},"row":{}}"#, token));
-        assert!(!can_show_json_wire(r#"{"note":"owner\u002dcredential","note":null}"#, token));
+        assert!(can_show_json_wire(
+            r#"{ "status": "\"done\"", "state": 3 }"#,
+            token
+        ));
+        assert!(!can_show_json_wire(
+            r#"{"row":{"pass\u0077ord":"private"},"row":{}}"#,
+            token
+        ));
+        assert!(!can_show_json_wire(
+            r#"{"note":"owner\u002dcredential","note":null}"#,
+            token
+        ));
     }
 }

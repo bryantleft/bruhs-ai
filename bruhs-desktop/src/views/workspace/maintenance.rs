@@ -13,7 +13,7 @@ pub(super) struct MaintenancePreferences {
     pub(super) continue_threads: bool,
     keep_awake: bool,
     fetch_seconds: u32,
-    activity:background::Policy,
+    activity: background::Policy,
     pub(super) auto_pull: bool,
     pub retention_days: u16,
 }
@@ -24,7 +24,7 @@ impl Default for MaintenancePreferences {
             continue_threads: true,
             keep_awake: false,
             fetch_seconds: 0,
-            activity:Default::default(),
+            activity: Default::default(),
             auto_pull: false,
             retention_days: 0,
         }
@@ -34,7 +34,8 @@ pub(super) struct Maintenance {
     pub prefs: MaintenancePreferences,
     seconds: Entity<InputState>,
     polling: Option<Task<()>>,
-    power:Option<background::Power>,power_timer:Option<Task<()>>,
+    power: Option<background::Power>,
+    power_timer: Option<Task<()>>,
     sleep: Option<Task<()>>,
     sleep_error: Option<String>,
     git_status: Option<String>,
@@ -81,14 +82,15 @@ impl Maintenance {
             prefs,
             seconds,
             polling: None,
-            power:None,power_timer:None,
+            power: None,
+            power_timer: None,
             sleep: None,
             sleep_error: None,
             git_status: None,
             cleanup_schedule: None,
             cleanup_running: false,
             cleanup_status: None,
-            captures: captures::Retention::new(window,cx,subscriptions),
+            captures: captures::Retention::new(window, cx, subscriptions),
         }
     }
 }
@@ -100,7 +102,7 @@ impl Workspace {
         }
         self.maintenance.cleanup_schedule = Some(cx.spawn(async move |this, cx| loop {
             if this
-                .update(cx, |this, cx| this.run_maintenance_cleanup(false,cx))
+                .update(cx, |this, cx| this.run_maintenance_cleanup(false, cx))
                 .is_err()
             {
                 break;
@@ -114,15 +116,19 @@ impl Workspace {
     fn run_maintenance_cleanup(&mut self, manual: bool, cx: &mut Context<'_, Self>) {
         let days = self.maintenance.prefs.retention_days;
         let captures = manual && self.maintenance.captures.days.unwrap_or_default() > 0;
-        if (days == 0 && !captures) || self.maintenance.cleanup_running {return;}
+        if (days == 0 && !captures) || self.maintenance.cleanup_running {
+            return;
+        }
         self.maintenance.cleanup_running = true;
         let work = spawn_tokio(cx, async move {
             let mut results = Vec::new();
             if days != 0 {
                 let result = tokio::task::spawn_blocking(move || {
-                    let dir = crate::paths::log_dir().ok_or_else(|| std::io::Error::other("The log folder is unavailable."))?;
+                    let dir = crate::paths::log_dir()
+                        .ok_or_else(|| std::io::Error::other("The log folder is unavailable."))?;
                     crate::logging::prune_rotated_log(&dir, days, std::time::SystemTime::now())
-                }).await;
+                })
+                .await;
                 results.push(match result {
                     Ok(Ok(true)) => "Deleted one expired desktop log.".into(),
                     Ok(Ok(false)) => "No rotated log met the retention period.".into(),
@@ -131,23 +137,29 @@ impl Workspace {
                 });
             }
             if captures {
-                results.push(match crate::server_client::ServerClient::workbench_client().prune_browser_captures().await {
-                    Ok(0) => "No browser capture met the retention period.".into(),
-                    Ok(1) => "Deleted one expired browser capture.".into(),
-                    Ok(count) => format!("Deleted {count} expired browser captures."),
-                    Err(e) => format!("Could not clean up browser captures. {e}"),
-                });
+                results.push(
+                    match crate::server_client::ServerClient::workbench_client()
+                        .prune_browser_captures()
+                        .await
+                    {
+                        Ok(0) => "No browser capture met the retention period.".into(),
+                        Ok(1) => "Deleted one expired browser capture.".into(),
+                        Ok(count) => format!("Deleted {count} expired browser captures."),
+                        Err(e) => format!("Could not clean up browser captures. {e}"),
+                    },
+                );
             }
             results.join(" ")
         });
-        cx.spawn(async move |this,cx| {
-            let message=work.await;
-            let _=this.update(cx,|this,cx|{
-                this.maintenance.cleanup_running=false;
-                this.maintenance.cleanup_status=Some(message);
+        cx.spawn(async move |this, cx| {
+            let message = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.maintenance.cleanup_running = false;
+                this.maintenance.cleanup_status = Some(message);
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
     }
 
     pub(super) fn update_sleep_prevention(&mut self, cx: &mut Context<'_, Self>) {
@@ -195,7 +207,9 @@ impl Workspace {
             cx.background_executor().timer(interval).await;
             let Ok(projects) = this.update(cx, |this, cx| {
                 let mut projects = BTreeSet::new();
-                if this.background_paused(){return projects;}
+                if this.background_paused() {
+                    return projects;
+                }
                 for thread in &this.threads {
                     let chat = thread.chat.read(cx);
                     if chat.project_scoped {
@@ -267,17 +281,32 @@ impl Workspace {
     }
 
     pub(super) fn render_source_control(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let id = if self.settings_project_scope.is_empty() { "settings-enable-auto-pull" } else { "settings-auto-pull" };
-        let mut rows = vec![self.defaults_scope_row(cx), self.scoped_switch_row(
-            ScopedSwitch::AutoPull, id, "desktop-settings-row-auto-pull", "Automatically pull",
-            "Fast-forward clean default checkouts after fetch.",
-            self.maintenance.prefs.auto_pull, cx,
-        )];
+        let id = if self.settings_project_scope.is_empty() {
+            "settings-enable-auto-pull"
+        } else {
+            "settings-auto-pull"
+        };
+        let mut rows = vec![
+            self.defaults_scope_row(cx),
+            self.scoped_switch_row(
+                ScopedSwitch::AutoPull,
+                id,
+                "desktop-settings-row-auto-pull",
+                "Automatically pull",
+                "Fast-forward clean default checkouts after fetch.",
+                self.maintenance.prefs.auto_pull,
+                cx,
+            ),
+        ];
         let (delivery, template_row) = self.delivery_preference_rows(cx);
         rows.extend(delivery);
-        div().flex().flex_col().gap_4()
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
             .child(self.settings_card("", "", rows))
-            .child(self.source_writer_card(template_row, cx)).into_any_element()
+            .child(self.source_writer_card(template_row, cx))
+            .into_any_element()
     }
 
     fn environment_maintenance_row(
@@ -315,7 +344,11 @@ impl Workspace {
                 .as_deref()
                 .unwrap_or("Prevent idle sleep during active turns.")
                 .to_owned(),
-            if self.maintenance.prefs.keep_awake {"On"} else {"Off"},
+            if self.maintenance.prefs.keep_awake {
+                "On"
+            } else {
+                "Off"
+            },
             settings_ui::switch(
                 "settings-keep-awake",
                 self.maintenance.prefs.keep_awake,
@@ -333,7 +366,11 @@ impl Workspace {
             "desktop-settings-row-provider-checks",
             "Provider update checks",
             "Check for new provider CLI versions.",
-            if self.maintenance.prefs.provider_checks {"On"} else {"Off"},
+            if self.maintenance.prefs.provider_checks {
+                "On"
+            } else {
+                "Off"
+            },
             settings_ui::switch(
                 "settings-provider-checks",
                 self.maintenance.prefs.provider_checks,
@@ -353,10 +390,31 @@ impl Workspace {
                 },
             ),
         );
-        let git_description = self.maintenance.git_status.as_deref().unwrap_or("Seconds between remote fetches (0 to disable).").to_owned();
-        let git = self.environment_maintenance_row("desktop-settings-row-fetch-interval","Git fetch interval",git_description,
+        let git_description = self
+            .maintenance
+            .git_status
+            .as_deref()
+            .unwrap_or("Seconds between remote fetches (0 to disable).")
+            .to_owned();
+        let git = self.environment_maintenance_row(
+            "desktop-settings-row-fetch-interval",
+            "Git fetch interval",
+            git_description,
             format!("{} seconds", self.maintenance.prefs.fetch_seconds),
-            div().w(px(144.)).flex().items_center().gap_2().child(div().flex_1().min_w_0().child(Input::new(&self.maintenance.seconds).aria_label("Git fetch interval in seconds"))).child("seconds").into_any_element());
+            div()
+                .w(px(144.))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Input::new(&self.maintenance.seconds)
+                            .aria_label("Git fetch interval in seconds"),
+                    ),
+                )
+                .child("seconds")
+                .into_any_element(),
+        );
         div()
             .flex()
             .flex_col()

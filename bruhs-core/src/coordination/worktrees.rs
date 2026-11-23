@@ -533,14 +533,13 @@ mod tests {
             git(&path, &["branch", "--show-current"]).trim(),
             "bruhs/task"
         );
-        assert!(
-            f.runtime
-                .task(&id)
-                .await
-                .unwrap()
-                .removed_worktree
-                .is_none()
-        );
+        assert!(f
+            .runtime
+            .task(&id)
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_none());
         // The staged folder is deleted in the background.
         let parent = f.root.join("p");
         for _ in 0..200 {
@@ -641,27 +640,25 @@ mod tests {
             .remove_worktree_in(&ids[0], &f.root)
             .await
             .unwrap();
-        assert!(
-            f.runtime
-                .task(&ids[1])
-                .await
-                .unwrap()
-                .removed_worktree
-                .is_some()
-        );
+        assert!(f
+            .runtime
+            .task(&ids[1])
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_some());
         f.runtime
             .restore_worktree_in(&ids[1], &f.root)
             .await
             .unwrap();
         assert!(path.join("README.md").is_file());
-        assert!(
-            f.runtime
-                .task(&ids[0])
-                .await
-                .unwrap()
-                .removed_worktree
-                .is_none()
-        );
+        assert!(f
+            .runtime
+            .task(&ids[0])
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_none());
     }
 
     /// Work `git status` cannot see keeps the worktree: an agent's own
@@ -763,14 +760,13 @@ mod tests {
             git(&path, &["branch", "--show-current"]).trim(),
             "bruhs/cut"
         );
-        assert!(
-            f.runtime
-                .task(&id)
-                .await
-                .unwrap()
-                .removed_worktree
-                .is_none()
-        );
+        assert!(f
+            .runtime
+            .task(&id)
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_none());
     }
 
     /// A chat turn that checked a task's worktree out again leaves the task
@@ -799,13 +795,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(view.state, WorktreeState::Present, "{view:?}");
-        assert!(
-            f.runtime
-                .task(&id)
-                .await
-                .unwrap()
-                .removed_worktree
-                .is_none()
-        );
+        assert!(f
+            .runtime
+            .task(&id)
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_none());
     }
 }

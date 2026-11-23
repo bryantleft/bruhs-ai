@@ -3,7 +3,7 @@ use bruhs_models::delivery::{
     generation::OptionKind,
     writer_catalog::{WriterCliModel, WriterOption},
 };
-use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox, saved_option_value};
+use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
 use bruhs_ui::press::on_press_view;
 use std::path::PathBuf;
 

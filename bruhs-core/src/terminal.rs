@@ -282,12 +282,14 @@ impl TerminalManager {
         spec: TerminalSpec,
         program: Option<&[String]>,
     ) -> Result<TerminalInfo, TerminalError> {
-        let prepared = program.and_then(|parts| parts.split_first()).map(|(program,args)| {
-            let mut cmd = CommandBuilder::new(program);
-            cmd.args(args);
-            cmd
-        });
-        self.create_command(spec,prepared,None)
+        let prepared = program
+            .and_then(|parts| parts.split_first())
+            .map(|(program, args)| {
+                let mut cmd = CommandBuilder::new(program);
+                cmd.args(args);
+                cmd
+            });
+        self.create_command(spec, prepared, None)
     }
 
     pub(crate) fn create_command(
@@ -320,7 +322,9 @@ impl TerminalManager {
         let mut cmd = prepared.unwrap_or_else(|| {
             let shell = pick_shell(std::env::var("SHELL").ok().as_deref());
             let mut c = CommandBuilder::new(&shell);
-            if !cfg!(windows) { c.arg("-l"); }
+            if !cfg!(windows) {
+                c.arg("-l");
+            }
             c
         });
         cmd.cwd(&cwd);
@@ -412,9 +416,14 @@ impl TerminalManager {
                 let child = lock(&reader_session.child).take();
                 let succeeded = child.is_some_and(|mut child| match child.wait() {
                     Ok(status) => status.success(),
-                    Err(e) => { tracing::debug!("terminal child wait failed: {e}"); false }
+                    Err(e) => {
+                        tracing::debug!("terminal child wait failed: {e}");
+                        false
+                    }
                 });
-                if let Some(completion) = completion { let _ = completion.send(succeeded); }
+                if let Some(completion) = completion {
+                    let _ = completion.send(succeeded);
+                }
                 if registered_rx.recv().is_err() {
                     return; // creation was abandoned
                 }

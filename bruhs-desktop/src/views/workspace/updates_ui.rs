@@ -5,19 +5,19 @@
 mod combined;
 
 use super::*;
-use combined::CombinedRun;
-use bruhs_core::agent_extensions::registry::updates as registry;
 use crate::app_state::spawn_tokio;
+use bruhs_core::agent_extensions::registry::updates as registry;
 use bruhs_core::updates::{release::StageProgress, BuildInfo, UpdateChecker};
 use bruhs_models::agent::AgentProvider;
 use bruhs_models::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
 use bruhs_models::updates::{
-    provider_cli_label, running_label, sidebar_label, AppUpdateState, ProviderRun,
-    ProviderUpdate, ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS,
-    RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
+    provider_cli_label, running_label, sidebar_label, AppUpdateState, ProviderRun, ProviderUpdate,
+    ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS, RUN_POLL_INTERVAL_MS,
+    SUCCESS_VISIBLE_MS,
 };
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
+use combined::CombinedRun;
 use std::collections::{HashMap, HashSet};
 
 pub(super) enum UpdateRow<'a> {
@@ -86,7 +86,7 @@ pub(super) struct DesktopUpdates {
     pub(super) translated: bool,
     /// Online checks (registries, the remote) run only while this is on.
     pub enabled: bool,
-    pub provider_checks:bool,
+    pub provider_checks: bool,
     pub report: Option<UpdatesReport>,
     registry: Vec<registry::Installed>,
     registry_notice: Option<String>,
@@ -114,7 +114,12 @@ pub(super) struct DesktopUpdates {
 }
 
 impl DesktopUpdates {
-    pub(super) fn new(enabled: bool, provider_checks:bool, track: UpdateTrack, cx: &mut Context<'_, Self>) -> Self {
+    pub(super) fn new(
+        enabled: bool,
+        provider_checks: bool,
+        track: UpdateTrack,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
         let mut this = Self {
             bundle: bruhs_core::updates::release::current_app_bundle(),
             translated: bruhs_core::updates::release::running_under_rosetta(),
@@ -254,10 +259,13 @@ impl DesktopUpdates {
                                 this.registry = checked.installed;
                                 this.registry_notice = checked.notice;
                                 this.registry_errors.retain(|id, _| {
-                                    this.registry
-                                        .iter()
-                                        .any(|r| r.id() == id && !matches!(r.state,
-                                            registry::State::Current | registry::State::Ahead))
+                                    this.registry.iter().any(|r| {
+                                        r.id() == id
+                                            && !matches!(
+                                                r.state,
+                                                registry::State::Current | registry::State::Ahead
+                                            )
+                                    })
                                 });
                             }
                             Err(e) => {
@@ -285,7 +293,9 @@ impl DesktopUpdates {
     /// Start updating `provider`. The installer runs in its own process
     /// group, so it finishes even if bruhs quits.
     pub(super) fn update(&mut self, provider: AgentProvider, cx: &mut Context<'_, Self>) {
-        if cx.try_global::<crate::app_state::DesktopState>().is_none() || !self.starting.insert(provider) {
+        if cx.try_global::<crate::app_state::DesktopState>().is_none()
+            || !self.starting.insert(provider)
+        {
             return;
         }
         let checker = self.checker.clone();
@@ -295,7 +305,13 @@ impl DesktopUpdates {
             let _ = this.update(cx, |this, cx| {
                 this.starting.remove(&provider);
                 if let Some(batch) = &mut this.combined {
-                    batch.provider_started(provider, started.as_ref().map(|run| run.id).map_err(ToString::to_string));
+                    batch.provider_started(
+                        provider,
+                        started
+                            .as_ref()
+                            .map(|run| run.id)
+                            .map_err(ToString::to_string),
+                    );
                 }
                 match started {
                     Ok(run) => {
@@ -610,7 +626,11 @@ impl Workspace {
 
     pub(super) fn sidebar_check_button(&self, cx: &Context<'_, Self>) -> AnyElement {
         let checking = self.updates.read(cx).checking;
-        let label = self.ui_language().text(if checking { "Checking for updates…" } else { "Check for updates" });
+        let label = self.ui_language().text(if checking {
+            "Checking for updates…"
+        } else {
+            "Check for updates"
+        });
         let button = div()
             .id("desktop-sidebar-check-updates")
             .debug_selector(|| "desktop-sidebar-check-updates".into())
@@ -628,20 +648,32 @@ impl Workspace {
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx));
         if checking {
-            return button.role(Role::Status).child(update_spinner(cx)).into_any_element();
+            return button
+                .role(Role::Status)
+                .child(update_spinner(cx))
+                .into_any_element();
         }
         let target = cx.weak_entity();
-        let button = button.role(Role::Button)
+        let button = button
+            .role(Role::Button)
             .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
-                let _ = target.update(cx, |ws, cx| {ws.check_linked_providers(cx);ws.updates.update(cx,|u,cx|u.check_now(cx));});
+                let _ = target.update(cx, |ws, cx| {
+                    ws.check_linked_providers(cx);
+                    ws.updates.update(cx, |u, cx| u.check_now(cx));
+                });
             })
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800().opacity(0.4)))
-            .child(icon_svg(assets::REFRESH_ICON_PATH, theme::ICON_PX, theme::rambutan_500()));
+            .child(icon_svg(
+                assets::REFRESH_ICON_PATH,
+                theme::ICON_PX,
+                theme::rambutan_500(),
+            ));
         on_press_view(button, cx, |this, _, cx| {
             this.check_linked_providers(cx);
             this.updates.update(cx, |updates, cx| updates.check_now(cx));
-        }).into_any_element()
+        })
+        .into_any_element()
     }
 
     /// Web `SidebarUpdateButton`: the provider pill while runs are active or
@@ -656,10 +688,21 @@ impl Workspace {
         } else {
             self.provider_or_desktop_pill(updates, cx)?
         };
-        Some(div().px(px(8.0)).pt(px(4.0)).flex_shrink_0().child(element).into_any_element())
+        Some(
+            div()
+                .px(px(8.0))
+                .pt(px(4.0))
+                .flex_shrink_0()
+                .child(element)
+                .into_any_element(),
+        )
     }
 
-    fn provider_or_desktop_pill(&self, updates: &DesktopUpdates, cx: &Context<'_, Self>) -> Option<AnyElement> {
+    fn provider_or_desktop_pill(
+        &self,
+        updates: &DesktopUpdates,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
         Some(match updates.sidebar_runs(EpochMs::now()) {
             SidebarRuns::Active(active) => {
                 let tooltip: SharedString = active
@@ -775,7 +818,8 @@ impl Workspace {
                 .into_any_element()
             }
             SidebarRuns::None
-                if self.linked_projects.peer_updates().is_empty() && updates.registry_targets().next().is_none()
+                if self.linked_projects.peer_updates().is_empty()
+                    && updates.registry_targets().next().is_none()
                     && updates.registry_busy.is_empty()
                     && matches!(updates.install, AppInstall::Ready { .. })
                     && !updates
@@ -825,14 +869,20 @@ impl Workspace {
                 let busy = !updates.registry_busy.is_empty();
                 let report = updates.report.as_ref();
                 let progress = updates.install.progress_label();
-                if progress.is_none() && !busy && peers.is_empty() && registry_count == 0
+                if progress.is_none()
+                    && !busy
+                    && peers.is_empty()
+                    && registry_count == 0
                     && !report.is_some_and(UpdatesReport::has_updates)
                 {
                     return None;
                 }
-                let can_update = !peers.is_empty() || registry_count > 0 || progress.is_some() || report.is_some_and(|r| {
-                    !r.updatable_providers().is_empty() || r.app.state == AppUpdateState::Behind
-                });
+                let can_update = !peers.is_empty()
+                    || registry_count > 0
+                    || progress.is_some()
+                    || report.is_some_and(|r| {
+                        !r.updatable_providers().is_empty() || r.app.state == AppUpdateState::Behind
+                    });
                 let label = progress.clone().unwrap_or_else(|| {
                     if busy {
                         "Updating providers…"
@@ -840,20 +890,32 @@ impl Workspace {
                         "Update"
                     } else {
                         report.map_or("Update", sidebar_label)
-                    }.to_owned()
+                    }
+                    .to_owned()
                 });
                 let tooltip: SharedString = if busy {
                     "Updating installed registry agents".into()
                 } else if registry_count > 0 {
-                    updates.registry_targets().map(|r| r.name()).collect::<Vec<_>>().join(", ").into()
+                    updates
+                        .registry_targets()
+                        .map(|r| r.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                        .into()
                 } else if let Some(progress) = progress {
                     progress.into()
                 } else {
-                    report.map(UpdatesReport::summary).unwrap_or_default().into()
+                    report
+                        .map(UpdatesReport::summary)
+                        .unwrap_or_default()
+                        .into()
                 };
-                let count = peers.len() + registry_count + report.map_or(0, |r| {
-                    r.providers.iter().filter(|p| p.is_outdated()).count() + usize::from(r.app.needs_action())
-                });
+                let count = peers.len()
+                    + registry_count
+                    + report.map_or(0, |r| {
+                        r.providers.iter().filter(|p| p.is_outdated()).count()
+                            + usize::from(r.app.needs_action())
+                    });
                 pill("desktop-sidebar-update", tone_action())
                     .role(Role::Button)
                     .aria_label(label.clone())
@@ -897,8 +959,16 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         if can_update {
-            self.open_overlay(Overlay::UpdateConfirm { from_settings: self.settings_visible(), details_open: false });
-            if self.updates.read(cx).combined_targets(self.linked_projects.peer_updates()).is_some() {
+            self.open_overlay(Overlay::UpdateConfirm {
+                from_settings: self.settings_visible(),
+                details_open: false,
+            });
+            if self
+                .updates
+                .read(cx)
+                .combined_targets(self.linked_projects.peer_updates())
+                .is_some()
+            {
                 let cancel = self.modal_focus.update_cancel.clone();
                 cx.defer_in(window, move |_, window, cx| cancel.focus(window, cx));
             } else {
@@ -939,7 +1009,9 @@ impl Workspace {
     /// Swap in the staged update once this process exits, then quit; the
     /// bundled helpers stop with it and the new app opens.
     fn restart_to_update(&mut self, cx: &mut Context<'_, Self>) -> bool {
-        if self.updates.read(cx).combined.is_some() { return false; }
+        if self.updates.read(cx).combined.is_some() {
+            return false;
+        }
         let AppInstall::Ready { staged, .. } = self.updates.read(cx).install.clone() else {
             return false;
         };
@@ -1028,9 +1100,17 @@ impl Workspace {
         self.render_modal_shell(title, content, None, window, cx)
     }
 
-    pub(super) fn dismiss_update_confirm(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
-        let Some(Overlay::UpdateConfirm { from_settings, .. }) = self.overlay else { return false; };
-        self.overlay = from_settings.then_some(Overlay::Settings { open_dropdown: None });
+    pub(super) fn dismiss_update_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let Some(Overlay::UpdateConfirm { from_settings, .. }) = self.overlay else {
+            return false;
+        };
+        self.overlay = from_settings.then_some(Overlay::Settings {
+            open_dropdown: None,
+        });
         let focus = if from_settings && self.updates.read(cx).combined.is_some() {
             self.modal_start_focus_handle.clone()
         } else if from_settings {
@@ -1060,16 +1140,31 @@ impl Workspace {
             .unwrap_or_default();
         let updates = self.updates.read(cx);
         let registry: Vec<_> = updates.registry_targets().collect();
-        let has_targets = !targets.is_empty() || !registry.is_empty() || !self.linked_projects.peer_updates().is_empty();
+        let has_targets = !targets.is_empty()
+            || !registry.is_empty()
+            || !self.linked_projects.peer_updates().is_empty();
         let combined = updates.combined_targets(self.linked_projects.peer_updates());
         let combined_dialog = combined.is_some();
-        let details_open = matches!(self.overlay, Some(Overlay::UpdateConfirm { details_open: true, .. }));
+        let details_open = matches!(
+            self.overlay,
+            Some(Overlay::UpdateConfirm {
+                details_open: true,
+                ..
+            })
+        );
         let show_details = !combined_dialog || details_open;
-        let restarting = combined.as_ref().is_some_and(|p|p.version.is_some());
-        let remote = combined.as_ref().is_some_and(|p|!p.peers.is_empty());
-        let action = if restarting { "Update all and restart" } else { "Update providers" };
+        let restarting = combined.as_ref().is_some_and(|p| p.version.is_some());
+        let remote = combined.as_ref().is_some_and(|p| !p.peers.is_empty());
+        let action = if restarting {
+            "Update all and restart"
+        } else {
+            "Update providers"
+        };
         let desktop_update = report.as_ref().is_some_and(|r| r.app.needs_action())
-            || matches!(updates.install, AppInstall::Staging { .. } | AppInstall::Ready { .. });
+            || matches!(
+                updates.install,
+                AppInstall::Staging { .. } | AppInstall::Ready { .. }
+            );
         let skipped_hosts = self.linked_projects.skipped_update_hosts();
         let skipped_count = skipped.len();
         let rows = targets
@@ -1109,27 +1204,52 @@ impl Workspace {
             .when_some(combined.as_ref(), |el, plan| {
                 el.child(plan.render_summary(&registry))
             })
-            .when(!skipped_hosts.is_empty(), |el| el.child(meta("Skipped machines")).children(skipped_hosts.into_iter().map(meta)))
-            .when(show_details, |el| el.children(self.render_app_update_row(UpdateRow::Confirmation, cx)))
-            .when(has_targets && show_details, |el| el.child(meta(
-                "Running chats keep their current CLI. New sessions use updated providers.",
-            )).child(div().flex().flex_col().gap(px(6.0)).children(rows)))
+            .when(!skipped_hosts.is_empty(), |el| {
+                el.child(meta("Skipped machines"))
+                    .children(skipped_hosts.into_iter().map(meta))
+            })
+            .when(show_details, |el| {
+                el.children(self.render_app_update_row(UpdateRow::Confirmation, cx))
+            })
+            .when(has_targets && show_details, |el| {
+                el.child(meta(
+                    "Running chats keep their current CLI. New sessions use updated providers.",
+                ))
+                .child(div().flex().flex_col().gap(px(6.0)).children(rows))
+            })
             .when(restarting, |el| {
-                let working = self.threads.iter().filter(|t| t.chat.read(cx).is_working()).count();
+                let working = self
+                    .threads
+                    .iter()
+                    .filter(|t| t.chat.read(cx).is_working())
+                    .count();
                 let detail = match working {
                     0 => "Bruhs restarts last.".to_owned(),
                     1 => "Bruhs restarts last and interrupts 1 running thread.".to_owned(),
                     n => format!("Bruhs restarts last and interrupts {n} running threads."),
                 };
-                el.child(meta(format!("{detail} Choose Later during the countdown to keep working.")))
+                el.child(meta(format!(
+                    "{detail} Choose Later during the countdown to keep working."
+                )))
             })
             .when(combined_dialog, |el| {
-                let text = if details_open { "Hide update details" } else { "Show update details" };
-                let button = web_button("combined-update-details", WebButtonVariant::Ghost,
-                    WebButtonSize::Small, ButtonState::Enabled)
-                    .debug_selector(|| "desktop-combined-update-details".into())
-                    .role(Role::Button).tab_index(0).aria_expanded(details_open)
-                    .aria_label(text).child(text);
+                let text = if details_open {
+                    "Hide update details"
+                } else {
+                    "Show update details"
+                };
+                let button = web_button(
+                    "combined-update-details",
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-combined-update-details".into())
+                .role(Role::Button)
+                .tab_index(0)
+                .aria_expanded(details_open)
+                .aria_label(text)
+                .child(text);
                 el.child(div().flex().child(on_press_view(button, cx, |ws, _, cx| {
                     if let Some(Overlay::UpdateConfirm { details_open, .. }) = &mut ws.overlay {
                         *details_open = !*details_open;
@@ -1151,8 +1271,18 @@ impl Workspace {
                         ),
                 )
             });
-        let machine_title = combined.as_ref().filter(|_|remote).map(|p|match p.machine_count(){1=>"Update 1 machine?".into(),n=>format!("Update {n} machines?")});
-        let button_height = if compact { px(36.0) } else { px(theme::CONTROL_PX) };
+        let machine_title = combined
+            .as_ref()
+            .filter(|_| remote)
+            .map(|p| match p.machine_count() {
+                1 => "Update 1 machine?".into(),
+                n => format!("Update {n} machines?"),
+            });
+        let button_height = if compact {
+            px(36.0)
+        } else {
+            px(theme::CONTROL_PX)
+        };
         let cancel_btn = web_button(
             "update-confirm-cancel",
             WebButtonVariant::Ghost,
@@ -1162,14 +1292,24 @@ impl Workspace {
         .h(button_height)
         .when(compact, |el| el.w_full().justify_center())
         .debug_selector(|| "desktop-update-confirm-cancel".to_string())
-        .when(combined_dialog, |el| el.track_focus(&self.modal_focus.update_cancel))
-        .aria_label(if combined_dialog { "Cancel updates" } else if has_targets { "Cancel provider updates" } else { "Close update details" })
+        .when(combined_dialog, |el| {
+            el.track_focus(&self.modal_focus.update_cancel)
+        })
+        .aria_label(if combined_dialog {
+            "Cancel updates"
+        } else if has_targets {
+            "Cancel provider updates"
+        } else {
+            "Close update details"
+        })
         .tab_index(0)
         .role(Role::Button)
         .child(if has_targets { "Cancel" } else { "Close" })
-        .map(|el| on_press_view(el, cx, |this, window, cx| {
-            this.dismiss_update_confirm(window, cx);
-        }));
+        .map(|el| {
+            on_press_view(el, cx, |this, window, cx| {
+                this.dismiss_update_confirm(window, cx);
+            })
+        });
         let footer = div()
             .flex()
             .when(compact, |el| el.flex_col().gap(px(8.0)))
@@ -1231,100 +1371,95 @@ impl Workspace {
             cx.notify();
         }))
         .child(
-            bruhs_ui::dialog::dialog_card(
-                "desktop-modal-dialog",
-                title.clone(),
-                Role::Dialog,
-                cx,
-            )
-            .debug_selector(|| "desktop-modal-dialog".to_string())
-            .child(self.blur_scrim.backdrop())
-            .when(compact, |el| {
-                el.w_full().max_w_full().rounded_none().rounded_t(px(16.0))
-            })
-            .when(!compact, |el| {
-                el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0))
-            })
-            .max_h(dialog_max_height(window))
-            .track_focus(&self.modal_start_focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px(px(24.0))
-                            .pt(px(24.0))
-                            .pb(px(if compact { 16.0 } else { 24.0 }))
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .font_family(theme::HEADING_FONT_FAMILY)
-                                    .text_size(px(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .line_height(relative(1.5))
-                                    .text_color(theme::rambutan_100())
-                                    .child(title),
+            bruhs_ui::dialog::dialog_card("desktop-modal-dialog", title.clone(), Role::Dialog, cx)
+                .debug_selector(|| "desktop-modal-dialog".to_string())
+                .child(self.blur_scrim.backdrop())
+                .when(compact, |el| {
+                    el.w_full().max_w_full().rounded_none().rounded_t(px(16.0))
+                })
+                .when(!compact, |el| {
+                    el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0))
+                })
+                .max_h(dialog_max_height(window))
+                .track_focus(&self.modal_start_focus_handle)
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    this.trap_modal_tab_focus(event, window, cx);
+                }))
+                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                    cx.stop_propagation();
+                }))
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(24.0))
+                        .pt(px(24.0))
+                        .pb(px(if compact { 16.0 } else { 24.0 }))
+                        .border_b_1()
+                        .border_color(theme::longan_800())
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .font_family(theme::HEADING_FONT_FAMILY)
+                                .text_size(px(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX))
+                                .font_weight(FontWeight::MEDIUM)
+                                .line_height(relative(1.5))
+                                .text_color(theme::rambutan_100())
+                                .child(title),
+                        )
+                        .child(
+                            web_button(
+                                "close-modal",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::IconSmall,
+                                ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-modal-close".to_string())
+                            .aria_label("Close dialog")
                             .child(
-                                web_button(
-                                    "close-modal",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::IconSmall,
-                                    ButtonState::Enabled,
-                                )
-                                .debug_selector(|| "desktop-modal-close".to_string())
-                                .aria_label("Close dialog")
-                                .child(
-                                    svg()
-                                        .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(theme::ICON_PX))
-                                        .text_color(theme::rambutan_400()),
-                                )
-                                .track_focus(&self.modal_focus.close)
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, window, cx| {
-                                        if this.dismiss_update_confirm(window, cx) {
-                                            return;
-                                        }
-                                        this.close_transient_surfaces();
-                                        cx.notify();
-                                    })
-                                }),
-                            ),
-                    )
-                    .child(self.render_modal_content_start())
-                    .child(
-                        div()
-                            .id("desktop-modal-body")
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.modal_scroll)
-                            .child(content)
-                            .vertical_scrollbar(&self.modal_scroll),
-                    )
-                    .child(
-                        div()
-                            .id("desktop-modal-footer")
-                            .debug_selector(|| "desktop-modal-footer".into())
-                            .flex_shrink_0()
-                            .px(px(24.0))
-                            .py(px(16.0))
-                            .child(footer),
-                    )
-                    .child(self.render_modal_focus_sentinel()),
-            )
-            .into_any_element()
+                                svg()
+                                    .path(assets::CLOSE_ICON_PATH)
+                                    .size(px(theme::ICON_PX))
+                                    .text_color(theme::rambutan_400()),
+                            )
+                            .track_focus(&self.modal_focus.close)
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
+                                    if this.dismiss_update_confirm(window, cx) {
+                                        return;
+                                    }
+                                    this.close_transient_surfaces();
+                                    cx.notify();
+                                })
+                            }),
+                        ),
+                )
+                .child(self.render_modal_content_start())
+                .child(
+                    div()
+                        .id("desktop-modal-body")
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.modal_scroll)
+                        .child(content)
+                        .vertical_scrollbar(&self.modal_scroll),
+                )
+                .child(
+                    div()
+                        .id("desktop-modal-footer")
+                        .debug_selector(|| "desktop-modal-footer".into())
+                        .flex_shrink_0()
+                        .px(px(24.0))
+                        .py(px(16.0))
+                        .child(footer),
+                )
+                .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 
     pub(super) fn render_settings_updates_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -1362,7 +1497,8 @@ impl Workspace {
                 None => "Not checked yet.".into(),
             }
         };
-        let updatable = self.linked_projects.peer_updates().len() + updates.registry_targets().count()
+        let updatable = self.linked_projects.peer_updates().len()
+            + updates.registry_targets().count()
             + updates
                 .report
                 .as_ref()
@@ -1388,7 +1524,9 @@ impl Workspace {
                 updates.check_now(cx);
             });
         }));
-        let includes_desktop = updates.combined_targets(self.linked_projects.peer_updates()).is_some();
+        let includes_desktop = updates
+            .combined_targets(self.linked_projects.peer_updates())
+            .is_some();
         let status_controls = div()
             .flex()
             .items_center()
@@ -1403,20 +1541,34 @@ impl Workspace {
                     )
                     .debug_selector(|| "desktop-settings-updates-update-all".to_string())
                     .track_focus(&self.modal_focus.update_all)
-                    .aria_label(if includes_desktop { "Review provider and desktop updates" } else { "Update providers" })
+                    .aria_label(if includes_desktop {
+                        "Review provider and desktop updates"
+                    } else {
+                        "Update providers"
+                    })
                     .child(if includes_desktop || updatable > 1 {
                         "Update all"
                     } else {
                         "Update"
                     })
-                    .map(|el| on_press_view(el, cx, |this, window, cx| {
-                        if this.updates.read(cx).combined.is_some() { return; }
-                        if this.updates.read(cx).combined_targets(this.linked_projects.peer_updates()).is_some() {
-                            this.activate_sidebar_update(true, window, cx);
-                        } else {
-                            this.updates.update(cx, |updates, cx| updates.update_all(cx));
-                        }
-                    })),
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
+                            if this.updates.read(cx).combined.is_some() {
+                                return;
+                            }
+                            if this
+                                .updates
+                                .read(cx)
+                                .combined_targets(this.linked_projects.peer_updates())
+                                .is_some()
+                            {
+                                this.activate_sidebar_update(true, window, cx);
+                            } else {
+                                this.updates
+                                    .update(cx, |updates, cx| updates.update_all(cx));
+                            }
+                        })
+                    }),
                 )
             })
             .child(check_now)
@@ -1626,7 +1778,10 @@ impl Workspace {
                                         .mt(px(8.0))
                                         .max_h(px(160.0))
                                         .overflow_y_scroll()
-                                        .font_family(crate::theme::FontFace::Code.with_default(SETTINGS_CODE_FONT_FAMILY))
+                                        .font_family(
+                                            crate::theme::FontFace::Code
+                                                .with_default(SETTINGS_CODE_FONT_FAMILY),
+                                        )
                                         .text_color(theme::rambutan_300())
                                         .child(run.output.clone()),
                                 )
@@ -1730,8 +1885,12 @@ impl Workspace {
             .and_then(|app| app.release.as_ref())
             .and_then(ReleaseUpdate::notes_url);
         let control = match (app.as_ref().map(|app| app.state), &install) {
-            (_, AppInstall::Ready { .. }) if self.updates.read(cx).combined.is_some() =>
-                meta("Desktop update ready").id("desktop-combined-release-ready").role(Role::Status).into_any_element(),
+            (_, AppInstall::Ready { .. }) if self.updates.read(cx).combined.is_some() => {
+                meta("Desktop update ready")
+                    .id("desktop-combined-release-ready")
+                    .role(Role::Status)
+                    .into_any_element()
+            }
             (_, AppInstall::Ready { .. }) => web_button(
                 "desktop-settings-restart-update",
                 WebButtonVariant::Primary,
@@ -1862,10 +2021,20 @@ impl Workspace {
             control
         };
         let row = match location {
-            UpdateRow::Confirmation => self.stacked_settings_row("desktop-settings-row-update-app", "bruhs", line, control),
-            UpdateRow::Settings => self.settings_row("desktop-settings-row-update-app", "bruhs", line, control),
-            UpdateRow::About(version) => self.settings_row_opts("desktop-settings-about-version",
-                format!("Version  {version}"), line, None, false, control),
+            UpdateRow::Confirmation => {
+                self.stacked_settings_row("desktop-settings-row-update-app", "bruhs", line, control)
+            }
+            UpdateRow::Settings => {
+                self.settings_row("desktop-settings-row-update-app", "bruhs", line, control)
+            }
+            UpdateRow::About(version) => self.settings_row_opts(
+                "desktop-settings-about-version",
+                format!("Version  {version}"),
+                line,
+                None,
+                false,
+                control,
+            ),
         };
         let mut rows = vec![row];
         if self.updates.read(cx).translated && self.updates.read(cx).bundle.is_some() {
@@ -1876,15 +2045,22 @@ impl Workspace {
                     "Update to run natively on this Mac.",
                 _ => "The next desktop update will switch this Mac to the native Apple silicon build.",
             };
-            rows.push(div()
-                .id("desktop-update-architecture")
-                .debug_selector(|| "desktop-update-architecture".into())
-                .role(Role::Status)
-                .px(px(16.0)).py_2()
-                .child(div().text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
-                    .text_color(theme::persimmon_200()).child("Intel build on Apple silicon"))
-                .child(meta(detail))
-                .into_any_element());
+            rows.push(
+                div()
+                    .id("desktop-update-architecture")
+                    .debug_selector(|| "desktop-update-architecture".into())
+                    .role(Role::Status)
+                    .px(px(16.0))
+                    .py_2()
+                    .child(
+                        div()
+                            .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
+                            .text_color(theme::persimmon_200())
+                            .child("Intel build on Apple silicon"),
+                    )
+                    .child(meta(detail))
+                    .into_any_element(),
+            );
         }
         if let AppInstall::Failed { error, .. }
         | AppInstall::Ready {
@@ -1968,8 +2144,6 @@ impl Workspace {
         }
         vec![div().flex().flex_col().children(rows).into_any_element()]
     }
-
-
 }
 
 pub(super) fn copy_button(

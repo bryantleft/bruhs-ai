@@ -205,12 +205,22 @@ impl Workspace {
             )),
         ));
         if prefs.engine == "custom" {
-            rows.push(self.settings_row(
-                "desktop-settings-row-browser-search-url", "Custom search URL",
-                if prefs.custom_url_valid() { "Use %s where the search terms go." }
-                else { "Enter an HTTP or HTTPS URL containing %s." },
-                settings_ui::control_column(Input::new(&self.browser_search_url_input).aria_label("Custom search URL").into_any_element()),
-            ));
+            rows.push(
+                self.settings_row(
+                    "desktop-settings-row-browser-search-url",
+                    "Custom search URL",
+                    if prefs.custom_url_valid() {
+                        "Use %s where the search terms go."
+                    } else {
+                        "Enter an HTTP or HTTPS URL containing %s."
+                    },
+                    settings_ui::control_column(
+                        Input::new(&self.browser_search_url_input)
+                            .aria_label("Custom search URL")
+                            .into_any_element(),
+                    ),
+                ),
+            );
         }
         if crate::views::preview_panel::WebViewHost::available() {
             #[cfg(target_os = "macos")]
@@ -618,6 +628,11 @@ impl Workspace {
                     })),
             );
         }
-        vec![self.settings_row("desktop-settings-row-browser-viewport","Default browser viewport","Page size for the preview browser.",settings_ui::control_column(controls.into_any_element()))]
+        vec![self.settings_row(
+            "desktop-settings-row-browser-viewport",
+            "Default browser viewport",
+            "Page size for the preview browser.",
+            settings_ui::control_column(controls.into_any_element()),
+        )]
     }
 }

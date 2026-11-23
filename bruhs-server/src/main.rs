@@ -190,13 +190,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let updates = bruhs_core::updates::UpdateChecker::new(
-            bruhs_core::updates::BuildInfo::new(
-                env!("BRUHS_BUILD_COMMIT"),
-                env!("BRUHS_REPO_ROOT"),
-                "scripts/dev.sh",
-            )
-            .with_release(env!("BRUHS_RELEASE_VERSION")),
-        );
+        bruhs_core::updates::BuildInfo::new(
+            env!("BRUHS_BUILD_COMMIT"),
+            env!("BRUHS_REPO_ROOT"),
+            "scripts/dev.sh",
+        )
+        .with_release(env!("BRUHS_RELEASE_VERSION")),
+    );
     let app = router(ServerState {
         app: state.clone(),
         config: Arc::clone(&config),
@@ -429,7 +429,10 @@ fn router_with_capture_daemon(
             "/api/agent-extensions/config",
             get(routes::agent_extensions::config).post(routes::agent_extensions::save),
         )
-        .route("/api/agent-extensions/pools.js", get(routes::agent_extensions::pools_script))
+        .route(
+            "/api/agent-extensions/pools.js",
+            get(routes::agent_extensions::pools_script),
+        )
         .route(
             "/api/agent-extensions/usage/pools",
             get(routes::agent_extensions::pools::snapshot),
@@ -475,9 +478,18 @@ fn router_with_capture_daemon(
         .route("/api/worktrees/ui", get(routes::worktrees::ui))
         .route("/api/worktrees/measure", get(routes::worktrees::measure))
         .route("/api/worktrees/remove", post(routes::worktrees::remove))
-        .route("/api/worktrees/cleanup-deleted-scratch",post(routes::worktrees::clean_deleted_scratch))
-        .route("/api/worktrees/cleanup-deleted-thread",post(routes::worktrees::clean_deleted_thread))
-        .route("/api/worktrees/cleanup-deleted-thread/with-file-policy",post(routes::worktrees::clean_deleted_thread))
+        .route(
+            "/api/worktrees/cleanup-deleted-scratch",
+            post(routes::worktrees::clean_deleted_scratch),
+        )
+        .route(
+            "/api/worktrees/cleanup-deleted-thread",
+            post(routes::worktrees::clean_deleted_thread),
+        )
+        .route(
+            "/api/worktrees/cleanup-deleted-thread/with-file-policy",
+            post(routes::worktrees::clean_deleted_thread),
+        )
         .route(
             "/api/worktrees/start-again",
             post(routes::worktrees::start_again),
@@ -505,7 +517,10 @@ fn router_with_capture_daemon(
         )
         .route("/api/local-tools", get(routes::local_tools::snapshot))
         .route("/api/local-tools/ui", get(routes::local_tools::ui))
-        .route("/api/voice/dictionaries",post(routes::local_tools::dictionary))
+        .route(
+            "/api/voice/dictionaries",
+            post(routes::local_tools::dictionary),
+        )
         .route("/api/local-tools/grants", post(routes::local_tools::grant))
         .route(
             "/api/local-tools/grants/{id}",
@@ -545,9 +560,18 @@ fn router_with_capture_daemon(
         )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))
-        .route("/api/reactive/task-models", get(routes::reactive::task_models))
-        .route("/api/reactive/task-threads",get(routes::reactive::task_threads))
-        .route("/api/reactive/desktop-task-turns",get(routes::reactive::desktop_task_turns))
+        .route(
+            "/api/reactive/task-models",
+            get(routes::reactive::task_models),
+        )
+        .route(
+            "/api/reactive/task-threads",
+            get(routes::reactive::task_threads),
+        )
+        .route(
+            "/api/reactive/desktop-task-turns",
+            get(routes::reactive::desktop_task_turns),
+        )
         .route("/api/reactive/stream", get(routes::reactive::stream))
         .route(
             "/api/reactive/tasks/{task}/deliveries",
@@ -773,8 +797,14 @@ fn router_with_capture_daemon(
             post(routes::uploads::post_upload).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
         )
         .route("/api/agent/uploads/open", get(routes::uploads::get_open))
-        .route("/api/maintenance/browser-captures", get(routes::uploads::capture_retention).post(routes::uploads::set_capture_retention))
-        .route("/api/maintenance/browser-captures/prune", post(routes::uploads::prune_captures))
+        .route(
+            "/api/maintenance/browser-captures",
+            get(routes::uploads::capture_retention).post(routes::uploads::set_capture_retention),
+        )
+        .route(
+            "/api/maintenance/browser-captures/prune",
+            post(routes::uploads::prune_captures),
+        )
         .route(
             "/api/agent/artifacts/{id}",
             get(routes::artifacts::get_artifact),

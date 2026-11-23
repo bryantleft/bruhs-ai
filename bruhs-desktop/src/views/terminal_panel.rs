@@ -100,17 +100,17 @@ pub fn menu_projects(
 }
 
 pub(crate) struct ProjectCommand {
-    pub name:String,
-    pub command:String,
+    pub name: String,
+    pub command: String,
     /// Thread and configured preview URL for this script.
     pub preview: Option<(String, String)>,
-    pub stop_on_settle_for:Option<String>,
+    pub stop_on_settle_for: Option<String>,
 }
 
 pub struct TerminalPanelView {
     previews: std::collections::BTreeMap<String, (String, String, String)>,
-    pending_stops: std::collections::BTreeMap<u64,String>,
-    stop_owners: std::collections::BTreeMap<String,String>,
+    pending_stops: std::collections::BTreeMap<u64, String>,
+    stop_owners: std::collections::BTreeMap<String, String>,
     mode: TerminalPanelMode,
     manager: TerminalManager,
     runtime: Arc<tokio::runtime::Runtime>,
@@ -158,7 +158,8 @@ impl TerminalPanelView {
             error: None,
             open_generation: 0,
             previews: Default::default(),
-            pending_stops:Default::default(),stop_owners:Default::default(),
+            pending_stops: Default::default(),
+            stop_owners: Default::default(),
         }
     }
 
@@ -180,14 +181,21 @@ impl TerminalPanelView {
         }
     }
 
-    pub(crate) fn thread_server_previews(&self, thread: &str, cx: &App) -> Vec<(String, String, String)> {
-        self.sessions.iter().filter_map(|session| {
-            let terminal = session.read(cx);
-            let id = &terminal.info.id;
-            let (owner, label, url) = self.previews.get(id)?;
-            (owner == thread && terminal.status() == TerminalStatus::Live)
-                .then(|| (id.clone(), label.clone(), url.clone()))
-        }).collect()
+    pub(crate) fn thread_server_previews(
+        &self,
+        thread: &str,
+        cx: &App,
+    ) -> Vec<(String, String, String)> {
+        self.sessions
+            .iter()
+            .filter_map(|session| {
+                let terminal = session.read(cx);
+                let id = &terminal.info.id;
+                let (owner, label, url) = self.previews.get(id)?;
+                (owner == thread && terminal.status() == TerminalStatus::Live)
+                    .then(|| (id.clone(), label.clone(), url.clone()))
+            })
+            .collect()
     }
 
     pub fn has_sessions(&self) -> bool {
@@ -262,8 +270,10 @@ impl TerminalPanelView {
         };
         self.open_generation = self.open_generation.wrapping_add(1);
         let generation = self.open_generation;
-        let stop_with=action.as_ref().and_then(|a|a.stop_on_settle_for.clone());
-        if let Some(owner)=&stop_with {self.pending_stops.insert(generation,owner.clone());}
+        let stop_with = action.as_ref().and_then(|a| a.stop_on_settle_for.clone());
+        if let Some(owner) = &stop_with {
+            self.pending_stops.insert(generation, owner.clone());
+        }
         let manager = self.manager.clone();
         let created = cx.background_spawn(async move {
             manager.create(spec).map(|info| PendingTerminal {
@@ -275,7 +285,9 @@ impl TerminalPanelView {
         cx.spawn_in(window, async move |this, cx| {
             let result = created.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                if stop_with.is_some() && this.pending_stops.remove(&generation).is_none(){return;}
+                if stop_with.is_some() && this.pending_stops.remove(&generation).is_none() {
+                    return;
+                }
                 match result {
                     Ok(mut pending) => {
                         let info = pending.info.clone();
@@ -286,9 +298,11 @@ impl TerminalPanelView {
                         if this.open_generation == generation {
                             this.error = None;
                         }
-                        if let Some(owner)=stop_with {this.stop_owners.insert(id.clone(),owner);}
+                        if let Some(owner) = stop_with {
+                            this.stop_owners.insert(id.clone(), owner);
+                        }
                         if let Some(action) = action {
-                            let command=action.command;
+                            let command = action.command;
                             if let Err(error) =
                                 this.manager.write(&id, format!("{command}\r").as_bytes())
                             {
@@ -353,10 +367,18 @@ impl TerminalPanelView {
         self.open(path, name, window, cx);
     }
 
-    pub(crate) fn stop_thread_actions(&mut self,thread:&str,cx:&mut Context<'_,Self>){
-        self.pending_stops.retain(|_,owner|owner!=thread);
-        let ids:Vec<_>=self.stop_owners.iter().filter(|(_,owner)|owner.as_str()==thread).map(|(id,_)|id.clone()).collect();
-        for id in ids {let _=self.manager.write(&id,&[3]);self.close(&id,cx);}
+    pub(crate) fn stop_thread_actions(&mut self, thread: &str, cx: &mut Context<'_, Self>) {
+        self.pending_stops.retain(|_, owner| owner != thread);
+        let ids: Vec<_> = self
+            .stop_owners
+            .iter()
+            .filter(|(_, owner)| owner.as_str() == thread)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let _ = self.manager.write(&id, &[3]);
+            self.close(&id, cx);
+        }
     }
 
     pub fn close(&mut self, id: &str, cx: &mut Context<'_, Self>) {

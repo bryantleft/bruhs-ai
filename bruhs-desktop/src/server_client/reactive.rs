@@ -60,11 +60,22 @@ impl ServerClient {
         let scope = bruhs_models::delivery::DeliveryPreferenceScope {
             path: (!project.is_empty()).then(|| project.to_owned()),
         };
-        let response = self.http()?.get(self.url("/api/reactive/task-models")).query(&scope).send().await;
+        let response = self
+            .http()?
+            .get(self.url("/api/reactive/task-models"))
+            .query(&scope)
+            .send()
+            .await;
         let response = match Self::check(response, "Read scheduled task models").await {
-            Err(ServerError::Status { code: reqwest::StatusCode::NOT_FOUND, .. }) => {
+            Err(ServerError::Status {
+                code: reqwest::StatusCode::NOT_FOUND,
+                ..
+            }) => {
                 return match self.writer_models(project).await {
-                    Err(ServerError::Status { code: reqwest::StatusCode::NOT_FOUND, .. }) => Ok(Default::default()),
+                    Err(ServerError::Status {
+                        code: reqwest::StatusCode::NOT_FOUND,
+                        ..
+                    }) => Ok(Default::default()),
                     result => result,
                 };
             }
@@ -73,8 +84,16 @@ impl ServerClient {
         Self::decode(response, "Read scheduled task models").await
     }
 
-    pub async fn task_base_branches(&self, project: &str) -> Result<bruhs_core::git::Branches, ServerError> {
-        self.send_json(reqwest::Method::POST, "/api/agent/git-branches", Some(&serde_json::json!({"path":project}))).await
+    pub async fn task_base_branches(
+        &self,
+        project: &str,
+    ) -> Result<bruhs_core::git::Branches, ServerError> {
+        self.send_json(
+            reqwest::Method::POST,
+            "/api/agent/git-branches",
+            Some(&serde_json::json!({"path":project})),
+        )
+        .await
     }
 
     pub async fn weekly_reports(
@@ -166,7 +185,10 @@ impl ServerClient {
     }
 
     pub async fn agent_thread_runs(
-        &self, agent_id: &str, before: Option<&str>, thread: Option<&str>,
+        &self,
+        agent_id: &str,
+        before: Option<&str>,
+        thread: Option<&str>,
     ) -> Result<Vec<ReactiveRun>, ServerError> {
         let mut url = reqwest::Url::parse(&self.base)
             .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;

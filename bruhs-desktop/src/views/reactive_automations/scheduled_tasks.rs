@@ -375,10 +375,22 @@ fn schedule_timing(setup: &AutomationSetup, snapshot: &ReactiveSnapshot) -> Stat
     let due = deadlines
         .and_then(|times| times.get(&setup.source.id))
         .copied();
-    task_timing_label(&setup.subscription.id, &setup.source.kind, setup.enabled(), due, deadlines.is_some())
+    task_timing_label(
+        &setup.subscription.id,
+        &setup.source.kind,
+        setup.enabled(),
+        due,
+        deadlines.is_some(),
+    )
 }
 
-fn task_timing_label(id: &str, kind: &SourceKind, enabled: bool, due: Option<bruhs_models::EpochMs>, known: bool) -> Stateful<Div> {
+fn task_timing_label(
+    id: &str,
+    kind: &SourceKind,
+    enabled: bool,
+    due: Option<bruhs_models::EpochMs>,
+    known: bool,
+) -> Stateful<Div> {
     let (label, exact) = if !enabled {
         ("Paused".into(), None)
     } else if *kind == SourceKind::Webhook {
@@ -410,18 +422,39 @@ fn task_timing_label(id: &str, kind: &SourceKind, enabled: bool, due: Option<bru
         })
 }
 
-pub(crate) fn linked_scheduled_row(id: String, task: &ScheduledTaskSummary, controls: Div, thread_link: Option<AnyElement>) -> AnyElement {
+pub(crate) fn linked_scheduled_row(
+    id: String,
+    task: &ScheduledTaskSummary,
+    controls: Div,
+    thread_link: Option<AnyElement>,
+) -> AnyElement {
     let timing = task_timing_label(&id, &task.schedule, task.enabled, task.next_run_at, true);
     div()
         .id(SharedString::from(id.clone()))
         .debug_selector(move || id)
         .role(Role::Group)
         .aria_label(format!("Scheduled task {}", task.title))
-        .flex().items_center().justify_between().gap_3().px_4().py_3().min_w_0()
-        .child(div().flex().flex_col().gap_1().flex_1().min_w_0()
-            .child(heading(task.title.clone()))
-            .when(!task.project_path.is_empty(), |info| info.child(muted(task.project_path.clone())))
-            .child(timing).children(thread_link))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
+        .px_4()
+        .py_3()
+        .min_w_0()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .flex_1()
+                .min_w_0()
+                .child(heading(task.title.clone()))
+                .when(!task.project_path.is_empty(), |info| {
+                    info.child(muted(task.project_path.clone()))
+                })
+                .child(timing)
+                .children(thread_link),
+        )
         .child(controls)
         .into_any_element()
 }
@@ -453,10 +486,17 @@ impl ReactiveAutomations {
         let mut snapshot = ReactiveSnapshot::default();
         if shares_conversations {
             let mut selected = std::collections::BTreeMap::new();
-            if let Some((task, choice)) = task.as_ref().and_then(|t| Some((t, t.conversation.as_ref()?))) {
+            if let Some((task, choice)) = task
+                .as_ref()
+                .and_then(|t| Some((t, t.conversation.as_ref()?)))
+            {
                 let id = task.setup.subscription.id.clone();
-                snapshot.task_threads.insert(id.clone(), choice.thread_id.clone());
-                if task.conversation_chosen { selected.insert(id, choice.clone()); }
+                snapshot
+                    .task_threads
+                    .insert(id.clone(), choice.thread_id.clone());
+                if task.conversation_chosen {
+                    selected.insert(id, choice.clone());
+                }
             }
             snapshot.selected_task_threads = Some(selected);
         }
@@ -600,7 +640,10 @@ impl ReactiveAutomations {
             .previous
             .as_ref()
             .filter(|e| {
-                e.setup == setup && e.enabled == enabled && e.signing_secret == signing_secret && e.destination == destination
+                e.setup == setup
+                    && e.enabled == enabled
+                    && e.signing_secret == signing_secret
+                    && e.destination == destination
             })
             .map_or_else(uuid::Uuid::new_v4, |e| e.request_id);
         let edit = LinkedTaskSave {
@@ -658,12 +701,19 @@ impl ReactiveAutomations {
             .collect()
     }
 
-    pub(crate) fn open_task_by_id(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(crate) fn open_task_by_id(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         let task = self.snapshot.as_ref().and_then(|snapshot| {
             let sub = snapshot.subscriptions.iter().find(|sub| sub.id == id)?;
             AutomationSetup::from_subscription(snapshot, sub)
         });
-        if let Some(task) = task { self.edit_scheduled_task(Some(task), window, cx); }
+        if let Some(task) = task {
+            self.edit_scheduled_task(Some(task), window, cx);
+        }
     }
 
     pub(crate) fn automation_project_paths(&self) -> impl Iterator<Item = &str> {
@@ -679,7 +729,8 @@ impl ReactiveAutomations {
     }
 
     pub(crate) fn scheduled_editor_open(&self) -> bool {
-        self.task_dialog.delete.is_some() || self.task_dialog.history.is_some()
+        self.task_dialog.delete.is_some()
+            || self.task_dialog.history.is_some()
             || matches!(&self.editor, Some(Editor::Automation(editor)) if editor.scheduled_form)
     }
 
@@ -702,9 +753,15 @@ impl ReactiveAutomations {
         }
     }
 
-    pub(crate) fn dismiss_scheduled_task(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(crate) fn dismiss_scheduled_task(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if let Some(history) = self.task_dialog.history.take() {
-            if let Some(focus) = history.return_focus { focus.focus(window, cx); }
+            if let Some(focus) = history.return_focus {
+                focus.focus(window, cx);
+            }
             cx.notify();
         } else if self.scheduled_editor_open() && !self.busy {
             self.editor = None;
@@ -755,16 +812,22 @@ impl ReactiveAutomations {
                     checkout: s.subscription.task_checkout.clone(),
                 })
             });
-        let webhook_task = setup.as_ref()
+        let webhook_task = setup
+            .as_ref()
             .filter(|setup| setup.source.kind == SourceKind::Webhook)
-            .filter(|_| self.snapshot.as_ref().is_some_and(|s| s.can_address_task_webhooks))
+            .filter(|_| {
+                self.snapshot
+                    .as_ref()
+                    .is_some_and(|s| s.can_address_task_webhooks)
+            })
             .map(|setup| setup.subscription.id.clone());
         let new = setup.is_none();
         if let Some(setup) = setup {
             if !scheduled(&setup.source.kind) {
                 return;
             }
-            if self.linked_task.as_ref().is_some_and(|t|t.locked) || chosen.is_some()
+            if self.linked_task.as_ref().is_some_and(|t| t.locked)
+                || chosen.is_some()
                 || self
                     .snapshot
                     .as_ref()
@@ -782,7 +845,9 @@ impl ReactiveAutomations {
             self.task_dialog.menu_task = None;
             self.task_dialog.origin = origin;
             editor.webhook_url = webhook_task.map(|task| {
-                cx.new(|cx| task_webhook_url::TaskWebhookUrl::new(self.client.clone(), task, window, cx))
+                cx.new(|cx| {
+                    task_webhook_url::TaskWebhookUrl::new(self.client.clone(), task, window, cx)
+                })
             });
             self.task_dialog.scroll = ScrollHandle::new();
             self.task_dialog.restore_focus = true;
@@ -889,8 +954,14 @@ impl ReactiveAutomations {
                 }
                 TaskConversation::Agent => "Runs use this agent’s own conversation.",
             }))
-            .when(editor.task_conversation().has_destination() && self.snapshot.as_ref().is_some_and(|s|s.can_delete_task_threads),
-                |el|el.child(muted("Deleting the thread also deletes this task.")))
+            .when(
+                editor.task_conversation().has_destination()
+                    && self
+                        .snapshot
+                        .as_ref()
+                        .is_some_and(|s| s.can_delete_task_threads),
+                |el| el.child(muted("Deleting the thread also deletes this task.")),
+            )
     }
 
     pub(crate) fn open_schedule_delete_confirmation(
@@ -916,7 +987,12 @@ impl ReactiveAutomations {
         self.task_dialog.delete.take();
     }
 
-    fn answer_schedule_delete(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<'_, Self>) {
+    fn answer_schedule_delete(
+        &mut self,
+        confirm: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if let Some(prompt) = self.task_dialog.delete.take() {
             if let Some(origin) = prompt.origin {
                 origin.focus(window, cx);
@@ -935,7 +1011,8 @@ impl ReactiveAutomations {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let answer = self.open_schedule_delete_confirmation(format!("Delete “{name}”?"), window, cx);
+        let answer =
+            self.open_schedule_delete_confirmation(format!("Delete “{name}”?"), window, cx);
         let id = id.to_owned();
         cx.spawn(async move |this, cx| {
             if answer.await.is_ok() {
@@ -1043,7 +1120,12 @@ impl ReactiveAutomations {
                 .child(
                     muted(if let Some(prompt) = &sub.webhook_prompt {
                         prompt.clone()
-                    } else if shared_agent(snapshot, sub) || snapshot.selected_task_threads.as_ref().is_some_and(|all|all.contains_key(&sub.id)) {
+                    } else if shared_agent(snapshot, sub)
+                        || snapshot
+                            .selected_task_threads
+                            .as_ref()
+                            .is_some_and(|all| all.contains_key(&sub.id))
+                    {
                         sub.instructions.clone()
                     } else {
                         setup.agent.instructions.clone()
@@ -1063,11 +1145,24 @@ impl ReactiveAutomations {
                     .selected_task_threads
                     .as_ref()
                     .and_then(|all| all.get(&sub.id));
-                let live_title = selected.filter(|c| c.desktop_model.is_some()).and_then(|c|
-                    cx.try_global::<crate::app_state::ThreadCatalog>()?.threads.iter()
-                        .find(|(id,_)| id == c.thread_id.as_str()).map(|(_,title)|title.as_str()));
-                let title = live_title.or_else(|| selected.map(|c| c.title.as_str())).unwrap_or_else(|| setup.title()).to_owned();
-                let label = if selected.is_some() {title.clone()} else {"Open thread".into()};
+                let live_title = selected
+                    .filter(|c| c.desktop_model.is_some())
+                    .and_then(|c| {
+                        cx.try_global::<crate::app_state::ThreadCatalog>()?
+                            .threads
+                            .iter()
+                            .find(|(id, _)| id == c.thread_id.as_str())
+                            .map(|(_, title)| title.as_str())
+                    });
+                let title = live_title
+                    .or_else(|| selected.map(|c| c.title.as_str()))
+                    .unwrap_or_else(|| setup.title())
+                    .to_owned();
+                let label = if selected.is_some() {
+                    title.clone()
+                } else {
+                    "Open thread".into()
+                };
                 let location = TaskThreadLocation {
                     task_id: sub.id.clone(),
                     agent_id: sub.agent_id.clone(),

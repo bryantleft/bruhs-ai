@@ -267,9 +267,10 @@ pub(super) async fn stream_agent_response(
         return;
     }
     let claim = required_session.and_then(|r| r.claim);
-    let desktop_turn = match claim
-        .map_or_else(|| bruhs_core::reactive::desktop_turn_lock(&turn.thread_id), Ok)
-    {
+    let desktop_turn = match claim.map_or_else(
+        || bruhs_core::reactive::desktop_turn_lock(&turn.thread_id),
+        Ok,
+    ) {
         Ok(lock) => Arc::new(lock),
         Err(error) => {
             let message = if error.kind() == std::io::ErrorKind::WouldBlock {
@@ -324,7 +325,15 @@ pub(super) async fn stream_agent_response(
 // A textual error only triggers a quota metadata check. It cannot supply a reset time.
 fn quota_error(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
-    ["usage limit", "quota exceeded", "exceeded your quota", "rate limit", "rate_limit_exceeded"].iter().any(|s|message.contains(s))
+    [
+        "usage limit",
+        "quota exceeded",
+        "exceeded your quota",
+        "rate limit",
+        "rate_limit_exceeded",
+    ]
+    .iter()
+    .any(|s| message.contains(s))
 }
 
 /// Forward one attempt's events until it ends. Returns the error that ended
@@ -417,9 +426,13 @@ async fn forward_turn_events(
                 let _ = tx.send(AgentUiEvent::PermissionCancelled(id));
             }
             OrchestratorEvent::Query(QueryEvent::Raw(value)) => {
-                if value["type"] == "rate_limit_event" && value["rate_limit_info"]["status"] == "rejected" {
+                if value["type"] == "rate_limit_event"
+                    && value["rate_limit_info"]["status"] == "rejected"
+                {
                     *limited = true;
-                    let reset = value["rate_limit_info"]["resetsAt"].as_i64().and_then(|s|s.checked_mul(1000));
+                    let reset = value["rate_limit_info"]["resetsAt"]
+                        .as_i64()
+                        .and_then(|s| s.checked_mul(1000));
                     run.retire();
                     let _ = tx.send(AgentUiEvent::QuotaBlocked(reset));
                 }
@@ -924,7 +937,9 @@ impl ChatView {
                 Some(ThreadMessageAnswer::Replied(reply.content.clone()))
             }
             Some((TurnState::Stopped, _)) => Some(ThreadMessageAnswer::Stopped),
-            Some((TurnState::InterruptedByRestart, _)) => Some(ThreadMessageAnswer::Failed("Interrupted by restart".into())),
+            Some((TurnState::InterruptedByRestart, _)) => {
+                Some(ThreadMessageAnswer::Failed("Interrupted by restart".into()))
+            }
             Some((TurnState::Failed { error }, _)) => {
                 Some(ThreadMessageAnswer::Failed(error.clone()))
             }
@@ -1075,7 +1090,10 @@ impl ChatView {
         {
             return false;
         }
-        if self.input_state.update(cx, |field, cx| field.edit_markdown_key(key, window, cx)) {
+        if self
+            .input_state
+            .update(cx, |field, cx| field.edit_markdown_key(key, window, cx))
+        {
             self.recall = None;
             return true;
         }
@@ -1308,7 +1326,9 @@ impl ChatView {
         self.pending_composer = None;
     }
 
-    pub(crate) fn turn_generation(&self) -> u64 { self.turn_generation }
+    pub(crate) fn turn_generation(&self) -> u64 {
+        self.turn_generation
+    }
 
     pub(crate) fn is_quota_turn(&self, generation: u64) -> bool {
         self.turn_generation == generation && !self.is_streaming && !self.placing
@@ -1395,7 +1415,6 @@ impl ChatView {
         self.is_streaming || self.placing
     }
 
-
     pub fn submit_prompt(&mut self, content: String, cx: &mut Context<'_, Self>) {
         self.finish_submit(content, Vec::new(), Vec::new(), Vec::new(), cx);
     }
@@ -1429,13 +1448,22 @@ impl ChatView {
 
     /// Native reasoning effort for this send. Default preserves CLI settings.
     pub(super) fn claude_send_effort(&self) -> Option<String> {
-        if self.kiro_agents.is_some() {return self.kiro_selection().effort;}
+        if self.kiro_agents.is_some() {
+            return self.kiro_selection().effort;
+        }
         use bruhs_models::delivery::generation::OptionKind;
-        let role=self.role_profile.as_ref().and_then(|role| role.effort.as_deref());
+        let role = self
+            .role_profile
+            .as_ref()
+            .and_then(|role| role.effort.as_deref());
         role.or_else(|| self.model_options.configured(OptionKind::Effort))
-            .or_else(|| self.claude_effort.as_deref().filter(|v| self.effort_spec().is_some_and(|s|s.accepts(v))))
-            .filter(|v| *v!="default").map(str::to_owned)
-
+            .or_else(|| {
+                self.claude_effort
+                    .as_deref()
+                    .filter(|v| self.effort_spec().is_some_and(|s| s.accepts(v)))
+            })
+            .filter(|v| *v != "default")
+            .map(str::to_owned)
     }
 
     /// Lock the checkout, reuse a worktree, or create one before the agent runs.
@@ -1596,14 +1624,26 @@ impl ChatView {
         self.placing = true;
         let prefs = self.worktree_prefs;
         let naming = self.branch_naming.clone();
-        let setup=self.setup_actions.clone();
+        let setup = self.setup_actions.clone();
         let visible = bruhs_models::logic::context_chip::expand_prompt(&content, &chips);
         let prompt = bruhs_models::logic::composer_text::visible_prompt(&visible, &attachments);
         let naming_files = uploads.clone();
         let model = self.text_generation_model.clone();
         let create = spawn_tokio(cx, async move {
-            let first_message = bruhs_core::thread_title::FirstMessage { text: &prompt, files: &naming_files };
-            let checkout = bruhs_core::git::prepare_thread_worktree(&repo, &base, &branch, prefs, &naming, first_message, &model).await?;
+            let first_message = bruhs_core::thread_title::FirstMessage {
+                text: &prompt,
+                files: &naming_files,
+            };
+            let checkout = bruhs_core::git::prepare_thread_worktree(
+                &repo,
+                &base,
+                &branch,
+                prefs,
+                &naming,
+                first_message,
+                &model,
+            )
+            .await?;
             bruhs_core::git::run_project_setup(&checkout.path, &setup).await?;
             Ok::<_, bruhs_core::git::GitError>(checkout)
         });
@@ -1614,7 +1654,9 @@ impl ChatView {
                 this.placing = false;
                 match created {
                     Ok(checkout) => {
-                        if let Some(notice) = checkout.naming_notice { cx.emit(ChatViewEvent::Notice(notice)); }
+                        if let Some(notice) = checkout.naming_notice {
+                            cx.emit(ChatViewEvent::Notice(notice));
+                        }
                         let branch = checkout.branch;
                         let path = checkout.path.to_string_lossy().into_owned();
                         let remembered = RememberedWorktree {
@@ -1655,9 +1697,11 @@ impl ChatView {
         self.draft_placement = None;
         self.inherit_repo_placement = false;
         if let Some(path) = worktree {
-            let scratch = branch.is_none() && bruhs_core::worktrees::scratch::is_managed_path(std::path::Path::new(&path));
+            let scratch = branch.is_none()
+                && bruhs_core::worktrees::scratch::is_managed_path(std::path::Path::new(&path));
             if !scratch {
-                self.project_settings_root.get_or_insert_with(||self.project_path.clone());
+                self.project_settings_root
+                    .get_or_insert_with(|| self.project_path.clone());
             }
             self.worktree_path = Some(path.clone());
             self.project_path = path.clone();
@@ -1669,7 +1713,9 @@ impl ChatView {
                 project_path: path,
                 branch,
             });
-            if !scratch { self.refresh_git_branches(cx); }
+            if !scratch {
+                self.refresh_git_branches(cx);
+            }
         }
     }
 
@@ -1771,7 +1817,16 @@ impl ChatView {
             let (pastes, tree) = snap.await;
             let _ = this.update(cx, |this, cx| {
                 this.placing = false;
-                this.finish_launch(content, pastes, chips, uploads, tree, previous_turn, required_session, cx);
+                this.finish_launch(
+                    content,
+                    pastes,
+                    chips,
+                    uploads,
+                    tree,
+                    previous_turn,
+                    required_session,
+                    cx,
+                );
             });
         })
         .detach();
@@ -1835,7 +1890,7 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> Result<AgentTurn, IdError> {
         self.response_media_bindings.clear();
-        self.paragraph_progress=Default::default();
+        self.paragraph_progress = Default::default();
         self.dismiss_prompt_suggestion(cx);
         let expanded = expand_prompt(&content, &chips);
         let visible = super::files::visible_with_files(&expanded, &pastes.items, &uploads);
@@ -1880,8 +1935,9 @@ impl ChatView {
         // other provider (the model changed), which cannot resume it.
         let other_instance = provider == AgentProvider::Acp
             && self.session_provider == Some(provider)
-            && self.session_id.as_deref().is_some_and(|id|
-                !bruhs_models::agent_extensions::acp_session_matches_model(id, &model_id));
+            && self.session_id.as_deref().is_some_and(|id| {
+                !bruhs_models::agent_extensions::acp_session_matches_model(id, &model_id)
+            });
         let other_provider = !self.fresh_session
             && self.session_id.is_some()
             && self.session_provider != Some(provider);
@@ -1902,7 +1958,11 @@ impl ChatView {
         self.turn_stamp = resume.is_none().then_some(stamp);
         let carried = if self.handoff_pending {
             None
-        } else if other_provider || (!self.fresh_session && other_instance) || other_instructions || (resume.is_none() && self.fork.is_some()) {
+        } else if other_provider
+            || (!self.fresh_session && other_instance)
+            || other_instructions
+            || (resume.is_none() && self.fork.is_some())
+        {
             self.conversation_context(&self.messages)
         } else {
             self.import_context.clone()
@@ -1952,9 +2012,14 @@ impl ChatView {
             .instructions(instructions)
             // A chat with no project needs no coding plugins (web: no `project_path`).
             .lean(!project_scoped);
-            turn.model_options=self.model_options.clone();
-            if self.role_profile.as_ref().is_some_and(|r|r.effort.is_some()) {
-                turn.model_options.clear(bruhs_models::delivery::generation::OptionKind::Effort);
+            turn.model_options = self.model_options.clone();
+            if self
+                .role_profile
+                .as_ref()
+                .is_some_and(|r| r.effort.is_some())
+            {
+                turn.model_options
+                    .clear(bruhs_models::delivery::generation::OptionKind::Effort);
             }
             turn.kiro_selection = self.kiro_selection();
             if fresh {
@@ -2004,24 +2069,46 @@ impl ChatView {
                     };
                     let saved = (view.session_id.clone(), view.import_context.is_some());
                     match &event {
-                        AgentUiEvent::PermissionRequest(request) if view.pending_permission.as_ref().is_none_or(|pending| pending.id != request.id) => cx.emit(ChatViewEvent::ThreadAttention("Approval needed")),
-                        AgentUiEvent::SecretRequest(_) => cx.emit(ChatViewEvent::ThreadAttention("Input needed")),
+                        AgentUiEvent::PermissionRequest(request)
+                            if view
+                                .pending_permission
+                                .as_ref()
+                                .is_none_or(|pending| pending.id != request.id) =>
+                        {
+                            cx.emit(ChatViewEvent::ThreadAttention("Approval needed"))
+                        }
+                        AgentUiEvent::SecretRequest(_) => {
+                            cx.emit(ChatViewEvent::ThreadAttention("Input needed"))
+                        }
                         _ => {}
                     }
-                    let recovery_update = matches!(&event, AgentUiEvent::Session(_) | AgentUiEvent::PermissionRequest(_) | AgentUiEvent::PermissionCancelled(_) | AgentUiEvent::SecretRequest(_) | AgentUiEvent::SecretResolved(_));
+                    let recovery_update = matches!(
+                        &event,
+                        AgentUiEvent::Session(_)
+                            | AgentUiEvent::PermissionRequest(_)
+                            | AgentUiEvent::PermissionCancelled(_)
+                            | AgentUiEvent::SecretRequest(_)
+                            | AgentUiEvent::SecretResolved(_)
+                    );
                     let media_update = matches!(&event, AgentUiEvent::ResponseMedia(_));
                     view.apply_agent_event(event);
-                    if recovery_update || media_update
+                    if recovery_update
+                        || media_update
                         || saved != (view.session_id.clone(), view.import_context.is_some())
                     {
                         // Saved now, so a crash mid-turn keeps the session.
                         cx.emit(ChatViewEvent::MessagesChanged);
                     }
-                    if !done { view.schedule_restart_checkpoint(cx); }
+                    if !done {
+                        view.schedule_restart_checkpoint(cx);
+                    }
                     if done {
                         cx.emit(ChatViewEvent::TurnFinished);
                         if let Some(reset_ms) = blocked {
-                            cx.emit(ChatViewEvent::UsageLimitReached{reset_ms,generation});
+                            cx.emit(ChatViewEvent::UsageLimitReached {
+                                reset_ms,
+                                generation,
+                            });
                         }
                         if let Some(brief) = view.take_handoff_brief() {
                             cx.emit(ChatViewEvent::Handoff { brief });
@@ -2195,9 +2282,13 @@ impl ChatView {
 
     pub(super) fn apply_agent_event(&mut self, event: AgentUiEvent) {
         match &event {
-            AgentUiEvent::ToolCall {tool,..} => {
-                let content = self.messages.last().filter(|m|m.role==MessageRole::Assistant).map_or("", |m|m.content.as_str());
-                self.readout.tool_start(content,tool);
+            AgentUiEvent::ToolCall { tool, .. } => {
+                let content = self
+                    .messages
+                    .last()
+                    .filter(|m| m.role == MessageRole::Assistant)
+                    .map_or("", |m| m.content.as_str());
+                self.readout.tool_start(content, tool);
             }
             AgentUiEvent::PermissionRequest(_) => self.readout.latest_status("Needs approval"),
             AgentUiEvent::SecretRequest(_) => self.readout.latest_status("Needs input"),
@@ -2333,7 +2424,7 @@ impl ChatView {
                     smoke_log("permission_cancelled", &id);
                 }
             }
-            AgentUiEvent::QuotaBlocked(_) => {},
+            AgentUiEvent::QuotaBlocked(_) => {}
             AgentUiEvent::Session(id) => self.record_session(id),
             AgentUiEvent::SessionRejected => {
                 self.session_id = None;
@@ -2414,12 +2505,19 @@ impl ChatView {
                 };
                 app.resolve_permission(&request_id, decision)
                     .await
-                    .map(|()| { if let Some(run) = run {run.answered(&request_id);} })
+                    .map(|()| {
+                        if let Some(run) = run {
+                            run.answered(&request_id);
+                        }
+                    })
                     .map_err(|err| format!("permission {request_id} not delivered: {err}"))
             });
             cx.spawn(async move |this, cx| {
                 let failure = match delivery.await {
-                    Ok(Ok(())) => { let _ = this.update(cx, |_, cx| cx.emit(ChatViewEvent::MessagesChanged)); return; },
+                    Ok(Ok(())) => {
+                        let _ = this.update(cx, |_, cx| cx.emit(ChatViewEvent::MessagesChanged));
+                        return;
+                    }
                     Ok(Err(message)) => message,
                     Err(join) => format!("permission reply did not finish: {join}"),
                 };

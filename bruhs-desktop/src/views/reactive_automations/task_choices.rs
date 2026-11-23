@@ -1,10 +1,10 @@
 //! Projects and provider models for a scheduled task on the selected host.
 use super::*;
-use crate::views::model_browser::{self, Browser, FAVORITES, Favorites};
+use crate::views::model_browser::{self, Browser, Favorites, FAVORITES};
 pub(in crate::views) type ToggleFavorite = Rc<dyn Fn(&str, &mut App)>;
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::delivery::writer_catalog::WriterCatalog;
-use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox, saved_option_value};
+use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TaskField {
@@ -354,13 +354,16 @@ impl ReactiveAutomations {
                 .timer(std::time::Duration::from_millis(100))
                 .await;
             let request = cx.update(|cx| {
-                spawn_tokio(
-                    cx,
-                    async move {
-                        if let Some(host) = host { host.conversations(&project, &query).await }
-                        else { client.task_threads(&project, &query).await.map_err(reactive_error) }
-                    },
-                )
+                spawn_tokio(cx, async move {
+                    if let Some(host) = host {
+                        host.conversations(&project, &query).await
+                    } else {
+                        client
+                            .task_threads(&project, &query)
+                            .await
+                            .map_err(reactive_error)
+                    }
+                })
             });
             let result = request.await;
             let _ = panel.update(cx, |p, cx| {
@@ -546,8 +549,7 @@ impl ReactiveAutomations {
         let mut extra = Vec::new();
         let selected_model = catalog.and_then(|c| c.model(&model));
         let model_key = selected_model.map_or(model.as_str(), |m| m.id.as_str());
-        let model_label = selected_model
-            .map_or_else(|| model.clone(), |m| m.label.clone());
+        let model_label = selected_model.map_or_else(|| model.clone(), |m| m.label.clone());
         let browser = Browser::new(
             models.iter().map(|m| m.id.as_str()),
             editor.picker.model_tab.as_deref(),
@@ -596,23 +598,21 @@ impl ReactiveAutomations {
                 project_key,
                 project_groups,
             ),
-            (
-                TaskField::Model,
-                "task-model",
-                "Model",
-                model_key,
-                groups,
-            ),
+            (TaskField::Model, "task-model", "Model", model_key, groups),
         ] {
             if field == TaskField::Model {
                 if let Some(choice) = editor.picker.displayed_thread() {
-                    let model = choice.desktop_model.as_deref().or(choice.agent_model.as_deref()).unwrap_or_else(|| {
-                        self.snapshot
-                            .iter()
-                            .flat_map(|s| &s.agents)
-                            .find(|a| a.id == choice.agent_id)
-                            .map_or("Unavailable", |a| a.model.as_str())
-                    });
+                    let model = choice
+                        .desktop_model
+                        .as_deref()
+                        .or(choice.agent_model.as_deref())
+                        .unwrap_or_else(|| {
+                            self.snapshot
+                                .iter()
+                                .flat_map(|s| &s.agents)
+                                .find(|a| a.id == choice.agent_id)
+                                .map_or("Unavailable", |a| a.model.as_str())
+                        });
                     model_field = model_field.child(
                         div()
                             .flex()
@@ -733,7 +733,13 @@ impl ReactiveAutomations {
             } else {
                 picker
             };
-            let control = div().min_w_0().flex().flex_col().gap_1().child(muted(label)).child(picker);
+            let control = div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(muted(label))
+                .child(picker);
             if field == TaskField::Project {
                 project_field = control;
             } else {

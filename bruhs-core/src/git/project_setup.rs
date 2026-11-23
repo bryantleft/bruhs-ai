@@ -78,16 +78,14 @@ mod tests {
     async fn successful_steps_run_once_and_a_failed_step_can_be_retried() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path();
-        assert!(
-            Command::new("git")
-                .arg("init")
-                .current_dir(cwd)
-                .output()
-                .await
-                .unwrap()
-                .status
-                .success()
-        );
+        assert!(Command::new("git")
+            .arg("init")
+            .current_dir(cwd)
+            .output()
+            .await
+            .unwrap()
+            .status
+            .success());
         let first = SetupAction {
             id: "1".into(),
             name: "Record path".into(),

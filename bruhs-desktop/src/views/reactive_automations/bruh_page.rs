@@ -5,8 +5,6 @@
 //! page's state. Save sends `settings_commands`, so a face edit never
 //! touches the agent.
 mod task_thread_actions;
-pub(crate) use task_thread_actions::TaskThreadDeletion;
-use task_thread_actions::TaskThreadMenu;
 use super::app_grants::{app_grants, AppGrantsState};
 use super::computer_view::ComputerView;
 use super::create_bruh::{
@@ -41,6 +39,8 @@ use bruhs_ui::press::on_press_view;
 use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
 use std::cell::Cell;
+pub(crate) use task_thread_actions::TaskThreadDeletion;
+use task_thread_actions::TaskThreadMenu;
 
 /// Web `text-h3`.
 pub(super) const TITLE_TEXT_PX: f32 = 18.0;
@@ -845,15 +845,19 @@ impl ReactiveAutomations {
         let requested = agent_id.clone();
         let destination = page.task_thread.clone();
         let filter = destination.as_ref().map(|d| d.thread_id.to_string());
-        let operation = spawn_tokio(cx, async move { client.agent_thread_runs(&requested, None, filter.as_deref()).await });
+        let operation = spawn_tokio(cx, async move {
+            client
+                .agent_thread_runs(&requested, None, filter.as_deref())
+                .await
+        });
         page.newest_request = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
             let _ = this.update(cx, |this, cx| {
-                let Some(page) = this
-                    .bruh
-                    .as_mut()
-                    .filter(|page| page.agent_id == agent_id && page.runs_revision == revision && page.task_thread == destination)
-                else {
+                let Some(page) = this.bruh.as_mut().filter(|page| {
+                    page.agent_id == agent_id
+                        && page.runs_revision == revision
+                        && page.task_thread == destination
+                }) else {
                     return;
                 };
                 match result {
@@ -883,21 +887,26 @@ impl ReactiveAutomations {
         let destination = page.task_thread.clone();
         let filter = destination.as_ref().map(|d| d.thread_id.to_string());
         let operation = spawn_tokio(cx, async move {
-            client.agent_thread_runs(&requested, Some(&before), filter.as_deref()).await
+            client
+                .agent_thread_runs(&requested, Some(&before), filter.as_deref())
+                .await
         });
         page.earlier_request = Some(cx.spawn(async move |this, cx| {
             let result = operation.await;
-            let _ = this.update(cx, |this, cx| {
-                let Some(page) = this.bruh.as_mut().filter(|page| page.agent_id == agent_id && page.task_thread == destination) else {
-                    return;
-                };
-                page.loading_earlier = false;
-                match result {
-                    Ok(runs) => page.runs.take_earlier(runs),
-                    Err(error) => page.runs.error = Some(reactive_error(error)),
-                }
-                cx.notify();
-            });
+            let _ =
+                this.update(cx, |this, cx| {
+                    let Some(page) = this.bruh.as_mut().filter(|page| {
+                        page.agent_id == agent_id && page.task_thread == destination
+                    }) else {
+                        return;
+                    };
+                    page.loading_earlier = false;
+                    match result {
+                        Ok(runs) => page.runs.take_earlier(runs),
+                        Err(error) => page.runs.error = Some(reactive_error(error)),
+                    }
+                    cx.notify();
+                });
         }));
         cx.notify();
     }
@@ -1347,20 +1356,55 @@ impl ReactiveAutomations {
         };
         let error = self.error.clone().or_else(|| self.load_error.clone());
         let header = if let Some(location) = self.task_thread() {
-            let title=snapshot.selected_task_threads.as_ref().and_then(|all|all.get(&location.task_id))
-                .filter(|c|c.thread_id==location.thread_id).map(|c|c.title.clone())
-                .or_else(|| snapshot.subscriptions.iter().find(|sub| sub.id==location.task_id &&
-                    snapshot.task_threads.get(&sub.id)==Some(&location.thread_id)).and_then(|sub|sub.task_title.clone()))
+            let title = snapshot
+                .selected_task_threads
+                .as_ref()
+                .and_then(|all| all.get(&location.task_id))
+                .filter(|c| c.thread_id == location.thread_id)
+                .map(|c| c.title.clone())
+                .or_else(|| {
+                    snapshot
+                        .subscriptions
+                        .iter()
+                        .find(|sub| {
+                            sub.id == location.task_id
+                                && snapshot.task_threads.get(&sub.id) == Some(&location.thread_id)
+                        })
+                        .and_then(|sub| sub.task_title.clone())
+                })
                 .unwrap_or_else(|| location.title.clone());
-            let heading=div().id("task-thread-header").debug_selector(|| "task-thread-header".into())
-                .role(Role::Heading).aria_label(title.clone()).flex_1().min_w_0().truncate()
-                .text_color(theme::rambutan_100()).font_weight(FontWeight::SEMIBOLD).child(title.clone());
-            div().flex().items_center().gap_2().px(px(layout.padding)).py_2().border_b_1()
-                .border_color(theme::ring_modal()).child(heading)
-                .when(snapshot.can_delete_task_threads, |el|el.child(self.thread_actions(location,&title,snapshot,cx))).into_any_element()
-        } else { self.render_bruh_header(state, &job, layout, cx).into_any_element() };
+            let heading = div()
+                .id("task-thread-header")
+                .debug_selector(|| "task-thread-header".into())
+                .role(Role::Heading)
+                .aria_label(title.clone())
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(theme::rambutan_100())
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title.clone());
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px(px(layout.padding))
+                .py_2()
+                .border_b_1()
+                .border_color(theme::ring_modal())
+                .child(heading)
+                .when(snapshot.can_delete_task_threads, |el| {
+                    el.child(self.thread_actions(location, &title, snapshot, cx))
+                })
+                .into_any_element()
+        } else {
+            self.render_bruh_header(state, &job, layout, cx)
+                .into_any_element()
+        };
         root.child(header)
-            .when(self.task_thread().is_none(), |root| root.child(self.render_bruh_tabs(tab, layout, cx)))
+            .when(self.task_thread().is_none(), |root| {
+                root.child(self.render_bruh_tabs(tab, layout, cx))
+            })
             .child(
                 div()
                     .id("desktop-bruh-tabpanel")
@@ -1546,7 +1590,9 @@ impl ReactiveAutomations {
         let Some(page) = self.bruh.as_ref() else {
             return div();
         };
-        let blocked = self.task_thread_block().or_else(|| composer_block(Some(state.status)));
+        let blocked = self
+            .task_thread_block()
+            .or_else(|| composer_block(Some(state.status)));
         let empty = page
             .message
             .as_ref()

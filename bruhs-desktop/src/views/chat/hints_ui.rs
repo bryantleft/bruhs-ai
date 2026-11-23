@@ -396,17 +396,15 @@ impl ChatView {
             clamp_composer_hint_index(self.composer_hint_selected_index, matches.len());
         let no_matches = matches.is_empty();
         let rows = if no_matches {
-            vec![
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::rambutan_500())
-                    .child(COMPOSER_HINT_EMPTY_LABEL)
-                    .into_any_element(),
-            ]
+            vec![div()
+                .px_3()
+                .py_2()
+                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::rambutan_500())
+                .child(COMPOSER_HINT_EMPTY_LABEL)
+                .into_any_element()]
         } else {
             matches
                 .into_iter()
@@ -1046,17 +1044,15 @@ impl ChatView {
 
         let thread_count = self.thread_hits.len();
         let rows = if self.thread_hits.is_empty() && self.mention_items.is_empty() {
-            vec![
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::rambutan_500())
-                    .child(COMPOSER_HINT_EMPTY_LABEL)
-                    .into_any_element(),
-            ]
+            vec![div()
+                .px_3()
+                .py_2()
+                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::rambutan_500())
+                .child(COMPOSER_HINT_EMPTY_LABEL)
+                .into_any_element()]
         } else {
             let selected_index = clamp_composer_hint_index(
                 self.composer_hint_selected_index,
@@ -1266,17 +1262,15 @@ impl ChatView {
             } else {
                 theme::rambutan_500()
             };
-            vec![
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(color)
-                    .child(message)
-                    .into_any_element(),
-            ]
+            vec![div()
+                .px_3()
+                .py_2()
+                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(color)
+                .child(message)
+                .into_any_element()]
         } else {
             let selected_index = clamp_composer_hint_index(
                 self.composer_hint_selected_index,
@@ -1396,17 +1390,15 @@ impl ChatView {
             } else {
                 theme::rambutan_500()
             };
-            vec![
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(color)
-                    .child(message)
-                    .into_any_element(),
-            ]
+            vec![div()
+                .px_3()
+                .py_2()
+                .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(color)
+                .child(message)
+                .into_any_element()]
         } else {
             let selected_index =
                 clamp_composer_hint_index(self.composer_hint_selected_index, self.pull_items.len());

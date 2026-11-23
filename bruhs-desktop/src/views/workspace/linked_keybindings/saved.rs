@@ -127,7 +127,8 @@ impl Vault {
     pub(super) fn read(&self, id: Uuid, destination: &Destination) -> Result<String, String> {
         #[cfg(not(test))]
         if self.projects {
-            return bruhs_core::linked_projects::connection::project_token(id, destination).map(|token|token.to_string());
+            return bruhs_core::linked_projects::connection::project_token(id, destination)
+                .map(|token| token.to_string());
         }
         let key = id.to_string();
         #[cfg(test)]

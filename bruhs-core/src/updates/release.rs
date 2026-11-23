@@ -608,7 +608,10 @@ mod tests {
             ("aarch64", false, "native"),
         ] {
             let target = target_arch(binary, translated);
-            assert_eq!(parse_latest(&release, target).unwrap().zip_url.as_deref(), Some(expected));
+            assert_eq!(
+                parse_latest(&release, target).unwrap().zip_url.as_deref(),
+                Some(expected)
+            );
         }
     }
 
@@ -633,7 +636,10 @@ mod tests {
 
     #[test]
     fn nightly_feed_compares_prerelease_versions_and_skips_other_tracks_and_drafts() {
-        assert_eq!(UpdateTrack::for_installed("1.3.0-nightly.2"), UpdateTrack::Nightly);
+        assert_eq!(
+            UpdateTrack::for_installed("1.3.0-nightly.2"),
+            UpdateTrack::Nightly
+        );
         assert_eq!(UpdateTrack::for_installed("1.3.0"), UpdateTrack::Stable);
         assert_eq!(UpdateTrack::for_installed(""), UpdateTrack::Stable);
         let mut releases = serde_json::json!([

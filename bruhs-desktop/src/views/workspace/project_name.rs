@@ -193,28 +193,26 @@ impl Workspace {
         let Some(path) = self.project_title_state_path() else {
             return;
         };
-        cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(revision) = this.read_with(cx, |ws, _| ws.project_names.revision) else {
-                    break;
-                };
-                let file = path.clone();
-                let pending = cx
-                    .background_spawn(async move { names::pending(&file) })
-                    .await;
-                let Ok(()) = this.update(cx, |ws, cx| {
-                    if ws.project_names.busy || ws.project_names.revision != revision {
-                        return;
-                    }
-                    let Ok(pending) = pending else { return };
-                    ws.apply_pending_project_names(pending, cx);
-                }) else {
-                    break;
-                };
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(2))
-                    .await;
-            }
+        cx.spawn(async move |this, cx| loop {
+            let Ok(revision) = this.read_with(cx, |ws, _| ws.project_names.revision) else {
+                break;
+            };
+            let file = path.clone();
+            let pending = cx
+                .background_spawn(async move { names::pending(&file) })
+                .await;
+            let Ok(()) = this.update(cx, |ws, cx| {
+                if ws.project_names.busy || ws.project_names.revision != revision {
+                    return;
+                }
+                let Ok(pending) = pending else { return };
+                ws.apply_pending_project_names(pending, cx);
+            }) else {
+                break;
+            };
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(2))
+                .await;
         })
         .detach();
     }
@@ -518,14 +516,12 @@ mod tests {
                     "https://example.org/team/editor.git",
                 ],
             ] {
-                assert!(
-                    std::process::Command::new("git")
-                        .args(args)
-                        .current_dir(&path)
-                        .status()
-                        .unwrap()
-                        .success()
-                );
+                assert!(std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&path)
+                    .status()
+                    .unwrap()
+                    .success());
             }
             let path = path.to_str().unwrap().to_owned();
             ws.update_in(win, |ws, w, cx| {
@@ -580,11 +576,10 @@ mod tests {
             for p in &paths {
                 assert_eq!(ws.project_list.title(p), Some("Studio editor"));
             }
-            assert!(
-                ws.grouped_projects()
-                    .iter()
-                    .any(|g| g.label == "Studio editor" && g.members.len() == 2)
-            );
+            assert!(ws
+                .grouped_projects()
+                .iter()
+                .any(|g| g.label == "Studio editor" && g.members.len() == 2));
             assert_eq!(ws.matching_thread_items("Studio editor", cx).len(), 2);
         });
         launch::saved(&ws, win).await;
@@ -648,12 +643,11 @@ mod tests {
         win.run_until_parked();
         ws.read_with(win, |ws, _| {
             assert_eq!(ws.project_list.title(&paths[0]), Some("Host edit"));
-            assert!(
-                ws.project_names
-                    .error
-                    .as_ref()
-                    .is_some_and(|error| error.contains("changed"))
-            );
+            assert!(ws
+                .project_names
+                .error
+                .as_ref()
+                .is_some_and(|error| error.contains("changed")));
         });
         launch::saved(&ws, win).await;
         ws.update_in(win, |ws, _, cx| {
@@ -671,17 +665,15 @@ mod tests {
         });
         ws.read_with(win, |ws, cx| {
             assert_eq!(ws.project_list.title(&paths[0]), None);
-            assert!(
-                ws.listed_projects()
-                    .iter()
-                    .any(|p| p.path == paths[0] && p.name == "one")
-            );
+            assert!(ws
+                .listed_projects()
+                .iter()
+                .any(|p| p.path == paths[0] && p.name == "one"));
             for p in &paths {
-                assert!(
-                    ws.threads
-                        .iter()
-                        .any(|t| t.chat.read(cx).settings_project_path() == p)
-                );
+                assert!(ws
+                    .threads
+                    .iter()
+                    .any(|t| t.chat.read(cx).settings_project_path() == p));
             }
         });
         launch::saved(&ws, win).await;

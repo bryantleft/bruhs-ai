@@ -468,11 +468,9 @@ mod tests {
     fn long_equal_prefix_preserves_line_numbers_and_removal_ties() {
         let prefix = "same\n".repeat(1500);
         let lines = lcs_diff(&format!("{prefix}a\nb"), &format!("{prefix}b\na"));
-        assert!(
-            lines[..1500]
-                .iter()
-                .all(|line| line.kind == LineKind::Context)
-        );
+        assert!(lines[..1500]
+            .iter()
+            .all(|line| line.kind == LineKind::Context));
         assert_eq!(
             &lines[1500..],
             &[

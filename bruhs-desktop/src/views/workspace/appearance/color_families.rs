@@ -261,7 +261,10 @@ pub(super) fn edit(
             };
             let mut hover = rgb.mix(target, 0.12).css();
             if alpha < 1. {
-                hover.push_str(&format!("{:02x}", (alpha * 255.).round().to_u8_saturating()));
+                hover.push_str(&format!(
+                    "{:02x}",
+                    (alpha * 255.).round().to_u8_saturating()
+                ));
             }
             set("messageActionHover", hover);
         }

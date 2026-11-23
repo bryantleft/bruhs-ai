@@ -1,8 +1,8 @@
 //! A new conversation owns its checkout independently of the branch's display name.
 use super::*;
 use bruhs_models::logic::run_place::{
-    WorktreePreferences,
     branch_naming::{Mode, Naming},
+    WorktreePreferences,
 };
 use std::collections::HashSet;
 
@@ -34,7 +34,14 @@ pub async fn prepare_thread_worktree<'a>(
         let writer = crate::delivery::DeliveryService::saved_writer_model(repo).await;
         use bruhs_models::delivery::WriterModel;
         let (model, options) = match &writer {
-            Ok(WriterModel::Separate { model, options }) if crate::text_generators::split_selection(model).is_none() || crate::text_generators::active(model).await.map_err(GitError::Failed)? => (model.as_str(), Some(options)),
+            Ok(WriterModel::Separate { model, options })
+                if crate::text_generators::split_selection(model).is_none()
+                    || crate::text_generators::active(model)
+                        .await
+                        .map_err(GitError::Failed)? =>
+            {
+                (model.as_str(), Some(options))
+            }
             _ => (model, None),
         };
         let suggestion = match writer.as_ref() {
@@ -47,9 +54,11 @@ pub async fn prepare_thread_worktree<'a>(
                 }
                 local_suggestion(&text, naming.mode)
             }
-            Ok(_) => crate::thread_title::branch_name_with_options(repo, model, options, prompt, naming)
-                .await
-                .map_err(|e| e.to_string()),
+            Ok(_) => {
+                crate::thread_title::branch_name_with_options(repo, model, options, prompt, naming)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
         };
         Some(suggestion.and_then(|raw| naming.branch(&raw)))
     } else {
@@ -280,11 +289,9 @@ mod tests {
             "fix-broken-tab"
         );
         assert_eq!(available_name(&path, "team").await.unwrap(), "team-1");
-        assert!(
-            rename_generated(&path, &branch, "main", Mode::Custom)
-                .await
-                .is_err()
-        );
+        assert!(rename_generated(&path, &branch, "main", Mode::Custom)
+            .await
+            .is_err());
         let exact = rename_generated(&path, &branch, "Issues/BR-42/修正", Mode::Custom)
             .await
             .unwrap();
@@ -298,15 +305,11 @@ mod tests {
         add_worktree(repo.path(), "main", &legacy, "team/old-abc")
             .await
             .unwrap();
-        assert!(
-            owned_branch(repo.path(), &legacy, "bruhs/abc")
-                .await
-                .is_ok()
-        );
-        assert!(
-            owned_branch(repo.path(), &legacy, "bruhs/def")
-                .await
-                .is_err()
-        );
+        assert!(owned_branch(repo.path(), &legacy, "bruhs/abc")
+            .await
+            .is_ok());
+        assert!(owned_branch(repo.path(), &legacy, "bruhs/def")
+            .await
+            .is_err());
     }
 }

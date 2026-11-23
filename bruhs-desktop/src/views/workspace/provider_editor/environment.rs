@@ -184,10 +184,24 @@ impl Workspace {
                     .child(hint("Managed in Secrets")),
             );
         }
-        if editor.kiro.active && !editor.variables.iter().any(|r| r.name.read(cx).value().as_str() == "KIRO_API_KEY")
-            && !sources.read(cx).bindings().iter().any(|b| b.target == target && b.variable == "KIRO_API_KEY") {
-            section = section.child(editor_button("kiro-add-api-key", "Add Kiro API key",
-                WebButtonVariant::Outline, editor.busy, cx, |ws, w, cx| {
+        if editor.kiro.active
+            && !editor
+                .variables
+                .iter()
+                .any(|r| r.name.read(cx).value().as_str() == "KIRO_API_KEY")
+            && !sources
+                .read(cx)
+                .bindings()
+                .iter()
+                .any(|b| b.target == target && b.variable == "KIRO_API_KEY")
+        {
+            section = section.child(editor_button(
+                "kiro-add-api-key",
+                "Add Kiro API key",
+                WebButtonVariant::Outline,
+                editor.busy,
+                cx,
+                |ws, w, cx| {
                     if let Some(e) = &mut ws.provider_editor {
                         let row = VariableRow::new("KIRO_API_KEY", None, w, cx);
                         e.track_edits(&row.name, cx);
@@ -196,7 +210,8 @@ impl Workspace {
                         e.variables.push(row);
                     }
                     cx.notify();
-                }));
+                },
+            ));
         }
         for (i, row) in editor.variables.iter().enumerate() {
             let target = row.name.clone();

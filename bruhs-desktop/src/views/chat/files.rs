@@ -425,7 +425,10 @@ mod tests {
 
     #[test]
     fn title_text_omits_rendered_attachment_labels_and_keeps_user_text() {
-        let file = UploadedFile { name: "chart.png".into(), path: "/upload/chart.png".into() };
+        let file = UploadedFile {
+            name: "chart.png".into(),
+            path: "/upload/chart.png".into(),
+        };
         for typed in ["", "Fix this", "Attached: chart.png"] {
             let content = visible_with_files(typed, &[], std::slice::from_ref(&file));
             let message = super::super::Message::user_with_files(content, vec![file.clone()]);

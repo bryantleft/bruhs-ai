@@ -21,7 +21,9 @@ impl Workspace {
         }
         let thread = self.task_thread_view.take();
         self.open_routed_view(view, window, cx);
-        self.task_thread_view = thread.filter(|t| matches!(&self.active_view, AppView::Bruh { agent_id } if agent_id == &t.agent_id));
+        self.task_thread_view = thread.filter(
+            |t| matches!(&self.active_view, AppView::Bruh { agent_id } if agent_id == &t.agent_id),
+        );
     }
 
     /// Open `view` the way its own control does, for a `bruhs://` link or

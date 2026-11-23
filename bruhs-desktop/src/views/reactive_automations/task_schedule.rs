@@ -124,7 +124,8 @@ impl AutomationEditor {
             source.weekdays = (1..=5).collect();
             "09:00".into()
         };
-        self.date_time_picker.use_text_entry(source.kind == "calendar" && times.contains(','));
+        self.date_time_picker
+            .use_text_entry(source.kind == "calendar" && times.contains(','));
         source.times.set_text_value(
             format_times(&times, crate::clock_format::pattern()).into(),
             window,
@@ -137,7 +138,9 @@ impl AutomationEditor {
             source.value.set_value("", window, cx);
         }
         let interval = match source.source.kind {
-            SourceKind::Schedule { every_ms } if minutes => (bruhs_models::num::ToFloatLossy::to_f64_lossy(every_ms) / 60_000.).to_string(),
+            SourceKind::Schedule { every_ms } if minutes => {
+                (bruhs_models::num::ToFloatLossy::to_f64_lossy(every_ms) / 60_000.).to_string()
+            }
             SourceKind::Schedule { every_ms } => seconds(every_ms),
             _ => "15".into(),
         };
@@ -220,7 +223,9 @@ fn schedule_occurrence(
 
 pub(super) fn interval_milliseconds(text: &str, original: &SourceKind) -> Result<u64, String> {
     if let SourceKind::Schedule { every_ms } = original {
-        if text.trim() == (bruhs_models::num::ToFloatLossy::to_f64_lossy(*every_ms) / 60_000.).to_string() {
+        if text.trim()
+            == (bruhs_models::num::ToFloatLossy::to_f64_lossy(*every_ms) / 60_000.).to_string()
+        {
             return Ok(*every_ms);
         }
     }
@@ -231,7 +236,9 @@ pub(super) fn interval_milliseconds(text: &str, original: &SourceKind) -> Result
             "Enter an interval of at least one minute within the supported clock range.".into(),
         );
     }
-    Ok(bruhs_models::num::ToIntSaturating::to_u64_saturating(millis))
+    Ok(bruhs_models::num::ToIntSaturating::to_u64_saturating(
+        millis,
+    ))
 }
 
 impl ReactiveAutomations {

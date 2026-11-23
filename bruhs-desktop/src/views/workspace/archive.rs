@@ -31,8 +31,11 @@ impl ArchivedThread {
                 let chat = t.chat.read(cx);
                 chat.project_scoped.then(|| chat.settings_project_path())
             }
-            Self::Stored(r) if !r.thread.project_name.is_empty() =>
-                r.thread.project_settings_root.as_deref().or(r.thread.project_path.as_deref()),
+            Self::Stored(r) if !r.thread.project_name.is_empty() => r
+                .thread
+                .project_settings_root
+                .as_deref()
+                .or(r.thread.project_path.as_deref()),
             Self::Stored(_) => None,
         }
     }
@@ -41,9 +44,15 @@ impl ArchivedThread {
         let paths = match self {
             Self::Live(t, _) => {
                 let chat = t.chat.read(cx);
-                [Some(chat.project_path.as_str()), chat.worktree_path.as_deref()]
+                [
+                    Some(chat.project_path.as_str()),
+                    chat.worktree_path.as_deref(),
+                ]
             }
-            Self::Stored(r) => [r.thread.project_path.as_deref(), r.thread.worktree_path.as_deref()],
+            Self::Stored(r) => [
+                r.thread.project_path.as_deref(),
+                r.thread.worktree_path.as_deref(),
+            ],
         };
         paths.into_iter().flatten()
     }
@@ -222,28 +231,34 @@ impl Workspace {
                     .unwrap_or_default();
                 let (enabled, keep) = self.cleanup_rules(project);
                 if enabled {
-                    worktree_storage::CleanupTarget::new(&r.thread.id, r.thread.worktree_path, r.thread.branch, keep)
-                } else { None }
+                    worktree_storage::CleanupTarget::new(
+                        &r.thread.id,
+                        r.thread.worktree_path,
+                        r.thread.branch,
+                        keep,
+                    )
+                } else {
+                    None
+                }
             }
         };
         if let Some(checkout) = checkout {
             self.cleanup_deleted_checkout(checkout, cx);
         }
         self.details.hidden_inline.remove(id);
-        self.thread_origins.retain(|child, origin| child != id && origin.parent() != id);
+        self.thread_origins
+            .retain(|child, origin| child != id && origin.parent() != id);
         self.known_thread_pulls.remove(id);
         self.pull_check_times.remove(id);
         self.persist_and_notify(cx);
     }
     pub(super) fn render_archived_threads(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         if self.archived_threads.is_empty() {
-            return vec![
-                div()
-                    .p_4()
-                    .text_color(theme::rambutan_400())
-                    .child("No archived threads")
-                    .into_any_element(),
-            ];
+            return vec![div()
+                .p_4()
+                .text_color(theme::rambutan_400())
+                .child("No archived threads")
+                .into_any_element()];
         }
         self.archived_threads
             .iter()

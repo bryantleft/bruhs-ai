@@ -448,7 +448,7 @@ fn delivery_label(row: &WebhookDeliverySummary) -> String {
 }
 
 fn delivery_heading(row: &WebhookDeliverySummary) -> Div {
-    use bruhs_models::time::{RelativeTimeStyle, format_relative_ms};
+    use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
     let color = match row.outcome {
         WebhookOutcome::Queued => theme::pandan_400(),
         WebhookOutcome::AwaitingReview => theme::blueberry_400(),

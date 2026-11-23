@@ -812,7 +812,12 @@ mod git {
         let other = repo_with_unstaged_change();
         let (chat, cx) = chat_window(cx);
         chat.update(cx, |chat, cx| {
-            chat.set_project_context(project.path().to_string_lossy().into_owned(), "repo", true, cx);
+            chat.set_project_context(
+                project.path().to_string_lossy().into_owned(),
+                "repo",
+                true,
+                cx,
+            );
             chat.previous_worktree = Some(RememberedWorktree {
                 path: other.path().to_string_lossy().into_owned(),
                 branch: "main".into(),
@@ -825,7 +830,14 @@ mod git {
         chat.read_with(cx, |chat, _| {
             assert!(!chat.run_locked);
             assert!(!chat.is_streaming);
-            assert!(chat.messages.last().unwrap().state.error().unwrap().contains("different project"));
+            assert!(chat
+                .messages
+                .last()
+                .unwrap()
+                .state
+                .error()
+                .unwrap()
+                .contains("different project"));
         });
     }
 

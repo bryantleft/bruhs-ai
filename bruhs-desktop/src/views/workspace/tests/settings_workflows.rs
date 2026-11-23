@@ -332,7 +332,12 @@ fn scheduled_destination_search_selects_a_project_thread_and_preserves_its_agent
 #[gpui::test]
 fn scheduled_tasks_manage_the_selected_subscription(cx: &mut gpui::TestAppContext) {
     use bruhs_models::reactive::{ReactiveChange, ReactiveCommand, SourceKind};
-    let (workspace, cx, panel) = scheduled_task_workspace(cx, SourceKind::Schedule { every_ms: 86_400_000 });
+    let (workspace, cx, panel) = scheduled_task_workspace(
+        cx,
+        SourceKind::Schedule {
+            every_ms: 86_400_000,
+        },
+    );
     for (width, stacked) in [(820., true), (1040., false)] {
         cx.simulate_resize(gpui::size(px(width), px(820.)));
         cx.run_until_parked();
@@ -417,23 +422,35 @@ fn scheduled_tasks_manage_the_selected_subscription(cx: &mut gpui::TestAppContex
     let (start, _) = workspace.update_in(cx, |ws, _, cx| ws.active_modal_focus_bounds(cx));
     for key in ["shift-tab", "shift-tab", "tab", "tab"] {
         cx.simulate_keystrokes(key);
-        assert!(cx.update(|window, cx| start.contains_focused(window, cx)), "{key} kept focus inside the task dialog");
+        assert!(
+            cx.update(|window, cx| start.contains_focused(window, cx)),
+            "{key} kept focus inside the task dialog"
+        );
     }
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     assert!(cx.debug_bounds("scheduled-task-dialog").is_none());
     assert!(cx.debug_bounds("desktop-settings-dialog").is_some());
     super::keys::press(cx, "enter");
-    assert!(cx.debug_bounds("reactive-Create task").is_some(), "focus returns to New task");
+    assert!(
+        cx.debug_bounds("reactive-Create task").is_some(),
+        "focus returns to New task"
+    );
     click_debug_selector(cx, "reactive-Cancel");
     click_debug_selector(cx, "task-actions-task");
     click_debug_selector(cx, "reactive-Edit");
     assert!(cx.debug_bounds("reactive-Save task").is_some());
     click_debug_selector(cx, "scheduled-task-close");
     super::keys::press(cx, "enter");
-    assert!(cx.debug_bounds("scheduled-task-actions-menu").is_some(), "focus returns to the row’s action button");
+    assert!(
+        cx.debug_bounds("scheduled-task-actions-menu").is_some(),
+        "focus returns to the row’s action button"
+    );
     super::keys::press(cx, "enter");
-    assert!(cx.debug_bounds("reactive-Save task").is_some(), "the menu focuses Edit");
+    assert!(
+        cx.debug_bounds("reactive-Save task").is_some(),
+        "the menu focuses Edit"
+    );
     click_debug_selector(cx, "reactive-Cancel");
     workspace.update_in(cx, |w, window, cx| {
         w.select_settings_option("settings-project-defaults-scope", "/other", window, cx);
@@ -457,8 +474,15 @@ fn scheduled_tasks_manage_the_selected_subscription(cx: &mut gpui::TestAppContex
     assert!(cx.debug_bounds("desktop-settings-dialog").is_some());
 
     workspace.update_in(cx, |w, _, cx| {
-        w.recent_projects.push(super::super::DesktopProjectLocation { name: "Research".into(), path: "/other/research".into() });
-        w.project_defaults.entry("/other/research".into()).or_default().model = Some("gpt-6-luna".into());
+        w.recent_projects
+            .push(super::super::DesktopProjectLocation {
+                name: "Research".into(),
+                path: "/other/research".into(),
+            });
+        w.project_defaults
+            .entry("/other/research".into())
+            .or_default()
+            .model = Some("gpt-6-luna".into());
         cx.notify();
     });
     click_debug_selector(cx, "reactive-New task");
@@ -469,12 +493,17 @@ fn scheduled_tasks_manage_the_selected_subscription(cx: &mut gpui::TestAppContex
     assert!(cx.debug_bounds("task-project-list").is_some());
     cx.simulate_keystrokes("tab");
     cx.run_until_parked();
-    assert!(cx.debug_bounds("task-project-list").is_none(), "Tab dismisses the project list");
+    assert!(
+        cx.debug_bounds("task-project-list").is_none(),
+        "Tab dismisses the project list"
+    );
     assert!(cx.debug_bounds("scheduled-task-dialog").is_some());
     click_debug_selector(cx, "task-project");
     cx.simulate_input("research");
     cx.run_until_parked();
-    assert!(cx.debug_bounds("task-project-option-/other/research").is_some());
+    assert!(cx
+        .debug_bounds("task-project-option-/other/research")
+        .is_some());
     assert!(cx.debug_bounds("task-project-option-/repo").is_none());
     super::keys::press(cx, "enter");
     let scroll = rendered_bounds(cx, "scheduled-task-dialog-scroll");
@@ -484,7 +513,13 @@ fn scheduled_tasks_manage_the_selected_subscription(cx: &mut gpui::TestAppContex
         ..Default::default()
     });
     cx.run_until_parked();
-    for day in ["task-schedule-days-0", "task-schedule-days-1", "task-schedule-days-2", "task-schedule-days-3", "task-schedule-days-4"] {
+    for day in [
+        "task-schedule-days-0",
+        "task-schedule-days-1",
+        "task-schedule-days-2",
+        "task-schedule-days-3",
+        "task-schedule-days-4",
+    ] {
         click_debug_selector(cx, day);
     }
     click_debug_selector(cx, "schedule-task-enabled");
@@ -1043,17 +1078,22 @@ fn scheduled_webhook_history_refreshes_and_returns_to_its_task(cx: &mut gpui::Te
     workspace.read_with(cx, |ws, cx| {
         let panel = ws.reactive_automations.read(cx);
         use bruhs_models::reactive::{ReactiveChange, ReactiveCommand};
-        let Some(ReactiveCommand::Apply { change: ReactiveChange::SaveAutomation { automation } }) = panel.sent_for_test().last() else {
+        let Some(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAutomation { automation },
+        }) = panel.sent_for_test().last()
+        else {
             panic!("expected the shared task edit to save");
         };
         assert_eq!(automation.subscription.id, "triage");
-        assert_eq!(automation.subscription.task_title.as_deref(), Some("Afternoon triage"));
+        assert_eq!(
+            automation.subscription.task_title.as_deref(),
+            Some("Afternoon triage")
+        );
         assert_eq!(automation.subscription.instructions, "Triage issues");
         assert_eq!(automation.agent.name, "Review issues");
     });
     worker.join().unwrap();
 }
-
 
 #[gpui::test]
 fn thread_details_menu_shares_choices_with_the_card_and_restores_defaults(
@@ -1166,7 +1206,12 @@ fn thread_details_resizes_preserves_each_threads_inline_choice_and_opens_at_poin
     });
     cx.run_until_parked();
     let menu = rendered_bounds(cx, "thread-details-menu");
-    assert!((menu.top() - position.y).abs() <= px(1.) && menu.left() <= position.x + px(1.) && menu.right() >= position.x - px(1.), "menu {menu:?} at {position:?}");
+    assert!(
+        (menu.top() - position.y).abs() <= px(1.)
+            && menu.left() <= position.x + px(1.)
+            && menu.right() >= position.x - px(1.),
+        "menu {menu:?} at {position:?}"
+    );
     cx.simulate_keystrokes("end space escape");
     cx.run_until_parked();
     assert_no_rendered_bounds(cx, "thread-details-menu");
@@ -1608,21 +1653,32 @@ fn scheduled_model_picker_shares_favorites_and_saves_the_host_model(cx: &mut gpu
             let mut reader = BufReader::new(&stream);
             let mut request = String::new();
             reader.read_line(&mut request).unwrap();
-            if request.trim() == "stop" { break; }
-            assert_eq!(request.trim(), "GET /api/reactive/task-models?path=%2Frepo HTTP/1.1");
+            if request.trim() == "stop" {
+                break;
+            }
+            assert_eq!(
+                request.trim(),
+                "GET /api/reactive/task-models?path=%2Frepo HTTP/1.1"
+            );
             loop {
                 let mut line = String::new();
-                if reader.read_line(&mut line).unwrap() == 0 || line.trim().is_empty() { break; }
+                if reader.read_line(&mut line).unwrap() == 0 || line.trim().is_empty() {
+                    break;
+                }
             }
             let body = r#"{"models":[{"id":"codex/lab","label":"Nightly Lab","provider":"codex","options":[]}]}"#;
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
         }
     });
     cx.executor().allow_parking();
-    let (workspace, cx, panel) = scheduled_task_workspace_with(cx,
+    let (workspace, cx, panel) = scheduled_task_workspace_with(
+        cx,
         bruhs_models::reactive::SourceKind::Schedule { every_ms: 60000 },
-        |snapshot| snapshot.agents[0].model = "cursor/legacy".into());
-    panel.update(cx, |p, _| p.set_delivery_test_client(crate::server_client::ServerClient::new(&base, &base).unwrap()));
+        |snapshot| snapshot.agents[0].model = "cursor/legacy".into(),
+    );
+    panel.update(cx, |p, _| {
+        p.set_delivery_test_client(crate::server_client::ServerClient::new(&base, &base).unwrap())
+    });
     cx.simulate_resize(gpui::size(px(1040.), px(820.)));
     cx.run_until_parked();
     click_debug_selector(cx, "task-actions-task");
@@ -1630,14 +1686,17 @@ fn scheduled_model_picker_shares_favorites_and_saves_the_host_model(cx: &mut gpu
     let scroll = rendered_bounds(cx, "scheduled-task-dialog-scroll");
     let model = rendered_bounds(cx, "task-model");
     cx.simulate_event(gpui::ScrollEvent {
-        position: scroll.center(), delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), scroll.center().y - model.center().y)),
+        position: scroll.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), scroll.center().y - model.center().y)),
         ..Default::default()
     });
     cx.run_until_parked();
     click_debug_selector(cx, "task-model");
     cx.run_until_parked();
     click_debug_selector(cx, "task-model-star-codex/lab");
-    workspace.read_with(cx, |ws, _| assert!(ws.favorite_models.contains("codex/lab")));
+    workspace.read_with(cx, |ws, _| {
+        assert!(ws.favorite_models.contains("codex/lab"))
+    });
     click_debug_selector(cx, "task-model-tab-favorites");
     assert_no_rendered_bounds(cx, "task-model-tab-cursor");
     click_debug_selector(cx, "task-model-option-codex/lab");
@@ -1672,7 +1731,10 @@ fn scheduled_webhook_url_copies_and_rotates_after_confirmation(cx: &mut gpui::Te
                 r#"{"models":[]}"#.to_owned()
             } else {
                 let (method, token) = url_requests.next().expect("expected a webhook URL request");
-                assert_eq!(request.trim(), format!("{method} /api/reactive/tasks/task/webhook-url HTTP/1.1"));
+                assert_eq!(
+                    request.trim(),
+                    format!("{method} /api/reactive/tasks/task/webhook-url HTTP/1.1")
+                );
                 if method == "POST" {
                     let mut previous = [0; 7];
                     reader.read_exact(&mut previous).unwrap();
@@ -1728,7 +1790,10 @@ fn scheduled_webhook_url_copies_and_rotates_after_confirmation(cx: &mut gpui::Te
         cx.run_until_parked();
     }
     let field = rendered_bounds(cx, "task-webhook-url-field");
-    assert!(scroll.contains(&field.center()), "field {field:?} must be inside {scroll:?}");
+    assert!(
+        scroll.contains(&field.center()),
+        "field {field:?} must be inside {scroll:?}"
+    );
     click_debug_selector(cx, "task-webhook-url-field");
     cx.simulate_input("replacement");
     cx.simulate_keystrokes("cmd-c");
@@ -1815,10 +1880,14 @@ async fn appearance_theme_halves_apply_independently_and_survive_restart(
             gpui::rgb(family.palette(mode).surface[0]).into()
         );
         ws.open_settings(&OpenSettings, w, cx);
-        ws.settings_search.update(cx, |input, cx| input.set_value("Grove", w, cx));
+        ws.settings_search
+            .update(cx, |input, cx| input.set_value("Grove", w, cx));
         ws.refresh_settings_search(cx);
         ws.open_settings_hit(0, w, cx);
-        assert_eq!(ws.settings_section, super::super::SettingsSection::Appearance);
+        assert_eq!(
+            ws.settings_section,
+            super::super::SettingsSection::Appearance
+        );
     });
 }
 
@@ -1855,12 +1924,17 @@ async fn custom_theme_import_conflicts_export_and_restart(cx: &mut gpui::TestApp
     click_debug_selector(cx, "theme-editor-save");
     workspace.read_with(cx, |_, cx| {
         assert_eq!(cx.theme().background, gpui::rgb(0x123456).into());
-        assert_eq!(cx.theme().color_role("terminalCursor"), Some(gpui::rgb(0xff7900).into()));
-        assert_eq!(cx.theme().color_role("terminalSelection"), Some(gpui::rgba(0x267bc488).into()));
-
+        assert_eq!(
+            cx.theme().color_role("terminalCursor"),
+            Some(gpui::rgb(0xff7900).into())
+        );
+        assert_eq!(
+            cx.theme().color_role("terminalSelection"),
+            Some(gpui::rgba(0x267bc488).into())
+        );
     });
     click_debug_selector(cx, "settings-add-theme");
-    click_debug_selector(cx,"theme-json-input");
+    click_debug_selector(cx, "theme-json-input");
     cx.simulate_input(&source.to_string());
     click_debug_selector(cx, "theme-editor-save");
     click_debug_selector(cx, "theme-keep-both");
@@ -1873,23 +1947,35 @@ async fn custom_theme_import_conflicts_export_and_restart(cx: &mut gpui::TestApp
         assert_eq!(library["dark"], "aurora");
         assert_eq!(library["themes"][1]["name"], "Aurora (1)");
         assert_eq!(library["themes"][0], source);
-        assert_eq!(cx.theme().color_role("cssSidebarBackground"), Some(gpui::rgb(0x257c70).into()));
+        assert_eq!(
+            cx.theme().color_role("cssSidebarBackground"),
+            Some(gpui::rgb(0x257c70).into())
+        );
         assert_eq!(cx.theme().background, gpui::rgb(0x123456).into());
-        assert_eq!(cx.theme().color_role("terminalCursor"), Some(gpui::rgb(0xff7900).into()));
-        assert_eq!(cx.theme().color_role("terminalSelection"), Some(gpui::rgba(0x267bc488).into()));
-
+        assert_eq!(
+            cx.theme().color_role("terminalCursor"),
+            Some(gpui::rgb(0xff7900).into())
+        );
+        assert_eq!(
+            cx.theme().color_role("terminalSelection"),
+            Some(gpui::rgba(0x267bc488).into())
+        );
     });
     workspace.update_in(cx, open);
     cx.simulate_resize(gpui::size(px(1440.), px(1100.)));
     workspace.update(cx, |ws, cx| {
-        ws.settings_scroll.set_offset(gpui::point(px(0.), px(-420.)));
+        ws.settings_scroll
+            .set_offset(gpui::point(px(0.), px(-420.)));
         cx.notify();
     });
     click_debug_selector(cx, "theme-export-custom-aurora");
     let exported = dir.path().join("export.json");
     cx.simulate_new_path_selection(|_| Some(exported.clone()));
     cx.run_until_parked();
-    assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(exported).unwrap()).unwrap(), source);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(exported).unwrap()).unwrap(),
+        source
+    );
     click_debug_selector(cx, "theme-remove-custom-aurora");
     cx.simulate_prompt_answer("Remove");
     cx.run_until_parked();
@@ -1927,10 +2013,14 @@ fn custom_theme_editor_creates_edits_and_validates_colors(cx: &mut gpui::TestApp
     workspace.read_with(cx, |ws, _| {
         let library = serde_json::to_value(&ws.custom_themes).unwrap();
         assert_eq!(library["dark"], "forest");
-        assert_eq!(library["themes"][0]["variants"]["dark"]["canvas"], "#163925");
+        assert_eq!(
+            library["themes"][0]["variants"]["dark"]["canvas"],
+            "#163925"
+        );
     });
     workspace.update(cx, |ws, cx| {
-        ws.settings_scroll.set_offset(gpui::point(px(0.), px(-420.)));
+        ws.settings_scroll
+            .set_offset(gpui::point(px(0.), px(-420.)));
         cx.notify();
     });
     click_debug_selector(cx, "theme-edit-custom-forest");
@@ -2143,15 +2233,17 @@ async fn vscode_theme_batch_pairs_files_keeps_valid_imports_and_restores_selecti
         assert_eq!(cx.theme().background, gpui::rgb(0xf0faf7).into());
     });
     click_debug_selector(cx, "settings-add-theme");
-    click_debug_selector(cx,"theme-json-input");
-    cx.simulate_input(r##"{ /* paste a separate dark palette */ "name":"Night",
-        "colors":{"editor.background":"#112031",}, }"##);
+    click_debug_selector(cx, "theme-json-input");
+    cx.simulate_input(
+        r##"{ /* paste a separate dark palette */ "name":"Night",
+        "colors":{"editor.background":"#112031",}, }"##,
+    );
     click_debug_selector(cx, "theme-editor-save");
-    workspace.read_with(cx, |ws,cx| {
-        let library=serde_json::to_value(&ws.custom_themes).unwrap();
+    workspace.read_with(cx, |ws, cx| {
+        let library = serde_json::to_value(&ws.custom_themes).unwrap();
         assert_eq!(library["dark"], "night");
         assert_eq!(library["light"], "coast");
-        assert_eq!(cx.theme().background,gpui::rgb(0xf0faf7).into());
+        assert_eq!(cx.theme().background, gpui::rgb(0xf0faf7).into());
     });
 }
 
@@ -2171,7 +2263,7 @@ fn vscode_batch_installs_new_files_before_resolving_an_existing_theme(
     let original = json!({"version":1,"id":"coast","name":"Coast","appearance":"dark",
         "colors":{"canvas":"#222222"},"collection":{"id":"studio","label":"Studio"}});
     click_debug_selector(cx, "settings-add-theme");
-    click_debug_selector(cx,"theme-json-input");
+    click_debug_selector(cx, "theme-json-input");
     cx.simulate_input(&original.to_string());
     click_debug_selector(cx, "theme-editor-save");
     let paths = ["Coast", "Grotto"].map(|name| {
@@ -2374,7 +2466,7 @@ fn secret_provider_dialog_validates_fields_traps_focus_and_restores_the_trigger(
     cx.simulate_input("team.example");
     cx.run_until_parked();
     assert!(cx.debug_bounds("secret-provider-account-error").is_none());
-    for key in ["tab","tab","tab","shift-tab","shift-tab","shift-tab"] {
+    for key in ["tab", "tab", "tab", "shift-tab", "shift-tab", "shift-tab"] {
         cx.simulate_keystrokes(key);
         workspace.update_in(cx, |ws, window, cx| {
             let (dialog, _) = ws.active_modal_focus_bounds(cx);
@@ -2523,7 +2615,10 @@ fn rich_composer_setting_preserves_draft_and_queues_markdown(cx: &mut gpui::Test
     });
     press_key(cx, "shift-enter");
     chat.read_with(cx, |c, cx| {
-        assert_eq!(c.input_state.read(cx).value().as_str(), "- [x] Review\n- [ ] ");
+        assert_eq!(
+            c.input_state.read(cx).value().as_str(),
+            "- [x] Review\n- [ ] "
+        );
     });
     press_key(cx, "shift-enter");
     chat.read_with(cx, |c, cx| {
@@ -2552,15 +2647,21 @@ fn rich_composer_edits_the_selected_fence_language(cx: &mut gpui::TestAppContext
         assert!(c.input_state.read(cx).code_language_menu_open())
     });
     let menu = cx.debug_bounds("composer-code-language-0-list").unwrap();
-    let selected = cx.debug_bounds("composer-code-language-0-option-rust").unwrap();
+    let selected = cx
+        .debug_bounds("composer-code-language-0-option-rust")
+        .unwrap();
     assert!(menu.contains(&selected.center()));
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
-    chat.read_with(cx, |c, cx| assert_eq!(c.input_state.read(cx).value().as_str(), source));
+    chat.read_with(cx, |c, cx| {
+        assert_eq!(c.input_state.read(cx).value().as_str(), source)
+    });
     click_debug_selector(cx, "composer-code-language-0");
     cx.simulate_keystrokes("down enter");
     cx.run_until_parked();
-    chat.read_with(cx, |c, cx| assert!(c.input_state.read(cx).value().starts_with("```scala\n")));
+    chat.read_with(cx, |c, cx| {
+        assert!(c.input_state.read(cx).value().starts_with("```scala\n"))
+    });
     chat.update_in(cx, |c, w, cx| c.set_composer_draft(source.into(), w, cx));
     cx.run_until_parked();
     click_debug_selector(cx, "composer-code-language-0");
@@ -2597,7 +2698,9 @@ fn rich_composer_edits_the_selected_fence_language(cx: &mut gpui::TestAppContext
     click_debug_selector(cx, "composer-code-language-0");
     cx.simulate_input("mydsl");
     cx.run_until_parked();
-    assert!(cx.debug_bounds("composer-code-language-0-option- -check").is_some());
+    assert!(cx
+        .debug_bounds("composer-code-language-0-option- -check")
+        .is_some());
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     chat.update_in(cx, |c, w, cx| {
@@ -2781,7 +2884,10 @@ fn setting_sources_open_project_and_reset_only_this_preference(cx: &mut gpui::Te
     workspace.update_in(cx, |ws, window, cx| {
         ws.open_settings(&OpenSettings, window, cx);
         ws.set_settings_section(super::super::SettingsSection::Maintenance, cx);
-        ws.project_defaults.entry("/tmp/alpha".into()).or_default().continue_threads = Some(true);
+        ws.project_defaults
+            .entry("/tmp/alpha".into())
+            .or_default()
+            .continue_threads = Some(true);
         let beta = ws.project_defaults.entry("/tmp/beta".into()).or_default();
         beta.continue_threads = Some(false);
         beta.snooze_limited = Some(true);
@@ -2791,12 +2897,17 @@ fn setting_sources_open_project_and_reset_only_this_preference(cx: &mut gpui::Te
     click_debug_selector(cx, SOURCE);
     cx.run_until_parked();
     assert_rendered_bounds(cx, "setting-source-project-/tmp/alpha");
-    workspace.update_in(cx, |ws, w, _| assert!(ws.first_override_project.is_focused(w)));
+    workspace.update_in(cx, |ws, w, _| {
+        assert!(ws.first_override_project.is_focused(w))
+    });
     cx.simulate_keystrokes("enter");
     workspace.update_in(cx, |ws, _, cx| {
         assert_eq!(ws.settings_project_scope, "/tmp/alpha");
         assert_eq!(ws.settings_open_dropdown(), None);
-        assert_eq!(ws.snapshot(cx).project_defaults["/tmp/alpha"].continue_threads, Some(true));
+        assert_eq!(
+            ws.snapshot(cx).project_defaults["/tmp/alpha"].continue_threads,
+            Some(true)
+        );
     });
     cx.run_until_parked();
     click_debug_selector(cx, SOURCE);
@@ -2830,7 +2941,10 @@ fn setting_sources_open_project_and_reset_only_this_preference(cx: &mut gpui::Te
         let saved = ws.snapshot(cx);
         assert!(!saved.project_defaults.contains_key("/tmp/alpha"));
         assert_eq!(saved.project_defaults["/tmp/beta"].continue_threads, None);
-        assert_eq!(saved.project_defaults["/tmp/beta"].snooze_limited, Some(true));
+        assert_eq!(
+            saved.project_defaults["/tmp/beta"].snooze_limited,
+            Some(true)
+        );
         assert!(ws.continue_threads("/tmp/beta"));
         assert!(ws.settings_visible());
         assert_eq!(ws.settings_open_dropdown(), None);
@@ -2968,7 +3082,10 @@ fn worktree_submodule_defaults_preserve_existing_workspace_files(cx: &mut gpui::
     let mut upgrade = cx.clone();
     let (new, cx) = launch(cx, &dir.path().join("new.json"));
     let mut state = new.update_in(cx, |ws, _, cx| {
-        assert_eq!(ws.worktree_prefs.submodules, WorktreeSubmodules::FromProject);
+        assert_eq!(
+            ws.worktree_prefs.submodules,
+            WorktreeSubmodules::FromProject
+        );
         serde_json::to_value(ws.snapshot(cx)).unwrap()
     });
     state.as_object_mut().unwrap().remove("worktree_prefs");
@@ -3372,11 +3489,10 @@ async fn model_options_stay_with_project_fallback_and_restored_thread(
     let (ws, cx) = launch(&mut relaunch, &state);
     ws.update_in(cx, |ws, w, cx| {
         ws.select_thread_by_id(&fallback_thread, cx);
-        assert!(
-            ws.threads
-                .iter()
-                .any(|t| t.chat.read(cx).model_options.configured(Effort) == Some("xhigh"))
-        );
+        assert!(ws
+            .threads
+            .iter()
+            .any(|t| t.chat.read(cx).model_options.configured(Effort) == Some("xhigh")));
         let chat = ws.active_thread().unwrap().chat.read(cx);
         assert_eq!(chat.model_options.configured(ContextWindow), Some("1m"));
         ws.open_settings(&OpenSettings, w, cx);
@@ -3440,8 +3556,8 @@ async fn language_switch_localizes_search_survives_restart_and_resets(
     assert_rendered_bounds(cx, "desktop-settings-row-clock");
     saved(&workspace, cx).await;
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap()["appearance"]
-            ["language"],
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap()
+            ["appearance"]["language"],
         "fr"
     );
     quit(&workspace, cx);

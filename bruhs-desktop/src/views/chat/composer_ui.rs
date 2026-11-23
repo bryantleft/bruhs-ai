@@ -6,13 +6,13 @@
 //! context strip under it, and the `/ commands · @ files · ⌘K palette`
 //! hints. Sizes are the web's Tailwind values in px.
 
-use gpui::prelude::*;
-use gpui::*;
 use bruhs_ui::input::{Input, Textarea};
-use bruhs_ui::ActiveTheme;
 use bruhs_ui::scroll::ScrollableElement as _;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
+use bruhs_ui::ActiveTheme;
+use gpui::prelude::*;
+use gpui::*;
 
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
@@ -26,8 +26,8 @@ use bruhs_models::logic::run_place::WorkspaceChoice;
 
 use super::{
     composer_input_disabled_like_web, composer_input_tab_index_like_web, element_key, title_rename,
-    ChatView, ChatViewEvent, DraftPlacement, InputEnter, InputEscape, InputMoveDown, InputMoveUp, PermissionMode,
-    StashDraft,
+    ChatView, ChatViewEvent, DraftPlacement, InputEnter, InputEscape, InputMoveDown, InputMoveUp,
+    PermissionMode, StashDraft,
 };
 use crate::views::sidebar_order::relative_age;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
@@ -551,7 +551,9 @@ impl ChatView {
 
     /// `project / title` with the Diff · Tasks · panel toggles at the right.
     pub(super) fn render_header(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let project = self.breadcrumb_project().or_else(|| self.scratch_folder().map(|_| "Scratch".to_owned()));
+        let project = self
+            .breadcrumb_project()
+            .or_else(|| self.scratch_folder().map(|_| "Scratch".to_owned()));
         let details_bounds = self.details_trigger_bounds.clone();
         let running = self.running_tasks_count;
         // The thread's role, by its current name. A deleted role shows nothing.
@@ -560,9 +562,15 @@ impl ChatView {
             .id("chat-header")
             .debug_selector(|| "desktop-chat-header".to_string())
             .group(CHAT_HEADER_GROUP)
-            .when_some(cx.theme().color_role("cssHeaderBackground"), |el, color| el.bg(color))
-            .children(crate::views::workspace::appearance::background_layer("Header", cx))
-            .when_some(cx.theme().color_role("cssHeaderForeground"), |el, color| el.text_color(color))
+            .when_some(cx.theme().color_role("cssHeaderBackground"), |el, color| {
+                el.bg(color)
+            })
+            .children(crate::views::workspace::appearance::background_layer(
+                "Header", cx,
+            ))
+            .when_some(cx.theme().color_role("cssHeaderForeground"), |el, color| {
+                el.text_color(color)
+            })
             .h(px(CHAT_HEADER_HEIGHT_PX))
             .px(px(CHAT_HEADER_X_PADDING_PX))
             .flex()
@@ -681,12 +689,31 @@ impl ChatView {
                     .items_center()
                     .gap(px(CHAT_HEADER_TOGGLE_GAP_PX))
                     .flex_shrink_0()
-                    .child(div().on_children_prepainted(move |bounds, _, _| {
-                        if let Some(bounds) = bounds.first() { details_bounds.set(*bounds); }
-                    }).child(self.render_header_toggle(HeaderToggle {
-                        id: "details-toggle", selector:"desktop-thread-details-toggle", icon_path:assets::CLIPBOARD_LIST_ICON_PATH,
-                        label:None, aria:"Thread details",active:self.details_open,badge:None
-                    },|_,_,cx|cx.emit(ChatViewEvent::ToggleThreadDetails),cx).track_focus(&self.details_trigger).aria_expanded(self.details_open)))
+                    .child(
+                        div()
+                            .on_children_prepainted(move |bounds, _, _| {
+                                if let Some(bounds) = bounds.first() {
+                                    details_bounds.set(*bounds);
+                                }
+                            })
+                            .child(
+                                self.render_header_toggle(
+                                    HeaderToggle {
+                                        id: "details-toggle",
+                                        selector: "desktop-thread-details-toggle",
+                                        icon_path: assets::CLIPBOARD_LIST_ICON_PATH,
+                                        label: None,
+                                        aria: "Thread details",
+                                        active: self.details_open,
+                                        badge: None,
+                                    },
+                                    |_, _, cx| cx.emit(ChatViewEvent::ToggleThreadDetails),
+                                    cx,
+                                )
+                                .track_focus(&self.details_trigger)
+                                .aria_expanded(self.details_open),
+                            ),
+                    )
                     .child(self.render_header_toggle(
                         HeaderToggle {
                             id: "diff-toggle",
@@ -974,7 +1001,8 @@ impl ChatView {
                 this.enqueue_paths(paths.paths(), cx);
             }))
             .when(self.composer_hint_popover_open(cx), |el| {
-                let available = (self.measured_width.get() - CHAT_COMPOSER_PAGE_X_PADDING_PX * 2.0).max(1.0);
+                let available =
+                    (self.measured_width.get() - CHAT_COMPOSER_PAGE_X_PADDING_PX * 2.0).max(1.0);
                 let width = available.min(self.chat_width.limit().unwrap_or(available));
                 el.child(
                     div()
@@ -1269,10 +1297,7 @@ impl ChatView {
                 .child(
                     self.effort_spec()
                         .and_then(|s| s.choices.iter().find(|c| Some(c.value.as_str()) == effort))
-                        .map_or_else(
-                            || effort.unwrap_or("Auto").to_owned(),
-                            |c| c.label.clone(),
-                        ),
+                        .map_or_else(|| effort.unwrap_or("Auto").to_owned(), |c| c.label.clone()),
                 )
                 .into_any_element();
         }
@@ -1297,7 +1322,9 @@ impl ChatView {
             .children((0..levels.len()).map(|i| {
                 div()
                     .w(px(2.))
-                    .h(px(3. + 2. * bruhs_models::num::ToFloatLossy::to_f32_lossy(i)))
+                    .h(px(
+                        3. + 2. * bruhs_models::num::ToFloatLossy::to_f32_lossy(i)
+                    ))
                     .rounded(px(1.))
                     .bg(if i < strength {
                         theme::rambutan_300()
@@ -1311,10 +1338,14 @@ impl ChatView {
     fn render_composer_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         let draft_empty = self.input_state.read(cx).value().trim().is_empty();
         let separate_stop = self.is_streaming && !draft_empty;
-        let model = self.native_model().map_or_else(|| model_label(&self.model_id), |m| m.label.clone());
+        let model = self
+            .native_model()
+            .map_or_else(|| model_label(&self.model_id), |m| m.label.clone());
         let model_tooltip = format!("Change model: {model} (⌘⇧M)");
         let compact_model = model.strip_prefix("Claude ").unwrap_or(&model).to_string();
-        let effort = self.claude_send_effort().or_else(||self.effort_spec().map(|s|s.default.clone()));
+        let effort = self
+            .claude_send_effort()
+            .or_else(|| self.effort_spec().map(|s| s.default.clone()));
         let model_chip = self.render_chip(
             "desktop-model-status",
             "desktop-model-status",
@@ -1325,9 +1356,13 @@ impl ChatView {
             div()
                 .min_w_0()
                 .truncate()
-                .flex().items_center().gap_1()
+                .flex()
+                .items_center()
+                .gap_1()
                 .child(div().truncate().child(compact_model))
-                .when(self.effort_spec().is_some(),|el|el.child(self.effort_indicator(effort.as_deref())))
+                .when(self.effort_spec().is_some(), |el| {
+                    el.child(self.effort_indicator(effort.as_deref()))
+                })
                 .into_any_element(),
             Some(self.chevron()),
             |this, window, cx| this.toggle_model_picker(window, cx),
@@ -1375,19 +1410,28 @@ impl ChatView {
                         |this, window, cx| this.attach_files(window, cx),
                         cx,
                     ))
-                    .when(cfg!(target_os = "macos"), |row| row.child(self.footer_icon_button(
-                        "desktop-capture-window",
-                        "Capture a window",
-                        assets::CAMERA_ICON_PATH,
-                        |_, window, cx| window.dispatch_action(Box::new(crate::views::workspace::CaptureWindow), cx),
-                        cx,
-                    )))
+                    .when(cfg!(target_os = "macos"), |row| {
+                        row.child(self.footer_icon_button(
+                            "desktop-capture-window",
+                            "Capture a window",
+                            assets::CAMERA_ICON_PATH,
+                            |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(crate::views::workspace::CaptureWindow),
+                                    cx,
+                                )
+                            },
+                            cx,
+                        ))
+                    })
                     .child(
                         div()
                             .min_w_0()
                             .max_w(px(CHIP_MODEL_MAX_WIDTH_PX))
                             .on_children_prepainted(move |bounds, _, _| {
-                                if let Some(bounds) = bounds.first() { model_bounds.set(*bounds); }
+                                if let Some(bounds) = bounds.first() {
+                                    model_bounds.set(*bounds);
+                                }
                             })
                             .child(model_chip),
                     )
@@ -1410,7 +1454,11 @@ impl ChatView {
                                     cx,
                                 )
                                 .when(!self.kiro_efforts().is_empty(), |button| {
-                                    button.w_auto().px_1().gap_1().child(self.effort_indicator(effort.as_deref()))
+                                    button
+                                        .w_auto()
+                                        .px_1()
+                                        .gap_1()
+                                        .child(self.effort_indicator(effort.as_deref()))
                                 })
                                 .track_focus(&self.composer_options_trigger_focus)
                                 .aria_expanded(self.composer_options_open),
@@ -1918,9 +1966,19 @@ impl ChatView {
             .child(section(0, "Access", self.render_permission_menu(cx)))
             .child(section(1, "Mode", mode))
             .when(self.effort_chip_visible(), |el| {
-                el.child(section(2, if self.kiro_agents.is_some(){"Reasoning"}else{"Model options"}, self.render_effort_menu(cx)))
+                el.child(section(
+                    2,
+                    if self.kiro_agents.is_some() {
+                        "Reasoning"
+                    } else {
+                        "Model options"
+                    },
+                    self.render_effort_menu(cx),
+                ))
             })
-            .when(self.kiro_agent_visible(), |el|el.child(section(6,"Agent",self.render_kiro_agents(cx))))
+            .when(self.kiro_agent_visible(), |el| {
+                el.child(section(6, "Agent", self.render_kiro_agents(cx)))
+            })
             .child(section(3, "Prompts", prompts))
             .child(dictation)
             .when(self.return_chip_visible() || has_usage, |el| {
@@ -1982,7 +2040,10 @@ impl ChatView {
     }
 
     fn render_dictation_status(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let cleaning=matches!(self.dictation.phase,super::dictation::DictationPhase::Cleaning(_));
+        let cleaning = matches!(
+            self.dictation.phase,
+            super::dictation::DictationPhase::Cleaning(_)
+        );
         let recording = self.dictation.recording();
         div()
             .id("desktop-dictation-status")
@@ -2004,7 +2065,9 @@ impl ChatView {
                                 .text_color(theme::rambutan_300())
                                 .child(if recording {
                                     "Recording microphone"
-                                } else if cleaning { "Cleaning up transcript" } else {
+                                } else if cleaning {
+                                    "Cleaning up transcript"
+                                } else {
                                     "Transcribing recording"
                                 }),
                         )
@@ -2018,7 +2081,16 @@ impl ChatView {
                                 cx,
                             ))
                         })
-                        .when(cleaning,|el|el.child(self.composer_option("dictation-skip-cleanup".into(),"desktop-dictation-skip-cleanup".into(),"Skip cleanup",None,|this,_,cx|this.skip_dictation_cleanup(cx),cx)))
+                        .when(cleaning, |el| {
+                            el.child(self.composer_option(
+                                "dictation-skip-cleanup".into(),
+                                "desktop-dictation-skip-cleanup".into(),
+                                "Skip cleanup",
+                                None,
+                                |this, _, cx| this.skip_dictation_cleanup(cx),
+                                cx,
+                            ))
+                        })
                         .child(self.composer_option(
                             "dictation-cancel".into(),
                             "desktop-dictation-cancel".into(),
@@ -2029,9 +2101,20 @@ impl ChatView {
                         )),
                 )
             })
-            .when(self.dictation.active() && !self.dictation.preview.is_empty(),|el| el.child(div()
-                .id("dictation-live-preview").role(Role::Status).aria_label("Live transcript")
-                .text_size(px(13.)).text_color(theme::rambutan_300()).child(self.dictation.preview.clone())))
+            .when(
+                self.dictation.active() && !self.dictation.preview.is_empty(),
+                |el| {
+                    el.child(
+                        div()
+                            .id("dictation-live-preview")
+                            .role(Role::Status)
+                            .aria_label("Live transcript")
+                            .text_size(px(13.))
+                            .text_color(theme::rambutan_300())
+                            .child(self.dictation.preview.clone()),
+                    )
+                },
+            )
             .when_some(self.dictation.error.clone(), |el, error| {
                 el.child(
                     div()
@@ -2719,7 +2802,9 @@ impl ChatView {
         self.composer_options_open = false;
         self.stash_open = false;
         self.workspace_menu_open = open;
-        if open { self.refresh_repo_placement(cx); }
+        if open {
+            self.refresh_repo_placement(cx);
+        }
         cx.notify();
     }
 
@@ -2805,10 +2890,18 @@ impl ChatView {
     }
 
     fn render_effort_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
-        if self.kiro_agents.is_none() {return self.render_native_options(cx);}
-        let mut rows=Vec::new();
+        if self.kiro_agents.is_none() {
+            return self.render_native_options(cx);
+        }
+        let mut rows = Vec::new();
         for &level in self.kiro_efforts() {
-            rows.push(self.effort_row(level,super::kiro::effort_label(level),self.kiro_display_effort()==Some(level),Some(level.to_owned()),cx));
+            rows.push(self.effort_row(
+                level,
+                super::kiro::effort_label(level),
+                self.kiro_display_effort() == Some(level),
+                Some(level.to_owned()),
+                cx,
+            ));
         }
         div()
             .id("desktop-effort-menu")
@@ -2849,17 +2942,22 @@ impl ChatView {
             .role(Role::MenuItem)
             .aria_label(label)
             .aria_selected(selected)
-            .when(if self.kiro_agents.is_some() {selected} else {key=="default"}, |el| {
-                el.track_focus(&self.composer_effort_focus)
-            })
+            .when(
+                if self.kiro_agents.is_some() {
+                    selected
+                } else {
+                    key == "default"
+                },
+                |el| el.track_focus(&self.composer_effort_focus),
+            )
             .border_1()
             .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .map(|el| {
                 on_press_view(el, cx, move |this, _, cx| {
-                    this.choose_kiro_effort(pick.clone(),cx);
-                    this.effort_menu_open=false;
+                    this.choose_kiro_effort(pick.clone(), cx);
+                    this.effort_menu_open = false;
                     cx.notify();
                 })
             })
@@ -2970,7 +3068,9 @@ impl ChatView {
 
     /// Project + branch shoulder under the composer (project threads only).
     fn render_context_strip(&self, window: &Window, cx: &Context<'_, Self>) -> Option<AnyElement> {
-        if !theme::show_composer_context() && !self.messages.is_empty(){return None;}
+        if !theme::show_composer_context() && !self.messages.is_empty() {
+            return None;
+        }
         let project = self.breadcrumb_project()?;
         let branch = self.branch_chip_label();
         let show_dirty = (self.thread_has_place() || self.run_choice == WorkspaceChoice::Checkout)
@@ -3359,7 +3459,11 @@ impl ChatView {
             .into_any_element()
     }
 
-    pub(super) fn choose_permission_mode(&mut self, mode: PermissionMode, cx: &mut Context<'_, Self>) {
+    pub(super) fn choose_permission_mode(
+        &mut self,
+        mode: PermissionMode,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.plan_return_mode = mode;
         cx.emit(ChatViewEvent::SetPermissionMode(mode));
         cx.notify();

@@ -312,17 +312,21 @@ mod tests {
                 .flex_col()
                 .gap_2()
                 .child(
-                    banner("inline-warn", BannerTone::Warning, "Claude is not authenticated.")
-                        .debug_selector("inline-warn-banner")
-                        .action(
-                            web_button(
-                                "sample-login",
-                                WebButtonVariant::Primary,
-                                WebButtonSize::Small,
-                                ButtonState::Enabled,
-                            )
-                            .child("Log in"),
-                        ),
+                    banner(
+                        "inline-warn",
+                        BannerTone::Warning,
+                        "Claude is not authenticated.",
+                    )
+                    .debug_selector("inline-warn-banner")
+                    .action(
+                        web_button(
+                            "sample-login",
+                            WebButtonVariant::Primary,
+                            WebButtonSize::Small,
+                            ButtonState::Enabled,
+                        )
+                        .child("Log in"),
+                    ),
                 )
                 .child(
                     banner("strip-err", BannerTone::Error, "Could not save settings.")

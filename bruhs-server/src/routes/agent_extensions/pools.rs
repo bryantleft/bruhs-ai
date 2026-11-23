@@ -1,9 +1,9 @@
 //! Usage from this computer, configured hubs and paired environments.
 use super::AppError;
-use axum::{Json, extract::Path};
+use axum::{extract::Path, Json};
 use bruhs_core::usage_hubs::{self as hubs, Hub, Origin, Reading, ResetCredit};
 use bruhs_models::agent_extensions::QuotaWindow;
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},

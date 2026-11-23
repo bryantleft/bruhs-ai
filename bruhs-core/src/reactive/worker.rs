@@ -68,7 +68,9 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
                                 let id = claim.run.id.clone();
                                 matches!(
                                     runtime
-                                        .call(move |db| store::task_conversations::run_was_deleted(db, &id))
+                                        .call(move |db| store::task_conversations::run_was_deleted(
+                                            db, &id
+                                        ))
                                         .await,
                                     Ok(true)
                                 )
@@ -254,7 +256,7 @@ async fn execute(
     let mut context = claim.context.clone();
     let mut changes = runtime.watch_changes();
     let mut effective_run = run.clone();
-    let mut effective_agent=agent.clone();
+    let mut effective_agent = agent.clone();
     let _desktop_lock = if claim.desktop_thread {
         let lock = match super::desktop_turn_lock(&run.thread_id) {
             Ok(lock) => lock,
@@ -300,7 +302,7 @@ async fn execute(
             .await;
         match prepared {
             Ok(Some((next, agent, history))) => {
-                effective_agent=agent;
+                effective_agent = agent;
                 effective_run = next;
                 context = history;
             }
@@ -441,8 +443,19 @@ async fn execute(
             return Ok(());
         }
         Err(error) => {
-            let id=run.id.clone();
-            runtime.call(move |db| store::finish_run(db,&id,RunStatus::Failed,None,Some(error.to_string()),None)).await?;
+            let id = run.id.clone();
+            runtime
+                .call(move |db| {
+                    store::finish_run(
+                        db,
+                        &id,
+                        RunStatus::Failed,
+                        None,
+                        Some(error.to_string()),
+                        None,
+                    )
+                })
+                .await?;
             return Ok(());
         }
     };

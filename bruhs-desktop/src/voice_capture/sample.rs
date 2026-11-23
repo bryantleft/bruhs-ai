@@ -28,9 +28,10 @@ pub fn record(
                 let peak = pcm[pcm.len().saturating_sub(count)..]
                     .iter()
                     .fold(0.0_f32, |acc, v| acc.max(v.abs()));
-                meter
-                    .peak_percent
-                    .store((peak.clamp(0.0, 1.0) * 100.).to_u32_saturating(), Ordering::Relaxed);
+                meter.peak_percent.store(
+                    (peak.clamp(0.0, 1.0) * 100.).to_u32_saturating(),
+                    Ordering::Relaxed,
+                );
             }
             if started.elapsed() >= Duration::from_secs(10) {
                 return true;

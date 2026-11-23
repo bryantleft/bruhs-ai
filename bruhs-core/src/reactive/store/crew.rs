@@ -803,7 +803,9 @@ pub(in crate::reactive) fn bruh_states(
     let mut states = Vec::new();
     for agent in records::<ReactiveAgent>(connection, "reactive_agents")?
         .into_iter()
-        .filter(|agent| managed_preset_id(&agent.id).is_none() && !desktop_threads.contains_key(&agent.id))
+        .filter(|agent| {
+            managed_preset_id(&agent.id).is_none() && !desktop_threads.contains_key(&agent.id)
+        })
     {
         let profile = profile(connection, &agent.id)?;
         let open_asks = count(

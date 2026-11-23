@@ -10,9 +10,9 @@ use bruhs_models::num::ToFloatLossy as _;
 
 use super::actions::*;
 use super::element::EditorElement;
-use super::text_layout::EditorText;
 use super::markdown::Mark;
 use super::state::{EditorState, FieldKind, InputContentType, InputState, TextareaState};
+use super::text_layout::EditorText;
 use crate::icons::{Icon, IconName};
 use crate::theme;
 use crate::zoom::px as css_px;

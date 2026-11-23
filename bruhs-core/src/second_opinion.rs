@@ -59,7 +59,11 @@ pub enum ReviewError {
 /// or runs past five minutes.
 pub async fn second_opinion(request: ReviewRequest) -> Result<Review, ReviewError> {
     let reviewer = reviewer_for(request.thread_provider);
-    crate::agent_extensions::availability::require_enabled_for_project(reviewer, request.project_path.as_ref()).map_err(ReviewError::Failed)?;
+    crate::agent_extensions::availability::require_enabled_for_project(
+        reviewer,
+        request.project_path.as_ref(),
+    )
+    .map_err(ReviewError::Failed)?;
     let prompt = second_opinion_prompt(&request.focus, &request.task, &request.answer);
     let run = async {
         match reviewer {

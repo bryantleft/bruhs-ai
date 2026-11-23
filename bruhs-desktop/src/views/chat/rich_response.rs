@@ -41,7 +41,11 @@ struct HostWidget {
 }
 
 fn widget_theme(app: &App) -> std::collections::BTreeMap<String, String> {
-    let scheme = if app.theme().is_dark() { "dark" } else { "light" };
+    let scheme = if app.theme().is_dark() {
+        "dark"
+    } else {
+        "light"
+    };
     let css_color = |color: Hsla| format!("#{:06x}", u32::from(color.to_rgb()) >> 8);
     [
         ("color-scheme", scheme.to_owned()),

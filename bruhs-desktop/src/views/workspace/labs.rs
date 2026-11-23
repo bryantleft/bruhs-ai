@@ -12,7 +12,11 @@ pub(super) struct Folders {
 
 pub(super) fn folder<'a>(thread: &'a DesktopThread, cx: &'a App) -> &'a str {
     let chat = thread.chat.read(cx);
-    if let Some(root) = chat.scratch_folder().and_then(std::path::Path::parent).and_then(std::path::Path::to_str) {
+    if let Some(root) = chat
+        .scratch_folder()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::to_str)
+    {
         root
     } else if chat.project_scoped || !thread.project_name.is_empty() {
         chat.settings_project_path()
@@ -48,7 +52,10 @@ impl Workspace {
         let enabled = !self.fast_checkout.enabled;
         self.fast_checkout.saving = true;
         self.fast_checkout.error = None;
-        let save = crate::app_state::spawn_tokio(cx, bruhs_core::git::checkout_cache::set_enabled(enabled));
+        let save = crate::app_state::spawn_tokio(
+            cx,
+            bruhs_core::git::checkout_cache::set_enabled(enabled),
+        );
         cx.spawn(async move |this, cx| {
             let result = save.await;
             let _ = this.update(cx, |this, cx| {
@@ -131,21 +138,24 @@ impl Workspace {
             ),
         ));
         #[cfg(target_os = "macos")]
-        rows.push(self.settings_row(
-            "labs-worktree-fast-checkout",
-            "Fast worktree checkout",
-            self.fast_checkout.error.clone().unwrap_or_else(||
-                "Clone new worktrees from a local APFS cache.".to_owned()
-            ),
-            settings_ui::switch(
-                "labs-toggle-fast-checkout",
-                self.fast_checkout.enabled,
-                self.fast_checkout.saving,
+        rows.push(
+            self.settings_row(
+                "labs-worktree-fast-checkout",
                 "Fast worktree checkout",
-                cx,
-                |this, _, cx| this.toggle_fast_checkout(cx),
+                self.fast_checkout
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Clone new worktrees from a local APFS cache.".to_owned()),
+                settings_ui::switch(
+                    "labs-toggle-fast-checkout",
+                    self.fast_checkout.enabled,
+                    self.fast_checkout.saving,
+                    "Fast worktree checkout",
+                    cx,
+                    |this, _, cx| this.toggle_fast_checkout(cx),
+                ),
             ),
-        ));
+        );
         rows
     }
 }
@@ -174,7 +184,10 @@ mod tests {
             cx.notify();
         });
         cx.run_until_parked();
-        for selector in ["desktop-sidebar-folder-/tmp/alpha", "desktop-sidebar-folder-/other/alpha"] {
+        for selector in [
+            "desktop-sidebar-folder-/tmp/alpha",
+            "desktop-sidebar-folder-/other/alpha",
+        ] {
             assert!(cx.debug_bounds(selector).is_some());
         }
         let button = cx

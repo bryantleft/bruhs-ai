@@ -650,7 +650,11 @@ impl ReactiveAutomations {
                 &editor.source.times,
                 "Run at",
                 crate::assets::CLOCK_ICON_PATH,
-                if multiple && editor.date_time_picker.in_text_mode() { 196. } else { 128. },
+                if multiple && editor.date_time_picker.in_text_mode() {
+                    196.
+                } else {
+                    128.
+                },
             )
         };
         let picker = &editor.date_time_picker;

@@ -882,7 +882,15 @@ impl Workspace {
                 .reported_limit
                 .filter(|(generation, _)| chat.is_quota_turn(*generation));
             let provider = AgentProvider::for_model(&chat.model_id);
-            if matches!(provider, AgentProvider::Codex | AgentProvider::Claude | AgentProvider::OpenCode | AgentProvider::Cursor | AgentProvider::Grok | AgentProvider::Antigravity) {
+            if matches!(
+                provider,
+                AgentProvider::Codex
+                    | AgentProvider::Claude
+                    | AgentProvider::OpenCode
+                    | AgentProvider::Cursor
+                    | AgentProvider::Grok
+                    | AgentProvider::Antigravity
+            ) {
                 usage_rows.push(usage::ThreadUsage(provider).into_any_element());
             }
             if let Some((_, reset)) = limit {

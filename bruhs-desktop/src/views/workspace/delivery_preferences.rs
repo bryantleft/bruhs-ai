@@ -276,8 +276,7 @@ impl Workspace {
                     match result {
                         Ok(value) => this.delivery_preferences.value = Some(value),
                         Err(error) => {
-                            this.delivery_preferences.error =
-                                Some(friendly_delivery_error(&error))
+                            this.delivery_preferences.error = Some(friendly_delivery_error(&error))
                         }
                     }
                 } else if let Err(error) = result {
@@ -378,7 +377,17 @@ impl Workspace {
             }
         });
         let mut rows = vec![
-            self.settings_row("desktop-settings-row-merge-credits","Remove agent credits when merging","Strip agent footers from merge and squash messages.",toggle("settings-delivery-credits","Remove agent credits when merging",credits,false)),
+            self.settings_row(
+                "desktop-settings-row-merge-credits",
+                "Remove agent credits when merging",
+                "Strip agent footers from merge and squash messages.",
+                toggle(
+                    "settings-delivery-credits",
+                    "Remove agent credits when merging",
+                    credits,
+                    false,
+                ),
+            ),
             self.settings_row(
                 "desktop-settings-row-merge-method",
                 "Default merge method",

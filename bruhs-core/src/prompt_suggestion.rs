@@ -50,7 +50,10 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
     suggest_in_project(request, Path::new("")).await
 }
 
-pub async fn suggest_in_project(request: SuggestionRequest, project: &Path) -> Result<SuggestionReply, SuggestionError> {
+pub async fn suggest_in_project(
+    request: SuggestionRequest,
+    project: &Path,
+) -> Result<SuggestionReply, SuggestionError> {
     let info = model_info(&request.model).ok_or(SuggestionError::InvalidRequest)?;
     if info.provider.is_external() {
         return Err(SuggestionError::UnsupportedProvider);
@@ -252,7 +255,7 @@ fn claude_options(
     let mut options = crate::agent::claude_query_options_from_env(prompt);
     options.model = Some(model.to_owned());
     if let Some(selected) = instructions.generation {
-        crate::agent::model_options::apply_claude(&mut options,selected);
+        crate::agent::model_options::apply_claude(&mut options, selected);
     } else {
         options = options.effort("low");
         if !instructions.think {
@@ -363,7 +366,7 @@ fn codex_options(
         );
     }
     if let Some(selected) = instructions.generation {
-        crate::agent::model_options::apply_codex(&mut options,selected);
+        crate::agent::model_options::apply_codex(&mut options, selected);
     } else {
         options.config.push(ConfigOverride::reasoning_effort("low"));
     }

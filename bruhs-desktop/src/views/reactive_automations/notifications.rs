@@ -1,15 +1,15 @@
 //! System notifications for agent updates, and the login service that keeps
 //! agents running after the app quits.
 use super::*;
+use crate::views::language::Language;
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::NOTIFICATIONS_NOTE;
-use crate::views::language::Language;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::zoom::px;
 
 /// The same notification form is available in Settings and on the Automations page.
 #[derive(IntoElement)]
-pub(crate) struct AgentNotificationSettings(pub Entity<ReactiveAutomations>,pub Language);
+pub(crate) struct AgentNotificationSettings(pub Entity<ReactiveAutomations>, pub Language);
 
 impl RenderOnce for AgentNotificationSettings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -19,7 +19,7 @@ impl RenderOnce for AgentNotificationSettings {
             }
             panel.ensure_notification_form(window, cx);
             if panel.notify_form.is_some() {
-                return panel.notification_form_in(self.1,cx);
+                return panel.notification_form_in(self.1, cx);
             }
             card()
                 .child(heading(self.1.text("Agent notifications")))
@@ -30,8 +30,12 @@ impl RenderOnce for AgentNotificationSettings {
                 })))
                 .when(!panel.reading, |el| {
                     el.child(
-                        ghost_control("settings-retry-notifications", self.1.text("Retry"), panel.busy)
-                            .on_activate(cx, |this, _, cx| this.refresh_snapshot(cx)),
+                        ghost_control(
+                            "settings-retry-notifications",
+                            self.1.text("Retry"),
+                            panel.busy,
+                        )
+                        .on_activate(cx, |this, _, cx| this.refresh_snapshot(cx)),
                     )
                 })
         })
@@ -202,10 +206,10 @@ impl ReactiveAutomations {
     /// Web `NotificationsPanel`: a card with its switches, the quiet hours
     /// fields when on, then the note and Save.
     pub(super) fn render_notifications(&self, cx: &Context<'_, Self>) -> Div {
-        self.notification_form_in(Language::En,cx)
+        self.notification_form_in(Language::En, cx)
     }
 
-    fn notification_form_in(&self,language:Language,cx:&Context<'_,Self>)->Div {
+    fn notification_form_in(&self, language: Language, cx: &Context<'_, Self>) -> Div {
         let note = muted(language.text(NOTIFICATIONS_NOTE)).text_color(theme::rambutan_500());
         let mut section = card()
             .debug_selector(|| "reactive-notifications".to_string())
@@ -243,17 +247,27 @@ impl ReactiveAutomations {
                         }),
                     )
                     .child(
-                        toggle("reactive-quiet-hours", language.text("Quiet hours"), form.quiet, busy)
-                            .on_activate(cx, |this, _, cx| {
-                                this.update_form(|form| form.quiet = !form.quiet, cx)
-                            }),
+                        toggle(
+                            "reactive-quiet-hours",
+                            language.text("Quiet hours"),
+                            form.quiet,
+                            busy,
+                        )
+                        .on_activate(cx, |this, _, cx| {
+                            this.update_form(|form| form.quiet = !form.quiet, cx)
+                        }),
                     ),
             )
             .when(form.quiet, |section| {
                 section
                     .child(field(language.text("Start"), &form.start, false, busy))
                     .child(field(language.text("End"), &form.end, false, busy))
-                    .child(field(language.text("Time zone"), &form.time_zone, false, busy))
+                    .child(field(
+                        language.text("Time zone"),
+                        &form.time_zone,
+                        false,
+                        busy,
+                    ))
             })
             .child(note)
             .child(

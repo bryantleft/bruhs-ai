@@ -48,7 +48,7 @@ impl Naming {
     /// Turn a model suggestion into the requested Git ref. Custom mode
     /// preserves case, punctuation and namespaces exactly.
     pub fn branch(&self, generated: &str) -> Result<String, String> {
-        use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+        use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
         let name = if self.mode == Mode::Custom {
             generated.trim().to_owned()
         } else {

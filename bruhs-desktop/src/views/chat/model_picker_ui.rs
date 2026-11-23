@@ -32,9 +32,13 @@ fn runtime_model_lister(cx: &App) -> Option<RuntimeModelLister> {
 
 #[cfg(not(test))]
 fn default_model_lister() -> Option<RuntimeModelLister> {
-    Some(RuntimeModelLister(std::sync::Arc::new(|provider, project| {
-        Box::pin(async move { bruhs_core::agent::list_runtime_models_for_project(provider, &project).await })
-    })))
+    Some(RuntimeModelLister(std::sync::Arc::new(
+        |provider, project| {
+            Box::pin(async move {
+                bruhs_core::agent::list_runtime_models_for_project(provider, &project).await
+            })
+        },
+    )))
 }
 
 /// Tests never run a CLI unless they install a lister.
@@ -153,8 +157,10 @@ impl ChatView {
         self.workspace_menu_open = false;
         self.effort_menu_open = false;
         self.picker_availability =
-            bruhs_core::agent_extensions::availability::ProviderAvailability::load_for_project(self.project_path.as_ref())
-                .map_err(|err| format!("Could not read provider settings: {err}"));
+            bruhs_core::agent_extensions::availability::ProviderAvailability::load_for_project(
+                self.project_path.as_ref(),
+            )
+            .map_err(|err| format!("Could not read provider settings: {err}"));
         self.refresh_acp_models();
         self.model_browser_tab = None;
         self.model_browser_tab = Some(self.model_browser(&self.available_picker_models()).active);
@@ -171,8 +177,16 @@ impl ChatView {
             input.focus(window, cx);
         });
         let rows = self.model_picker_matches(cx);
-        self.model_picker_index = rows.iter().position(|m| m.id == self.model_id)
-            .unwrap_or_else(|| if self.model_picker_custom_match(cx).is_some() { rows.len() } else { 0 });
+        self.model_picker_index = rows
+            .iter()
+            .position(|m| m.id == self.model_id)
+            .unwrap_or_else(|| {
+                if self.model_picker_custom_match(cx).is_some() {
+                    rows.len()
+                } else {
+                    0
+                }
+            });
         cx.notify();
     }
 
@@ -191,9 +205,14 @@ impl ChatView {
         let mut listing = RuntimeModels::default();
         match crate::views::acp_models::load() {
             Ok(instances) => {
-                for instance in instances.into_iter().filter(|i| self.picker_availability.as_ref().is_ok_and(|prefs| i.enabled(prefs))) {
+                for instance in instances.into_iter().filter(|i| {
+                    self.picker_availability
+                        .as_ref()
+                        .is_ok_and(|prefs| i.enabled(prefs))
+                }) {
                     listing.models.extend(instance.choices);
-                    self.picker_acp_instances.insert(instance.id, (instance.name, instance.accent));
+                    self.picker_acp_instances
+                        .insert(instance.id, (instance.name, instance.accent));
                 }
             }
             Err(err) => listing.error = Some(format!("Could not read ACP agents: {err}")),
@@ -203,7 +222,9 @@ impl ChatView {
 
     fn model_accent(&self, model: &str) -> Option<u32> {
         let (instance, _) = model.strip_prefix("acp/")?.split_once('/')?;
-        self.picker_acp_instances.get(instance).and_then(|(_,accent)| *accent)
+        self.picker_acp_instances
+            .get(instance)
+            .and_then(|(_, accent)| *accent)
     }
 
     fn picker_model_enabled(&self, model: &str) -> bool {
@@ -225,9 +246,19 @@ impl ChatView {
     fn available_picker_models(&self) -> Vec<ModelChoice> {
         let mut rows = listed_models(&self.runtime_models);
         for model in &self.model_catalog.models {
-            if !rows.iter().any(|row| row.id==model.id) {
-                let end=rows.iter().rposition(|row|row.provider==model.provider).map_or(rows.len(),|i|i+1);
-                rows.insert(end,ModelChoice{id:model.id.clone(),label:model.label.clone(),provider:model.provider});
+            if !rows.iter().any(|row| row.id == model.id) {
+                let end = rows
+                    .iter()
+                    .rposition(|row| row.provider == model.provider)
+                    .map_or(rows.len(), |i| i + 1);
+                rows.insert(
+                    end,
+                    ModelChoice {
+                        id: model.id.clone(),
+                        label: model.label.clone(),
+                        provider: model.provider,
+                    },
+                );
             }
         }
         rows.retain(|row| self.picker_model_enabled(&row.id));
@@ -235,9 +266,15 @@ impl ChatView {
     }
 
     fn model_browser(&self, models: &[ModelChoice]) -> Browser {
-        let custom = self.picker_model_enabled(&self.model_id).then_some(self.model_id.as_str());
-        Browser::new(models.iter().map(|m| m.id.as_str()).chain(custom), self.model_browser_tab.as_deref(),
-            &self.model_id, &self.favorite_models)
+        let custom = self
+            .picker_model_enabled(&self.model_id)
+            .then_some(self.model_id.as_str());
+        Browser::new(
+            models.iter().map(|m| m.id.as_str()).chain(custom),
+            self.model_browser_tab.as_deref(),
+            &self.model_id,
+            &self.favorite_models,
+        )
     }
 
     pub(super) fn model_picker_matches(&self, cx: &App) -> Vec<ModelChoice> {
@@ -246,7 +283,11 @@ impl ChatView {
         if self.model_picker_open && query.trim().is_empty() {
             let browser = self.model_browser(&models);
             models.retain(|m| browser.includes(&m.id, &self.favorite_models));
-            models.sort_by_key(|m| !self.favorite_models.contains(&model_browser::favorite_key(&m.id)));
+            models.sort_by_key(|m| {
+                !self
+                    .favorite_models
+                    .contains(&model_browser::favorite_key(&m.id))
+            });
         }
         filter_models_like_web(&models, &query)
     }
@@ -254,16 +295,16 @@ impl ChatView {
     pub(super) fn model_picker_custom_match(&self, cx: &App) -> Option<String> {
         let query = self.model_picker_query.read(cx).value();
         let models = self.available_picker_models();
-        if self.model_picker_open && query.trim().is_empty()
-            && !self.model_browser(&models).includes(&self.model_id, &self.favorite_models) {
+        if self.model_picker_open
+            && query.trim().is_empty()
+            && !self
+                .model_browser(&models)
+                .includes(&self.model_id, &self.favorite_models)
+        {
             return None;
         }
-        custom_model_match(
-            query.as_ref(),
-            &self.model_id,
-            &models,
-        )
-        .filter(|model| self.picker_model_enabled(model))
+        custom_model_match(query.as_ref(), &self.model_id, &models)
+            .filter(|model| self.picker_model_enabled(model))
     }
 
     /// Ask each runtime that can list models for the account's; core caches
@@ -277,7 +318,10 @@ impl ChatView {
             if !self.picker_provider_enabled(provider) {
                 continue;
             }
-            let listing = crate::app_state::spawn_tokio(cx, lister(provider, self.project_path.as_str().into()));
+            let listing = crate::app_state::spawn_tokio(
+                cx,
+                lister(provider, self.project_path.as_str().into()),
+            );
             cx.spawn(async move |chat, cx| {
                 let listing = listing.await;
                 let _ = chat.update(cx, |chat, cx| {
@@ -432,17 +476,29 @@ impl ChatView {
         let browser = self.model_browser(&self.available_picker_models());
         let browse = self.model_picker_query.read(cx).value().trim().is_empty();
         let view = cx.weak_entity();
-        let rail = browse.then(|| browser.rail("desktop-model-picker", &self.model_picker_rail, self.model_picker_query.focus_handle(cx), |id| {
-            self.picker_acp_instances.get(id).cloned().unwrap_or_else(|| (id.to_owned(),None))
-        }, move |tab, window, cx| {
-            let _ = view.update(cx, |chat,cx| {
-                chat.model_browser_tab = Some(tab);
-                chat.model_picker_index = 0;
-                chat.model_picker_scroll.set_offset(Point::default());
-                chat.model_picker_query.update(cx, |field,cx| field.focus(window,cx));
-                cx.notify();
-            });
-        }));
+        let rail = browse.then(|| {
+            browser.rail(
+                "desktop-model-picker",
+                &self.model_picker_rail,
+                self.model_picker_query.focus_handle(cx),
+                |id| {
+                    self.picker_acp_instances
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| (id.to_owned(), None))
+                },
+                move |tab, window, cx| {
+                    let _ = view.update(cx, |chat, cx| {
+                        chat.model_browser_tab = Some(tab);
+                        chat.model_picker_index = 0;
+                        chat.model_picker_scroll.set_offset(Point::default());
+                        chat.model_picker_query
+                            .update(cx, |field, cx| field.focus(window, cx));
+                        cx.notify();
+                    });
+                },
+            )
+        });
         let count = matches.len() + usize::from(custom.is_some());
         let highlighted = self.model_picker_index.min(count.saturating_sub(1));
         let highlighted_provider = matches
@@ -480,13 +536,19 @@ impl ChatView {
                 let favorite_id = model.id.clone();
                 let hover_group = format!("desktop-model-picker-row-{}", model.id);
                 let view = cx.weak_entity();
-                let star = model_browser::star("desktop-model-picker", &model.id,
-                    self.favorite_models.contains(&model_browser::favorite_key(&model.id)), move |window,cx| {
-                        let _ = view.update(cx, |chat,cx| {
+                let star = model_browser::star(
+                    "desktop-model-picker",
+                    &model.id,
+                    self.favorite_models
+                        .contains(&model_browser::favorite_key(&model.id)),
+                    move |window, cx| {
+                        let _ = view.update(cx, |chat, cx| {
                             cx.emit(ChatViewEvent::ToggleFavoriteModel(favorite_id.clone()));
-                            chat.model_picker_query.update(cx, |field,cx| field.focus(window,cx));
+                            chat.model_picker_query
+                                .update(cx, |field, cx| field.focus(window, cx));
                         });
-                    });
+                    },
+                );
                 rows.push(
                     div()
                         .id(("desktop-model-picker-option", key))
@@ -671,7 +733,14 @@ impl ChatView {
                             .as_ref()
                             .err()
                             .cloned()
-                            .unwrap_or_else(|| if browse && browser.active == FAVORITES { "No favorites yet" } else { MODEL_PICKER_EMPTY_LABEL }.to_owned()),
+                            .unwrap_or_else(|| {
+                                if browse && browser.active == FAVORITES {
+                                    "No favorites yet"
+                                } else {
+                                    MODEL_PICKER_EMPTY_LABEL
+                                }
+                                .to_owned()
+                            }),
                     )
                     .into_any_element(),
             );
@@ -680,7 +749,10 @@ impl ChatView {
         let has_options = self.has_picker_options();
         let stacked = window.viewport_size().width < px(640.);
         let (column, footer) = if has_options {
-            (self.picker_model_options(false, stacked, cx), self.picker_model_options(true, stacked, cx))
+            (
+                self.picker_model_options(false, stacked, cx),
+                self.picker_model_options(true, stacked, cx),
+            )
         } else {
             (None, None)
         };
@@ -691,17 +763,24 @@ impl ChatView {
         };
         let expanded = column.is_some();
         let rail_focus = self.model_picker_rail.clone();
-        let options = div().flex_1().min_w_0().min_h_0().flex().flex_col()
+        let options = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .debug_selector(|| "desktop-model-picker-search-row".to_string())
                     .when(has_options, |el| {
                         el.capture_action(cx.listener(Self::focus_highlighted_model_options))
                     })
-                    .when(browse, |el| el.capture_action(move |_: &bruhs_ui::input::MoveLeft, window,cx| {
-                        rail_focus.focus(window,cx);
-                        cx.stop_propagation();
-                    }))
+                    .when(browse, |el| {
+                        el.capture_action(move |_: &bruhs_ui::input::MoveLeft, window, cx| {
+                            rail_focus.focus(window, cx);
+                            cx.stop_propagation();
+                        })
+                    })
                     .flex_shrink_0()
                     .flex()
                     .items_center()
@@ -800,22 +879,40 @@ impl ChatView {
             .flex()
             .flex_col()
             .child(
-                div().flex().min_h_0()
+                div()
+                    .flex()
+                    .min_h_0()
                     .when(expanded, |el| el.h(px(346.)))
                     .when(stacked, |el| el.flex_col())
-                    .child(div().flex().min_h_0().min_w_0().flex_1().children(rail).child(options))
+                    .child(
+                        div()
+                            .flex()
+                            .min_h_0()
+                            .min_w_0()
+                            .flex_1()
+                            .children(rail)
+                            .child(options),
+                    )
                     .children(column),
             )
             .child(
-                div().id("model-options-footer")
+                div()
+                    .id("model-options-footer")
                     .debug_selector(|| "model-options-footer".into())
-                    .p_1().flex_shrink_0().flex().items_center().gap_1()
-                    .border_t_1().border_color(theme::ring_floating())
+                    .p_1()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .border_t_1()
+                    .border_color(theme::ring_floating())
                     .child(div().flex_1().min_w_0().children(footer))
                     .child(self.picker_permission_control(cx)),
             )
             .on_mouse_down_out(cx.listener(|chat, event: &MouseDownEvent, _, cx| {
-                if chat.model_picker_dropdown.is_none() && !chat.model_chip_bounds.get().contains(&event.position) {
+                if chat.model_picker_dropdown.is_none()
+                    && !chat.model_chip_bounds.get().contains(&event.position)
+                {
                     chat.model_picker_open = false;
                     cx.notify();
                 }

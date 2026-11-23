@@ -18,8 +18,16 @@ pub enum KeepWhen {
 impl KeepWhen {
     pub const CHOICES: [(Self, &'static str, &'static str); 3] = [
         (Self::AnyLocalFiles, "any-local-files", "Any local files"),
-        (Self::UncommittedChanges, "uncommitted-changes", "Uncommitted changes"),
-        (Self::TrackedChanges, "tracked-changes", "Edited tracked files"),
+        (
+            Self::UncommittedChanges,
+            "uncommitted-changes",
+            "Uncommitted changes",
+        ),
+        (
+            Self::TrackedChanges,
+            "tracked-changes",
+            "Edited tracked files",
+        ),
     ];
     pub fn key(self) -> &'static str {
         match self {

@@ -1,5 +1,5 @@
 //! Resolve author coordinates against the size of one CSS background tile.
-use super::super::style::{Length, position, words};
+use super::super::style::{position, words, Length};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 
 pub(super) fn angle(input: &str) -> Option<i64> {

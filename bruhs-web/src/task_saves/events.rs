@@ -66,5 +66,4 @@ impl TaskSaves {
         self.refresh_status();
         self.save();
     }
-
 }

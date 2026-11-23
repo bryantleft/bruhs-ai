@@ -1,6 +1,3 @@
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
-use gpui::prelude::*;
-use gpui::*;
 use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_ui::resizable::{
     h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
@@ -9,6 +6,9 @@ use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
 use bruhs_ui::{ActiveTheme, Icon, IconName, WindowExt};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
+use gpui::prelude::*;
+use gpui::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
@@ -28,8 +28,8 @@ use crate::views::native_blur::BlurScrimHandle;
 use crate::views::sidebar_order::{relative_age, sidebar_order, ThreadMeta};
 use crate::views::{
     chat::{
-        ChatView, ChatViewEvent, ChatWidth, ComposerPrefs, CyclePermissionMode, DesktopToolCall, Message,
-        MessageRole, PermissionMode, SendShortcut, TurnState,
+        ChatView, ChatViewEvent, ChatWidth, ComposerPrefs, CyclePermissionMode, DesktopToolCall,
+        Message, MessageRole, PermissionMode, SendShortcut, TurnState,
     },
     diff_panel::{turn_files_from_messages, DiffPanelEvent, DiffPanelView},
     dropdown::{dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler},
@@ -67,7 +67,7 @@ use bruhs_ui::text_field::TextInput;
 mod app_links;
 mod default_model;
 mod native_model_options;
-use bruhs_models::delivery::{generation::GenerationOptions,writer_catalog::WriterCatalog};
+use bruhs_models::delivery::{generation::GenerationOptions, writer_catalog::WriterCatalog};
 mod apps_settings;
 mod automations_ui;
 mod backup_settings;
@@ -85,10 +85,10 @@ mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
 mod import_ui;
-mod move_in_ui;
 #[cfg(test)]
 mod keyboard_tests;
 mod mail_compose;
+mod move_in_ui;
 mod vault_settings;
 #[cfg(test)]
 mod zoom_tests;
@@ -98,13 +98,28 @@ mod keybindings_ui;
 mod language;
 mod linked_keybindings;
 pub(crate) use linked_keybindings::{LinkedDeliveries, TaskEditorHost};
+pub(crate) mod appearance;
+mod archive;
+mod browser_settings;
+mod clone_project;
+mod color_sliders;
+mod delivery_preferences;
+mod device_settings;
+mod diagnostics;
+mod environments;
+mod font_settings;
 mod keybinding_file;
+mod kiro_options;
 mod knowledge_storage;
 mod knowledge_ui;
+mod labs;
 mod library_pages_ui;
+mod license_browser;
 mod life_ui;
+mod maintenance;
 mod mcp_bridge;
 mod meetings_ui;
+mod microphone_test;
 mod mobile;
 mod modal_ui;
 #[cfg(all(feature = "native-performance", target_os = "macos"))]
@@ -122,93 +137,78 @@ mod panels_ui;
 mod performance_tests;
 mod persisted_enum;
 mod persistence;
-mod archive;
-mod clone_project;
-mod project_defaults;
-mod kiro_options;
+mod person_merge;
 mod project_actions;
 mod project_art;
-mod project_order;
+mod project_defaults;
 mod project_grouping;
 mod project_name;
-mod project_removal;
-mod delivery_preferences;
-mod source_writer;
-mod environments;
-mod diagnostics;
-mod device_settings;
-mod telemetry;
-mod maintenance;
-mod font_settings;
-mod voice_dictionary;
-mod voice_runtime;
-mod voice_models;
-mod voice_cloud;
-mod voice_cleanup;
-mod voice_shortcut;
-mod microphone_test;
-mod voice_settings;
-mod snapshots;
-mod snooze_options;
-mod quota_settings;
-pub(crate) mod appearance;
-mod color_sliders;
-mod browser_settings;
-mod thread_notifications;
-mod person_merge;
+mod project_order;
 #[cfg(test)]
 mod project_picker_tests;
 mod project_picker_ui;
+mod project_removal;
+mod provider_health;
+mod pull_settlement;
+mod quota_settings;
 mod record_picker_ui;
 mod role_settings_ui;
 mod room_ui;
 mod save_queue;
 mod save_status;
+mod scheduled_replies;
 mod scheduling_ui;
 mod search_record_detail;
-mod license_browser;
+mod setting_source;
 mod settings_page_ui;
 mod settings_ui;
 mod sidebar_ui;
 #[cfg(debug_assertions)]
 mod smoke;
+mod snapshots;
+mod snooze_options;
 mod snooze_ui;
+mod source_writer;
 mod state_file;
 #[cfg(test)]
 mod state_fixture_tests;
 mod task_forms_ui;
 mod tasks_ui;
+mod telemetry;
 #[cfg(all(test, unix))]
 mod thread_auth_tests;
 #[cfg(test)]
 mod thread_catalog_tests;
-mod thread_link_ui;
 mod thread_details;
 mod thread_forks;
+mod thread_link_ui;
+mod thread_notifications;
 mod thread_snapshot;
-mod scheduled_replies;
 mod thread_titles;
+mod voice_cleanup;
+mod voice_cloud;
+mod voice_dictionary;
+mod voice_models;
+mod voice_runtime;
+mod voice_settings;
+mod voice_shortcut;
 mod welcome;
-mod labs;
-mod pull_settlement;
-mod provider_health;
-mod setting_source;
 use setting_source::ScopedSwitch;
+mod fallback_model;
+mod panel_motion;
 mod provider_editor;
-mod usage_hubs;
-mod text_generators;
 mod quit_shortcut;
 mod secret_source_settings;
-mod panel_motion;
-mod fallback_model;
-mod worktree_naming;
-mod worktree_storage;
+mod text_generators;
 mod threads_ui;
 mod today_ui;
 mod updates_ui;
+mod usage_hubs;
 mod view_restore;
 mod whiteboard_ui;
 mod work_item_handoff_ui;
+mod worktree_naming;
+mod worktree_storage;
 use calendar_ui::*;
 use event_dialog_ui::*;
 use modal_ui::*;
@@ -539,11 +539,16 @@ enum Overlay {
         target: RecordDeleteTarget,
     },
     /// The sidebar Update pill's "Update N providers?".
-    UpdateConfirm { from_settings: bool, details_open: bool },
+    UpdateConfirm {
+        from_settings: bool,
+        details_open: bool,
+    },
     ThemeEditor(appearance::ThemeEditor),
     RemoveThemeVariants(appearance::VariantRemoval),
     /// "Restart to update" for a downloaded release.
-    RestartConfirm { previous: Option<Box<Overlay>> },
+    RestartConfirm {
+        previous: Option<Box<Overlay>>,
+    },
     /// The thread menu's "Custom…" snooze (web "Snooze until").
     SnoozeCustom {
         thread_id: String,
@@ -629,7 +634,10 @@ enum PaletteMode {
 #[derive(Clone, Debug)]
 enum PaletteItem {
     Action(&'static CommandAction),
-    Project {path:String,name:String},
+    Project {
+        path: String,
+        name: String,
+    },
     LinkedProject(project_grouping::Member),
     Thread {
         id: String,
@@ -928,9 +936,9 @@ struct PersistedWorkspaceState {
     selected_calendar_event_id: Option<String>,
     threads: Vec<PersistedThread>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    desktop_task_links: BTreeMap<String,BTreeMap<String,String>>,
+    desktop_task_links: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    desktop_task_cursors: BTreeMap<String,i64>,
+    desktop_task_cursors: BTreeMap<String, i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -962,44 +970,50 @@ struct PersistedWorkspaceState {
     automation_state: AutomationState,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_start_folder: Option<String>,
-    #[serde(skip_serializing_if="skip_false")]
+    #[serde(skip_serializing_if = "skip_false")]
     clone_host_folders: bool,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     idle_settle_days: Option<u16>,
     pull_preferences: pull_settlement::Preferences,
-    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
-    known_thread_pulls: BTreeMap<String,pull_settlement::Observation>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    maintenance:Option<maintenance::MaintenancePreferences>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    known_thread_pulls: BTreeMap<String, pull_settlement::Observation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    maintenance: Option<maintenance::MaintenancePreferences>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     project_defaults: BTreeMap<String, project_defaults::ProjectDefaults>,
-    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     project_actions: BTreeMap<String, Vec<project_actions::ProjectAction>>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     snooze_options: Option<Vec<snooze_options::Choice>>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    quota_prefs:Option<quota_settings::Preferences>,
-    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_prefs: Option<quota_settings::Preferences>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     quota_recoveries: BTreeMap<String, quota_settings::Recovery>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     interrupted_runs: BTreeMap<String, maintenance::restart::Interrupted>,
-    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
     default_options: GenerationOptions,
-    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
     fallback_options: GenerationOptions,
-    #[serde(skip_serializing_if="Option::is_none")]
-    fallback_model:Option<String>,
-    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
-    default_kiro:super::chat::kiro::KiroChoices,
-    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
-    fallback_kiro:super::chat::kiro::KiroChoices,
-    #[serde(skip_serializing_if="BTreeMap::is_empty")]
-    provider_resets:BTreeMap<String,i64>,
-    #[serde(default,skip_serializing_if="project_order::ProjectList::empty")]
-    project_list:project_order::ProjectList,
-    #[serde(skip_serializing_if="Option::is_none")]
-    response_stream:Option<super::chat::response_stream::Mode>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback_model: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "super::chat::kiro::KiroChoices::is_empty"
+    )]
+    default_kiro: super::chat::kiro::KiroChoices,
+    #[serde(
+        default,
+        skip_serializing_if = "super::chat::kiro::KiroChoices::is_empty"
+    )]
+    fallback_kiro: super::chat::kiro::KiroChoices,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    provider_resets: BTreeMap<String, i64>,
+    #[serde(default, skip_serializing_if = "project_order::ProjectList::empty")]
+    project_list: project_order::ProjectList,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_stream: Option<super::chat::response_stream::Mode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     text_generation_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     browser_preferences: Option<super::browser_preferences::BrowserPreferences>,
@@ -1020,7 +1034,7 @@ struct PersistedWorkspaceState {
     confirm_thread_unpin: Option<bool>,
     confirm_thread_delete: Option<bool>,
     #[serde(default)]
-    quit_mode:quit_shortcut::Mode,
+    quit_mode: quit_shortcut::Mode,
     /// Missing means update checks are on (web `bruhs.updateChecks`).
     update_checks: Option<bool>,
     #[serde(default)]
@@ -1050,8 +1064,8 @@ struct PersistedWorkspaceState {
     follow_up: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     send_shortcut: Option<String>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    slash_skills:Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    slash_skills: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     composer_rich_text: Option<bool>,
     tool_visibility: crate::views::chat::tool_visibility::Visibility,
@@ -1063,12 +1077,12 @@ struct PersistedWorkspaceState {
     appearance: Option<appearance::DeviceAppearance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     custom_themes: Option<Arc<appearance::ThemeLibrary>>,
-    #[serde(default, skip_serializing_if="BTreeMap::is_empty")]
-    thread_origins: BTreeMap<String,thread_details::Origin>,
-    #[serde(default, skip_serializing_if="std::collections::BTreeSet::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    thread_origins: BTreeMap<String, thread_details::Origin>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     hidden_inline_thread_details: std::collections::BTreeSet<String>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    fonts:Option<font_settings::DeviceFonts>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fonts: Option<font_settings::DeviceFonts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     snapshots: Option<snapshots::Preferences>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1078,9 +1092,9 @@ struct PersistedWorkspaceState {
     worktree_retention: worktree_storage::WorktreeRetention,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_scratch_cleanups: Vec<worktree_storage::ScratchCleanup>,
-    cleanup_deleted_worktrees:bool,
+    cleanup_deleted_worktrees: bool,
     cleanup_keep_when: bruhs_models::coordination::worktree::KeepWhen,
-    health_interval:u32,
+    health_interval: u32,
     branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
     #[serde(skip_serializing_if = "Option::is_none")]
     diff_preferences: Option<crate::views::diff_panel::DiffPreferences>,
@@ -1112,9 +1126,15 @@ struct PersistedWorkspaceState {
     /// Shortcut rules. Empty means the shipped defaults.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
-    #[serde(default, skip_serializing_if = "linked_keybindings::SavedLinks::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "linked_keybindings::SavedLinks::is_empty"
+    )]
     shortcut_links: linked_keybindings::SavedLinks,
-    #[serde(default, skip_serializing_if = "linked_keybindings::SavedLinks::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "linked_keybindings::SavedLinks::is_empty"
+    )]
     project_links: linked_keybindings::SavedLinks,
     /// Records the addition of the native Settings shortcut once per device.
     keybinding_schema: u8,
@@ -1122,9 +1142,12 @@ struct PersistedWorkspaceState {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PersistedThread {
-    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
     model_options: GenerationOptions,
-    #[serde(default,skip_serializing_if="super::chat::kiro::KiroChoices::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "super::chat::kiro::KiroChoices::is_empty"
+    )]
     kiro_choices: super::chat::kiro::KiroChoices,
     id: String,
     title: String,
@@ -1133,7 +1156,7 @@ struct PersistedThread {
     model_id: String,
     #[serde(default, with = "persisted_enum::required")]
     permission_mode: PermissionMode,
-    #[serde(default,skip_serializing_if="skip_false")]
+    #[serde(default, skip_serializing_if = "skip_false")]
     project_permission_override: bool,
     messages: Vec<PersistedMessage>,
     /// Last activity. Builds before 2026-10 also wrote a placeholder
@@ -1185,7 +1208,7 @@ struct PersistedThread {
     /// Worktree this thread runs in, once the first send created or reused one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     worktree_path: Option<String>,
-    #[serde(default,skip_serializing_if="Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     project_settings_root: Option<String>,
     /// Effort applied on the last successful send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1449,9 +1472,9 @@ pub struct Workspace {
     files_generation: u64,
     pull_panel_visible: bool,
     branch_pull: Option<DesktopBranchPull>,
-    known_thread_pulls: BTreeMap<String,pull_settlement::Observation>,
+    known_thread_pulls: BTreeMap<String, pull_settlement::Observation>,
     pull_preferences: pull_settlement::Preferences,
-    pull_check_times: BTreeMap<String,std::time::Instant>,
+    pull_check_times: BTreeMap<String, std::time::Instant>,
     pull_lifecycle_task: Option<Task<()>>,
     linked_pull: Option<(Option<String>, DesktopBranchPull)>,
     opened_pull_key: Option<String>,
@@ -1607,7 +1630,7 @@ pub struct Workspace {
     confirm_thread_archive: bool,
     confirm_thread_unpin: bool,
     confirm_thread_delete: bool,
-    quit_gesture:quit_shortcut::Gesture,
+    quit_gesture: quit_shortcut::Gesture,
     voice_press: Option<voice_shortcut::Press>,
     title_instructions: String,
     title_instructions_by_project: BTreeMap<String, String>,
@@ -1617,7 +1640,7 @@ pub struct Workspace {
     title_project_instructions_input: Entity<TextareaState>,
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
-    keymap_file:keybinding_file::KeymapFile,
+    keymap_file: keybinding_file::KeymapFile,
     linked_keybindings: linked_keybindings::LinkedKeybindings,
     linked_projects: linked_keybindings::LinkedProjects,
     keybinding_edit_open: bool,
@@ -1661,7 +1684,7 @@ pub struct Workspace {
     /// Stored follow-up. Claude can steer a running turn. Codex still queues.
     follow_up_steer: bool,
     send_shortcut: SendShortcut,
-    slash_skills:bool,
+    slash_skills: bool,
     composer_rich_text: bool,
     tool_visibility: crate::views::chat::tool_visibility::Visibility,
     screen_reader: crate::views::chat::screen_reader::ReaderPreferences,
@@ -1674,19 +1697,19 @@ pub struct Workspace {
     theme_navigation: appearance::CollectionNavigation,
     theme_preview_active: bool,
     details: thread_details::DetailsUi,
-    thread_origins: BTreeMap<String,thread_details::Origin>,
-    fonts:font_settings::DeviceFonts,
-    available_fonts:Vec<String>,
+    thread_origins: BTreeMap<String, thread_details::Origin>,
+    fonts: font_settings::DeviceFonts,
+    available_fonts: Vec<String>,
     snapshots: snapshots::Preferences,
     picking_window: bool,
     capture_binding: snapshots::CaptureBinding,
-    delivery_preferences:delivery_preferences::HostPreferences,
+    delivery_preferences: delivery_preferences::HostPreferences,
     environments: environments::Environments,
     diagnostics: diagnostics::Monitor,
     local_tools: device_settings::Access,
-    command_launcher: Option<Result<crate::launcher::Status,String>>,
+    command_launcher: Option<Result<crate::launcher::Status, String>>,
     command_launcher_busy: bool,
-    telemetry:telemetry::Editor,
+    telemetry: telemetry::Editor,
     dictation_prefs: crate::voice_capture::DictationPreferences,
     voice_dictionary_editor: voice_dictionary::DictionaryEditor,
     voice_model_input: Entity<InputState>,
@@ -1698,14 +1721,15 @@ pub struct Workspace {
     worktree_retention: worktree_storage::WorktreeRetention,
     pending_scratch_cleanups: Vec<worktree_storage::ScratchCleanup>,
     dispatched_scratch_cleanups: std::collections::BTreeSet<String>,
-    cleanup_deleted_worktrees:bool,
+    cleanup_deleted_worktrees: bool,
     cleanup_keep_when: bruhs_models::coordination::worktree::KeepWhen,
-    health_interval:u32,
+    health_interval: u32,
     branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
-    health_interval_input:Entity<InputState>,
+    health_interval_input: Entity<InputState>,
     generators: text_generators::GeneratorSettings,
     acp_models: Vec<crate::views::acp_models::Instance>,
-    provider_availability: Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
+    provider_availability:
+        Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
     usage_hubs: usage_hubs::UsageHubs,
     provider_editor: Option<provider_editor::ProviderEditor>,
     provider_add_focus: FocusHandle,
@@ -1716,15 +1740,15 @@ pub struct Workspace {
     checkout_defaults: bruhs_core::git::ProjectCheckoutDefaults,
     checkout_defaults_watch: Option<Task<()>>,
     provider_change_error: Option<String>,
-    health_result:Option<Vec<bruhs_core::agent::health::ProviderHealth>>,
-    health_timer:Option<Task<()>>,
-    health_check:Option<Task<()>>,
+    health_result: Option<Vec<bruhs_core::agent::health::ProviderHealth>>,
+    health_timer: Option<Task<()>>,
+    health_check: Option<Task<()>>,
     retention_editor: Option<worktree_storage::retention::DaysEditor>,
     location_input: Entity<InputState>,
     location_status: Option<String>,
-    worktree_cleanup_status:Option<String>,
+    worktree_cleanup_status: Option<String>,
     settings_advanced: std::collections::BTreeSet<&'static str>,
-    location_busy:bool,
+    location_busy: bool,
     #[cfg(target_os = "macos")]
     fast_checkout: labs::FastCheckout,
     branch_prefix_input: Entity<InputState>,
@@ -1794,39 +1818,39 @@ pub struct Workspace {
     clone_host_folders: bool,
     clone_editor: clone_project::CloneEditor,
     idle_settle_days: u16,
-    maintenance:maintenance::Maintenance,
+    maintenance: maintenance::Maintenance,
     project_defaults: BTreeMap<String, project_defaults::ProjectDefaults>,
     settings_project_scope: String,
     project_actions: BTreeMap<String, Vec<project_actions::ProjectAction>>,
     action_editor: project_actions::ActionEditor,
     idle_action_runs: Option<BTreeMap<String, EpochMs>>,
-    snooze_editor:snooze_options::Editor,
-    quota_prefs:quota_settings::Preferences,
+    snooze_editor: snooze_options::Editor,
+    quota_prefs: quota_settings::Preferences,
     project_identities: project_grouping::Identities,
     expanded_project_groups: std::collections::BTreeSet<String>,
-    project_names:project_name::SyncState,
-    project_list:project_order::ProjectList,
+    project_names: project_name::SyncState,
+    project_list: project_order::ProjectList,
     removal: project_removal::RemovalState,
-    response_stream:super::chat::response_stream::Mode,
+    response_stream: super::chat::response_stream::Mode,
     text_generation_model: Option<String>,
     title_requests: BTreeMap<String, thread_titles::PendingTitle>,
     title_request_serial: u64,
     task_thread_view: Option<crate::views::reactive_automations::TaskThreadLocation>,
-    desktop_task_cursors: BTreeMap<String,i64>,
+    desktop_task_cursors: BTreeMap<String, i64>,
     reading_desktop_tasks: HashSet<String>,
-    desktop_task_links: BTreeMap<String,BTreeMap<String,String>>,
-    quota_timers:BTreeMap<String,Task<()>>,
+    desktop_task_links: BTreeMap<String, BTreeMap<String, String>>,
+    quota_timers: BTreeMap<String, Task<()>>,
     foreign_runs: BTreeMap<String, maintenance::restart::Interrupted>,
     quota_recoveries: BTreeMap<String, quota_settings::Recovery>,
     quota_dispatching: BTreeMap<String, quota_settings::Recovery>,
-    fallback_model:Option<String>,
-    default_kiro:super::chat::kiro::KiroChoices,
-    fallback_kiro:super::chat::kiro::KiroChoices,
-    provider_resets:BTreeMap<String,i64>,
-    capacity_task:Option<Task<()>>,
-    snooze_options:Option<Vec<snooze_options::Choice>>,
+    fallback_model: Option<String>,
+    default_kiro: super::chat::kiro::KiroChoices,
+    fallback_kiro: super::chat::kiro::KiroChoices,
+    provider_resets: BTreeMap<String, i64>,
+    capacity_task: Option<Task<()>>,
+    snooze_options: Option<Vec<snooze_options::Choice>>,
     browser_search_url_input: Entity<InputState>,
-    viewport_fields:[Entity<InputState>;2],
+    viewport_fields: [Entity<InputState>; 2],
     #[cfg(target_os = "macos")]
     browser_profile_editor: browser_settings::ProfileEditor,
     project_picker_current_path: String,
@@ -1973,8 +1997,8 @@ pub struct Workspace {
     terminal_drawer_height: f32,
     /// Right panel width in px, dragged at its left edge (web `RightPanelWidth`).
     right_panel_width: f32,
-    sidebar_motion:panel_motion::Motion,
-    right_panel_motion:panel_motion::Motion,
+    sidebar_motion: panel_motion::Motion,
+    right_panel_motion: panel_motion::Motion,
     right_panel_split_state: Entity<ResizableState>,
     /// Page zoom; see [`crate::zoom`].
     zoom: f32,
@@ -2040,8 +2064,13 @@ impl Workspace {
         #[cfg(test)] restore_threads: ThreadRestorer,
     ) -> Self {
         let untrusted_workspace_state = disk_version == DiskVersion::Untrusted;
-        let favorite_models = persisted.as_ref().map(|s| s.favorite_models.clone()).unwrap_or_default();
-        let explicit_model = persisted.as_ref().is_some_and(|state| state.current_model.is_some());
+        let favorite_models = persisted
+            .as_ref()
+            .map(|s| s.favorite_models.clone())
+            .unwrap_or_default();
+        let explicit_model = persisted
+            .as_ref()
+            .is_some_and(|state| state.current_model.is_some());
         let current_model = persisted
             .as_ref()
             .and_then(|state| state.current_model.clone())
@@ -2053,36 +2082,56 @@ impl Workspace {
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.observe_window_activation(window, |this, window, cx| {
             this.cancel_quit_on_blur(window, cx);
-            if !window.is_window_active() {this.release_voice_shortcut(cx);}
+            if !window.is_window_active() {
+                this.release_voice_shortcut(cx);
+            }
         }));
         let workspace_for_appearance = cx.weak_entity();
         subscriptions.push(window.observe_window_appearance(move |window, cx| {
             let _ = workspace_for_appearance.update(cx, |this, cx| {
-                if this.theme_preview_active { this.preview_theme_draft(window, cx); }
-                else if this.appearance.scheme == appearance::ColorScheme::System { this.apply_device_appearance(window, cx); }
+                if this.theme_preview_active {
+                    this.preview_theme_draft(window, cx);
+                } else if this.appearance.scheme == appearance::ColorScheme::System {
+                    this.apply_device_appearance(window, cx);
+                }
             });
         }));
-        let settings_model_query = cx.new(|cx| InputState::new(window, cx).placeholder(super::model_browser::SEARCH_HINT));
+        let settings_model_query =
+            cx.new(|cx| InputState::new(window, cx).placeholder(super::model_browser::SEARCH_HINT));
         subscriptions.push(redraw_on_edit(&settings_model_query, window, cx));
-        let appearance = persisted.as_ref().and_then(|state|state.appearance).unwrap_or_default().normalized();
+        let appearance = persisted
+            .as_ref()
+            .and_then(|state| state.appearance)
+            .unwrap_or_default()
+            .normalized();
         let system_language = language::Language::system();
-        let search_placeholder = appearance.language.effective(system_language).text("Search settings");
-        let settings_search = cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder));
-        subscriptions.push(cx.subscribe_in(&settings_search, window, |this: &mut Self, field, event: &InputEvent, window, cx| {
-            match event {
+        let search_placeholder = appearance
+            .language
+            .effective(system_language)
+            .text("Search settings");
+        let settings_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder));
+        subscriptions.push(cx.subscribe_in(
+            &settings_search,
+            window,
+            |this: &mut Self, field, event: &InputEvent, window, cx| match event {
                 InputEvent::Focus if !this.settings_search_open => {
                     this.settings_search_open = true;
                     cx.notify();
                 }
-                InputEvent::Blur if this.settings_search_open && field.read(cx).value().trim().is_empty() => {
+                InputEvent::Blur
+                    if this.settings_search_open && field.read(cx).value().trim().is_empty() =>
+                {
                     this.settings_search_open = false;
                     cx.notify();
                 }
                 InputEvent::Change => this.refresh_settings_search(cx),
-                InputEvent::PressEnter { .. } => this.open_settings_hit(this.settings_search_index, window, cx),
+                InputEvent::PressEnter { .. } => {
+                    this.open_settings_hit(this.settings_search_index, window, cx)
+                }
                 _ => {}
-            }
-        }));
+            },
+        ));
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
         let record_picker = record_picker_ui::RecordPickerUi::new(window, cx, &mut subscriptions);
@@ -2148,7 +2197,12 @@ impl Workspace {
             event_create_end_input,
             event_create_notes_input,
         } = Self::new_event_form_inputs(window, cx, &mut subscriptions);
-        let sidebar_search = Self::new_sidebar_search(appearance.language.effective(system_language), window, cx, &mut subscriptions);
+        let sidebar_search = Self::new_sidebar_search(
+            appearance.language.effective(system_language),
+            window,
+            cx,
+            &mut subscriptions,
+        );
         let saved_title_instructions = persisted
             .as_ref()
             .and_then(|state| state.title_instructions.clone())
@@ -2160,36 +2214,91 @@ impl Workspace {
                 cx,
                 &mut subscriptions,
             );
-        let browser_prefs = persisted.as_ref().and_then(|p| p.browser_preferences.clone()).unwrap_or_default();
-        let browser_search_url_input = Self::new_browser_settings(browser_prefs, window, cx, &mut subscriptions);
-        let viewport_fields=Self::new_viewport_fields(window,cx,&mut subscriptions);
-        let health_interval=persisted.as_ref().map_or(300, |p|p.health_interval);
-        let health_interval=if health_interval==0{0}else{health_interval.clamp(30,86400)};
-        let health_interval_input=Self::new_health_interval(health_interval,window,cx,&mut subscriptions);
-        let branch_naming=persisted.as_ref().map(|p|p.branch_naming.clone()).unwrap_or_default();
-        let voice_cleanup_fields=voice_cleanup::Fields::new(&persisted.as_ref().and_then(|state|state.dictation_prefs.as_ref()).map(|p|p.cleanup.clone()).unwrap_or_default(),window,cx,&mut subscriptions);
-        let voice_cloud = voice_cloud::Editor::new(window,cx,&mut subscriptions);
-        let voice_models = voice_models::Browser::new(window,cx,&mut subscriptions);
-        let voice_model_input = cx.new(|cx| InputState::new(window,cx).placeholder("Model ID from your server")
-            .default_value(persisted.as_ref().and_then(|state|state.dictation_prefs.as_ref()).map(|p|p.remote_model.clone()).unwrap_or_default()));
-        subscriptions.push(cx.subscribe_in(&voice_model_input,window, |this: &mut Self,field,event:&InputEvent,_,cx|{
-            if matches!(event,InputEvent::Change) {
-                let value=field.read(cx).value().to_string();
-                if this.dictation_prefs.remote_model!=value {this.dictation_prefs.remote_model=value;this.stamp_run_prefs_on_threads(cx);this.persist_and_notify(cx);}
-            }
-        }));
-        let location_input=cx.new(|cx|InputState::new(window,cx).placeholder("Default location").default_value(bruhs_core::worktrees::locations::selected_parent().ok().flatten().map(|p|p.to_string_lossy().into_owned()).unwrap_or_default()));
-        let (branch_prefix_input,branch_instructions_input)=Self::new_branch_fields(&branch_naming,window,cx,&mut subscriptions);
+        let browser_prefs = persisted
+            .as_ref()
+            .and_then(|p| p.browser_preferences.clone())
+            .unwrap_or_default();
+        let browser_search_url_input =
+            Self::new_browser_settings(browser_prefs, window, cx, &mut subscriptions);
+        let viewport_fields = Self::new_viewport_fields(window, cx, &mut subscriptions);
+        let health_interval = persisted.as_ref().map_or(300, |p| p.health_interval);
+        let health_interval = if health_interval == 0 {
+            0
+        } else {
+            health_interval.clamp(30, 86400)
+        };
+        let health_interval_input =
+            Self::new_health_interval(health_interval, window, cx, &mut subscriptions);
+        let branch_naming = persisted
+            .as_ref()
+            .map(|p| p.branch_naming.clone())
+            .unwrap_or_default();
+        let voice_cleanup_fields = voice_cleanup::Fields::new(
+            &persisted
+                .as_ref()
+                .and_then(|state| state.dictation_prefs.as_ref())
+                .map(|p| p.cleanup.clone())
+                .unwrap_or_default(),
+            window,
+            cx,
+            &mut subscriptions,
+        );
+        let voice_cloud = voice_cloud::Editor::new(window, cx, &mut subscriptions);
+        let voice_models = voice_models::Browser::new(window, cx, &mut subscriptions);
+        let voice_model_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Model ID from your server")
+                .default_value(
+                    persisted
+                        .as_ref()
+                        .and_then(|state| state.dictation_prefs.as_ref())
+                        .map(|p| p.remote_model.clone())
+                        .unwrap_or_default(),
+                )
+        });
+        subscriptions.push(cx.subscribe_in(
+            &voice_model_input,
+            window,
+            |this: &mut Self, field, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = field.read(cx).value().to_string();
+                    if this.dictation_prefs.remote_model != value {
+                        this.dictation_prefs.remote_model = value;
+                        this.stamp_run_prefs_on_threads(cx);
+                        this.persist_and_notify(cx);
+                    }
+                }
+            },
+        ));
+        let location_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Default location")
+                .default_value(
+                    bruhs_core::worktrees::locations::selected_parent()
+                        .ok()
+                        .flatten()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )
+        });
+        let (branch_prefix_input, branch_instructions_input) =
+            Self::new_branch_fields(&branch_naming, window, cx, &mut subscriptions);
         let project_start_folder_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("~/").default_value(
-                persisted.as_ref().and_then(|p| p.project_start_folder.clone()).unwrap_or_default()
+                persisted
+                    .as_ref()
+                    .and_then(|p| p.project_start_folder.clone())
+                    .unwrap_or_default(),
             )
         });
-        subscriptions.push(cx.subscribe(&project_start_folder_input, |this: &mut Self, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.persist(cx);
-            }
-        }));
+        subscriptions.push(cx.subscribe(
+            &project_start_folder_input,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.persist(cx);
+                }
+            },
+        ));
         let saved_autocompact = persisted
             .as_ref()
             .and_then(|state| autocompact_flag(state.claude_autocompact.as_deref()))
@@ -2201,9 +2310,12 @@ impl Workspace {
                 .as_ref()
                 .map(|state| state.keybindings.clone())
                 .unwrap_or_default(),
-            persisted.as_ref().map_or(0, |state| state.keybinding_schema),
+            persisted
+                .as_ref()
+                .map_or(0, |state| state.keybinding_schema),
         );
-        let keybinding_filter = cx.new(|cx| InputState::new(window,cx).placeholder("Search keybindings"));
+        let keybinding_filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search keybindings"));
         subscriptions.push(redraw_on_edit(&keybinding_filter, window, cx));
         let (keybinding_key_input, keybinding_when_input) =
             keybindings_ui::new_keybinding_inputs(&keybindings, window, cx, &mut subscriptions);
@@ -2308,7 +2420,9 @@ impl Workspace {
             this.drive_background_automations(cx);
         });
         cx.defer_in(window, |this, _, cx| this.refresh_branch_pull(cx));
-        let run_choice = persisted.as_ref().filter(|s| !s.run_choice.is_empty())
+        let run_choice = persisted
+            .as_ref()
+            .filter(|s| !s.run_choice.is_empty())
             .map(|s| WorkspaceChoice::parse(&s.run_choice));
         let claude_effort = persisted.as_ref().and_then(|state| {
             state
@@ -2399,8 +2513,14 @@ impl Workspace {
             files_generation: 0,
             pull_panel_visible: false,
             branch_pull: None,
-            known_thread_pulls: persisted.as_ref().map(|p|p.known_thread_pulls.clone()).unwrap_or_default(),
-            pull_preferences: persisted.as_ref().map(|p|p.pull_preferences).unwrap_or_default(),
+            known_thread_pulls: persisted
+                .as_ref()
+                .map(|p| p.known_thread_pulls.clone())
+                .unwrap_or_default(),
+            pull_preferences: persisted
+                .as_ref()
+                .map(|p| p.pull_preferences)
+                .unwrap_or_default(),
             pull_check_times: Default::default(),
             pull_lifecycle_task: None,
             linked_pull: None,
@@ -2433,8 +2553,18 @@ impl Workspace {
             automation_state,
             reactive_automations: {
                 let panel = cx.new(crate::views::reactive_automations::ReactiveAutomations::new);
-                subscriptions.push(cx.observe(&panel, |this,_,cx| {
-                    if this.details.open_for_active_thread(this.active_thread_id.as_deref()) || (this.settings_visible() && matches!(this.settings_section, SettingsSection::General | SettingsSection::ScheduledTasks)) { cx.notify(); }
+                subscriptions.push(cx.observe(&panel, |this, _, cx| {
+                    if this
+                        .details
+                        .open_for_active_thread(this.active_thread_id.as_deref())
+                        || (this.settings_visible()
+                            && matches!(
+                                this.settings_section,
+                                SettingsSection::General | SettingsSection::ScheduledTasks
+                            ))
+                    {
+                        cx.notify();
+                    }
                 }));
                 subscriptions.push(cx.subscribe(
                     &panel,
@@ -2498,21 +2628,52 @@ impl Workspace {
                         this.open_room_dialog(Some(event.room_id.clone()), window, cx)
                     },
                 ));
-                subscriptions.push(cx.subscribe(&panel, |this,_,activity:&crate::views::reactive_automations::DesktopTaskActivity,cx| {
-                    this.read_scheduled_replies(activity,cx);
-                }));
-                subscriptions.push(cx.subscribe_in(&panel, window, |this, _, event: &crate::views::reactive_automations::TaskThreadLocation, window, cx| {
-                    if this.desktop_task_links.contains_key(event.thread_id.as_str()) && this.threads.iter().any(|thread| thread.id == event.thread_id.as_str()) {
-                        this.select_thread_by_id(event.thread_id.as_str(),cx);
-                        return;
-                    }
-                    this.activate_sidebar_view(AppView::Bruh { agent_id: event.agent_id.clone() }, window, cx);
-                    this.task_thread_view = Some(event.clone());
-                    this.persist_and_notify(cx);
-                }));
-                subscriptions.push(cx.subscribe_in(&panel, window, |this, _, event, window, cx| {
-                    this.task_thread_deletion(event,window,cx);
-                }));
+                subscriptions.push(cx.subscribe(
+                    &panel,
+                    |this,
+                     _,
+                     activity: &crate::views::reactive_automations::DesktopTaskActivity,
+                     cx| {
+                        this.read_scheduled_replies(activity, cx);
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::TaskThreadLocation,
+                     window,
+                     cx| {
+                        if this
+                            .desktop_task_links
+                            .contains_key(event.thread_id.as_str())
+                            && this
+                                .threads
+                                .iter()
+                                .any(|thread| thread.id == event.thread_id.as_str())
+                        {
+                            this.select_thread_by_id(event.thread_id.as_str(), cx);
+                            return;
+                        }
+                        this.activate_sidebar_view(
+                            AppView::Bruh {
+                                agent_id: event.agent_id.clone(),
+                            },
+                            window,
+                            cx,
+                        );
+                        this.task_thread_view = Some(event.clone());
+                        this.persist_and_notify(cx);
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this, _, event, window, cx| {
+                        this.task_thread_deletion(event, window, cx);
+                    },
+                ));
                 // A crew change can end a held `message_bruh` call.
                 subscriptions.push(cx.subscribe(
                     &panel,
@@ -2560,10 +2721,17 @@ impl Workspace {
             local_servers: Vec::new(),
             local_servers_loading: false,
             local_servers_generation: 0,
-            thread_origins: persisted.as_ref().map(|p|p.thread_origins.clone()).unwrap_or_default(),
+            thread_origins: persisted
+                .as_ref()
+                .map(|p| p.thread_origins.clone())
+                .unwrap_or_default(),
             details: {
                 let mut details = thread_details::DetailsUi::new(cx);
-                if let Some(state) = &persisted { details.hidden_inline.clone_from(&state.hidden_inline_thread_details); }
+                if let Some(state) = &persisted {
+                    details
+                        .hidden_inline
+                        .clone_from(&state.hidden_inline_thread_details);
+                }
                 details
             },
             settings_section: SettingsSection::General,
@@ -2581,7 +2749,24 @@ impl Workspace {
                     .as_ref()
                     .and_then(|state| state.update_checks)
                     .unwrap_or(true);
-                let updates = cx.new(|cx| updates_ui::DesktopUpdates::new(enabled, persisted.as_ref().and_then(|s|s.maintenance.as_ref()).is_none_or(|m|m.provider_checks), persisted.as_ref().and_then(|s| s.update_track).unwrap_or_else(|| updates_ui::UpdateTrack::for_installed(env!("BRUHS_RELEASE_VERSION"))), cx));
+                let updates = cx.new(|cx| {
+                    updates_ui::DesktopUpdates::new(
+                        enabled,
+                        persisted
+                            .as_ref()
+                            .and_then(|s| s.maintenance.as_ref())
+                            .is_none_or(|m| m.provider_checks),
+                        persisted
+                            .as_ref()
+                            .and_then(|s| s.update_track)
+                            .unwrap_or_else(|| {
+                                updates_ui::UpdateTrack::for_installed(env!(
+                                    "BRUHS_RELEASE_VERSION"
+                                ))
+                            }),
+                        cx,
+                    )
+                });
                 cx.subscribe(&updates, Self::combined_update_event).detach();
                 let mut registry_revision = 0;
                 cx.observe(&updates, move |ws, u, cx| {
@@ -2592,7 +2777,8 @@ impl Workspace {
                         ws.check_provider_health(cx);
                     }
                     cx.notify();
-                }).detach();
+                })
+                .detach();
                 updates
             },
             settings_search,
@@ -2603,8 +2789,14 @@ impl Workspace {
             settings_models_load: None,
             thread_catalog: Default::default(),
             thread_catalog_load: None,
-            default_options: persisted.as_ref().map(|s|s.default_options.clone()).unwrap_or_default(),
-            fallback_options: persisted.as_ref().map(|s|s.fallback_options.clone()).unwrap_or_default(),
+            default_options: persisted
+                .as_ref()
+                .map(|s| s.default_options.clone())
+                .unwrap_or_default(),
+            fallback_options: persisted
+                .as_ref()
+                .map(|s| s.fallback_options.clone())
+                .unwrap_or_default(),
             settings_search_results: Vec::new(),
             settings_search_catalog: Vec::new(),
             settings_search_index: 0,
@@ -2672,13 +2864,30 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.crew_rail_open)
                 .unwrap_or(true),
-            thread_notifications: persisted.as_ref().and_then(|state| state.thread_notifications).unwrap_or_default(),
-            confirm_thread_archive: persisted.as_ref().and_then(|state| state.confirm_thread_archive).unwrap_or(false),
-            confirm_thread_unpin: persisted.as_ref().and_then(|p| p.confirm_thread_unpin).unwrap_or(false),
+            thread_notifications: persisted
+                .as_ref()
+                .and_then(|state| state.thread_notifications)
+                .unwrap_or_default(),
+            confirm_thread_archive: persisted
+                .as_ref()
+                .and_then(|state| state.confirm_thread_archive)
+                .unwrap_or(false),
+            confirm_thread_unpin: persisted
+                .as_ref()
+                .and_then(|p| p.confirm_thread_unpin)
+                .unwrap_or(false),
             voice_press: None,
-            quit_gesture:quit_shortcut::Gesture::new(persisted.as_ref().map(|p|p.quit_mode).unwrap_or_default()),
-            confirm_thread_delete: persisted.as_ref().and_then(|p| p.confirm_thread_delete).unwrap_or(true),
-            labs_sidebar: persisted.as_ref().map(|s|s.labs_sidebar.clone()).unwrap_or_default(),
+            quit_gesture: quit_shortcut::Gesture::new(
+                persisted.as_ref().map(|p| p.quit_mode).unwrap_or_default(),
+            ),
+            confirm_thread_delete: persisted
+                .as_ref()
+                .and_then(|p| p.confirm_thread_delete)
+                .unwrap_or(true),
+            labs_sidebar: persisted
+                .as_ref()
+                .map(|s| s.labs_sidebar.clone())
+                .unwrap_or_default(),
             sidebar_working_section: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_working_section)
@@ -2696,9 +2905,13 @@ impl Workspace {
             title_project_instructions_input,
             keybindings,
             keybinding_index: 0,
-            keymap_file:keybinding_file::KeymapFile::new(),
-            linked_projects: linked_keybindings::LinkedProjects::restore(persisted.as_ref().map(|s| &s.project_links)),
-            linked_keybindings: linked_keybindings::LinkedKeybindings::restore(persisted.as_ref().map(|s| &s.shortcut_links)),
+            keymap_file: keybinding_file::KeymapFile::new(),
+            linked_projects: linked_keybindings::LinkedProjects::restore(
+                persisted.as_ref().map(|s| &s.project_links),
+            ),
+            linked_keybindings: linked_keybindings::LinkedKeybindings::restore(
+                persisted.as_ref().map(|s| &s.shortcut_links),
+            ),
             keybinding_edit_open: false,
             keybinding_draft: None,
             keybinding_when_open: None,
@@ -2739,8 +2952,11 @@ impl Workspace {
             run_choice,
             claude_effort,
             follow_up_steer,
-            dictation_prefs: persisted.as_ref().and_then(|state| state.dictation_prefs.clone()).unwrap_or_default(),
-            voice_dictionary_editor: voice_dictionary::DictionaryEditor::new(window,cx),
+            dictation_prefs: persisted
+                .as_ref()
+                .and_then(|state| state.dictation_prefs.clone())
+                .unwrap_or_default(),
+            voice_dictionary_editor: voice_dictionary::DictionaryEditor::new(window, cx),
             voice_model_input,
             voice_cleanup_fields,
             voice_models,
@@ -2756,35 +2972,65 @@ impl Workspace {
             voice_device_generation: 0,
             voice_testing: false,
             microphone_test: Default::default(),
-            voice_runtime:Default::default(),
+            voice_runtime: Default::default(),
             voice_test_result: None,
-            fonts:persisted.as_ref().and_then(|s|s.fonts.clone()).unwrap_or_default(),
-            available_fonts:Vec::new(),
-            snapshots: persisted.as_ref().and_then(|s| s.snapshots).unwrap_or_default(),
+            fonts: persisted
+                .as_ref()
+                .and_then(|s| s.fonts.clone())
+                .unwrap_or_default(),
+            available_fonts: Vec::new(),
+            snapshots: persisted
+                .as_ref()
+                .and_then(|s| s.snapshots)
+                .unwrap_or_default(),
             picking_window: false,
             capture_binding: Default::default(),
-            environments:environments::Environments::new(window,cx),
-            diagnostics:Default::default(),
+            environments: environments::Environments::new(window, cx),
+            diagnostics: Default::default(),
             local_tools: Default::default(),
             command_launcher: None,
             command_launcher_busy: false,
-            telemetry:telemetry::Editor::new(window,cx),
-            delivery_preferences:Default::default(),
+            telemetry: telemetry::Editor::new(window, cx),
+            delivery_preferences: Default::default(),
             theme_import_notice: None,
             theme_navigation: Default::default(),
             theme_preview_active: false,
-            custom_themes: persisted.as_ref().and_then(|state|state.custom_themes.clone()).unwrap_or_default(),
+            custom_themes: persisted
+                .as_ref()
+                .and_then(|state| state.custom_themes.clone())
+                .unwrap_or_default(),
             appearance,
             system_language,
-            chat_width: persisted.as_ref().and_then(|state| state.chat_width).unwrap_or_default(),
+            chat_width: persisted
+                .as_ref()
+                .and_then(|state| state.chat_width)
+                .unwrap_or_default(),
             last_reader_title: None,
-            screen_reader: persisted.as_ref().and_then(|p|p.screen_reader).unwrap_or_default(),
-            composer_rich_text: persisted.as_ref().and_then(|p| p.composer_rich_text).unwrap_or(true),
-            slash_skills:persisted.as_ref().and_then(|p|p.slash_skills).unwrap_or(true),
-            tool_visibility:persisted.as_ref().map(|p|p.tool_visibility).unwrap_or_default(),
-            send_shortcut: persisted.as_ref().and_then(|p| {
-                SendShortcut::OPTIONS.into_iter().find(|(_, id)| Some(*id) == p.send_shortcut.as_deref()).map(|(mode, _)| mode)
-            }).unwrap_or_default(),
+            screen_reader: persisted
+                .as_ref()
+                .and_then(|p| p.screen_reader)
+                .unwrap_or_default(),
+            composer_rich_text: persisted
+                .as_ref()
+                .and_then(|p| p.composer_rich_text)
+                .unwrap_or(true),
+            slash_skills: persisted
+                .as_ref()
+                .and_then(|p| p.slash_skills)
+                .unwrap_or(true),
+            tool_visibility: persisted
+                .as_ref()
+                .map(|p| p.tool_visibility)
+                .unwrap_or_default(),
+            send_shortcut: persisted
+                .as_ref()
+                .and_then(|p| {
+                    SendShortcut::OPTIONS
+                        .into_iter()
+                        .find(|(_, id)| Some(*id) == p.send_shortcut.as_deref())
+                        .map(|(mode, _)| mode)
+                })
+                .unwrap_or_default(),
             claude_autocompact,
             autocompact_input,
             compact_idle,
@@ -2845,13 +3091,19 @@ impl Workspace {
             browser_search_url_input,
             viewport_fields,
             #[cfg(target_os = "macos")]
-            browser_profile_editor: browser_settings::ProfileEditor::new(window,cx),
+            browser_profile_editor: browser_settings::ProfileEditor::new(window, cx),
             project_start_folder_input,
-            branch_naming, branch_prefix_input, branch_instructions_input, branch_editor_scope: String::new(), branch_prefix_edited: false, branch_instructions_edited: false,
+            branch_naming,
+            branch_prefix_input,
+            branch_instructions_input,
+            branch_editor_scope: String::new(),
+            branch_prefix_edited: false,
+            branch_instructions_edited: false,
             generators: text_generators::GeneratorSettings::new(cx),
             acp_models: crate::views::acp_models::load().unwrap_or_default(),
-            provider_availability: bruhs_core::agent_extensions::availability::ProviderAvailability::load()
-                .map_err(|err| err.to_string()),
+            provider_availability:
+                bruhs_core::agent_extensions::availability::ProviderAvailability::load()
+                    .map_err(|err| err.to_string()),
             provider_change_error: None,
             usage_hubs: usage_hubs::UsageHubs::new(cx),
             provider_editor: None,
@@ -2862,49 +3114,117 @@ impl Workspace {
             first_override_project: cx.focus_handle(),
             checkout_defaults: Default::default(),
             checkout_defaults_watch: None,
-            health_interval,health_interval_input,health_result:None,health_timer:None,health_check:None,
+            health_interval,
+            health_interval_input,
+            health_result: None,
+            health_timer: None,
+            health_check: None,
             retention_editor: None,
-            worktree_retention: persisted.as_ref().map(|s| s.worktree_retention).unwrap_or_default(),
+            worktree_retention: persisted
+                .as_ref()
+                .map(|s| s.worktree_retention)
+                .unwrap_or_default(),
             #[cfg(target_os = "macos")]
             fast_checkout: Default::default(),
-            location_input,location_status:None,location_busy:false,worktree_cleanup_status:None,settings_advanced: Default::default(),
-            cleanup_keep_when: persisted.as_ref().map(|state|state.cleanup_keep_when).unwrap_or_default(),
-            pending_scratch_cleanups: persisted.as_mut().map(|s| std::mem::take(&mut s.pending_scratch_cleanups)).unwrap_or_default(),
+            location_input,
+            location_status: None,
+            location_busy: false,
+            worktree_cleanup_status: None,
+            settings_advanced: Default::default(),
+            cleanup_keep_when: persisted
+                .as_ref()
+                .map(|state| state.cleanup_keep_when)
+                .unwrap_or_default(),
+            pending_scratch_cleanups: persisted
+                .as_mut()
+                .map(|s| std::mem::take(&mut s.pending_scratch_cleanups))
+                .unwrap_or_default(),
             dispatched_scratch_cleanups: Default::default(),
-            cleanup_deleted_worktrees:persisted.as_ref().is_some_and(|s|s.cleanup_deleted_worktrees),
-            maintenance:maintenance::Maintenance::new(persisted.as_ref().map_or_else(maintenance::MaintenancePreferences::for_new_install, |state|state.maintenance.clone().unwrap_or_default()),window,cx,&mut subscriptions),
-            idle_settle_days: persisted.as_ref().map_or(3, |state|state.idle_settle_days.unwrap_or(1)).min(365),
-            clone_host_folders: persisted.as_ref().is_some_and(|p|p.clone_host_folders),
-            clone_editor: clone_project::CloneEditor::new(window,cx),
-            snooze_options:persisted.as_ref().and_then(|s|s.snooze_options.clone()),
-            snooze_editor:snooze_options::Editor::new(window,cx),
-            quota_prefs:persisted.as_ref().and_then(|s|s.quota_prefs).unwrap_or_default(),
-            desktop_task_cursors: persisted.as_ref().map(|p| p.desktop_task_cursors.clone()).unwrap_or_default(),
+            cleanup_deleted_worktrees: persisted
+                .as_ref()
+                .is_some_and(|s| s.cleanup_deleted_worktrees),
+            maintenance: maintenance::Maintenance::new(
+                persisted.as_ref().map_or_else(
+                    maintenance::MaintenancePreferences::for_new_install,
+                    |state| state.maintenance.clone().unwrap_or_default(),
+                ),
+                window,
+                cx,
+                &mut subscriptions,
+            ),
+            idle_settle_days: persisted
+                .as_ref()
+                .map_or(3, |state| state.idle_settle_days.unwrap_or(1))
+                .min(365),
+            clone_host_folders: persisted.as_ref().is_some_and(|p| p.clone_host_folders),
+            clone_editor: clone_project::CloneEditor::new(window, cx),
+            snooze_options: persisted.as_ref().and_then(|s| s.snooze_options.clone()),
+            snooze_editor: snooze_options::Editor::new(window, cx),
+            quota_prefs: persisted
+                .as_ref()
+                .and_then(|s| s.quota_prefs)
+                .unwrap_or_default(),
+            desktop_task_cursors: persisted
+                .as_ref()
+                .map(|p| p.desktop_task_cursors.clone())
+                .unwrap_or_default(),
             reading_desktop_tasks: Default::default(),
-            desktop_task_links: persisted.as_ref().map(|p|p.desktop_task_links.clone()).unwrap_or_default(),
-            quota_timers:BTreeMap::new(),
-            foreign_runs:BTreeMap::new(),
-            quota_recoveries:persisted.as_mut().map(|s|std::mem::take(&mut s.quota_recoveries)).unwrap_or_default(),
-            quota_dispatching:BTreeMap::new(),
-            default_kiro:persisted.as_ref().map(|p|p.default_kiro.clone()).unwrap_or_default(),
-            fallback_kiro:persisted.as_ref().map(|p|p.fallback_kiro.clone()).unwrap_or_default(),
-            fallback_model:persisted.as_ref().and_then(|p|p.fallback_model.clone()),
-            provider_resets:persisted.as_ref().map(|p|p.provider_resets.clone()).unwrap_or_default(),
-            capacity_task:None,
+            desktop_task_links: persisted
+                .as_ref()
+                .map(|p| p.desktop_task_links.clone())
+                .unwrap_or_default(),
+            quota_timers: BTreeMap::new(),
+            foreign_runs: BTreeMap::new(),
+            quota_recoveries: persisted
+                .as_mut()
+                .map(|s| std::mem::take(&mut s.quota_recoveries))
+                .unwrap_or_default(),
+            quota_dispatching: BTreeMap::new(),
+            default_kiro: persisted
+                .as_ref()
+                .map(|p| p.default_kiro.clone())
+                .unwrap_or_default(),
+            fallback_kiro: persisted
+                .as_ref()
+                .map(|p| p.fallback_kiro.clone())
+                .unwrap_or_default(),
+            fallback_model: persisted.as_ref().and_then(|p| p.fallback_model.clone()),
+            provider_resets: persisted
+                .as_ref()
+                .map(|p| p.provider_resets.clone())
+                .unwrap_or_default(),
+            capacity_task: None,
             project_identities: Default::default(),
             expanded_project_groups: Default::default(),
             removal: Default::default(),
-            project_names:Default::default(),
-            project_list:persisted.as_ref().map(|s|s.project_list.clone()).unwrap_or_default(),
-            title_requests: persisted.as_mut().map(|p| std::mem::take(&mut p.title_requests)).unwrap_or_default(),
-            title_request_serial:0,
+            project_names: Default::default(),
+            project_list: persisted
+                .as_ref()
+                .map(|s| s.project_list.clone())
+                .unwrap_or_default(),
+            title_requests: persisted
+                .as_mut()
+                .map(|p| std::mem::take(&mut p.title_requests))
+                .unwrap_or_default(),
+            title_request_serial: 0,
             task_thread_view: persisted.as_ref().and_then(|p| p.task_thread_view.clone()),
-            text_generation_model:persisted.as_ref().and_then(|s|s.text_generation_model.clone()),
-            response_stream:persisted.as_ref().and_then(|s|s.response_stream).unwrap_or_default(),
+            text_generation_model: persisted
+                .as_ref()
+                .and_then(|s| s.text_generation_model.clone()),
+            response_stream: persisted
+                .as_ref()
+                .and_then(|s| s.response_stream)
+                .unwrap_or_default(),
             idle_action_runs: None,
-            action_editor:project_actions::ActionEditor::new(window,cx),
-            project_actions:persisted.as_ref().map(|s|s.project_actions.clone()).unwrap_or_default(),
-            project_defaults: persisted.as_ref().map(|state| state.project_defaults.clone()).unwrap_or_default(),
+            action_editor: project_actions::ActionEditor::new(window, cx),
+            project_actions: persisted
+                .as_ref()
+                .map(|s| s.project_actions.clone())
+                .unwrap_or_default(),
+            project_defaults: persisted
+                .as_ref()
+                .map(|state| state.project_defaults.clone())
+                .unwrap_or_default(),
             settings_project_scope: String::new(),
             project_picker_current_path: String::new(),
             project_picker_current_name: String::new(),
@@ -3019,14 +3339,17 @@ impl Workspace {
             whiteboard_panels: std::collections::BTreeMap::new(),
             terminal_drawer_height,
             right_panel_width,
-            sidebar_motion:Default::default(),right_panel_motion:Default::default(),
+            sidebar_motion: Default::default(),
+            right_panel_motion: Default::default(),
             right_panel_split_state,
             terminal_split_state,
             zoom: crate::zoom::restore(persisted.as_ref().and_then(|state| state.zoom)),
             _subscriptions: subscriptions,
         };
         workspace.sync_credential_sections(window, cx);
-        workspace.diff_panel.update(cx,|panel,cx|panel.set_default_wrap(workspace.fonts.wrap,cx));
+        workspace.diff_panel.update(cx, |panel, cx| {
+            panel.set_default_wrap(workspace.fonts.wrap, cx)
+        });
         workspace.restore_project_list(cx);
         workspace.refresh_project_identities(cx);
         workspace.schedule_project_refresh(cx);
@@ -3047,8 +3370,13 @@ impl Workspace {
         }
         workspace.resume_title_requests(cx);
         #[cfg(debug_assertions)]
-        if let (Some(prompt),Some(thread))=(crate::views::chat::desktop_smoke_prompt(),workspace.active_thread()){
-            thread.chat.update(cx,|chat,cx|chat.submit_prompt(prompt,cx));
+        if let (Some(prompt), Some(thread)) = (
+            crate::views::chat::desktop_smoke_prompt(),
+            workspace.active_thread(),
+        ) {
+            thread
+                .chat
+                .update(cx, |chat, cx| chat.submit_prompt(prompt, cx));
         }
         // Return to the view the app closed on, as the web does from its URL.
         if let Some(view) = reopen_view {
@@ -3107,7 +3435,9 @@ impl Workspace {
     /// thread's session still resumes on the provider that owns it.
     fn set_current_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         let model_id = model_id.into();
-        if self.current_model != model_id {self.default_options = Default::default();}
+        if self.current_model != model_id {
+            self.default_options = Default::default();
+        }
         self.explicit_model = true;
         self.current_model = model_id.clone();
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
@@ -3124,7 +3454,9 @@ impl Workspace {
     }
 
     fn save_default_model(&mut self, model: Option<String>, cx: &mut Context<'_, Self>) {
-        if model.as_deref()!=Some(self.current_model.as_str()) {self.default_options=Default::default();}
+        if model.as_deref() != Some(self.current_model.as_str()) {
+            self.default_options = Default::default();
+        }
         self.explicit_model = model.is_some();
         self.current_model = model.unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_owned());
         if let Some(chat) = self
@@ -3682,15 +4014,17 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.reconcile_linked_task_editor(window,cx);
-        self.reconcile_linked_thread(window,cx);
+        self.reconcile_linked_task_editor(window, cx);
+        self.reconcile_linked_thread(window, cx);
         self.reconcile_linked_delivery_dialog(window, cx);
-        self.restore_theme_preview(window,cx);
+        self.restore_theme_preview(window, cx);
         if self.settings_visible() && self.settings_section == SettingsSection::SourceControl {
-            self.sync_writer_editor(window,cx);
+            self.sync_writer_editor(window, cx);
         }
-        if self.settings_visible() && self.settings_section == SettingsSection::Worktrees &&
-            self.branch_editor_scope != self.settings_project_scope {
+        if self.settings_visible()
+            && self.settings_section == SettingsSection::Worktrees
+            && self.branch_editor_scope != self.settings_project_scope
+        {
             self.commit_branch_fields(window, cx);
             self.load_branch_fields(window, cx);
         }
@@ -3703,7 +4037,11 @@ impl Render for Workspace {
             }
         }
         let title = (self.screen_reader.window_title && self.active_view == AppView::Chat)
-            .then(|| self.active_thread().map(|thread| thread.chat.read(cx).reader_title())).flatten();
+            .then(|| {
+                self.active_thread()
+                    .map(|thread| thread.chat.read(cx).reader_title())
+            })
+            .flatten();
         if self.last_reader_title != title {
             window.set_window_title(title.as_deref().unwrap_or(crate::DESKTOP_WINDOW_TITLE));
             self.last_reader_title = title;
@@ -3742,9 +4080,12 @@ impl Render for Workspace {
             let visible = self.active_view == AppView::Chat
                 && self.active_thread_id.as_deref() == Some(thread.id.as_str());
             thread.chat.update(cx, |chat, cx| {
-                let details_open = visible && !self.overlay_open() && self.details.is_open(&thread.id);
+                let details_open =
+                    visible && !self.overlay_open() && self.details.is_open(&thread.id);
                 let details_inline_open = details_open && self.details.inline;
-                if chat.details_open != details_open || chat.details_inline_open != details_inline_open {
+                if chat.details_open != details_open
+                    || chat.details_inline_open != details_inline_open
+                {
                     chat.details_open = details_open;
                     chat.details_inline_open = details_inline_open;
                     cx.notify();
@@ -3819,7 +4160,8 @@ impl Render for Workspace {
             .update(cx, |panel, _| panel.set_shown(preview_shown));
         if self.active_view == AppView::Workbench && self.workbench_panel.is_none() {
             let usage = std::mem::take(&mut self.usage_hubs.open_workbench_usage);
-            let panel = cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(usage, window, cx));
+            let panel =
+                cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(usage, window, cx));
             // Verification's "Use draft" fills the composer, as on the web.
             self._subscriptions.push(cx.subscribe_in(
                 &panel,
@@ -3877,11 +4219,29 @@ impl Render for Workspace {
         let right_drawer_width = (bruhs_ui::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
-        let now=std::time::Instant::now();
-        let duration=if crate::motion::reduce_motion(cx) {0}else{self.appearance.panel_duration_ms};
-        let sidebar_fraction=self.sidebar_motion.sample(sidebar_docked||sidebar_drawer_open,now,if booking{0}else{duration});
-        let panel_fraction=self.right_panel_motion.sample(chat_panel_open,now,if self.active_view==AppView::Chat{duration}else{0});
-        if self.sidebar_motion.running() || self.right_panel_motion.running(){window.request_animation_frame();}
+        let now = std::time::Instant::now();
+        let duration = if crate::motion::reduce_motion(cx) {
+            0
+        } else {
+            self.appearance.panel_duration_ms
+        };
+        let sidebar_fraction = self.sidebar_motion.sample(
+            sidebar_docked || sidebar_drawer_open,
+            now,
+            if booking { 0 } else { duration },
+        );
+        let panel_fraction = self.right_panel_motion.sample(
+            chat_panel_open,
+            now,
+            if self.active_view == AppView::Chat {
+                duration
+            } else {
+                0
+            },
+        );
+        if self.sidebar_motion.running() || self.right_panel_motion.running() {
+            window.request_animation_frame();
+        }
         let body = div()
             .id("workspace-body")
             .role(Role::Main)
@@ -3893,17 +4253,20 @@ impl Render for Workspace {
             .flex()
             .flex_row()
             // Like web, the booking page is a page of its own.
-            .when(!sidebar_drawer && (sidebar_docked || sidebar_fraction>0.0), |el| {
-                el.child(
-                    div()
-                        .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX*sidebar_fraction))
-                        .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX*sidebar_fraction))
-                        .overflow_hidden()
-                        .h_full()
-                        .flex_shrink_0()
-                        .child(self.render_sidebar(window, cx)),
-                )
-            })
+            .when(
+                !sidebar_drawer && (sidebar_docked || sidebar_fraction > 0.0),
+                |el| {
+                    el.child(
+                        div()
+                            .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX * sidebar_fraction))
+                            .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX * sidebar_fraction))
+                            .overflow_hidden()
+                            .h_full()
+                            .flex_shrink_0()
+                            .child(self.render_sidebar(window, cx)),
+                    )
+                },
+            )
             .child({
                 let main_column = div()
                     .flex_1()
@@ -3935,9 +4298,11 @@ impl Render for Workspace {
                             .overflow_hidden()
                             .child(self.render_main_surface(window, cx))
                             // Notices float over the view (no layout shift).
-                            .when(!self.settings_has_notice(cx), |el| el.children(self.render_hub_notice(window, cx))),
+                            .when(!self.settings_has_notice(cx), |el| {
+                                el.children(self.render_hub_notice(window, cx))
+                            }),
                     );
-                if !right_panel_drawer && (chat_panel_open || panel_fraction>0.0) {
+                if !right_panel_drawer && (chat_panel_open || panel_fraction > 0.0) {
                     // Web: the panel's left edge drags and the width is
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
@@ -3957,7 +4322,7 @@ impl Render for Workspace {
                         if self.right_panel_split_state.read(cx).is_resizing() {
                             docked_right_panel_range(viewport_width, sidebar_width)
                         } else {
-                            (width*panel_fraction,width*panel_fraction)
+                            (width * panel_fraction, width * panel_fraction)
                         };
                     div()
                         .flex_1()
@@ -3985,66 +4350,73 @@ impl Render for Workspace {
             })
             .children(self.render_live_meeting_pill(cx))
             .children(self.render_auto_record_prompt(cx))
-            .when(sidebar_drawer && (sidebar_drawer_open || sidebar_fraction>0.0), |el| {
-                el.child(
-                    div()
-                        .id("compact-sidebar-backdrop")
-                        .debug_selector(|| "desktop-compact-sidebar-backdrop".to_string())
-                        .absolute()
-                        .size_full()
-                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY*sidebar_fraction))
-                        .occlude()
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            cx.stop_propagation();
-                            this.compact_sidebar_open = false;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    div()
-                        .id("compact-sidebar-drawer")
-                        .debug_selector(|| "desktop-compact-sidebar-drawer".to_string())
-                        .role(Role::Complementary)
-                        .aria_label("Threads")
-                        .absolute()
-                        .left(px(-WORKSPACE_SIDE_PANEL_WIDTH_PX*(1.0-sidebar_fraction)))
-                        .top_0()
-                        .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
-                        .max_w_full()
-                        .h_full()
-                        .occlude()
-                        .child(self.render_sidebar(window, cx)),
-                )
-            })
-            .when(right_panel_drawer && (chat_panel_open || panel_fraction>0.0), |el| {
-                el.child(
-                    div()
-                        .id("compact-right-panel-backdrop")
-                        .debug_selector(|| "desktop-compact-right-panel-backdrop".to_string())
-                        .absolute()
-                        .size_full()
-                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY*panel_fraction))
-                        .occlude()
-                        .on_click(cx.listener(|this, _event, window, cx| {
-                            cx.stop_propagation();
-                            this.close_panel(&ClosePanel, window, cx);
-                        })),
-                )
-                .child(
-                    div()
-                        .id("compact-tasks-panel")
-                        .debug_selector(|| "desktop-compact-tasks-panel".to_string())
-                        .role(Role::Complementary)
-                        .aria_label("Right panel")
-                        .absolute()
-                        .right(px(-right_drawer_width*(1.0-panel_fraction)))
-                        .top_0()
-                        .w(px(right_drawer_width))
-                        .h_full()
-                        .occlude()
-                        .child(self.render_right_panel(cx)),
-                )
-            });
+            .when(
+                sidebar_drawer && (sidebar_drawer_open || sidebar_fraction > 0.0),
+                |el| {
+                    el.child(
+                        div()
+                            .id("compact-sidebar-backdrop")
+                            .debug_selector(|| "desktop-compact-sidebar-backdrop".to_string())
+                            .absolute()
+                            .size_full()
+                            .bg(theme::longan_950()
+                                .opacity(DRAWER_SCRIM_OPACITY * sidebar_fraction))
+                            .occlude()
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                cx.stop_propagation();
+                                this.compact_sidebar_open = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("compact-sidebar-drawer")
+                            .debug_selector(|| "desktop-compact-sidebar-drawer".to_string())
+                            .role(Role::Complementary)
+                            .aria_label("Threads")
+                            .absolute()
+                            .left(px(-WORKSPACE_SIDE_PANEL_WIDTH_PX * (1.0 - sidebar_fraction)))
+                            .top_0()
+                            .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
+                            .max_w_full()
+                            .h_full()
+                            .occlude()
+                            .child(self.render_sidebar(window, cx)),
+                    )
+                },
+            )
+            .when(
+                right_panel_drawer && (chat_panel_open || panel_fraction > 0.0),
+                |el| {
+                    el.child(
+                        div()
+                            .id("compact-right-panel-backdrop")
+                            .debug_selector(|| "desktop-compact-right-panel-backdrop".to_string())
+                            .absolute()
+                            .size_full()
+                            .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY * panel_fraction))
+                            .occlude()
+                            .on_click(cx.listener(|this, _event, window, cx| {
+                                cx.stop_propagation();
+                                this.close_panel(&ClosePanel, window, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("compact-tasks-panel")
+                            .debug_selector(|| "desktop-compact-tasks-panel".to_string())
+                            .role(Role::Complementary)
+                            .aria_label("Right panel")
+                            .absolute()
+                            .right(px(-right_drawer_width * (1.0 - panel_fraction)))
+                            .top_0()
+                            .w(px(right_drawer_width))
+                            .h_full()
+                            .occlude()
+                            .child(self.render_right_panel(cx)),
+                    )
+                },
+            );
 
         div()
             .key_context("Workspace")
@@ -4084,32 +4456,28 @@ impl Render for Workspace {
             // textarea: nothing traps the keyboard. The composer indents its
             // list items and code first (`composer_edit`), and accepts a
             // suggestion, before this runs.
-            .capture_action(cx.listener(
-                |this, _: &bruhs_ui::input::IndentInline, window, cx| {
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::IndentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    if this.overlay_open()
-                        && this.modal_contains_focus(window, cx)
-                    {
+                    if this.overlay_open() && this.modal_contains_focus(window, cx) {
                         this.step_modal_focus(false, window, cx);
                     } else {
                         window.focus_next(cx);
                     }
-                },
-            ))
-            .capture_action(cx.listener(
-                |this, _: &bruhs_ui::input::OutdentInline, window, cx| {
+                }),
+            )
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::OutdentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
-                    if this.overlay_open()
-                        && this.modal_contains_focus(window, cx)
-                    {
+                    if this.overlay_open() && this.modal_contains_focus(window, cx) {
                         this.step_modal_focus(true, window, cx);
                     } else {
                         window.focus_prev(cx);
                     }
-                },
-            ))
+                }),
+            )
             // Every bruhs type role is `line-height: 1.5`; gpui defaults to φ
             // (1.618), which made every row ~2px taller than the web's.
             .line_height(relative(WORKSPACE_LINE_HEIGHT))
@@ -4181,13 +4549,19 @@ impl Render for Workspace {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
-            .children(crate::views::workspace::appearance::background_layer("Root", cx))
-            .children(self.inspection_frame(true,cx))
+            .children(crate::views::workspace::appearance::background_layer(
+                "Root", cx,
+            ))
+            .children(self.inspection_frame(true, cx))
             .child(body)
-            .when(matches!(self.overlay, Some(Overlay::ThemeEditor(_) | Overlay::RemoveThemeVariants(_))), |el| {
-                el.child(self.render_settings(window, cx))
-            })
-            .children(self.inspection_frame(false,cx))
+            .when(
+                matches!(
+                    self.overlay,
+                    Some(Overlay::ThemeEditor(_) | Overlay::RemoveThemeVariants(_))
+                ),
+                |el| el.child(self.render_settings(window, cx)),
+            )
+            .children(self.inspection_frame(false, cx))
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
                     Overlay::Capture => self.render_capture_dialog(window, cx),
@@ -4209,8 +4583,10 @@ impl Render for Workspace {
                         self.render_record_delete_confirm(target, window, cx)
                     }
                     Overlay::UpdateConfirm { .. } => self.render_update_confirm(window, cx),
-                    Overlay::ThemeEditor(editor) => self.render_theme_editor(editor,window,cx),
-                    Overlay::RemoveThemeVariants(removal) => self.render_variant_removal(removal, window, cx),
+                    Overlay::ThemeEditor(editor) => self.render_theme_editor(editor, window, cx),
+                    Overlay::RemoveThemeVariants(removal) => {
+                        self.render_variant_removal(removal, window, cx)
+                    }
                     Overlay::RestartConfirm { .. } => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
                     Overlay::CreateBruh => self.render_create_bruh(window, cx),
@@ -4218,7 +4594,10 @@ impl Render for Workspace {
                 })
             })
             // Drawn after the form dialog so it sits on top of it.
-            .when(matches!(self.overlay,Some(Overlay::Settings { .. })), |el| el.children(self.render_theme_import_notice()))
+            .when(
+                matches!(self.overlay, Some(Overlay::Settings { .. })),
+                |el| el.children(self.render_theme_import_notice()),
+            )
             .when_some(self.top_layer, |el, top_layer| {
                 el.child(match top_layer {
                     TopLayer::CommandBar => self.render_command_bar(window, cx),
@@ -4259,9 +4638,12 @@ impl Render for Workspace {
                         ),
                 )
             })
-            .when(!self.settings_visible() && ((!sidebar_docked && !sidebar_drawer_open) || self.overlay_open()), |el|
-                el.children(self.floating_update_progress(cx)))
-            .when_some(self.quit_hint(),|el,hint|el.child(hint))
+            .when(
+                !self.settings_visible()
+                    && ((!sidebar_docked && !sidebar_drawer_open) || self.overlay_open()),
+                |el| el.children(self.floating_update_progress(cx)),
+            )
+            .when_some(self.quit_hint(), |el, hint| el.child(hint))
     }
 }
 

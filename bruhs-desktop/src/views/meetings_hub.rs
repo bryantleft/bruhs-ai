@@ -262,7 +262,13 @@ pub fn format_started_at(ms: f64) -> String {
     Local
         .timestamp_millis_opt(EpochMs::saturating_from_f64(ms).as_millis())
         .single()
-        .map(|d| format!("{} {}", d.format("%Y-%m-%d"), d.format(crate::clock_format::pattern())))
+        .map(|d| {
+            format!(
+                "{} {}",
+                d.format("%Y-%m-%d"),
+                d.format(crate::clock_format::pattern())
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -536,7 +542,12 @@ impl MeetingsHub {
         self.notify_notice(message, warning, cx);
     }
 
-    pub fn show_update_notice(&mut self, message: String, warning: bool, cx: &mut Context<'_, Self>) {
+    pub fn show_update_notice(
+        &mut self,
+        message: String,
+        warning: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.show_notice(message, warning, cx);
         if let Some(notice) = self.notice.as_mut() {
             notice.show_in_settings = true;

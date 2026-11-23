@@ -191,7 +191,7 @@ impl SettingsSlider {
             Self::MicrophonePlayback => (0., 100., 1.),
             Self::MaxSpeakers => (2.0, 20.0, 1.0),
             Self::Contrast => (50.0, 200.0, 5.0),
-            Self::PanelDuration => (0.0,400.0,25.0),
+            Self::PanelDuration => (0.0, 400.0, 25.0),
             Self::GlassOpacity => (40.0, 100.0, 5.0),
             Self::LinkThreshold => (0.5, 0.95, 0.05),
         }
@@ -562,7 +562,7 @@ impl Workspace {
             SettingsSlider::MicrophonePlayback => self.microphone_test.fraction(),
             SettingsSlider::MaxSpeakers => f64::from(prefs.diarize.max_speakers),
             SettingsSlider::Contrast => f64::from(self.appearance.contrast),
-            SettingsSlider::PanelDuration=>f64::from(self.appearance.panel_duration_ms),
+            SettingsSlider::PanelDuration => f64::from(self.appearance.panel_duration_ms),
             SettingsSlider::GlassOpacity => f64::from(self.appearance.glass_opacity),
             SettingsSlider::LinkThreshold => {
                 f64::from(prefs.diarize.cross_meeting_linking_threshold)
@@ -582,24 +582,38 @@ impl Workspace {
             return;
         }
         match kind {
-            SettingsSlider::PanelDuration=>{self.appearance.panel_duration_ms=value.to_u32_saturating().min(400) as u16;self.persist_and_notify(cx);}
-            SettingsSlider::MicrophonePlayback => {self.microphone_test.seek(value);cx.notify();}
+            SettingsSlider::PanelDuration => {
+                self.appearance.panel_duration_ms = value.to_u32_saturating().min(400) as u16;
+                self.persist_and_notify(cx);
+            }
+            SettingsSlider::MicrophonePlayback => {
+                self.microphone_test.seek(value);
+                cx.notify();
+            }
             SettingsSlider::GlassOpacity => {
-                self.appearance.glass_opacity = u8::try_from(value.to_u32_saturating()).unwrap_or(100);
+                self.appearance.glass_opacity =
+                    u8::try_from(value.to_u32_saturating()).unwrap_or(100);
                 theme::set_glass_opacity(self.appearance.glass_opacity, cx);
                 self.persist_and_notify(cx);
             }
             SettingsSlider::Contrast => {
-                self.appearance.contrast = u8::try_from(value.to_u32_saturating().clamp(50, 200)).unwrap_or(100);
+                self.appearance.contrast =
+                    u8::try_from(value.to_u32_saturating().clamp(50, 200)).unwrap_or(100);
                 bruhs_ui::theme::set_contrast(self.appearance.contrast, cx);
                 self.persist_and_notify(cx);
             }
-            SettingsSlider::MaxSpeakers => self.update_meeting_prefs(|prefs| {
-                prefs.diarize.max_speakers = value.to_u32_saturating().clamp(2, 20);
-            }, cx),
-            SettingsSlider::LinkThreshold => self.update_meeting_prefs(|prefs| {
-                prefs.diarize.cross_meeting_linking_threshold = value.to_f32_lossy();
-            }, cx),
+            SettingsSlider::MaxSpeakers => self.update_meeting_prefs(
+                |prefs| {
+                    prefs.diarize.max_speakers = value.to_u32_saturating().clamp(2, 20);
+                },
+                cx,
+            ),
+            SettingsSlider::LinkThreshold => self.update_meeting_prefs(
+                |prefs| {
+                    prefs.diarize.cross_meeting_linking_threshold = value.to_f32_lossy();
+                },
+                cx,
+            ),
         }
     }
 
@@ -1008,10 +1022,7 @@ impl Workspace {
                     "Auto record calendar meetings",
                     cx,
                     move |this, _window, cx| {
-                        this.update_meeting_prefs(
-                            |p| p.auto_record.enabled = !settings.enabled,
-                            cx,
-                        )
+                        this.update_meeting_prefs(|p| p.auto_record.enabled = !settings.enabled, cx)
                     },
                 ),
             ),
@@ -1068,10 +1079,7 @@ impl Workspace {
                     cx,
                     move |this, _window, cx| {
                         this.update_meeting_prefs(
-                            |p| {
-                                p.auto_record.audio_driven_enabled =
-                                    !settings.audio_driven_enabled
-                            },
+                            |p| p.auto_record.audio_driven_enabled = !settings.audio_driven_enabled,
                             cx,
                         )
                     },
@@ -1163,7 +1171,9 @@ impl Workspace {
         let (provider_toggle, provider_select) =
             self.settings_dropdown_handlers(SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID, cx);
         let provider_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .max_w_full()
+            .min_w_0()
             .child(dropdown(
                 SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID,
                 "Transcription provider",
@@ -1192,15 +1202,22 @@ impl Workspace {
             provider_control,
         )];
         if prefs.transcription.provider == bruhs_models::TranscriptionProvider::OpenAiCompatible {
-            rows.push(self.settings_row(
-                "desktop-settings-row-transcription-server-model",
-                "Server transcription model",
-                "Model ID returning verbose_json segments.",
-                div().w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
-                    .child(Input::new(&self.settings_transcription_model_input)
-                        .aria_label("Server transcription model"))
-                    .into_any_element(),
-            ));
+            rows.push(
+                self.settings_row(
+                    "desktop-settings-row-transcription-server-model",
+                    "Server transcription model",
+                    "Model ID returning verbose_json segments.",
+                    div()
+                        .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+                        .max_w_full()
+                        .min_w_0()
+                        .child(
+                            Input::new(&self.settings_transcription_model_input)
+                                .aria_label("Server transcription model"),
+                        )
+                        .into_any_element(),
+                ),
+            );
             if let Err(error) = prefs.transcription.validate() {
                 rows.push(
                     div()
@@ -1218,7 +1235,9 @@ impl Workspace {
         let (final_toggle, final_select) =
             self.settings_dropdown_handlers(SETTINGS_WHISPER_DROPDOWN_ID, cx);
         let final_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .max_w_full()
+            .min_w_0()
             .child(dropdown(
                 SETTINGS_WHISPER_DROPDOWN_ID,
                 "Transcription model",
@@ -1232,7 +1251,9 @@ impl Workspace {
         let (live_toggle, live_select) =
             self.settings_dropdown_handlers(SETTINGS_LIVE_WHISPER_DROPDOWN_ID, cx);
         let live_control = div()
-            .w(px(WHISPER_DROPDOWN_WIDTH_PX)).max_w_full().min_w_0()
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .max_w_full()
+            .min_w_0()
             .child(dropdown(
                 SETTINGS_LIVE_WHISPER_DROPDOWN_ID,
                 "Live preview model",
@@ -1252,11 +1273,11 @@ impl Workspace {
             ));
         }
         rows.push(self.settings_row(
-                "desktop-settings-row-live-whisper-model",
-                "Live preview model",
+            "desktop-settings-row-live-whisper-model",
+            "Live preview model",
             "Local model for live transcripts while recording.",
-                live_control,
-            ));
+            live_control,
+        ));
         rows
     }
 
@@ -1284,17 +1305,19 @@ impl Workspace {
             ),
         )];
         if diarize.subspeaker_enabled {
-            rows.push(self.settings_row(
-                "desktop-settings-row-max-speakers",
-                "Max speakers",
-                "Higher finds more people on large calls.",
-                code_text(
-                    diarize.max_speakers.to_string(),
-                    CODE_SM_PX,
-                    theme::rambutan_200(),
-                )
-                .into_any_element(),
-            ));
+            rows.push(
+                self.settings_row(
+                    "desktop-settings-row-max-speakers",
+                    "Max speakers",
+                    "Higher finds more people on large calls.",
+                    code_text(
+                        diarize.max_speakers.to_string(),
+                        CODE_SM_PX,
+                        theme::rambutan_200(),
+                    )
+                    .into_any_element(),
+                ),
+            );
             rows.push(self.render_settings_slider_body(
                 SettingsSlider::MaxSpeakers,
                 "2, faster",
@@ -1386,10 +1409,7 @@ impl Workspace {
                 "Extract observations about each person during summaries",
                 cx,
                 move |this, _window, cx| {
-                    this.update_meeting_prefs(
-                        |p| p.personality.extract_observations = !extract,
-                        cx,
-                    )
+                    this.update_meeting_prefs(|p| p.personality.extract_observations = !extract, cx)
                 },
             ),
         )]
@@ -1399,7 +1419,9 @@ impl Workspace {
 /// Fixed-width column for a row's dropdown (web `ROW_CONTROL` / `sm:w-80`).
 pub(super) fn control_column(control: AnyElement) -> AnyElement {
     div()
-        .w(px(SETTINGS_ROW_CONTROL_WIDTH_PX)).max_w_full().min_w_0()
+        .w(px(SETTINGS_ROW_CONTROL_WIDTH_PX))
+        .max_w_full()
+        .min_w_0()
         .child(control)
         .into_any_element()
 }

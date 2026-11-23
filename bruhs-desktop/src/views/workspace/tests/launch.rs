@@ -57,7 +57,10 @@ pub(in crate::views::workspace) fn launch<'a>(
 }
 
 /// The window stops saving, as the app does when it quits.
-pub(in crate::views::workspace) fn quit(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
+pub(in crate::views::workspace) fn quit(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+) {
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert!(workspace.save_status.is_saved(), "quit after the last save");
         workspace.persistence_test_path = None;
@@ -65,7 +68,10 @@ pub(in crate::views::workspace) fn quit(workspace: &Entity<Workspace>, cx: &mut 
 }
 
 /// Waits for the last change to reach the file.
-pub(in crate::views::workspace) async fn saved(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
+pub(in crate::views::workspace) async fn saved(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+) {
     cx.condition(workspace, |workspace, _| workspace.save_status.is_saved())
         .await;
     cx.run_until_parked();

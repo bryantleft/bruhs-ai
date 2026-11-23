@@ -705,7 +705,9 @@ async fn scheduled_thread_modes_keep_queued_runs_separate_and_resume_only_their_
         }
         assert_eq!(ids[0] == ids[1], mode == TaskConversation::FreshSession);
         let reply = ReactiveCommand::ChatInTaskThread {
-            task_id: scheduled.id.clone(), thread_id: dedicated.clone(), message: "Inspect the result".into(),
+            task_id: scheduled.id.clone(),
+            thread_id: dedicated.clone(),
+            message: "Inspect the result".into(),
         };
         let saved = runtime.snapshot().await.unwrap();
         if mode == TaskConversation::FreshSession {
@@ -720,9 +722,19 @@ async fn scheduled_thread_modes_keep_queued_runs_separate_and_resume_only_their_
         } else {
             assert!(!saved.task_threads.contains_key(&scheduled.id));
             assert!(runtime.command(reply).await.is_err());
-            let page = runtime.agent_thread_runs("assistant".into(), None, Some(dedicated.clone())).await.unwrap();
+            let page = runtime
+                .agent_thread_runs("assistant".into(), None, Some(dedicated.clone()))
+                .await
+                .unwrap();
             assert_eq!(page.len(), 5);
-            let earlier = runtime.agent_thread_runs("assistant".into(), Some(page[1].id.clone()), Some(dedicated.clone())).await.unwrap();
+            let earlier = runtime
+                .agent_thread_runs(
+                    "assistant".into(),
+                    Some(page[1].id.clone()),
+                    Some(dedicated.clone()),
+                )
+                .await
+                .unwrap();
             assert_eq!(earlier, page[2..]);
         }
     }
@@ -814,9 +826,13 @@ async fn run_now_targets_one_paused_task_and_preserves_its_regular_schedule() {
     );
     first.unwrap();
     duplicate.unwrap();
-    let snapshot = runtime.command(ReactiveCommand::RunScheduledTask {
-        id: "manual".into(), run_id: request_id.to_string(),
-    }).await.unwrap();
+    let snapshot = runtime
+        .command(ReactiveCommand::RunScheduledTask {
+            id: "manual".into(),
+            run_id: request_id.to_string(),
+        })
+        .await
+        .unwrap();
     assert!(snapshot.events.is_empty());
     assert_eq!(snapshot.runs.len(), 1);
     let manual = claim_one(&runtime).await.unwrap().run;
@@ -975,10 +991,15 @@ async fn schedule_can_select_an_existing_project_conversation_after_its_task_is_
     assert_ne!(fresh.run.thread_id, target);
     assert!(fresh.run.session_id.is_none());
     if let ReactiveCommand::SaveScheduledTask { automation, .. } = &mut reset {
-        automation.subscription.task_checkout = TaskCheckout::Existing { path: project.clone() };
+        automation.subscription.task_checkout = TaskCheckout::Existing {
+            path: project.clone(),
+        };
     }
     assert!(runtime.command(reset).await.is_err());
-    assert_eq!(runtime.snapshot().await.unwrap().task_threads["weekly"],fresh.run.thread_id);
+    assert_eq!(
+        runtime.snapshot().await.unwrap().task_threads["weekly"],
+        fresh.run.thread_id
+    );
     finish(&runtime, "fresh", "Done", None).await;
     assert_eq!(
         runtime

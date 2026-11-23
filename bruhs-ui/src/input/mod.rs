@@ -14,9 +14,9 @@ mod element;
 mod fence_header;
 mod list;
 mod list_layout;
-mod text_layout;
 mod markdown;
 mod state;
+mod text_layout;
 mod view;
 
 #[cfg(test)]
@@ -211,7 +211,8 @@ mod tests {
                             (pt.x - first.x).abs() < px(1.),
                             "{word}: {pt:?} vs {first:?}"
                         );
-                        let click = gpui::point(pt.x - px(3.), pt.y + drawn.layout.line_height() / 2.);
+                        let click =
+                            gpui::point(pt.x - px(3.), pt.y + drawn.layout.line_height() / 2.);
                         assert_eq!(field.offset_at(click), Some(at), "{word} wrap margin");
                         if target.is_none() {
                             target = Some((click, at));
@@ -246,18 +247,28 @@ mod tests {
         );
         let task = source.find("[x]").unwrap();
         let checkbox = cx.read(|cx| {
-            field.read(cx).range_to_bounds(&(task..task + 3)).unwrap().center()
+            field
+                .read(cx)
+                .range_to_bounds(&(task..task + 3))
+                .unwrap()
+                .center()
         });
         cx.simulate_click(checkbox, Default::default());
-        assert_eq!(cx.read(|cx| field.read(cx).value().to_string()), source.replace("[x]", "[ ]"));
+        assert_eq!(
+            cx.read(|cx| field.read(cx).value().to_string()),
+            source.replace("[x]", "[ ]")
+        );
         cx.simulate_click(click, Default::default());
-        cx.update(|w, cx| field.update(cx, |f, cx| {
-            f.replace_and_mark_text_in_range(None, "ni", None, w, cx);
-            f.replace_text_in_range(None, "你", w, cx);
-        }));
-        assert_eq!(cx.read(|cx| field.read(cx).value().to_string()),
-            format!("{}你{}", &source[..at], &source[at..]).replace("[x]", "[ ]"));
-
+        cx.update(|w, cx| {
+            field.update(cx, |f, cx| {
+                f.replace_and_mark_text_in_range(None, "ni", None, w, cx);
+                f.replace_text_in_range(None, "你", w, cx);
+            })
+        });
+        assert_eq!(
+            cx.read(|cx| field.read(cx).value().to_string()),
+            format!("{}你{}", &source[..at], &source[at..]).replace("[x]", "[ ]")
+        );
     }
 
     #[gpui::test]

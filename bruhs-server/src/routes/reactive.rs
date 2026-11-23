@@ -129,19 +129,24 @@ pub async fn task_models(
 ) -> Result<impl axum::response::IntoResponse, AppError> {
     let project = std::path::Path::new(scope.path.as_deref().unwrap_or_default());
     if !project.as_os_str().is_empty() && !project.is_absolute() {
-        return Err(AppError::BadRequest("Choose an absolute project folder.".into()));
+        return Err(AppError::BadRequest(
+            "Choose an absolute project folder.".into(),
+        ));
     }
     let catalog = bruhs_core::agent::writer_catalog_for_project(project).await;
-    Ok(([(axum::http::header::CACHE_CONTROL, "no-store")], Json(catalog)))
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(catalog),
+    ))
 }
 
 #[derive(serde::Deserialize)]
 pub struct ThreadSearch {
-    project:String,
+    project: String,
     #[serde(default)]
-    desktop:bool,
+    desktop: bool,
     #[serde(default)]
-    query:String,
+    query: String,
 }
 
 pub async fn task_threads(
@@ -150,7 +155,8 @@ pub async fn task_threads(
 ) -> Result<impl axum::response::IntoResponse, AppError> {
     let host = runtime(value)?;
     let threads = if search.desktop {
-        host.project_conversations(search.project, search.query).await?
+        host.project_conversations(search.project, search.query)
+            .await?
     } else {
         host.task_threads(search.project, search.query).await?
     };
@@ -193,7 +199,9 @@ pub async fn agent_runs(
     Path(id): Path<String>,
     Query(page): Query<RunPage>,
 ) -> Result<impl axum::response::IntoResponse, AppError> {
-    let runs = runtime(value)?.agent_thread_runs(id, page.before, page.thread).await?;
+    let runs = runtime(value)?
+        .agent_thread_runs(id, page.before, page.thread)
+        .await?;
     Ok((
         [(axum::http::header::CACHE_CONTROL, "no-store")],
         Json(runs),

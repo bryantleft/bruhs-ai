@@ -115,20 +115,39 @@ impl Workspace {
                 ),
             );
         }
-        rows.push(self.settings_row(
-            "voice-row-cleanup-model",
-            "Cleanup model",
-            "Model used to clean up transcripts.",
-            settings_ui::control_column(self.text_model_control(
-                "settings-voice-cleanup-model",
+        rows.push(
+            self.settings_row(
+                "voice-row-cleanup-model",
                 "Cleanup model",
-                prefs.model.as_deref().filter(|model|!self.generator_unavailable(model)).unwrap_or("inherit"),
-                &[("inherit","Use text generation model")],
-                cx,
-            )),
-        ));
-        rows.push(self.settings_row("voice-row-correction-cue","Correction cue","Spoken word that triggers a correction. Leave blank to disable.",
-            settings_ui::control_column(self.voice_cleanup_fields.cue.element("Correction cue",false).into_any_element())));
+                "Model used to clean up transcripts.",
+                settings_ui::control_column(
+                    self.text_model_control(
+                        "settings-voice-cleanup-model",
+                        "Cleanup model",
+                        prefs
+                            .model
+                            .as_deref()
+                            .filter(|model| !self.generator_unavailable(model))
+                            .unwrap_or("inherit"),
+                        &[("inherit", "Use text generation model")],
+                        cx,
+                    ),
+                ),
+            ),
+        );
+        rows.push(
+            self.settings_row(
+                "voice-row-correction-cue",
+                "Correction cue",
+                "Spoken word that triggers a correction. Leave blank to disable.",
+                settings_ui::control_column(
+                    self.voice_cleanup_fields
+                        .cue
+                        .element("Correction cue", false)
+                        .into_any_element(),
+                ),
+            ),
+        );
         rows
     }
     pub(super) fn select_cleanup(
@@ -144,9 +163,10 @@ impl Workspace {
             "settings-voice-cleanup-model" => {
                 self.dictation_prefs.cleanup.model = if value == "inherit" {
                     None
-                } else if self.generator_model(value) || MODEL_CATALOG
-                    .iter()
-                    .any(|m| !m.provider.is_external() && m.id == value)
+                } else if self.generator_model(value)
+                    || MODEL_CATALOG
+                        .iter()
+                        .any(|m| !m.provider.is_external() && m.id == value)
                 {
                     Some(value.to_owned())
                 } else {

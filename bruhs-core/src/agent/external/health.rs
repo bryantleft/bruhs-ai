@@ -98,10 +98,18 @@ pub async fn external_provider_health(
                     .as_deref()
                     .and_then(bruhs_models::agent_extensions::parse_accent_color);
                 if prefs.acp_enabled(&instance) {
-                    row.status = if instance.driver == Some(bruhs_models::agent_extensions::AcpDriver::Kiro) {
+                    row.status = if instance.driver
+                        == Some(bruhs_models::agent_extensions::AcpDriver::Kiro)
+                    {
                         bounded(probe_kiro(&instance, &mut row)).await
                     } else {
-                        bounded(probe_acp(Path::new(instance.executable()), &instance.args, Some(&instance), &mut row)).await
+                        bounded(probe_acp(
+                            Path::new(instance.executable()),
+                            &instance.args,
+                            Some(&instance),
+                            &mut row,
+                        ))
+                        .await
                     };
                 }
                 row
@@ -137,9 +145,9 @@ fn process_command(program: &Path, cwd: &Path) -> Command {
     cmd
 }
 
-fn command(program:&Path,cwd:&Path)->Command{
-    let mut cmd=process_command(program,cwd);
-    cmd.env("NO_COLOR","1").env("CI","1");
+fn command(program: &Path, cwd: &Path) -> Command {
+    let mut cmd = process_command(program, cwd);
+    cmd.env("NO_COLOR", "1").env("CI", "1");
     cmd
 }
 const MAX_BYTES: u64 = 256 * 1024;
@@ -172,12 +180,17 @@ async fn output(cmd: &mut Command) -> io::Result<(bool, String, String)> {
     let success = child.wait().await?.success();
     #[cfg(unix)]
     group.release();
-    Ok((success,
+    Ok((
+        success,
         bruhs_models::runtime_models::strip_ansi(&String::from_utf8_lossy(&stdout)),
-        bruhs_models::runtime_models::strip_ansi(&String::from_utf8_lossy(&stderr))))
+        bruhs_models::runtime_models::strip_ansi(&String::from_utf8_lossy(&stderr)),
+    ))
 }
 
-async fn probe_kiro(instance: &bruhs_models::agent_extensions::AcpInstance, row: &mut ProviderHealth) -> io::Result<Status> {
+async fn probe_kiro(
+    instance: &bruhs_models::agent_extensions::AcpInstance,
+    row: &mut ProviderHealth,
+) -> io::Result<Status> {
     use crate::agent_extensions::{environment, kiro::Catalog};
     let directory = tempfile::tempdir()?;
     let managed = crate::secret_sources::for_target(&format!("acp/{}", instance.id)).await?;
@@ -187,17 +200,33 @@ async fn probe_kiro(instance: &bruhs_models::agent_extensions::AcpInstance, row:
         output(cmd.args(args)).await
     };
     let (ok, stdout, stderr) = invoke(&["--version"]).await?;
-    if !ok { return Ok(Status::Failed); }
+    if !ok {
+        return Ok(Status::Failed);
+    }
     row.version = version(&format!("{stdout}\n{stderr}"));
     let (ok, account, _) = invoke(&["whoami", "--format", "json"]).await?;
     if !ok {
         Catalog::default().save(instance)?;
-        return Ok(if account.trim().lines().next().and_then(|line| serde_json::from_str::<Value>(line).ok())
-            .is_some_and(|value| value.get("account").is_some_and(Value::is_null)) { Status::SignedOut } else { Status::Failed });
+        return Ok(
+            if account
+                .trim()
+                .lines()
+                .next()
+                .and_then(|line| serde_json::from_str::<Value>(line).ok())
+                .is_some_and(|value| value.get("account").is_some_and(Value::is_null))
+            {
+                Status::SignedOut
+            } else {
+                Status::Failed
+            },
+        );
     }
     let (models, agents) = tokio::join!(
         invoke(&["chat", "--list-models", "--format", "json"]),
-        tokio::time::timeout(Duration::from_secs(2), account::kiro_agents(instance, directory.path())),
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            account::kiro_agents(instance, directory.path())
+        ),
     );
     let mut catalog = match models {
         Ok((true, text, _)) => Catalog::parse(&text, instance).unwrap_or_default(),

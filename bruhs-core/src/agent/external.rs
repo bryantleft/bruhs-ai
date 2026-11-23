@@ -14,9 +14,9 @@ pub(super) mod acp;
 pub mod health;
 pub(crate) mod metadata;
 pub(super) mod models;
-pub(super) mod writer_catalog;
 #[path = "../../../claude-sdk-rs/src/process.rs"]
 pub(super) mod process;
+pub(super) mod writer_catalog;
 
 #[derive(Clone)]
 pub(crate) struct Options {

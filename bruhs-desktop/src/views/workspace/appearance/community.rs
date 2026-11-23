@@ -4,7 +4,7 @@ mod package;
 mod panel;
 
 use super::library::InstalledTheme;
-use futures_util::{StreamExt, stream};
+use futures_util::{stream, StreamExt};
 pub(super) use panel::Browser;
 use reqwest::{Client, Response, Url};
 use serde_json::Value;

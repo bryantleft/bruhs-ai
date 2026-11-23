@@ -1113,8 +1113,9 @@ impl Workspace {
                 let label = if event.start_at_ms <= now_ms && event.end_at_ms > now_ms {
                     "Now".to_string()
                 } else {
-                    local_datetime_from_ms(event.start_at_ms)
-                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string())
+                    local_datetime_from_ms(event.start_at_ms).map_or_else(String::new, |time| {
+                        time.format(crate::clock_format::pattern()).to_string()
+                    })
                 };
                 let event_id = event.event_id.clone();
                 let event_title = event.title.clone();
@@ -1348,9 +1349,13 @@ impl Workspace {
                 .iter()
                 .map(|block| {
                     let start = local_datetime_from_ms(block.start_at_ms)
-                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string());
+                        .map_or_else(String::new, |time| {
+                            time.format(crate::clock_format::pattern()).to_string()
+                        });
                     let end = local_datetime_from_ms(block.end_at_ms)
-                        .map_or_else(String::new, |time| time.format(crate::clock_format::pattern()).to_string());
+                        .map_or_else(String::new, |time| {
+                            time.format(crate::clock_format::pattern()).to_string()
+                        });
                     div()
                         .flex()
                         .gap_3()

@@ -96,14 +96,27 @@ impl Workspace {
                 .and_then(|p| p.text_generation_model.as_deref())
                 .unwrap_or("inherit")
         };
-        let selected = if self.generator_unavailable(selected) {"automatic"} else {selected};
+        let selected = if self.generator_unavailable(selected) {
+            "automatic"
+        } else {
+            selected
+        };
         choices.extend([
             ("automatic", "Automatic"),
             ("local", "Local first-message text"),
         ]);
-        self.settings_row("desktop-settings-row-text-generation-model","Text generation model",
+        self.settings_row(
+            "desktop-settings-row-text-generation-model",
+            "Text generation model",
             "Model for thread titles and branch names.",
-            self.text_model_control("settings-text-generation-model","Text generation model",selected,&choices,cx))
+            self.text_model_control(
+                "settings-text-generation-model",
+                "Text generation model",
+                selected,
+                &choices,
+                cx,
+            ),
+        )
     }
 
     pub(super) fn choose_title_model(&mut self, value: &str, cx: &mut Context<'_, Self>) {

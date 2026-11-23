@@ -41,7 +41,9 @@ impl Workspace {
         let prefs = self.dictation_prefs.clone();
         let project = self.active_settings_project(cx);
         let project_name = project.as_deref().and_then(|path| {
-            self.threads.iter().find(|thread| thread.project_path == path)
+            self.threads
+                .iter()
+                .find(|thread| thread.project_path == path)
                 .map(|thread| thread.project_name.clone())
         });
         let cleanup_model = self.effective_text_model(project.as_deref(), &self.current_model);
@@ -202,10 +204,25 @@ impl Workspace {
             .iter()
             .position(|rule| rule.command == "voice.dictate");
         let mut input = self.microphone_rows(cx);
-        let mut transcription = vec![self.settings_row("settings-row-voice-destination","Transcribe with",
+        let mut transcription = vec![self.settings_row(
+            "settings-row-voice-destination",
+            "Transcribe with",
             "Whisper runs locally; cloud providers receive audio on stop.",
-            settings_ui::control_column(self.choice_control("settings-voice-destination","Transcribe with",destination.key(),
-                &[("off","Off"),("local","Local Whisper"),("openai","OpenAI"),("xai","xAI"),("openrouter","OpenRouter"),("compatible","Compatible server")],cx)))];
+            settings_ui::control_column(self.choice_control(
+                "settings-voice-destination",
+                "Transcribe with",
+                destination.key(),
+                &[
+                    ("off", "Off"),
+                    ("local", "Local Whisper"),
+                    ("openai", "OpenAI"),
+                    ("xai", "xAI"),
+                    ("openrouter", "OpenRouter"),
+                    ("compatible", "Compatible server"),
+                ],
+                cx,
+            )),
+        )];
         transcription.extend(self.voice_cloud_rows(cx));
         if destination == Destination::Local {
             transcription.push(self.settings_row(
@@ -239,11 +256,21 @@ impl Workspace {
             transcription.push(self.settings_row(
                 "desktop-settings-row-voice-silence",
                 "Silence filtering",
-                if matches!(destination, Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)) {"Handled automatically by OpenAI."}else{"Skip quiet recordings and trim silence."},
+                if matches!(
+                    destination,
+                    Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)
+                ) {
+                    "Handled automatically by OpenAI."
+                } else {
+                    "Skip quiet recordings and trim silence."
+                },
                 settings_ui::switch(
                     "settings-voice-silence",
                     self.dictation_prefs.silence_filtering,
-                    matches!(destination, Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)),
+                    matches!(
+                        destination,
+                        Destination::Cloud(bruhs_models::cloud_speech::Provider::OpenAi)
+                    ),
                     "Silence filtering",
                     cx,
                     |this, _, cx| {

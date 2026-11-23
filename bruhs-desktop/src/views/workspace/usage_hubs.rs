@@ -588,7 +588,11 @@ impl Workspace {
         let state = &self.usage_hubs;
         let mut rows = Vec::new();
         let revision = self.linked_projects.usage_revision();
-        let linked = if state.linked_revision == revision {state.linked.as_slice()} else {&[]};
+        let linked = if state.linked_revision == revision {
+            state.linked.as_slice()
+        } else {
+            &[]
+        };
         if linked.is_empty() && state.rows.is_empty() && state.device_accounts.is_empty() {
             rows.push(
                 div()
@@ -649,8 +653,15 @@ impl Workspace {
                 Some(Ok(accounts)) if accounts.is_empty() => "No accounts reported.",
                 Some(Ok(_)) => "Linked environment",
             };
-            rows.push(div().px_4().py_2().text_xs().text_color(theme::rambutan_400())
-                .child(format!("{name} · {status}")).into_any_element());
+            rows.push(
+                div()
+                    .px_4()
+                    .py_2()
+                    .text_xs()
+                    .text_color(theme::rambutan_400())
+                    .child(format!("{name} · {status}"))
+                    .into_any_element(),
+            );
         }
         let mut outstanding = state
             .credit_action
@@ -786,9 +797,10 @@ impl Workspace {
                             description: None,
                         });
                     }
-                    let selected = f.source.as_ref().map_or("value", |s| {
-                        saved_option_value(&format!("source:{s}"))
-                    });
+                    let selected = f
+                        .source
+                        .as_ref()
+                        .map_or("value", |s| saved_option_value(&format!("source:{s}")));
                     let id = "usage-hub-key-source";
                     let (toggle, select) = self.settings_dropdown_handlers(id, cx);
                     key = key.child(

@@ -530,21 +530,39 @@ impl ReactiveRuntime {
         self.changes.subscribe()
     }
 
-    pub async fn linked_schedule_inventory(&self, links: bool) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
-        self.call(move |db| store::linked_threads::inventory(db, links)).await
+    pub async fn linked_schedule_inventory(
+        &self,
+        links: bool,
+    ) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
+        self.call(move |db| store::linked_threads::inventory(db, links))
+            .await
     }
 
-    pub async fn linked_thread(&self, task: String, thread: bruhs_models::ids::ThreadId, before: Option<String>) -> Result<bruhs_models::reactive::LinkedThreadPage, ReactiveError> {
-        self.call(move |db| store::linked_threads::read(db, &task, &thread, before.as_deref())).await
+    pub async fn linked_thread(
+        &self,
+        task: String,
+        thread: bruhs_models::ids::ThreadId,
+        before: Option<String>,
+    ) -> Result<bruhs_models::reactive::LinkedThreadPage, ReactiveError> {
+        self.call(move |db| store::linked_threads::read(db, &task, &thread, before.as_deref()))
+            .await
     }
 
-    pub async fn reply_to_linked_thread(&self, task: String, thread: bruhs_models::ids::ThreadId, reply: bruhs_models::reactive::LinkedThreadReply) -> Result<(), ReactiveError> {
-        self.call(move |db| store::linked_threads::send(db, &task, &thread, reply)).await?;
+    pub async fn reply_to_linked_thread(
+        &self,
+        task: String,
+        thread: bruhs_models::ids::ThreadId,
+        reply: bruhs_models::reactive::LinkedThreadReply,
+    ) -> Result<(), ReactiveError> {
+        self.call(move |db| store::linked_threads::send(db, &task, &thread, reply))
+            .await?;
         self.changed();
         Ok(())
     }
 
-    pub async fn scheduled_task_inventory(&self) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
+    pub async fn scheduled_task_inventory(
+        &self,
+    ) -> Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, ReactiveError> {
         self.call(store::scheduled_task_inventory).await
     }
 
@@ -574,22 +592,32 @@ impl ReactiveRuntime {
         id: String,
         enabled: bool,
     ) -> Result<bruhs_models::reactive::ScheduledTaskSummary, ReactiveError> {
-        let task = self.call(move |db| store::set_linked_schedule_enabled(db, &id, enabled)).await?;
+        let task = self
+            .call(move |db| store::set_linked_schedule_enabled(db, &id, enabled))
+            .await?;
         self.changed();
         Ok(task)
     }
 
     pub async fn delete_linked_schedule(&self, id: String) -> Result<(), ReactiveError> {
-        self.call(move |db| store::delete_linked_schedule(db, id)).await?;
+        self.call(move |db| store::delete_linked_schedule(db, id))
+            .await?;
         self.changed();
         Ok(())
     }
 
-    pub async fn run_linked_schedule(&self, id: String, request: uuid::Uuid) -> Result<(), ReactiveError> {
-        self.call(move |db| store::transaction(db, |db| {
-            store::reports::guard_managed_identity(db, &id)?;
-            store::run_scheduled_task(db, &id, &request.to_string())
-        })).await?;
+    pub async fn run_linked_schedule(
+        &self,
+        id: String,
+        request: uuid::Uuid,
+    ) -> Result<(), ReactiveError> {
+        self.call(move |db| {
+            store::transaction(db, |db| {
+                store::reports::guard_managed_identity(db, &id)?;
+                store::run_scheduled_task(db, &id, &request.to_string())
+            })
+        })
+        .await?;
         self.changed();
         Ok(())
     }
@@ -739,10 +767,20 @@ impl ReactiveRuntime {
     }
 
     pub async fn agent_thread_runs(
-        &self, agent_id: String, before: Option<String>, thread: Option<bruhs_models::ids::ThreadId>
+        &self,
+        agent_id: String,
+        before: Option<String>,
+        thread: Option<bruhs_models::ids::ThreadId>,
     ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
-        self.call(move |connection| store::agent_runs(connection, &agent_id, before.as_deref(), thread.as_ref().map(|id| id.as_str())))
-            .await
+        self.call(move |connection| {
+            store::agent_runs(
+                connection,
+                &agent_id,
+                before.as_deref(),
+                thread.as_ref().map(|id| id.as_str()),
+            )
+        })
+        .await
     }
 
     /// One room's messages, newest first, a page of `HISTORY_LIMIT` at a time.
@@ -881,7 +919,8 @@ impl ReactiveRuntime {
         key: &str,
         payload: Value,
     ) -> Result<ReactiveEvent, ReactiveError> {
-        self.publish_hook_request(source_id, token, key, payload, Default::default()).await
+        self.publish_hook_request(source_id, token, key, payload, Default::default())
+            .await
     }
 
     pub async fn publish_hook_request(

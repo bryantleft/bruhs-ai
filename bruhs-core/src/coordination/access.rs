@@ -5,10 +5,15 @@ use sha2::{Digest, Sha256};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AccessScope {
     Owner,
-    Keybindings { editable: bool },
+    Keybindings {
+        editable: bool,
+    },
     Projects,
     ProjectNames,
-    ProjectUsage { #[serde(default)] rename: bool },
+    ProjectUsage {
+        #[serde(default)]
+        rename: bool,
+    },
     ProjectSchedules {
         #[serde(default)]
         rename: bool,
@@ -31,12 +36,17 @@ pub enum AccessScope {
         #[serde(default)]
         usage: bool,
     },
-    Guest { task_id: ThreadId },
+    Guest {
+        task_id: ThreadId,
+    },
 }
 
 impl AccessScope {
     pub fn shares_usage(&self) -> bool {
-        matches!(self, Self::ProjectUsage { .. } | Self::ProjectSchedules { usage: true, .. })
+        matches!(
+            self,
+            Self::ProjectUsage { .. } | Self::ProjectSchedules { usage: true, .. }
+        )
     }
 }
 
@@ -63,7 +73,8 @@ impl CoordinationRuntime {
         scope: AccessScope,
         lifetime_seconds: u32,
     ) -> Result<IssuedAccess, CoordinationError> {
-        self.issue_access_with_updates(scope, lifetime_seconds, false).await
+        self.issue_access_with_updates(scope, lifetime_seconds, false)
+            .await
     }
 
     pub async fn issue_access_with_updates(
@@ -72,7 +83,15 @@ impl CoordinationRuntime {
         lifetime_seconds: u32,
         provider_updates: bool,
     ) -> Result<IssuedAccess, CoordinationError> {
-        if provider_updates && !matches!(&scope, AccessScope::Projects | AccessScope::ProjectNames | AccessScope::ProjectUsage { .. } | AccessScope::ProjectSchedules { .. }) {
+        if provider_updates
+            && !matches!(
+                &scope,
+                AccessScope::Projects
+                    | AccessScope::ProjectNames
+                    | AccessScope::ProjectUsage { .. }
+                    | AccessScope::ProjectSchedules { .. }
+            )
+        {
             return Err(invalid("Provider updates require a Projects grant."));
         }
         if lifetime_seconds == 0 {
@@ -147,7 +166,11 @@ impl CoordinationRuntime {
     ) -> Result<CoordinationSnapshot, CoordinationError> {
         match scope {
             AccessScope::Owner => Ok(self.snapshot().await),
-            AccessScope::Projects | AccessScope::ProjectUsage { .. } | AccessScope::ProjectNames | AccessScope::ProjectSchedules { .. } | AccessScope::Keybindings { .. } => Err(CoordinationError::Unauthorized),
+            AccessScope::Projects
+            | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectNames
+            | AccessScope::ProjectSchedules { .. }
+            | AccessScope::Keybindings { .. } => Err(CoordinationError::Unauthorized),
             AccessScope::Guest { task_id } => {
                 let mut task = self.task(task_id).await?;
                 task.approvals.clear();

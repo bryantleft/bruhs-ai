@@ -104,7 +104,9 @@ impl Default for WriterCatalog {
 impl WriterCatalog {
     pub fn model(&self, id: &str) -> Option<&WriterCliModel> {
         let provider = AgentProvider::for_model(id);
-        self.models.iter().find(|m| m.provider == provider && provider.model_id(&m.id) == provider.model_id(id))
+        self.models
+            .iter()
+            .find(|m| m.provider == provider && provider.model_id(&m.id) == provider.model_id(id))
     }
 }
 

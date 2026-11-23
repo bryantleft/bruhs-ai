@@ -2,7 +2,7 @@ use super::*;
 
 impl Workspace {
     pub(in crate::views::workspace) fn scheduled_host_field(&self, cx: &Context<'_, Self>) -> Div {
-        use bruhs_ui::dropdown::{DropdownGroup, Listbox, dropdown, saved_option_value};
+        use bruhs_ui::dropdown::{dropdown, saved_option_value, DropdownGroup, Listbox};
         let panel = self.scheduled_panel();
         let current = self
             .linked_projects

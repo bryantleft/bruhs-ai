@@ -388,32 +388,43 @@ impl Workspace {
                 ),
             );
         }
+        rows.push(
+            self.settings_row(
+                "desktop-settings-row-snapshot-global",
+                "System-wide shortcut",
+                self.capture_binding
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "Capture the front window from any app.".into()),
+                settings_ui::switch(
+                    "snapshot-global",
+                    self.snapshots.global,
+                    false,
+                    "System-wide capture shortcut",
+                    cx,
+                    |this, _, cx| {
+                        this.snapshots.global = !this.snapshots.global;
+                        this.sync_capture_shortcut(cx);
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+        );
         rows.push(self.settings_row(
-            "desktop-settings-row-snapshot-global",
-            "System-wide shortcut",
-            self.capture_binding.error.clone().unwrap_or_else(|| {
-                "Capture the front window from any app.".into()
-            }),
+            "desktop-settings-row-snapshot-text",
+            "Include app text",
+            "Attach visible text using Accessibility or on-device OCR.",
             settings_ui::switch(
-                "snapshot-global",
-                self.snapshots.global,
+                "snapshot-include-text",
+                self.snapshots.include_text,
                 false,
-                "System-wide capture shortcut",
+                "Include app text",
                 cx,
                 |this, _, cx| {
-                    this.snapshots.global = !this.snapshots.global;
-                    this.sync_capture_shortcut(cx);
+                    this.snapshots.include_text = !this.snapshots.include_text;
                     this.persist_and_notify(cx);
                 },
             ),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-snapshot-text", "Include app text",
-            "Attach visible text using Accessibility or on-device OCR.",
-            settings_ui::switch("snapshot-include-text",self.snapshots.include_text,false,"Include app text",cx,|this,_,cx|{
-                this.snapshots.include_text = !this.snapshots.include_text;
-                this.persist_and_notify(cx);
-            }),
         ));
         rows.push(self.settings_row(
             "desktop-settings-row-snapshot-sound",
@@ -444,11 +455,20 @@ impl Workspace {
             ),
         ));
         rows.push(self.settings_row(
-            "desktop-settings-row-snapshot-animations", "Capture animations", "Animate captured thumbnails into the draft.",
-            settings_ui::switch("snapshot-animations", !self.snapshots.disable_animations, false, "Capture animations", cx, |this,_,cx|{
-                this.snapshots.disable_animations = !this.snapshots.disable_animations;
-                this.persist_and_notify(cx);
-            }),
+            "desktop-settings-row-snapshot-animations",
+            "Capture animations",
+            "Animate captured thumbnails into the draft.",
+            settings_ui::switch(
+                "snapshot-animations",
+                !self.snapshots.disable_animations,
+                false,
+                "Capture animations",
+                cx,
+                |this, _, cx| {
+                    this.snapshots.disable_animations = !this.snapshots.disable_animations;
+                    this.persist_and_notify(cx);
+                },
+            ),
         ));
         rows
     }

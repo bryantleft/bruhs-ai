@@ -104,13 +104,15 @@ impl Workspace {
         if previous == Some(&next) {
             return;
         }
-        let newly_settled=apply && !thread.settled;
+        let newly_settled = apply && !thread.settled;
         if apply {
             thread.settled = true;
             thread.active_rank = None;
         }
         self.known_thread_pulls.insert(id.to_owned(), next);
-        if newly_settled{self.launch_thread_hooks(id,true,cx);}
+        if newly_settled {
+            self.launch_thread_hooks(id, true, cx);
+        }
         self.persist_and_notify(cx);
     }
 
@@ -126,7 +128,9 @@ impl Workspace {
                     .timer(Duration::from_secs(60))
                     .await;
                 let Ok(mut groups) = this.update(cx, |this, cx| {
-                    for id in this.new_idle_action_threads(cx) {this.launch_thread_hooks(&id,true,cx);}
+                    for id in this.new_idle_action_threads(cx) {
+                        this.launch_thread_hooks(&id, true, cx);
+                    }
                     let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
                     for t in &this.threads {
                         let path = labs::folder(t, cx);
@@ -212,9 +216,13 @@ impl Workspace {
         )];
         if inactivity {
             rows.push(self.scoped_switch_row(
-                ScopedSwitch::KeepPull, "settings-keep-pull", "desktop-row-keep-pull", "Keep threads with a PR",
+                ScopedSwitch::KeepPull,
+                "settings-keep-pull",
+                "desktop-row-keep-pull",
+                "Keep threads with a PR",
                 "Keep threads with an open pull request active during periods of inactivity.",
-                self.pull_preferences.keep, cx,
+                self.pull_preferences.keep,
+                cx,
             ));
         }
         rows
@@ -223,7 +231,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{BranchPullLookup, Instant, Duration};
+    use super::{BranchPullLookup, Duration, Instant};
 
     #[gpui::test]
     fn observations_respect_project_overrides_and_manual_restore(cx: &mut gpui::TestAppContext) {

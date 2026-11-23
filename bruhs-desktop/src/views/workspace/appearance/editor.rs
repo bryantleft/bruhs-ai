@@ -1022,7 +1022,9 @@ impl Workspace {
                             .justify_between()
                             .gap_2()
                             .min_h(px(40.))
-                            .map(|row| inspector::reveal_selected_row(row, panel, role, cx.entity_id()))
+                            .map(|row| {
+                                inspector::reveal_selected_row(row, panel, role, cx.entity_id())
+                            })
                             .rounded_md()
                             .when(selected, |el| el.bg(theme::persimmon_500().opacity(0.13)))
                             .child(on_press_view(usage, cx, move |ws, _, cx| {

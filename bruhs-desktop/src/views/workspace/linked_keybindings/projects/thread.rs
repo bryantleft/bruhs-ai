@@ -168,12 +168,10 @@ impl ThreadPanel {
                 cx.notify();
             }
         });
-        let poll = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(5)).await;
-                if this.update(cx, |panel, cx| panel.read(None, cx)).is_err() {
-                    break;
-                }
+        let poll = cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(5)).await;
+            if this.update(cx, |panel, cx| panel.read(None, cx)).is_err() {
+                break;
             }
         });
         let mut panel = Self {

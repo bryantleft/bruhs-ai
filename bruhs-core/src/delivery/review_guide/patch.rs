@@ -1,8 +1,8 @@
 //! Byte offsets into a private patch file. Memory scales with files, hunks and
 //! page boundaries. Source lines are read only for the requested page or citation.
-use super::{DeliveryError, DeliveryResult, GuideSide, invalid, storage};
-use bruhs_models::logic::diff::{FileDiff, HunkRange, parse_hunk_header, parse_unified};
-use serde_json::{Value, json};
+use super::{invalid, storage, DeliveryError, DeliveryResult, GuideSide};
+use bruhs_models::logic::diff::{parse_hunk_header, parse_unified, FileDiff, HunkRange};
+use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs::File,

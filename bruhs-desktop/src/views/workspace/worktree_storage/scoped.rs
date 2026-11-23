@@ -106,7 +106,9 @@ impl Workspace {
                 .await;
             if this
                 .update(cx, |ws, cx| {
-                    if ws.settings_project_scope == scope && (first_read || ws.checkout_defaults != value) {
+                    if ws.settings_project_scope == scope
+                        && (first_read || ws.checkout_defaults != value)
+                    {
                         ws.checkout_defaults = value;
                         for thread in &ws.threads {
                             thread.chat.update(cx, |chat, cx| {
@@ -185,7 +187,13 @@ impl Workspace {
         if choice == WorkspaceChoice::PreviousWorktree || self.previous_worktree.is_some() {
             options.push(("previous_worktree", "Previous worktree"));
         }
-        let control = settings_ui::control_column(self.choice_control(id, "Default workspace", choice.as_str(), &options, cx));
+        let control = settings_ui::control_column(self.choice_control(
+            id,
+            "Default workspace",
+            choice.as_str(),
+            &options,
+            cx,
+        ));
         let actions = self.setting_source_actions(
             WorktreeSetting::Placement,
             id,

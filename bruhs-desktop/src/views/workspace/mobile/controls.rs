@@ -55,9 +55,27 @@ impl Workspace {
     ) -> Stateful<Div> {
         let off = matches!(self.mobile.connection, Connection::Off);
         let offering = self.mobile.offer.is_some();
-        let mut panel=div().id("desktop-mobile-access").debug_selector(||"desktop-mobile-access".into()).mb_3().p_3().rounded(px(8.0)).border_1().border_color(theme::longan_800()).bg(theme::longan_900()).flex().flex_col().gap_3()
-            .child(div().text_size(px(15.0)).text_color(theme::rambutan_100()).child("Phone access"))
-            .child(note("Read project chats and live output from your phone while bruhs is running."));
+        let mut panel = div()
+            .id("desktop-mobile-access")
+            .debug_selector(|| "desktop-mobile-access".into())
+            .mb_3()
+            .p_3()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme::longan_800())
+            .bg(theme::longan_900())
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .text_size(px(15.0))
+                    .text_color(theme::rambutan_100())
+                    .child("Phone access"),
+            )
+            .child(note(
+                "Read project chats and live output from your phone while bruhs is running.",
+            ));
         if off {
             panel=panel.child(note("Use an HTTPS origin your phone trusts, such as Tailscale Serve or trusted TLS PEM files."))
                 .child(field("HTTPS origin",&self.mobile.origin,false)).child(field("Listen IP:port",&self.mobile.bind,false))
@@ -77,8 +95,15 @@ impl Workspace {
                     .activate(cx, |this, _, cx| this.start_mobile(cx)),
             );
         } else if let Some(host) = self.mobile.host() {
-            panel=panel.child(note(format!("Listening at {}, backend {}",host.origin(),host.address())))
-                .child(note("Each paired device has its own scope, expiry, and revoke control."));
+            panel = panel
+                .child(note(format!(
+                    "Listening at {}, backend {}",
+                    host.origin(),
+                    host.address()
+                )))
+                .child(note(
+                    "Each paired device has its own scope, expiry, and revoke control.",
+                ));
             let mut scopes_row = div()
                 .flex()
                 .flex_wrap()

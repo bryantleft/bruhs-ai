@@ -87,7 +87,9 @@ impl Workspace {
     }
 
     fn save_binding_draft(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.linked_keybindings.editable() { return; }
+        if !self.linked_keybindings.editable() {
+            return;
+        }
         let Some(rule) = self.new_rule(cx) else {
             return;
         };
@@ -164,7 +166,9 @@ impl Workspace {
             "keybinding-new-save",
             WebButtonVariant::Primary,
             WebButtonSize::Small,
-            ButtonState::disabled_if(!self.linked_keybindings.editable() || self.new_rule(cx).is_none()),
+            ButtonState::disabled_if(
+                !self.linked_keybindings.editable() || self.new_rule(cx).is_none(),
+            ),
         )
         .debug_selector(|| "keybinding-new-save".into())
         .aria_label("Save new keybinding")

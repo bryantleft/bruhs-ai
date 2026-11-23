@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 mod fonts;
 mod palettes;
+pub use fonts::{set_font_families, set_text_layout, show_composer_context, wrap_code, FontFace};
 pub use palettes::{Palette, ThemeFamily};
-pub use fonts::{FontFace,set_font_families,set_text_layout,wrap_code,show_composer_context};
 
 /// bruhs label/UI face (web: `Monaspace Argon`).
 pub const UI_FONT_FAMILY: &str = "Monaspace Argon";
@@ -406,8 +406,19 @@ pub fn ring_modal() -> Hsla {
 // =====================================================================
 
 /// Palette used by the native desktop surfaces and controls.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all="lowercase")]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
     Light,
     #[default]
@@ -530,7 +541,9 @@ pub fn apply_bruhs_theme(cx: &mut App) {
     let mode = cx
         .try_global::<Theme>()
         .map_or(ThemeMode::Dark, |theme| theme.mode);
-    let color_roles = cx.try_global::<Theme>().and_then(|theme| theme.color_roles.clone());
+    let color_roles = cx
+        .try_global::<Theme>()
+        .and_then(|theme| theme.color_roles.clone());
     cx.set_global(Theme {
         color_roles,
         mode,

@@ -5,42 +5,45 @@ use bruhs_models::logic::run_place::WorktreeSubmodules;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct ProjectDefaults {
-    #[serde(default,skip_serializing_if="crate::views::chat::kiro::KiroChoices::is_empty")]
-    pub kiro:crate::views::chat::kiro::KiroChoices,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub artwork:Option<super::project_art::Artwork>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::views::chat::kiro::KiroChoices::is_empty"
+    )]
+    pub kiro: crate::views::chat::kiro::KiroChoices,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artwork: Option<super::project_art::Artwork>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default, skip_serializing_if="GenerationOptions::is_empty")]
+    #[serde(default, skip_serializing_if = "GenerationOptions::is_empty")]
     pub model_options: GenerationOptions,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub text_generation_model: Option<String>,
     /// Zero disables inactivity-based settlement. A missing override inherits the environment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_settle_days: Option<u16>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub settle_merged: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub cleanup_deleted_worktrees:Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup_deleted_worktrees: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cleanup_mode: Option<worktree_storage::CleanupMode>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cleanup_keep_when: Option<bruhs_models::coordination::worktree::KeepWhen>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_retention: Option<worktree_storage::WorktreeRetention>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub keep_pull: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_pull: Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub snooze_limited:Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub resume_limited:Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub continue_threads:Option<bool>,
-    #[serde(skip_serializing_if="Option::is_none")]
-    pub response_stream:Option<crate::views::chat::response_stream::Mode>,
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snooze_limited: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_limited: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continue_threads: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_stream: Option<crate::views::chat::response_stream::Mode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub snooze_choices: Option<Vec<snooze_options::Choice>>,
     #[serde(
         with = "persisted_enum::optional",
@@ -76,7 +79,7 @@ impl super::setting_source::ProjectSetting for DefaultModel {
 
     fn clear_project(self, prefs: &mut ProjectDefaults) {
         prefs.model = None;
-        prefs.model_options=Default::default();
+        prefs.model_options = Default::default();
     }
 
     fn after_reset(self, ws: &mut Workspace, _: &mut Window, cx: &mut Context<'_, Workspace>) {
@@ -124,11 +127,34 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    pub(super) fn response_stream_row(&self,cx:&Context<'_,Self>)->AnyElement {
-        let scoped=!self.settings_project_scope.is_empty();
-        let current=if scoped {self.project_defaults.get(&self.settings_project_scope).and_then(|p|p.response_stream).map_or("inherit",|m|m.key())}else{self.response_stream.key()};
-        const MODES: &[(&str,&str)]=&[("inherit","Environment default"),("live","As text arrives"),("paragraph","Show finished paragraphs"),("turn","Wait for the full response")];
-        self.settings_row("desktop-settings-row-response-stream","Response streaming","When assistant text appears during a turn.",settings_ui::control_column(self.choice_control("settings-response-streaming","Response streaming",current,if scoped {MODES}else{&MODES[1..]},cx)))
+    pub(super) fn response_stream_row(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let scoped = !self.settings_project_scope.is_empty();
+        let current = if scoped {
+            self.project_defaults
+                .get(&self.settings_project_scope)
+                .and_then(|p| p.response_stream)
+                .map_or("inherit", |m| m.key())
+        } else {
+            self.response_stream.key()
+        };
+        const MODES: &[(&str, &str)] = &[
+            ("inherit", "Environment default"),
+            ("live", "As text arrives"),
+            ("paragraph", "Show finished paragraphs"),
+            ("turn", "Wait for the full response"),
+        ];
+        self.settings_row(
+            "desktop-settings-row-response-stream",
+            "Response streaming",
+            "When assistant text appears during a turn.",
+            settings_ui::control_column(self.choice_control(
+                "settings-response-streaming",
+                "Response streaming",
+                current,
+                if scoped { MODES } else { &MODES[1..] },
+                cx,
+            )),
+        )
     }
 
     pub(super) fn render_settlement_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -209,7 +235,7 @@ impl Workspace {
                 controls.into_any_element(),
             ));
         }
-        rows.extend(self.pull_settlement_rows(days > 0,cx));
+        rows.extend(self.pull_settlement_rows(days > 0, cx));
         rows
     }
 
@@ -228,13 +254,26 @@ impl Workspace {
 
     pub(super) fn available_new_thread_model(&self, path: &str, requested: &str) -> String {
         let preferred = self.model_for_new_thread(requested);
-        let Ok(prefs) = bruhs_core::agent_extensions::availability::ProviderAvailability::load_for_project(path.as_ref())
-        else { return preferred.to_owned() };
+        let Ok(prefs) =
+            bruhs_core::agent_extensions::availability::ProviderAvailability::load_for_project(
+                path.as_ref(),
+            )
+        else {
+            return preferred.to_owned();
+        };
         let instances = std::cell::OnceCell::new();
-        let automatic = !self.explicit_model && self.project_defaults.get(path).is_none_or(|p| p.model.is_none());
+        let automatic = !self.explicit_model
+            && self
+                .project_defaults
+                .get(path)
+                .is_none_or(|p| p.model.is_none());
         self.enabled_new_thread_model(requested, automatic, &prefs, || {
-            instances.get_or_init(|| crate::views::acp_models::load().unwrap_or_default()).as_slice()
-        }).unwrap_or(requested).to_owned()
+            instances
+                .get_or_init(|| crate::views::acp_models::load().unwrap_or_default())
+                .as_slice()
+        })
+        .unwrap_or(requested)
+        .to_owned()
     }
 
     pub(super) fn settings_project_options(&self, cx: &App) -> Vec<DropdownOption> {
@@ -254,9 +293,19 @@ impl Workspace {
         for project in &listed {
             projects.insert(&project.path, &project.name);
         }
-        let saved_paths = self.project_defaults.keys().chain(self.project_actions.keys()).map(String::as_str);
-        for path in saved_paths.chain(self.reactive_automations.read(cx).automation_project_paths())
-            .chain(std::iter::once(self.settings_project_scope.as_str())).filter(|p| !p.is_empty())
+        let saved_paths = self
+            .project_defaults
+            .keys()
+            .chain(self.project_actions.keys())
+            .map(String::as_str);
+        for path in saved_paths
+            .chain(
+                self.reactive_automations
+                    .read(cx)
+                    .automation_project_paths(),
+            )
+            .chain(std::iter::once(self.settings_project_scope.as_str()))
+            .filter(|p| !p.is_empty())
         {
             projects.entry(path).or_insert_with(|| {
                 std::path::Path::new(path)
@@ -265,26 +314,36 @@ impl Workspace {
                     .unwrap_or(path)
             });
         }
-        projects.into_iter().filter(|(path, _)| !path.is_empty()).map(|(path, name)| DropdownOption {
-            value: role_settings_ui::project_value(path),
-            label: name.into(),
-            description: Some(path.into()),
-        }).collect()
+        projects
+            .into_iter()
+            .filter(|(path, _)| !path.is_empty())
+            .map(|(path, name)| DropdownOption {
+                value: role_settings_ui::project_value(path),
+                label: name.into(),
+                description: Some(path.into()),
+            })
+            .collect()
     }
 
     pub(super) fn defaults_scope_row(&self, cx: &Context<'_, Self>) -> AnyElement {
         let mut options = self.settings_project_options(cx);
-        options.insert(0, DropdownOption {
-            value: "",
-            label: "This environment".into(),
-            description: None,
-        });
+        options.insert(
+            0,
+            DropdownOption {
+                value: "",
+                label: "This environment".into(),
+                description: None,
+            },
+        );
         let id = "settings-project-defaults-scope";
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
         let (title, description) = if self.settings_section == SettingsSection::ScheduledTasks {
             ("Project", "Filter tasks by environment or project.")
         } else {
-            ("Project defaults and overrides", "Edit environment defaults or one project.")
+            (
+                "Project defaults and overrides",
+                "Edit environment defaults or one project.",
+            )
         };
         self.settings_row(
             "desktop-settings-row-defaults-scope",
@@ -323,7 +382,14 @@ impl Workspace {
             .unwrap_or_default();
         match id {
             "settings-response-streaming" => {
-                prefs.response_stream = if value=="inherit" {None} else {let Some(mode)=crate::views::chat::response_stream::Mode::parse(value) else {return false};Some(mode)};
+                prefs.response_stream = if value == "inherit" {
+                    None
+                } else {
+                    let Some(mode) = crate::views::chat::response_stream::Mode::parse(value) else {
+                        return false;
+                    };
+                    Some(mode)
+                };
             }
             "settings-auto-pull" => {
                 let on = match value {

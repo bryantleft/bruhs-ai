@@ -7,8 +7,8 @@
 //! off. A plain key such as `/` or `c` is left alone when its condition fails,
 //! or the character would never reach the field.
 
-mod draft;
 mod condition;
+mod draft;
 pub(super) use draft::NewBinding;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,8 +28,8 @@ use gpui::{
 };
 
 use bruhs_models::logic::keybindings::{
-    chord_claimed, chord_from_event, default_keybindings, gpui_shortcut, resolve,
-    KeyContext, Keybinding, KeybindingEdit,
+    chord_claimed, chord_from_event, default_keybindings, gpui_shortcut, resolve, KeyContext,
+    Keybinding, KeybindingEdit,
 };
 
 use crate::views::chat::{FindInThread, StashDraft};
@@ -1033,7 +1033,6 @@ impl Workspace {
             )
             .into_any_element()
     }
-
 }
 
 pub(super) fn shortcut_label(raw: &str) -> String {
@@ -1174,7 +1173,14 @@ fn push_rule_bindings(
             installed,
         ),
         "snapshot.capture" => bind(&shortcut, CaptureWindow, name, None, add, installed),
-        "voice.dictate" => bind(&shortcut, crate::views::chat::ToggleDictation, name, Some("Chat"), add, installed),
+        "voice.dictate" => bind(
+            &shortcut,
+            crate::views::chat::ToggleDictation,
+            name,
+            Some("Chat"),
+            add,
+            installed,
+        ),
         "draft.stash" => {
             bind(
                 &shortcut,

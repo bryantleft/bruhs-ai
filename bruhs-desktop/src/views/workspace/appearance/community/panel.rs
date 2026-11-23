@@ -423,10 +423,16 @@ impl Browser {
         };
         let count = match ext.downloads {
             n if n >= 1_000_000 => {
-                format!("{:.1}M", bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1e6)
+                format!(
+                    "{:.1}M",
+                    bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1e6
+                )
             }
             n if n >= 1000 => {
-                format!("{:.1}K", bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1000.)
+                format!(
+                    "{:.1}K",
+                    bruhs_models::num::ToFloatLossy::to_f64_lossy(n) / 1000.
+                )
             }
             n => n.to_string(),
         };

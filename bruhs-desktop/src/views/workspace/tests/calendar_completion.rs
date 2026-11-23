@@ -431,7 +431,11 @@ fn the_week_fits_a_640_window_and_opens_near_now_like_web(cx: &mut gpui::TestApp
         let scroll = &workspace.calendar_timegrid_scroll;
         // Late in the day the last hour reaches the bottom of the viewport.
         let reachable = expected.min(f32::from(scroll.max_offset().y));
-        assert_eq!(f32::from(-scroll.offset().y), reachable, "the grid opened near now");
+        assert_eq!(
+            f32::from(-scroll.offset().y),
+            reachable,
+            "the grid opened near now"
+        );
     });
 }
 

@@ -635,7 +635,10 @@ impl ChatView {
                             .flex()
                             .items_center()
                             .gap(px(PERMISSION_PROMPT_Y_PADDING_PX))
-                            .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(PERMISSION_PROMPT_FONT_FAMILY),
+                            )
                             .font_weight(FontWeight::MEDIUM)
                             .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -659,7 +662,10 @@ impl ChatView {
                             .py(px(PERMISSION_PROMPT_Y_PADDING_PX))
                             .flex()
                             .items_center()
-                            .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(PERMISSION_PROMPT_FONT_FAMILY),
+                            )
                             .font_weight(FontWeight::MEDIUM)
                             .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -721,7 +727,10 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .gap(px(PERMISSION_PROMPT_ACTION_GAP_PX))
-                                    .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(PERMISSION_PROMPT_FONT_FAMILY),
+                                    )
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -770,7 +779,10 @@ impl ChatView {
                                     .items_center()
                                     .justify_center()
                                     .gap(px(PERMISSION_PROMPT_ACTION_GAP_PX))
-                                    .font_family(crate::theme::FontFace::Interface.with_default(PERMISSION_PROMPT_FONT_FAMILY))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(PERMISSION_PROMPT_FONT_FAMILY),
+                                    )
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(PERMISSION_PROMPT_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)

@@ -164,7 +164,10 @@ impl DeliveryService {
             _ => None,
         };
         let catalog = if model_change.is_some() && !endpoint_writer {
-            Some(crate::agent::writer_catalog_for_project(path.unwrap_or_else(|| Path::new(""))).await)
+            Some(
+                crate::agent::writer_catalog_for_project(path.unwrap_or_else(|| Path::new("")))
+                    .await,
+            )
         } else {
             None
         };

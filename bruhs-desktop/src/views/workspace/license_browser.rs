@@ -467,20 +467,16 @@ mod tests {
             catalog.texts[fonts.notices[0].text].as_ref(),
             include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/LICENSE"))
         );
-        assert!(
-            catalog
-                .entries
-                .iter()
-                .any(|component| component.name == "serde"
-                    && component.version.is_some()
-                    && component.source.is_some())
-        );
-        assert!(
-            catalog
-                .entries
-                .iter()
-                .any(|component| component.bundle == "Composer syntaxes")
-        );
+        assert!(catalog
+            .entries
+            .iter()
+            .any(|component| component.name == "serde"
+                && component.version.is_some()
+                && component.source.is_some()));
+        assert!(catalog
+            .entries
+            .iter()
+            .any(|component| component.bundle == "Composer syntaxes"));
         assert!(Catalog::from_zip(b"incomplete download").is_err());
     }
 }

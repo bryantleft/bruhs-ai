@@ -2,7 +2,8 @@
 mod conversation;
 mod links;
 use crate::prompt_suggestion::{
-    isolated_agent_reply, unfence, usage_permits_in_project, Instructions, ReplyUse, SuggestionError,
+    isolated_agent_reply, unfence, usage_permits_in_project, Instructions, ReplyUse,
+    SuggestionError,
 };
 use bruhs_models::delivery::{generation::GenerationOptions, writer_catalog::cli_provider};
 pub use conversation::{conversation, Conversation, TitleTurn};
@@ -242,35 +243,41 @@ async fn run_text(
 ) -> Result<String, SuggestionError> {
     let deadline = Duration::from_secs(if generation.is_some() { 120 } else { 20 });
     if crate::text_generators::split_selection(model).is_some() {
-        let images = match purpose { ReplyUse::Naming(images) => images, _ => &[] };
-        return tokio::time::timeout(deadline, crate::text_generators::generate(model, instructions, prompt, images)).await.map_err(|_| SuggestionError::TimedOut)?.map_err(SuggestionError::Provider);
+        let images = match purpose {
+            ReplyUse::Naming(images) => images,
+            _ => &[],
+        };
+        return tokio::time::timeout(
+            deadline,
+            crate::text_generators::generate(model, instructions, prompt, images),
+        )
+        .await
+        .map_err(|_| SuggestionError::TimedOut)?
+        .map_err(SuggestionError::Provider);
     }
     let provider = cli_provider(model).ok_or(SuggestionError::InvalidRequest)?;
-    tokio::time::timeout(
-        deadline,
-        async {
-            if !usage_permits_in_project(provider, project).await {
-                return Err(SuggestionError::UsageReserved);
-            }
-            let workspace = tokio::task::spawn_blocking(tempfile::tempdir)
-                .await
-                .map_err(std::io::Error::other)??;
-            isolated_agent_reply(
-                provider,
-                prompt,
-                model,
-                &Instructions {
-                    text: instructions,
-                    think: false,
-                    generation,
-                },
-                workspace.path(),
-                project,
-                purpose,
-            )
+    tokio::time::timeout(deadline, async {
+        if !usage_permits_in_project(provider, project).await {
+            return Err(SuggestionError::UsageReserved);
+        }
+        let workspace = tokio::task::spawn_blocking(tempfile::tempdir)
             .await
-        },
-    )
+            .map_err(std::io::Error::other)??;
+        isolated_agent_reply(
+            provider,
+            prompt,
+            model,
+            &Instructions {
+                text: instructions,
+                think: false,
+                generation,
+            },
+            workspace.path(),
+            project,
+            purpose,
+        )
+        .await
+    })
     .await
     .map_err(|_| SuggestionError::TimedOut)?
 }

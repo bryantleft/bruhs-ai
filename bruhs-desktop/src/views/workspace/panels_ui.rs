@@ -581,13 +581,17 @@ impl Workspace {
     /// Right panel shell: tab bar (Diff · Tasks · Preview · Files) over the
     /// chosen surface.
     pub(super) fn render_right_panel(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let surface = if self.right_panel_open(){showing_surface(
-            self.file_surface,
-            self.pull_panel_visible,
-            self.files_panel_visible,
-            self.diff_panel_visible,
-            self.preview_panel_visible,
-        )}else{self.last_panel_surface};
+        let surface = if self.right_panel_open() {
+            showing_surface(
+                self.file_surface,
+                self.pull_panel_visible,
+                self.files_panel_visible,
+                self.diff_panel_visible,
+                self.preview_panel_visible,
+            )
+        } else {
+            self.last_panel_surface
+        };
         let body: AnyElement = match surface {
             RightPanelSurface::Diff => self.diff_panel.clone().into_any_element(),
             RightPanelSurface::Tasks => self.tasks_panel.clone().into_any_element(),
@@ -1317,7 +1321,7 @@ impl Workspace {
             return;
         };
         let generation = self.pull_generation;
-        let lookup_started=std::time::Instant::now();
+        let lookup_started = std::time::Instant::now();
         let source_path = self.active_thread().map_or_else(
             || path.clone(),
             |t| t.chat.read(cx).settings_project_path().to_owned(),
@@ -1333,7 +1337,14 @@ impl Workspace {
                 if this.pull_generation != generation {
                     return;
                 }
-                this.observe_thread_pull(&thread_id,&source_path,&branch,&lookup,lookup_started,cx);
+                this.observe_thread_pull(
+                    &thread_id,
+                    &source_path,
+                    &branch,
+                    &lookup,
+                    lookup_started,
+                    cx,
+                );
                 let Some(pull) = lookup.pull else {
                     this.branch_pull = None;
                     this.open_substantial_changes(completed_turn, cx);
@@ -1663,9 +1674,18 @@ impl Workspace {
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_100())
                     .child({
-                        let text=div().font_family(theme::CODE_FONT_FAMILY).child(ready.text.clone().unwrap_or_default());
-                        if self.fonts.wrap==Some(false) {div().w_full().overflow_x_scrollbar().child(text.whitespace_nowrap()).into_any_element()}
-                        else{text.into_any_element()}
+                        let text = div()
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .child(ready.text.clone().unwrap_or_default());
+                        if self.fonts.wrap == Some(false) {
+                            div()
+                                .w_full()
+                                .overflow_x_scrollbar()
+                                .child(text.whitespace_nowrap())
+                                .into_any_element()
+                        } else {
+                            text.into_any_element()
+                        }
                     })
                     .children(
                         notes
@@ -1754,7 +1774,12 @@ impl Workspace {
         let terminal_panel =
             cx.new(|cx| TerminalPanelView::new(terminal_manager, terminal_runtime, cx));
         subscriptions.push(cx.observe(&terminal_panel, |this: &mut Self, _, cx| {
-            if this.details.open_for_active_thread(this.active_thread_id.as_deref()) { cx.notify(); }
+            if this
+                .details
+                .open_for_active_thread(this.active_thread_id.as_deref())
+            {
+                cx.notify();
+            }
         }));
         subscriptions.push(cx.subscribe_in(
             &terminal_panel,

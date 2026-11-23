@@ -14,9 +14,7 @@
 use super::import_ui::live_line::{
     live_line, LiveKind, LiveLine, MOVE_IN_ERROR_LIVE, MOVE_IN_STATUS_LIVE,
 };
-use super::import_ui::{
-    IMPORT_DIALOG_WIDTH_PX, IMPORT_LABEL_SM_TEXT_SIZE_PX, IMPORT_RADIUS_PX,
-};
+use super::import_ui::{IMPORT_DIALOG_WIDTH_PX, IMPORT_LABEL_SM_TEXT_SIZE_PX, IMPORT_RADIUS_PX};
 use super::*;
 use bruhs_models::imports::{
     looked_in_line, persona_lines, prefill_from_persona, AgentScan, PersonaCandidate,
@@ -950,46 +948,46 @@ impl Workspace {
             .max_h(modal_ui::picker_max_height(window))
             .bg(theme::longan_800())
             .track_focus(&self.modal_start_focus_handle)
-                    .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key.as_str() != "escape"
-                            || event.keystroke.modifiers != Modifiers::default()
-                        {
-                            return;
-                        }
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        // An open bruh list closes first.
-                        if !this.close_move_in_bruh_list(cx) {
-                            this.close_move_in(cx);
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key.as_str() != "escape"
+                    || event.keystroke.modifiers != Modifiers::default()
+                {
+                    return;
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+                // An open bruh list closes first.
+                if !this.close_move_in_bruh_list(cx) {
+                    this.close_move_in(cx);
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(theme::longan_800())
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .px_4()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .child(
-                                div()
-                                    .id("desktop-move-in-title")
-                                    .role(Role::Heading)
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
-                                    .text_color(theme::rambutan_200())
-                                    .child(MOVE_IN_TITLE),
-                            )
-                            .child(self.render_move_in_tabs(open, cx)),
+                            .id("desktop-move-in-title")
+                            .role(Role::Heading)
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(IMPORT_LABEL_SM_TEXT_SIZE_PX))
+                            .text_color(theme::rambutan_200())
+                            .child(MOVE_IN_TITLE),
                     )
-                    .child(scroll.vertical_scrollbar(&open.body_scroll))
-                    .child(actions)
-                    .child(self.render_modal_focus_sentinel()),
+                    .child(self.render_move_in_tabs(open, cx)),
             )
-            .into_any_element()
+            .child(scroll.vertical_scrollbar(&open.body_scroll))
+            .child(actions)
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 }

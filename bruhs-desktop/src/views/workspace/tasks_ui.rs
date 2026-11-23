@@ -972,7 +972,9 @@ impl Workspace {
             .border_r_1()
             .border_color(theme::longan_800().opacity(PROJECT_SIDEBAR_BORDER_OPACITY))
             .text_color(theme::rambutan_300())
-            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_BODY_FONT_FAMILY),
+            )
             .flex()
             .flex_col()
             .child(
@@ -994,7 +996,10 @@ impl Workspace {
                             .items_center()
                             .rounded(px(PROJECT_SIDEBAR_ROW_RADIUS_PX))
                             .px(px(PROJECT_SIDEBAR_ROW_X_PADDING_PX))
-                            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_LABEL_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(PROJECT_SIDEBAR_LABEL_FONT_FAMILY),
+                            )
                             .text_size(px(PROJECT_SIDEBAR_ROW_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                             .text_color(if self.selected_project_id.is_none() {
@@ -1052,7 +1057,10 @@ impl Workspace {
                             )
                             .px(px(PROJECT_SIDEBAR_FOOTER_X_PADDING_PX))
                             .py(px(PROJECT_SIDEBAR_FOOTER_Y_PADDING_PX))
-                            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(PROJECT_SIDEBAR_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(PROJECT_SIDEBAR_FOOTER_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
                             .tab_index(0)
@@ -1107,7 +1115,9 @@ impl Workspace {
             .gap(px(PROJECT_SIDEBAR_ROW_GAP_PX))
             .rounded(px(PROJECT_SIDEBAR_ROW_RADIUS_PX))
             .px(px(PROJECT_SIDEBAR_ROW_X_PADDING_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_LABEL_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(PROJECT_SIDEBAR_LABEL_FONT_FAMILY),
+            )
             .text_size(px(PROJECT_SIDEBAR_ROW_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(if is_active {
@@ -1200,7 +1210,9 @@ impl Workspace {
             .border_b_1()
             .border_color(theme::longan_800().opacity(TASKS_HEADER_BORDER_OPACITY))
             .flex_shrink_0()
-            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_HEADER_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASKS_HEADER_BODY_FONT_FAMILY),
+            )
             .child(
                 div()
                     .flex_1()
@@ -1296,7 +1308,9 @@ impl Workspace {
             .rounded(px(TASKS_HEADER_CONTROL_RADIUS_PX))
             .px(px(TASKS_HEADER_CONTROL_X_PADDING_PX))
             .py(px(TASKS_HEADER_CONTROL_Y_PADDING_PX))
-            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_HEADER_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASKS_HEADER_BODY_FONT_FAMILY),
+            )
             .text_size(px(TASKS_HEADER_MODE_TEXT_SIZE_PX))
             .font_weight(FontWeight::MEDIUM)
             .text_color(if is_active {
@@ -1365,7 +1379,10 @@ impl Workspace {
                     .child(
                         div()
                             .flex_1()
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_LIST_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASK_LIST_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TASK_LIST_HEADER_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_500())
@@ -1376,7 +1393,10 @@ impl Workspace {
                             .w(px(TASK_LIST_PRIORITY_COLUMN_WIDTH_PX))
                             .flex_shrink_0()
                             .text_center()
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_LIST_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASK_LIST_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TASK_LIST_HEADER_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_500())
@@ -1387,7 +1407,10 @@ impl Workspace {
                             .w(px(TASK_LIST_DUE_COLUMN_WIDTH_PX))
                             .flex_shrink_0()
                             .text_right()
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_LIST_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASK_LIST_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TASK_LIST_HEADER_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_500())
@@ -1410,7 +1433,10 @@ impl Workspace {
                                 .justify_center()
                                 .gap_3()
                                 .py(px(TASK_LIST_EMPTY_Y_PADDING_PX))
-                                .font_family(crate::theme::FontFace::Interface.with_default(TASK_LIST_BODY_FONT_FAMILY))
+                                .font_family(
+                                    crate::theme::FontFace::Interface
+                                        .with_default(TASK_LIST_BODY_FONT_FAMILY),
+                                )
                                 .text_size(px(TASK_LIST_EMPTY_TEXT_SIZE_PX))
                                 .text_color(theme::rambutan_500())
                                 .child("No tasks yet")
@@ -1508,7 +1534,9 @@ impl Workspace {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_ROW_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(TASK_ROW_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(TASK_ROW_TITLE_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .child(item.title.clone()),
@@ -1529,7 +1557,9 @@ impl Workspace {
                     .w(px(TASK_LIST_DUE_COLUMN_WIDTH_PX))
                     .flex_shrink_0()
                     .text_right()
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_ROW_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(TASK_ROW_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(TASK_ROW_DUE_TEXT_SIZE_PX))
                     .text_color(
                         due.as_ref()
@@ -1652,7 +1682,9 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(TASK_BOARD_HEADER_GAP_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_BOARD_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface.with_default(TASK_BOARD_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(TASK_BOARD_HEADER_TEXT_SIZE_PX))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme::rambutan_400())
@@ -1695,7 +1727,10 @@ impl Workspace {
                                 .gap_2()
                                 .py(px(TASK_BOARD_EMPTY_Y_PADDING_PX))
                                 .text_center()
-                                .font_family(crate::theme::FontFace::Interface.with_default(TASK_BOARD_BODY_FONT_FAMILY))
+                                .font_family(
+                                    crate::theme::FontFace::Interface
+                                        .with_default(TASK_BOARD_BODY_FONT_FAMILY),
+                                )
                                 .text_size(px(TASK_BOARD_EMPTY_TEXT_SIZE_PX))
                                 .text_color(theme::rambutan_500())
                                 .child("No tasks")
@@ -1801,7 +1836,10 @@ impl Workspace {
                             .flex_1()
                             .min_w_0()
                             .line_clamp(2)
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_BOARD_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASK_BOARD_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TASK_CARD_TITLE_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_200())
                             .child(item.title.clone()),
@@ -1810,7 +1848,10 @@ impl Workspace {
             .when_some(due, |el, (label, color)| {
                 el.child(
                     div()
-                        .font_family(crate::theme::FontFace::Interface.with_default(TASK_BOARD_BODY_FONT_FAMILY))
+                        .font_family(
+                            crate::theme::FontFace::Interface
+                                .with_default(TASK_BOARD_BODY_FONT_FAMILY),
+                        )
                         .text_size(px(TASK_CARD_DUE_TEXT_SIZE_PX))
                         .text_color(color)
                         .child(label),

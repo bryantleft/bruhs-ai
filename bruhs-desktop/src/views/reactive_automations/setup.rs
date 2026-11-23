@@ -2,10 +2,10 @@
 use super::app_poll::{app_poll_source, ask_before_kind, AppPollEditor};
 use super::*;
 use bruhs_models::apps::{describe_app_poll, FROM_NEWER_SOURCE};
-#[path = "task_schedule.rs"]
-mod task_schedule;
 #[path = "task_datetime_picker.rs"]
 mod task_datetime_picker;
+#[path = "task_schedule.rs"]
+mod task_schedule;
 use bruhs_models::crew::{
     access_summary, BruhLook, BruhStatus, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
 };
@@ -49,11 +49,19 @@ impl AutomationEditor {
     }
 
     pub(super) fn task_title(&self) -> &'static str {
-        if self.is_new { "New task" } else { "Edit task" }
+        if self.is_new {
+            "New task"
+        } else {
+            "Edit task"
+        }
     }
 
     pub(super) fn task_save_label(&self) -> &'static str {
-        if self.is_new { "Create task" } else { "Save task" }
+        if self.is_new {
+            "Create task"
+        } else {
+            "Save task"
+        }
     }
 
     fn owner_prompt(&self) -> &Entity<TextareaState> {
@@ -95,7 +103,8 @@ impl AutomationEditor {
         self.security.encoding_open = false;
         if self.scheduled_form {
             self.date_time_picker.close();
-            self.date_time_picker.use_text_entry(kind == "calendar" && value(&self.source.times,cx).contains(','));
+            self.date_time_picker
+                .use_text_entry(kind == "calendar" && value(&self.source.times, cx).contains(','));
             if self.source.kind == "webhook" && self.webhook_prompt.is_some() {
                 let text = value(self.task_prompt(), cx);
                 self.owner_prompt()
@@ -140,7 +149,12 @@ impl AutomationEditor {
     pub(super) fn shared_task_choices(&self, selected_model: Option<&str>) -> (Div, Div) {
         let project = div().child(field("Project", &self.agent.path, false, true));
         let model = if let Some(model) = selected_model {
-            div().flex().flex_col().gap_1().child(muted("Model")).child(muted(model.to_owned()))
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(muted("Model"))
+                .child(muted(model.to_owned()))
         } else {
             div().child(field("Model", &self.agent.model, false, true))
         };
@@ -152,23 +166,32 @@ impl AutomationEditor {
     }
 
     pub(super) fn set_task_model(&self, model: &str, window: &mut Window, cx: &mut App) {
-        self.agent.model.update(cx, |input, cx| input.set_value(model, window, cx));
+        self.agent
+            .model
+            .update(cx, |input, cx| input.set_value(model, window, cx));
     }
 
-    pub(super) fn project_path(&self, cx: &App) -> String { value(&self.agent.path, cx) }
+    pub(super) fn project_path(&self, cx: &App) -> String {
+        value(&self.agent.path, cx)
+    }
     pub(super) fn set_project_path(&self, project: &str, window: &mut Window, cx: &mut App) {
-        self.agent.path.update(cx, |input, cx| input.set_value(project, window, cx));
+        self.agent
+            .path
+            .update(cx, |input, cx| input.set_value(project, window, cx));
     }
 
     pub(super) fn source_mut(&mut self) -> &mut SourceEditor {
         &mut self.source
     }
     fn schedule_uses_minutes(&self) -> bool {
-        self.scheduled_form && !matches!(&self.source.source.kind,
+        self.scheduled_form
+            && !matches!(&self.source.source.kind,
             SourceKind::Schedule { every_ms } if *every_ms < 60_000 || *every_ms > task_schedule::MAX_EXACT_MS)
     }
 
-    pub(super) fn task_conversation(&self) -> TaskConversation { self.subscription.subscription.task_conversation }
+    pub(super) fn task_conversation(&self) -> TaskConversation {
+        self.subscription.subscription.task_conversation
+    }
     pub(super) fn subscription_mut(&mut self) -> &mut SubscriptionEditor {
         &mut self.subscription
     }
@@ -210,9 +233,7 @@ pub(super) fn with_agent_fields(
         || fields.purpose.trim().is_empty()
         || fields.folder.trim().is_empty()
     {
-        return Err(
-            "Enter a name, instructions, and a project folder.".into(),
-        );
+        return Err("Enter a name, instructions, and a project folder.".into());
     }
     bruhs_models::agent::ModelId::try_from(fields.model.clone())
         .map_err(|error| error.to_string())?;
@@ -231,12 +252,12 @@ fn webhook_prompt_help() -> Div {
 
 impl ReactiveAutomations {
     fn render_task_prompt(&self, editor: &AutomationEditor, cx: &Context<'_, Self>) -> Div {
-        let body = div().debug_selector(|| "scheduled-task-prompt".into()).flex().flex_col().gap_1().child(field(
-            "Prompt",
-            editor.task_prompt(),
-            true,
-            self.busy,
-        ));
+        let body = div()
+            .debug_selector(|| "scheduled-task-prompt".into())
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(field("Prompt", editor.task_prompt(), true, self.busy));
         if editor.source.kind != "webhook" {
             return body;
         }
@@ -323,7 +344,11 @@ impl ReactiveAutomations {
         let poll = AppPollEditor::new(&source.source.kind, window, cx);
         self.editor = Some(Editor::Automation(Box::new(AutomationEditor {
             scheduled_form: false,
-            task_name: edit_input(setup.as_ref().map_or("", AutomationSetup::title), window, cx),
+            task_name: edit_input(
+                setup.as_ref().map_or("", AutomationSetup::title),
+                window,
+                cx,
+            ),
             schedule_focus: task_schedule::ScheduleFocus::new(cx),
             date_time_picker: task_datetime_picker::SchedulePicker::new(cx),
             task_enabled: setup.as_ref().is_none_or(AutomationSetup::enabled),
@@ -334,12 +359,33 @@ impl ReactiveAutomations {
             host_request: None,
             open_filter: None,
             task_thread_open: false,
-            checkout: task_checkout::CheckoutEditor::new(&subscription.subscription.task_checkout, window, cx),
+            checkout: task_checkout::CheckoutEditor::new(
+                &subscription.subscription.task_checkout,
+                window,
+                cx,
+            ),
             webhook_url: None,
-            webhook_prompt: subscription.subscription.webhook_prompt.as_deref().map(|text| edit_area(text, window, cx)),
-            security: webhook_security::SecurityFields::new(&subscription.subscription.webhook_security, window, cx),
-            dedupe: webhook_dedupe::DedupeFields::new(&subscription.subscription.webhook_dedupe, window, cx),
-            filters: subscription.subscription.webhook_filters.iter().map(|filter| webhook_filters::FilterRow::new(Some(filter), window, cx)).collect(),
+            webhook_prompt: subscription
+                .subscription
+                .webhook_prompt
+                .as_deref()
+                .map(|text| edit_area(text, window, cx)),
+            security: webhook_security::SecurityFields::new(
+                &subscription.subscription.webhook_security,
+                window,
+                cx,
+            ),
+            dedupe: webhook_dedupe::DedupeFields::new(
+                &subscription.subscription.webhook_dedupe,
+                window,
+                cx,
+            ),
+            filters: subscription
+                .subscription
+                .webhook_filters
+                .iter()
+                .map(|filter| webhook_filters::FilterRow::new(Some(filter), window, cx))
+                .collect(),
             agent,
             source,
             subscription,
@@ -357,7 +403,9 @@ impl ReactiveAutomations {
         let Some(Editor::Automation(editor)) = &self.editor else {
             return;
         };
-        if editor.host_request.is_some() { return; }
+        if editor.host_request.is_some() {
+            return;
+        }
         let mut setup = match editor.build(self.app_source_block(), self.poll_apps.listing(), cx) {
             Ok(setup) => setup,
             Err(error) => {
@@ -369,11 +417,13 @@ impl ReactiveAutomations {
         self.error = None;
         if editor.scheduled_form {
             // Other tasks keep their original clock or webhook when this task changes its trigger.
-            if setup.source != editor.source.source && self.snapshot.as_ref().is_some_and(|snapshot| {
-                snapshot.subscriptions.iter().any(|sub| {
-                    sub.id != setup.subscription.id && sub.source_id == setup.source.id
+            if setup.source != editor.source.source
+                && self.snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.subscriptions.iter().any(|sub| {
+                        sub.id != setup.subscription.id && sub.source_id == setup.source.id
+                    })
                 })
-            }) {
+            {
                 setup.source.id = uuid::Uuid::new_v4().to_string();
                 setup.subscription.source_id.clone_from(&setup.source.id);
             }
@@ -381,11 +431,9 @@ impl ReactiveAutomations {
             if let Some(choice) = destination {
                 // A paired host resolves the selected agent from its own records at save time.
                 if self.linked_task.is_none() {
-                    let saved_agent = self
-                        .snapshot
-                        .iter()
-                        .flat_map(|s| &s.agents)
-                        .find(|a| a.id == choice.agent_id && a.project_path == setup.agent.project_path);
+                    let saved_agent = self.snapshot.iter().flat_map(|s| &s.agents).find(|a| {
+                        a.id == choice.agent_id && a.project_path == setup.agent.project_path
+                    });
                     if let Some(agent) = saved_agent {
                         setup.agent = agent.clone();
                         if let Some(model) = &choice.desktop_model {
@@ -395,11 +443,13 @@ impl ReactiveAutomations {
                         setup.agent.id.clone_from(&choice.agent_id);
                         setup.agent.name.clone_from(&choice.title);
                         setup.agent.model.clone_from(model);
-                        setup.agent.instructions = "Continue the selected desktop conversation.".into();
+                        setup.agent.instructions =
+                            "Continue the selected desktop conversation.".into();
                         setup.agent.memory.clear();
                     } else {
-                        self.error =
-                            Some("The destination thread is no longer available in this project.".into());
+                        self.error = Some(
+                            "The destination thread is no longer available in this project.".into(),
+                        );
                         cx.notify();
                         return;
                     };
@@ -416,11 +466,22 @@ impl ReactiveAutomations {
                     setup.subscription.instructions = prompt;
                 }
             }
-            if editor.is_new || setup.agent.model != editor.agent.agent.model
+            if editor.is_new
+                || setup.agent.model != editor.agent.agent.model
                 || setup.agent.project_path != editor.agent.agent.project_path
             {
-                let model = destination.and_then(|choice| choice.desktop_model.as_ref().or(choice.agent_model.as_ref())).unwrap_or(&setup.agent.model);
-                if let Some(problem) = editor.picker.model_problem(&setup.agent.project_path, model) {
+                let model = destination
+                    .and_then(|choice| {
+                        choice
+                            .desktop_model
+                            .as_ref()
+                            .or(choice.agent_model.as_ref())
+                    })
+                    .unwrap_or(&setup.agent.model);
+                if let Some(problem) = editor
+                    .picker
+                    .model_problem(&setup.agent.project_path, model)
+                {
                     self.error = Some(problem.to_owned());
                     cx.notify();
                     return;
@@ -493,10 +554,15 @@ impl ReactiveAutomations {
                         "automation-enable".into(),
                         "Enable automation",
                         match editor.signing_secret(setup, cx) {
-                            Some(secret) => ReactiveCommand::SaveScheduledTask { destination: None,
-                                automation: Box::new(setup.clone()), enabled: setup.enabled(), signing_secret: Some(secret),
+                            Some(secret) => ReactiveCommand::SaveScheduledTask {
+                                destination: None,
+                                automation: Box::new(setup.clone()),
+                                enabled: setup.enabled(),
+                                signing_secret: Some(secret),
                             },
-                            None => apply(ReactiveChange::SaveAutomation { automation: Box::new(setup.clone()) }),
+                            None => apply(ReactiveChange::SaveAutomation {
+                                automation: Box::new(setup.clone()),
+                            }),
                         },
                         cx,
                     ))
@@ -523,7 +589,11 @@ impl ReactiveAutomations {
             );
         }
         let in_dialog = choices.is_some();
-        let title = if editor.scheduled_form { editor.task_title() } else { "Set up an automation" };
+        let title = if editor.scheduled_form {
+            editor.task_title()
+        } else {
+            "Set up an automation"
+        };
         let mut body = if in_dialog {
             div().flex().flex_col().gap_3()
         } else {
@@ -541,53 +611,116 @@ impl ReactiveAutomations {
         if in_dialog || editor.subscription.subscription.task_title.is_some() {
             body = body.child(field("Name", &editor.task_name, false, self.busy));
         } else if !editor.agent_locked {
-            body = body.child(field("Automation name", &editor.agent.name, false, self.busy));
+            body = body.child(field(
+                "Automation name",
+                &editor.agent.name,
+                false,
+                self.busy,
+            ));
         }
         if let Some((project, model)) = choices {
-            body = body.child(self.render_task_conversation(editor,cx));
-            if let Some(choice)=&editor.picker.chosen_thread {
-                if let Some(agent)=self.snapshot.iter().flat_map(|s|&s.agents).find(|a|a.id==choice.agent_id) {
-                    body=body.child(muted(format!("Runs as {}",agent.name)));
+            body = body.child(self.render_task_conversation(editor, cx));
+            if let Some(choice) = &editor.picker.chosen_thread {
+                if let Some(agent) = self
+                    .snapshot
+                    .iter()
+                    .flat_map(|s| &s.agents)
+                    .find(|a| a.id == choice.agent_id)
+                {
+                    body = body.child(muted(format!("Runs as {}", agent.name)));
                 }
             } else if editor.agent_locked {
                 body = body.child(muted(format!("Runs as {}", editor.agent.agent.name)));
             }
-            if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none() {
+            if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none()
+            {
                 let (workspace, details) = self.render_task_checkout(editor, cx);
-                body = body.child(div().flex().flex_wrap().items_start().gap_3()
-                    .child(div().flex_1().min_w(px(200.)).child(project))
-                    .child(div().flex_1().min_w(px(200.)).child(workspace)))
+                body = body
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_start()
+                            .gap_3()
+                            .child(div().flex_1().min_w(px(200.)).child(project))
+                            .child(div().flex_1().min_w(px(200.)).child(workspace)),
+                    )
                     .children(details);
             } else {
                 body = body.child(project);
             }
             body = body.child(self.render_task_prompt(editor, cx)).child(model);
         } else if editor.agent_locked {
-            body = body.child(muted("This routine runs as this bruh. Change its job and model in Settings.")
-                .debug_selector(|| "automation-runs-as-bruh".to_string()));
+            body = body.child(
+                muted("This routine runs as this bruh. Change its job and model in Settings.")
+                    .debug_selector(|| "automation-runs-as-bruh".to_string()),
+            );
         } else {
-            body = body.child(field("What should this automation do?", &editor.agent.instructions, true, self.busy))
-                .child(field("Automation working folder", &editor.agent.path, false, self.busy))
+            body = body
+                .child(field(
+                    "What should this automation do?",
+                    &editor.agent.instructions,
+                    true,
+                    self.busy,
+                ))
+                .child(field(
+                    "Automation working folder",
+                    &editor.agent.path,
+                    false,
+                    self.busy,
+                ))
                 .child(field("Model", &editor.agent.model, false, self.busy));
         }
         if !in_dialog && editor.source.kind == "webhook" {
             if let Some(prompt) = &editor.webhook_prompt {
-                body = body.child(field("Webhook prompt", prompt, true, self.busy)).child(webhook_prompt_help());
+                body = body
+                    .child(field("Webhook prompt", prompt, true, self.busy))
+                    .child(webhook_prompt_help());
             }
         }
         if editor.scheduled_form {
             if !in_dialog {
-                body = body.child(self.render_task_conversation(editor,cx));
-                if !editor.task_conversation().is_agent() && editor.picker.displayed_thread().is_none() {
-                    let (workspace,details)=self.render_task_checkout(editor,cx);
+                body = body.child(self.render_task_conversation(editor, cx));
+                if !editor.task_conversation().is_agent()
+                    && editor.picker.displayed_thread().is_none()
+                {
+                    let (workspace, details) = self.render_task_checkout(editor, cx);
                     body = body.child(workspace).children(details);
                 }
             }
             body = body.child(self.schedule_selector(editor, cx));
         } else {
-        body = body.child(muted("Starts when"))
-            .child(div().flex().flex_wrap().gap_2().children(super::app_poll::starts_when_options(self.apps_ready(),editor.source.kind).into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{if !ask_before_kind(&mut editor.source,kind){editor.select_trigger(kind,window,cx);}}cx.notify();}))))
-            .children(self.render_newer_source_confirm(&editor.source, cx));
+            body = body
+                .child(muted("Starts when"))
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        super::app_poll::starts_when_options(self.apps_ready(), editor.source.kind)
+                            .into_iter()
+                            .map(|(kind, label)| {
+                                control(
+                                    SharedString::from(format!("automation-kind-{kind}")),
+                                    label,
+                                    self.busy,
+                                )
+                                .aria_selected(editor.source.kind == kind)
+                                .when(editor.source.kind == kind, |button| {
+                                    button.bg(theme::blueberry_500().opacity(0.15))
+                                })
+                                .on_activate(
+                                    cx,
+                                    move |this, window, cx| {
+                                        if let Some(Editor::Automation(editor)) = &mut this.editor {
+                                            if !ask_before_kind(&mut editor.source, kind) {
+                                                editor.select_trigger(kind, window, cx);
+                                            }
+                                        }
+                                        cx.notify();
+                                    },
+                                )
+                            }),
+                    ),
+                )
+                .children(self.render_newer_source_confirm(&editor.source, cx));
         }
         body=match editor.source.kind {
             "calendar" | "once" | "schedule" if editor.scheduled_form => body.child(self.schedule_timing_fields(editor, cx)),
@@ -633,8 +766,18 @@ impl ReactiveAutomations {
                         self.busy,
                     ))
                 })
-                .when(!(in_dialog && editor.agent_locked) && !(editor.source.kind == "webhook" && editor.webhook_prompt.is_some()), |advanced| advanced.child(field(
-                    "Event-specific instructions", &editor.subscription.instructions, true, self.busy)))
+                .when(
+                    !(in_dialog && editor.agent_locked)
+                        && !(editor.source.kind == "webhook" && editor.webhook_prompt.is_some()),
+                    |advanced| {
+                        advanced.child(field(
+                            "Event-specific instructions",
+                            &editor.subscription.instructions,
+                            true,
+                            self.busy,
+                        ))
+                    },
+                )
                 .child(
                     control(
                         "automation-auto-run",
@@ -665,8 +808,16 @@ impl ReactiveAutomations {
                 ));
             }
             if editor.scheduled_form && editor.source.kind == "calendar" {
-                advanced = advanced.child(muted("For multiple runs each day, separate the times with commas."))
-                    .child(field("Time zone", &editor.source.time_zone, false, self.busy));
+                advanced = advanced
+                    .child(muted(
+                        "For multiple runs each day, separate the times with commas.",
+                    ))
+                    .child(field(
+                        "Time zone",
+                        &editor.source.time_zone,
+                        false,
+                        self.busy,
+                    ));
             }
             if editor.source.kind == "folder" {
                 advanced = advanced
@@ -725,7 +876,9 @@ impl ReactiveAutomations {
                 .child(self.render_busy_choice(editor.subscription.subscription.on_busy, cx));
             body = body.child(advanced);
         }
-        if in_dialog { return body; }
+        if in_dialog {
+            return body;
+        }
         if editor.scheduled_form {
             if let Some(error) = self.error.as_ref().or(self.load_error.as_ref()) {
                 body = body.child(
@@ -938,26 +1091,36 @@ impl AutomationEditor {
         listing: Option<&bruhs_models::apps::AppsListing>,
         cx: &App,
     ) -> Result<AutomationSetup, String> {
-        let task_name = if self.scheduled_form || self.subscription.subscription.task_title.is_some() {
-            let title = value(&self.task_name, cx).trim().to_owned();
-            if title.is_empty() {
-                return Err("Enter a task name.".into());
-            }
-            Some(title)
-        } else {
-            None
-        };
+        let task_name =
+            if self.scheduled_form || self.subscription.subscription.task_title.is_some() {
+                let title = value(&self.task_name, cx).trim().to_owned();
+                if title.is_empty() {
+                    return Err("Enter a task name.".into());
+                }
+                Some(title)
+            } else {
+                None
+            };
         let fields = AgentFields {
             name: if self.is_new {
-                task_name.clone().unwrap_or_else(|| value(&self.agent.name, cx))
+                task_name
+                    .clone()
+                    .unwrap_or_else(|| value(&self.agent.name, cx))
             } else {
                 value(&self.agent.name, cx)
             },
-            purpose: if self.scheduled_form && self.source.kind == "webhook" && self.webhook_prompt.is_some() {
+            purpose: if self.scheduled_form
+                && self.source.kind == "webhook"
+                && self.webhook_prompt.is_some()
+            {
                 if self.agent.agent.instructions.trim().is_empty() {
                     "Follow the task prompt supplied by the owner for each webhook delivery.".into()
-                } else { self.agent.agent.instructions.clone() }
-            } else { value(&self.agent.instructions, cx) },
+                } else {
+                    self.agent.agent.instructions.clone()
+                }
+            } else {
+                value(&self.agent.instructions, cx)
+            },
             folder: value(&self.agent.path, cx),
             model: value(&self.agent.model, cx),
             memory: value(&self.agent.memory, cx),
@@ -1000,7 +1163,10 @@ impl AutomationEditor {
                 }
             }
             "schedule" if self.schedule_uses_minutes() => SourceKind::Schedule {
-                every_ms: task_schedule::interval_milliseconds(&value(&self.source.interval, cx), &self.source.source.kind)?,
+                every_ms: task_schedule::interval_milliseconds(
+                    &value(&self.source.interval, cx),
+                    &self.source.source.kind,
+                )?,
             },
             "schedule" => SourceKind::Schedule {
                 every_ms: interval?,
@@ -1024,29 +1190,56 @@ impl AutomationEditor {
         if let Some(name) = task_name {
             subscription.task_title = Some(name);
         }
-        if !matches!(source.kind, SourceKind::Once{..}|SourceKind::Calendar{..}|SourceKind::Schedule{..}|SourceKind::Webhook) {
+        if !matches!(
+            source.kind,
+            SourceKind::Once { .. }
+                | SourceKind::Calendar { .. }
+                | SourceKind::Schedule { .. }
+                | SourceKind::Webhook
+        ) {
             subscription.task_conversation = TaskConversation::Agent;
         }
         if subscription.task_conversation.is_agent() {
             subscription.task_checkout = TaskCheckout::Project;
-        } else if let Some(choice)=self.picker.displayed_thread() {
-            subscription.task_checkout=choice.checkout.clone();
+        } else if let Some(choice) = self.picker.displayed_thread() {
+            subscription.task_checkout = choice.checkout.clone();
         } else if self.scheduled_form {
             subscription.task_checkout = self.checkout.build(cx)?;
         }
         subscription.webhook_prompt = if source.kind == SourceKind::Webhook {
             self.webhook_prompt.as_ref().map(|input| value(input, cx))
-        } else { None };
-        if subscription.webhook_prompt.as_ref().is_some_and(|p| p.trim().is_empty()) {
+        } else {
+            None
+        };
+        if subscription
+            .webhook_prompt
+            .as_ref()
+            .is_some_and(|p| p.trim().is_empty())
+        {
             return Err("Enter a webhook prompt.".into());
         }
-        subscription.webhook_security = if source.kind == SourceKind::Webhook { self.security.build(cx)? } else { WebhookSecurity::default() };
+        subscription.webhook_security = if source.kind == SourceKind::Webhook {
+            self.security.build(cx)?
+        } else {
+            WebhookSecurity::default()
+        };
         subscription.webhook_dedupe = if source.kind == SourceKind::Webhook {
             self.dedupe.build(cx)?
-        } else { WebhookDedupe::default() };
+        } else {
+            WebhookDedupe::default()
+        };
         subscription.webhook_filters = if source.kind == SourceKind::Webhook {
-            self.filters.iter().enumerate().map(|(index, row)| row.build(cx).map_err(|error| format!("Filter {} · {error}", index + 1))).collect::<Result<_, _>>()?
-        } else { Vec::new() };
+            self.filters
+                .iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    row.build(cx)
+                        .map_err(|error| format!("Filter {} · {error}", index + 1))
+                })
+                .collect::<Result<_, _>>()?
+        } else {
+            Vec::new()
+        };
         subscription.instructions = value(&self.subscription.instructions, cx);
         subscription.debounce_ms = milliseconds(&value(&self.subscription.debounce, cx), true)?;
         subscription.throttle_ms = milliseconds(&value(&self.subscription.throttle, cx), true)?;
@@ -1203,9 +1396,14 @@ fn review_fields_with(
         ),
     ];
     if !setup.subscription.task_conversation.is_agent() {
-        fields.push(("Thread", setup.subscription.task_conversation.label().into()));
+        fields.push((
+            "Thread",
+            setup.subscription.task_conversation.label().into(),
+        ));
     }
-    if let Some(prompt) = &setup.subscription.webhook_prompt { fields.push(("Webhook prompt", prompt.clone())); }
+    if let Some(prompt) = &setup.subscription.webhook_prompt {
+        fields.push(("Webhook prompt", prompt.clone()));
+    }
     if let Some(sig) = &setup.subscription.webhook_security.signature {
         fields.push(("Require signature", format!("HMAC-SHA256 · {}", sig.header)));
     }
@@ -1218,19 +1416,27 @@ fn review_fields_with(
     }
     if !dedupe.coalesce_key.is_empty() {
         fields.push(("Coalesce key", dedupe.coalesce_key.clone()));
-        fields.push(("Coalesce window", format!("{} seconds", dedupe.coalesce_window_seconds.unwrap_or(120))));
+        fields.push((
+            "Coalesce window",
+            format!("{} seconds", dedupe.coalesce_window_seconds.unwrap_or(120)),
+        ));
     }
     if !setup.subscription.webhook_filters.is_empty() {
-        let filters = setup.subscription.webhook_filters.iter().map(|filter| {
-            let test = match &filter.test {
-                WebhookTest::Equals(value) => format!("equals {value}"),
-                WebhookTest::NotEquals(value) => format!("does not equal {value}"),
-                WebhookTest::In(values) => format!("is one of {}", values.join(", ")),
-                WebhookTest::StartsWith(value) => format!("starts with {value}"),
-                WebhookTest::Exists => "exists".to_owned(),
-            };
-            format!("{} {test}", filter.path)
-        }).collect::<Vec<_>>();
+        let filters = setup
+            .subscription
+            .webhook_filters
+            .iter()
+            .map(|filter| {
+                let test = match &filter.test {
+                    WebhookTest::Equals(value) => format!("equals {value}"),
+                    WebhookTest::NotEquals(value) => format!("does not equal {value}"),
+                    WebhookTest::In(values) => format!("is one of {}", values.join(", ")),
+                    WebhookTest::StartsWith(value) => format!("starts with {value}"),
+                    WebhookTest::Exists => "exists".to_owned(),
+                };
+                format!("{} {test}", filter.path)
+            })
+            .collect::<Vec<_>>();
         fields.push(("Webhook filters", filters.join("\n")));
     }
     fields
@@ -1292,9 +1498,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn scheduled_editor_preserves_calendar_interval_and_once_values(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn scheduled_editor_preserves_calendar_interval_and_once_values(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
@@ -1387,9 +1591,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn scheduled_webhook_form_keeps_selected_filter_and_thread_mode(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn scheduled_webhook_form_keeps_selected_filter_and_thread_mode(cx: &mut gpui::TestAppContext) {
         use super::{TaskConversation, WebhookFilter, WebhookTest};
         cx.update(|cx| {
             bruhs_ui::init(cx);
@@ -1413,11 +1615,16 @@ mod tests {
             };
             editor.scheduled_form = true;
             editor.select_trigger("webhook", window, cx);
-            assert_eq!(super::value(editor.task_prompt(), cx), super::DEFAULT_WEBHOOK_PROMPT);
+            assert_eq!(
+                super::value(editor.task_prompt(), cx),
+                super::DEFAULT_WEBHOOK_PROMPT
+            );
             editor.task_prompt().update(cx, |input, cx| {
                 input.set_value("Summarize {{body.issue}}.", window, cx)
             });
-            editor.task_name.update(cx, |input, cx| input.set_value("Review", window, cx));
+            editor
+                .task_name
+                .update(cx, |input, cx| input.set_value("Review", window, cx));
             editor.agent.instructions.update(cx, |input, cx| {
                 input.set_value("Summarize the event.", window, cx)
             });
@@ -1425,15 +1632,21 @@ mod tests {
                 .agent
                 .path
                 .update(cx, |input, cx| input.set_value("/tmp", window, cx));
-            for (input,text) in [
-                (&editor.dedupe.replay,"{{headers.delivery-id}}"),
-                (&editor.dedupe.coalesce,"{{body.id}}"),
-                (&editor.dedupe.seconds,"9"),
+            for (input, text) in [
+                (&editor.dedupe.replay, "{{headers.delivery-id}}"),
+                (&editor.dedupe.coalesce, "{{body.id}}"),
+                (&editor.dedupe.seconds, "9"),
             ] {
-                input.update(cx,|input,cx|input.set_value(text,window,cx));
+                input.update(cx, |input, cx| input.set_value(text, window, cx));
             }
-            assert!(editor.build(None, None, cx).unwrap_err().contains("10 to 3600"));
-            editor.dedupe.seconds.update(cx,|input,cx|input.set_value("30",window,cx));
+            assert!(editor
+                .build(None, None, cx)
+                .unwrap_err()
+                .contains("10 to 3600"));
+            editor
+                .dedupe
+                .seconds
+                .update(cx, |input, cx| input.set_value("30", window, cx));
             let original = WebhookFilter {
                 path: "headers.source".into(),
                 test: WebhookTest::Equals("original".into()),
@@ -1445,18 +1658,37 @@ mod tests {
             ));
         });
         cx.run_until_parked();
-        for selector in ["task-webhook-signature", "task-signature-encoding", "task-signature-encoding-option-base64"] {
-            let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("missing {selector}"));
+        for selector in [
+            "task-webhook-signature",
+            "task-signature-encoding",
+            "task-signature-encoding-option-base64",
+        ] {
+            let bounds = cx
+                .debug_bounds(selector)
+                .unwrap_or_else(|| panic!("missing {selector}"));
             cx.simulate_click(bounds.center(), gpui::Modifiers::default());
             cx.run_until_parked();
         }
         panel.update_in(cx, |panel, window, cx| {
-            let Some(Editor::Automation(editor)) = &mut panel.editor else { panic!("expected the task editor") };
-            assert!(editor.build(None, None, cx).unwrap_err().contains("shared signing secret"));
-            editor.security.secret.update(cx, |input, cx| input.set_value("fixture-secret", window, cx));
-            editor.security.age.update(cx, |input, cx| input.set_value("1441", window, cx));
+            let Some(Editor::Automation(editor)) = &mut panel.editor else {
+                panic!("expected the task editor")
+            };
+            assert!(editor
+                .build(None, None, cx)
+                .unwrap_err()
+                .contains("shared signing secret"));
+            editor.security.secret.update(cx, |input, cx| {
+                input.set_value("fixture-secret", window, cx)
+            });
+            editor
+                .security
+                .age
+                .update(cx, |input, cx| input.set_value("1441", window, cx));
             assert!(editor.build(None, None, cx).unwrap_err().contains("1440"));
-            editor.security.age.update(cx, |input, cx| input.set_value("15", window, cx));
+            editor
+                .security
+                .age
+                .update(cx, |input, cx| input.set_value("15", window, cx));
         });
         for selector in [
             "webhook-test-1",
@@ -1470,14 +1702,22 @@ mod tests {
             cx.simulate_click(bounds.center(), gpui::Modifiers::default());
             cx.run_until_parked();
         }
-        for selector in ["task-checkout", "task-checkout-option-existing", "reactive-Create task"] {
-            let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("missing {selector}"));
+        for selector in [
+            "task-checkout",
+            "task-checkout-option-existing",
+            "reactive-Create task",
+        ] {
+            let bounds = cx
+                .debug_bounds(selector)
+                .unwrap_or_else(|| panic!("missing {selector}"));
             cx.simulate_click(bounds.center(), gpui::Modifiers::default());
             cx.run_until_parked();
         }
         assert!(cx.debug_bounds("task-save-error").is_some());
         for selector in ["task-checkout", "task-checkout-option-project"] {
-            let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("missing {selector}"));
+            let bounds = cx
+                .debug_bounds(selector)
+                .unwrap_or_else(|| panic!("missing {selector}"));
             cx.simulate_click(bounds.center(), gpui::Modifiers::default());
             cx.run_until_parked();
         }
@@ -1487,15 +1727,28 @@ mod tests {
                 panic!("expected the task review");
             };
             let reviewed = editor.build(None, None, cx).expect("valid task");
-            assert_eq!(reviewed.subscription.webhook_prompt.as_deref(), Some("Summarize {{body.issue}}."));
+            assert_eq!(
+                reviewed.subscription.webhook_prompt.as_deref(),
+                Some("Summarize {{body.issue}}.")
+            );
             assert!(!reviewed.agent.instructions.contains("{{body.issue}}"));
             let policy = &reviewed.subscription.webhook_security;
             assert_eq!(policy.max_delivery_age_minutes, Some(15));
-            assert_eq!(policy.signature.as_ref().unwrap().encoding, super::WebhookSignatureEncoding::Base64);
-            assert!(!serde_json::to_string(&reviewed).unwrap().contains("fixture-secret"));
-            assert_eq!(reviewed.subscription.webhook_dedupe, super::WebhookDedupe {
-                replay_key: "{{headers.delivery-id}}".into(), coalesce_key: "{{body.id}}".into(), coalesce_window_seconds: Some(30),
-            });
+            assert_eq!(
+                policy.signature.as_ref().unwrap().encoding,
+                super::WebhookSignatureEncoding::Base64
+            );
+            assert!(!serde_json::to_string(&reviewed)
+                .unwrap()
+                .contains("fixture-secret"));
+            assert_eq!(
+                reviewed.subscription.webhook_dedupe,
+                super::WebhookDedupe {
+                    replay_key: "{{headers.delivery-id}}".into(),
+                    coalesce_key: "{{body.id}}".into(),
+                    coalesce_window_seconds: Some(30),
+                }
+            );
             assert_eq!(
                 reviewed.subscription.task_conversation,
                 TaskConversation::Continue

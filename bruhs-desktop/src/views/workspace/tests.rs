@@ -1,5 +1,5 @@
-mod thread_resource_flow;
 mod settings_workflows;
+mod thread_resource_flow;
 use super::threads_ui::{
     step_thread_index, thread_link, thread_selection_after_delete, THREAD_TITLE_GENERAL,
 };
@@ -135,10 +135,10 @@ use super::{
     SETTINGS_BODY_TEXT_SIZE_PX, SETTINGS_BODY_X_PADDING_PX, SETTINGS_BODY_Y_PADDING_PX,
     SETTINGS_CLOSE_BUTTON_SIZE_PX, SETTINGS_CLOSE_HOVER_BG_OPACITY, SETTINGS_CLOSE_LABEL,
     SETTINGS_CODE_FONT_FAMILY, SETTINGS_CODE_RADIUS_PX, SETTINGS_CONTROL_RADIUS_PX,
-    SETTINGS_META_TEXT_SIZE_PX, SETTINGS_ROW_TEXT_GAP_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
-    SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, SETTINGS_SECTION_GAP_PX, TASKS_ALL_PROJECTS_LABEL,
-    TASKS_HEADER_BODY_FONT_FAMILY, TASKS_HEADER_BORDER_OPACITY, TASKS_HEADER_CONTROL_GAP_PX,
-    TASKS_HEADER_CONTROL_RADIUS_PX, TASKS_HEADER_CONTROL_X_PADDING_PX,
+    SETTINGS_META_TEXT_SIZE_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
+    SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, SETTINGS_ROW_TEXT_GAP_PX, SETTINGS_SECTION_GAP_PX,
+    TASKS_ALL_PROJECTS_LABEL, TASKS_HEADER_BODY_FONT_FAMILY, TASKS_HEADER_BORDER_OPACITY,
+    TASKS_HEADER_CONTROL_GAP_PX, TASKS_HEADER_CONTROL_RADIUS_PX, TASKS_HEADER_CONTROL_X_PADDING_PX,
     TASKS_HEADER_CONTROL_Y_PADDING_PX, TASKS_HEADER_MIN_HEIGHT_PX,
     TASKS_HEADER_MODE_ACTIVE_BG_OPACITY, TASKS_HEADER_MODE_TEXT_SIZE_PX,
     TASKS_HEADER_NEW_TASK_BG_OPACITY, TASKS_HEADER_NEW_TASK_BORDER_OPACITY,
@@ -190,9 +190,9 @@ use crate::{app_state::DesktopState, assets, theme};
 use bruhs_core::registry::TaskUpdate;
 use bruhs_core::TaskKind;
 use bruhs_models::EpochMs;
+use bruhs_ui::zoom::px;
 use chrono::{NaiveDate, NaiveDateTime};
 use gpui::{AppContext as _, Entity, Focusable};
-use bruhs_ui::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
@@ -427,7 +427,10 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     cx.run_until_parked();
     // Scroll the editor row and its list into the General viewport.
     workspace.update_in(cx, |workspace, _, cx| {
-        workspace.settings_scroll.set_offset(gpui::point(px(0.), -workspace.settings_scroll.max_offset().y));
+        workspace.settings_scroll.set_offset(gpui::point(
+            px(0.),
+            -workspace.settings_scroll.max_offset().y,
+        ));
         cx.notify();
     });
     cx.run_until_parked();
@@ -442,7 +445,10 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
 
     // A pointer can only select a tab inside the independently scrolling sidebar.
     workspace.update_in(cx, |workspace, _, cx| {
-        workspace.settings_nav_scroll.set_offset(gpui::point(px(0.), -workspace.settings_nav_scroll.max_offset().y));
+        workspace.settings_nav_scroll.set_offset(gpui::point(
+            px(0.),
+            -workspace.settings_nav_scroll.max_offset().y,
+        ));
         cx.notify();
     });
     cx.run_until_parked();
@@ -493,7 +499,9 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     });
 
     workspace.update_in(cx, |workspace, _, cx| {
-        workspace.settings_nav_scroll.set_offset(gpui::point(px(0.), px(0.)));
+        workspace
+            .settings_nav_scroll
+            .set_offset(gpui::point(px(0.), px(0.)));
         cx.notify();
     });
     cx.run_until_parked();
@@ -504,7 +512,11 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
         assert_eq!(workspace.settings_scroll.offset().y, px(0.0));
         assert_eq!(workspace.settings_section, super::SettingsSection::Keyboard);
     });
-    workspace.update_in(cx,|w,_,cx|{w.settings_nav_scroll.set_offset(gpui::point(px(0.),px(-10_000.)));cx.notify();});
+    workspace.update_in(cx, |w, _, cx| {
+        w.settings_nav_scroll
+            .set_offset(gpui::point(px(0.), px(-10_000.)));
+        cx.notify();
+    });
     cx.run_until_parked();
     click_debug_selector(cx, "desktop-settings-nav-about");
     cx.run_until_parked();
@@ -2738,14 +2750,18 @@ fn settings_restores_an_archived_thread_and_draft_after_restart(cx: &mut gpui::T
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.confirm_thread_archive = true;
         let chat = workspace.active_thread().unwrap().chat.clone();
-        chat.update(cx, |chat, cx| chat.set_composer_draft("Unsent thought".into(), window, cx));
+        chat.update(cx, |chat, cx| {
+            chat.set_composer_draft("Unsent thought".into(), window, cx)
+        });
     });
     open_thread_menu_by_pointer(cx, &id);
     click_debug_selector(cx, "desktop-thread-menu-archive");
     cx.run_until_parked();
     cx.simulate_prompt_answer("Cancel");
     cx.run_until_parked();
-    workspace.update_in(cx, |workspace, _, _| assert!(workspace.archived_threads.is_empty()));
+    workspace.update_in(cx, |workspace, _, _| {
+        assert!(workspace.archived_threads.is_empty())
+    });
     open_thread_menu_by_pointer(cx, &id);
     click_debug_selector(cx, "desktop-thread-menu-archive");
     cx.run_until_parked();
@@ -2766,21 +2782,39 @@ fn settings_restores_an_archived_thread_and_draft_after_restart(cx: &mut gpui::T
         workspace.set_settings_section(super::SettingsSection::Archived, cx);
     });
     cx.run_until_parked();
-    click_debug_selector(cx, Box::leak(format!("settings-restore-thread-{id}").into_boxed_str()));
+    click_debug_selector(
+        cx,
+        Box::leak(format!("settings-restore-thread-{id}").into_boxed_str()),
+    );
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _, cx| {
-        let thread = workspace.threads.iter().find(|thread| thread.id == id).unwrap();
-        assert_eq!(thread.chat.read(cx).input_state.read(cx).value().as_str(), "Unsent thought");
+        let thread = workspace
+            .threads
+            .iter()
+            .find(|thread| thread.id == id)
+            .unwrap();
+        assert_eq!(
+            thread.chat.read(cx).input_state.read(cx).value().as_str(),
+            "Unsent thought"
+        );
         assert!(workspace.snapshot(cx).archived_threads.is_empty());
     });
 }
 
 #[gpui::test]
 fn settings_send_shortcut_controls_newlines_and_sending(cx: &mut gpui::TestAppContext) {
-    let (workspace,cx, id, _) = thread_menu_workspace(cx);
+    let (workspace, cx, id, _) = thread_menu_workspace(cx);
     let chat = workspace.update_in(cx, |workspace, window, cx| {
-        workspace.select_settings_option("desktop-send-shortcut", "mod-enter-multiline", window, cx);
-        assert_eq!(workspace.snapshot(cx).send_shortcut.as_deref(), Some("mod-enter-multiline"));
+        workspace.select_settings_option(
+            "desktop-send-shortcut",
+            "mod-enter-multiline",
+            window,
+            cx,
+        );
+        assert_eq!(
+            workspace.snapshot(cx).send_shortcut.as_deref(),
+            Some("mod-enter-multiline")
+        );
         let chat = workspace.active_thread().unwrap().chat.clone();
         chat.update(cx, |chat, cx| {
             chat.set_composer_draft("first\nsecond".into(), window, cx);
@@ -2792,42 +2826,76 @@ fn settings_send_shortcut_controls_newlines_and_sending(cx: &mut gpui::TestAppCo
     cx.run_until_parked();
     press_key(cx, "enter");
     chat.update_in(cx, |chat, _, cx| {
-        assert_eq!(chat.input_state.read(cx).value().as_str(), "first\nsecond\n");
+        assert_eq!(
+            chat.input_state.read(cx).value().as_str(),
+            "first\nsecond\n"
+        );
         assert!(chat.prompt_queue.for_thread(&id).is_empty());
     });
-    press_key(cx, if cfg!(target_os = "macos") { "cmd-enter" } else { "ctrl-enter" });
+    press_key(
+        cx,
+        if cfg!(target_os = "macos") {
+            "cmd-enter"
+        } else {
+            "ctrl-enter"
+        },
+    );
     chat.update_in(cx, |chat, window, cx| {
         assert_eq!(chat.prompt_queue.for_thread(&id).len(), 1);
         chat.set_composer_draft("one line".into(), window, cx);
     });
     press_key(cx, "enter");
-    chat.update_in(cx, |chat, _, _| assert_eq!(chat.prompt_queue.for_thread(&id).len(), 2));
+    chat.update_in(cx, |chat, _, _| {
+        assert_eq!(chat.prompt_queue.for_thread(&id).len(), 2)
+    });
 }
 
 #[gpui::test]
-fn settings_records_a_dictation_shortcut_and_applies_the_voice_model_to_chats(cx: &mut gpui::TestAppContext) {
+fn settings_records_a_dictation_shortcut_and_applies_the_voice_model_to_chats(
+    cx: &mut gpui::TestAppContext,
+) {
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.open_settings(&super::OpenSettings, window, cx);
         workspace.set_settings_section(super::SettingsSection::Voice, cx);
-        workspace.select_settings_option("settings-voice-model", "large_v3_turbo", window,cx);
-        workspace.select_settings_option("settings-voice-language","fr",window,cx);
+        workspace.select_settings_option("settings-voice-model", "large_v3_turbo", window, cx);
+        workspace.select_settings_option("settings-voice-language", "fr", window, cx);
         let saved = workspace.snapshot(cx).dictation_prefs.unwrap();
-        assert_eq!(saved.model,bruhs_models::WhisperModel::LargeV3Turbo);
-        assert_eq!(saved.options().language.as_deref(),Some("fr"));
-        for thread in &workspace.threads { assert_eq!(thread.chat.read(cx).dictation_prefs, saved); }
-        workspace.set_settings_section(super::SettingsSection::Keyboard,cx);
-        let index = workspace.keybindings.iter().position(|rule|rule.command=="voice.dictate").unwrap();
-        workspace.keybinding_filter.update(cx,|input,cx|input.set_value("voice.dictate",window,cx));
-        workspace.select_keybinding(index,window,cx);
+        assert_eq!(saved.model, bruhs_models::WhisperModel::LargeV3Turbo);
+        assert_eq!(saved.options().language.as_deref(), Some("fr"));
+        for thread in &workspace.threads {
+            assert_eq!(thread.chat.read(cx).dictation_prefs, saved);
+        }
+        workspace.set_settings_section(super::SettingsSection::Keyboard, cx);
+        let index = workspace
+            .keybindings
+            .iter()
+            .position(|rule| rule.command == "voice.dictate")
+            .unwrap();
+        workspace
+            .keybinding_filter
+            .update(cx, |input, cx| input.set_value("voice.dictate", window, cx));
+        workspace.select_keybinding(index, window, cx);
     });
     cx.run_until_parked();
-    click_debug_selector(cx,"desktop-record-shortcut");
+    click_debug_selector(cx, "desktop-record-shortcut");
     cx.run_until_parked();
-    press_key(cx,if cfg!(target_os="macos") { "cmd-alt-v" } else { "ctrl-alt-v" });
-    workspace.update_in(cx, |workspace,_,cx| {
-        let rule = workspace.snapshot(cx).keybindings.into_iter().find(|rule|rule.command=="voice.dictate").unwrap();
-        assert_eq!(rule.key,"mod+alt+v");
+    press_key(
+        cx,
+        if cfg!(target_os = "macos") {
+            "cmd-alt-v"
+        } else {
+            "ctrl-alt-v"
+        },
+    );
+    workspace.update_in(cx, |workspace, _, cx| {
+        let rule = workspace
+            .snapshot(cx)
+            .keybindings
+            .into_iter()
+            .find(|rule| rule.command == "voice.dictate")
+            .unwrap();
+        assert_eq!(rule.key, "mod+alt+v");
         assert!(workspace.settings_visible());
     });
 }
@@ -3021,7 +3089,10 @@ fn desktop_thread_menu_disables_regeneration_only_while_the_title_is_pending(
             chat.is_streaming = true;
             cx.notify();
         });
-        ws.title_requests.insert(id.clone(), super::thread_titles::PendingTitle::new(1, "Previous title".into(), None));
+        ws.title_requests.insert(
+            id.clone(),
+            super::thread_titles::PendingTitle::new(1, "Previous title".into(), None),
+        );
         cx.notify();
     });
     cx.run_until_parked();
@@ -3156,7 +3227,11 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
     cx.simulate_keystrokes("down");
     assert_eq!(item_focused(&workspace, cx), Some(1));
     cx.simulate_keystrokes("up up");
-    assert_eq!(item_focused(&workspace, cx), Some(10), "Up from Pin reaches Archive");
+    assert_eq!(
+        item_focused(&workspace, cx),
+        Some(10),
+        "Up from Pin reaches Archive"
+    );
     cx.simulate_keystrokes("home");
     assert_eq!(item_focused(&workspace, cx), Some(0));
     cx.simulate_keystrokes("end");
@@ -3453,7 +3528,13 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
             .find(|id| *id != workspace.current_model)
             .expect("a second model to pick")
     });
-    click_debug_selector(cx, leaked_debug_selector(format!("desktop-model-picker-tab-{}", bruhs_models::agent::AgentProvider::for_model(target))));
+    click_debug_selector(
+        cx,
+        leaked_debug_selector(format!(
+            "desktop-model-picker-tab-{}",
+            bruhs_models::agent::AgentProvider::for_model(target)
+        )),
+    );
     cx.run_until_parked();
     click_debug_selector(
         cx,
@@ -5122,8 +5203,8 @@ fn work_item(id: &str, status: DesktopWorkItemStatus) -> DesktopWorkItem {
 
 fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -> PersistedThread {
     PersistedThread {
-        model_options:Default::default(),
-        kiro_choices:Default::default(),
+        model_options: Default::default(),
+        kiro_choices: Default::default(),
         id: id.to_string(),
         title: "Thread".to_string(),
         project_name: String::new(),
@@ -5406,7 +5487,12 @@ fn command_actions_should_match_web_reference() {
                 "Import thread...",
                 "Claude Code, Codex, Cursor"
             ),
-            ("move-in", "Agent", "Move in...", "OpenClaw, Hermes Agent, a prompt"),
+            (
+                "move-in",
+                "Agent",
+                "Move in...",
+                "OpenClaw, Hermes Agent, a prompt"
+            ),
             ("pin-thread", "Actions", "Pin / unpin thread", "⌘⇧P"),
             (
                 "settle-thread",
@@ -7076,15 +7162,22 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
     assert_rendered_bounds(cx, "desktop-update-confirm");
     let label = rendered_bounds(cx, "desktop-settings-row-update-app-label");
     let control = rendered_bounds(cx, "desktop-settings-row-update-app-control");
-    assert!(control.top() >= label.bottom(), "version and actions should stack in the update dialog");
+    assert!(
+        control.top() >= label.bottom(),
+        "version and actions should stack in the update dialog"
+    );
     click_debug_selector(cx, "desktop-update-confirm-cancel");
     cx.run_until_parked();
-    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.restart_sidebar.is_focused(window)));
+    workspace.update_in(cx, |ws, window, _| {
+        assert!(ws.modal_focus.restart_sidebar.is_focused(window))
+    });
     keys::press(cx, "enter");
     assert_rendered_bounds(cx, "desktop-update-confirm");
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
-    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.restart_sidebar.is_focused(window)));
+    workspace.update_in(cx, |ws, window, _| {
+        assert!(ws.modal_focus.restart_sidebar.is_focused(window))
+    });
 
     assert_no_rendered_bounds(cx, "desktop-update-confirm");
     workspace.update_in(cx, |workspace, _window, cx| {
@@ -7106,16 +7199,19 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
         seed(cx, update_report(provider, app, vec![]));
         click_debug_selector(cx, "desktop-sidebar-update");
         cx.run_until_parked();
-        assert_rendered_bounds(cx,"desktop-settings-row-update-app");
+        assert_rendered_bounds(cx, "desktop-settings-row-update-app");
         if can_update_providers {
-            assert_rendered_bounds(cx,"desktop-update-confirm-run");
+            assert_rendered_bounds(cx, "desktop-update-confirm-run");
         } else {
-            assert_no_rendered_bounds(cx,"desktop-update-confirm-run");
+            assert_no_rendered_bounds(cx, "desktop-update-confirm-run");
         }
         click_debug_selector(cx, "desktop-update-confirm-cancel");
         cx.run_until_parked();
     }
-    seed(cx, update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]));
+    seed(
+        cx,
+        update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]),
+    );
 
     // Settings rows: Update now and its copy button, the app command.
     workspace.update_in(cx, |workspace, window, cx| {
@@ -7241,7 +7337,9 @@ fn desktop_sidebar_checks_for_updates_with_automatic_checks_off(cx: &mut gpui::T
 }
 
 #[gpui::test]
-fn settings_combined_update_requires_confirmation_and_returns_to_settings(cx: &mut gpui::TestAppContext) {
+fn settings_combined_update_requires_confirmation_and_returns_to_settings(
+    cx: &mut gpui::TestAppContext,
+) {
     use super::updates_ui::AppInstall;
     use bruhs_models::updates::AppUpdateState;
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
@@ -7249,16 +7347,23 @@ fn settings_combined_update_requires_confirmation_and_returns_to_settings(cx: &m
         ws.updates.update(cx, |u, cx| {
             u.bundle = Some("Fixture.app".into());
             u.install = AppInstall::Ready {
-                version: "0.2.0".into(), staged: "Staged.app".into(), restart_error: None,
+                version: "0.2.0".into(),
+                staged: "Staged.app".into(),
+                restart_error: None,
             };
-            u.set_report_for_test(update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]), cx);
+            u.set_report_for_test(
+                update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]),
+                cx,
+            );
         });
         ws.open_settings(&OpenSettings, window, cx);
         ws.set_settings_section(super::SettingsSection::Updates, cx);
     });
     cx.run_until_parked();
     click_debug_selector(cx, "desktop-settings-updates-update-all");
-    workspace.update_in(cx, |ws, window, _| assert!(ws.modal_focus.update_cancel.is_focused(window)));
+    workspace.update_in(cx, |ws, window, _| {
+        assert!(ws.modal_focus.update_cancel.is_focused(window))
+    });
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     workspace.update_in(cx, |ws, window, _| {
@@ -7371,8 +7476,14 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.set_settings_section(super::SettingsSection::About, cx);
         workspace.select_settings_option("settings-update-track", "nightly", window, cx);
-        assert_eq!(workspace.snapshot(cx).update_track, Some(super::updates_ui::UpdateTrack::Nightly));
-        assert!(matches!(workspace.updates.read(cx).install, super::updates_ui::AppInstall::Idle));
+        assert_eq!(
+            workspace.snapshot(cx).update_track,
+            Some(super::updates_ui::UpdateTrack::Nightly)
+        );
+        assert!(matches!(
+            workspace.updates.read(cx).install,
+            super::updates_ui::AppInstall::Idle
+        ));
         assert!(workspace.updates.read(cx).report.is_none());
     });
 }
@@ -7570,8 +7681,16 @@ fn saved_snooze_choices_set_the_selected_threads_wake_time(cx: &mut gpui::TestAp
     cx.simulate_click(choice.center(), gpui::Modifiers::none());
     cx.run_until_parked();
     workspace.update_in(cx, |this, _, _| {
-        let until = this.threads.iter().find(|t| t.id == id).unwrap().snoozed_until_ms.unwrap();
-        assert!((before + 135 * 60_000..=EpochMs::now().as_millis() + 135 * 60_000).contains(&until));
+        let until = this
+            .threads
+            .iter()
+            .find(|t| t.id == id)
+            .unwrap()
+            .snoozed_until_ms
+            .unwrap();
+        assert!(
+            (before + 135 * 60_000..=EpochMs::now().as_millis() + 135 * 60_000).contains(&until)
+        );
     });
 }
 

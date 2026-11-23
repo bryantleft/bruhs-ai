@@ -1902,7 +1902,13 @@ fn format_epoch_ms(timestamp_ms: i64) -> String {
         .single()
         .map_or_else(
             || "Earlier".to_string(),
-            |date| format!("{}, {}", date.format("%b %-d"), date.format(crate::clock_format::pattern())),
+            |date| {
+                format!(
+                    "{}, {}",
+                    date.format("%b %-d"),
+                    date.format(crate::clock_format::pattern())
+                )
+            },
         )
 }
 

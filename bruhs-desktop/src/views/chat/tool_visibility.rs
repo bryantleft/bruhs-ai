@@ -34,12 +34,7 @@ impl Visibility {
             _ => matches!(self, Self::ShowAll | Self::HideSuccessful),
         }
     }
-    pub(super) fn answer(
-        self,
-        streaming: bool,
-        text: &str,
-        final_offset: Option<usize>,
-    ) -> &str {
+    pub(super) fn answer(self, streaming: bool, text: &str, final_offset: Option<usize>) -> &str {
         if self != Self::Zen {
             return text;
         }

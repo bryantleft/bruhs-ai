@@ -165,7 +165,9 @@ impl TasksPanelView {
                 .justify_center()
                 .gap_3()
                 .py_8()
-                .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_LABEL_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(TASKS_PANEL_LABEL_FONT_FAMILY),
+                )
                 .text_size(px(TASKS_PANEL_EMPTY_TEXT_SIZE_PX))
                 .font_family(theme::UI_SMALL_FONT_FAMILY)
                 .text_color(theme::rambutan_500())
@@ -214,7 +216,10 @@ impl TasksPanelView {
                 div()
                     .px_3()
                     .py_1p5()
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_LABEL_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(TASKS_PANEL_LABEL_FONT_FAMILY),
+                    )
                     .text_size(px(TASKS_PANEL_SECTION_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_500())
@@ -300,7 +305,10 @@ impl TasksPanelView {
                                     .child(
                                         div()
                                             .truncate()
-                                            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY))
+                                            .font_family(
+                                                crate::theme::FontFace::Interface
+                                                    .with_default(TASKS_PANEL_BODY_FONT_FAMILY),
+                                            )
                                             .text_size(px(TASKS_PANEL_ROW_LABEL_TEXT_SIZE_PX))
                                             .text_color(theme::rambutan_200())
                                             .child(task.label.clone()),
@@ -318,7 +326,10 @@ impl TasksPanelView {
                             )
                             .child(
                                 div()
-                                    .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_LABEL_FONT_FAMILY))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(TASKS_PANEL_LABEL_FONT_FAMILY),
+                                    )
                                     .text_size(px(TASKS_PANEL_TIME_TEXT_SIZE_PX))
                                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                                     .text_color(theme::rambutan_500())
@@ -338,9 +349,7 @@ impl TasksPanelView {
                                     format!("desktop-background-task-stop-{task_key}")
                                 })
                                 .aria_label(format!("Stop {}", task.label))
-                                .tooltip(|window, cx| {
-                                    Tooltip::new("Stop task").build(window, cx)
-                                })
+                                .tooltip(|window, cx| Tooltip::new("Stop task").build(window, cx))
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -399,7 +408,9 @@ impl TasksPanelView {
                         .p_3()
                         .max_h(px(TASKS_PANEL_LOG_MAX_HEIGHT_PX))
                         .overflow_y_scrollbar()
-                        .font_family(crate::theme::FontFace::Code.with_default(TASKS_PANEL_LOG_FONT_FAMILY))
+                        .font_family(
+                            crate::theme::FontFace::Code.with_default(TASKS_PANEL_LOG_FONT_FAMILY),
+                        )
                         .text_size(px(TASKS_PANEL_LOG_TEXT_SIZE_PX))
                         .text_color(theme::rambutan_400())
                         .child(log_tail),
@@ -418,7 +429,9 @@ impl Render for TasksPanelView {
             .border_l_1()
             .border_color(theme::longan_800().opacity(TASKS_PANEL_DIVIDER_OPACITY))
             .text_color(theme::rambutan_300())
-            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY),
+            )
             .flex()
             .flex_col()
             .child(
@@ -436,7 +449,10 @@ impl Render for TasksPanelView {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASKS_PANEL_BODY_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASKS_PANEL_BODY_FONT_FAMILY),
+                            )
                             .text_size(px(TASKS_PANEL_HEADER_TEXT_SIZE_PX))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(theme::rambutan_300())

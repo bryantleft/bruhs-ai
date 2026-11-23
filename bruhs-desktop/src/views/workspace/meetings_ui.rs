@@ -18,12 +18,12 @@ use bruhs_models::{
     PersonProfile, RelationshipItemKind, RelationshipProfile, SearchDocument, SearchHit,
     SearchIndex, SearchKind, Speaker, SpeakerIdentity,
 };
-use gpui::prelude::*;
-use gpui::*;
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::{
     Escape as InputEscape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
+use gpui::prelude::*;
+use gpui::*;
 use std::sync::Arc;
 
 use super::{
@@ -881,7 +881,10 @@ impl Workspace {
                                     s.action_items.iter().map(|a| {
                                         let mut row = div()
                                             .flex()
-                                            .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
+                                            .font_family(
+                                                crate::theme::FontFace::Interface
+                                                    .with_default(LABEL_FONT),
+                                            )
                                             .text_size(px(LABEL_PX))
                                             .text_color(theme::rambutan_300())
                                             .child(a.text.clone());
@@ -2493,7 +2496,10 @@ impl Workspace {
                                         .px_3()
                                         .py_1()
                                         .rounded(px(4.0))
-                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
+                                        .font_family(
+                                            crate::theme::FontFace::Interface
+                                                .with_default(LABEL_FONT),
+                                        )
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_400())
                                         .tab_index(0)
@@ -2520,7 +2526,10 @@ impl Workspace {
                                         .py_1()
                                         .rounded(px(4.0))
                                         .bg(theme::persimmon_600())
-                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
+                                        .font_family(
+                                            crate::theme::FontFace::Interface
+                                                .with_default(LABEL_FONT),
+                                        )
                                         .text_size(px(LABEL_PX))
                                         .text_color(gpui::white())
                                         .tab_index(0)
@@ -2546,7 +2555,10 @@ impl Workspace {
                                         .py_1()
                                         .rounded(px(4.0))
                                         .bg(theme::longan_800())
-                                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
+                                        .font_family(
+                                            crate::theme::FontFace::Interface
+                                                .with_default(LABEL_FONT),
+                                        )
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_200())
                                         .tab_index(0)
@@ -2721,7 +2733,9 @@ impl Workspace {
         self.meetings_hub
             .update(cx, |hub, cx| hub.dismiss_notice(cx));
         match action {
-            crate::views::meetings_hub::NoticeAction::OpenThread(id) => self.select_thread_by_id(&id, cx),
+            crate::views::meetings_hub::NoticeAction::OpenThread(id) => {
+                self.select_thread_by_id(&id, cx)
+            }
             crate::views::meetings_hub::NoticeAction::OpenAutomations => {
                 self.activate_sidebar_view(AppView::Automations, window, cx);
             }
@@ -2730,7 +2744,12 @@ impl Workspace {
 
     pub(super) fn settings_has_notice(&self, cx: &Context<'_, Self>) -> bool {
         self.settings_visible()
-            && self.meetings_hub.read(cx).notice.as_ref().is_some_and(|n| n.show_in_settings)
+            && self
+                .meetings_hub
+                .read(cx)
+                .notice
+                .as_ref()
+                .is_some_and(|n| n.show_in_settings)
     }
 
     /// Web `BannerStack`: a bounded notice rail below page content.

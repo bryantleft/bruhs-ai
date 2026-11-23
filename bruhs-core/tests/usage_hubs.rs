@@ -62,13 +62,12 @@ fn hub_replacement_and_source_removal_survive_reopen() {
     assert!(hubs::remove(&replaced).is_err());
     let rt = tokio::runtime::Runtime::new().unwrap();
     for hub in hubs::list().unwrap() {
-        assert!(
-            rt.block_on(hubs::report(&hub))
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("management key")
-        );
+        assert!(rt
+            .block_on(hubs::report(&hub))
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("management key"));
         hubs::remove(&hub).unwrap();
     }
     assert!(hubs::list().unwrap().is_empty());

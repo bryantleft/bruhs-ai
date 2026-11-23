@@ -1,22 +1,22 @@
 //! Local control and the independently scoped task and keybinding sharing listener.
 use crate::{error::AppError, routes::paths::HomePath};
 use axum::{
-    Extension, Json, Router,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{header, HeaderMap, StatusCode},
     response::{
-        Html, IntoResponse, Sse,
         sse::{Event, KeepAlive},
+        Html, IntoResponse, Sse,
     },
     routing::{get, post},
+    Extension, Json, Router,
 };
 use bruhs_core::coordination::{AccessScope, BoardLinks, CoordinationError, CoordinationRuntime};
-use bruhs_models::coordination::{CoordinationCommand, CoordinationSnapshot, board::TaskBoard};
+use bruhs_models::coordination::{board::TaskBoard, CoordinationCommand, CoordinationSnapshot};
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
 use tower_http::compression::{
-    CompressionLayer, CompressionLevel,
     predicate::{DefaultPredicate, Predicate, SizeAbove},
+    CompressionLayer, CompressionLevel,
 };
 
 mod provider_updates;
@@ -192,7 +192,11 @@ pub async fn issue_access(
         [(header::CACHE_CONTROL, "no-store")],
         Json(
             runtime(value)?
-                .issue_access_with_updates(request.scope, request.lifetime_seconds, request.provider_updates)
+                .issue_access_with_updates(
+                    request.scope,
+                    request.lifetime_seconds,
+                    request.provider_updates,
+                )
                 .await?,
         ),
     ))
@@ -354,7 +358,10 @@ async fn remote_projects(
     let bearer = token(&headers)?;
     if !matches!(
         state.runtime.authorize(&bearer).await?,
-        AccessScope::Projects | AccessScope::ProjectUsage { .. } | AccessScope::ProjectNames | AccessScope::ProjectSchedules { .. }
+        AccessScope::Projects
+            | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectNames
+            | AccessScope::ProjectSchedules { .. }
     ) {
         return Err(CoordinationError::Unauthorized.into());
     }
@@ -377,19 +384,62 @@ async fn remote_projects(
     let grant = state.runtime.authorize_grant(&bearer).await?;
     let scope = grant.scope;
     let usage = scope.shares_usage();
-    let conversations = matches!(scope, AccessScope::ProjectSchedules { edit: true, conversations: true, .. });
-    let read_threads = matches!(scope, AccessScope::ProjectSchedules { read_threads: true, .. });
-    let reply_threads = read_threads && matches!(scope, AccessScope::ProjectSchedules { reply_threads: true, .. });
+    let conversations = matches!(
+        scope,
+        AccessScope::ProjectSchedules {
+            edit: true,
+            conversations: true,
+            ..
+        }
+    );
+    let read_threads = matches!(
+        scope,
+        AccessScope::ProjectSchedules {
+            read_threads: true,
+            ..
+        }
+    );
+    let reply_threads = read_threads
+        && matches!(
+            scope,
+            AccessScope::ProjectSchedules {
+                reply_threads: true,
+                ..
+            }
+        );
     let task_edit = matches!(scope, AccessScope::ProjectSchedules { edit: true, .. });
     let (editable, schedules, toggle, run, delete, deliveries) = match scope {
         AccessScope::ProjectUsage { rename } => (rename, false, false, false, false, false),
         AccessScope::Projects => (false, false, false, false, false, false),
         AccessScope::ProjectNames => (true, false, false, false, false, false),
-        AccessScope::ProjectSchedules { rename, toggle, run, delete, deliveries, .. } => (rename, true, toggle, run, delete, deliveries),
+        AccessScope::ProjectSchedules {
+            rename,
+            toggle,
+            run,
+            delete,
+            deliveries,
+            ..
+        } => (rename, true, toggle, run, delete, deliveries),
         _ => return Err(CoordinationError::Unauthorized.into()),
     };
     Ok((
-        [("x-bruhs-provider-updates", grant.provider_updates.to_string()), ("x-bruhs-edit-project-names", editable.to_string()), ("x-bruhs-read-scheduled-tasks", schedules.to_string()), ("x-bruhs-toggle-scheduled-tasks", toggle.to_string()), ("x-bruhs-run-scheduled-tasks", run.to_string()), ("x-bruhs-delete-scheduled-tasks", delete.to_string()), ("x-bruhs-webhook-deliveries", deliveries.to_string()), ("x-bruhs-read-usage", usage.to_string()), ("x-bruhs-edit-scheduled-tasks", task_edit.to_string()), ("x-bruhs-task-conversations", conversations.to_string()), ("x-bruhs-read-task-threads", read_threads.to_string()), ("x-bruhs-reply-task-threads", reply_threads.to_string())],
+        [
+            (
+                "x-bruhs-provider-updates",
+                grant.provider_updates.to_string(),
+            ),
+            ("x-bruhs-edit-project-names", editable.to_string()),
+            ("x-bruhs-read-scheduled-tasks", schedules.to_string()),
+            ("x-bruhs-toggle-scheduled-tasks", toggle.to_string()),
+            ("x-bruhs-run-scheduled-tasks", run.to_string()),
+            ("x-bruhs-delete-scheduled-tasks", delete.to_string()),
+            ("x-bruhs-webhook-deliveries", deliveries.to_string()),
+            ("x-bruhs-read-usage", usage.to_string()),
+            ("x-bruhs-edit-scheduled-tasks", task_edit.to_string()),
+            ("x-bruhs-task-conversations", conversations.to_string()),
+            ("x-bruhs-read-task-threads", read_threads.to_string()),
+            ("x-bruhs-reply-task-threads", reply_threads.to_string()),
+        ],
         Json(
             cached
                 .as_ref()
@@ -400,7 +450,8 @@ async fn remote_projects(
 }
 
 async fn remote_project_usage(
-    State(state): State<Arc<RemoteState>>, headers: HeaderMap,
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     let bearer = token(&headers)?;
     if !state.runtime.authorize(&bearer).await?.shares_usage() {
@@ -421,7 +472,9 @@ async fn authorize_delivery_read(
     let bearer = token(request.headers())?;
     let allowed = async || -> Result<(), AppError> {
         match runtime.authorize(&bearer).await? {
-            AccessScope::ProjectSchedules { deliveries: true, .. } => Ok(()),
+            AccessScope::ProjectSchedules {
+                deliveries: true, ..
+            } => Ok(()),
             _ => Err(CoordinationError::Unauthorized.into()),
         }
     };
@@ -437,13 +490,21 @@ async fn remote_scheduled_tasks(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     let bearer = token(&headers)?;
-    let AccessScope::ProjectSchedules { read_threads, .. } = state.runtime.authorize(&bearer).await? else {
+    let AccessScope::ProjectSchedules { read_threads, .. } =
+        state.runtime.authorize(&bearer).await?
+    else {
         return Err(CoordinationError::Unauthorized.into());
     };
-    let reactive = reactive.ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
-    let tasks = reactive.linked_schedule_inventory(read_threads).await
+    let reactive = reactive
+        .ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
+    let tasks = reactive
+        .linked_schedule_inventory(read_threads)
+        .await
         .map_err(|_| AppError::Unavailable("Could not read scheduled tasks.".into()))?;
-    if !matches!(state.runtime.authorize(&bearer).await?, AccessScope::ProjectSchedules { .. }) {
+    if !matches!(
+        state.runtime.authorize(&bearer).await?,
+        AccessScope::ProjectSchedules { .. }
+    ) {
         return Err(CoordinationError::Unauthorized.into());
     }
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(tasks)))
@@ -463,15 +524,27 @@ async fn set_remote_schedule_enabled(
     Json(edit): Json<ScheduleEnabled>,
 ) -> Result<impl IntoResponse, AppError> {
     let bearer = token(&headers)?;
-    if !matches!(state.runtime.authorize(&bearer).await?, AccessScope::ProjectSchedules { toggle: true, .. }) {
+    if !matches!(
+        state.runtime.authorize(&bearer).await?,
+        AccessScope::ProjectSchedules { toggle: true, .. }
+    ) {
         return Err(CoordinationError::Unauthorized.into());
     }
-    let reactive = reactive.ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
-    let task = reactive.set_linked_schedule_enabled(id, edit.enabled).await.map_err(|err| match err {
-        bruhs_core::reactive::ReactiveError::Storage(_) => AppError::Unavailable("The host could not save the scheduled task.".into()),
-        other => AppError::from(other),
-    })?;
-    if !matches!(state.runtime.authorize(&bearer).await?, AccessScope::ProjectSchedules { toggle: true, .. }) {
+    let reactive = reactive
+        .ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
+    let task = reactive
+        .set_linked_schedule_enabled(id, edit.enabled)
+        .await
+        .map_err(|err| match err {
+            bruhs_core::reactive::ReactiveError::Storage(_) => {
+                AppError::Unavailable("The host could not save the scheduled task.".into())
+            }
+            other => AppError::from(other),
+        })?;
+    if !matches!(
+        state.runtime.authorize(&bearer).await?,
+        AccessScope::ProjectSchedules { toggle: true, .. }
+    ) {
         return Err(CoordinationError::Unauthorized.into());
     }
     Ok(Json(task))
@@ -487,11 +560,17 @@ async fn delete_remote_schedule(
     if !matches!(scope, AccessScope::ProjectSchedules { delete: true, .. }) {
         return Err(CoordinationError::Unauthorized.into());
     }
-    let reactive = reactive.ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
-    reactive.delete_linked_schedule(id).await.map_err(|err| match err {
-        bruhs_core::reactive::ReactiveError::Storage(_) => AppError::Unavailable("The host could not delete the scheduled task.".into()),
-        other => AppError::from(other),
-    })?;
+    let reactive = reactive
+        .ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
+    reactive
+        .delete_linked_schedule(id)
+        .await
+        .map_err(|err| match err {
+            bruhs_core::reactive::ReactiveError::Storage(_) => {
+                AppError::Unavailable("The host could not delete the scheduled task.".into())
+            }
+            other => AppError::from(other),
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -505,11 +584,17 @@ async fn run_remote_schedule(
     if !matches!(scope, AccessScope::ProjectSchedules { run: true, .. }) {
         return Err(CoordinationError::Unauthorized.into());
     }
-    let reactive = reactive.ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
-    reactive.run_linked_schedule(id, request).await.map_err(|err| match err {
-        bruhs_core::reactive::ReactiveError::Storage(_) => AppError::Unavailable("The host could not queue the scheduled task.".into()),
-        other => AppError::from(other),
-    })?;
+    let reactive = reactive
+        .ok_or_else(|| AppError::Unavailable("The automation host is unavailable.".into()))?;
+    reactive
+        .run_linked_schedule(id, request)
+        .await
+        .map_err(|err| match err {
+            bruhs_core::reactive::ReactiveError::Storage(_) => {
+                AppError::Unavailable("The host could not queue the scheduled task.".into())
+            }
+            other => AppError::from(other),
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -520,7 +605,12 @@ async fn rename_remote_projects(
 ) -> Result<StatusCode, AppError> {
     let bearer = token(&headers)?;
     let mut cache = state.projects.lock().await;
-    if !matches!(state.runtime.authorize(&bearer).await?, AccessScope::ProjectNames | AccessScope::ProjectUsage { rename: true } | AccessScope::ProjectSchedules { rename: true, .. }) {
+    if !matches!(
+        state.runtime.authorize(&bearer).await?,
+        AccessScope::ProjectNames
+            | AccessScope::ProjectUsage { rename: true }
+            | AccessScope::ProjectSchedules { rename: true, .. }
+    ) {
         return Err(CoordinationError::Unauthorized.into());
     }
     let path = state
@@ -674,7 +764,11 @@ async fn remote_changes(
     let token = token(&headers)?;
     if matches!(
         state.runtime.authorize(&token).await?,
-        AccessScope::Keybindings { .. } | AccessScope::Projects | AccessScope::ProjectUsage { .. } | AccessScope::ProjectNames | AccessScope::ProjectSchedules { .. }
+        AccessScope::Keybindings { .. }
+            | AccessScope::Projects
+            | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectNames
+            | AccessScope::ProjectSchedules { .. }
     ) {
         return Err(CoordinationError::Unauthorized.into());
     }
@@ -704,14 +798,12 @@ mod tests {
                 "https://bob:secret@example.org/group/app.git?q=private",
             ],
         ] {
-            assert!(
-                std::process::Command::new("git")
-                    .args(args)
-                    .current_dir(&checkout)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&checkout)
+                .status()
+                .unwrap()
+                .success());
         }
         let saved = root.path().join("desktop.json");
         std::fs::write(&saved, serde_json::to_vec(&serde_json::json!({
@@ -743,7 +835,10 @@ mod tests {
         let delivery = bruhs_core::delivery::DeliveryService::open(root.path().join("delivery"))
             .await
             .unwrap();
-        let reactive = bruhs_core::reactive::ReactiveRuntime::open(root.path().join("automations.db")).await.unwrap();
+        let reactive =
+            bruhs_core::reactive::ReactiveRuntime::open(root.path().join("automations.db"))
+                .await
+                .unwrap();
         let app = remote_router_with_state(runtime.clone(), BoardLinks::new(delivery), Some(saved))
             .layer(axum::Extension(reactive));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -753,88 +848,451 @@ mod tests {
         let url = format!("{base}/projects");
         let schedules_url = format!("{url}/scheduled-tasks");
         for old in [&access.token, &writer.token, &other.token] {
-            assert_eq!(client.get(&schedules_url).bearer_auth(old).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(&schedules_url)
+                    .bearer_auth(old)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
         }
         let editor_url = format!("{base}/projects/task-editor/missing");
         for restricted in [&access.token, &writer.token, &other.token] {
-            assert_eq!(client.get(&editor_url).bearer_auth(restricted).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(&editor_url)
+                    .bearer_auth(restricted)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
         }
-        let editor = runtime.issue_access(AccessScope::ProjectSchedules {rename:false,toggle:false,run:false,delete:false,deliveries:false,usage:false,edit:true,conversations:false,read_threads:false,reply_threads:false},60).await.unwrap();
-        assert_eq!(client.get(&url).bearer_auth(&editor.token).send().await.unwrap().headers()["x-bruhs-edit-scheduled-tasks"],"true");
-        assert_eq!(client.get(&editor_url).bearer_auth(&editor.token).send().await.unwrap().status(), StatusCode::NOT_FOUND);
-        assert_eq!(client.get(format!("{url}/task-models")).query(&[("path","/private-folder")]).bearer_auth(&editor.token).send().await.unwrap().status(), StatusCode::BAD_REQUEST);
+        let editor = runtime
+            .issue_access(
+                AccessScope::ProjectSchedules {
+                    rename: false,
+                    toggle: false,
+                    run: false,
+                    delete: false,
+                    deliveries: false,
+                    usage: false,
+                    edit: true,
+                    conversations: false,
+                    read_threads: false,
+                    reply_threads: false,
+                },
+                60,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .headers()["x-bruhs-edit-scheduled-tasks"],
+            "true"
+        );
+        assert_eq!(
+            client
+                .get(&editor_url)
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            client
+                .get(format!("{url}/task-models"))
+                .query(&[("path", "/private-folder")])
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
         let search = format!("{url}/task-conversations");
         let thread_url = format!("{schedules_url}/missing/thread/owner-thread");
-        assert_eq!(client.get(&thread_url).bearer_auth(&editor.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
-        let reader = runtime.issue_access(AccessScope::ProjectSchedules { rename:false, toggle:false, run:false, delete:false, deliveries:false, usage:false, edit:false, conversations:false, read_threads:true, reply_threads:false }, 60).await.unwrap();
-        assert_eq!(client.get(&thread_url).bearer_auth(&reader.token).send().await.unwrap().status(), StatusCode::NOT_FOUND);
-        assert_eq!(client.post(&thread_url).bearer_auth(&reader.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            client
+                .get(&thread_url)
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let reader = runtime
+            .issue_access(
+                AccessScope::ProjectSchedules {
+                    rename: false,
+                    toggle: false,
+                    run: false,
+                    delete: false,
+                    deliveries: false,
+                    usage: false,
+                    edit: false,
+                    conversations: false,
+                    read_threads: true,
+                    reply_threads: false,
+                },
+                60,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&thread_url)
+                .bearer_auth(&reader.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            client
+                .post(&thread_url)
+                .bearer_auth(&reader.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
         let project = checkout.to_str().unwrap();
-        assert_eq!(client.get(&search).query(&[("path",project)]).bearer_auth(&editor.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
-        let picker = runtime.issue_access(AccessScope::ProjectSchedules {rename:false,toggle:false,run:false,delete:false,deliveries:false,usage:false,edit:true,conversations:true,read_threads:false,reply_threads:false},60).await.unwrap();
-        assert_eq!(client.get(&url).bearer_auth(&picker.token).send().await.unwrap().headers()["x-bruhs-task-conversations"],"true");
-        let private = client.get(&search).query(&[("path","/private-folder")]).bearer_auth(&picker.token).send().await.unwrap();
-        assert_eq!(private.status(),StatusCode::BAD_REQUEST);
+        assert_eq!(
+            client
+                .get(&search)
+                .query(&[("path", project)])
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let picker = runtime
+            .issue_access(
+                AccessScope::ProjectSchedules {
+                    rename: false,
+                    toggle: false,
+                    run: false,
+                    delete: false,
+                    deliveries: false,
+                    usage: false,
+                    edit: true,
+                    conversations: true,
+                    read_threads: false,
+                    reply_threads: false,
+                },
+                60,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth(&picker.token)
+                .send()
+                .await
+                .unwrap()
+                .headers()["x-bruhs-task-conversations"],
+            "true"
+        );
+        let private = client
+            .get(&search)
+            .query(&[("path", "/private-folder")])
+            .bearer_auth(&picker.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(private.status(), StatusCode::BAD_REQUEST);
         runtime.revoke_access(&picker.grant.id).await.unwrap();
-        assert_eq!(client.get(&search).query(&[("path",project)]).bearer_auth(&picker.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            client
+                .get(&search)
+                .query(&[("path", project)])
+                .bearer_auth(&picker.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
         runtime.revoke_access(&editor.grant.id).await.unwrap();
-        assert_eq!(client.get(&editor_url).bearer_auth(&editor.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            client
+                .get(&editor_url)
+                .bearer_auth(&editor.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
         let usage_url = format!("{url}/usage");
         for token in [&access.token, &writer.token, &other.token] {
-            assert_eq!(client.get(&usage_url).bearer_auth(token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(&usage_url)
+                    .bearer_auth(token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
         }
         for rename in [false, true] {
-            let grant = runtime.issue_access(AccessScope::ProjectUsage { rename }, 60).await.unwrap();
-            let inventory = client.get(&url).bearer_auth(&grant.token).send().await.unwrap();
+            let grant = runtime
+                .issue_access(AccessScope::ProjectUsage { rename }, 60)
+                .await
+                .unwrap();
+            let inventory = client
+                .get(&url)
+                .bearer_auth(&grant.token)
+                .send()
+                .await
+                .unwrap();
             assert_eq!(inventory.headers()["x-bruhs-read-usage"], "true");
-            assert_eq!(inventory.headers()["x-bruhs-edit-project-names"], rename.to_string().as_str());
+            assert_eq!(
+                inventory.headers()["x-bruhs-edit-project-names"],
+                rename.to_string().as_str()
+            );
             assert_eq!(inventory.headers()["x-bruhs-read-scheduled-tasks"], "false");
-            for route in [&schedules_url, &format!("{base}/keybindings"), &format!("{base}/tasks")] {
-                assert_eq!(client.get(route).bearer_auth(&grant.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            for route in [
+                &schedules_url,
+                &format!("{base}/keybindings"),
+                &format!("{base}/tasks"),
+            ] {
+                assert_eq!(
+                    client
+                        .get(route)
+                        .bearer_auth(&grant.token)
+                        .send()
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::FORBIDDEN
+                );
             }
             runtime.revoke_access(&grant.grant.id).await.unwrap();
-            assert_eq!(client.get(&usage_url).bearer_auth(&grant.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(&usage_url)
+                    .bearer_auth(&grant.token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
         }
         let run_url = format!("{schedules_url}/missing/runs/{}", uuid::Uuid::new_v4());
         let run_request = |token: &str| client.put(&run_url).bearer_auth(token).send();
-        let toggle_request = |token: &str| client.put(format!("{schedules_url}/missing/enabled"))
-            .bearer_auth(token).json(&serde_json::json!({"enabled":true})).send();
+        let toggle_request = |token: &str| {
+            client
+                .put(format!("{schedules_url}/missing/enabled"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({"enabled":true}))
+                .send()
+        };
         for old in [&access.token, &writer.token, &other.token] {
-            assert_eq!(toggle_request(old).await.unwrap().status(), StatusCode::FORBIDDEN);
-            assert_eq!(run_request(old).await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                toggle_request(old).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(
+                run_request(old).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
         }
-        let delete_request = |token: &str| client.delete(format!("{schedules_url}/missing")).bearer_auth(token).send();
-        for (rename, toggle, run, delete, deliveries) in [(false,false,false,false,false), (true,false,false,false,false), (false,true,false,false,false), (true,true,false,false,false), (false,false,true,false,false), (true,true,true,false,false), (false,false,false,true,false), (true,true,true,true,false), (false,false,false,false,true), (true,true,true,true,true)] {
-            let grant = runtime.issue_access(AccessScope::ProjectSchedules { rename, toggle, run, delete, deliveries, usage: false, edit: false, conversations: false, read_threads: false, reply_threads: false }, 60).await.unwrap();
-            let response = client.get(&url).bearer_auth(&grant.token).send().await.unwrap();
+        let delete_request = |token: &str| {
+            client
+                .delete(format!("{schedules_url}/missing"))
+                .bearer_auth(token)
+                .send()
+        };
+        for (rename, toggle, run, delete, deliveries) in [
+            (false, false, false, false, false),
+            (true, false, false, false, false),
+            (false, true, false, false, false),
+            (true, true, false, false, false),
+            (false, false, true, false, false),
+            (true, true, true, false, false),
+            (false, false, false, true, false),
+            (true, true, true, true, false),
+            (false, false, false, false, true),
+            (true, true, true, true, true),
+        ] {
+            let grant = runtime
+                .issue_access(
+                    AccessScope::ProjectSchedules {
+                        rename,
+                        toggle,
+                        run,
+                        delete,
+                        deliveries,
+                        usage: false,
+                        edit: false,
+                        conversations: false,
+                        read_threads: false,
+                        reply_threads: false,
+                    },
+                    60,
+                )
+                .await
+                .unwrap();
+            let response = client
+                .get(&url)
+                .bearer_auth(&grant.token)
+                .send()
+                .await
+                .unwrap();
             assert_eq!(response.headers()["x-bruhs-edit-scheduled-tasks"], "false");
-            assert_eq!(client.get(&editor_url).bearer_auth(&grant.token).send().await.unwrap().status(),StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(&editor_url)
+                    .bearer_auth(&grant.token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
             assert_eq!(response.headers()["x-bruhs-read-usage"], "false");
             assert_eq!(response.headers()["x-bruhs-read-scheduled-tasks"], "true");
-            assert_eq!(response.headers()["x-bruhs-toggle-scheduled-tasks"], toggle.to_string().as_str());
-            assert_eq!(response.headers()["x-bruhs-run-scheduled-tasks"], run.to_string().as_str());
-            assert_eq!(response.headers()["x-bruhs-webhook-deliveries"], deliveries.to_string().as_str());
+            assert_eq!(
+                response.headers()["x-bruhs-toggle-scheduled-tasks"],
+                toggle.to_string().as_str()
+            );
+            assert_eq!(
+                response.headers()["x-bruhs-run-scheduled-tasks"],
+                run.to_string().as_str()
+            );
+            assert_eq!(
+                response.headers()["x-bruhs-webhook-deliveries"],
+                deliveries.to_string().as_str()
+            );
             for suffix in ["deliveries", "deliveries/one"] {
-                let response = client.get(format!("{schedules_url}/missing/{suffix}")).bearer_auth(&grant.token).send().await.unwrap();
-                assert_eq!(response.status(), if deliveries { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN });
+                let response = client
+                    .get(format!("{schedules_url}/missing/{suffix}"))
+                    .bearer_auth(&grant.token)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    if deliveries {
+                        StatusCode::NOT_FOUND
+                    } else {
+                        StatusCode::FORBIDDEN
+                    }
+                );
             }
-            assert_eq!(response.headers()["x-bruhs-delete-scheduled-tasks"], delete.to_string().as_str());
-            assert_eq!(delete_request(&grant.token).await.unwrap().status(), if delete { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN });
-            assert_eq!(run_request(&grant.token).await.unwrap().status(), if run { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN });
-            assert_eq!(toggle_request(&grant.token).await.unwrap().status(), if toggle { StatusCode::NOT_FOUND } else { StatusCode::FORBIDDEN });
-            assert_eq!(response.headers()["x-bruhs-edit-project-names"], if rename { "true" } else { "false" });
-            let response = client.get(&schedules_url).bearer_auth(&grant.token).send().await.unwrap();
+            assert_eq!(
+                response.headers()["x-bruhs-delete-scheduled-tasks"],
+                delete.to_string().as_str()
+            );
+            assert_eq!(
+                delete_request(&grant.token).await.unwrap().status(),
+                if delete {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            assert_eq!(
+                run_request(&grant.token).await.unwrap().status(),
+                if run {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            assert_eq!(
+                toggle_request(&grant.token).await.unwrap().status(),
+                if toggle {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            assert_eq!(
+                response.headers()["x-bruhs-edit-project-names"],
+                if rename { "true" } else { "false" }
+            );
+            let response = client
+                .get(&schedules_url)
+                .bearer_auth(&grant.token)
+                .send()
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(response.json::<Vec<bruhs_models::reactive::ScheduledTaskSummary>>().await.unwrap(), vec![]);
-            for endpoint in ["tasks","changes","keybindings"] {
-                assert_eq!(client.get(format!("{base}/{endpoint}")).bearer_auth(&grant.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                response
+                    .json::<Vec<bruhs_models::reactive::ScheduledTaskSummary>>()
+                    .await
+                    .unwrap(),
+                vec![]
+            );
+            for endpoint in ["tasks", "changes", "keybindings"] {
+                assert_eq!(
+                    client
+                        .get(format!("{base}/{endpoint}"))
+                        .bearer_auth(&grant.token)
+                        .send()
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::FORBIDDEN
+                );
             }
             runtime.revoke_access(&grant.grant.id).await.unwrap();
-            assert_eq!(client.get(format!("{schedules_url}/missing/deliveries/one")).bearer_auth(&grant.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
-            assert_eq!(delete_request(&grant.token).await.unwrap().status(), StatusCode::FORBIDDEN);
-            assert_eq!(run_request(&grant.token).await.unwrap().status(), StatusCode::FORBIDDEN);
-            assert_eq!(toggle_request(&grant.token).await.unwrap().status(), StatusCode::FORBIDDEN);
-            assert_eq!(client.get(&schedules_url).bearer_auth(&grant.token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert_eq!(
+                client
+                    .get(format!("{schedules_url}/missing/deliveries/one"))
+                    .bearer_auth(&grant.token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(
+                delete_request(&grant.token).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(
+                run_request(&grant.token).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(
+                toggle_request(&grant.token).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+            assert_eq!(
+                client
+                    .get(&schedules_url)
+                    .bearer_auth(&grant.token)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::FORBIDDEN
+            );
         }
 
         let response = client
@@ -940,11 +1398,9 @@ mod tests {
         let renamed: Vec<bruhs_core::linked_projects::Checkout> =
             read(&access.token).await.unwrap().json().await.unwrap();
         assert_eq!(renamed.len(), 2);
-        assert!(
-            renamed
-                .iter()
-                .all(|p| p.name == "Editor" && p.title.as_deref() == Some("Editor"))
-        );
+        assert!(renamed
+            .iter()
+            .all(|p| p.name == "Editor" && p.title.as_deref() == Some("Editor")));
         let both = serde_json::json!({(checkout.to_str().unwrap()):"Editor",(legacy.to_str().unwrap()):"Editor"});
         assert_eq!(
             post(&writer.token, both, None).await.unwrap().status(),
@@ -1097,11 +1553,9 @@ mod tests {
         }
         let disk = saved.with_file_name("keybindings.json");
         let saved = std::fs::read(&disk).unwrap();
-        assert!(
-            serde_json::from_slice::<Vec<Keybinding>>(&saved)
-                .unwrap()
-                .contains(&changed)
-        );
+        assert!(serde_json::from_slice::<Vec<Keybinding>>(&saved)
+            .unwrap()
+            .contains(&changed));
         runtime.revoke_access(&write.grant.id).await.unwrap();
         let remove = KeybindingEdit::Remove { rule: changed };
         assert_eq!(

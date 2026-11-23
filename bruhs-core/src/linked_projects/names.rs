@@ -1,6 +1,6 @@
 //! A paired host can receive a rename while its desktop is closed. Keep the edits
 //! beside the workspace until its normal guarded save has incorporated them.
-use super::{Checkout, saved_projects};
+use super::{saved_projects, Checkout};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,

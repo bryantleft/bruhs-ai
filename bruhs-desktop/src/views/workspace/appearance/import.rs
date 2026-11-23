@@ -1,6 +1,6 @@
 //! Read and group theme files on the background executor. A malformed file
 //! does not prevent another theme from the same selection from being installed.
-use super::library::{InstalledTheme, MAX_THEME_BYTES, ThemeFile};
+use super::library::{InstalledTheme, ThemeFile, MAX_THEME_BYTES};
 use super::vscode::display_name;
 use bruhs_ui::theme::ThemeMode;
 use std::collections::{BTreeMap, BTreeSet};

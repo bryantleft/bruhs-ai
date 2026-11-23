@@ -287,10 +287,17 @@ impl Connection {
     }
 }
 
-pub(super) async fn kiro_agents(instance: &AcpInstance, cwd: &Path) -> io::Result<crate::agent_extensions::kiro::Agents> {
+pub(super) async fn kiro_agents(
+    instance: &AcpInstance,
+    cwd: &Path,
+) -> io::Result<crate::agent_extensions::kiro::Agents> {
     let mut conn = Connection::start(instance, cwd).await?;
-    let template = conn.request("_kiro/config/template", json!({}), None).await?;
-    Ok(crate::agent_extensions::kiro::Agents::from_template(&template))
+    let template = conn
+        .request("_kiro/config/template", json!({}), None)
+        .await?;
+    Ok(crate::agent_extensions::kiro::Agents::from_template(
+        &template,
+    ))
 }
 
 struct ActiveTerminal(TerminalManager, String);

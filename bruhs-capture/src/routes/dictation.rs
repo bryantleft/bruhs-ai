@@ -1,8 +1,8 @@
 //! Temporary composer audio. The local route always uses Whisper. A distinct
 //! authenticated route sends audio to the host-configured compatible service.
-pub mod runtime;
 pub mod cloud;
 pub mod models;
+pub mod runtime;
 use axum::{
     body::Bytes,
     extract::{Query, State},
@@ -130,7 +130,8 @@ async fn run(
     } else {
         let path = state.models.ensure_whisper(model, |_, _| {}).await.map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, format!("Local dictation model is unavailable: {error}. Check the model download and retry.")))?;
         let language = options
-            .language.clone()
+            .language
+            .clone()
             .or_else(|| (!model.descriptor().multilingual).then(|| "en".into()));
         runtime::infer(&state.dictation, &path, model, samples, language, permit).await?
     };
@@ -158,7 +159,11 @@ mod tests {
     #[test]
     fn filler_cleanup_preserves_words_containing_a_filler() {
         assert_eq!(
-            bruhs_models::voice_dictionary::without_fillers("Um, update the album, uh, using uh-huh.", Some("en"), ""),
+            bruhs_models::voice_dictionary::without_fillers(
+                "Um, update the album, uh, using uh-huh.",
+                Some("en"),
+                ""
+            ),
             "update the album, using uh-huh."
         );
     }

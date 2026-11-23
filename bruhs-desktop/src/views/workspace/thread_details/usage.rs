@@ -193,11 +193,9 @@ pub(in crate::views::workspace) fn window_row(w: &QuotaWindow, now: i64) -> AnyE
     let (label, minutes) = label_and_minutes(w);
     let left = (100. - w.used_percent).clamp(0., 100.).round();
     let remaining = w.resets_at.map(|end| end.saturating_sub(now).max(0));
-    let time_fraction = remaining
-        .zip(minutes.filter(|m| *m > 0))
-        .map(|(s, m)| {
-            (bruhs_models::num::ToFloatLossy::to_f64_lossy(s) / (f64::from(m) * 60.)).clamp(0., 1.)
-        });
+    let time_fraction = remaining.zip(minutes.filter(|m| *m > 0)).map(|(s, m)| {
+        (bruhs_models::num::ToFloatLossy::to_f64_lossy(s) / (f64::from(m) * 60.)).clamp(0., 1.)
+    });
     let pace = time_fraction.map(|f| {
         let delta = 100. - w.used_percent - f * 100.;
         if delta < -5. {

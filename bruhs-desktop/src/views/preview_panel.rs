@@ -9,10 +9,10 @@
 
 use bruhs_core::preview::LocalServer;
 use bruhs_models::logic::preview::normalize_preview_url;
-use gpui::prelude::*;
-use gpui::*;
 use bruhs_ui::input::{Input, InputEvent, InputState};
 use bruhs_ui::zoom::px;
+use gpui::prelude::*;
+use gpui::*;
 
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
@@ -101,23 +101,30 @@ pub(crate) fn edit_native_history(redo: bool) -> bool {
 
 #[cfg(target_os = "macos")]
 mod host {
+    use crate::views::browser_preferences::{BrowserAppearance, PagePreferences};
     use wry::dpi::{LogicalPosition, LogicalSize};
     use wry::{Rect, WebView, WebViewBuilder, WebViewExtMacOS};
-    use crate::views::browser_preferences::{BrowserAppearance, PagePreferences};
 
     fn set_appearance(webview: &WebView, appearance: BrowserAppearance) {
-        use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua};
+        use objc2_app_kit::{
+            NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+        };
         // AppKit exports these immutable names for the lifetime of the process.
         let named = match appearance {
             BrowserAppearance::System => None,
-            // SAFETY: NSAppearanceNameAqua is an immutable AppKit extern static constant.
-            BrowserAppearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
-            // SAFETY: NSAppearanceNameDarkAqua is an immutable AppKit extern static constant.
-            BrowserAppearance::Dark => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }),
+            BrowserAppearance::Light => {
+                // SAFETY: NSAppearanceNameAqua is an immutable AppKit extern static constant.
+                let name = unsafe { NSAppearanceNameAqua };
+                NSAppearance::appearanceNamed(name)
+            }
+            BrowserAppearance::Dark => {
+                // SAFETY: NSAppearanceNameDarkAqua is an immutable AppKit extern static constant.
+                let name = unsafe { NSAppearanceNameDarkAqua };
+                NSAppearance::appearanceNamed(name)
+            }
         };
         webview.webview().setAppearance(named.as_deref());
     }
-
 
     /// Longan-950 behind the page while it loads.
     const BACKGROUND: (u8, u8, u8, u8) = (0x14, 0x12, 0x10, 0xff);
@@ -160,7 +167,9 @@ mod host {
             Self::default()
         }
 
-        pub fn uses_profile(&self, profile: uuid::Uuid) -> bool { self.profile == Some(profile) }
+        pub fn uses_profile(&self, profile: uuid::Uuid) -> bool {
+            self.profile == Some(profile)
+        }
 
         pub fn available() -> bool {
             true
@@ -203,19 +212,21 @@ mod host {
                 self.clear();
                 self.profile = page.profile;
             }
-            let mut bounds=bounds;
-            let scale=if let Some((w,h))=page.viewport {
-                let width=f32::from(bounds.size.width);
-                let height=f32::from(bounds.size.height);
-                let scale=(width/f32::from(w)).min(height/f32::from(h)).max(0.001);
-                let display_width=f32::from(w)*scale;
-                let display_height=f32::from(h)*scale;
-                bounds.origin.x += gpui::px((width-display_width)*0.5);
-                bounds.origin.y += gpui::px((height-display_height)*0.5);
-                bounds.size=gpui::size(gpui::px(display_width),gpui::px(display_height));
+            let mut bounds = bounds;
+            let scale = if let Some((w, h)) = page.viewport {
+                let width = f32::from(bounds.size.width);
+                let height = f32::from(bounds.size.height);
+                let scale = (width / f32::from(w)).min(height / f32::from(h)).max(0.001);
+                let display_width = f32::from(w) * scale;
+                let display_height = f32::from(h) * scale;
+                bounds.origin.x += gpui::px((width - display_width) * 0.5);
+                bounds.origin.y += gpui::px((height - display_height) * 0.5);
+                bounds.size = gpui::size(gpui::px(display_width), gpui::px(display_height));
                 scale
-            } else {bruhs_ui::zoom::zoom()};
-            let zoom=scale*f32::from(page.zoom_percent.unwrap_or(100))/100.;
+            } else {
+                bruhs_ui::zoom::zoom()
+            };
+            let zoom = scale * f32::from(page.zoom_percent.unwrap_or(100)) / 100.;
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
@@ -394,7 +405,9 @@ impl PreviewPanelView {
             |this: &mut Self, input, event: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = event {
                     let raw = input.read(cx).value().to_string();
-                    if let Some(url) = super::browser_preferences::BrowserPreferences::get(cx).address(&raw) {
+                    if let Some(url) =
+                        super::browser_preferences::BrowserPreferences::get(cx).address(&raw)
+                    {
                         this.go_to(&url, window, cx);
                     }
                 }
@@ -461,7 +474,9 @@ impl PreviewPanelView {
             origin: point(px(0.0), px(0.0)),
             size: size(px(480.0), px(320.0)),
         };
-        let result = self.host.place(window, &url, bounds, self.page_settings(cx));
+        let result = self
+            .host
+            .place(window, &url, bounds, self.page_settings(cx));
         self.host_error = result.as_ref().err().cloned();
         cx.notify();
         result
@@ -477,8 +492,11 @@ impl PreviewPanelView {
     fn page_settings(&self, cx: &App) -> super::browser_preferences::PagePreferences {
         if self.browser_settings_enabled && self.url_row {
             cx.try_global::<super::browser_preferences::BrowserPreferences>()
-                .map(|prefs| prefs.page_settings()).unwrap_or_default()
-        } else { Default::default() }
+                .map(|prefs| prefs.page_settings())
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        }
     }
 
     pub fn use_application_session(&mut self) {
@@ -487,7 +505,9 @@ impl PreviewPanelView {
 
     #[cfg(target_os = "macos")]
     pub fn release_profile(&mut self, profile: uuid::Uuid) {
-        if self.host.uses_profile(profile) { self.host.clear(); }
+        if self.host.uses_profile(profile) {
+            self.host.clear();
+        }
     }
 
     pub fn set_url_row(&mut self, shown: bool) {
@@ -616,7 +636,10 @@ impl PreviewPanelView {
         if !self.shown || cfg!(test) {
             return;
         }
-        match self.host.place(window, &url, bounds, self.page_settings(cx)) {
+        match self
+            .host
+            .place(window, &url, bounds, self.page_settings(cx))
+        {
             Ok(()) => {
                 if self.host_error.take().is_some() {
                     cx.notify();
@@ -729,7 +752,9 @@ impl PreviewPanelView {
                             .bordered(false)
                             .focus_bordered(false)
                             .cleanable(false)
-                            .font_family(crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY),
+                            )
                             .text_size(px(HEADER_TEXT_SIZE_PX)),
                     ),
             )
@@ -746,7 +771,9 @@ impl PreviewPanelView {
                 .on_click(cx.listener(|this, _ev, window, cx| {
                     cx.stop_propagation();
                     let raw = this.url_input.read(cx).value().to_string();
-                    if let Some(url) = super::browser_preferences::BrowserPreferences::get(cx).address(&raw) {
+                    if let Some(url) =
+                        super::browser_preferences::BrowserPreferences::get(cx).address(&raw)
+                    {
                         this.go_to(&url, window, cx);
                     }
                 }))
@@ -804,7 +831,11 @@ impl PreviewPanelView {
                 cx.stop_propagation();
                 this.go_to(&target, window, cx);
             }))
-            .child(div().font_family(crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY)).child(label))
+            .child(
+                div()
+                    .font_family(crate::theme::FontFace::Code.with_default(INPUT_FONT_FAMILY))
+                    .child(label),
+            )
             .child(
                 div()
                     .min_w_0()

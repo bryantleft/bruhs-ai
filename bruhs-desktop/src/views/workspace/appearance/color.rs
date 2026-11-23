@@ -74,7 +74,11 @@ impl Rgb {
         let a = self.contrast(light);
         let b = self.contrast(dark);
         if a.max(b) >= 4.5 {
-            if a >= b { light } else { dark }
+            if a >= b {
+                light
+            } else {
+                dark
+            }
         } else if self.dark() {
             Self::hex(0xffffff)
         } else {
@@ -189,7 +193,11 @@ impl Lch {
         for _ in 0..18 {
             let l = (lo + hi) * 0.5;
             let passes = (Self { l, ..self }).rgb().contrast(surface) >= ratio;
-            if passes == lighter { hi = l } else { lo = l }
+            if passes == lighter {
+                hi = l
+            } else {
+                lo = l
+            }
         }
         Self {
             l: if lighter { hi } else { lo },

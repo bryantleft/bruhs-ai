@@ -22,7 +22,8 @@ use std::collections::BTreeMap;
 
 // Page copy.
 pub const VAULT_TITLE: &str = "Vault";
-pub const VAULT_DESCRIPTION: &str = "Logins, keys, and 1Password references stored in your OS keychain.";
+pub const VAULT_DESCRIPTION: &str =
+    "Logins, keys, and 1Password references stored in your OS keychain.";
 pub const NEW_ENTRY: &str = "New entry";
 pub const SAVE_ENTRY: &str = "Save entry";
 pub const CANCEL: &str = "Cancel";

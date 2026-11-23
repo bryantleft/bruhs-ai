@@ -98,7 +98,9 @@ pub fn model_options(model: &str) -> Vec<ModelOption> {
 pub struct GenerationOptions(BTreeMap<OptionKind, String>);
 
 impl GenerationOptions {
-    pub fn clear(&mut self,kind:OptionKind) {self.0.remove(&kind);}
+    pub fn clear(&mut self, kind: OptionKind) {
+        self.0.remove(&kind);
+    }
     pub fn configured(&self, kind: OptionKind) -> Option<&str> {
         self.0.get(&kind).map(String::as_str)
     }

@@ -108,7 +108,9 @@ pub fn is_settled(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {
     if facts.unread {
         return false;
     }
-    facts.idle_settle_after_ms.is_some_and(|age| now_ms.saturating_sub(facts.updated_at_ms) >= age)
+    facts
+        .idle_settle_after_ms
+        .is_some_and(|age| now_ms.saturating_sub(facts.updated_at_ms) >= age)
 }
 
 fn snoozed(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {

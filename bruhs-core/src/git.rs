@@ -19,22 +19,22 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
-use bruhs_models::logic::git::{BranchName, BranchNameError, GitStatus, parse_porcelain};
+use bruhs_models::logic::git::{parse_porcelain, BranchName, BranchNameError, GitStatus};
 use bruhs_models::logic::text::truncate_utf8;
 
 mod background;
-mod clone_fs;
 #[cfg(target_os = "macos")]
 pub mod checkout_cache;
+mod clone_fs;
 mod project_clone;
 mod project_identity;
 pub use project_identity::{project_identity, ProjectIdentity};
 mod project_setup;
 mod thread_worktree;
-pub use thread_worktree::{ThreadCheckout, prepare_thread_worktree};
-pub use project_setup::{run_project_setup,SetupAction};
 pub use background::{fast_forward_clean_default, fetch_project_remote};
 pub use project_clone::clone_project;
+pub use project_setup::{run_project_setup, SetupAction};
+pub use thread_worktree::{prepare_thread_worktree, ThreadCheckout};
 mod cow;
 
 /// Working-tree diffs beyond this size are cut so UIs stay responsive.
@@ -552,7 +552,17 @@ fn finish(bytes: Vec<u8>, truncated: bool) -> GitDiff {
 /// Paths are the raw bytes git printed (not decoded), so names that are not
 /// UTF-8 reach `git add` unchanged.
 async fn untracked_files(dir: &Path, paths: &[&str]) -> Result<(Vec<Vec<u8>>, bool), GitError> {
-    let args = [&["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z"][..], paths].concat();
+    let args = [
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ][..],
+        paths,
+    ]
+    .concat();
     let out = git(dir, &args).await?;
     if !out.success() {
         return Err(out.failure());
@@ -892,7 +902,11 @@ async fn register_checkout(
     }
     args.extend(["--", destination, start]);
     let out = git(repo, &args).await?;
-    if out.success() { Ok(()) } else { Err(out.failure()) }
+    if out.success() {
+        Ok(())
+    } else {
+        Err(out.failure())
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1099,7 +1113,8 @@ pub async fn seed_worktree_build_dirs(repo: &Path, dest: &Path) -> Vec<String> {
 /// that worktree; `Ok(Some(None))` when its HEAD is detached.
 pub async fn worktree_branch(repo: &Path, path: &Path) -> Result<Option<Option<String>>, GitError> {
     let wanted = resolve(path);
-    Ok(registered_worktrees(repo).await?
+    Ok(registered_worktrees(repo)
+        .await?
         .into_iter()
         .find(|(listed, _)| resolve(listed) == wanted)
         .map(|(_, branch)| branch))
@@ -1144,7 +1159,11 @@ pub async fn main_checkout(worktree: &Path) -> Option<PathBuf> {
 
 /// Shared repository identity, including when a working copy uses a separate Git directory.
 pub(crate) async fn common_git_dir(checkout: &Path) -> Result<PathBuf, GitError> {
-    let out = git(checkout, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await?;
+    let out = git(
+        checkout,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await?;
     if !out.success() {
         return Err(out.failure());
     }
@@ -1153,10 +1172,16 @@ pub(crate) async fn common_git_dir(checkout: &Path) -> Result<PathBuf, GitError>
 
 /// Every worktree of `repo`, the main one included.
 pub async fn worktree_paths(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
-    Ok(registered_worktrees(repo).await?.into_iter().map(|(path, _)| path).collect())
+    Ok(registered_worktrees(repo)
+        .await?
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect())
 }
 
-pub(crate) async fn registered_worktrees(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {
+pub(crate) async fn registered_worktrees(
+    repo: &Path,
+) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {
     let out = git(repo, &["worktree", "list", "--porcelain", "-z"]).await?;
     if !out.success() {
         return Err(out.failure());
@@ -1308,7 +1333,7 @@ pub fn ensure_bruhs_worktree(path: &Path) -> Result<PathBuf, GitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bruhs_models::logic::git::{DirtyFile, FileStatus, is_valid_branch};
+    use bruhs_models::logic::git::{is_valid_branch, DirtyFile, FileStatus};
 
     /// A throwaway repository with one commit on `main`. Git runs with an
     /// isolated config so the user's settings and hooks never apply.
@@ -1797,11 +1822,9 @@ mod tests {
 
         let unrelated = Repo::new();
         for occupied in [repo.path(), unrelated.path()] {
-            assert!(
-                add_worktree(repo.path(), "main", occupied, "main")
-                    .await
-                    .is_err()
-            );
+            assert!(add_worktree(repo.path(), "main", occupied, "main")
+                .await
+                .is_err());
         }
         let occupied = dest_root.path().join("occupied");
         std::fs::create_dir_all(&occupied).unwrap();
@@ -1970,11 +1993,9 @@ mod tests {
         assert_eq!(repo.git(&["write-tree"]).trim(), tree);
 
         assert!(restore_worktree(repo.path(), "nope").await.is_err());
-        assert!(
-            restore_worktree(repo.path(), &"a".repeat(40))
-                .await
-                .is_err()
-        );
+        assert!(restore_worktree(repo.path(), &"a".repeat(40))
+            .await
+            .is_err());
         assert_eq!(repo.read("README.md"), "edited\n");
     }
 

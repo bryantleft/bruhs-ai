@@ -601,7 +601,14 @@ async fn is_ancestor(root: &Path, ancestor: &str, tip: &str) -> bool {
 
 /// Every provider and the app, checked concurrently.
 pub async fn check_all(build: &BuildInfo, online: bool) -> UpdatesReport {
-    check_all_on(build, std::env::var_os("PATH").as_ref(), online, online, release::UpdateTrack::Stable).await
+    check_all_on(
+        build,
+        std::env::var_os("PATH").as_ref(),
+        online,
+        online,
+        release::UpdateTrack::Stable,
+    )
+    .await
 }
 
 async fn check_all_on(
@@ -703,15 +710,25 @@ impl UpdateChecker {
         online: bool,
         provider_checks: bool,
     ) -> UpdatesReport {
-        self.report_on_track(force, online, provider_checks, release::UpdateTrack::Stable).await
+        self.report_on_track(force, online, provider_checks, release::UpdateTrack::Stable)
+            .await
     }
 
-    pub async fn report_on_track(&self, force: bool, online: bool, provider_checks: bool, track: release::UpdateTrack) -> UpdatesReport {
+    pub async fn report_on_track(
+        &self,
+        force: bool,
+        online: bool,
+        provider_checks: bool,
+        track: release::UpdateTrack,
+    ) -> UpdatesReport {
         let mut report = if online {
             let mut last = self.inner.last.lock().await;
             match last.as_ref() {
                 Some((cached, cached_track, report))
-                    if *cached_track == track && *cached == provider_checks && !force && report.is_fresh(EpochMs::now()) =>
+                    if *cached_track == track
+                        && *cached == provider_checks
+                        && !force
+                        && report.is_fresh(EpochMs::now()) =>
                 {
                     report.clone()
                 }
@@ -729,7 +746,14 @@ impl UpdateChecker {
                 }
             }
         } else {
-            check_all_on(&self.inner.build, self.inner.path.as_ref(), false, false, track).await
+            check_all_on(
+                &self.inner.build,
+                self.inner.path.as_ref(),
+                false,
+                false,
+                track,
+            )
+            .await
         };
         report.runs = self.runs();
         report

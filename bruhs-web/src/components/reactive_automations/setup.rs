@@ -2,7 +2,8 @@
 use super::app_poll::{AppPollFields, NewerSourceConfirm};
 use super::calendar::{calendar_source, local_time_zone, WeekdayToggles};
 use super::{
-    apply, command_button, id, milliseconds, once_time, seconds, source_kind, Check, Field, CARD, SELECT,
+    apply, command_button, id, milliseconds, once_time, seconds, source_kind, Check, Field, CARD,
+    SELECT,
 };
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
@@ -401,7 +402,16 @@ pub(crate) fn AutomationSetupPanel(
                     &timeout.get_untracked(),
                 )?
             };
-            if !matches!(setup.source.kind,SourceKind::Webhook|SourceKind::Once{..}|SourceKind::Schedule{..}|SourceKind::Calendar{..}) { setup.subscription.task_conversation=Default::default(); setup.subscription.task_checkout=Default::default(); }
+            if !matches!(
+                setup.source.kind,
+                SourceKind::Webhook
+                    | SourceKind::Once { .. }
+                    | SourceKind::Schedule { .. }
+                    | SourceKind::Calendar { .. }
+            ) {
+                setup.subscription.task_conversation = Default::default();
+                setup.subscription.task_checkout = Default::default();
+            }
             if setup.source.kind != SourceKind::Webhook {
                 setup.subscription.webhook_filters.clear();
                 setup.subscription.webhook_prompt = None;

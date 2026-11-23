@@ -67,12 +67,11 @@ async fn check(directory: &Path) {
     assert_eq!(choices[0].desktop_model.as_deref(), Some(model));
     let metadata = serde_json::to_string(&choices).unwrap();
     assert!(!metadata.contains("Private message") && !metadata.contains("private-session"));
-    assert!(
-        host.task_threads(project.into(), "".into())
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(host
+        .task_threads(project.into(), "".into())
+        .await
+        .unwrap()
+        .is_empty());
     desktop["threads"][0]["model_id"] = json!("");
     desktop["current_model"] = json!("legacy-model");
     std::fs::write(&profile, desktop.to_string()).unwrap();
@@ -172,18 +171,16 @@ async fn check(directory: &Path) {
     // A later stale link rolls the entire checkout removal back.
     let linked: std::collections::BTreeSet<_> = ["digest".to_owned()].into();
     let missing = ThreadId::try_from("zz-missing").unwrap();
-    assert!(
-        restored
-            .command(ReactiveCommand::DeleteCheckoutTaskThreads {
-                threads: [
-                    (id.clone(), linked.clone()),
-                    (missing, ["moved".to_owned()].into())
-                ]
-                .into(),
-            })
-            .await
-            .is_err()
-    );
+    assert!(restored
+        .command(ReactiveCommand::DeleteCheckoutTaskThreads {
+            threads: [
+                (id.clone(), linked.clone()),
+                (missing, ["moved".to_owned()].into())
+            ]
+            .into(),
+        })
+        .await
+        .is_err());
     assert_eq!(
         restored.snapshot().await.unwrap().task_threads["digest"],
         id

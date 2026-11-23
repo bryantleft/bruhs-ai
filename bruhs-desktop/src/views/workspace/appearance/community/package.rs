@@ -3,7 +3,7 @@ use super::super::{
     vscode,
 };
 use super::{
-    Extension, FILE_LIMIT, InstalledTheme, check_license, jsonc, manifest_themes, theme_id,
+    check_license, jsonc, manifest_themes, theme_id, Extension, InstalledTheme, FILE_LIMIT,
 };
 use serde_json::{Map, Value};
 use std::{

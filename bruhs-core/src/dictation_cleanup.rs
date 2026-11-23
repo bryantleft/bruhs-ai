@@ -32,7 +32,15 @@ pub async fn clean(
     style: Option<&str>,
     cue: &str,
 ) -> Result<String, SuggestionError> {
-    clean_in_project(std::path::Path::new(""), model, transcript, draft, style, cue).await
+    clean_in_project(
+        std::path::Path::new(""),
+        model,
+        transcript,
+        draft,
+        style,
+        cue,
+    )
+    .await
 }
 
 pub async fn clean_in_project(
@@ -50,8 +58,13 @@ pub async fn clean_in_project(
         "editing_instructions":style.filter(|s|!s.trim().is_empty()).unwrap_or(DEFAULT_STYLE).chars().take(4096).collect::<String>(),
         "correction_cue":cue.chars().take(50).collect::<String>()}).to_string();
     if crate::text_generators::split_selection(model).is_some() {
-        let reply = tokio::time::timeout(Duration::from_secs(30), crate::text_generators::generate(model, INSTRUCTIONS, &prompt, &[]))
-            .await.map_err(|_| SuggestionError::TimedOut)?.map_err(SuggestionError::Provider)?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(30),
+            crate::text_generators::generate(model, INSTRUCTIONS, &prompt, &[]),
+        )
+        .await
+        .map_err(|_| SuggestionError::TimedOut)?
+        .map_err(SuggestionError::Provider)?;
         return parse(&reply);
     }
     let info = model_info(model)

@@ -850,19 +850,38 @@ impl Workspace {
     pub(super) fn render_task_model_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         vec![
             self.settings_row(
-                "desktop-settings-row-prompt-suggestions", "Suggest next prompt",
+                "desktop-settings-row-prompt-suggestions",
+                "Suggest next prompt",
                 bruhs_models::logic::prompt_suggestion::SUGGESTION_HELP,
-                settings_ui::switch("desktop-prompt-suggestions", self.task_models.prompt_suggestions, false, "Suggest next prompt", cx,
-                    |this, _, cx| this.set_task_models(cx, |models| models.prompt_suggestions = !models.prompt_suggestions)),
+                settings_ui::switch(
+                    "desktop-prompt-suggestions",
+                    self.task_models.prompt_suggestions,
+                    false,
+                    "Suggest next prompt",
+                    cx,
+                    |this, _, cx| {
+                        this.set_task_models(cx, |models| {
+                            models.prompt_suggestions = !models.prompt_suggestions
+                        })
+                    },
+                ),
             ),
             self.settings_row(
-                "desktop-settings-row-suggestion-model", "Prompt suggestion model",
+                "desktop-settings-row-suggestion-model",
+                "Prompt suggestion model",
                 "Override the automatic suggestion model.",
-                settings_ui::control_column(self.role_dropdown(
-                    SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID, "Prompt suggestion model",
-                    self.task_models.suggestion_model.as_deref().unwrap_or(INHERIT),
-                    suggestion_model_groups(), cx,
-                )),
+                settings_ui::control_column(
+                    self.role_dropdown(
+                        SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID,
+                        "Prompt suggestion model",
+                        self.task_models
+                            .suggestion_model
+                            .as_deref()
+                            .unwrap_or(INHERIT),
+                        suggestion_model_groups(),
+                        cx,
+                    ),
+                ),
             ),
             self.settings_row(
                 "desktop-settings-row-summary-model",
@@ -892,13 +911,19 @@ impl Workspace {
                 "desktop-settings-row-meeting-suggestion-model",
                 "Meeting suggestion model",
                 "Model for live meeting suggestions.",
-                settings_ui::control_column(self.role_dropdown(
-                    SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID,
-                    "Meeting suggestion model",
-                    self.meeting_suggestions.prefs.model.as_deref().unwrap_or(INHERIT),
-                    suggestion_model_groups(),
-                    cx,
-                )),
+                settings_ui::control_column(
+                    self.role_dropdown(
+                        SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID,
+                        "Meeting suggestion model",
+                        self.meeting_suggestions
+                            .prefs
+                            .model
+                            .as_deref()
+                            .unwrap_or(INHERIT),
+                        suggestion_model_groups(),
+                        cx,
+                    ),
+                ),
             ),
             self.settings_row(
                 "desktop-settings-row-review-claude",

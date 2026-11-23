@@ -25,8 +25,6 @@ use bruhs_models::logic::queue::PromptQueue;
 use bruhs_models::logic::run_place::{RememberedWorktree, WorkspaceChoice};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::EpochMs;
-use gpui::prelude::*;
-use gpui::*;
 use bruhs_ui::input::{
     Enter as InputEnter, Escape as InputEscape, Input, InputEvent, InputState,
     MoveDown as InputMoveDown, MoveUp as InputMoveUp, TextareaState,
@@ -35,6 +33,8 @@ use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::text::{TextView, TextViewStyle};
 use bruhs_ui::zoom::px;
 use bruhs_ui::ActiveTheme;
+use gpui::prelude::*;
+use gpui::*;
 use markdown::{mdast, ParseOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -76,25 +76,25 @@ mod files;
 mod git_info;
 mod git_ui;
 mod hints_ui;
+pub(crate) mod kiro;
 mod mobile;
 mod model_picker_ui;
 mod native_options;
-pub(crate) mod kiro;
 pub(crate) use mobile::mobile_label;
 mod prompt_suggestion;
 pub(crate) mod response_stream;
-pub(crate) mod tool_visibility;
+mod restart;
 mod rich_response;
+pub(crate) mod screen_reader;
 mod secret_prompt;
 #[cfg(debug_assertions)]
 mod smoke;
-pub(crate) mod screen_reader;
 mod streaming;
-mod restart;
 mod svg_cache;
 mod timeline_ui;
 mod title_rename;
 mod tool_output_ui;
+pub(crate) mod tool_visibility;
 mod viewport;
 use assistant_content::*;
 #[cfg(test)]
@@ -185,14 +185,21 @@ pub(crate) fn cli_health(
 {
     use bruhs_core::agent::health::{self, ProviderHealth, Status};
     use bruhs_models::agent::AgentProvider;
-    let claude = auth::auth_check_program(cx, prefs.enabled(AgentProvider::Claude)).map(|p| p.into_owned());
+    let claude =
+        auth::auth_check_program(cx, prefs.enabled(AgentProvider::Claude)).map(|p| p.into_owned());
     let codex = codex_auth::codex_program(cx, prefs.enabled(AgentProvider::Codex));
     let external = !cfg!(test);
     #[cfg(feature = "native-performance")]
     let external = external
         && !crate::native_performance::block_service(cx, crate::native_performance::Service::Auth);
-    async fn native(provider: AgentProvider, program: Option<String>, enabled: bool) -> ProviderHealth {
-        if !enabled { return ProviderHealth::new(provider, Status::Disabled); }
+    async fn native(
+        provider: AgentProvider,
+        program: Option<String>,
+        enabled: bool,
+    ) -> ProviderHealth {
+        if !enabled {
+            return ProviderHealth::new(provider, Status::Disabled);
+        }
         let mut row = ProviderHealth::new(provider, Status::Failed);
         let Some(program) = program else { return row };
         let (version, auth) = tokio::join!(
@@ -215,8 +222,16 @@ pub(crate) fn cli_health(
     }
     async move {
         let (claude, codex, external) = tokio::join!(
-            native(AgentProvider::Claude, claude, prefs.enabled(AgentProvider::Claude)),
-            native(AgentProvider::Codex, codex, prefs.enabled(AgentProvider::Codex)),
+            native(
+                AgentProvider::Claude,
+                claude,
+                prefs.enabled(AgentProvider::Claude)
+            ),
+            native(
+                AgentProvider::Codex,
+                codex,
+                prefs.enabled(AgentProvider::Codex)
+            ),
             async {
                 if external {
                     health::external_provider_health(&prefs).await
@@ -345,8 +360,8 @@ enum DesktopMermaidRender {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DesktopToolCall {
     /// Bytes of assistant prose preceding this call. Older transcripts lack this boundary.
-    #[serde(default,skip_serializing_if="Option::is_none")]
-    pub text_offset:Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_offset: Option<usize>,
     pub id: String,
     pub tool: String,
     #[serde(default)]
@@ -525,7 +540,10 @@ pub use bruhs_models::PermissionMode;
 
 pub enum ChatViewEvent {
     CheckpointInterruptedRun,
-    UsageLimitReached { reset_ms: Option<i64>, generation: u64 },
+    UsageLimitReached {
+        reset_ms: Option<i64>,
+        generation: u64,
+    },
     RunningTasksChanged,
     OpenSettings,
     /// The access-mode menu or the Build/Plan chip picked a mode.
@@ -533,7 +551,9 @@ pub enum ChatViewEvent {
     ToggleTasks,
     ToggleDiff,
     ToggleThreadDetails,
-    ForkFromReply { index: usize },
+    ForkFromReply {
+        index: usize,
+    },
     OpenForkSource,
     /// The header's panel-right button (⌘⌥B).
     TogglePanel,
@@ -615,7 +635,7 @@ pub enum ChatViewEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct DraftPlacement {
     pub choice: WorkspaceChoice,
-    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous: Option<RememberedWorktree>,
 }
 
@@ -706,8 +726,8 @@ pub struct ChatView {
     pub is_streaming: bool,
     readout: screen_reader::Readout,
     pub send_shortcut: SendShortcut,
-    pub(crate) slash_skills:bool,
-    pub(crate) tool_visibility:tool_visibility::Visibility,
+    pub(crate) slash_skills: bool,
+    pub(crate) tool_visibility: tool_visibility::Visibility,
     chat_width: ChatWidth,
     pub spinner_frame: usize,
     stream_started_at: Option<Instant>,
@@ -719,7 +739,7 @@ pub struct ChatView {
     pub(crate) details_inline_open: bool,
     restart_turn: Option<restart::Run>,
     restart_checkpoint: Option<Task<()>>,
-    pub(crate) reported_limit: Option<(u64,Option<i64>)>,
+    pub(crate) reported_limit: Option<(u64, Option<i64>)>,
     pub running_tasks_count: usize,
     running_tasks: Vec<bruhs_core::BackgroundTask>,
     pub permission_mode: PermissionMode,
@@ -759,7 +779,7 @@ pub struct ChatView {
     /// Composer text applied on the next paint. Stream tasks have no window.
     pending_composer: Option<String>,
     dictation: dictation::ComposerDictation,
-    pub(crate) setup_actions:Vec<bruhs_core::git::SetupAction>,
+    pub(crate) setup_actions: Vec<bruhs_core::git::SetupAction>,
     pub(crate) branch_naming: bruhs_models::logic::run_place::branch_naming::Naming,
     pub(crate) worktree_prefs: bruhs_models::logic::run_place::WorktreePreferences,
     pub(crate) effort_label: bool,
@@ -931,7 +951,8 @@ pub struct ChatView {
     kiro_agents: Option<bruhs_core::agent_extensions::kiro::Agents>,
     kiro_agent_menu: bool,
     picker_acp_instances: HashMap<String, (String, Option<u32>)>,
-    picker_availability: Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
+    picker_availability:
+        Result<bruhs_core::agent_extensions::availability::ProviderAvailability, String>,
     runtime_models: Vec<bruhs_models::runtime_models::Listing>,
     model_picker_scroll: ScrollHandle,
     model_option_scroll: ScrollHandle,
@@ -953,7 +974,7 @@ pub struct ChatView {
     turn_generation: u64,
     pub(super) wait_on_quota: bool,
     response_stream: response_stream::Mode,
-    paragraph_progress:response_stream::ParagraphProgress,
+    paragraph_progress: response_stream::ParagraphProgress,
     _input_subscription: Subscription,
     _composer_key_subscription: Subscription,
     spinner_task: Option<Task<()>>,
@@ -1000,9 +1021,10 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> Self {
         let input_state = cx.new(|cx| {
-            let mut field=TextareaState::new(window,cx);
-            field.set_markdown_enabled(true,cx);
-            field.placeholder(CHAT_INPUT_PLACEHOLDER)
+            let mut field = TextareaState::new(window, cx);
+            field.set_markdown_enabled(true, cx);
+            field
+                .placeholder(CHAT_INPUT_PLACEHOLDER)
                 .auto_grow(CHAT_COMPOSER_MIN_ROWS, CHAT_COMPOSER_MAX_ROWS)
                 .submit_on_enter(true)
         });
@@ -1104,7 +1126,7 @@ impl ChatView {
             if key == "escape" && !modifiers.modified() {
                 if let Some(chat) = chat.upgrade() {
                     let closed = chat.update(cx, |this, cx| {
-                        if this.dictation.active() && this.chat_focus.contains_focused(window,cx) {
+                        if this.dictation.active() && this.chat_focus.contains_focused(window, cx) {
                             this.cancel_dictation(cx);
                             return true;
                         }
@@ -1202,8 +1224,12 @@ impl ChatView {
             };
             chat.update(cx, |this, cx| {
                 if this.model_picker_open {
-                    if this.model_picker_dropdown.is_none() && (key == "escape" || picker_digit.is_some() || this.model_picker_query.focus_handle(cx).is_focused(window))
-                        && this.handle_model_picker_key(key, picker_digit, window, cx) {
+                    if this.model_picker_dropdown.is_none()
+                        && (key == "escape"
+                            || picker_digit.is_some()
+                            || this.model_picker_query.focus_handle(cx).is_focused(window))
+                        && this.handle_model_picker_key(key, picker_digit, window, cx)
+                    {
                         cx.stop_propagation();
                     }
                     return;
@@ -1241,8 +1267,10 @@ impl ChatView {
             while task_events.recv().await.is_ok() {
                 if chat
                     .update(cx, |chat, cx| {
-                        let running_tasks: Vec<bruhs_core::BackgroundTask> =
-                            chat.thread_id.as_deref().map_or_else(Vec::new, |thread_id| {
+                        let running_tasks: Vec<bruhs_core::BackgroundTask> = chat
+                            .thread_id
+                            .as_deref()
+                            .map_or_else(Vec::new, |thread_id| {
                                 let mut rows: Vec<_> = app
                                     .registry()
                                     .get_by_thread(thread_id)
@@ -1306,7 +1334,11 @@ impl ChatView {
             running_tasks: Vec::new(),
             permission_mode: PermissionMode::Default,
             project_permission_override: false,
-            text_generation_model: bruhs_models::logic::prompt_suggestion::default_suggestion_model(AgentProvider::for_model(&model_id)).to_owned(),
+            text_generation_model:
+                bruhs_models::logic::prompt_suggestion::default_suggestion_model(
+                    AgentProvider::for_model(&model_id),
+                )
+                .to_owned(),
             model_id,
             project_path,
             project_scoped: false,
@@ -1335,7 +1367,7 @@ impl ChatView {
             dictation_prefs: Default::default(),
             worktree_prefs: Default::default(),
             branch_naming: Default::default(),
-            setup_actions:Vec::new(),
+            setup_actions: Vec::new(),
             effort_label: true,
             focus_pending_composer: false,
             recall: None,
@@ -1389,8 +1421,8 @@ impl ChatView {
             claude_effort: None,
             readout: Default::default(),
             send_shortcut: SendShortcut::default(),
-            slash_skills:true,
-            tool_visibility:Default::default(),
+            slash_skills: true,
+            tool_visibility: Default::default(),
             chat_width: ChatWidth::default(),
             follow_up_steer: false,
             claude_autocompact: None,
@@ -1438,9 +1470,9 @@ impl ChatView {
             favorite_models: Default::default(),
             model_browser_tab: None,
             model_picker_index: 0,
-            model_options:Default::default(),
-            model_catalog:Default::default(),
-            model_catalog_load:None,
+            model_options: Default::default(),
+            model_catalog: Default::default(),
+            model_catalog_load: None,
             kiro_choices: Default::default(),
             kiro_agents: None,
             kiro_agent_menu: false,
@@ -1457,9 +1489,9 @@ impl ChatView {
             agent_task: None,
             stream_task: None,
             turn_generation: 0,
-            wait_on_quota:false,
-            response_stream:Default::default(),
-            paragraph_progress:Default::default(),
+            wait_on_quota: false,
+            response_stream: Default::default(),
+            paragraph_progress: Default::default(),
             _input_subscription,
             _composer_key_subscription,
             spinner_task: None,
@@ -1586,26 +1618,31 @@ impl ChatView {
         self.pending_permission = None;
         self.clear_mention_hints();
         self.abandon_turn();
-        self.running_tasks = self.thread_id.as_deref().map_or_else(Vec::new, |thread_id| {
-            let mut rows: Vec<_> = cx
-                .global::<DesktopState>()
-                .app
-                .registry()
-                .get_by_thread(thread_id)
-                .into_iter()
-                .filter(|task| task.status == TaskStatus::Running)
-                .collect();
-            rows.sort_by_key(|task| task.started_at);
-            rows
-        });
+        self.running_tasks = self
+            .thread_id
+            .as_deref()
+            .map_or_else(Vec::new, |thread_id| {
+                let mut rows: Vec<_> = cx
+                    .global::<DesktopState>()
+                    .app
+                    .registry()
+                    .get_by_thread(thread_id)
+                    .into_iter()
+                    .filter(|task| task.status == TaskStatus::Running)
+                    .collect();
+                rows.sort_by_key(|task| task.started_at);
+                rows
+            });
         self.running_tasks_count = self.running_tasks.len();
         cx.notify();
     }
 
     pub fn set_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         self.dismiss_prompt_suggestion(cx);
-        let model_id=model_id.into();
-        if model_id!=self.model_id {self.model_options=Default::default();}
+        let model_id = model_id.into();
+        if model_id != self.model_id {
+            self.model_options = Default::default();
+        }
         self.model_id = model_id;
         self.refresh_kiro_choices();
         if !self.effort_chip_visible() {
@@ -1626,7 +1663,8 @@ impl ChatView {
 
     /// Model-specific reasoning settings available on this turn.
     pub(super) fn effort_chip_visible(&self) -> bool {
-        !self.kiro_efforts().is_empty() || self.native_model().is_some_and(|m|!m.options.is_empty())
+        !self.kiro_efforts().is_empty()
+            || self.native_model().is_some_and(|m| !m.options.is_empty())
     }
 
     /// A draft selection survives shared preference updates and reopening the workspace.
@@ -1695,7 +1733,11 @@ impl ChatView {
     ) {
         self.run_choice = choice;
         self.claude_effort = effort;
-        self.previous_worktree = self.draft_placement.as_ref().and_then(|draft|draft.previous.clone()).or(previous);
+        self.previous_worktree = self
+            .draft_placement
+            .as_ref()
+            .and_then(|draft| draft.previous.clone())
+            .or(previous);
         self.base_branch = base_branch;
         self.follow_up_steer = composer.follow_up_steer;
         self.claude_autocompact = composer.autocompact;
@@ -1787,11 +1829,17 @@ impl ChatView {
 
     /// Original project of a thread placed on a managed worktree.
     fn provider_enabled_for_chat(&self, provider: AgentProvider) -> bool {
-        bruhs_core::agent_extensions::availability::require_enabled_for_project(provider, self.project_path.as_ref()).is_ok()
+        bruhs_core::agent_extensions::availability::require_enabled_for_project(
+            provider,
+            self.project_path.as_ref(),
+        )
+        .is_ok()
     }
 
-    pub(crate) fn settings_project_path(&self)->&str {
-        self.project_settings_root.as_deref().unwrap_or(&self.project_path)
+    pub(crate) fn settings_project_path(&self) -> &str {
+        self.project_settings_root
+            .as_deref()
+            .unwrap_or(&self.project_path)
     }
 
     /// Keep this conversation while changing the folder its next turn can use.
@@ -1818,7 +1866,7 @@ impl ChatView {
             self.fresh_session = true;
             self.instructions_stamp = None;
             self.worktree_path = None;
-        self.project_settings_root = None;
+            self.project_settings_root = None;
             self.run_locked = false;
             self.draft_placement = None;
             self.repo_placement_path = None;
@@ -1875,18 +1923,24 @@ impl ChatView {
         cx.notify();
     }
 
-    pub(super) fn set_response_stream(&mut self,mode:response_stream::Mode) {
+    pub(super) fn set_response_stream(&mut self, mode: response_stream::Mode) {
         if self.response_stream != mode {
-            self.response_stream=mode;
+            self.response_stream = mode;
             self.refresh_paragraph_progress(true);
             self.messages_viewport.remeasure();
         }
     }
 
-    fn refresh_paragraph_progress(&mut self, reset:bool) {
-        if reset { self.paragraph_progress=Default::default(); }
-        if self.response_stream==response_stream::Mode::Paragraph {
-            if let Some(message)=self.messages.last().filter(|m|m.role==MessageRole::Assistant && m.state.is_streaming()){
+    fn refresh_paragraph_progress(&mut self, reset: bool) {
+        if reset {
+            self.paragraph_progress = Default::default();
+        }
+        if self.response_stream == response_stream::Mode::Paragraph {
+            if let Some(message) = self
+                .messages
+                .last()
+                .filter(|m| m.role == MessageRole::Assistant && m.state.is_streaming())
+            {
                 self.paragraph_progress.advance(&message.content);
             }
         }
@@ -2400,9 +2454,10 @@ impl ChatView {
                             bruhs_core::TaskKind::Swarm => {
                                 (theme::blueberry_400().opacity(0.16), theme::blueberry_400())
                             }
-                            bruhs_core::TaskKind::Subagent => {
-                                (theme::mangosteen_400().opacity(0.16), theme::mangosteen_400())
-                            }
+                            bruhs_core::TaskKind::Subagent => (
+                                theme::mangosteen_400().opacity(0.16),
+                                theme::mangosteen_400(),
+                            ),
                             bruhs_core::TaskKind::BackgroundAgent => {
                                 (theme::pandan_400().opacity(0.16), theme::pandan_400())
                             }
@@ -2525,8 +2580,11 @@ impl Render for ChatView {
             .track_focus(&self.chat_focus)
             .key_context("Chat")
             .on_action(cx.listener(|this, _: &ToggleDictation, _, cx| {
-                if this.dictation.recording() { this.stop_dictation(cx); }
-                else if !this.dictation.active() { this.start_dictation(cx); }
+                if this.dictation.recording() {
+                    this.stop_dictation(cx);
+                } else if !this.dictation.active() {
+                    this.start_dictation(cx);
+                }
             }))
             .on_action(cx.listener(Self::send_message))
             .on_action(cx.listener(Self::stash_draft))
@@ -2557,10 +2615,23 @@ impl Render for ChatView {
             .flex_1()
             .h_full()
             .min_w_0()
-            .bg(cx.theme().color_role("cssConversationBackground").or_else(|| cx.theme().color_role("canvas")).unwrap_or(cx.theme().background))
-            .when(cx.theme().color_role("cssConversationBackground").is_none(), |el| el.theme_region("canvas", cx))
-            .children(crate::views::workspace::appearance::background_layer("Conversation", cx))
-            .when_some(cx.theme().color_role("cssConversationForeground"), |el, color| el.text_color(color))
+            .bg(cx
+                .theme()
+                .color_role("cssConversationBackground")
+                .or_else(|| cx.theme().color_role("canvas"))
+                .unwrap_or(cx.theme().background))
+            .when(
+                cx.theme().color_role("cssConversationBackground").is_none(),
+                |el| el.theme_region("canvas", cx),
+            )
+            .children(crate::views::workspace::appearance::background_layer(
+                "Conversation",
+                cx,
+            ))
+            .when_some(
+                cx.theme().color_role("cssConversationForeground"),
+                |el, color| el.text_color(color),
+            )
             .flex()
             .flex_col()
             .child(self.readout.element())

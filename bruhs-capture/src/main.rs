@@ -84,12 +84,34 @@ fn router(state: Arc<state::CaptureState>, token: auth::DaemonToken) -> Router {
             post(routes::dictation::transcribe)
                 .layer(axum::extract::DefaultBodyLimit::max(50 << 20)),
         )
-        .route("/dictation/compatible", post(routes::dictation::compatible).layer(axum::extract::DefaultBodyLimit::max(50 << 20)))
-        .route("/dictation/runtime",get(routes::dictation::runtime::get).post(routes::dictation::runtime::set))
-        .route("/dictation/models", get(routes::dictation::models::get).post(routes::dictation::models::change))
-        .route("/dictation/cloud/models", get(routes::dictation::cloud::catalog))
-        .route("/dictation/cloud/{provider}/key", get(routes::dictation::cloud::key_status).post(routes::dictation::cloud::set_key).layer(axum::extract::DefaultBodyLimit::max(8192)))
-        .route("/dictation/cloud/{provider}/transcribe", post(routes::dictation::cloud::transcribe).layer(axum::extract::DefaultBodyLimit::max(50 << 20)))
+        .route(
+            "/dictation/compatible",
+            post(routes::dictation::compatible)
+                .layer(axum::extract::DefaultBodyLimit::max(50 << 20)),
+        )
+        .route(
+            "/dictation/runtime",
+            get(routes::dictation::runtime::get).post(routes::dictation::runtime::set),
+        )
+        .route(
+            "/dictation/models",
+            get(routes::dictation::models::get).post(routes::dictation::models::change),
+        )
+        .route(
+            "/dictation/cloud/models",
+            get(routes::dictation::cloud::catalog),
+        )
+        .route(
+            "/dictation/cloud/{provider}/key",
+            get(routes::dictation::cloud::key_status)
+                .post(routes::dictation::cloud::set_key)
+                .layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/dictation/cloud/{provider}/transcribe",
+            post(routes::dictation::cloud::transcribe)
+                .layer(axum::extract::DefaultBodyLimit::max(50 << 20)),
+        )
         .route("/events", get(routes::events::get_events))
         .route("/recovery", get(routes::recovery::pending))
         .route("/recovery/failures", get(routes::recovery::failures))

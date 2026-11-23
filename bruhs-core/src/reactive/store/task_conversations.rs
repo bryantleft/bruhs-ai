@@ -335,7 +335,11 @@ pub(super) fn linked_agent(
 fn choice(row: &rusqlite::Row<'_>, offset: usize) -> Result<TaskThreadChoice, ReactiveError> {
     let id: String = row.get(offset)?;
     let desktop_model: Option<String> = row.get(offset + 4)?;
-    let agent_model = if desktop_model.is_some() { None } else { row.get(offset + 5)? };
+    let agent_model = if desktop_model.is_some() {
+        None
+    } else {
+        row.get(offset + 5)?
+    };
     Ok(TaskThreadChoice {
         thread_id: ThreadId::try_from(id)
             .map_err(|_| ReactiveError::Storage("Invalid saved task thread ID.".into()))?,
@@ -356,7 +360,13 @@ pub(super) fn reply(
     reply_once(db, task, thread, message, None)
 }
 
-pub(super) fn reply_once(db: &Connection, task: &str, thread: &ThreadId, message: &str, request: Option<uuid::Uuid>) -> Result<(), ReactiveError> {
+pub(super) fn reply_once(
+    db: &Connection,
+    task: &str,
+    thread: &ThreadId,
+    message: &str,
+    request: Option<uuid::Uuid>,
+) -> Result<(), ReactiveError> {
     text(message, "Thread message", true)?;
     let sub: Subscription = required(db, "reactive_subscriptions", task, "task")?;
     let current = current(db, task)?;
@@ -370,11 +380,16 @@ pub(super) fn reply_once(db: &Connection, task: &str, thread: &ThreadId, message
             return Err(ReactiveError::Conflict("This reply was deleted.".into()));
         }
         if let Some(run) = get::<ReactiveRun>(db, "reactive_runs", &id.to_string())? {
-            if run.trigger == Some(RunTrigger::Chat) && run.thread_id == *thread
-                && run.subscription_id.as_deref() == Some(task) && run.owner_message.as_deref() == Some(message) {
+            if run.trigger == Some(RunTrigger::Chat)
+                && run.thread_id == *thread
+                && run.subscription_id.as_deref() == Some(task)
+                && run.owner_message.as_deref() == Some(message)
+            {
                 return Ok(());
             }
-            return Err(ReactiveError::Conflict("This reply identifier is already in use.".into()));
+            return Err(ReactiveError::Conflict(
+                "This reply identifier is already in use.".into(),
+            ));
         }
     }
     let agent = enabled_agent(db, &sub.agent_id)?;
@@ -388,7 +403,9 @@ pub(super) fn reply_once(db: &Connection, task: &str, thread: &ThreadId, message
         RunStatus::Queued,
         0,
     )?;
-    if let Some(id) = request { run.id = id.to_string(); }
+    if let Some(id) = request {
+        run.id = id.to_string();
+    }
     run.source_id = Some(sub.source_id);
     run.trigger = Some(RunTrigger::Chat);
     run.owner_message = Some(message.to_owned());

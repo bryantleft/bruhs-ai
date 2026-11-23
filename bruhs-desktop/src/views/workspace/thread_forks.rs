@@ -83,7 +83,7 @@ impl Workspace {
         let scoped_permissions = view.project_permission_override;
         let role = view.role.clone();
         let effort = view.effort.clone();
-        let model_options=view.model_options.clone();
+        let model_options = view.model_options.clone();
         let worktree = view.worktree_path.clone();
         let branch = parent.branch.clone();
         let mut child = Self::create_thread_with_title(
@@ -99,7 +99,7 @@ impl Workspace {
         child.chat.update(cx, |view, cx| {
             view.project_permission_override = scoped_permissions;
             view.role = role;
-            view.model_options=model_options;
+            view.model_options = model_options;
             view.effort = effort;
             view.fresh_session = true;
             view.fork = Some(std::sync::Arc::new(fork));

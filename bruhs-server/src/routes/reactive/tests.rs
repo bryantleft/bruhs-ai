@@ -570,21 +570,36 @@ async fn webhook_filters_use_http_request_metadata_without_persisting_it() {
         "id":"scan-bills","source_id":"scans","agent_id":"bills","instructions":"Review this delivery","enabled":true,
         "webhook_filters":[{"path":"query.queue","op":"equals","value":"ready queue"},{"path":"headers.x-source","op":"exists"},{"path":"body.action","op":"in","value":["opened","reopened"]}]
     }}})).await;
-    let token=fixture.runtime.webhook_token("scans").await.unwrap();
-    for (action, expected) in [("closed", vec!["scan-bills"]),("opened",vec![])] {
-        let response=fixture.client.post(format!("{}/api/reactive/hooks/scans?queue=other&queue=ready+queue",fixture.base))
-            .bearer_auth(&token).header("X-Source","private-source-fixture").json(&json!({"action":action}))
-            .send().await.unwrap();
-        assert_eq!(response.status(),StatusCode::ACCEPTED);
-        let event:ReactiveEvent=response.json().await.unwrap();
+    let token = fixture.runtime.webhook_token("scans").await.unwrap();
+    for (action, expected) in [("closed", vec!["scan-bills"]), ("opened", vec![])] {
+        let response = fixture
+            .client
+            .post(format!(
+                "{}/api/reactive/hooks/scans?queue=other&queue=ready+queue",
+                fixture.base
+            ))
+            .bearer_auth(&token)
+            .header("X-Source", "private-source-fixture")
+            .json(&json!({"action":action}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let event: ReactiveEvent = response.json().await.unwrap();
         assert!(event.filtered_subscriptions.is_empty());
         let snapshot = fixture.runtime.snapshot().await.unwrap();
-        let stored = snapshot.events.iter().find(|stored| stored.id == event.id).unwrap();
+        let stored = snapshot
+            .events
+            .iter()
+            .find(|stored| stored.id == event.id)
+            .unwrap();
         assert_eq!(stored.filtered_subscriptions, expected);
     }
-    let snapshot=fixture.runtime.snapshot().await.unwrap();
-    assert_eq!(snapshot.runs.len(),1);
-    assert!(!serde_json::to_string(&snapshot).unwrap().contains("private-source-fixture"));
+    let snapshot = fixture.runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(), 1);
+    assert!(!serde_json::to_string(&snapshot)
+        .unwrap()
+        .contains("private-source-fixture"));
 }
 
 #[tokio::test]
@@ -634,10 +649,16 @@ async fn webhook_delivery_history_is_scoped_to_the_task_and_records_each_http_at
             ))
             .send()
     };
-    let foreign_origin = fixture.client
-        .get(format!("{}/api/reactive/tasks/scan-bills/deliveries", fixture.base))
+    let foreign_origin = fixture
+        .client
+        .get(format!(
+            "{}/api/reactive/tasks/scan-bills/deliveries",
+            fixture.base
+        ))
         .header("Origin", "https://unrelated.example")
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(foreign_origin.status(), StatusCode::FORBIDDEN);
     let response = list("scan-bills").await.unwrap();
     assert_eq!(response.headers()["cache-control"], "no-store");
@@ -728,7 +749,6 @@ async fn webhook_delivery_history_is_scoped_to_the_task_and_records_each_http_at
         StatusCode::OK
     );
 }
-
 
 #[tokio::test]
 async fn webhook_history_keeps_recent_attempts_and_original_task_outcomes_across_restart() {

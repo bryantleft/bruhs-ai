@@ -254,7 +254,10 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(TASK_DETAIL_STATUS_CHIP_GAP_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(TASK_DIALOG_LABEL_FONT_FAMILY),
+                    )
                     .font_weight(FontWeight::MEDIUM)
                     .text_size(px(TASK_DETAIL_STATUS_CHIP_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -330,7 +333,10 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .tab_index(0)
@@ -391,7 +397,9 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                )
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if none_selected {
                     theme::rambutan_100()
@@ -435,7 +443,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -494,7 +505,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -553,7 +567,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -611,7 +628,9 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                )
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if selected {
                     theme::rambutan_100()
@@ -747,7 +766,9 @@ impl Workspace {
             .border_1()
             .border_color(theme::ring_panel())
             .text_color(theme::rambutan_300())
-            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY),
+            )
             .flex()
             .flex_col()
             .child(
@@ -762,7 +783,10 @@ impl Workspace {
                     .border_color(theme::ring_panel())
                     .child(
                         div()
-                            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
+                            .font_family(
+                                crate::theme::FontFace::Interface
+                                    .with_default(TASK_DIALOG_LABEL_FONT_FAMILY),
+                            )
                             .text_size(px(TASK_DETAIL_TITLE_TEXT_SIZE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_100())
@@ -892,7 +916,10 @@ impl Workspace {
                             .gap_3()
                             .child(
                                 div()
-                                    .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(TASK_DIALOG_LABEL_FONT_FAMILY),
+                                    )
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme::rambutan_200())
@@ -1031,7 +1058,9 @@ impl Workspace {
 
     pub(super) fn task_create_field_label(&self, label: &'static str) -> Div {
         div()
-            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY),
+            )
             .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_400())
@@ -1072,7 +1101,10 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_200())
                     .tab_index(0)
@@ -1127,7 +1159,9 @@ impl Workspace {
                 .gap(px(FORM_SELECT_OPTION_GAP_PX))
                 .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                 .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                .font_family(
+                    crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                )
                 .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                 .text_color(if no_project_selected {
                     theme::rambutan_100()
@@ -1167,7 +1201,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1222,7 +1259,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1281,7 +1321,10 @@ impl Workspace {
                     .gap(px(FORM_SELECT_OPTION_GAP_PX))
                     .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
                     .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(FORM_SELECT_BODY_FONT_FAMILY))
+                    .font_family(
+                        crate::theme::FontFace::Interface
+                            .with_default(FORM_SELECT_BODY_FONT_FAMILY),
+                    )
                     .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
                     .text_color(if is_selected {
                         theme::rambutan_100()
@@ -1351,7 +1394,10 @@ impl Workspace {
                                 .debug_selector(|| "desktop-task-create-title-error".to_string())
                                 .role(Role::Alert)
                                 .aria_label(error.clone())
-                                .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_LABEL_FONT_FAMILY))
+                                .font_family(
+                                    crate::theme::FontFace::Interface
+                                        .with_default(TASK_DIALOG_LABEL_FONT_FAMILY),
+                                )
                                 .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
                                 .font_family(theme::UI_SMALL_FONT_FAMILY)
                                 .text_color(theme::lychee_300())
@@ -1423,116 +1469,118 @@ impl Workspace {
             .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
             .max_h(px(dialog_height))
             .bg(theme::longan_800())
-            .font_family(crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY))
-            .track_focus(&self.modal_start_focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        this.trap_modal_tab_focus(event, window, cx);
-                    }))
-                    .on_click(cx.listener(|_this, _ev, _window, cx| {
-                        cx.stop_propagation();
-                    }))
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(TASK_CREATE_HEADER_Y_PADDING_PX))
-                            .border_b_1()
-                            .border_color(theme::longan_800())
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(TASK_DIALOG_TITLE_TEXT_SIZE_PX))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::rambutan_100())
-                                    .child("New task"),
-                            )
-                            .child(
-                                web_button(
-                                    "task-create-close",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::IconSmall,
-                                    ButtonState::Enabled,
-                                )
-                                .debug_selector(|| "desktop-task-create-close".to_string())
-                                .aria_label("Close task dialog")
-                                .child(
-                                    svg()
-                                        .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(14.0))
-                                        .text_color(theme::rambutan_400()),
-                                )
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, _window, cx| {
-                                        this.close_task_create(cx);
-                                    })
-                                }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("task-create-body")
-                            .debug_selector(|| "desktop-task-create-body".to_string())
-                            .relative()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.modal_scroll)
-                            .child(fields)
-                            .vertical_scrollbar(&self.modal_scroll),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "desktop-task-create-footer".to_string())
-                            .flex_shrink_0()
-                            .border_t_1()
-                            .border_color(theme::longan_800())
-                            .bg(theme::longan_900().opacity(TASK_CREATE_FOOTER_BG_OPACITY))
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(TASK_CREATE_FOOTER_Y_PADDING_PX))
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .gap(px(TASK_CREATE_FOOTER_GAP_PX))
-                            .child(
-                                web_button(
-                                    "task-create-cancel",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Default,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Cancel")
-                                .debug_selector(|| "desktop-task-create-cancel".to_string())
-                                .child("Cancel")
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, _window, cx| {
-                                        this.close_task_create(cx);
-                                    })
-                                }),
-                            )
-                            .child(
-                                web_button(
-                                    "task-create-submit",
-                                    WebButtonVariant::Primary,
-                                    WebButtonSize::Default,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Create task")
-                                .debug_selector(|| "desktop-task-create-submit".to_string())
-                                .child("Create")
-                                .map(|el| {
-                                    on_press_view(el, cx, |this, window, cx| {
-                                        this.create_task_from_title_input(window, cx);
-                                    })
-                                }),
-                            ),
-                    )
-                    .child(self.render_modal_focus_sentinel()),
+            .font_family(
+                crate::theme::FontFace::Interface.with_default(TASK_DIALOG_BODY_FONT_FAMILY),
             )
-            .into_any_element()
+            .track_focus(&self.modal_start_focus_handle)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.trap_modal_tab_focus(event, window, cx);
+            }))
+            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                    .py(px(TASK_CREATE_HEADER_Y_PADDING_PX))
+                    .border_b_1()
+                    .border_color(theme::longan_800())
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(TASK_DIALOG_TITLE_TEXT_SIZE_PX))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::rambutan_100())
+                            .child("New task"),
+                    )
+                    .child(
+                        web_button(
+                            "task-create-close",
+                            WebButtonVariant::Ghost,
+                            WebButtonSize::IconSmall,
+                            ButtonState::Enabled,
+                        )
+                        .debug_selector(|| "desktop-task-create-close".to_string())
+                        .aria_label("Close task dialog")
+                        .child(
+                            svg()
+                                .path(assets::CLOSE_ICON_PATH)
+                                .size(px(14.0))
+                                .text_color(theme::rambutan_400()),
+                        )
+                        .map(|el| {
+                            on_press_view(el, cx, |this, _window, cx| {
+                                this.close_task_create(cx);
+                            })
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .id("task-create-body")
+                    .debug_selector(|| "desktop-task-create-body".to_string())
+                    .relative()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.modal_scroll)
+                    .child(fields)
+                    .vertical_scrollbar(&self.modal_scroll),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "desktop-task-create-footer".to_string())
+                    .flex_shrink_0()
+                    .border_t_1()
+                    .border_color(theme::longan_800())
+                    .bg(theme::longan_900().opacity(TASK_CREATE_FOOTER_BG_OPACITY))
+                    .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                    .py(px(TASK_CREATE_FOOTER_Y_PADDING_PX))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(TASK_CREATE_FOOTER_GAP_PX))
+                    .child(
+                        web_button(
+                            "task-create-cancel",
+                            WebButtonVariant::Ghost,
+                            WebButtonSize::Default,
+                            ButtonState::Enabled,
+                        )
+                        .aria_label("Cancel")
+                        .debug_selector(|| "desktop-task-create-cancel".to_string())
+                        .child("Cancel")
+                        .tab_index(0)
+                        .role(Role::Button)
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .map(|el| {
+                            on_press_view(el, cx, |this, _window, cx| {
+                                this.close_task_create(cx);
+                            })
+                        }),
+                    )
+                    .child(
+                        web_button(
+                            "task-create-submit",
+                            WebButtonVariant::Primary,
+                            WebButtonSize::Default,
+                            ButtonState::Enabled,
+                        )
+                        .aria_label("Create task")
+                        .debug_selector(|| "desktop-task-create-submit".to_string())
+                        .child("Create")
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| {
+                                this.create_task_from_title_input(window, cx);
+                            })
+                        }),
+                    ),
+            )
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
     }
 }
 

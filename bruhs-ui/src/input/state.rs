@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use gpui::{
     App, AppContext, Bounds, ClipboardItem, Context, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, Pixels, Point, ScrollHandle, SharedString, Subscription, Task,
-    UTF16Selection, Window,
+    Focusable, Pixels, Point, ScrollHandle, SharedString, Subscription, Task, UTF16Selection,
+    Window,
 };
 
 use bruhs_models::{logic::composer_text::ComposerKey, num::ToFloatLossy as _};

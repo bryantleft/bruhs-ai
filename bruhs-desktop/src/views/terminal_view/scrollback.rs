@@ -35,8 +35,9 @@ impl TerminalView {
         }
         Some(Scrollback {
             history,
-            from_top: history
-                .saturating_sub(i32::try_from(self.term.grid().display_offset()).unwrap_or(i32::MAX)),
+            from_top: history.saturating_sub(
+                i32::try_from(self.term.grid().display_offset()).unwrap_or(i32::MAX),
+            ),
             track,
             thumb: (track * (rows / (rows + history.to_f32_lossy())))
                 .max(px(18.))

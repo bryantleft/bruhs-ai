@@ -107,34 +107,32 @@ impl Workspace {
         if !self.maintenance.prefs.activity.monitors() {
             return;
         }
-        self.maintenance.power_timer = Some(cx.spawn(async move |this, cx| {
-            loop {
-                let sample = cx
-                    .background_executor()
-                    .spawn(async { power_sample() })
-                    .await;
-                let Ok(interval) = this.update(cx, |this, cx| {
-                    let was_paused = this.background_paused();
-                    this.maintenance.power = Some(sample);
-                    if was_paused && !this.background_paused() && this.health_interval > 0 {
-                        this.check_provider_health(cx);
-                    }
-                    let policy = this.maintenance.prefs.activity;
-                    let active = cx.active_window().is_some()
-                        || this.threads.iter().any(|t| t.chat.read(cx).is_streaming);
-                    cx.notify();
-                    if active {
-                        policy.active_seconds
-                    } else {
-                        policy.idle_seconds
-                    }
-                }) else {
-                    return;
-                };
-                cx.background_executor()
-                    .timer(Duration::from_secs(u64::from(interval.clamp(5, 3600))))
-                    .await;
-            }
+        self.maintenance.power_timer = Some(cx.spawn(async move |this, cx| loop {
+            let sample = cx
+                .background_executor()
+                .spawn(async { power_sample() })
+                .await;
+            let Ok(interval) = this.update(cx, |this, cx| {
+                let was_paused = this.background_paused();
+                this.maintenance.power = Some(sample);
+                if was_paused && !this.background_paused() && this.health_interval > 0 {
+                    this.check_provider_health(cx);
+                }
+                let policy = this.maintenance.prefs.activity;
+                let active = cx.active_window().is_some()
+                    || this.threads.iter().any(|t| t.chat.read(cx).is_streaming);
+                cx.notify();
+                if active {
+                    policy.active_seconds
+                } else {
+                    policy.idle_seconds
+                }
+            }) else {
+                return;
+            };
+            cx.background_executor()
+                .timer(Duration::from_secs(u64::from(interval.clamp(5, 3600))))
+                .await;
         }));
     }
     pub(in crate::views::workspace) fn set_background_option(
@@ -192,7 +190,12 @@ impl Workspace {
             "settings-row-background-profile",
             "Background activity profile",
             status,
-            match policy.profile {Profile::Balanced=>"Balanced",Profile::Performance=>"Performance",Profile::BatterySaver=>"Battery saver",Profile::Custom=>"Custom"},
+            match policy.profile {
+                Profile::Balanced => "Balanced",
+                Profile::Performance => "Performance",
+                Profile::BatterySaver => "Battery saver",
+                Profile::Custom => "Custom",
+            },
             settings_ui::control_column(self.choice_control(
                 "background-profile",
                 "Background activity profile",
@@ -226,7 +229,7 @@ impl Workspace {
                 id,
                 label,
                 "Pause scheduled fetches and provider health checks.",
-                if enabled {"On"} else {"Off"},
+                if enabled { "On" } else { "Off" },
                 settings_ui::switch(id, enabled, false, label, cx, move |this, _, cx| {
                     let policy = &mut this.maintenance.prefs.activity;
                     match id {

@@ -1,9 +1,9 @@
 //! Convert local VS Code workbench theme files into portable T3 version 1 themes.
 use super::{color, palette};
 
-use super::library::{ThemeFile, identifier, reserved};
+use super::library::{identifier, reserved, ThemeFile};
 use bruhs_ui::theme::ThemeMode;
-use color::{Rgb, source_color};
+use color::{source_color, Rgb};
 use serde_json::Value;
 
 pub(super) fn recognizes(value: &Value) -> bool {
@@ -310,11 +310,9 @@ mod tests {
         let exported = theme.json();
         assert_eq!(InstalledTheme::parse(&exported).unwrap(), theme);
         assert!(InstalledTheme::parse(&format!("/* invalid in a T3 file */ {exported}")).is_err());
-        assert!(
-            InstalledTheme::parse(r#"{"tokenColors":[]}"#)
-                .unwrap_err()
-                .contains("editor.background")
-        );
+        assert!(InstalledTheme::parse(r#"{"tokenColors":[]}"#)
+            .unwrap_err()
+            .contains("editor.background"));
         assert!(InstalledTheme::parse("{\"colors\":{}, /* unterminated }").is_err());
     }
 }

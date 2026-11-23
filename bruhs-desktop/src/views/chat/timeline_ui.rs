@@ -5,8 +5,8 @@
 //! The pure helpers (tool labels, summaries, changed files) are ports of the
 //! web module so both surfaces say the same thing about the same turn.
 
-use crate::views::theme_regions::ThemeRegion as _;
 use crate::views::copy_feedback::CopyFeedback;
+use crate::views::theme_regions::ThemeRegion as _;
 use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_ui::press::on_press_view;
@@ -15,22 +15,22 @@ use chrono::{Local, TimeZone};
 use std::time::Duration;
 
 use bruhs_ui::tooltip::Tooltip;
-use gpui::prelude::*;
 use bruhs_ui::ActiveTheme;
+use gpui::prelude::*;
 use gpui::*;
 
 #[cfg(any(test, debug_assertions))]
 use super::TurnState;
 use super::{
-    ChatView, ChatViewEvent, DesktopToolCall, Message, MessageRole, element_key,
-    fold_duration_label, turn_duration_ms, turn_fold_label,
+    element_key, fold_duration_label, turn_duration_ms, turn_fold_label, ChatView, ChatViewEvent,
+    DesktopToolCall, Message, MessageRole,
 };
 use crate::views::diff_panel::{changed_files_from_tool_calls, split_path};
 use crate::{assets, theme};
-use bruhs_models::EpochMs;
 pub use bruhs_models::logic::tools::{
-    ToolKind, ToolState, tool_kind, tool_label, tool_state, work_summary,
+    tool_kind, tool_label, tool_state, work_summary, ToolKind, ToolState,
 };
+use bruhs_models::EpochMs;
 
 // Web `Timeline`: `mx-auto max-w-3xl px-4 pt-4 pb-6`.
 pub const TRANSCRIPT_MAX_WIDTH_PX: f32 = 736.0;
@@ -354,19 +354,32 @@ impl ChatView {
                 div()
                     .max_w(relative(USER_BUBBLE_MAX_WIDTH))
                     .rounded(px(TRANSCRIPT_CARD_RADIUS_PX))
-                    .bg(cx.theme().color_role("cssUserBubbleBackground").or_else(|| cx.theme().color_role("messageSurface")).unwrap_or(theme::longan_800()))
-                    .when(cx.theme().color_role("cssUserBubbleBackground").is_none(), |el| el.theme_region("messageSurface", cx))
+                    .bg(cx
+                        .theme()
+                        .color_role("cssUserBubbleBackground")
+                        .or_else(|| cx.theme().color_role("messageSurface"))
+                        .unwrap_or(theme::longan_800()))
+                    .when(
+                        cx.theme().color_role("cssUserBubbleBackground").is_none(),
+                        |el| el.theme_region("messageSurface", cx),
+                    )
                     .px(px(USER_BUBBLE_X_PADDING_PX))
                     .py(px(USER_BUBBLE_Y_PADDING_PX))
                     .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .line_height(relative(1.5))
-                    .children(crate::views::workspace::appearance::rounded_background_layer(
-                        "UserBubble",
-                        px(TRANSCRIPT_CARD_RADIUS_PX),
-                        cx,
-                    ))
-                    .text_color(cx.theme().color_role("cssUserBubbleForeground").unwrap_or_else(theme::rambutan_100))
+                    .children(
+                        crate::views::workspace::appearance::rounded_background_layer(
+                            "UserBubble",
+                            px(TRANSCRIPT_CARD_RADIUS_PX),
+                            cx,
+                        ),
+                    )
+                    .text_color(
+                        cx.theme()
+                            .color_role("cssUserBubbleForeground")
+                            .unwrap_or_else(theme::rambutan_100),
+                    )
                     .flex()
                     .flex_col()
                     .when_some(caption, |bubble, caption| {
@@ -713,7 +726,8 @@ impl ChatView {
             .flex()
             .flex_col();
 
-        let has_tool_error = self.tool_visibility != super::tool_visibility::Visibility::ShowAll && tools.iter().any(|tool| tool.state == ToolState::Error);
+        let has_tool_error = self.tool_visibility != super::tool_visibility::Visibility::ShowAll
+            && tools.iter().any(|tool| tool.state == ToolState::Error);
         let thinking = (!zen && !msg.thinking.is_empty())
             .then(|| self.render_thinking_row(index, msg, streaming && !has_text, cx));
         let work = (!tools.is_empty()).then(|| {
@@ -738,8 +752,17 @@ impl ChatView {
         }
 
         if msg.state == super::TurnState::InterruptedByRestart {
-            return turn.children(thinking).children(work).children(text)
-                .child(div().px_1().text_xs().text_color(theme::rambutan_400()).child("Interrupted by restart"))
+            return turn
+                .children(thinking)
+                .children(work)
+                .children(text)
+                .child(
+                    div()
+                        .px_1()
+                        .text_xs()
+                        .text_color(theme::rambutan_400())
+                        .child("Interrupted by restart"),
+                )
                 .into_any_element();
         }
 
@@ -1887,10 +1910,10 @@ pub(super) fn transcript_fixture_messages(root: &str) -> Vec<Message> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopToolCall, ToolKind, ToolState, changed_files, tool_label, tool_state,
-        transcript_fixture_messages, work_summary, working_label,
+        changed_files, tool_label, tool_state, transcript_fixture_messages, work_summary,
+        working_label, DesktopToolCall, ToolKind, ToolState,
     };
-    use gpui::{Context, Render, TestAppContext, Window, div, prelude::*};
+    use gpui::{div, prelude::*, Context, Render, TestAppContext, Window};
     use serde_json::json;
 
     #[gpui::test]

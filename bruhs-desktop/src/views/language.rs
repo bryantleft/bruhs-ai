@@ -76,7 +76,11 @@ impl Language {
         Self::En
     }
     pub(crate) fn effective(self, system: Self) -> Self {
-        if self == Self::System { system } else { self }
+        if self == Self::System {
+            system
+        } else {
+            self
+        }
     }
     pub(crate) fn translation(self, key: &str) -> Option<&'static str> {
         let i = match self {

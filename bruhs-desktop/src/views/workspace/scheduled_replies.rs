@@ -18,7 +18,10 @@ impl Workspace {
             .iter()
             .filter(|(id, _)| {
                 self.threads.iter().any(|thread| &thread.id == *id)
-                    || self.archived_threads.iter().any(|thread| thread.id() == id.as_str())
+                    || self
+                        .archived_threads
+                        .iter()
+                        .any(|thread| thread.id() == id.as_str())
             })
             .map(|(id, tasks)| (id.clone(), tasks.clone()))
             .collect();

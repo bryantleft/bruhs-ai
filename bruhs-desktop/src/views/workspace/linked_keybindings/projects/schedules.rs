@@ -288,8 +288,29 @@ impl Workspace {
     ) -> Vec<AnyElement> {
         let links = &self.linked_projects;
         let mut rows = vec![self.projects_scope_row(cx)];
-        if let Some(message)=&links.editor_error {rows.push(div().id("linked-task-editor-error").px_4().role(Role::Alert).text_sm().text_color(theme::lychee_300()).child(message.clone()).into_any_element());}
-        if links.opening_editor.is_some(){rows.push(div().id("linked-task-editor-loading").px_4().role(Role::Status).text_sm().child("Opening task editor…").into_any_element());}
+        if let Some(message) = &links.editor_error {
+            rows.push(
+                div()
+                    .id("linked-task-editor-error")
+                    .px_4()
+                    .role(Role::Alert)
+                    .text_sm()
+                    .text_color(theme::lychee_300())
+                    .child(message.clone())
+                    .into_any_element(),
+            );
+        }
+        if links.opening_editor.is_some() {
+            rows.push(
+                div()
+                    .id("linked-task-editor-loading")
+                    .px_4()
+                    .role(Role::Status)
+                    .text_sm()
+                    .child("Opening task editor…")
+                    .into_any_element(),
+            );
+        }
         if !matches!(links.scope, Some(ProjectView::OnHost { .. })) {
             let project = if links.scope.is_some() {
                 String::new()
@@ -381,8 +402,15 @@ impl Workspace {
                             ),
                     )
                     .when(connected && host.data.can_edit_schedules, |row| {
-                        let id=host.credential;
-                        row.child(super::super::super::provider_editor::editor_button(format!("linked-new-task-{id}"),"New task",WebButtonVariant::Outline,links.opening_editor.is_some(),cx,move |ws,w,cx|ws.open_linked_task_editor(id,None,w,cx)))
+                        let id = host.credential;
+                        row.child(super::super::super::provider_editor::editor_button(
+                            format!("linked-new-task-{id}"),
+                            "New task",
+                            WebButtonVariant::Outline,
+                            links.opening_editor.is_some(),
+                            cx,
+                            move |ws, w, cx| ws.open_linked_task_editor(id, None, w, cx),
+                        ))
                     })
                     .when(connected && !host.data.can_edit_schedules, |row| {
                         row.child(
@@ -458,7 +486,7 @@ impl Workspace {
                                 id.clone(),
                                 task,
                                 controls,
-                                self.linked_thread_link(host,task,cx),
+                                self.linked_thread_link(host, task, cx),
                             ));
                             rows.extend(status);
                             if let Some(ScheduleWrite::Failed(error)) = write {

@@ -2,7 +2,7 @@
 use super::workspace::{accent_dot, provider_label};
 use crate::{assets, theme};
 use bruhs_models::agent::AgentProvider;
-use bruhs_ui::press::{Interactivity, focusable_control, on_press};
+use bruhs_ui::press::{focusable_control, on_press, Interactivity};
 use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
@@ -271,7 +271,7 @@ pub(super) fn star(
 
 #[cfg(test)]
 mod tests {
-    use super::{Browser, FAVORITES, Favorites, favorite_key};
+    use super::{favorite_key, Browser, Favorites, FAVORITES};
     #[test]
     fn model_picker_favorites_follow_the_provider_instance_and_its_availability() {
         let saved = Favorites::from([

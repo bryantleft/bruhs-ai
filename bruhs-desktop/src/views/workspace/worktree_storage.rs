@@ -3,7 +3,9 @@ use super::*;
 use bruhs_core::worktrees::locations;
 use bruhs_models::coordination::worktree::KeepWhen;
 
-pub(super) use bruhs_models::coordination::worktree::{CleanupMode, ScratchCleanup, WorktreeRetention};
+pub(super) use bruhs_models::coordination::worktree::{
+    CleanupMode, ScratchCleanup, WorktreeRetention,
+};
 pub(super) mod retention;
 mod scoped;
 use scoped::WorktreeSetting;
@@ -58,9 +60,9 @@ impl Workspace {
         self.settings_row(
             "settings-worktree-location",
             "Worktree location",
-            self.location_status.clone().unwrap_or_else(|| {
-                "Parent folder for new bruhs-worktrees checkouts.".to_owned()
-            }),
+            self.location_status
+                .clone()
+                .unwrap_or_else(|| "Parent folder for new bruhs-worktrees checkouts.".to_owned()),
             settings_ui::control_column(
                 div()
                     .flex()
@@ -197,9 +199,13 @@ impl Workspace {
             creation.push(self.worktree_location_row(cx));
         }
         creation.push(self.scoped_switch_row(
-            ScopedSwitch::Remote, "settings-worktree-remote", "desktop-settings-row-worktree-remote", "Start from remote",
+            ScopedSwitch::Remote,
+            "settings-worktree-remote",
+            "desktop-settings-row-worktree-remote",
+            "Start from remote",
             "Branch from the latest upstream commit when available.",
-            self.worktree_prefs.start_from_remote, cx,
+            self.worktree_prefs.start_from_remote,
+            cx,
         ));
         creation.push(self.settings_advanced_button(
             "worktree-creation-advanced",
@@ -399,7 +405,8 @@ impl Workspace {
                 p.worktree_retention = (mode == Some(CleanupMode::Custom)).then_some(retention);
                 self.retention_editor = None;
                 p.cleanup_mode = mode;
-                p.cleanup_deleted_worktrees = (mode == Some(CleanupMode::Custom)).then_some(deleted);
+                p.cleanup_deleted_worktrees =
+                    (mode == Some(CleanupMode::Custom)).then_some(deleted);
                 p.cleanup_keep_when = (mode == Some(CleanupMode::Custom)).then_some(keep);
                 if *p == Default::default() {
                     self.project_defaults.remove(&project);
@@ -442,12 +449,35 @@ impl Workspace {
             let id = "settings-worktree-cleanup-mode";
             let row = "settings-row-worktree-cleanup-mode";
             let label = "Automatic worktree cleanup";
-            let control = settings_ui::control_column(self.choice_control(id, label, value,
-                &[("inherit", "Inherit"), ("off", "Off"), ("custom", "Custom")], cx));
-            let custom_environment = self.cleanup_deleted_worktrees || self.cleanup_keep_when != KeepWhen::default()
+            let control = settings_ui::control_column(self.choice_control(
+                id,
+                label,
+                value,
+                &[("inherit", "Inherit"), ("off", "Off"), ("custom", "Custom")],
+                cx,
+            ));
+            let custom_environment = self.cleanup_deleted_worktrees
+                || self.cleanup_keep_when != KeepWhen::default()
                 || self.worktree_retention != WorktreeRetention::default();
-            let actions = self.setting_source_actions(WorktreeSetting::Cleanup,id,row,label,custom_environment.then(||"Custom".into()),"Not set",mode.is_some(),cx);
-            rows.push(self.settings_row_with_reset(row,label,help,None,false,Some(control),Some(actions)));
+            let actions = self.setting_source_actions(
+                WorktreeSetting::Cleanup,
+                id,
+                row,
+                label,
+                custom_environment.then(|| "Custom".into()),
+                "Not set",
+                mode.is_some(),
+                cx,
+            );
+            rows.push(self.settings_row_with_reset(
+                row,
+                label,
+                help,
+                None,
+                false,
+                Some(control),
+                Some(actions),
+            ));
             if mode != Some(CleanupMode::Custom) {
                 return rows;
             }

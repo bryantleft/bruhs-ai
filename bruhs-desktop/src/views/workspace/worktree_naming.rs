@@ -282,23 +282,21 @@ impl Workspace {
             ],
             cx,
         );
-        let mut rows = vec![
-            self.settings_row_with_reset(
+        let mut rows = vec![self.settings_row_with_reset(
+            "worktree-naming-mode",
+            "Worktree branch naming",
+            "How new threads name their Git branch.",
+            (naming.mode == Mode::Semantic)
+                .then(|| "The model chooses a prefix such as feat/, fix/ or refactor/.".into()),
+            false,
+            Some(settings_ui::control_column(mode)),
+            self.branch_source(
+                Field::Mode,
                 "worktree-naming-mode",
                 "Worktree branch naming",
-                "How new threads name their Git branch.",
-                (naming.mode == Mode::Semantic)
-                    .then(|| "The model chooses a prefix such as feat/, fix/ or refactor/.".into()),
-                false,
-                Some(settings_ui::control_column(mode)),
-                self.branch_source(
-                    Field::Mode,
-                    "worktree-naming-mode",
-                    "Worktree branch naming",
-                    cx,
-                ),
+                cx,
             ),
-        ];
+        )];
         match naming.mode {
             Mode::Static => rows.push(
                 self.settings_row_with_reset(
@@ -328,7 +326,12 @@ impl Workspace {
                     None,
                     false,
                     None,
-                    self.branch_source(Field::Instructions, "worktree-naming-instructions", "Branch naming instructions", cx),
+                    self.branch_source(
+                        Field::Instructions,
+                        "worktree-naming-instructions",
+                        "Branch naming instructions",
+                        cx,
+                    ),
                 );
                 rows.push(
                     div()

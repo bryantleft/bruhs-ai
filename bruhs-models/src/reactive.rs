@@ -10,10 +10,10 @@ mod always_on;
 mod draft;
 mod report;
 mod webhook;
-pub use webhook::*;
 pub use always_on::*;
 pub use draft::{workflow_draft, ReactiveWorkflowDraft};
 pub use report::*;
+pub use webhook::*;
 
 /// Matches the private tool transport's payload budget. Reject, never silently truncate input.
 pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
@@ -76,7 +76,9 @@ pub enum SourceKind {
         every_ms: u64,
     },
     /// A scheduled prompt that becomes due once, including after an offline interval.
-    Once { due_at: EpochMs },
+    Once {
+        due_at: EpochMs,
+    },
     /// Wall-clock times in a named IANA time zone, such as weekdays at 08:00.
     Calendar {
         /// `HH:MM` local times, 24-hour clock.
@@ -106,7 +108,7 @@ pub enum SourceKind {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum TaskConversation {
     /// Existing automations continue in the agent's own conversation.
     #[default]
@@ -153,7 +155,9 @@ pub enum TaskDestinationEdit {
     Existing {
         thread_id: crate::ids::ThreadId,
     },
-    Desktop { thread_id: crate::ids::ThreadId },
+    Desktop {
+        thread_id: crate::ids::ThreadId,
+    },
     /// Detach only the binding that was shown when the owner opened the editor.
     FirstRun {
         previous: crate::ids::ThreadId,
@@ -336,7 +340,10 @@ pub struct LinkedThreadReply {
 
 impl SourceKind {
     pub fn is_scheduled_task(&self) -> bool {
-        matches!(self, Self::Once { .. } | Self::Schedule { .. } | Self::Calendar { .. } | Self::Webhook)
+        matches!(
+            self,
+            Self::Once { .. } | Self::Schedule { .. } | Self::Calendar { .. } | Self::Webhook
+        )
     }
 }
 
@@ -493,7 +500,10 @@ pub enum ReactiveCommand {
         approve: bool,
     },
     /// Run one time-based task immediately. Repeating a request with the same run ID is idempotent.
-    RunScheduledTask { id: String, run_id: String },
+    RunScheduledTask {
+        id: String,
+        run_id: String,
+    },
     /// Commit edited task settings and a requested activation change together.
     SaveScheduledTask {
         automation: Box<AutomationSetup>,
@@ -529,7 +539,8 @@ pub enum ReactiveCommand {
     },
     /// Delete the confirmed schedule links for a set of desktop conversations together.
     DeleteCheckoutTaskThreads {
-        threads: std::collections::BTreeMap<crate::ids::ThreadId, std::collections::BTreeSet<String>>,
+        threads:
+            std::collections::BTreeMap<crate::ids::ThreadId, std::collections::BTreeSet<String>>,
     },
     /// An owner reply in a scheduled task's saved destination.
     ChatInTaskThread {
@@ -679,7 +690,7 @@ pub struct ReactiveSnapshot {
     pub task_threads: std::collections::BTreeMap<String, crate::ids::ThreadId>,
     /// Manually selected destinations. Its presence signals support for project thread search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_task_threads: Option<std::collections::BTreeMap<String,TaskThreadChoice>>,
+    pub selected_task_threads: Option<std::collections::BTreeMap<String, TaskThreadChoice>>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub desktop_task_store: String,
     /// Most recent delivered turn sequence for each desktop destination.

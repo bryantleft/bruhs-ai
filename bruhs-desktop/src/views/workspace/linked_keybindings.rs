@@ -114,7 +114,11 @@ impl<T: Default> LinkedHost<T> {
     }
 
     fn client(&self) -> Result<reqwest::Client, String> {
-        bruhs_core::linked_projects::connection::client(self.tunnel.as_ref().map(|t| (t.name.as_str(), t.socket.clone())))
+        bruhs_core::linked_projects::connection::client(
+            self.tunnel
+                .as_ref()
+                .map(|t| (t.name.as_str(), t.socket.clone())),
+        )
     }
     async fn restore_token(&mut self, vault: Vault, manual: bool) -> Result<(), String> {
         if self.token.is_empty() {
