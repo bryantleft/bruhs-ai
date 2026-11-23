@@ -11,7 +11,9 @@ use bruhs_ui::zoom::px;
 use bruhs_ui::ActiveTheme;
 use gpui::prelude::*;
 use gpui::*;
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 mod menu_popover;
 mod viewport;
@@ -28,6 +30,7 @@ use bruhs_models::logic::menu::menu_step;
 use bruhs_models::logic::sidebar::{
     snooze_presets, thread_menu, SnoozeWhen, ThreadMenuEntry, ThreadMenuFacts,
 };
+use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{AppView, EpochMs};
 use bruhs_ui::press::on_press_view;
 
@@ -57,6 +60,42 @@ pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
 pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 16.0;
 const SIDEBAR_HEADER_GAP_PX: f32 = 8.0;
 const SIDEBAR_BRAND_LOGO_PX: f32 = 20.0;
+
+/// Rasterize `bruhs.svg` at its exact display pixel size so Metal never
+/// downsamples the fine halftone dot grid without mipmaps (which causes Moiré).
+fn brand_logo_image(size_px: Pixels, scale_factor: f32, cx: &App) -> Option<Arc<RenderImage>> {
+    thread_local! {
+        static CACHE: RefCell<Option<(ParsedSvg, Vec<(i32, Arc<RenderImage>)>)>> =
+            const { RefCell::new(None) };
+    }
+    let device_px = (f32::from(size_px) * scale_factor)
+        .round()
+        .to_i32_saturating()
+        .max(1);
+    CACHE.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        let (parsed, entries) = match guard.as_mut() {
+            Some(pair) => pair,
+            None => {
+                let parsed = cx.svg_renderer().parse_svg(assets::BRAND_LOGO_BYTES).ok()?;
+                guard.insert((parsed, Vec::new()))
+            }
+        };
+        if let Some((_, image)) = entries.iter().find(|(side, _)| *side == device_px) {
+            return Some(Arc::clone(image));
+        }
+        let side = DevicePixels(device_px);
+        let image = cx
+            .svg_renderer()
+            .render_parsed(parsed, SvgSize::ExactSize(size(side, side)))
+            .ok()?;
+        if entries.len() >= 8 {
+            entries.remove(0);
+        }
+        entries.push((device_px, Arc::clone(&image)));
+        Some(image)
+    })
+}
 const SIDEBAR_BRAND_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CONTROLS_X_PADDING_PX: f32 = 8.0;
 const SIDEBAR_CONTROLS_BOTTOM_PADDING_PX: f32 = 8.0;
@@ -119,7 +158,7 @@ const HOVER_BG_OPACITY_50: f32 = 0.50;
 const ACTIVE_BG_OPACITY_60: f32 = 0.60;
 const RING_WHITE_10: f32 = 0.10;
 
-pub const SIDEBAR_BRAND_LABEL: &str = "bruhs.ai";
+pub const SIDEBAR_BRAND_LABEL: &str = "bruhs";
 pub const SIDEBAR_SEARCH_PLACEHOLDER: &str = "Search";
 /// A card's project line for a thread without a project.
 pub const SIDEBAR_NO_PROJECT_LABEL: &str = "No project";
@@ -306,7 +345,7 @@ impl Workspace {
             .when_some(theme.color_role("cssSidebarInnerBackground"), |el, color| el.bg(color))
             .children(crate::views::workspace::appearance::background_layer("SidebarInner", cx))
             .when_some(theme.color_role("cssSidebarInnerForeground"), |el, color| el.text_color(color))
-            .child(self.render_sidebar_header())
+            .child(self.render_sidebar_header(window, cx))
             .child(self.render_sidebar_controls(cx))
             .children(self.render_crew_rail(window, cx))
             .child(self.render_sidebar_list(cx))
@@ -334,7 +373,12 @@ impl Workspace {
     }
 
     /// Brand row; doubles as the window drag strip behind the traffic lights.
-    fn render_sidebar_header(&self) -> AnyElement {
+    fn render_sidebar_header(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
+        let logo_size = px(SIDEBAR_BRAND_LOGO_PX);
+        let logo = match brand_logo_image(logo_size, window.scale_factor(), cx) {
+            Some(image) => img(image).size(logo_size),
+            None => img(assets::BRAND_LOGO_PATH).size(logo_size),
+        };
         div()
             .id("sidebar-header")
             .debug_selector(|| "desktop-sidebar-header".to_string())
@@ -346,7 +390,7 @@ impl Workspace {
             .gap(px(SIDEBAR_HEADER_GAP_PX))
             .flex_shrink_0()
             .window_control_area(WindowControlArea::Drag)
-            .child(img(assets::BRAND_LOGO_PATH).size(px(SIDEBAR_BRAND_LOGO_PX)))
+            .child(logo)
             .child(
                 div()
                     .text_size(px(SIDEBAR_BRAND_TEXT_PX))

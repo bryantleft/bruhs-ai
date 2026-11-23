@@ -1227,7 +1227,7 @@ pub fn Sidebar() -> impl IntoView {
             // Chrome header
             <div class="flex h-11 shrink-0 items-center gap-2 px-4">
                 <img src="/bruhs.svg" alt="" aria-hidden="true" class="bruhs-brand-logo" />
-                <span class="text-label text-rambutan-100">"bruhs.ai"</span>
+                <span class="text-label text-rambutan-100">"bruhs"</span>
             </div>
 
             // One control row: search, then choose project folder and new
@@ -1669,8 +1669,8 @@ mod tests {
         let legacy = t("c", "bruhs", "legacy", "now");
         assert!(is_settled(&old, now, false, false, false));
         assert!(
-            !is_settled(&old, now, true, false, false),
-            "active stays up top"
+            is_settled(&old, now, true, false, false),
+            "selecting a settled thread keeps it in place"
         );
         assert!(
             !is_settled(&old, now, false, true, false),

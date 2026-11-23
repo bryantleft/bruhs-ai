@@ -94,9 +94,10 @@ pub fn undo_open(started_ms: i64, now_ms: i64) -> bool {
     now_ms.saturating_sub(started_ms) < UNDO_MS && now_ms >= started_ms
 }
 
-/// A manually settled thread stays settled. Otherwise an idle, read,
-/// unselected thread settles after [`SETTLED_AFTER_MS`], pin or not.
-/// Working and a thread that needs an answer stay up.
+/// A manually settled thread stays settled. Otherwise an idle, read thread
+/// settles after [`SETTLED_AFTER_MS`], pin or not. Selecting a settled thread
+/// keeps it in place under Settled instead of jumping it to the top. Working
+/// and a thread that needs an answer stay up.
 pub fn is_settled(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {
     if facts.working || facts.needs_you {
         return false;
@@ -104,7 +105,7 @@ pub fn is_settled(facts: &SidebarFacts<'_>, now_ms: i64) -> bool {
     if facts.settled {
         return true;
     }
-    if facts.active || facts.unread {
+    if facts.unread {
         return false;
     }
     facts.idle_settle_after_ms.is_some_and(|age| now_ms.saturating_sub(facts.updated_at_ms) >= age)

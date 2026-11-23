@@ -227,9 +227,9 @@ mod tests {
     }
 
     #[test]
-    fn unread_or_active_stay_fresh() {
+    fn unread_stays_fresh_while_selected_settled_stays_in_place() {
         let old = meta("old", 3 * SETTLED_AFTER_MS, false, false);
-        assert!(!is_settled(&old, NOW, Some("old"), false, false));
+        assert!(is_settled(&old, NOW, Some("old"), false, false));
         assert!(!is_settled(&old, NOW, None, false, true));
         assert!(is_settled(&old, NOW, None, false, false));
     }

@@ -3,6 +3,7 @@ use gpui::{AssetSource, SharedString};
 use std::borrow::Cow;
 
 pub const BRAND_LOGO_PATH: &str = "bruhs.svg";
+pub const BRAND_LOGO_BYTES: &[u8] = include_bytes!("../../bruhs-web/bruhs.svg");
 pub const PROVIDER_LOGO_SIZE_PX: f32 = 12.0;
 pub const PROVIDER_LOGO_OPACITY: f32 = 0.6;
 pub const ACTIVITY_ICON_PATH: &str = "icons/activity.svg";
@@ -183,9 +184,7 @@ impl AssetSource for DesktopAssets {
             return Ok(Some(Cow::Borrowed(svg)));
         }
         match path {
-            BRAND_LOGO_PATH => Ok(Some(Cow::Borrowed(
-                &include_bytes!("../../bruhs-web/bruhs.svg")[..],
-            ))),
+            BRAND_LOGO_PATH => Ok(Some(Cow::Borrowed(BRAND_LOGO_BYTES))),
             "logos/claude.svg" => Ok(Some(Cow::Borrowed(
                 &include_bytes!("../../bruhs-web/logos/claude.svg")[..],
             ))),
