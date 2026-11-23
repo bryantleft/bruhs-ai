@@ -235,7 +235,6 @@ impl Workspace {
             .overflow_y_scroll()
             .track_scroll(&self.details.menu_scroll)
             .rounded(px(8.))
-            .shadow_md()
             .border_1()
             .border_color(theme::ring_floating())
             .p_1()
@@ -565,6 +564,7 @@ impl Workspace {
     fn detail_action(
         &self,
         id: impl Into<SharedString>,
+        icon: &'static str,
         label: impl Into<SharedString>,
         cx: &Context<'_, Self>,
         action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
@@ -580,9 +580,22 @@ impl Workspace {
         )
         .debug_selector(move || selector.clone())
         .aria_label(label.clone())
+        .h(px(28.))
         .w_full()
         .min_w_0()
+        .px_2()
+        .rounded(px(6.))
         .justify_start()
+        .gap_2()
+        .text_size(px(12.5))
+        .text_color(theme::rambutan_200())
+        .child(
+            svg()
+                .path(icon)
+                .size(px(14.))
+                .flex_shrink_0()
+                .text_color(theme::rambutan_400()),
+        )
         .child(div().min_w_0().truncate().child(label));
         on_press_view(button, cx, move |this, win, cx| {
             this.details.close();
@@ -666,31 +679,36 @@ impl Workspace {
     ) -> AnyElement {
         let prefs = self.appearance.thread_details;
         let chat = thread.chat.read(cx);
-        let mut rows = Vec::new();
+        let mut env_rows = Vec::new();
+        let mut code_rows = Vec::new();
+        let mut lineage_rows = Vec::new();
+        let mut usage_rows = Vec::new();
         let cwd = chat.worktree_path.as_ref().unwrap_or(&chat.project_path);
         let scoped = chat.project_scoped && !cwd.is_empty();
         if prefs.environment {
-            let place = if chat.worktree_path.is_some() {
-                "Worktree"
+            let (place, icon) = if chat.worktree_path.is_some() {
+                ("Worktree", assets::GIT_BRANCH_ICON_PATH)
             } else if scoped {
-                "Local checkout"
+                ("Local checkout", assets::FOLDER_ICON_PATH)
             } else {
-                "Local environment"
+                ("Local environment", assets::TOOL_TERMINAL_ICON_PATH)
             };
             let label = if scoped {
-                format!("{place} · {}", thread.project_name)
+                format!("{place}: {}", thread.project_name)
             } else {
                 place.to_owned()
             };
             let entity = thread.chat.clone();
             if scoped {
-                rows.push(
-                    self.detail_action("detail-environment", label, cx, move |_, w, cx| {
-                        entity.update(cx, |c, cx| c.toggle_workspace_menu(w, cx))
-                    }),
-                );
+                env_rows.push(self.detail_action(
+                    "detail-environment",
+                    icon,
+                    label,
+                    cx,
+                    move |_, w, cx| entity.update(cx, |c, cx| c.toggle_workspace_menu(w, cx)),
+                ));
             } else {
-                rows.push(detail_text("detail-environment", label));
+                env_rows.push(detail_meta("detail-environment", icon, label));
             }
         }
         if prefs.resources {
@@ -702,7 +720,7 @@ impl Workspace {
                 .as_ref()
                 .filter(|(key, folder, _)| key == &id && folder == &path);
             if let Some((_, _, text)) = matching {
-                rows.push(detail_text("detail-resource-sample", text.clone()));
+                env_rows.push(detail_sample("detail-resource-sample", text.clone()));
             }
             let button = web_button(
                 "measure-thread-usage",
@@ -711,8 +729,25 @@ impl Workspace {
                 ButtonState::disabled_if(self.details.measuring),
             )
             .debug_selector(|| "measure-thread-usage".into())
-            .child("Measure computer and disk usage");
-            rows.push(
+            .aria_label("Measure resource usage")
+            .h(px(28.))
+            .w_full()
+            .min_w_0()
+            .px_2()
+            .rounded(px(6.))
+            .justify_start()
+            .gap_2()
+            .text_size(px(12.5))
+            .text_color(theme::rambutan_200())
+            .child(
+                svg()
+                    .path(assets::ACTIVITY_ICON_PATH)
+                    .size(px(14.))
+                    .flex_shrink_0()
+                    .text_color(theme::rambutan_400()),
+            )
+            .child(div().min_w_0().truncate().child("Measure resource usage"));
+            env_rows.push(
                 on_press_view(button, cx, move |this, _, cx| {
                     this.measure_thread_usage(id.clone(), path.clone(), cx);
                 })
@@ -721,8 +756,9 @@ impl Workspace {
         }
         if scoped && prefs.open_in {
             let path = cwd.clone();
-            rows.push(self.detail_action(
+            code_rows.push(self.detail_action(
                 "detail-open-editor",
+                assets::EXTERNAL_LINK_ICON_PATH,
                 "Open in editor",
                 cx,
                 move |this, _, cx| this.open_path_in_editor(&path, None, cx),
@@ -733,16 +769,18 @@ impl Workspace {
             for action in self.actions_for_project(scope) {
                 let action = action.clone();
                 let path = cwd.clone();
-                rows.push(self.detail_action(
+                code_rows.push(self.detail_action(
                     format!("detail-script-{}", action.id),
+                    assets::TOOL_TERMINAL_ICON_PATH,
                     format!("Run {}", action.name),
                     cx,
                     move |this, w, cx| this.run_action_in(&action, path.clone(), w, cx),
                 ));
             }
             let scope = scope.to_owned();
-            rows.push(self.detail_action(
+            code_rows.push(self.detail_action(
                 "detail-manage-scripts",
+                assets::WRENCH_ICON_PATH,
                 "Manage project scripts",
                 cx,
                 move |this, w, cx| {
@@ -758,12 +796,17 @@ impl Workspace {
             .or(thread.branch.as_deref());
         if scoped && prefs.branch {
             if let Some(branch) = branch {
-                rows.push(detail_text("detail-branch", format!("Branch · {branch}")));
+                code_rows.push(detail_meta(
+                    "detail-branch",
+                    assets::GIT_BRANCH_ICON_PATH,
+                    format!("Branch: {branch}"),
+                ));
             }
             if let Some(pull) = self.displayed_pull() {
-                rows.push(self.detail_action(
+                code_rows.push(self.detail_action(
                     "detail-pull",
-                    format!("#{} · {}", pull.number, pull.title),
+                    assets::GIT_BRANCH_ICON_PATH,
+                    format!("#{} {}", pull.number, pull.title),
                     cx,
                     |this, _, cx| this.show_pull_surface(cx),
                 ));
@@ -771,16 +814,19 @@ impl Workspace {
         }
         if scoped && prefs.git_actions && branch.is_some() {
             let entity = thread.chat.clone();
-            rows.push(
-                self.detail_action("detail-git", "Switch branch…", cx, move |_, w, cx| {
-                    entity.update(cx, |c, cx| c.toggle_branch_menu(w, cx))
-                }),
-            );
+            code_rows.push(self.detail_action(
+                "detail-git",
+                assets::GIT_BRANCH_ICON_PATH,
+                "Switch branch…",
+                cx,
+                move |_, w, cx| entity.update(cx, |c, cx| c.toggle_branch_menu(w, cx)),
+            ));
         }
         if scoped && prefs.changes && (branch.is_some() || chat.git_dirty_count > 0) {
             let count = chat.git_dirty_count;
-            rows.push(self.detail_action(
+            code_rows.push(self.detail_action(
                 "detail-changes",
+                assets::FILE_DIFF_ICON_PATH,
                 format!(
                     "{count} changed {}",
                     if count == 1 { "file" } else { "files" }
@@ -795,9 +841,10 @@ impl Workspace {
                 .read(cx)
                 .thread_server_previews(&thread.id, cx)
             {
-                rows.push(self.detail_action(
+                code_rows.push(self.detail_action(
                     format!("detail-server-{id}"),
-                    format!("Preview · {name}"),
+                    assets::TOOL_GLOBE_ICON_PATH,
+                    format!("Preview: {name}"),
                     cx,
                     move |this, w, cx| this.show_action_preview(&url, w, cx),
                 ));
@@ -809,8 +856,9 @@ impl Workspace {
                 .read(cx)
                 .tasks_for_thread(&thread.id)
             {
-                rows.push(self.detail_action(
+                code_rows.push(self.detail_action(
                     format!("detail-automation-{id}"),
+                    assets::CLOCK_ICON_PATH,
                     title,
                     cx,
                     move |this, w, cx| {
@@ -831,9 +879,10 @@ impl Workspace {
             if let Some(parent) = parent.and_then(|id| self.threads.iter().find(|t| t.id == id)) {
                 let id = parent.id.clone();
                 let title = parent.chat.read(cx).thread_title.clone();
-                rows.push(self.detail_action(
+                lineage_rows.push(self.detail_action(
                     "detail-parent",
-                    format!("Parent · {title}"),
+                    assets::MESSAGE_SQUARE_ICON_PATH,
+                    format!("Parent: {title}"),
                     cx,
                     move |this, _, cx| this.select_thread_by_id(&id, cx),
                 ));
@@ -858,17 +907,19 @@ impl Workspace {
                 };
                 let id = child.id.clone();
                 let title = &child.chat.read(cx).thread_title;
-                rows.push(self.detail_action(
+                lineage_rows.push(self.detail_action(
                     format!("detail-child-{id}"),
-                    format!("{label} · {title}"),
+                    assets::MESSAGE_SQUARE_ICON_PATH,
+                    format!("{label}: {title}"),
                     cx,
                     move |this, _, cx| this.select_thread_by_id(&id, cx),
                 ));
             }
         }
         if prefs.side_chats {
-            rows.push(self.detail_action(
+            lineage_rows.push(self.detail_action(
                 "detail-new-side-chat",
+                assets::PLUS_ICON_PATH,
                 "New side chat",
                 cx,
                 |this, w, cx| this.new_side_chat(w, cx),
@@ -880,7 +931,7 @@ impl Workspace {
                 .filter(|(generation, _)| chat.is_quota_turn(*generation));
             let provider = AgentProvider::for_model(&chat.model_id);
             if matches!(provider, AgentProvider::Codex | AgentProvider::Claude | AgentProvider::OpenCode | AgentProvider::Cursor | AgentProvider::Grok | AgentProvider::Antigravity) {
-                rows.push(usage::ThreadUsage(provider).into_any_element());
+                usage_rows.push(usage::ThreadUsage(provider).into_any_element());
             }
             if let Some((_, reset)) = limit {
                 if reset.is_none_or(|ms| ms > EpochMs::now().as_millis()) {
@@ -891,22 +942,43 @@ impl Workspace {
                             format!("Usage limit resets {}", local.format(crate::clock_format::pattern()))
                         })
                         .unwrap_or_else(|| "Usage limit reached".into());
-                    rows.push(detail_text("detail-turn-limit", text));
+                    usage_rows.push(detail_meta(
+                        "detail-turn-limit",
+                        assets::CIRCLE_ALERT_ICON_PATH,
+                        text,
+                    ));
                 }
             }
         }
         if prefs.context {
             if let Some(reading) = chat.latest_context_reading() {
-                rows.push(detail_text(
+                usage_rows.push(detail_meta(
                     "detail-context",
+                    assets::ACTIVITY_ICON_PATH,
                     format!(
-                        "Context · {:.0}% ({} / {} tokens)",
+                        "Context: {:.0}% ({} / {} tokens)",
                         reading.percent(),
                         reading.used,
                         reading.window
                     ),
                 ));
             }
+        }
+        let mut rows = Vec::new();
+        for group in [env_rows, code_rows, lineage_rows, usage_rows] {
+            if group.is_empty() {
+                continue;
+            }
+            if !rows.is_empty() {
+                rows.push(
+                    div()
+                        .my_1()
+                        .border_t_1()
+                        .border_color(theme::longan_800().opacity(0.6))
+                        .into_any_element(),
+                );
+            }
+            rows.extend(group);
         }
         let menu_open = self.details.menu == Some(MenuAt::Card);
         let configure = web_button(
@@ -918,10 +990,13 @@ impl Workspace {
         .debug_selector(|| "detail-configure".into())
         .aria_label("Customize thread details")
         .aria_expanded(menu_open)
+        .size(px(24.))
+        .min_w(px(24.))
+        .min_h(px(24.))
         .child(
             svg()
                 .path(assets::ELLIPSIS_ICON_PATH)
-                .size(px(16.))
+                .size(px(14.))
                 .text_color(theme::rambutan_400()),
         );
         let configure = on_press_view(configure, cx, |this, w, cx| {
@@ -945,12 +1020,15 @@ impl Workspace {
                     })
                     .aria_label("Thread details")
                     .occlude()
-                    .rounded(px(8.))
-                    .shadow_md()
+                    .rounded(px(10.))
                     .border_1()
-                    .border_color(theme::ring_floating())
+                    .border_color(if self.details.inline {
+                        theme::longan_800().opacity(0.9)
+                    } else {
+                        theme::ring_floating()
+                    })
                     .bg(theme::longan_900())
-                    .p_2()
+                    .overflow_hidden()
                     .flex()
                     .flex_col()
                     .on_mouse_down_out(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
@@ -981,14 +1059,19 @@ impl Workspace {
                     .child(
                         div()
                             .relative()
+                            .h(px(36.))
+                            .pl_3()
+                            .pr_2()
+                            .border_b_1()
+                            .border_color(theme::longan_800().opacity(0.75))
                             .flex()
                             .items_center()
                             .justify_between()
                             .child(
                                 div()
-                                    .px_2()
-                                    .text_sm()
-                                    .text_color(theme::rambutan_200())
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_300())
                                     .child("Thread details"),
                             )
                             .child(configure)
@@ -1018,6 +1101,10 @@ impl Workspace {
                             .id("thread-details-items")
                             .overflow_y_scroll()
                             .max_h((window.viewport_size().height - px(142.)).max(px(70.)))
+                            .p(px(6.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
                             .children(rows),
                     ),
             )
@@ -1025,12 +1112,40 @@ impl Workspace {
     }
 }
 
-fn detail_text(id: &'static str, text: String) -> AnyElement {
+fn detail_meta(id: &'static str, icon: &'static str, text: String) -> AnyElement {
     div()
         .debug_selector(move || id.into())
+        .h(px(28.))
         .px_2()
-        .py_1()
-        .text_size(px(13.))
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_size(px(12.5))
+        .text_color(theme::rambutan_400())
+        .child(
+            svg()
+                .path(icon)
+                .size(px(14.))
+                .flex_shrink_0()
+                .text_color(theme::rambutan_500()),
+        )
+        .child(div().min_w_0().truncate().child(text))
+        .into_any_element()
+}
+
+fn detail_sample(id: &'static str, text: String) -> AnyElement {
+    div()
+        .debug_selector(move || id.into())
+        .mx_1()
+        .my_1()
+        .px_2()
+        .py_1p5()
+        .rounded(px(6.))
+        .bg(theme::longan_950().opacity(0.65))
+        .border_1()
+        .border_color(theme::longan_800().opacity(0.7))
+        .font_family(theme::CODE_FONT_FAMILY)
+        .text_size(px(11.5))
         .text_color(theme::rambutan_300())
         .child(text)
         .into_any_element()
