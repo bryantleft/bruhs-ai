@@ -739,7 +739,6 @@ impl Workspace {
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist_and_notify(cx);
             }
-            "settings-environment-mark" => {if let Some(mark)=environment_mark::Mark::parse(value){self.appearance.environment_mark=mark;self.persist_and_notify(cx);}}
             "settings-tool-visibility" => {
                 if let Some(mode)=crate::views::chat::tool_visibility::Visibility::parse(value) {
                     self.tool_visibility=mode;self.stamp_run_prefs_on_threads(cx);self.persist_and_notify(cx);
@@ -2251,7 +2250,6 @@ impl Workspace {
             ),
         ];
         let interface = vec![
-            self.environment_mark_row(cx),
             self.settings_row("desktop-settings-row-panel-animations","Panel animations","Duration in ms. 0 disables animation.",
                 settings_ui::control_column(div().w_full().flex().items_center().gap_2().child(div().flex_1().min_w_0().child(self.render_settings_slider(settings_ui::SettingsSlider::PanelDuration,cx))).child(format!("{} ms",self.appearance.panel_duration_ms)).into_any_element())),
 

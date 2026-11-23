@@ -713,6 +713,7 @@ pub struct ChatView {
     pub(crate) details_trigger: FocusHandle,
     pub(crate) details_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub(crate) details_open: bool,
+    pub(crate) details_inline_open: bool,
     restart_turn: Option<restart::Run>,
     restart_checkpoint: Option<Task<()>>,
     pub(crate) reported_limit: Option<(u64,Option<i64>)>,
@@ -1294,6 +1295,7 @@ impl ChatView {
             details_trigger: cx.focus_handle().tab_stop(true),
             details_trigger_bounds: Default::default(),
             details_open: Default::default(),
+            details_inline_open: false,
             restart_turn: None,
             restart_checkpoint: None,
             reported_limit: None,
@@ -2560,20 +2562,65 @@ impl Render for ChatView {
             .flex_col()
             .child(self.readout.element())
             .child(self.render_header(cx))
-            .children(self.render_fork_source(cx))
-            .when(self.find_open, |el| el.child(self.render_find_bar(cx)))
-            .child(self.render_auth_banner(cx))
-            .when(hero, |el| {
-                el.child(
-                    div()
-                        .id("desktop-chat-hero-body")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
-                        .flex()
-                        .flex_col()
-                        .items_center()
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .when(self.details_inline_open, |lane| lane.pr(px(312.)))
+                    .children(self.render_fork_source(cx))
+                    .when(self.find_open, |el| el.child(self.render_find_bar(cx)))
+                    .child(self.render_auth_banner(cx))
+                    .when(hero, |el| {
+                        el.child(
+                            div()
+                                .id("desktop-chat-hero-body")
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .when(self.pending_permission.is_some(), |el| {
+                                    el.child(self.render_permission_prompt(cx))
+                                })
+                                .when(self.pending_secret.is_some(), |el| {
+                                    el.child(self.render_secret_prompt(window, cx))
+                                })
+                                .when(!self.running_tasks.is_empty(), |el| {
+                                    el.child(self.render_active_runs_strip(cx))
+                                })
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .when_some(self.chat_width.limit(), |el, limit| {
+                                            el.max_w(px(limit))
+                                        })
+                                        .min_w_0()
+                                        .my_auto()
+                                        .flex_shrink_0()
+                                        .child(self.render_composer_block(
+                                            ComposerPlacement::Hero,
+                                            window,
+                                            cx,
+                                        )),
+                                ),
+                        )
+                    })
+                    .when(!hero, |el| {
+                        el.child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .overflow_hidden()
+                                .child(self.render_message_viewport(current_message, cx))
+                                .when(self.show_scroll_to_bottom_control(), |el| {
+                                    el.child(self.render_scroll_to_bottom_control(cx))
+                                }),
+                        )
                         .when(self.pending_permission.is_some(), |el| {
                             el.child(self.render_permission_prompt(cx))
                         })
@@ -2586,47 +2633,17 @@ impl Render for ChatView {
                         .child(
                             div()
                                 .w_full()
-                                .when_some(self.chat_width.limit(), |el, limit| el.max_w(px(limit)))
-                                .min_w_0()
-                                .my_auto()
+                                .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
+                                .pb(px(CHAT_COMPOSER_BOTTOM_PADDING_PX))
                                 .flex_shrink_0()
                                 .child(self.render_composer_block(
-                                    ComposerPlacement::Hero,
+                                    ComposerPlacement::Docked,
                                     window,
                                     cx,
                                 )),
-                        ),
-                )
-            })
-            .when(!hero, |el| {
-                el.child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .overflow_hidden()
-                        .child(self.render_message_viewport(current_message, cx))
-                        .when(self.show_scroll_to_bottom_control(), |el| {
-                            el.child(self.render_scroll_to_bottom_control(cx))
-                        }),
-                )
-                .when(self.pending_permission.is_some(), |el| {
-                    el.child(self.render_permission_prompt(cx))
-                })
-                .when(self.pending_secret.is_some(), |el| {
-                    el.child(self.render_secret_prompt(window, cx))
-                })
-                .when(!self.running_tasks.is_empty(), |el| {
-                    el.child(self.render_active_runs_strip(cx))
-                })
-                .child(
-                    div()
-                        .w_full()
-                        .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
-                        .pb(px(CHAT_COMPOSER_BOTTOM_PADDING_PX))
-                        .flex_shrink_0()
-                        .child(self.render_composer_block(ComposerPlacement::Docked, window, cx)),
-                )
-            })
+                        )
+                    }),
+            )
             .when_some(self.render_expanded_widget(cx), |element, widget| {
                 element.child(widget)
             })

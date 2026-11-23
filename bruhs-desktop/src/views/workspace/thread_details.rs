@@ -111,7 +111,7 @@ pub(super) struct DetailsUi {
     measurement: Option<(String, Option<String>, String)>,
     measuring: bool,
     open_thread: Option<String>,
-    inline: bool,
+    pub(super) inline: bool,
     pub(super) hidden_inline: std::collections::BTreeSet<String>,
     menu: Option<MenuAt>,
     context_position: Option<Point<Pixels>>,
@@ -489,7 +489,6 @@ impl Workspace {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .when(inline && open, |lane| lane.pr(px(312.)))
                     .child(thread.chat.clone()),
             )
             .when(open, |main| {
@@ -958,8 +957,8 @@ impl Workspace {
         });
         div()
             .absolute()
-            .top(px(46.))
-            .right(px(12.))
+            .top(px(52.))
+            .right(px(16.))
             .w(px(280.))
             .max_w_full()
             .child(

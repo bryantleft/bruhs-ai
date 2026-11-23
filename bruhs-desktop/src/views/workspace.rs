@@ -200,7 +200,6 @@ mod text_generators;
 mod quit_shortcut;
 mod secret_source_settings;
 mod panel_motion;
-mod environment_mark;
 mod fallback_model;
 mod worktree_naming;
 mod worktree_storage;
@@ -3747,7 +3746,12 @@ impl Render for Workspace {
                 && self.active_thread_id.as_deref() == Some(thread.id.as_str());
             thread.chat.update(cx, |chat, cx| {
                 let details_open = visible && !self.overlay_open() && self.details.is_open(&thread.id);
-                if chat.details_open != details_open { chat.details_open = details_open; cx.notify(); }
+                let details_inline_open = details_open && self.details.inline;
+                if chat.details_open != details_open || chat.details_inline_open != details_inline_open {
+                    chat.details_open = details_open;
+                    chat.details_inline_open = details_inline_open;
+                    cx.notify();
+                }
                 chat.set_rich_response_shown(visible && !self.overlay_open(), cx);
                 if !visible {
                     chat.cancel_dictation(cx);

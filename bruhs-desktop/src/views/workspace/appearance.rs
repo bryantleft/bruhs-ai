@@ -49,7 +49,6 @@ pub(super) struct DeviceAppearance {
     pub(super) thread_details: thread_details::Preferences,
     pub(super) glass_opacity: u8,
     pub(super) panel_duration_ms: u16,
-    pub(super) environment_mark: environment_mark::Mark,
 }
 impl Default for DeviceAppearance {
     fn default() -> Self {
@@ -65,7 +64,6 @@ impl Default for DeviceAppearance {
             thread_details: Default::default(),
             glass_opacity: 100,
             panel_duration_ms: 0,
-            environment_mark: Default::default(),
         }
     }
 }

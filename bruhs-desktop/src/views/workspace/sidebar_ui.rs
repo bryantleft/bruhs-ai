@@ -397,7 +397,6 @@ impl Workspace {
                     .text_color(theme::rambutan_100())
                     .child(SIDEBAR_BRAND_LABEL),
             )
-            .children(self.environment_mark())
             .into_any_element()
     }
 

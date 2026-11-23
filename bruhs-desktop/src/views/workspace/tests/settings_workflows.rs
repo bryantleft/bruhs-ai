@@ -1152,7 +1152,10 @@ fn thread_details_resizes_preserves_each_threads_inline_choice_and_opens_at_poin
     cx.run_until_parked();
     let card = rendered_bounds(cx, "thread-details-card");
     let header = rendered_bounds(cx, "desktop-chat-header");
-    assert!(card.left() > header.right());
+    assert!(
+        card.top() >= header.bottom() && card.right() <= header.right() + px(1.),
+        "card {card:?} should sit beneath the right-aligned header {header:?}"
+    );
     let position = card.center();
     cx.simulate_event(MouseDownEvent {
         position,
