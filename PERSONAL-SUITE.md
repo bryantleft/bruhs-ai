@@ -47,6 +47,10 @@ Suggested slices can proceed independently except where a dependency is stated. 
 
 Use one inbox for connected messaging accounts and Crew conversations. Assign a message to a project, let agents split the work, and review their combined result in the same thread. Reply through the original account while keeping internal Crew notes private. The proposed first milestone covers two messaging services. [BNLE-70](https://linear.app/bnle/issue/BNLE-70/unify-human-messaging-and-agent-swarm-coordination-in-one-inbox)
 
+## Contests workspace
+
+Track paid contests, challenges and hackathons in an optional workspace, and let the Crew swarm work several at once. This needs the parallel claiming in [BNLE-70](https://linear.app/bnle/issue/BNLE-70/unify-human-messaging-and-agent-swarm-coordination-in-one-inbox). Contests would own discovery, triage, rules acceptance, submissions and their receipts. Calendar and Today would hold deadlines, Finance would hold prize income and compute spend, and Life Admin would hold tax forms and payout details. Every rules acceptance and submission waits for approval, and each contest runs under a hard compute cap. The proposed first milestone lists open Kaggle contests and Devpost hackathons, and a lead bruh splits a chosen contest into tracks that other bruhs claim in parallel. [BNLE-104](https://linear.app/bnle/issue/BNLE-104/find-and-work-paid-contests-and-hackathons-with-the-agent-swarm)
+
 ## Screenshot capture and markup
 
 Start on macOS with a shortcut to capture a region or window. Crop the screenshot, add arrows or text, and cover sensitive details before copying, saving, or attaching the finished image to a Crew task. Attachments contain only the flattened result. Scrolling capture, local text recognition, and pixel measurement are follow-up ideas. [BNLE-81](https://linear.app/bnle/issue/BNLE-81/capture-annotate-and-share-screenshots-from-bruhs) · [Shottr reference](https://shottr.cc/)
