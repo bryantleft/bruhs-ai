@@ -26,9 +26,6 @@ uuid = { workspace = true, features = ["v5"] }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "net", "io-util", "io-std", "fs"] }
 tokio-stream = { workspace = true }
 tokio-tungstenite = "0.29"
-portable-pty = "0.9"
-# portable-pty reports its errors as anyhow::Error; kept as error sources.
-anyhow = "1"
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 async-trait = "0.1"
@@ -57,14 +54,9 @@ thiserror = { workspace = true }
 toml = "0.8"
 # `serde`: keychain items travel inside sealed sets and backups.
 zeroize = { workspace = true, features = ["serde"] }
-htmd = "0.6"
-dom_query = "0.27"
-html5ever = "0.27"
-markup5ever_rcdom = "0.3"
 mail-parser = { version = "=0.11.9", features = ["full_encoding"] }
 mail-builder = { version = "=0.4.4", default-features = false }
 cssparser = "0.36"
-ress = "0.11.7"
 libc = "0.2"
 # Backup walks the data roots through folder handles, never following a link.
 rustix = { version = "1", features = ["fs"] }
@@ -96,6 +88,9 @@ reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 # Pith's scanner measures what deleting a worktree frees from APFS private
 # sizes and clone counts, which `du` overstates for copy-on-write clones.
 storage-scanner = { git = "https://github.com/bryantleft/bruhs", rev = "739a4bb85a973c40f1c5f9a550f2024ce7528ab4" }
+
+[target.'cfg(windows)'.dependencies]
+portable-pty = "0.9"
 
 [dev-dependencies]
 axum = { workspace = true, features = ["ws"] }

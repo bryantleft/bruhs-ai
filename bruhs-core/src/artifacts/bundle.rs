@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use bruhs_models::logic::attachments::{kind_for_name, mime_for, MAX_FILE_BYTES};
 use cssparser::{Parser, ParserInput, ToCss as _, Token};
-use html5ever::{parse_document, serialize, tendril::TendrilSink as _};
-use markup5ever_rcdom::{Handle, Node, NodeData, RcDom, SerializableHandle};
+
+use crate::html::{Document, NodeId};
 
 use super::ArtifactError;
 
@@ -49,153 +49,147 @@ pub(super) fn bundle(path: &str, project: Option<&str>) -> Result<(String, Strin
     let base = source
         .parent()
         .ok_or_else(|| invalid("The artifact has no containing directory."))?;
-    let dom = parse_document(RcDom::default(), Default::default()).one(html);
+    let mut dom = Document::parse(&html);
     let mut title = source.file_stem().map_or_else(
         || "Interactive response".into(),
         |s| s.to_string_lossy().into_owned(),
     );
-    let mut nodes = vec![dom.document.clone()];
-    let mut body = None;
-    let mut deferred_scripts = Vec::new();
-    while let Some(node) = nodes.pop() {
-        if let NodeData::Element {
-            name,
-            attrs,
-            template_contents,
-            ..
-        } = &node.data
-        {
-            let tag = name.local.as_ref();
-            if tag == "body" {
-                body = Some(node.clone());
-            }
-            if tag == "title" {
-                let content = text(&node);
-                if !content.trim().is_empty() {
-                    title = content.trim().into();
-                }
-            }
-            if matches!(tag, "base" | "iframe" | "object" | "embed") {
-                return Err(invalid(format!("Artifact <{tag}> elements are not supported in an isolated response. Inline their content before publishing.")));
-            }
-            if tag == "meta"
-                && attribute(&node, "http-equiv")
-                    .is_some_and(|value| value.eq_ignore_ascii_case("refresh"))
-            {
-                return Err(invalid(
-                    "Artifact meta refresh navigation is not supported.",
-                ));
-            }
-            if attribute(&node, "srcset").is_some() {
-                return Err(invalid("Choose one local image src instead of srcset before publishing a self-contained artifact."));
-            }
-            if tag == "form"
-                && attribute(&node, "action").is_some_and(|value| !value.trim().is_empty())
-            {
-                return Err(invalid(
-                    "Artifact forms must handle input locally; remove the action URL.",
-                ));
-            }
-            if let Some(css) = attribute(&node, "style") {
-                set_attribute(&node, "style", bundler.css(&css, base)?);
-            }
-            if tag == "style" {
-                set_text(
-                    &node,
-                    &safe_rawtext(&bundler.css(&text(&node), base)?, "style"),
-                );
-            }
-            if tag == "script" {
-                let kind = attribute(&node, "type")
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                if kind == "importmap" {
-                    return Err(invalid("JavaScript import maps must be prebundled into a standalone script before publishing."));
-                }
-                let script = if let Some(src) = attribute(&node, "src") {
-                    let path = bundler.resolve(&src, base)?;
-                    let script = bundler.read_text(&path)?;
-                    remove_attribute(&node, "src");
-                    if kind != "module" && attribute(&node, "defer").is_some() {
-                        deferred_scripts.push(node.clone());
-                    }
-                    Some(script)
-                } else {
-                    None
-                };
-                let content = script.unwrap_or_else(|| text(&node));
-                if matches!(
-                    kind.as_str(),
-                    "" | "module"
-                        | "text/javascript"
-                        | "application/javascript"
-                        | "text/ecmascript"
-                        | "application/ecmascript"
-                ) {
-                    validate_script(&content)?;
-                }
-                set_text(&node, &safe_rawtext(&content, "script"));
-            } else if tag == "link" {
-                let rel = attribute(&node, "rel")
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                if let Some(href) = attribute(&node, "href") {
-                    if rel.split_whitespace().any(|part| part == "stylesheet") {
-                        let css = bundler.stylesheet(&href, base)?;
-                        replace_stylesheet(&node, &safe_rawtext(&css, "style"));
-                    } else if rel.split_whitespace().any(|part| part == "icon") {
-                        set_attribute(&node, "href", bundler.asset(&href, base)?);
-                    } else {
-                        return Err(invalid(format!("Artifact link rel={rel:?} cannot be bundled. Remove preload/prefetch/import dependencies and publish their local contents instead.")));
-                    }
-                }
-            } else {
-                for key in ["src", "poster"] {
-                    if let Some(src) = attribute(&node, key) {
-                        set_attribute(&node, key, bundler.asset(&src, base)?);
-                    }
-                }
-                if matches!(tag, "image" | "use") {
-                    if let Some(src) = attribute(&node, "href") {
-                        set_attribute(&node, "href", bundler.asset(&src, base)?);
-                    }
-                }
-            }
-            attrs.borrow_mut().retain(|attribute| {
-                !matches!(attribute.name.local.as_ref(), "integrity" | "crossorigin")
-            });
-            if let Some(contents) = &*template_contents.borrow() {
-                nodes.push(contents.clone());
+    let mut body: Option<NodeId> = None;
+    let mut deferred_scripts: Vec<NodeId> = Vec::new();
+
+    for node in dom.elements_in_order(Document::ROOT) {
+        let Some(tag) = dom.tag_name(node).map(str::to_owned) else {
+            continue;
+        };
+        if tag == "body" {
+            body = Some(node);
+        }
+        if tag == "title" {
+            let content = dom.text_content(node);
+            if !content.trim().is_empty() {
+                title = content.trim().into();
             }
         }
-        nodes.extend(node.children.borrow().iter().rev().cloned());
+        if matches!(tag.as_str(), "base" | "iframe" | "object" | "embed") {
+            return Err(invalid(format!(
+                "Artifact <{tag}> elements are not supported in an isolated response. Inline their content before publishing."
+            )));
+        }
+        if tag == "meta"
+            && dom
+                .attr(node, "http-equiv")
+                .is_some_and(|value| value.eq_ignore_ascii_case("refresh"))
+        {
+            return Err(invalid(
+                "Artifact meta refresh navigation is not supported.",
+            ));
+        }
+        if dom.has_attr(node, "srcset") {
+            return Err(invalid(
+                "Choose one local image src instead of srcset before publishing a self-contained artifact.",
+            ));
+        }
+        if tag == "form"
+            && dom
+                .attr(node, "action")
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(invalid(
+                "Artifact forms must handle input locally; remove the action URL.",
+            ));
+        }
+        if let Some(css) = dom.attr(node, "style").map(str::to_owned) {
+            let rewritten = bundler.css(&css, base)?;
+            dom.set_attr(node, "style", rewritten);
+        }
+        if tag == "style" {
+            let rewritten = bundler.css(&dom.text_content(node), base)?;
+            dom.set_text(node, &safe_rawtext(&rewritten, "style"));
+        }
+        if tag == "script" {
+            let kind = dom
+                .attr(node, "type")
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if kind == "importmap" {
+                return Err(invalid(
+                    "JavaScript import maps must be prebundled into a standalone script before publishing.",
+                ));
+            }
+            let script = if let Some(src) = dom.attr(node, "src").map(str::to_owned) {
+                let path = bundler.resolve(&src, base)?;
+                let script = bundler.read_text(&path)?;
+                dom.remove_attr(node, "src");
+                if kind != "module" && dom.has_attr(node, "defer") {
+                    deferred_scripts.push(node);
+                }
+                Some(script)
+            } else {
+                None
+            };
+            let content = script.unwrap_or_else(|| dom.text_content(node));
+            if matches!(
+                kind.as_str(),
+                "" | "module"
+                    | "text/javascript"
+                    | "application/javascript"
+                    | "text/ecmascript"
+                    | "application/ecmascript"
+            ) {
+                validate_script(&content)?;
+            }
+            dom.set_text(node, &safe_rawtext(&content, "script"));
+        } else if tag == "link" {
+            let rel = dom
+                .attr(node, "rel")
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if let Some(href) = dom.attr(node, "href").map(str::to_owned) {
+                if rel.split_whitespace().any(|part| part == "stylesheet") {
+                    let css = bundler.stylesheet(&href, base)?;
+                    dom.replace_with_style(node, &safe_rawtext(&css, "style"));
+                } else if rel.split_whitespace().any(|part| part == "icon") {
+                    let data_uri = bundler.asset(&href, base)?;
+                    dom.set_attr(node, "href", data_uri);
+                } else {
+                    return Err(invalid(format!(
+                        "Artifact link rel={rel:?} cannot be bundled. Remove preload/prefetch/import dependencies and publish their local contents instead."
+                    )));
+                }
+            }
+        } else {
+            for key in ["src", "poster"] {
+                if let Some(src) = dom.attr(node, key).map(str::to_owned) {
+                    let data_uri = bundler.asset(&src, base)?;
+                    dom.set_attr(node, key, data_uri);
+                }
+            }
+            if matches!(tag.as_str(), "image" | "use") {
+                if let Some(src) = dom.attr(node, "href").map(str::to_owned) {
+                    let data_uri = bundler.asset(&src, base)?;
+                    dom.set_attr(node, "href", data_uri);
+                }
+            }
+        }
+        dom.retain_attrs(node, |key| !matches!(key, "integrity" | "crossorigin"));
     }
-    if let Some(body) = body {
+
+    if !deferred_scripts.is_empty() {
+        let target = body.unwrap_or(Document::ROOT);
         // Inline classic scripts ignore defer. Move originally deferred
         // files after the parsed body while preserving their source order.
         for script in deferred_scripts {
-            if let Some(parent) = script.parent.take().and_then(|parent| parent.upgrade()) {
-                parent
-                    .children
-                    .borrow_mut()
-                    .retain(|child| !std::rc::Rc::ptr_eq(child, &script));
-            }
-            script.parent.set(Some(std::rc::Rc::downgrade(&body)));
-            remove_attribute(&script, "defer");
-            body.children.borrow_mut().push(script);
+            dom.remove_attr(script, "defer");
+            dom.move_to_end(script, target);
         }
     }
-    let mut bytes = Vec::new();
-    serialize(
-        &mut bytes,
-        &SerializableHandle::from(dom.document),
-        Default::default(),
-    )?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
-        return Err(invalid("The bundled artifact exceeds the app's 50 MiB attachment budget. Show large recordings as separate media blocks."));
+
+    let html = dom.serialize();
+    if u64::try_from(html.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
+        return Err(invalid(
+            "The bundled artifact exceeds the app's 50 MiB attachment budget. Show large recordings as separate media blocks.",
+        ));
     }
-    let html = String::from_utf8(bytes)
-        .map_err(|_| invalid("The bundled artifact is not valid UTF-8."))?;
     Ok((html, title))
 }
 
@@ -207,7 +201,9 @@ impl Bundler {
             invalid(format!("Invalid artifact resource {reference:?}: {error}"))
         })?;
         if url.scheme() != "file" {
-            return Err(invalid(format!("External dependency {reference:?} cannot be fetched while publishing. Download or generate it inside the project and reference the local file.")));
+            return Err(invalid(format!(
+                "External dependency {reference:?} cannot be fetched while publishing. Download or generate it inside the project and reference the local file."
+            )));
         }
         let path = url.to_file_path().map_err(|_| {
             invalid(format!(
@@ -239,7 +235,9 @@ impl Bundler {
         let file = std::fs::File::open(path)?;
         let budget = MAX_FILE_BYTES.saturating_sub(self.bytes_read);
         if file.metadata()?.len() > budget {
-            return Err(invalid("Artifact inputs exceed the app's 50 MiB attachment budget. Show large media separately."));
+            return Err(invalid(
+                "Artifact inputs exceed the app's 50 MiB attachment budget. Show large media separately.",
+            ));
         }
         let mut bytes = Vec::new();
         file.take(budget + 1).read_to_end(&mut bytes)?;
@@ -355,7 +353,9 @@ impl Bundler {
                         tail = parser.slice_from(tail_start).trim().into();
                     }
                     if tail.starts_with("layer") || tail.starts_with("supports") {
-                        return Err(invalid("Stylesheet layer/supports imports must be prebundled before publishing."));
+                        return Err(invalid(
+                            "Stylesheet layer/supports imports must be prebundled before publishing.",
+                        ));
                     }
                     let imported = self.stylesheet(&reference, base)?;
                     if tail.is_empty() {
@@ -410,101 +410,11 @@ impl Bundler {
     }
 }
 
-fn attribute(node: &Handle, key: &str) -> Option<String> {
-    if let NodeData::Element { attrs, .. } = &node.data {
-        attrs
-            .borrow()
-            .iter()
-            .find(|attribute| attribute.name.local.as_ref() == key)
-            .map(|attribute| attribute.value.to_string())
-    } else {
-        None
-    }
-}
-
 fn css_url(reference: &str) -> String {
     format!(
         "url({})",
         Token::QuotedString(reference.into()).to_css_string()
     )
-}
-
-fn set_attribute(node: &Handle, key: &str, value: String) {
-    if let NodeData::Element { attrs, .. } = &node.data {
-        if let Some(attribute) = attrs
-            .borrow_mut()
-            .iter_mut()
-            .find(|attribute| attribute.name.local.as_ref() == key)
-        {
-            attribute.value = value.into();
-        }
-    }
-}
-
-fn remove_attribute(node: &Handle, key: &str) {
-    if let NodeData::Element { attrs, .. } = &node.data {
-        attrs
-            .borrow_mut()
-            .retain(|attribute| attribute.name.local.as_ref() != key);
-    }
-}
-
-fn replace_stylesheet(node: &Handle, css: &str) {
-    if let NodeData::Element { name, attrs, .. } = &node.data {
-        let mut name = name.clone();
-        name.local = "style".into();
-        let attrs = attrs
-            .borrow()
-            .iter()
-            .filter(|attr| {
-                !matches!(
-                    attr.name.local.as_ref(),
-                    "href" | "rel" | "integrity" | "crossorigin"
-                )
-            })
-            .cloned()
-            .collect();
-        let replacement = Node::new(NodeData::Element {
-            name,
-            attrs: std::cell::RefCell::new(attrs),
-            template_contents: std::cell::RefCell::new(None),
-            mathml_annotation_xml_integration_point: false,
-        });
-        set_text(&replacement, css);
-        if let Some(parent) = node.parent.take().and_then(|parent| parent.upgrade()) {
-            replacement
-                .parent
-                .set(Some(std::rc::Rc::downgrade(&parent)));
-            if let Some(slot) = parent
-                .children
-                .borrow_mut()
-                .iter_mut()
-                .find(|child| std::rc::Rc::ptr_eq(child, node))
-            {
-                *slot = replacement;
-            }
-        }
-    }
-}
-
-fn text(node: &Handle) -> String {
-    let mut result = String::new();
-    let mut nodes: Vec<_> = node.children.borrow().iter().rev().cloned().collect();
-    while let Some(node) = nodes.pop() {
-        if let NodeData::Text { contents } = &node.data {
-            result.push_str(&contents.borrow());
-        }
-        nodes.extend(node.children.borrow().iter().rev().cloned());
-    }
-    result
-}
-
-fn set_text(node: &Handle, content: &str) {
-    let text = Node::new(NodeData::Text {
-        contents: std::cell::RefCell::new(content.into()),
-    });
-    text.parent.set(Some(std::rc::Rc::downgrade(node)));
-    *node.children.borrow_mut() = vec![text];
 }
 
 fn safe_rawtext(source: &str, tag: &str) -> String {
@@ -521,17 +431,263 @@ fn safe_rawtext(source: &str, tag: &str) -> String {
     output
 }
 
+/// Lean, zero-dependency JavaScript scanner for artifact sandboxing.
+///
+/// Properly skips comments (`//`, `/* */`), string literals (`'...'`, `"..."`),
+/// template literals (while scanning `${...}` interpolations), and regex
+/// literals (`/.../flags` with `[...]` character classes), while rejecting
+/// `import`/`export` statements and dynamic network/worker/loader APIs.
 fn validate_script(source: &str) -> Result<(), ArtifactError> {
-    for token in ress::Scanner::new(source) {
-        let item = token.map_err(|error| invalid(format!("JavaScript could not be scanned: {error}. Fix its syntax or prebundle it before publishing.")))?;
-        if matches!(&item.token, ress::tokens::Token::Keyword(keyword) if matches!(keyword.as_str(), "import" | "export"))
-        {
-            return Err(invalid("JavaScript imports must be prebundled into a standalone script before publishing. Local CSS, classic script src files, images and media are bundled automatically."));
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    // Whether `/` at the current position begins a regex literal rather than division.
+    let mut regex_allowed = true;
+    // Stack of open brace depths for active `${...}` template literal interpolations.
+    let mut template_brace_stack: Vec<usize> = Vec::new();
+    let mut brace_depth = 0usize;
+
+    while i < len {
+        let b = bytes[i];
+
+        // Whitespace
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
         }
-        if matches!(&item.token, ress::tokens::Token::Ident(identifier) if ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "importScripts", "require"].contains(&identifier.as_ref()))
-        {
-            return Err(invalid("JavaScript requests or module loaders must be replaced with inline data and code before publishing an isolated artifact."));
+
+        // Line comment `//`
+        if b == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < len && !matches!(bytes[i], b'\n' | b'\r') {
+                i += 1;
+            }
+            continue;
         }
+
+        // Block comment `/* ... */`
+        if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+            i += 2;
+            let mut closed = false;
+            while i + 1 < len {
+                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    i += 2;
+                    closed = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !closed {
+                return Err(invalid(
+                    "JavaScript could not be scanned: unterminated block comment. Fix its syntax or prebundle it before publishing.",
+                ));
+            }
+            continue;
+        }
+
+        // Regex literal `/pattern/flags`
+        if b == b'/' && regex_allowed {
+            i += 1;
+            let mut in_class = false;
+            let mut closed = false;
+            while i < len {
+                let c = bytes[i];
+                if c == b'\\' {
+                    i = (i + 2).min(len);
+                    continue;
+                }
+                if c == b'\n' || c == b'\r' {
+                    break;
+                }
+                if c == b'[' {
+                    in_class = true;
+                } else if c == b']' {
+                    in_class = false;
+                } else if c == b'/' && !in_class {
+                    i += 1;
+                    while i < len && bytes[i].is_ascii_alphabetic() {
+                        i += 1;
+                    }
+                    closed = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !closed {
+                return Err(invalid(
+                    "JavaScript could not be scanned: unterminated regular expression. Fix its syntax or prebundle it before publishing.",
+                ));
+            }
+            regex_allowed = false;
+            continue;
+        }
+
+        // Single or double quoted string
+        if b == b'"' || b == b'\'' {
+            let quote = b;
+            i += 1;
+            let mut closed = false;
+            while i < len {
+                let c = bytes[i];
+                if c == b'\\' {
+                    i = (i + 2).min(len);
+                    continue;
+                }
+                if c == quote {
+                    i += 1;
+                    closed = true;
+                    break;
+                }
+                if c == b'\n' || c == b'\r' {
+                    break;
+                }
+                i += 1;
+            }
+            if !closed {
+                return Err(invalid(
+                    "JavaScript could not be scanned: unterminated string literal. Fix its syntax or prebundle it before publishing.",
+                ));
+            }
+            regex_allowed = false;
+            continue;
+        }
+
+        // Template literal `` `...` `` (re-entered after closing `}` of `${...}`)
+        if b == b'`' {
+            i = scan_template_chunk(bytes, i + 1, &mut template_brace_stack, brace_depth)?;
+            if template_brace_stack.last() == Some(&brace_depth) {
+                brace_depth += 1;
+                regex_allowed = true;
+            } else {
+                regex_allowed = false;
+            }
+            continue;
+        }
+
+        // Braces (track `${...}` template interpolation boundaries)
+        if b == b'{' {
+            brace_depth += 1;
+            regex_allowed = true;
+            i += 1;
+            continue;
+        }
+        if b == b'}' {
+            brace_depth = brace_depth.saturating_sub(1);
+            if template_brace_stack.last() == Some(&brace_depth) {
+                template_brace_stack.pop();
+                i = scan_template_chunk(bytes, i + 1, &mut template_brace_stack, brace_depth)?;
+                if template_brace_stack.last() == Some(&brace_depth) {
+                    brace_depth += 1;
+                    regex_allowed = true;
+                } else {
+                    regex_allowed = false;
+                }
+                continue;
+            }
+            regex_allowed = true;
+            i += 1;
+            continue;
+        }
+
+        // Identifiers and keywords
+        if b.is_ascii_alphabetic() || matches!(b, b'_' | b'$') || b >= 0x80 {
+            let start = i;
+            while i < len {
+                let c = bytes[i];
+                if c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$') {
+                    i += 1;
+                } else if c >= 0x80 {
+                    let ch = source[i..].chars().next().unwrap_or('\0');
+                    if ch.is_alphanumeric() {
+                        i += ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            let ident = &source[start..i];
+            if matches!(ident, "import" | "export") {
+                return Err(invalid(
+                    "JavaScript imports must be prebundled into a standalone script before publishing. Local CSS, classic script src files, images and media are bundled automatically.",
+                ));
+            }
+            if matches!(
+                ident,
+                "fetch"
+                    | "XMLHttpRequest"
+                    | "WebSocket"
+                    | "EventSource"
+                    | "Worker"
+                    | "SharedWorker"
+                    | "importScripts"
+                    | "require"
+            ) {
+                return Err(invalid(
+                    "JavaScript requests or module loaders must be replaced with inline data and code before publishing an isolated artifact.",
+                ));
+            }
+            regex_allowed = matches!(
+                ident,
+                "return"
+                    | "throw"
+                    | "case"
+                    | "in"
+                    | "instanceof"
+                    | "typeof"
+                    | "void"
+                    | "delete"
+                    | "new"
+                    | "do"
+                    | "else"
+                    | "yield"
+                    | "await"
+                    | "of"
+            );
+            continue;
+        }
+
+        // Numbers
+        if b.is_ascii_digit() {
+            while i < len && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'.' | b'_')) {
+                i += 1;
+            }
+            regex_allowed = false;
+            continue;
+        }
+
+        // Punctuation
+        regex_allowed = !matches!(b, b')' | b']');
+        i += 1;
     }
+
     Ok(())
+}
+
+fn scan_template_chunk(
+    bytes: &[u8],
+    mut i: usize,
+    template_brace_stack: &mut Vec<usize>,
+    brace_depth: usize,
+) -> Result<usize, ArtifactError> {
+    let len = bytes.len();
+    while i < len {
+        let c = bytes[i];
+        if c == b'\\' {
+            i = (i + 2).min(len);
+            continue;
+        }
+        if c == b'`' {
+            return Ok(i + 1);
+        }
+        if c == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
+            template_brace_stack.push(brace_depth);
+            return Ok(i + 2);
+        }
+        i += 1;
+    }
+    Err(invalid(
+        "JavaScript could not be scanned: unterminated template literal. Fix its syntax or prebundle it before publishing.",
+    ))
 }

@@ -314,7 +314,7 @@ async fn terminal(
 ) -> io::Result<()> {
     let cmd = command(instance, cwd).await?;
     let process = cmd.as_std();
-    let mut launch = portable_pty::CommandBuilder::new(process.get_program());
+    let mut launch = crate::pty::CommandBuilder::new(process.get_program());
     launch.args(process.get_args());
     for (k, v) in process.get_envs() {
         if let Some(v) = v {

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use crate::pty::{openpty, CommandBuilder, MasterPty, PtyChild, PtySize};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
@@ -80,9 +80,9 @@ pub enum TerminalError {
     #[error("working directory does not exist: {0}")]
     MissingCwd(String),
     #[error("pty: {0}")]
-    Pty(#[source] anyhow::Error),
+    Pty(#[source] std::io::Error),
     #[error("spawn: {0}")]
-    Spawn(#[source] anyhow::Error),
+    Spawn(#[source] std::io::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     /// The session's input queue is full (the program is not reading); the
@@ -183,8 +183,6 @@ fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-type PtyChild = Box<dyn Child + Send + Sync>;
-
 /// Kill `child` (SIGHUP, a short grace period, then SIGKILL) and reap it on
 /// a short-lived thread, so callers on async paths or the UI thread never
 /// wait for the process.
@@ -228,7 +226,7 @@ fn spawn_writer(
 
 struct Session {
     info: TerminalInfo,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    master: Mutex<MasterPty>,
     /// Queue to the dedicated writer thread; PTY writes never block callers.
     input: mpsc::Sender<Vec<u8>>,
     /// Taken by whoever reaps it: the reader thread after EOF, or `close`.
@@ -310,14 +308,7 @@ impl TerminalManager {
         let cols = spec.cols.filter(|c| *c > 0).unwrap_or(DEFAULT_COLS);
         let rows = spec.rows.filter(|r| *r > 0).unwrap_or(DEFAULT_ROWS);
 
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(TerminalError::Pty)?;
+        let pair = openpty(PtySize { rows, cols }).map_err(TerminalError::Pty)?;
 
         let mut cmd = prepared.unwrap_or_else(|| {
             let shell = pick_shell(std::env::var("SHELL").ok().as_deref());
@@ -564,12 +555,7 @@ impl TerminalManager {
         let session = self.session(id)?;
         let master = lock(&session.master);
         let result = master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .resize(PtySize { rows, cols })
             .map_err(TerminalError::Pty);
         drop(master);
         result

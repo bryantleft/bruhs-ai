@@ -501,7 +501,7 @@ mod tests {
             AppError::BadRequest(_)
         ));
         assert!(matches!(
-            map_terminal_error(TerminalError::Pty(std::io::Error::other("boom").into())),
+            map_terminal_error(TerminalError::Pty(std::io::Error::other("boom"))),
             AppError::Internal { .. }
         ));
     }
