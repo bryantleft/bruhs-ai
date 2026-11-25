@@ -139,22 +139,10 @@ fn parse_prose_content(raw: &str, streaming: bool, render_math: bool) -> Vec<Par
     };
     // The prose renderer already parses Markdown. Only parse it here when a
     // fence's info string could name Mermaid, not when prose mentions the word.
-    let parsed = if may_have_mermaid_fence(raw) {
-        markdown::to_mdast(raw, &ParseOptions::gfm()).ok()
-    } else {
-        None
-    };
-    let Some(ast) = parsed else {
-        let mut blocks = Vec::new();
-        push_prose(&mut blocks, raw);
-        if blocks.is_empty() {
-            blocks.push(ParsedAssistantBlock::Markdown(raw.to_string()));
-        }
-        return blocks;
-    };
-
     let mut ranges = Vec::new();
-    collect_mermaid_code_ranges(&ast, raw, &mut ranges);
+    if may_have_mermaid_fence(raw) {
+        collect_mermaid_code_ranges(raw, &mut ranges);
+    }
     if streaming {
         ranges.retain(|range| code_fence_closed(&raw[range.start..range.end]));
     }
@@ -226,50 +214,76 @@ pub(super) fn code_fence_closed(block: &str) -> bool {
     })
 }
 
-pub(super) fn collect_mermaid_code_ranges(
-    node: &mdast::Node,
-    raw: &str,
-    ranges: &mut Vec<DesktopMermaidRange>,
-) {
-    if let mdast::Node::Root(root) = node {
-        for child in &root.children {
-            if let mdast::Node::Code(code) = child {
-                let Some(lang) = code.lang.as_deref() else {
-                    continue;
-                };
-                if !lang.eq_ignore_ascii_case(MERMAID_LANG) {
-                    continue;
-                }
-                let Some(position) = code.position.as_ref() else {
-                    continue;
-                };
-                let Some(start) = markdown_offset_to_byte(raw, position.start.offset) else {
-                    continue;
-                };
-                let Some(end) = markdown_offset_to_byte(raw, position.end.offset) else {
-                    continue;
-                };
-                if start <= end && raw.is_char_boundary(start) && raw.is_char_boundary(end) {
-                    ranges.push(DesktopMermaidRange {
-                        start,
-                        end,
-                        source: code.value.clone(),
-                    });
-                }
+pub(super) fn collect_mermaid_code_ranges(raw: &str, ranges: &mut Vec<DesktopMermaidRange>) {
+    use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+    use std::borrow::Cow;
+
+    // CommonMark treats bare `\r` as a line ending, whereas `pulldown-cmark`
+    // only splits on `\n` / `\r\n`. Replacing bare `\r` with `\n` is 1:1 in
+    // bytes, so every byte offset maps identically back to `raw`.
+    let bytes = raw.as_bytes();
+    let has_bare_cr = bytes
+        .iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'\r' && bytes.get(i + 1) != Some(&b'\n'));
+    let normalized: Cow<'_, str> = if has_bare_cr {
+        let mut s = String::with_capacity(raw.len());
+        let mut chars = raw.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\r' && chars.peek() != Some(&'\n') {
+                s.push('\n');
+            } else {
+                s.push(c);
             }
         }
-    }
-}
+        Cow::Owned(s)
+    } else {
+        Cow::Borrowed(raw)
+    };
 
-pub(super) fn markdown_offset_to_byte(raw: &str, offset: usize) -> Option<usize> {
-    if offset <= raw.len() && raw.is_char_boundary(offset) {
-        return Some(offset);
+    let mut depth = 0usize;
+    let mut active: Option<(std::ops::Range<usize>, String)> = None;
+    for (event, range) in Parser::new_ext(&normalized, Options::ENABLE_TABLES).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if depth == 0 => {
+                let lang = info.split_whitespace().next().unwrap_or_default();
+                if lang.eq_ignore_ascii_case(MERMAID_LANG) {
+                    active = Some((range, String::new()));
+                }
+                depth += 1;
+            }
+            Event::Start(_) => {
+                depth += 1;
+            }
+            Event::Text(text) => {
+                if let Some((_, source)) = &mut active {
+                    source.push_str(&text);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    if let Some((block_range, source)) = active.take() {
+                        if block_range.start <= block_range.end
+                            && block_range.end <= raw.len()
+                            && raw.is_char_boundary(block_range.start)
+                            && raw.is_char_boundary(block_range.end)
+                        {
+                            ranges.push(DesktopMermaidRange {
+                                start: block_range.start,
+                                end: block_range.end,
+                                source,
+                            });
+                        }
+                    }
+                }
+            }
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
     }
-
-    raw.char_indices()
-        .map(|(byte_index, _)| byte_index)
-        .chain(std::iter::once(raw.len()))
-        .nth(offset)
 }
 
 pub(super) fn push_markdown_block(blocks: &mut Vec<ParsedAssistantBlock>, markdown: &str) {
@@ -490,26 +504,31 @@ pub(super) fn is_escaped(raw: &str, index: usize) -> bool {
     slash_count % 2 == 1
 }
 
+#[cfg(test)]
 pub(super) fn render_desktop_math(source: &str, display: bool) -> DesktopMathRender {
-    type MathCache = BoundedCache<(String, bool), DesktopMathRender>;
+    render_desktop_math_colored(source, display, &desktop_math_color())
+}
+
+pub(super) fn render_desktop_math_colored(
+    source: &str,
+    display: bool,
+    color: &str,
+) -> DesktopMathRender {
+    type MathCache = BoundedCache<(String, bool, String), DesktopMathRender>;
     static CACHE: OnceLock<Mutex<MathCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(BoundedCache::new(MATH_RENDER_CACHE_ENTRIES)));
-    let key = (source.to_string(), display);
+    let key = (source.to_string(), display, color.to_string());
     if let Some(render) = lock_render_cache(cache).get(&key) {
         return render;
     }
 
-    let options = mathjax_svg_rs::Options {
+    let options = super::tex_math::MathOptions {
         font_size: if display { 15.0 } else { 13.0 },
-        horizontal_align: if display {
-            mathjax_svg_rs::HorizontalAlign::Center
-        } else {
-            mathjax_svg_rs::HorizontalAlign::Left
-        },
+        display,
     };
 
-    let render = match mathjax_svg_rs::render_tex(source, &options) {
-        Ok(svg) => DesktopMathRender::Svg(desktop_math_svg(svg)),
+    let render = match super::tex_math::render_tex(source, &options) {
+        Ok(svg) => DesktopMathRender::Svg(desktop_math_svg_colored(svg, color)),
         Err(error) => DesktopMathRender::Error(error),
     };
 
@@ -517,27 +536,39 @@ pub(super) fn render_desktop_math(source: &str, display: bool) -> DesktopMathRen
     render
 }
 
-pub(super) fn desktop_math_svg(svg: String) -> String {
-    let svg = svg.replace("currentColor", "#dfcfc3");
-    svg.replacen("<svg ", "<svg style=\"color:#dfcfc3\" ", 1)
+pub(super) fn desktop_math_color() -> String {
+    hsla_to_hex(theme::rambutan_100())
 }
 
+pub(super) fn desktop_math_svg_colored(svg: String, color: &str) -> String {
+    let svg = svg.replace("currentColor", color);
+    svg.replacen("<svg ", &format!("<svg style=\"color:{color}\" "), 1)
+}
+
+#[cfg(test)]
 pub(super) fn render_desktop_mermaid(source: &str) -> DesktopMermaidRender {
-    static CACHE: OnceLock<Mutex<BoundedCache<String, DesktopMermaidRender>>> = OnceLock::new();
+    render_desktop_mermaid_themed(source, &desktop_mermaid_theme())
+}
+
+pub(super) fn render_desktop_mermaid_themed(
+    source: &str,
+    theme: &crate::diagram::Theme,
+) -> DesktopMermaidRender {
+    type MermaidCache = BoundedCache<(String, String, String), DesktopMermaidRender>;
+    static CACHE: OnceLock<Mutex<MermaidCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(BoundedCache::new(MERMAID_RENDER_CACHE_ENTRIES)));
-    let key = source.to_string();
+    let key = (
+        source.to_string(),
+        theme.background.clone(),
+        theme.primary_text_color.clone(),
+    );
     if let Some(render) = lock_render_cache(cache).get(&key) {
         return render;
     }
 
-    let options = mermaid_rs_renderer::RenderOptions {
-        theme: desktop_mermaid_theme(),
-        layout: mermaid_rs_renderer::LayoutConfig::default(),
-    };
-
-    let render = match mermaid_rs_renderer::render_with_options(source, options) {
+    let render = match crate::diagram::render_mermaid_svg(source, theme) {
         Ok(svg) => DesktopMermaidRender::Svg(svg),
-        Err(error) => DesktopMermaidRender::Error(error.to_string()),
+        Err(error) => DesktopMermaidRender::Error(error),
     };
 
     lock_render_cache(cache).insert(key, render.clone());
@@ -557,29 +588,42 @@ pub(super) fn lock_render_cache<K, V>(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-pub(super) fn desktop_mermaid_theme() -> mermaid_rs_renderer::Theme {
-    let mut mermaid_theme = mermaid_rs_renderer::Theme::modern();
-    mermaid_theme.background = "#141210".to_string();
-    mermaid_theme.primary_color = "#2f2922".to_string();
-    mermaid_theme.primary_text_color = "#dfcfc3".to_string();
-    mermaid_theme.primary_border_color = "#594a36".to_string();
-    mermaid_theme.line_color = "#c3afa1".to_string();
-    mermaid_theme.secondary_color = "#1f1a16".to_string();
-    mermaid_theme.tertiary_color = "#141210".to_string();
-    mermaid_theme.edge_label_background = "#141210".to_string();
-    mermaid_theme.cluster_background = "#1f1a16".to_string();
-    mermaid_theme.cluster_border = "#594a36".to_string();
-    mermaid_theme.sequence_actor_fill = "#2f2922".to_string();
-    mermaid_theme.sequence_actor_border = "#594a36".to_string();
-    mermaid_theme.sequence_actor_line = "#c3afa1".to_string();
-    mermaid_theme.sequence_note_fill = "#2f2922".to_string();
-    mermaid_theme.sequence_note_border = "#594a36".to_string();
-    mermaid_theme.sequence_activation_fill = "#1f1a16".to_string();
-    mermaid_theme.sequence_activation_border = "#594a36".to_string();
-    mermaid_theme.text_color = "#dfcfc3".to_string();
-    mermaid_theme.font_family = "Monaspace Neon, ui-monospace, monospace".to_string();
-    mermaid_theme.font_size = 12.0;
-    mermaid_theme
+pub(super) fn desktop_mermaid_theme() -> crate::diagram::Theme {
+    let bg = hsla_to_hex(theme::longan_950());
+    let secondary = hsla_to_hex(theme::longan_900());
+    let primary = hsla_to_hex(theme::longan_800());
+    let border = hsla_to_hex(theme::longan_700());
+    let text = hsla_to_hex(theme::rambutan_100());
+    let line = hsla_to_hex(theme::rambutan_300());
+    crate::diagram::Theme {
+        background: bg.clone(),
+        primary_color: primary.clone(),
+        primary_text_color: text.clone(),
+        primary_border_color: border.clone(),
+        line_color: line.clone(),
+        secondary_color: secondary.clone(),
+        edge_label_background: bg,
+        cluster_background: secondary.clone(),
+        cluster_border: border.clone(),
+        sequence_actor_fill: primary.clone(),
+        sequence_actor_border: border.clone(),
+        sequence_actor_line: line,
+        sequence_note_fill: primary,
+        sequence_note_border: border.clone(),
+        sequence_activation_fill: secondary,
+        sequence_activation_border: border,
+        text_color: text,
+        font_family: "Monaspace Neon, ui-monospace, monospace".to_string(),
+        font_size: 12.0,
+    }
+}
+
+fn hsla_to_hex(color: Hsla) -> String {
+    let rgba = gpui::Rgba::from(color);
+    let r = (rgba.r.clamp(0.0, 1.0) * 255.0).round().to_u8_saturating();
+    let g = (rgba.g.clamp(0.0, 1.0) * 255.0).round().to_u8_saturating();
+    let b = (rgba.b.clamp(0.0, 1.0) * 255.0).round().to_u8_saturating();
+    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 pub(super) fn desktop_block_id(

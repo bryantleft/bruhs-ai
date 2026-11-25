@@ -30,7 +30,7 @@ members = [
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
-exclude = ["third_party/axum", "third_party/gpui-windows", "third_party/mathjax-svg-rs"]
+exclude = ["third_party/gpui-windows"]
 
 [workspace.package]
 edition = "2021"
@@ -64,6 +64,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+pulldown-cmark = { version = "0.13.3", default-features = false }
 
 # HTTP
 axum = "0.8"
@@ -108,12 +109,6 @@ tempfile = "3"
 ztracing = { path = "third_party/ztracing-noop" }
 # Clears a dropped window's activation callback; see third_party/gpui-windows/VENDORED.md.
 gpui_windows = { path = "third_party/gpui-windows" }
-
-[patch.crates-io]
-# Borrowed byte writer for bounded task-event encoding; see third_party/axum/VENDORED.md.
-axum = { path = "third_party/axum" }
-# boa_engine 0.22, whose icu crates agree with gpui's; see third_party/mathjax-svg-rs/VENDORED.md.
-mathjax-svg-rs = { path = "third_party/mathjax-svg-rs" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"

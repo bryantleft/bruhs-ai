@@ -1,8 +1,8 @@
 //! Cold SVG work belongs to workers. Entries are keyed by exact source, never
 //! a message index, so a delayed result cannot overwrite a newer block.
 use super::{
-    render_desktop_math, render_desktop_mermaid, ChatView, DesktopMathRender, DesktopMermaidRender,
-    PreparedSvg,
+    desktop_math_color, desktop_mermaid_theme, render_desktop_math_colored,
+    render_desktop_mermaid_themed, ChatView, DesktopMathRender, DesktopMermaidRender, PreparedSvg,
 };
 use gpui::{AppContext as _, Context, SharedString, Task};
 use std::cell::RefCell;
@@ -24,19 +24,30 @@ pub(super) enum SvgKind {
 struct SvgKey {
     kind: SvgKind,
     source: SharedString,
+    palette_sig: SharedString,
+}
+
+enum SvgJobTheme {
+    Math(String),
+    Mermaid(Box<crate::diagram::Theme>),
 }
 
 impl SvgKey {
-    fn render(&self) -> Result<String, String> {
-        match self.kind {
-            SvgKind::Math { display } => match render_desktop_math(&self.source, display) {
-                DesktopMathRender::Svg(svg) => Ok(svg),
-                DesktopMathRender::Error(error) => Err(error),
-            },
-            SvgKind::Mermaid => match render_desktop_mermaid(&self.source) {
-                DesktopMermaidRender::Svg(svg) => Ok(svg),
-                DesktopMermaidRender::Error(error) => Err(error),
-            },
+    fn render(&self, job_theme: &SvgJobTheme) -> Result<String, String> {
+        match (self.kind, job_theme) {
+            (SvgKind::Math { display }, SvgJobTheme::Math(color)) => {
+                match render_desktop_math_colored(&self.source, display, color) {
+                    DesktopMathRender::Svg(svg) => Ok(svg),
+                    DesktopMathRender::Error(error) => Err(error),
+                }
+            }
+            (SvgKind::Mermaid, SvgJobTheme::Mermaid(theme)) => {
+                match render_desktop_mermaid_themed(&self.source, theme) {
+                    DesktopMermaidRender::Svg(svg) => Ok(svg),
+                    DesktopMermaidRender::Error(error) => Err(error),
+                }
+            }
+            _ => Err("mismatched SVG render job".to_string()),
         }
     }
 }
@@ -52,14 +63,13 @@ impl Default for RenderGates {
         static GATES: OnceLock<RenderGates> = OnceLock::new();
         GATES
             .get_or_init(|| {
-                // MathJax already has one engine thread. Only one adapter waits
-                // for it. Reserve CPU capacity for that engine and foreground
-                // work when scheduling independent diagram layouts.
-                let diagrams = std::thread::available_parallelism()
+                // Both math and diagram renderers are pure Rust and thread-safe;
+                // cap concurrency to leave CPU headroom for foreground UI work.
+                let workers = std::thread::available_parallelism()
                     .map_or(1, |count| count.get().saturating_sub(2).max(1));
                 Self {
-                    math: Arc::new(Semaphore::new(1)),
-                    diagrams: Arc::new(Semaphore::new(diagrams)),
+                    math: Arc::new(Semaphore::new(workers)),
+                    diagrams: Arc::new(Semaphore::new(workers)),
                 }
             })
             .clone()
@@ -115,9 +125,24 @@ impl SvgCache {
         source: &SharedString,
         cx: &Context<'_, ChatView>,
     ) -> PreparedSvg {
+        let (palette_sig, job_theme) = match kind {
+            SvgKind::Math { .. } => {
+                let color = desktop_math_color();
+                (SharedString::from(color.clone()), SvgJobTheme::Math(color))
+            }
+            SvgKind::Mermaid => {
+                let theme = desktop_mermaid_theme();
+                let sig = SharedString::from(format!(
+                    "{}:{}",
+                    theme.background, theme.primary_text_color
+                ));
+                (sig, SvgJobTheme::Mermaid(Box::new(theme)))
+            }
+        };
         let key = SvgKey {
             kind,
             source: source.clone(),
+            palette_sig,
         };
         if let Some(entry) = self.entries.borrow().get(&key) {
             return entry.value.borrow().clone();
@@ -146,7 +171,7 @@ impl SvgCache {
             }
             // Image construction hashes the SVG bytes. Keep that work on the
             // worker too; the foreground only adopts the finished image/error.
-            let result = match key.render() {
+            let result = match key.render(&job_theme) {
                 Ok(svg) => PreparedSvg::from_svg(svg),
                 Err(error) => PreparedSvg::Error(error.into()),
             };
