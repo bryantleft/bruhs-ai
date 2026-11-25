@@ -90,7 +90,6 @@ mod secret_prompt;
 mod smoke;
 mod streaming;
 mod svg_cache;
-mod tex_math;
 mod timeline_ui;
 mod title_rename;
 mod tool_output_ui;

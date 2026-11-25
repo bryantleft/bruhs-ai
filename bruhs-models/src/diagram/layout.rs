@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::f64::consts::PI;
 
-use bruhs_models::num::ToFloatLossy as _;
+use crate::num::ToFloatLossy as _;
 
 use super::ir::{
     Diagram, Direction, EdgeStyle, GanttChart, Graph, GraphEdge, GraphNode, NodeShape, NoteSide,
@@ -68,6 +68,35 @@ fn dashed_stroke(color: &str, width: f32, dash: &'static str) -> Stroke {
 // Layered Graph Layout
 // ---------------------------------------------------------------------------
 
+/// Compute longest-path topological layer ranks for a directed graph using
+/// Kahn's algorithm. Nodes inside cycles retain rank `0`.
+#[must_use]
+pub fn assign_dag_ranks(node_count: usize, edges: &[(usize, usize)]) -> Vec<usize> {
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+    let mut indeg = vec![0usize; node_count];
+    for &(u, v) in edges {
+        if u < node_count && v < node_count {
+            adj[u].push(v);
+            indeg[v] += 1;
+        }
+    }
+
+    let mut rank = vec![0usize; node_count];
+    let mut queue: VecDeque<usize> = (0..node_count).filter(|&u| indeg[u] == 0).collect();
+    while let Some(u) = queue.pop_front() {
+        for &v in &adj[u] {
+            if rank[v] < rank[u] + 1 {
+                rank[v] = rank[u] + 1;
+            }
+            indeg[v] = indeg[v].saturating_sub(1);
+            if indeg[v] == 0 {
+                queue.push_back(v);
+            }
+        }
+    }
+    rank
+}
+
 fn layout_graph(graph: &Graph, theme: &Theme) -> Scene {
     let n = graph.nodes.len();
     let fs = theme.font_size;
@@ -86,28 +115,13 @@ fn layout_graph(graph: &Graph, theme: &Theme) -> Scene {
         }
     }
     let back_edges = find_back_edges(n, &adj);
-    let mut dag_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
-    let mut indeg = vec![0usize; n];
-    for edge in &graph.edges {
-        if edge.from != edge.to && !back_edges.contains(&(edge.from, edge.to)) {
-            dag_adj[edge.from].push(edge.to);
-            indeg[edge.to] += 1;
-        }
-    }
-
-    let mut rank = vec![0usize; n];
-    let mut queue: VecDeque<usize> = (0..n).filter(|&u| indeg[u] == 0).collect();
-    while let Some(u) = queue.pop_front() {
-        for &v in &dag_adj[u] {
-            if rank[v] < rank[u] + 1 {
-                rank[v] = rank[u] + 1;
-            }
-            indeg[v] = indeg[v].saturating_sub(1);
-            if indeg[v] == 0 {
-                queue.push_back(v);
-            }
-        }
-    }
+    let dag_edges: Vec<(usize, usize)> = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.from != edge.to && !back_edges.contains(&(edge.from, edge.to)))
+        .map(|edge| (edge.from, edge.to))
+        .collect();
+    let rank = assign_dag_ranks(n, &dag_edges);
 
     let max_rank = rank.iter().copied().max().unwrap_or(0);
     let mut layers: Vec<Vec<usize>> = vec![Vec::new(); max_rank + 1];

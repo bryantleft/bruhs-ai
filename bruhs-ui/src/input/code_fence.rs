@@ -1,6 +1,7 @@
 //! Fenced Markdown metadata and syntax colors shared by the editor and its language menu.
-use super::{markdown::MarkdownEdit, syntax};
+use super::markdown::MarkdownEdit;
 use crate::theme;
+use bruhs_models::syntax::{self, TokenKind};
 use std::ops::Range;
 
 pub(super) struct Language {
@@ -313,12 +314,25 @@ impl TokenColor {
     }
 }
 
+impl From<TokenKind> for TokenColor {
+    fn from(kind: TokenKind) -> Self {
+        match kind {
+            TokenKind::Comment => Self::Comment,
+            TokenKind::String => Self::String,
+            TokenKind::Keyword => Self::Keyword,
+            TokenKind::Constant => Self::Constant,
+            TokenKind::Name => Self::Name,
+            TokenKind::Type => Self::Type,
+        }
+    }
+}
+
 pub(super) type Token = (Range<usize>, TokenColor);
 
 /// Run on the background executor. Each block starts its own scanner state,
 /// preserving multiline strings and comments without leaking into the next fence.
 pub(super) fn highlight(source: &str, fences: &[Fence]) -> Vec<Token> {
-    let mut tokens = Vec::new();
+    let mut raw = Vec::new();
     for fence in fences {
         let tag = &source[fence.tag.clone()];
         let Some(lang) = language(tag) else {
@@ -331,10 +345,12 @@ pub(super) fn highlight(source: &str, fences: &[Fence]) -> Vec<Token> {
             lang.id,
             &source[fence.body.clone()],
             fence.body.start,
-            &mut tokens,
+            &mut raw,
         );
     }
-    tokens
+    raw.into_iter()
+        .map(|(range, kind)| (range, TokenColor::from(kind)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -353,11 +369,9 @@ mod tests {
         }
         let mut colors = Vec::new();
         syntax::highlight_code("powershell", "if ($x) { Get-Item '猫' }", 0, &mut colors);
-        assert!(colors
-            .iter()
-            .any(|(_, color)| *color == TokenColor::Keyword));
-        assert!(colors.iter().any(|(_, color)| *color == TokenColor::Name));
-        assert!(colors.iter().any(|(_, color)| *color == TokenColor::String));
+        assert!(colors.iter().any(|(_, color)| *color == TokenKind::Keyword));
+        assert!(colors.iter().any(|(_, color)| *color == TokenKind::Name));
+        assert!(colors.iter().any(|(_, color)| *color == TokenKind::String));
         assert_eq!(language("s").unwrap().id, "asm");
         assert_eq!(language("RS").unwrap().id, "rust");
         assert_eq!(language("js").unwrap().id, "javascript");

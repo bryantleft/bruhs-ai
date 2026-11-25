@@ -31,7 +31,8 @@ pub struct Theme {
 }
 
 impl Theme {
-    #[cfg(test)]
+    /// Default dark theme matching the Bruhs `longan-950` canvas palette.
+    #[must_use]
     pub fn bruhs_dark() -> Self {
         Self {
             background: "#141210".to_string(),
@@ -51,7 +52,8 @@ impl Theme {
             sequence_activation_fill: "#1f1a16".to_string(),
             sequence_activation_border: "#594a36".to_string(),
             text_color: "#dfcfc3".to_string(),
-            font_family: "Monaspace Neon, ui-monospace, monospace".to_string(),
+            font_family: "MonaspaceNeonVariable, Monaspace Neon, ui-monospace, monospace"
+                .to_string(),
             font_size: 12.0,
         }
     }

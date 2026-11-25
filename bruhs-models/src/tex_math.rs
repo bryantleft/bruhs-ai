@@ -6,16 +6,31 @@
 
 use std::fmt::Write as _;
 
-use bruhs_models::num::ToFloatLossy as _;
+use crate::num::ToFloatLossy as _;
 
+/// Font size and style options for TeX math rendering.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct MathOptions {
+pub struct MathOptions {
     pub font_size: f32,
     pub display: bool,
 }
 
+/// Rendered TeX math SVG along with its layout box metrics for baseline alignment.
+#[derive(Clone, Debug)]
+pub struct MathRender {
+    pub svg: String,
+    pub width: f32,
+    pub height: f32,
+    pub baseline: f32,
+}
+
 /// Parse `source` as TeX math and render it to a self-contained SVG string.
-pub(super) fn render_tex(source: &str, options: &MathOptions) -> Result<String, String> {
+pub fn render_tex(source: &str, options: &MathOptions) -> Result<String, String> {
+    render_tex_with_metrics(source, options).map(|rendered| rendered.svg)
+}
+
+/// Parse `source` as TeX math and render it to a self-contained SVG with layout metrics.
+pub fn render_tex_with_metrics(source: &str, options: &MathOptions) -> Result<MathRender, String> {
     let trimmed = source.trim();
     if trimmed.is_empty() {
         return Err("empty math expression".to_string());
@@ -47,7 +62,12 @@ pub(super) fn render_tex(source: &str, options: &MathOptions) -> Result<String, 
     );
     emit_box(&box_node, pad_x, baseline, &mut svg);
     svg.push_str("</svg>");
-    Ok(svg)
+    Ok(MathRender {
+        svg,
+        width,
+        height,
+        baseline,
+    })
 }
 
 // ---------------------------------------------------------------------------

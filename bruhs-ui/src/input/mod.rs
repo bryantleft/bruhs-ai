@@ -16,7 +16,6 @@ mod list;
 mod list_layout;
 mod markdown;
 mod state;
-mod syntax;
 mod text_layout;
 mod view;
 
@@ -49,8 +48,10 @@ pub(crate) fn highlight_snippet(
         return Vec::new();
     }
     let mut raw = Vec::new();
-    syntax::highlight_code(lang.id, code, 0, &mut raw);
-    raw.into_iter().map(|(r, c)| (r, c.color())).collect()
+    bruhs_models::syntax::highlight_code(lang.id, code, 0, &mut raw);
+    raw.into_iter()
+        .map(|(r, kind)| (r, code_fence::TokenColor::from(kind).color()))
+        .collect()
 }
 
 /// Every field's focus handle, so the app can ask whether one has focus.

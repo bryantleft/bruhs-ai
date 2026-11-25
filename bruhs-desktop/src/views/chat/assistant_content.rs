@@ -522,12 +522,12 @@ pub(super) fn render_desktop_math_colored(
         return render;
     }
 
-    let options = super::tex_math::MathOptions {
+    let options = bruhs_models::tex_math::MathOptions {
         font_size: if display { 15.0 } else { 13.0 },
         display,
     };
 
-    let render = match super::tex_math::render_tex(source, &options) {
+    let render = match bruhs_models::tex_math::render_tex(source, &options) {
         Ok(svg) => DesktopMathRender::Svg(desktop_math_svg_colored(svg, color)),
         Err(error) => DesktopMathRender::Error(error),
     };
@@ -552,7 +552,7 @@ pub(super) fn render_desktop_mermaid(source: &str) -> DesktopMermaidRender {
 
 pub(super) fn render_desktop_mermaid_themed(
     source: &str,
-    theme: &crate::diagram::Theme,
+    theme: &bruhs_models::diagram::Theme,
 ) -> DesktopMermaidRender {
     type MermaidCache = BoundedCache<(String, String, String), DesktopMermaidRender>;
     static CACHE: OnceLock<Mutex<MermaidCache>> = OnceLock::new();
@@ -566,7 +566,7 @@ pub(super) fn render_desktop_mermaid_themed(
         return render;
     }
 
-    let render = match crate::diagram::render_mermaid_svg(source, theme) {
+    let render = match bruhs_models::diagram::render_mermaid_svg(source, theme) {
         Ok(svg) => DesktopMermaidRender::Svg(svg),
         Err(error) => DesktopMermaidRender::Error(error),
     };
@@ -588,14 +588,14 @@ pub(super) fn lock_render_cache<K, V>(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-pub(super) fn desktop_mermaid_theme() -> crate::diagram::Theme {
+pub(super) fn desktop_mermaid_theme() -> bruhs_models::diagram::Theme {
     let bg = hsla_to_hex(theme::longan_950());
     let secondary = hsla_to_hex(theme::longan_900());
     let primary = hsla_to_hex(theme::longan_800());
     let border = hsla_to_hex(theme::longan_700());
     let text = hsla_to_hex(theme::rambutan_100());
     let line = hsla_to_hex(theme::rambutan_300());
-    crate::diagram::Theme {
+    bruhs_models::diagram::Theme {
         background: bg.clone(),
         primary_color: primary.clone(),
         primary_text_color: text.clone(),

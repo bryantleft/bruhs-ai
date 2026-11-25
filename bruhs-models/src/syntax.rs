@@ -1,20 +1,101 @@
-//! Zero-dependency, line-stateful Rust syntax highlighter for all languages in
-//! `code_fence::LANGUAGES`.
+//! Zero-dependency, line-stateful Rust syntax highlighter shared by desktop
+//! (`bruhs-ui`) and web (`bruhs-web`).
 //!
-//! Replaces `two-face` (`syntect` + Sublime grammar blobs) and
-//! `tree-sitter-highlight` / `tree-sitter-powershell` with a lean, single-pass
-//! scanner that starts instantaneously, compiles with zero C toolchains, and
-//! preserves multiline comment/string state across lines.
+//! Replaces `two-face` (`syntect` + Sublime grammar blobs),
+//! `tree-sitter-highlight`, and `highlight.js` with a lean, single-pass
+//! scanner that starts instantaneously, compiles to native and WASM with zero
+//! external dependencies, and preserves multiline comment/string state across
+//! lines.
 
 use std::ops::Range;
 
-use super::code_fence::{Token, TokenColor};
+/// Semantic syntax token category mapped to desktop colors or web `.hljs-*` classes.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum TokenKind {
+    Comment,
+    String,
+    Keyword,
+    Constant,
+    Name,
+    Type,
+}
+
+impl TokenKind {
+    /// CSS class name matching `.hljs-*` token rules in `bruhs-web`.
+    #[must_use]
+    pub const fn hljs_class(self) -> &'static str {
+        match self {
+            Self::Comment => "hljs-comment",
+            Self::String => "hljs-string",
+            Self::Keyword => "hljs-keyword",
+            Self::Constant => "hljs-number",
+            Self::Name => "hljs-title",
+            Self::Type => "hljs-type",
+        }
+    }
+}
+
+/// A highlighted byte span in the source text and its semantic token kind.
+pub type Token = (Range<usize>, TokenKind);
+
+/// Resolve a language id or common file/fence alias to a canonical language id
+/// supported by this highlighter.
+#[must_use]
+pub fn canonical_language(tag: &str) -> Option<&'static str> {
+    let lower = tag.trim().to_ascii_lowercase();
+    let canonical = match lower.as_str() {
+        "asm" | "assembly" | "nasm" | "x86" | "s" => "asm",
+        "bash" | "sh" | "shell" | "zsh" | "fish" => "bash",
+        "c" | "h" => "c",
+        "cpp" | "c++" | "cc" | "cxx" | "hpp" | "hh" => "cpp",
+        "csharp" | "cs" | "c#" => "csharp",
+        "css" | "less" => "css",
+        "dart" => "dart",
+        "diff" | "patch" => "diff",
+        "dockerfile" | "docker" => "dockerfile",
+        "elixir" | "ex" | "exs" => "elixir",
+        "go" | "golang" => "go",
+        "graphql" | "gql" => "graphql",
+        "haskell" | "hs" => "haskell",
+        "html" | "htm" => "html",
+        "java" => "java",
+        "javascript" | "js" | "mjs" | "cjs" => "javascript",
+        "json" | "jsonc" => "json",
+        "jsx" | "javascriptreact" => "jsx",
+        "kotlin" | "kt" | "kts" => "kotlin",
+        "lua" => "lua",
+        "markdown" | "md" | "mdx" => "markdown",
+        "php" => "php",
+        "powershell" | "ps1" | "pwsh" => "powershell",
+        "python" | "py" | "pyi" => "python",
+        "r" => "r",
+        "ruby" | "rb" => "ruby",
+        "rust" | "rs" => "rust",
+        "scala" => "scala",
+        "scss" => "scss",
+        "sql" => "sql",
+        "svelte" => "svelte",
+        "swift" => "swift",
+        "toml" | "ini" | "cfg" | "conf" => "toml",
+        "tsx" | "typescriptreact" => "tsx",
+        "typescript" | "ts" | "mts" | "cts" => "typescript",
+        "vue" => "vue",
+        "xml" | "svg" | "plist" => "xml",
+        "yaml" | "yml" => "yaml",
+        "zig" => "zig",
+        _ => return None,
+    };
+    Some(canonical)
+}
 
 /// Highlight `code` (positioned at byte offset `base` in the outer document)
-/// for canonical language id `lang_id`, appending `(Range<usize>, TokenColor)`
+/// for language tag or canonical id `lang_id`, appending `(Range<usize>, TokenKind)`
 /// spans into `out`.
-pub(super) fn highlight_code(lang_id: &str, code: &str, base: usize, out: &mut Vec<Token>) {
-    let Some(spec) = language_spec(lang_id) else {
+pub fn highlight_code(lang_id: &str, code: &str, base: usize, out: &mut Vec<Token>) {
+    let Some(canonical) = canonical_language(lang_id) else {
+        return;
+    };
+    let Some(spec) = language_spec(canonical) else {
         return;
     };
     match spec {
@@ -30,10 +111,60 @@ pub(super) fn highlight_code(lang_id: &str, code: &str, base: usize, out: &mut V
     }
 }
 
-/// Returns whether `lang_id` has a native syntax highlighter.
-#[cfg(test)]
-pub(super) fn supports(lang_id: &str) -> bool {
-    language_spec(lang_id).is_some()
+/// Highlight `code` into HTML-escaped `<span class="hljs-...">` markup, or
+/// return `None` if `lang` is not recognized.
+#[must_use]
+pub fn highlight_to_hljs_html(lang: &str, code: &str) -> Option<String> {
+    let canonical = canonical_language(lang)?;
+    let mut tokens = Vec::new();
+    highlight_code(canonical, code, 0, &mut tokens);
+    let mut html = String::with_capacity(code.len() + tokens.len() * 32);
+    let mut cursor = 0usize;
+    for (range, kind) in tokens {
+        let start = range.start.min(code.len());
+        let end = range.end.min(code.len());
+        if start < cursor
+            || end <= start
+            || !code.is_char_boundary(start)
+            || !code.is_char_boundary(end)
+        {
+            continue;
+        }
+        if start > cursor {
+            push_escaped_html(&mut html, &code[cursor..start]);
+        }
+        html.push_str("<span class=\"");
+        html.push_str(kind.hljs_class());
+        html.push_str("\">");
+        push_escaped_html(&mut html, &code[start..end]);
+        html.push_str("</span>");
+        cursor = end;
+    }
+    if cursor < code.len() {
+        push_escaped_html(&mut html, &code[cursor..]);
+    }
+    Some(html)
+}
+
+fn push_escaped_html(out: &mut String, text: &str) {
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(ch),
+        }
+    }
+}
+
+/// Returns whether `lang_id` (or alias) has a native syntax highlighter.
+#[must_use]
+pub fn supports(lang_id: &str) -> bool {
+    canonical_language(lang_id)
+        .and_then(language_spec)
+        .is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -1607,7 +1738,7 @@ fn matches_word(word: &str, table: &[&str], case_insensitive: bool) -> bool {
     }
 }
 
-fn emit(out: &mut Vec<Token>, base: usize, range: Range<usize>, color: TokenColor) {
+fn emit(out: &mut Vec<Token>, base: usize, range: Range<usize>, color: TokenKind) {
     if !range.is_empty() {
         out.push((base + range.start..base + range.end, color));
     }
@@ -1626,13 +1757,13 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             CommentStyle::CStyle { nested } => {
                 if b == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
                     let end = scan_to_eol(bytes, i + 2);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
                 if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
                     let end = scan_c_block_comment(bytes, i, nested);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1640,13 +1771,13 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             CommentStyle::Hash { ps_block } => {
                 if ps_block && b == b'<' && i + 1 < len && bytes[i + 1] == b'#' {
                     let end = scan_until_pair(bytes, i + 2, b'#', b'>');
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
                 if b == b'#' {
                     let end = scan_to_eol(bytes, i + 1);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1658,7 +1789,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
                     } else {
                         scan_to_eol(bytes, i + 2)
                     };
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1666,13 +1797,13 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             CommentStyle::Sql => {
                 if b == b'-' && i + 1 < len && bytes[i + 1] == b'-' {
                     let end = scan_to_eol(bytes, i + 2);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
                 if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
                     let end = scan_c_block_comment(bytes, i, false);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1680,13 +1811,13 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             CommentStyle::Haskell => {
                 if b == b'-' && i + 1 < len && bytes[i + 1] == b'-' {
                     let end = scan_to_eol(bytes, i + 2);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
                 if b == b'{' && i + 1 < len && bytes[i + 1] == b'-' {
                     let end = scan_nested_pair(bytes, i, (b'{', b'-'), (b'-', b'}'));
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1694,13 +1825,13 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             CommentStyle::Php => {
                 if (b == b'/' && i + 1 < len && bytes[i + 1] == b'/') || b == b'#' {
                     let end = scan_to_eol(bytes, i + 1);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
                 if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
                     let end = scan_c_block_comment(bytes, i, false);
-                    emit(out, base, i..end, TokenColor::Comment);
+                    emit(out, base, i..end, TokenKind::Comment);
                     i = end;
                     continue;
                 }
@@ -1711,7 +1842,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
         // 2. Rust raw strings `r#"..."#` and `br#"..."#`
         if cfg.rust_quotes {
             if let Some(end) = try_scan_rust_raw_string(bytes, i) {
-                emit(out, base, i..end, TokenColor::String);
+                emit(out, base, i..end, TokenKind::String);
                 i = end;
                 continue;
             }
@@ -1725,7 +1856,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             && bytes[i + 2] == b
         {
             let end = scan_triple_quote(bytes, i + 3, b);
-            emit(out, base, i..end, TokenColor::String);
+            emit(out, base, i..end, TokenKind::String);
             i = end;
             continue;
         }
@@ -1735,9 +1866,9 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             let is_json_key = matches!(cfg.comments, CommentStyle::None)
                 && skip_spaces(bytes, end).is_some_and(|p| bytes[p] == b':');
             let color = if is_json_key {
-                TokenColor::Name
+                TokenKind::Name
             } else {
-                TokenColor::String
+                TokenKind::String
             };
             emit(out, base, i..end, color);
             i = end;
@@ -1746,7 +1877,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
         if cfg.single_quote_strings && b == b'\'' {
             let allow_escape = !cfg.case_insensitive;
             let end = scan_quoted(bytes, i + 1, b'\'', allow_escape);
-            emit(out, base, i..end, TokenColor::String);
+            emit(out, base, i..end, TokenKind::String);
             i = end;
             continue;
         }
@@ -1759,7 +1890,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
         }
         if cfg.backtick_strings && b == b'`' {
             let end = scan_quoted(bytes, i + 1, b'`', true);
-            emit(out, base, i..end, TokenColor::String);
+            emit(out, base, i..end, TokenKind::String);
             i = end;
             continue;
         }
@@ -1783,9 +1914,9 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             if i > start + 1 {
                 let word = &code[start..i];
                 let color = if matches_word(word, cfg.constants, cfg.case_insensitive) {
-                    TokenColor::Constant
+                    TokenKind::Constant
                 } else {
-                    TokenColor::Name
+                    TokenKind::Name
                 };
                 emit(out, base, start..i, color);
                 continue;
@@ -1800,7 +1931,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             while i < len && is_ident_continue(bytes[i]) {
                 i += 1;
             }
-            emit(out, base, start..i, TokenColor::Type);
+            emit(out, base, start..i, TokenKind::Type);
             continue;
         }
 
@@ -1808,7 +1939,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
         if b.is_ascii_digit() || (b == b'.' && i + 1 < len && bytes[i + 1].is_ascii_digit()) {
             let start = i;
             i = scan_number(bytes, i);
-            emit(out, base, start..i, TokenColor::Constant);
+            emit(out, base, start..i, TokenKind::Constant);
             continue;
         }
 
@@ -1823,7 +1954,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             while i < len && is_ident_continue(bytes[i]) {
                 i += 1;
             }
-            emit(out, base, start..i, TokenColor::Keyword);
+            emit(out, base, start..i, TokenKind::Keyword);
             continue;
         }
 
@@ -1855,20 +1986,20 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
             let word = &code[start..i];
             let next_non_ws = skip_spaces(bytes, i).map(|p| bytes[p]);
             let color = if is_cmdlet {
-                Some(TokenColor::Name)
+                Some(TokenKind::Name)
             } else if matches_word(word, cfg.keywords, cfg.case_insensitive) {
-                Some(TokenColor::Keyword)
+                Some(TokenKind::Keyword)
             } else if matches_word(word, cfg.constants, cfg.case_insensitive) {
-                Some(TokenColor::Constant)
+                Some(TokenKind::Constant)
             } else if matches_word(word, cfg.types, cfg.case_insensitive) {
-                Some(TokenColor::Type)
+                Some(TokenKind::Type)
             } else if next_non_ws == Some(b'(') || (cfg.rust_quotes && next_non_ws == Some(b'!')) {
-                Some(TokenColor::Name)
+                Some(TokenKind::Name)
             } else if !cfg.case_insensitive
                 && b.is_ascii_uppercase()
                 && word.bytes().any(|c| c.is_ascii_lowercase())
             {
-                Some(TokenColor::Type)
+                Some(TokenKind::Type)
             } else if !cfg.case_insensitive
                 && word.len() >= 2
                 && word
@@ -1876,7 +2007,7 @@ fn highlight_generic(cfg: &LangConfig, code: &str, base: usize, out: &mut Vec<To
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
                 && word.bytes().any(|c| c.is_ascii_uppercase())
             {
-                Some(TokenColor::Constant)
+                Some(TokenKind::Constant)
             } else {
                 None
             };
@@ -1900,14 +2031,14 @@ fn highlight_markup(code: &str, base: usize, out: &mut Vec<Token>) {
             // HTML comment `<!-- ... -->`
             if code[i..].starts_with("<!--") {
                 let end = code[i + 4..].find("-->").map_or(len, |off| i + 4 + off + 3);
-                emit(out, base, i..end, TokenColor::Comment);
+                emit(out, base, i..end, TokenKind::Comment);
                 i = end;
                 continue;
             }
             // DOCTYPE / processing instruction
             if i + 1 < len && matches!(bytes[i + 1], b'!' | b'?') {
                 let end = code[i + 2..].find('>').map_or(len, |off| i + 2 + off + 1);
-                emit(out, base, i..end, TokenColor::Keyword);
+                emit(out, base, i..end, TokenKind::Keyword);
                 i = end;
                 continue;
             }
@@ -1923,13 +2054,13 @@ fn highlight_markup(code: &str, base: usize, out: &mut Vec<Token>) {
                 j += 1;
             }
             if j > tag_start {
-                emit(out, base, tag_start..j, TokenColor::Name);
+                emit(out, base, tag_start..j, TokenKind::Name);
                 // Scan attributes until `>`
                 while j < len && bytes[j] != b'>' {
                     let b = bytes[j];
                     if b == b'"' || b == b'\'' {
                         let end = scan_quoted(bytes, j + 1, b, false);
-                        emit(out, base, j..end, TokenColor::String);
+                        emit(out, base, j..end, TokenKind::String);
                         j = end;
                     } else if is_ident_start(b) || matches!(b, b'@' | b':' | b'v') {
                         let attr_start = j;
@@ -1940,7 +2071,7 @@ fn highlight_markup(code: &str, base: usize, out: &mut Vec<Token>) {
                         {
                             j += 1;
                         }
-                        emit(out, base, attr_start..j, TokenColor::Type);
+                        emit(out, base, attr_start..j, TokenKind::Type);
                     } else {
                         j += utf8_char_len(bytes[j]).min(len - j);
                     }
@@ -1963,19 +2094,19 @@ fn highlight_css(code: &str, base: usize, out: &mut Vec<Token>) {
         let b = bytes[i];
         if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
             let end = scan_c_block_comment(bytes, i, false);
-            emit(out, base, i..end, TokenColor::Comment);
+            emit(out, base, i..end, TokenKind::Comment);
             i = end;
             continue;
         }
         if b == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
             let end = scan_to_eol(bytes, i + 2);
-            emit(out, base, i..end, TokenColor::Comment);
+            emit(out, base, i..end, TokenKind::Comment);
             i = end;
             continue;
         }
         if b == b'"' || b == b'\'' {
             let end = scan_quoted(bytes, i + 1, b, true);
-            emit(out, base, i..end, TokenColor::String);
+            emit(out, base, i..end, TokenKind::String);
             i = end;
             continue;
         }
@@ -1995,7 +2126,7 @@ fn highlight_css(code: &str, base: usize, out: &mut Vec<Token>) {
             while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
                 i += 1;
             }
-            emit(out, base, start..i, TokenColor::Keyword);
+            emit(out, base, start..i, TokenKind::Keyword);
             continue;
         }
         // Hex color `#rgb` / `#rrggbb` or ID selector
@@ -2006,9 +2137,9 @@ fn highlight_css(code: &str, base: usize, out: &mut Vec<Token>) {
                 i += 1;
             }
             let color = if brace_depth > 0 {
-                TokenColor::Constant
+                TokenKind::Constant
             } else {
-                TokenColor::Name
+                TokenKind::Name
             };
             emit(out, base, start..i, color);
             continue;
@@ -2019,7 +2150,7 @@ fn highlight_css(code: &str, base: usize, out: &mut Vec<Token>) {
             while i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'%') {
                 i += 1;
             }
-            emit(out, base, start..i, TokenColor::Constant);
+            emit(out, base, start..i, TokenKind::Constant);
             continue;
         }
         if is_ident_start(b) || (b == b'-' && i + 1 < len && bytes[i + 1] == b'-') {
@@ -2030,9 +2161,9 @@ fn highlight_css(code: &str, base: usize, out: &mut Vec<Token>) {
             }
             let next = skip_spaces(bytes, i).map(|p| bytes[p]);
             let color = if next == Some(b':') && brace_depth > 0 {
-                Some(TokenColor::Type)
+                Some(TokenKind::Type)
             } else if next == Some(b'(') || brace_depth == 0 {
-                Some(TokenColor::Name)
+                Some(TokenKind::Name)
             } else {
                 None
             };
@@ -2051,9 +2182,9 @@ fn highlight_yaml(code: &str, base: usize, out: &mut Vec<Token>) {
         let trimmed = line.trim_start();
         let lead = line.len() - trimmed.len();
         if trimmed.starts_with('#') {
-            emit(out, base + offset, lead..line.len(), TokenColor::Comment);
+            emit(out, base + offset, lead..line.len(), TokenKind::Comment);
         } else if trimmed.starts_with("---") || trimmed.starts_with("...") {
-            emit(out, base + offset, lead..lead + 3, TokenColor::Keyword);
+            emit(out, base + offset, lead..lead + 3, TokenKind::Keyword);
         } else {
             let mut pos = lead;
             if trimmed.starts_with("- ") {
@@ -2061,7 +2192,7 @@ fn highlight_yaml(code: &str, base: usize, out: &mut Vec<Token>) {
             }
             if let Some(colon) = find_yaml_colon(&line[pos..]) {
                 let key_end = pos + colon;
-                emit(out, base + offset, pos..key_end, TokenColor::Name);
+                emit(out, base + offset, pos..key_end, TokenKind::Name);
                 highlight_yaml_value(&line[key_end + 1..], base + offset + key_end + 1, out);
             } else {
                 highlight_yaml_value(&line[pos..], base + offset + pos, out);
@@ -2102,9 +2233,9 @@ fn highlight_yaml_value(val: &str, base: usize, out: &mut Vec<Token>) {
     }
     let content = &trimmed[..end_ws];
     if content.starts_with('#') {
-        emit(out, base, lead..lead + end_ws, TokenColor::Comment);
+        emit(out, base, lead..lead + end_ws, TokenKind::Comment);
     } else if content.starts_with('"') || content.starts_with('\'') {
-        emit(out, base, lead..lead + end_ws, TokenColor::String);
+        emit(out, base, lead..lead + end_ws, TokenKind::String);
     } else if matches!(
         content,
         "true" | "false" | "null" | "~" | "yes" | "no" | "True" | "False" | "Null"
@@ -2113,7 +2244,7 @@ fn highlight_yaml_value(val: &str, base: usize, out: &mut Vec<Token>) {
         .first()
         .is_some_and(|b| b.is_ascii_digit() || (*b == b'-' && content.len() > 1))
     {
-        emit(out, base, lead..lead + end_ws, TokenColor::Constant);
+        emit(out, base, lead..lead + end_ws, TokenKind::Constant);
     }
 }
 
@@ -2123,14 +2254,14 @@ fn highlight_toml(code: &str, base: usize, out: &mut Vec<Token>) {
         let trimmed = line.trim_start();
         let lead = line.len() - trimmed.len();
         if trimmed.starts_with('#') {
-            emit(out, base + offset, lead..line.len(), TokenColor::Comment);
+            emit(out, base + offset, lead..line.len(), TokenKind::Comment);
         } else if trimmed.starts_with('[') {
             let end = trimmed
                 .find(']')
                 .map_or(trimmed.trim_end().len(), |p| p + 1);
-            emit(out, base + offset, lead..lead + end, TokenColor::Type);
+            emit(out, base + offset, lead..lead + end, TokenKind::Type);
         } else if let Some(eq) = trimmed.find('=') {
-            emit(out, base + offset, lead..lead + eq, TokenColor::Name);
+            emit(out, base + offset, lead..lead + eq, TokenKind::Name);
             highlight_generic(
                 &TOML_VALUE,
                 &line[lead + eq + 1..],
@@ -2161,13 +2292,13 @@ fn highlight_diff(code: &str, base: usize, out: &mut Vec<Token>) {
     for line in code.split_inclusive('\n') {
         let color =
             if line.starts_with("+++") || line.starts_with("---") || line.starts_with("diff ") {
-                Some(TokenColor::Keyword)
+                Some(TokenKind::Keyword)
             } else if line.starts_with("@@") {
-                Some(TokenColor::Type)
+                Some(TokenKind::Type)
             } else if line.starts_with('+') {
-                Some(TokenColor::String)
+                Some(TokenKind::String)
             } else if line.starts_with('-') {
-                Some(TokenColor::Constant)
+                Some(TokenKind::Constant)
             } else {
                 None
             };
@@ -2184,18 +2315,18 @@ fn highlight_markdown(code: &str, base: usize, out: &mut Vec<Token>) {
         let trimmed = line.trim_start();
         let lead = line.len() - trimmed.len();
         if trimmed.starts_with('#') {
-            emit(out, base + offset, lead..line.len(), TokenColor::Keyword);
+            emit(out, base + offset, lead..line.len(), TokenKind::Keyword);
         } else if trimmed.starts_with('>') {
-            emit(out, base + offset, lead..line.len(), TokenColor::Comment);
+            emit(out, base + offset, lead..line.len(), TokenKind::Comment);
         } else if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            emit(out, base + offset, lead..line.len(), TokenColor::Type);
+            emit(out, base + offset, lead..line.len(), TokenKind::Type);
         } else {
             let bytes = line.as_bytes();
             let mut i = 0;
             while i < bytes.len() {
                 if bytes[i] == b'`' {
                     let end = scan_quoted(bytes, i + 1, b'`', false);
-                    emit(out, base + offset, i..end, TokenColor::String);
+                    emit(out, base + offset, i..end, TokenKind::String);
                     i = end;
                 } else {
                     i += utf8_char_len(bytes[i]).min(bytes.len() - i);
@@ -2232,7 +2363,7 @@ fn highlight_dockerfile(code: &str, base: usize, out: &mut Vec<Token>) {
         let trimmed = line.trim_start();
         let lead = line.len() - trimmed.len();
         if trimmed.starts_with('#') {
-            emit(out, base + offset, lead..line.len(), TokenColor::Comment);
+            emit(out, base + offset, lead..line.len(), TokenKind::Comment);
         } else {
             let word_len = trimmed
                 .bytes()
@@ -2247,7 +2378,7 @@ fn highlight_dockerfile(code: &str, base: usize, out: &mut Vec<Token>) {
                     out,
                     base + offset,
                     lead..lead + word_len,
-                    TokenColor::Keyword,
+                    TokenKind::Keyword,
                 );
                 highlight_generic(
                     &BASH,
@@ -2273,12 +2404,12 @@ fn highlight_asm(code: &str, base: usize, out: &mut Vec<Token>) {
         while i < len {
             let b = bytes[i];
             if b == b';' || (b == b'/' && i + 1 < len && bytes[i + 1] == b'/') || b == b'#' {
-                emit(out, base + offset, i..len, TokenColor::Comment);
+                emit(out, base + offset, i..len, TokenKind::Comment);
                 break;
             }
             if b == b'"' || b == b'\'' {
                 let end = scan_quoted(bytes, i + 1, b, true);
-                emit(out, base + offset, i..end, TokenColor::String);
+                emit(out, base + offset, i..end, TokenKind::String);
                 i = end;
                 first_word = false;
                 continue;
@@ -2289,7 +2420,7 @@ fn highlight_asm(code: &str, base: usize, out: &mut Vec<Token>) {
                 while i < len && bytes[i].is_ascii_alphanumeric() {
                     i += 1;
                 }
-                emit(out, base + offset, start..i, TokenColor::Type);
+                emit(out, base + offset, start..i, TokenKind::Type);
                 first_word = false;
                 continue;
             }
@@ -2299,7 +2430,7 @@ fn highlight_asm(code: &str, base: usize, out: &mut Vec<Token>) {
                     i += 1;
                 }
                 i = scan_number(bytes, i);
-                emit(out, base + offset, start..i, TokenColor::Constant);
+                emit(out, base + offset, start..i, TokenKind::Constant);
                 first_word = false;
                 continue;
             }
@@ -2310,11 +2441,11 @@ fn highlight_asm(code: &str, base: usize, out: &mut Vec<Token>) {
                     i += 1;
                 }
                 if i < len && bytes[i] == b':' {
-                    emit(out, base + offset, start..i, TokenColor::Name);
+                    emit(out, base + offset, start..i, TokenKind::Name);
                 } else if b == b'.' {
-                    emit(out, base + offset, start..i, TokenColor::Type);
+                    emit(out, base + offset, start..i, TokenKind::Type);
                 } else if first_word {
-                    emit(out, base + offset, start..i, TokenColor::Keyword);
+                    emit(out, base + offset, start..i, TokenKind::Keyword);
                 }
                 first_word = false;
                 continue;
@@ -2449,18 +2580,18 @@ fn try_scan_rust_raw_string(bytes: &[u8], start: usize) -> Option<usize> {
     Some(bytes.len())
 }
 
-fn scan_rust_single_quote(code: &str, start: usize) -> Option<(usize, TokenColor)> {
+fn scan_rust_single_quote(code: &str, start: usize) -> Option<(usize, TokenKind)> {
     let rest = &code[start + 1..];
     let mut chars = rest.chars();
     let first = chars.next()?;
     if first == '\\' {
         // Escaped char literal: '\n', '\x7f', '\u{...}'
         let end = scan_quoted(code.as_bytes(), start + 1, b'\'', true);
-        return Some((end, TokenColor::String));
+        return Some((end, TokenKind::String));
     }
     if chars.next() == Some('\'') {
         // Single char literal `'x'`
-        return Some((start + 1 + first.len_utf8() + 1, TokenColor::String));
+        return Some((start + 1 + first.len_utf8() + 1, TokenKind::String));
     }
     if first.is_ascii_alphabetic() || first == '_' {
         // Lifetime `'a`, `'static`
@@ -2469,7 +2600,7 @@ fn scan_rust_single_quote(code: &str, start: usize) -> Option<(usize, TokenColor
         while i < bytes.len() && is_ident_continue(bytes[i]) {
             i += 1;
         }
-        return Some((i, TokenColor::Type));
+        return Some((i, TokenKind::Type));
     }
     None
 }
@@ -2526,5 +2657,27 @@ const fn utf8_char_len(first: u8) -> usize {
         3
     } else {
         4
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_aliases_and_hljs_html_escaping() {
+        assert_eq!(canonical_language("rs"), Some("rust"));
+        assert_eq!(canonical_language("TSX"), Some("tsx"));
+        assert_eq!(canonical_language("yml"), Some("yaml"));
+        assert_eq!(canonical_language("ini"), Some("toml"));
+        assert_eq!(canonical_language("unknown"), None);
+
+        let html =
+            highlight_to_hljs_html("rs", "/* hi */\nlet s = \"<a>&'b'\";\nlet n = 42;").unwrap();
+        assert!(html.contains("<span class=\"hljs-comment\">/* hi */</span>"));
+        assert!(html.contains("<span class=\"hljs-keyword\">let</span>"));
+        assert!(html.contains("&lt;a&gt;&amp;&#x27;b&#x27;"));
+        assert!(!html.contains("<a>"));
+        assert!(html.contains("<span class=\"hljs-number\">42</span>"));
     }
 }

@@ -3,7 +3,6 @@
 mod app_state;
 mod assets;
 mod clock_format;
-mod diagram;
 mod helpers;
 #[cfg(unix)]
 mod instance_lock;

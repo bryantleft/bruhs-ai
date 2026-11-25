@@ -29,7 +29,7 @@ struct SvgKey {
 
 enum SvgJobTheme {
     Math(String),
-    Mermaid(Box<crate::diagram::Theme>),
+    Mermaid(Box<bruhs_models::diagram::Theme>),
 }
 
 impl SvgKey {

@@ -13,6 +13,9 @@
 //! - [`updates`]: provider CLI and app update reports and their rules.
 //! - [`logic`]: pure logic the web and desktop both run (diffs, WAV, tool
 //!   labels, git parsing, …).
+//! - [`syntax`], [`tex_math`], [`diagram`]: zero-dependency syntax highlighting,
+//!   TeX math → SVG, and 3-stage Mermaid diagram → SVG engines shared by
+//!   desktop and web.
 
 pub mod agent;
 pub mod agent_extensions;
@@ -29,6 +32,7 @@ pub mod coordination;
 pub mod crew;
 pub mod database;
 pub mod delivery;
+pub mod diagram;
 pub mod dictation_runtime;
 pub mod ids;
 pub mod imports;
@@ -44,7 +48,9 @@ pub mod remote_hosts;
 pub mod roles;
 pub mod runtime_models;
 pub mod secrets;
+pub mod syntax;
 pub mod telemetry;
+pub mod tex_math;
 pub mod thread_link;
 pub mod time;
 mod unknown_variant;

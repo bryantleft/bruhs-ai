@@ -1,7 +1,8 @@
 //! Editable Mermaid flowcharts and basic sequence diagrams, without browser code.
 use super::*;
+use crate::diagram::layout::assign_dag_ranks;
 use crate::num::ToFloatLossy as _;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 fn invalid(message: &str) -> BoardError {
     BoardError::Invalid(format!("Mermaid import: {message}"))
@@ -256,41 +257,22 @@ fn flowchart(
             }
         }
     }
-    let mut indegree = nodes
-        .keys()
-        .map(|id| (id.clone(), 0_usize))
-        .collect::<BTreeMap<_, _>>();
-    let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (from, to, _) in &edges {
-        *indegree.get_mut(to).ok_or(BoardError::Missing)? += 1;
-        children.entry(from.clone()).or_default().push(to.clone());
-    }
-    let mut queue = order
+    let node_indices: BTreeMap<&str, usize> = order
         .iter()
-        .filter(|id| indegree.get(*id) == Some(&0))
-        .cloned()
-        .collect::<VecDeque<_>>();
-    let mut ranks: BTreeMap<String, usize> = BTreeMap::new();
-    while let Some(id) = queue.pop_front() {
-        let rank = ranks.get(&id).copied().unwrap_or(0);
-        if let Some(next) = children.get(&id) {
-            for to in next {
-                ranks
-                    .entry(to.clone())
-                    .and_modify(|r| *r = (*r).max(rank + 1))
-                    .or_insert(rank + 1);
-                let degree = indegree.get_mut(to).ok_or(BoardError::Missing)?;
-                *degree -= 1;
-                if *degree == 0 {
-                    queue.push_back(to.clone());
-                }
-            }
-        }
+        .enumerate()
+        .map(|(index, id)| (id.as_str(), index))
+        .collect();
+    let mut indexed_edges = Vec::with_capacity(edges.len());
+    for (from, to, _) in &edges {
+        let from_idx = *node_indices.get(from.as_str()).ok_or(BoardError::Missing)?;
+        let to_idx = *node_indices.get(to.as_str()).ok_or(BoardError::Missing)?;
+        indexed_edges.push((from_idx, to_idx));
     }
+    let ranks = assign_dag_ranks(order.len(), &indexed_edges);
     let mut board = BoardDocument::empty(uuid::Uuid::new_v4().to_string(), project, title, now);
     let mut slots = BTreeMap::new();
     for (index, id) in order.into_iter().enumerate() {
-        let rank = ranks.get(&id).copied().unwrap_or(0);
+        let rank = ranks.get(index).copied().unwrap_or(0);
         let slot = slots.entry(rank).or_insert(0_usize);
         let (a, b) = (rank.to_f64_lossy() * 280.0, slot.to_f64_lossy() * 140.0);
         *slot += 1;

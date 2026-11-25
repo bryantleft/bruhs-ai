@@ -1,8 +1,8 @@
 //! Zero-dependency, 3-stage diagram engine (`parse` → `layout` → `render`).
 //!
-//! - [`ir`]: Format-agnostic [`Diagram`] IR, [`Theme`], and positioned [`Scene`] geometry.
-//! - [`mermaid`]: Mermaid text syntax parser → [`Diagram`].
-//! - [`layout`]: Sugiyama layered graph, sequence, pie, and gantt layout → [`Scene`].
+//! - [`ir`]: Format-agnostic [`ir::Diagram`] IR, [`Theme`], and positioned [`ir::Scene`] geometry.
+//! - [`mermaid`]: Mermaid text syntax parser → [`ir::Diagram`].
+//! - [`layout`]: Sugiyama layered graph, sequence, pie, and gantt layout → [`ir::Scene`].
 //! - [`svg`]: Vector SVG backend (`Scene` → SVG string).
 
 pub mod ir;
