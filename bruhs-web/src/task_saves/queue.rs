@@ -21,6 +21,18 @@ pub(super) struct Pending {
 pub(super) struct Queue(BTreeMap<(Kind, String), Pending>);
 
 impl Queue {
+    pub(super) fn task_pending(&self, id: &str) -> bool {
+        self.0.contains_key(&(Kind::Task, id.to_owned()))
+    }
+
+    pub(super) fn pending_task_ids(&self) -> BTreeSet<String> {
+        self.0
+            .keys()
+            .filter(|(kind, _)| *kind == Kind::Task)
+            .map(|(_, id)| id.clone())
+            .collect()
+    }
+
     pub fn conversation(&self, id: &str) -> Option<Option<Arc<crate::storage::MessagesRecord>>> {
         let pending = self.0.get(&(Kind::Conversation, id.to_owned()))?;
         Some(match &pending.draft {

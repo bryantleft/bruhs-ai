@@ -10,6 +10,8 @@ use crate::storage::metadata::{yield_before_save, SaveError};
 
 mod queue;
 use queue::Queue;
+mod tab_sync;
+pub(crate) use tab_sync::publish_task_changes;
 mod hydration;
 pub(crate) use hydration::InitialEdits;
 mod record;
@@ -43,6 +45,10 @@ pub struct TaskSaves {
 }
 
 impl TaskSaves {
+    pub(crate) fn listen_for_task_changes(self, ready: RwSignal<bool>) {
+        tab_sync::listen(self, ready);
+    }
+
     pub fn install() {
         let saves = Self {
             queue: RwSignal::new(Queue::default()),

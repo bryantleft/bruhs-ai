@@ -2,7 +2,8 @@ use leptos::prelude::*;
 
 use crate::components::task_pagination::{page_start, TaskPagination};
 use crate::components::task_row::TaskRow;
-use crate::state::{SelectedWorkItem, SetSelectedWorkItem, WorkItem};
+use crate::state::{SelectedWorkItem, SetSelectedWorkItem};
+use crate::task_style::{live_task_preview, TaskPreview};
 
 pub(super) const PAGE_SIZE: usize = 100;
 
@@ -10,7 +11,7 @@ pub(super) const PAGE_SIZE: usize = 100;
 pub fn TaskList(
     /// Filtered list of items already scoped to the active project.
     #[prop(into)]
-    items: Signal<Vec<WorkItem>>,
+    items: Signal<Vec<TaskPreview>>,
 ) -> impl IntoView {
     let SelectedWorkItem(selected) = expect_context::<SelectedWorkItem>();
     let SetSelectedWorkItem(set_selected) = expect_context::<SetSelectedWorkItem>();
@@ -66,20 +67,21 @@ pub fn TaskList(
             </div>
 
             // Body
-            {move || if total.get() == 0 {
-                view! {
+            <Show
+                when=move || total.get() != 0
+                fallback=|| view! {
                     <div class="flex items-center justify-center py-12">
                         <span class="text-body-sm text-rambutan-500">"no tasks yet"</span>
                     </div>
-                }.into_any()
-            } else {
-                view! {
+                }
+            >
                     <div class="py-1">
-                        <For
+                        <ForEnumerate
                             each=move || visible.get()
-                            key=|item: &WorkItem| item.id.clone()
-                            children=move |item| {
+                            key=|item: &TaskPreview| item.id.clone()
+                            children=move |index, item| {
                                 let id = item.id.clone();
+                                let live_item = live_task_preview(visible, index, item);
                                 let id_for_select = id.clone();
                                 let id_for_match = id;
                                 let on_select = Callback::new(move |_| {
@@ -90,7 +92,7 @@ pub fn TaskList(
                                 });
                                 view! {
                                     <TaskRow
-                                        item=item
+                                        item=live_item
                                         selected=is_selected
                                         on_select=on_select
                                     />
@@ -98,8 +100,7 @@ pub fn TaskList(
                             }
                         />
                     </div>
-                }.into_any()
-            }}
+            </Show>
           </div>
           <TaskPagination total page page_size=PAGE_SIZE label="Task list pages" />
         </div>

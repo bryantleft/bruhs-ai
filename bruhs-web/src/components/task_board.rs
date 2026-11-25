@@ -1,11 +1,9 @@
-use crate::task_style::WorkItemStatusStyle;
+use crate::task_style::{live_task_preview, TaskPreview, WorkItemStatusStyle};
 use leptos::prelude::*;
 
 use crate::components::task_card::TaskCard;
 use crate::components::task_pagination::{page_start, TaskPagination};
-use crate::state::{
-    SelectedWorkItem, SetSelectedWorkItem, SetWorkItemsSignal, WorkItem, WorkItemStatus,
-};
+use crate::state::{SelectedWorkItem, SetSelectedWorkItem, SetWorkItemsSignal, WorkItemStatus};
 use crate::storage;
 
 const BOARD_COLUMNS: &[WorkItemStatus] = &[
@@ -19,7 +17,7 @@ const BOARD_COLUMNS: &[WorkItemStatus] = &[
 pub fn TaskBoard(
     /// Filtered list of items already scoped to the active project.
     #[prop(into)]
-    items: Signal<Vec<WorkItem>>,
+    items: Signal<Vec<TaskPreview>>,
 ) -> impl IntoView {
     let SelectedWorkItem(selected) = expect_context::<SelectedWorkItem>();
     let SetSelectedWorkItem(set_selected) = expect_context::<SetSelectedWorkItem>();
@@ -31,16 +29,18 @@ pub fn TaskBoard(
     // Called by every column's drop handler.
     let move_to_status = move |task_id: String, new_status: WorkItemStatus| {
         let mut moved = None;
-        set_work_items.update(|items| {
-            for item in items.iter_mut() {
-                if item.id == task_id && item.status != new_status {
-                    let original = item.clone();
-                    item.status = new_status;
-                    item.updated_at = crate::clock::now_ms();
-                    moved = Some((original, item.clone()));
-                    break;
-                }
+        set_work_items.maybe_update(|items| {
+            let Some(item) = items.iter_mut().find(|item| item.id == task_id) else {
+                return false;
+            };
+            if item.status == new_status {
+                return false;
             }
+            let original = item.clone();
+            item.status = new_status;
+            item.updated_at = crate::clock::now_ms();
+            moved = Some((original, item.clone()));
+            true
         });
         if let Some((original, item)) = moved {
             storage::persist_work_item(Some(original), item);
@@ -59,7 +59,7 @@ pub fn TaskBoard(
         >
             {BOARD_COLUMNS.iter().map(|&status| {
                 let column_items = Memo::new(move |_| {
-                    items.with(|items| items.iter().filter(|w| w.status == status).cloned().collect::<Vec<_>>())
+                    items.with(|items| items.iter().filter(|item| item.status == status).cloned().collect::<Vec<_>>())
                 });
                 const PAGE_SIZE: usize = 40;
                 let page = RwSignal::new(0usize);
@@ -134,23 +134,23 @@ pub fn TaskBoard(
                             </span>
                         </div>
 
-                        // Column body — droppable in TS via @dnd-kit; no DnD here yet.
                         <div class="flex-1 overflow-y-auto space-y-2 p-2">
-                            {move || if total.get() == 0 {
-                                view! {
+                            <Show
+                                when=move || total.get() != 0
+                                fallback=|| view! {
                                     <p class="text-rambutan-500 text-body-sm text-center py-4">
                                         "no tasks"
                                     </p>
-                                }.into_any()
-                            } else {
-                                view! {
-                                    <For
+                                }
+                            >
+                                    <ForEnumerate
                                         each=move || visible.get()
-                                        key=|item: &WorkItem| item.id.clone()
-                                        children=move |item| {
+                                        key=|item: &TaskPreview| item.id.clone()
+                                        children=move |index, item| {
                                             let id = item.id.clone();
+                                            let live_item = live_task_preview(visible, index, item);
                                             let id_for_select = id.clone();
-                                            let id_for_match = id;
+                                            let id_for_match = id.clone();
                                             let on_select = Callback::new(move |_| {
                                                 set_selected.set(Some(id_for_select.clone()));
                                             });
@@ -159,15 +159,15 @@ pub fn TaskBoard(
                                             });
                                             view! {
                                                 <TaskCard
-                                                    item=item
+                                                    id=id
+                                                    item=live_item
                                                     selected=is_selected
                                                     on_select=on_select
                                                 />
                                             }
                                         }
                                     />
-                                }.into_any()
-                            }}
+                            </Show>
                         </div>
                         <TaskPagination total page page_size=PAGE_SIZE label=format!("{} task pages", label) />
                     </div>

@@ -1,7 +1,7 @@
-use crate::task_style::PriorityStyle;
+use crate::task_style::{PriorityStyle, TaskPreview};
 use leptos::prelude::*;
 
-use crate::state::{format_due_date, WorkItem};
+use crate::state::format_due_date;
 
 /// 4-bar priority indicator (mirrors task_row.rs but inlined here so the
 /// card is self-contained).
@@ -31,17 +31,11 @@ fn priority_bars(level: u8, color_class: &str) -> impl IntoView {
 /// optional label/due bottom row.
 #[component]
 pub fn TaskCard(
-    item: WorkItem,
+    id: String,
+    item: Memo<TaskPreview>,
     #[prop(into)] selected: Signal<bool>,
     on_select: Callback<()>,
 ) -> impl IntoView {
-    let priority_color = item.priority.color_class();
-    let priority_label = item.priority.label();
-    let priority_level = item.priority.bars();
-    let title = item.title.clone();
-    let due_meta = item.due_date.as_deref().and_then(format_due_date);
-    let drag_id = item.id.clone();
-
     let card_class = move || {
         let base = "rounded-grape border p-3 cursor-pointer transition-colors";
         if selected.get() {
@@ -70,24 +64,23 @@ pub fn TaskCard(
             // "move" so the cursor reflects the operation.
             on:dragstart=move |ev: web_sys::DragEvent| {
                 if let Some(dt) = ev.data_transfer() {
-                    let _ = dt.set_data("text/plain", &drag_id);
+                    let _ = dt.set_data("text/plain", &id);
                     dt.set_effect_allowed("move");
                 }
             }
         >
-            // Top row: priority bars + title
-            <div class="flex items-start gap-2">
-                <span class="flex items-center mt-0.5 shrink-0" title=priority_label>
-                    {priority_bars(priority_level, priority_color)}
-                </span>
-                <span class="text-body-sm text-rambutan-200 line-clamp-2 flex-1">{title}</span>
-            </div>
-
-            // Bottom row: due date (labels not yet in data model).
-            {due_meta.map(|(text, class)| view! {
-                <div class="flex items-center gap-1.5 mt-2 flex-wrap text-label-sm text-rambutan-500">
-                    <span class=class>{text}</span>
+            {move || item.with(|item| view! {
+                <div class="flex items-start gap-2">
+                    <span class="flex items-center mt-0.5 shrink-0" title=item.priority.label()>
+                        {priority_bars(item.priority.bars(), item.priority.color_class())}
+                    </span>
+                    <span class="text-body-sm text-rambutan-200 line-clamp-2 flex-1">{item.title.clone()}</span>
                 </div>
+                {item.due_date.as_deref().and_then(format_due_date).map(|(text, class)| view! {
+                    <div class="flex items-center gap-1.5 mt-2 flex-wrap text-label-sm text-rambutan-500">
+                        <span class=class>{text}</span>
+                    </div>
+                })}
             })}
         </div>
     }

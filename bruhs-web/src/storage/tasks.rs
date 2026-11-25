@@ -1,7 +1,7 @@
 //! Compare original records and commit a logical task operation atomically.
 
 use idb::TransactionMode;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use wasm_bindgen::JsValue;
 
 use super::metadata::{finish, LocalTransaction, SaveError};
@@ -49,6 +49,30 @@ pub async fn load() -> Result<Vec<WorkItem>, SaveError> {
                 .then_with(|| a.id.cmp(&b.id))
         });
         Ok(items)
+    }
+    .await;
+    finish(tx, result).await
+}
+
+pub(crate) async fn load_changed(
+    ids: &BTreeSet<String>,
+) -> Result<BTreeMap<String, Option<WorkItem>>, SaveError> {
+    let db = open_db().await?;
+    let tx = LocalTransaction::new(db.transaction(&[STORE_WORK_ITEMS], TransactionMode::ReadOnly)?);
+    let result = async {
+        let store = tx.object_store(STORE_WORK_ITEMS)?;
+        let reads = ids.iter().map(|id| async {
+            let item = store
+                .get(JsValue::from_str(id))?
+                .await?
+                .map(|raw| from_js::<WorkItem>(raw).map_err(|_| SaveError::Corrupt))
+                .transpose()?;
+            if item.as_ref().is_some_and(|item| item.id != *id) {
+                return Err(SaveError::Corrupt);
+            }
+            Ok((id.clone(), item))
+        });
+        futures_util::future::join_all(reads).await.into_iter().collect()
     }
     .await;
     finish(tx, result).await
@@ -197,5 +221,12 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
         threads::validate_and_cascade(&tx, writes).await
     }
     .await;
-    finish(tx, result).await
+    finish(tx, result).await?;
+    crate::task_saves::publish_task_changes(
+        writes
+            .iter()
+            .filter(|write| write.kind == Kind::Task && write.expected != write.draft)
+            .map(|write| write.id),
+    );
+    Ok(())
 }

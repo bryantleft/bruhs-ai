@@ -1,7 +1,7 @@
-use crate::task_style::{PriorityStyle, WorkItemStatusStyle};
+use crate::task_style::{PriorityStyle, TaskPreview, WorkItemStatusStyle};
 use leptos::prelude::*;
 
-use crate::state::{format_due_date, WorkItem};
+use crate::state::format_due_date;
 
 /// Render a 4-bar priority indicator — matches TS apps/web's PriorityIcon
 /// (apps/web/src/components/tasks/priority-icon.tsx). Each bar's height
@@ -31,21 +31,10 @@ fn priority_bars(level: u8, color_class: &str) -> impl IntoView {
 
 #[component]
 pub fn TaskRow(
-    item: WorkItem,
+    item: Memo<TaskPreview>,
     #[prop(into)] selected: Signal<bool>,
     on_select: Callback<()>,
 ) -> impl IntoView {
-    let status_dot_class = format!(
-        "inline-block size-2.5 rounded-orb {}",
-        item.status.dot_bg_class()
-    );
-    let status_label = item.status.label();
-    let priority_color = item.priority.color_class();
-    let priority_label = item.priority.label();
-    let priority_level = item.priority.bars();
-    let title = item.title.clone();
-    let due_meta = item.due_date.as_deref().and_then(format_due_date);
-
     let row_class = move || {
         let base =
             "flex items-center gap-2 py-2 px-3 rounded-grape cursor-pointer transition-colors";
@@ -70,32 +59,27 @@ pub fn TaskRow(
                 }
             }
         >
-            // Status dot — fixed-width slot to keep the title column aligned.
-            <span class="flex items-center justify-center w-6 shrink-0">
-                <span class=status_dot_class title=status_label></span>
-            </span>
-
-            // Title
-            <span class="flex-1 truncate text-body-sm text-rambutan-200">
-                {title}
-            </span>
-
-            // Priority bars
-            <span class="flex items-center justify-center w-8 shrink-0" title=priority_label>
-                {priority_bars(priority_level, priority_color)}
-            </span>
-
-            // Due date — color-coded relative format from format_due_date.
-            {match due_meta {
-                Some((text, class)) => view! {
-                    <span class=format!("w-20 text-right text-label shrink-0 {class}")>
-                        {text}
+            {move || item.with(|item| {
+                let dot = format!("inline-block size-2.5 rounded-orb {}", item.status.dot_bg_class());
+                let due = item.due_date.as_deref().and_then(format_due_date);
+                view! {
+                    <span class="flex items-center justify-center w-6 shrink-0">
+                        <span class=dot title=item.status.label()></span>
                     </span>
-                }.into_any(),
-                None => view! {
-                    <span class="w-20 text-right text-label shrink-0 text-rambutan-500"></span>
-                }.into_any(),
-            }}
+                    <span class="flex-1 truncate text-body-sm text-rambutan-200">{item.title.clone()}</span>
+                    <span class="flex items-center justify-center w-8 shrink-0" title=item.priority.label()>
+                        {priority_bars(item.priority.bars(), item.priority.color_class())}
+                    </span>
+                    {match due {
+                        Some((text, class)) => view! {
+                            <span class=format!("w-20 text-right text-label shrink-0 {class}")>{text}</span>
+                        }.into_any(),
+                        None => view! {
+                            <span class="w-20 text-right text-label shrink-0 text-rambutan-500"></span>
+                        }.into_any(),
+                    }}
+                }
+            })}
         </div>
     }
 }

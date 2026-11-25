@@ -2,7 +2,47 @@
 //! `WorkItemStatus` / `Priority` enums. Moved out of bruhs-models, which
 //! holds no presentation.
 
-use bruhs_models::{Priority, WorkItemStatus};
+use bruhs_models::{Priority, WorkItem, WorkItemStatus};
+use leptos::prelude::*;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TaskPreview {
+    pub id: String,
+    pub title: String,
+    pub status: WorkItemStatus,
+    pub priority: Priority,
+    pub due_date: Option<String>,
+}
+
+impl From<&WorkItem> for TaskPreview {
+    fn from(item: &WorkItem) -> Self {
+        Self {
+            id: item.id.clone(),
+            title: item.title.clone(),
+            status: item.status,
+            priority: item.priority,
+            due_date: item.due_date.clone(),
+        }
+    }
+}
+
+pub(crate) fn live_task_preview(
+    visible: Memo<Vec<TaskPreview>>,
+    index: ReadSignal<usize>,
+    original: TaskPreview,
+) -> Memo<TaskPreview> {
+    Memo::new(move |previous: Option<&TaskPreview>| {
+        let index = index.get();
+        visible.with(|items| {
+            items
+                .get(index)
+                .filter(|item| item.id == original.id)
+                .or(previous)
+                .unwrap_or(&original)
+                .clone()
+        })
+    })
+}
 
 pub trait WorkItemStatusStyle {
     fn glyph(&self) -> &'static str;

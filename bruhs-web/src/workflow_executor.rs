@@ -124,9 +124,10 @@ impl WorkflowExecutor {
             load_error: RwSignal::new(None),
         };
         provide_context(executor);
+        let task_saves = expect_context::<crate::task_saves::TaskSaves>();
+        task_saves.listen_for_task_changes(executor.ready);
         executor.load_merge();
         executor.load();
-        let task_saves = expect_context::<crate::task_saves::TaskSaves>();
         Effect::new(move |_| {
             if task_saves.contacts_committed.get() != 0 {
                 executor.retry_contact_sync();

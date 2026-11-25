@@ -9,6 +9,7 @@ use crate::state::{
     ProjectsSignal, SelectedProject, SetTaskCreateOpen, SetTaskViewModeSignal, SidebarOpen,
     TaskViewMode, TaskViewModeSignal, WorkItemsSignal,
 };
+use crate::task_style::TaskPreview;
 use crate::ui::Dialog;
 
 #[component]
@@ -40,7 +41,7 @@ pub fn TasksPage() -> impl IntoView {
                     Some(p) => w.project_id.as_deref() == Some(p.as_str()),
                     None => true,
                 })
-                .cloned()
+                .map(TaskPreview::from)
                 .collect::<Vec<_>>()
         })
     });
