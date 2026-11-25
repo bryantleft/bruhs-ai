@@ -102,81 +102,167 @@ impl VoiceDictionary {
         if spellings.is_empty() {
             return text.to_owned();
         }
-        let mut words: Vec<_> = spellings.keys().collect();
-        words.sort_by_key(|s| std::cmp::Reverse(s.len()));
-        let alternatives = words
-            .into_iter()
-            .map(|s| regex::escape(s))
-            .collect::<Vec<_>>()
-            .join("|");
-        let Ok(pattern) = regex::RegexBuilder::new(&alternatives)
-            .case_insensitive(true)
-            .build()
-        else {
-            return text.to_owned();
-        };
-        let word_char = |c: char| c.is_alphanumeric() || c == '_';
-        pattern
-            .replace_all(text, |captures: &regex::Captures<'_>| {
-                let part = captures
-                    .get(0)
-                    .expect("capture zero is the complete spelling");
-                if text[..part.start()]
-                    .chars()
-                    .next_back()
-                    .is_some_and(word_char)
-                    || text[part.end()..].chars().next().is_some_and(word_char)
-                {
-                    part.as_str().to_owned()
-                } else {
-                    spellings
-                        .get(&part.as_str().to_lowercase())
-                        .copied()
-                        .unwrap_or(part.as_str())
-                        .to_owned()
+        let mut words: Vec<(&str, &str)> = spellings
+            .iter()
+            .map(|(spelling, &term)| (spelling.as_str(), term))
+            .collect();
+        words.sort_by_key(|(s, _)| std::cmp::Reverse(s.len()));
+        let mut out = String::with_capacity(text.len());
+        let mut pos = 0usize;
+        let mut prev_is_word = false;
+        while pos < text.len() {
+            if !prev_is_word {
+                let mut matched = None;
+                for &(needle, replacement) in &words {
+                    if let Some(len) = match_ci_prefix(&text[pos..], needle) {
+                        let end = pos + len;
+                        if !text[end..].chars().next().is_some_and(is_word_char) {
+                            matched = Some((end, replacement));
+                            break;
+                        }
+                    }
                 }
-            })
-            .into_owned()
+                if let Some((end, replacement)) = matched {
+                    out.push_str(replacement);
+                    prev_is_word = text[pos..end].chars().next_back().is_some_and(is_word_char);
+                    pos = end;
+                    continue;
+                }
+            }
+            let Some(ch) = text[pos..].chars().next() else {
+                break;
+            };
+            out.push(ch);
+            prev_is_word = is_word_char(ch);
+            pos += ch.len_utf8();
+        }
+        out
     }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// If `text` begins with `needle_lower` (compared case-insensitively on Unicode
+/// scalar values), return the matched byte length in `text`.
+fn match_ci_prefix(text: &str, needle_lower: &str) -> Option<usize> {
+    let mut target = needle_lower.chars();
+    let mut next_target = target.next()?;
+    for (idx, ch) in text.char_indices() {
+        for lc in ch.to_lowercase() {
+            if lc != next_target {
+                return None;
+            }
+            match target.next() {
+                Some(n) => next_target = n,
+                None => {
+                    // Ensure the lowercased expansion of `ch` has no extra trailing chars.
+                    let mut check = ch.to_lowercase();
+                    let consumed = check.by_ref().position(|c| c == lc).unwrap_or(0);
+                    let remaining = ch.to_lowercase().skip(consumed + 1).count();
+                    return (remaining == 0).then_some(idx + ch.len_utf8());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn match_cue(rest: &str, cue_words: &[String], prev_is_word: bool) -> Option<usize> {
+    let first = cue_words.first()?;
+    let first_starts_word = first.chars().next().is_some_and(is_word_char);
+    if first_starts_word && prev_is_word {
+        return None;
+    }
+    let mut pos = match_ci_prefix(rest, first)?;
+    for word in &cue_words[1..] {
+        let mut ws_len = 0usize;
+        for ch in rest[pos..].chars() {
+            if ch.is_whitespace() {
+                ws_len += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if ws_len == 0 {
+            return None;
+        }
+        pos += ws_len;
+        let len = match_ci_prefix(&rest[pos..], word)?;
+        pos += len;
+    }
+    let last_ends_word = cue_words
+        .last()
+        .and_then(|w| w.chars().next_back())
+        .is_some_and(is_word_char);
+    if last_ends_word && rest[pos..].chars().next().is_some_and(is_word_char) {
+        return None;
+    }
+    Some(pos)
 }
 
 /// Remove standalone speech hesitations while retaining dictated paragraphs, code and the cleanup cue.
 pub fn without_fillers(text: &str, language: Option<&str>, correction: &str) -> String {
-    let language_words = match language.and_then(|code| code.split(['-', '_']).next()) {
-        Some("en") => "|um|ah|eh",
-        Some("fr") => "|euh",
-        Some("de") => "|ähm|äh",
-        _ => "",
-    };
-    let fillers =
-        format!(r"\b(?:uhhh|uhh|uhm|umm|uh|ehh|ehm|ahm|hmm|hm|mmm|хм|ммм{language_words})\b[,.]?");
-    let cue = correction
+    let mut fillers: Vec<&'static str> = vec![
+        "uhhh", "uhh", "uhm", "umm", "uh", "ehh", "ehm", "ahm", "hmm", "hm", "mmm", "хм", "ммм",
+    ];
+    match language.and_then(|code| code.split(['-', '_']).next()) {
+        Some("en") => fillers.extend_from_slice(&["um", "ah", "eh"]),
+        Some("fr") => fillers.push("euh"),
+        Some("de") => fillers.extend_from_slice(&["ähm", "äh"]),
+        _ => {}
+    }
+    fillers.sort_by_key(|f| std::cmp::Reverse(f.len()));
+
+    let cue_words: Vec<String> = correction
         .split_whitespace()
-        .map(regex::escape)
-        .collect::<Vec<_>>()
-        .join(r"\s+");
-    let pattern = if cue.is_empty() {
-        fillers
-    } else {
-        format!(r"(?P<cue>\b{cue}\b)|{fillers}")
-    };
-    let Ok(pattern) = regex::RegexBuilder::new(&pattern)
-        .case_insensitive(true)
-        .build()
-    else {
-        return text.to_owned();
-    };
-    let filtered = pattern.replace_all(text, |captures: &regex::Captures<'_>| {
-        let found = captures.get(0).expect("complete match");
-        if captures.name("cue").is_some()
-            || text[..found.start()].ends_with('-')
-            || text[found.end()..].starts_with('-')
-        {
-            found.as_str().to_owned()
-        } else {
-            String::new()
+        .map(str::to_lowercase)
+        .collect();
+
+    let mut filtered = String::with_capacity(text.len());
+    let mut pos = 0usize;
+    let mut prev_is_word = false;
+    while pos < text.len() {
+        if !cue_words.is_empty() {
+            if let Some(len) = match_cue(&text[pos..], &cue_words, prev_is_word) {
+                let end = pos + len;
+                filtered.push_str(&text[pos..end]);
+                prev_is_word = text[pos..end].chars().next_back().is_some_and(is_word_char);
+                pos = end;
+                continue;
+            }
         }
-    });
+        if !prev_is_word {
+            let mut matched_filler = None;
+            for &filler in &fillers {
+                if let Some(len) = match_ci_prefix(&text[pos..], filler) {
+                    let mut end = pos + len;
+                    if !text[end..].chars().next().is_some_and(is_word_char) {
+                        if text[end..].starts_with([',', '.']) {
+                            end += 1;
+                        }
+                        matched_filler = Some(end);
+                        break;
+                    }
+                }
+            }
+            if let Some(end) = matched_filler {
+                if text[..pos].ends_with('-') || text[end..].starts_with('-') {
+                    filtered.push_str(&text[pos..end]);
+                }
+                prev_is_word = text[pos..end].chars().next_back().is_some_and(is_word_char);
+                pos = end;
+                continue;
+            }
+        }
+        let Some(ch) = text[pos..].chars().next() else {
+            break;
+        };
+        filtered.push(ch);
+        prev_is_word = is_word_char(ch);
+        pos += ch.len_utf8();
+    }
     filtered
         .trim()
         .lines()

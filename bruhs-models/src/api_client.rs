@@ -271,13 +271,96 @@ pub fn api_approval_review(proposal: &ApiProposal) -> String {
     format!("{} {}\nThread: {}\n\nHeaders:\n{}\n\nBody:\n{}\n\nOrdinary variables:\n{}\nKeychain reference names:\n{}",visible(&proposal.request.method),visible(&proposal.destination),visible(&proposal.thread_id),headers,visible(&expand(&proposal.request.body)),values(&proposal.environment.values),values(&proposal.environment.secrets))
 }
 
+/// Minimal POSIX-style word splitter for curl commands (no expansion or execution).
+fn split_shell_words(input: &str) -> Result<Vec<String>, ()> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            ' ' | '\t' | '\n' | '\r' => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            '#' if !in_word => {
+                for next in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+            }
+            '\'' => {
+                in_word = true;
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == '\'' {
+                        closed = true;
+                        break;
+                    }
+                    current.push(next);
+                }
+                if !closed {
+                    return Err(());
+                }
+            }
+            '"' => {
+                in_word = true;
+                let mut closed = false;
+                while let Some(next) = chars.next() {
+                    if next == '"' {
+                        closed = true;
+                        break;
+                    }
+                    if next == '\\' {
+                        match chars.next() {
+                            Some('\n') => {}
+                            Some(esc @ ('"' | '\\' | '$' | '`')) => current.push(esc),
+                            Some(other) => {
+                                current.push('\\');
+                                current.push(other);
+                            }
+                            None => return Err(()),
+                        }
+                    } else {
+                        current.push(next);
+                    }
+                }
+                if !closed {
+                    return Err(());
+                }
+            }
+            '\\' => match chars.next() {
+                Some('\n') => {}
+                Some(escaped) => {
+                    in_word = true;
+                    current.push(escaped);
+                }
+                None => return Err(()),
+            },
+            other => {
+                in_word = true;
+                current.push(other);
+            }
+        }
+    }
+
+    if in_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
 /// Tokenize only; no subprocess, expansion, file access, or shell execution.
 pub fn import_curl(command: &str) -> Result<ApiRequest, String> {
     if command.len() > PAYLOAD_BYTES {
         return Err("Curl input exceeds 32 KiB.".into());
     }
     reject_shell_syntax(command)?;
-    let words = shell_words::split(command).map_err(|_| "Close all quotes in the curl command.")?;
+    let words = split_shell_words(command).map_err(|()| "Close all quotes in the curl command.")?;
     if words.first().map(String::as_str) != Some("curl") {
         return Err("Start with curl followed by one HTTP URL.".into());
     }

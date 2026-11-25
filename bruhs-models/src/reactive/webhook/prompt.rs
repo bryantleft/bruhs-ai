@@ -1,55 +1,119 @@
 //! Substitute request fields once, keeping sender-controlled text visibly framed.
 use super::{dedupe::request_value, WebhookMetadata};
-use regex::Regex;
 use serde_json::Value;
-use std::sync::LazyLock;
 use uuid::Uuid;
 
 pub const DEFAULT_WEBHOOK_PROMPT: &str = "Handle this webhook:\n{{body}}";
 const MAX_PROMPT_UNITS: usize = 120_000;
-static PLACEHOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{\{([^{}]*)\}\}").expect("valid webhook placeholder pattern"));
-static MENTION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)[\p{Sc}@]|webhook-data|t3-context:|/").expect("valid webhook marker pattern")
-});
 
 pub struct RenderedWebhookPrompt {
     pub text: String,
     pub missing: Vec<String>,
 }
 
+/// Unicode General Category `Sc` (Currency_Symbol).
+const fn is_currency_symbol(ch: char) -> bool {
+    matches!(
+        ch,
+        '$'
+            | '\u{00A2}'..='\u{00A5}'
+            | '\u{058F}'
+            | '\u{060B}'
+            | '\u{07FE}'..='\u{07FF}'
+            | '\u{09F2}'..='\u{09F3}'
+            | '\u{09FB}'
+            | '\u{0AF1}'
+            | '\u{0BF9}'
+            | '\u{0E3F}'
+            | '\u{17DB}'
+            | '\u{20A0}'..='\u{20C0}'
+            | '\u{A838}'
+            | '\u{FDFC}'
+            | '\u{FE69}'
+            | '\u{FF04}'
+            | '\u{FFE0}'..='\u{FFE1}'
+            | '\u{FFE5}'..='\u{FFE6}'
+            | '\u{11FDD}'..='\u{11FE0}'
+            | '\u{1E2FF}'
+            | '\u{1ECB0}'
+    )
+}
+
+fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .get(..needle.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 fn inert(text: &str) -> std::borrow::Cow<'_, str> {
     let mut escaped = String::new();
     let mut end = 0;
-    for matched in MENTION.find_iter(text) {
-        let split = match matched.as_str() {
-            "/" => {
-                let before = text[..matched.start()].chars().next_back();
-                let token = text[matched.end()..]
+    let mut pos = 0;
+    while pos < text.len() {
+        let rest = &text[pos..];
+        let (split, advance) = if starts_with_ignore_ascii_case(rest, "webhook-data") {
+            (Some(pos + 7), "webhook-data".len())
+        } else if starts_with_ignore_ascii_case(rest, "t3-context:") {
+            (Some(pos + 10), "t3-context:".len())
+        } else if let Some(ch) = rest.chars().next() {
+            let step = ch.len_utf8();
+            if ch == '@' || is_currency_symbol(ch) {
+                (Some(pos + step), step)
+            } else if ch == '/' {
+                let before = text[..pos].chars().next_back();
+                let token = text[pos + step..]
                     .split(char::is_whitespace)
                     .next()
                     .unwrap_or_default();
-                if before.is_some_and(|c| !c.is_whitespace())
-                    || token.is_empty()
-                    || token.contains('/')
-                {
-                    continue;
-                }
-                matched.end()
+                let is_slash_cmd = !before.is_some_and(|c| !c.is_whitespace())
+                    && !token.is_empty()
+                    && !token.contains('/');
+                (is_slash_cmd.then_some(pos + step), step)
+            } else {
+                (None, step)
             }
-            word if word.eq_ignore_ascii_case("webhook-data") => matched.start() + 7,
-            word if word.eq_ignore_ascii_case("t3-context:") => matched.start() + 10,
-            _ => matched.end(),
+        } else {
+            break;
         };
-        escaped.push_str(&text[end..split]);
-        escaped.push('\u{2060}');
-        end = split;
+        if let Some(split) = split {
+            escaped.push_str(&text[end..split]);
+            escaped.push('\u{2060}');
+            end = split;
+        }
+        pos += advance;
     }
     if end == 0 {
         return text.into();
     }
     escaped.push_str(&text[end..]);
     escaped.into()
+}
+
+/// Find the next `{{...}}` placeholder whose body contains neither `{` nor `}`.
+fn next_placeholder(template: &str, from: usize) -> Option<(usize, usize, &str)> {
+    let bytes = template.as_bytes();
+    let mut i = from;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'{' && bytes[i + 1] == b'{' {
+            let body_start = i + 2;
+            let mut j = body_start;
+            while j < bytes.len() && bytes[j] != b'{' && bytes[j] != b'}' {
+                j += 1;
+            }
+            if j + 1 < bytes.len() && bytes[j] == b'}' && bytes[j + 1] == b'}' {
+                return Some((i, j + 2, &template[body_start..j]));
+            }
+            i = if j > body_start && j < bytes.len() && bytes[j] == b'{' {
+                j
+            } else {
+                i + 2
+            };
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 pub fn render_webhook_prompt(
@@ -72,12 +136,9 @@ pub fn render_webhook_prompt(
     let mut missing = Vec::new();
     let mut end = 0;
     let mut framed = false;
-    for capture in PLACEHOLDER.captures_iter(template) {
-        let marker = capture
-            .get(0)
-            .expect("regex capture includes the whole match");
-        append(&template[end..marker.start()])?;
-        let expression = capture[1].trim();
+    while let Some((start, marker_end, raw_expr)) = next_placeholder(template, end) {
+        append(&template[end..start])?;
+        let expression = raw_expr.trim();
         match request_value(expression, body, request) {
             Some(value) if !value.is_empty() => {
                 framed = true;
@@ -90,7 +151,7 @@ pub fn render_webhook_prompt(
             }
             _ => {}
         }
-        end = marker.end();
+        end = marker_end;
     }
     append(&template[end..])?;
     if framed {

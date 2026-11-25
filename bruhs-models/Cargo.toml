@@ -18,7 +18,6 @@ workspace = true
 indexmap = { version = "2", features = ["serde"] }
 # NFC before a backup password reaches the key derivation (`backup::normalize_password`).
 unicode-normalization = "0.1.26"
-regex = "1"
 serde = { workspace = true, features = ["rc"] }
 uuid = { workspace = true, features = ["js", "serde"] }
 serde_json = { workspace = true }
@@ -28,9 +27,7 @@ pulldown-cmark = { version = "0.13.3", default-features = false }
 percent-encoding = "2"
 form_urlencoded = "1"
 sha2 = { workspace = true }
-shell-words = "=1.1.1"
 base64 = "0.22"
-email_address = { version = "=0.2.10", default-features = false }
 # Case-insensitive ASCII scans of workspace reads (`workspace_bridge::query`).
 memchr = "2"
 

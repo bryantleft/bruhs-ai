@@ -5,9 +5,8 @@ mod reply;
 pub use reply::reply_content;
 
 use super::MailAddress;
-use email_address::EmailAddress;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fmt, str::FromStr as _};
+use std::{collections::HashSet, fmt};
 
 pub const MAIL_DRAFT_ATTACHMENT_MAX_BYTES: usize = 16 << 20;
 pub const MAIL_DRAFT_MAX_ATTACHMENTS: usize = 20;
@@ -243,6 +242,182 @@ fn display_name(name: &str) -> String {
     }
 }
 
+struct ParsedMailbox<'a> {
+    display_part: &'a str,
+    email: &'a str,
+    local_part: &'a str,
+    domain: &'a str,
+}
+
+fn is_atext(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(
+            ch,
+            '!' | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '*'
+                | '+'
+                | '-'
+                | '/'
+                | '='
+                | '?'
+                | '^'
+                | '_'
+                | '`'
+                | '{'
+                | '|'
+                | '}'
+                | '~'
+        )
+        || (!ch.is_ascii() && !ch.is_control() && !ch.is_whitespace())
+}
+
+fn is_valid_local_part(local: &str) -> bool {
+    if local.is_empty() || local.len() > 64 {
+        return false;
+    }
+    if let Some(inner) = local.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        let mut escaped = false;
+        for ch in inner.chars() {
+            if ch.is_control() {
+                return false;
+            }
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                return false;
+            }
+        }
+        return !escaped;
+    }
+    if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
+        return false;
+    }
+    local.chars().all(|ch| ch == '.' || is_atext(ch))
+}
+
+fn is_valid_domain(domain: &str) -> bool {
+    if domain.is_empty() || domain.len() > 253 {
+        return false;
+    }
+    if let Some(literal) = domain.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        return !literal.is_empty()
+            && literal
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b':' | b'-'));
+    }
+    if domain.starts_with('.') || domain.ends_with('.') || domain.contains("..") {
+        return false;
+    }
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|ch| {
+                ch.is_ascii_alphanumeric()
+                    || ch == '-'
+                    || (!ch.is_ascii() && !ch.is_control() && !ch.is_whitespace())
+            })
+    })
+}
+
+fn split_addr_spec(addr: &str) -> Option<(&str, &str)> {
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut at_pos = None;
+    for (idx, ch) in addr.char_indices() {
+        if ch.is_control() {
+            return None;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if !quoted && ch == '@' {
+            at_pos = Some(idx);
+        }
+    }
+    if quoted || escaped {
+        return None;
+    }
+    let at = at_pos?;
+    let local = &addr[..at];
+    let domain = &addr[at + 1..];
+    if is_valid_local_part(local) && is_valid_domain(domain) {
+        Some((local, domain))
+    } else {
+        None
+    }
+}
+
+fn parse_mailbox(token: &str) -> Option<ParsedMailbox<'_>> {
+    let token = token.trim();
+    if token.is_empty() || token.chars().any(char::is_control) {
+        return None;
+    }
+    // Check for angle-bracket form: `[display] <addr-spec>`
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut open_angle = None;
+    for (idx, ch) in token.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if !quoted && ch == '<' {
+            open_angle = Some(idx);
+            break;
+        }
+    }
+    if quoted || escaped {
+        return None;
+    }
+    if let Some(open) = open_angle {
+        let rest = &token[open + 1..];
+        let inner = rest.strip_suffix('>')?.trim();
+        let display_part = token[..open].trim();
+        let (local_part, domain) = split_addr_spec(inner)?;
+        return Some(ParsedMailbox {
+            display_part,
+            email: inner,
+            local_part,
+            domain,
+        });
+    }
+    if token.contains(['<', '>']) {
+        return None;
+    }
+    let (local_part, domain) = split_addr_spec(token)?;
+    Some(ParsedMailbox {
+        display_part: "",
+        email: token,
+        local_part,
+        domain,
+    })
+}
+
 fn recipients(
     value: &str,
     field: MailRecipientField,
@@ -250,20 +425,15 @@ fn recipients(
 ) -> Result<Vec<MailAddress>, MailComposeError> {
     let mut result = Vec::new();
     for (index, token) in tokens(value, field)?.into_iter().enumerate() {
-        let address =
-            EmailAddress::from_str(token).map_err(|_| MailComposeError::InvalidRecipient {
-                field,
-                index: index.saturating_add(1),
-            })?;
-        let key = format!(
-            "{}@{}",
-            address.local_part(),
-            address.domain().to_lowercase()
-        );
+        let address = parse_mailbox(token).ok_or(MailComposeError::InvalidRecipient {
+            field,
+            index: index.saturating_add(1),
+        })?;
+        let key = format!("{}@{}", address.local_part, address.domain.to_lowercase());
         if seen.insert(key) {
             result.push(MailAddress {
-                name: display_name(address.display_part()),
-                address: address.email().to_owned(),
+                name: display_name(address.display_part),
+                address: address.email.to_owned(),
             });
         }
     }
