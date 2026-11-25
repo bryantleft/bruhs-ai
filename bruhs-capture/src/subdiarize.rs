@@ -12,10 +12,11 @@
 //! "me" segments pass through unchanged.
 
 use crate::resample::ResampleError;
+use bruhs_models::logic::wav::WavError;
+#[cfg(target_os = "macos")]
+use bruhs_models::logic::wav::{SampleFormat, WavReader};
 use bruhs_models::num::ToFloatLossy;
 use bruhs_models::{ClusterCentroid, SpeakerId, TranscriptSegment};
-#[cfg(target_os = "macos")]
-use hound::{SampleFormat, WavReader};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
@@ -45,8 +46,8 @@ const KMEANS_MAX_ITER: usize = 100;
 pub enum SubdiarizeError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] WavError),
     #[error("resample: {0}")]
     Resample(#[from] ResampleError),
     #[error("sherpa: {0}")]
@@ -181,7 +182,7 @@ fn load_wav_mono_16k(path: &Path) -> Result<Vec<f32>, SubdiarizeError> {
     let mut reader = WavReader::open(path)?;
     let spec = reader.spec();
     if spec.bits_per_sample != 16 || spec.sample_format != SampleFormat::Int {
-        return Err(SubdiarizeError::Hound(hound::Error::Unsupported));
+        return Err(SubdiarizeError::Hound(WavError::Unsupported));
     }
     let channels = spec.channels as usize;
     let mut mono: Vec<f32> = Vec::with_capacity(reader.len() as usize / channels.max(1));

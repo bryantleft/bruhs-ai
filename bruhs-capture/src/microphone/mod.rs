@@ -8,6 +8,7 @@ pub use gate::{
     MicDecision, MicrophoneGate, MuteBinding, MuteSignal, SampleWindow, MUTE_SIGNAL_TTL,
 };
 
+use bruhs_models::logic::wav;
 use std::io::{Seek, Write};
 
 #[derive(Debug, thiserror::Error)]
@@ -15,7 +16,7 @@ pub enum MicrophoneWriteError {
     #[error("microphone writer requires 16-bit PCM and a nonzero sample rate/channel count")]
     InvalidFormat,
     #[error(transparent)]
-    Wav(#[from] hound::Error),
+    Wav(#[from] wav::WavError),
     #[error("microphone stream: {0}")]
     Stream(String),
 }
@@ -23,7 +24,7 @@ pub enum MicrophoneWriteError {
 /// Holds no raw audio queue. Mutating its policy requires exclusive access to
 /// the same object that commits PCM, so a policy update cannot race a write.
 pub struct MicrophoneWriter<W: Write + Seek> {
-    writer: hound::WavWriter<W>,
+    writer: wav::WavWriter<W>,
     gate: MicrophoneGate,
     rms_sum: f64,
     rms_count: usize,
@@ -35,12 +36,12 @@ pub struct MicrophoneWriter<W: Write + Seek> {
 
 impl<W: Write + Seek> MicrophoneWriter<W> {
     pub fn new(
-        writer: hound::WavWriter<W>,
+        writer: wav::WavWriter<W>,
         gate: MicrophoneGate,
     ) -> Result<Self, MicrophoneWriteError> {
         let spec = writer.spec();
         if spec.bits_per_sample != 16
-            || spec.sample_format != hound::SampleFormat::Int
+            || spec.sample_format != wav::SampleFormat::Int
             || spec.channels == 0
             || spec.sample_rate == 0
         {

@@ -34,13 +34,13 @@ async fn stub(
 }
 
 fn wav(path: &Path, frames: usize) {
-    let mut writer = hound::WavWriter::create(
+    let mut writer = bruhs_models::logic::wav::WavWriter::create(
         path,
-        hound::WavSpec {
+        bruhs_models::logic::wav::WavSpec {
             channels: 1,
             sample_rate: 16_000,
             bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
+            sample_format: bruhs_models::logic::wav::SampleFormat::Int,
         },
     )
     .unwrap();
@@ -235,7 +235,8 @@ fn chunking_stays_within_upload_limit_and_preserves_source_time() {
     let first = chunks.next_chunk().unwrap().unwrap();
     assert!(first.bytes.len() <= MAX_UPLOAD_BYTES);
     assert_eq!(first.start_ms, 0);
-    let first_reader = hound::WavReader::new(std::io::Cursor::new(first.bytes)).unwrap();
+    let first_reader =
+        bruhs_models::logic::wav::WavReader::new(std::io::Cursor::new(first.bytes)).unwrap();
     assert_eq!(
         usize::try_from(first_reader.duration()).unwrap(),
         first_frames
@@ -246,7 +247,8 @@ fn chunking_stays_within_upload_limit_and_preserves_source_time() {
         u32::try_from(first_frames * 1000 / 16_000).unwrap()
     );
     assert_eq!(next.duration_ms, 1000);
-    let reader = hound::WavReader::new(std::io::Cursor::new(next.bytes)).unwrap();
+    let reader =
+        bruhs_models::logic::wav::WavReader::new(std::io::Cursor::new(next.bytes)).unwrap();
     assert_eq!(reader.duration(), 16_000);
     assert!(chunks.next_chunk().unwrap().is_none());
 }

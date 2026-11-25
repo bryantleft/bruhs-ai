@@ -29,7 +29,7 @@ pub enum RemoteError {
     #[error("Transcription server response: {0}")]
     Response(&'static str),
     #[error("transcription audio: {0}")]
-    Audio(#[from] hound::Error),
+    Audio(#[from] bruhs_models::logic::wav::WavError),
     #[error("transcription file: {0}")]
     Io(#[from] std::io::Error),
     #[error("Transcription worker was cancelled; recording files were retained.")]
@@ -436,7 +436,7 @@ impl VerboseTranscript {
 }
 
 struct WavChunks {
-    reader: hound::WavReader<BufReader<File>>,
+    reader: bruhs_models::logic::wav::WavReader<BufReader<File>>,
     offset_frames: u64,
 }
 
@@ -448,10 +448,10 @@ struct AudioChunk {
 
 impl WavChunks {
     fn open(path: &Path) -> Result<Self, RemoteError> {
-        let reader = hound::WavReader::open(path)?;
+        let reader = bruhs_models::logic::wav::WavReader::open(path)?;
         let spec = reader.spec();
         if spec.bits_per_sample != 16
-            || spec.sample_format != hound::SampleFormat::Int
+            || spec.sample_format != bruhs_models::logic::wav::SampleFormat::Int
             || spec.channels == 0
             || spec.sample_rate == 0
         {
@@ -494,7 +494,7 @@ impl WavChunks {
             })?;
         let mut output =
             std::io::Cursor::new(Vec::with_capacity(WAV_HEADER_BYTES + samples.len() * 2));
-        let mut writer = hound::WavWriter::new(&mut output, spec)?;
+        let mut writer = bruhs_models::logic::wav::WavWriter::new(&mut output, spec)?;
         for sample in samples {
             writer.write_sample(sample)?;
         }

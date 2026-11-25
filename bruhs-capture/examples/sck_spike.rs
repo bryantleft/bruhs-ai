@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // We capture stereo float32 from SCK, downmix to mono i16, and write to
     // a hound WavWriter at 48kHz. Stop time finalizes the writer.
     struct Writer {
-        wav: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
+        wav: Option<bruhs_models::logic::wav::WavWriter<std::io::BufWriter<std::fs::File>>>,
         frames_written: u64,
         sample_rate: u32,
         channels: u32,
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     impl Writer {
-        fn finalize(&mut self) -> Result<(), hound::Error> {
+        fn finalize(&mut self) -> Result<(), bruhs_models::logic::wav::WavError> {
             if let Some(w) = self.wav.take() {
                 w.finalize()?;
             }
@@ -237,15 +237,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rt.block_on(async move {
         // Open the WAV writer up front; we'll write to it from the delegate.
-        let spec = hound::WavSpec {
+        let spec = bruhs_models::logic::wav::WavSpec {
             channels: 1,
             sample_rate: 48_000,
             bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
+            sample_format: bruhs_models::logic::wav::SampleFormat::Int,
         };
         let path = "/tmp/bruhs-sck-spike.wav";
         let _ = std::fs::remove_file(path);
-        let wav = hound::WavWriter::create(path, spec)?;
+        let wav = bruhs_models::logic::wav::WavWriter::create(path, spec)?;
 
         let writer = Arc::new(Mutex::new(Writer {
             wav: Some(wav),

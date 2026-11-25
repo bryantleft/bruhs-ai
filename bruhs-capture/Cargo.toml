@@ -27,7 +27,6 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
 cpal = { workspace = true }
-hound = "3.5"
 whisper-rs = { version = "0.12", default-features = false }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "multipart"] }

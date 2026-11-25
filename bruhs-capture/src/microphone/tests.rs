@@ -23,17 +23,17 @@ fn guarded() -> (MicrophoneGate, MuteBinding) {
     let binding = gate.enable(Uuid::new_v4(), at(0));
     (gate, binding)
 }
-fn spec(channels: u16) -> hound::WavSpec {
-    hound::WavSpec {
+fn spec(channels: u16) -> wav::WavSpec {
+    wav::WavSpec {
         channels,
         sample_rate: 8,
         bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
+        sample_format: wav::SampleFormat::Int,
     }
 }
 fn pcm(cursor: &mut Cursor<Vec<u8>>) -> Vec<i16> {
     cursor.set_position(0);
-    hound::WavReader::new(cursor)
+    wav::WavReader::new(cursor)
         .unwrap()
         .samples::<i16>()
         .map(Result::unwrap)
@@ -171,8 +171,7 @@ fn both_pcm_formats_zero_before_wav_and_meter_without_shortening_timeline() {
         let mut bytes = Cursor::new(Vec::new());
         let (gate, b) = guarded();
         let mut writer =
-            MicrophoneWriter::new(hound::WavWriter::new(&mut bytes, spec(1)).unwrap(), gate)
-                .unwrap();
+            MicrophoneWriter::new(wav::WavWriter::new(&mut bytes, spec(1)).unwrap(), gate).unwrap();
         let write = |writer: &mut MicrophoneWriter<_>, time| {
             if floats {
                 writer.write_f32(&[1.0, -1.0], frame(time, time + 1))
@@ -202,7 +201,7 @@ fn both_pcm_formats_zero_before_wav_and_meter_without_shortening_timeline() {
 fn rms_forgets_old_energy_even_when_pause_and_resume_happen_between_callbacks() {
     let mut bytes = Cursor::new(Vec::new());
     let mut writer = MicrophoneWriter::new(
-        hound::WavWriter::new(&mut bytes, spec(1)).unwrap(),
+        wav::WavWriter::new(&mut bytes, spec(1)).unwrap(),
         MicrophoneGate::ordinary(),
     )
     .unwrap();
@@ -219,7 +218,7 @@ fn fresh_heartbeats_do_not_reset_meter_and_stereo_uses_sample_frames() {
     let mut bytes = Cursor::new(Vec::new());
     let (gate, b) = guarded();
     let mut writer =
-        MicrophoneWriter::new(hound::WavWriter::new(&mut bytes, spec(2)).unwrap(), gate).unwrap();
+        MicrophoneWriter::new(wav::WavWriter::new(&mut bytes, spec(2)).unwrap(), gate).unwrap();
     writer
         .gate_mut()
         .observe(b, 1, at(0), at(0), MuteSignal::Unmuted);
@@ -235,7 +234,7 @@ fn fresh_heartbeats_do_not_reset_meter_and_stereo_uses_sample_frames() {
 fn ordinary_capture_preserves_pcm_and_sanitizes_nonfinite_float_input() {
     let mut bytes = Cursor::new(Vec::new());
     let mut writer = MicrophoneWriter::new(
-        hound::WavWriter::new(&mut bytes, spec(1)).unwrap(),
+        wav::WavWriter::new(&mut bytes, spec(1)).unwrap(),
         MicrophoneGate::ordinary(),
     )
     .unwrap();
@@ -256,12 +255,9 @@ fn microphone_gate_does_not_touch_a_separate_remote_audio_writer() {
     let mut mic_bytes = Cursor::new(Vec::new());
     let mut remote_bytes = Cursor::new(Vec::new());
     let (gate, _) = guarded();
-    let mut mic = MicrophoneWriter::new(
-        hound::WavWriter::new(&mut mic_bytes, spec(1)).unwrap(),
-        gate,
-    )
-    .unwrap();
-    let mut remote = hound::WavWriter::new(&mut remote_bytes, spec(1)).unwrap();
+    let mut mic =
+        MicrophoneWriter::new(wav::WavWriter::new(&mut mic_bytes, spec(1)).unwrap(), gate).unwrap();
+    let mut remote = wav::WavWriter::new(&mut remote_bytes, spec(1)).unwrap();
     mic.write_i16(&[1000, 2000, 3000, 4000], None);
     for sample in [1000i16, 2000, 3000, 4000] {
         remote.write_sample(sample).unwrap();
@@ -306,7 +302,7 @@ fn failed_pcm_write_stops_future_writes_and_survives_successful_finalization() {
         writes: Rc::clone(&writes),
     };
     let mut writer = MicrophoneWriter::new(
-        hound::WavWriter::new(sink, spec(1)).unwrap(),
+        wav::WavWriter::new(sink, spec(1)).unwrap(),
         MicrophoneGate::ordinary(),
     )
     .unwrap();
@@ -338,7 +334,7 @@ fn failed_pcm_write_stops_future_writes_and_survives_successful_finalization() {
 fn stream_failure_prevents_writes_and_survives_notice_and_gate_changes() {
     let mut bytes = Cursor::new(Vec::new());
     let mut writer = MicrophoneWriter::new(
-        hound::WavWriter::new(&mut bytes, spec(1)).unwrap(),
+        wav::WavWriter::new(&mut bytes, spec(1)).unwrap(),
         MicrophoneGate::ordinary(),
     )
     .unwrap();
@@ -364,11 +360,11 @@ fn stream_failure_prevents_writes_and_survives_notice_and_gate_changes() {
 
 #[test]
 fn writer_rejects_non_pcm16_format() {
-    let wav = hound::WavWriter::new(
+    let wav = wav::WavWriter::new(
         Cursor::new(Vec::new()),
-        hound::WavSpec {
+        wav::WavSpec {
             bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
+            sample_format: wav::SampleFormat::Float,
             ..spec(1)
         },
     )

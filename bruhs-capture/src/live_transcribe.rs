@@ -189,7 +189,8 @@ fn run(
         // and cache it. Fallback to 16 kHz only if hound can't open the file
         // (handled below by the decode error path).
         let current_rate = source_rate.unwrap_or_else(|| {
-            hound::WavReader::open(&source_wav).map_or(16_000, |r| r.spec().sample_rate)
+            bruhs_models::logic::wav::WavReader::open(&source_wav)
+                .map_or(16_000, |r| r.spec().sample_rate)
         });
 
         // Seek-based decode: only read new audio since last tick, with a

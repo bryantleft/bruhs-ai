@@ -1043,7 +1043,6 @@ dependencies = [
  "cpal",
  "directories",
  "futures-core",
- "hound",
  "keyring",
  "rand 0.9.4",
  "reqwest",
@@ -1155,15 +1154,12 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "pulldown-cmark",
  "raw-window-handle",
- "regex",
  "reqwest",
  "serde",
  "serde_json",
- "serde_json_lenient",
  "sha2 0.10.9",
  "simdutf8",
  "sys-locale",
- "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -1197,18 +1193,15 @@ name = "bruhs-models"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "email_address",
  "form_urlencoded",
  "indexmap",
  "memchr",
  "percent-encoding",
  "pulldown-cmark",
- "regex",
  "serde",
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
- "shell-words",
  "thiserror 2.0.21",
  "unicode-normalization",
  "uuid",
@@ -1230,7 +1223,6 @@ dependencies = [
  "flate2",
  "futures-core",
  "futures-util",
- "home",
  "libc",
  "reqwest",
  "rusqlite",
@@ -2605,12 +2597,6 @@ dependencies = [
  "paste",
  "pin-project-lite",
 ]
-
-[[package]]
-name = "email_address"
-version = "0.2.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ab6bbd053d3cdc62ba3de82aae11530a97bbd5b3a572fbdbcd0f0e545e3ff21"
 
 [[package]]
 name = "embed-resource"
@@ -7979,18 +7965,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "serde_json_lenient"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e033097bf0d2b59a62b42c18ebbb797503839b26afdda2c4e1415cb6c813540"
-dependencies = [
- "itoa",
- "memchr",
- "ryu",
- "serde",
 ]
 
 [[package]]

@@ -89,10 +89,10 @@ pub async fn enroll_voice(
 #[derive(Debug, thiserror::Error)]
 pub enum EnrollError {
     #[error("wav decode: {0}")]
-    Decode(#[from] hound::Error),
+    Decode(#[from] bruhs_models::logic::wav::WavError),
     #[error("wav decode: unsupported WAV format: {format:?} {bits}-bit")]
     UnsupportedFormat {
-        format: hound::SampleFormat,
+        format: bruhs_models::logic::wav::SampleFormat,
         bits: u16,
     },
     #[error("wav decode: resample: {0}")]
@@ -162,7 +162,7 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// Resamples if the input sample rate differs from 16kHz.
 #[cfg(target_os = "macos")]
 fn decode_wav_bytes_to_f32_mono_16k(bytes: &[u8]) -> Result<Vec<f32>, EnrollError> {
-    use hound::{SampleFormat, WavReader};
+    use bruhs_models::logic::wav::{SampleFormat, WavReader};
     use std::io::Cursor;
 
     let cursor = Cursor::new(bytes);
@@ -285,14 +285,14 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn wav_body_is_decoded_and_resampled_to_16k_mono() {
-        let spec = hound::WavSpec {
+        let spec = bruhs_models::logic::wav::WavSpec {
             channels: 2,
             sample_rate: 48_000,
             bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
+            sample_format: bruhs_models::logic::wav::SampleFormat::Int,
         };
         let mut bytes = std::io::Cursor::new(Vec::new());
-        let mut writer = hound::WavWriter::new(&mut bytes, spec).unwrap();
+        let mut writer = bruhs_models::logic::wav::WavWriter::new(&mut bytes, spec).unwrap();
         for i in 0..48_000 {
             let s = ((i.to_f32_lossy() * 0.05).sin() * 8_000.0).to_i16_saturating();
             writer.write_sample(s).unwrap();

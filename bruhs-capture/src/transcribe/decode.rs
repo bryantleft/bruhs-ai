@@ -3,6 +3,7 @@
 //! mono, resample to 16 kHz via rubato.
 
 use crate::resample::{resample_mono, ResampleError};
+use bruhs_models::logic::wav::{self, WavError};
 use bruhs_models::num::ToFloatLossy;
 use std::path::Path;
 
@@ -10,8 +11,8 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] WavError),
     #[error("resample: {0}")]
     Resample(#[from] ResampleError),
     #[error("unsupported wav format: {0}")]
@@ -31,9 +32,9 @@ pub fn decode_wav_from_sample(
     path: &Path,
     mono_sample_offset: u32,
 ) -> Result<(Vec<f32>, u32), DecodeError> {
-    let mut reader = hound::WavReader::open(path)?;
+    let mut reader = wav::WavReader::open(path)?;
     let spec = reader.spec();
-    if spec.bits_per_sample != 16 || spec.sample_format != hound::SampleFormat::Int {
+    if spec.bits_per_sample != 16 || spec.sample_format != wav::SampleFormat::Int {
         return Err(DecodeError::UnsupportedFormat(format!(
             "expected 16-bit PCM, got {} bits {:?}",
             spec.bits_per_sample, spec.sample_format
@@ -50,9 +51,7 @@ pub fn decode_wav_from_sample(
         mono_sample_offset.saturating_mul(u32::try_from(channels).unwrap_or(u32::MAX));
     // Seek past already-processed samples. hound seek() takes a sample offset
     // in units of single-channel samples (i.e. interleaved frames × channels).
-    reader.seek(raw_sample_offset).map_err(|e| {
-        DecodeError::Hound(hound::Error::IoError(std::io::Error::other(e.to_string())))
-    })?;
+    reader.seek(raw_sample_offset)?;
 
     // Read the remaining interleaved samples and mix to mono f32.
     // channels > 0 is guaranteed by the UnsupportedFormat check above.
@@ -87,9 +86,9 @@ pub fn decode_wav_from_sample(
 /// Load a WAV file, mix to mono, and resample to 16 kHz f32. Returns the
 /// final mono sample buffer.
 pub fn decode_wav_to_whisper_input(path: &Path) -> Result<Vec<f32>, DecodeError> {
-    let mut reader = hound::WavReader::open(path)?;
+    let mut reader = wav::WavReader::open(path)?;
     let spec = reader.spec();
-    if spec.bits_per_sample != 16 || spec.sample_format != hound::SampleFormat::Int {
+    if spec.bits_per_sample != 16 || spec.sample_format != wav::SampleFormat::Int {
         return Err(DecodeError::UnsupportedFormat(format!(
             "expected 16-bit PCM, got {} bits {:?}",
             spec.bits_per_sample, spec.sample_format
@@ -127,7 +126,7 @@ pub fn decode_wav_to_whisper_input(path: &Path) -> Result<Vec<f32>, DecodeError>
 mod tests {
     use super::*;
     use bruhs_models::num::ToIntSaturating;
-    use hound::{SampleFormat, WavSpec, WavWriter};
+    use wav::{SampleFormat, WavSpec, WavWriter};
 
     fn write_test_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[i16]) {
         let spec = WavSpec {

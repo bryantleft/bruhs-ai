@@ -8,9 +8,10 @@
 //! place only when complete.
 
 use crate::resample::{MonoResampler, ResampleError};
-use bruhs_models::logic::wav::resampled_len;
+use bruhs_models::logic::wav::{
+    resampled_len, SampleFormat, WavError, WavIntoSamples, WavReader, WavSpec, WavWriter,
+};
 use bruhs_models::num::{clamp_to_i16, ToIntSaturating};
-use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -19,8 +20,8 @@ use std::path::Path;
 pub enum MixError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] WavError),
     #[error("unsupported format: {0:?}")]
     UnsupportedFormat(WavSpec),
     #[error("resample: {0}")]
@@ -90,7 +91,7 @@ struct MonoFrames {
     /// Mono frames in the file (a trailing partial frame counts as one).
     frames: usize,
     channels: usize,
-    samples: hound::WavIntoSamples<BufReader<File>, i16>,
+    samples: WavIntoSamples<BufReader<File>, i16>,
 }
 
 impl MonoFrames {

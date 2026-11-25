@@ -78,8 +78,8 @@ pub enum AudioError {
     PlayStream(#[source] cpal::PlayStreamError),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] bruhs_models::logic::wav::WavError),
     #[error("microphone write: {0}")]
     MicrophoneWrite(#[from] MicrophoneWriteError),
     #[error("unsupported sample format: {0}")]
@@ -133,14 +133,14 @@ impl MicRecorder {
             let channels = supported.channels();
             let sample_format = supported.sample_format();
 
-            let spec = hound::WavSpec {
+            let spec = bruhs_models::logic::wav::WavSpec {
                 channels,
                 sample_rate,
                 bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
+                sample_format: bruhs_models::logic::wav::SampleFormat::Int,
             };
             let file = std::io::BufWriter::new(crate::paths::create_private_file(&path)?);
-            let writer = hound::WavWriter::new(file, spec)?;
+            let writer = bruhs_models::logic::wav::WavWriter::new(file, spec)?;
             // Automatic meeting-mute detection is not connected yet. Existing
             // starts remain ordinary capture; unsupported request flags still
             // fail validation instead of pretending to enable protection.
@@ -268,13 +268,13 @@ mod tests {
     }
 
     fn synthetic_writer() -> Mutex<Option<MicrophoneWriter<std::io::Cursor<Vec<u8>>>>> {
-        let wav = hound::WavWriter::new(
+        let wav = bruhs_models::logic::wav::WavWriter::new(
             std::io::Cursor::new(Vec::new()),
-            hound::WavSpec {
+            bruhs_models::logic::wav::WavSpec {
                 channels: 1,
                 sample_rate: 8,
                 bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
+                sample_format: bruhs_models::logic::wav::SampleFormat::Int,
             },
         )
         .unwrap();

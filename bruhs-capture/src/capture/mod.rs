@@ -17,8 +17,8 @@ pub enum CaptureError {
     Backend(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] bruhs_models::logic::wav::WavError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,9 +3,9 @@
 //! segment based on which channel was active during that segment's
 //! time range.
 
+use bruhs_models::logic::wav::{SampleFormat, WavError, WavReader};
 use bruhs_models::num::ToFloatLossy;
 use bruhs_models::TranscriptSegment;
-use hound::{SampleFormat, WavReader};
 use std::path::Path;
 
 pub const SPEAKER_ID_ME: &str = "me";
@@ -21,8 +21,8 @@ const WINDOW_MS: u64 = 25;
 pub enum DiarizeError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("hound: {0}")]
-    Hound(#[from] hound::Error),
+    #[error("wav: {0}")]
+    Hound(#[from] WavError),
     #[error("unsupported wav format: {0}")]
     UnsupportedFormat(String),
 }

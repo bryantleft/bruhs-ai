@@ -29,8 +29,8 @@ use std::{
     thread::JoinHandle,
 };
 
+use bruhs_models::logic::wav::{self, WavWriter};
 use cidre::{cat, cm, define_obj_type, dispatch, ns, objc, sc};
-use hound::WavWriter;
 use sc::stream::{Output, OutputImpl};
 
 use super::{CaptureError, PermissionStatus};
@@ -44,7 +44,7 @@ struct WriterState<W: Write + Seek = BufWriter<File>> {
     sample_rate: u32,
     channels: u32,
     first_log: bool,
-    failure: Option<hound::Error>,
+    failure: Option<wav::WavError>,
 }
 
 impl<W: Write + Seek> WriterState<W> {
@@ -69,13 +69,13 @@ impl<W: Write + Seek> WriterState<W> {
     }
 
     /// Latch a failure: later samples are dropped and stop reports it.
-    fn fail(&mut self, error: hound::Error) {
+    fn fail(&mut self, error: wav::WavError) {
         if self.failure.is_none() {
             self.failure = Some(error);
         }
     }
 
-    fn finalize(&mut self) -> Result<(), hound::Error> {
+    fn finalize(&mut self) -> Result<(), wav::WavError> {
         let finalized = self.wav.take().map_or(Ok(()), WavWriter::finalize);
         // A successful header update cannot repair missing PCM samples.
         if let Some(error) = self.failure.take() {
@@ -134,7 +134,7 @@ impl RecorderOutputInner {
                     "system audio is not 32-bit float PCM ({asbd:?}); recording it failed"
                 );
                 self.writer.lock().unwrap_or_else(|e| e.into_inner()).fail(
-                    hound::Error::FormatError("system audio stream is not 32-bit float PCM"),
+                    wav::WavError::FormatError("system audio stream is not 32-bit float PCM"),
                 );
                 FormatCheck::Unsupported
             };
@@ -418,14 +418,14 @@ impl MacSystemRecorder {
             // Run the SCK setup + wait-for-stop inside the runtime.
             rt.block_on(async move {
                 // --- WAV writer ---
-                let spec = hound::WavSpec {
+                let spec = wav::WavSpec {
                     channels: 1,
                     sample_rate: 48_000,
                     bits_per_sample: 16,
-                    sample_format: hound::SampleFormat::Int,
+                    sample_format: wav::SampleFormat::Int,
                 };
                 let file = BufWriter::new(crate::paths::create_private_file(&path)?);
-                let wav = hound::WavWriter::new(file, spec).map_err(CaptureError::Hound)?;
+                let wav = wav::WavWriter::new(file, spec).map_err(CaptureError::Hound)?;
 
                 let writer = Arc::new(Mutex::new(WriterState {
                     wav: Some(wav),
@@ -633,11 +633,11 @@ mod tests {
             wav: Some(
                 WavWriter::new(
                     sink,
-                    hound::WavSpec {
+                    wav::WavSpec {
                         channels: 1,
                         sample_rate: 48_000,
                         bits_per_sample: 16,
-                        sample_format: hound::SampleFormat::Int,
+                        sample_format: wav::SampleFormat::Int,
                     },
                 )
                 .expect("synthetic WAV header should be writable"),
@@ -719,7 +719,7 @@ mod tests {
         assert!(!state.write_sample(123));
         drop(state);
         bytes.set_position(0);
-        let pcm = hound::WavReader::new(bytes)
+        let pcm = wav::WavReader::new(bytes)
             .unwrap()
             .samples::<i16>()
             .collect::<Result<Vec<_>, _>>()
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn unsupported_stream_format_fails_the_recording() {
         let mut state = writer(Cursor::new(Vec::new()));
-        state.fail(hound::Error::FormatError("synthetic"));
+        state.fail(wav::WavError::FormatError("synthetic"));
         assert!(!state.write_sample(1));
         assert!(state.finalize().is_err());
     }
