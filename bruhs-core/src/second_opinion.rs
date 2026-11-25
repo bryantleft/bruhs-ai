@@ -3,7 +3,7 @@
 //! saved, nothing can be edited, and the run is bounded, so it never changes
 //! the thread's own provider session or its prompt cache.
 
-use crate::agent::{claude_query_options_from_env, UsageInfo};
+use crate::agent::{claude_query_options_from_env, codex_query_options, UsageInfo};
 use bruhs_models::agent::AgentProvider;
 use bruhs_models::logic::handoff::{reviewer_for, second_opinion_prompt, SECOND_OPINION_MAX_TURNS};
 use codex_sdk_rs::{ApprovalPolicy, CodexAccess, SandboxMode, Session};
@@ -132,7 +132,7 @@ fn codex_review_options(
     project_path: &str,
     model: Option<&str>,
 ) -> codex_sdk_rs::QueryOptions {
-    let mut options = codex_sdk_rs::QueryOptions::new(prompt)
+    let mut options = codex_query_options(prompt)
         .cwd(project_path)
         .access(CodexAccess::Sandboxed {
             sandbox: SandboxMode::ReadOnly,
@@ -140,9 +140,6 @@ fn codex_review_options(
         })
         .session(Session::Ephemeral)
         .skip_git_repo_check(true);
-    for key in crate::connections::PRIVATE_ENV {
-        options = options.env_remove(key);
-    }
     crate::agent::lean_codex(&mut options);
     // `None` leaves the model to the user's Codex configuration.
     if let Some(model) = model {

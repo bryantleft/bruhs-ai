@@ -325,9 +325,13 @@ fn grok_read_only_restricts_tools_and_overrides_inherited_allows() {
         None,
     );
     let prepared = options.prepare().unwrap();
-    let args = prepared
-        .command
-        .as_std()
+    let command = prepared.command.as_std();
+    for key in ["DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"] {
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == key && value == Some(std::ffi::OsStr::new("1"))));
+    }
+    let args = command
         .get_args()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();

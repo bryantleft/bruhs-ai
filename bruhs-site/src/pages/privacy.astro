@@ -4,7 +4,7 @@ import Base from "../layouts/Base.astro";
 
 <Base
   title="Privacy · bruhs"
-  description="The bruhs.ai website collects nothing about you. What the bruhs app sends online, and where downloads come from."
+  description="What the bruhs website and app send online, including provider requests, updates, and optional diagnostics."
   path="/privacy"
   current="privacy"
   fonts={[]}
@@ -12,10 +12,14 @@ import Base from "../layouts/Base.astro";
   <main id="main" tabindex="-1" class="doc">
     <div class="wrap">
       <h1>Privacy</h1>
-      <p>This page covers the bruhs.ai website and the downloads it links to. The bruhs app keeps your data on your device; <a href="/#faq">the questions on the home page</a> list what goes online.</p>
+      <p>Bruhs stores your workspace on your device. Model requests, connected services, updates, and optional diagnostics can send data over the network.</p>
 
       <h2>The website</h2>
       <p>The site has no forms, no cookies, no analytics and no tracking pixels. It is hosted on Vercel, which keeps standard request logs (such as IP address and time) for operating the service.</p>
+
+      <h2>AI providers and connected services</h2>
+      <p>Cloud model providers receive prompts, attachments, and the context used for the request. Audio is transcribed locally by default. If you choose cloud speech or a remote transcription endpoint, that service receives the audio. Connected services such as Google Calendar exchange data with their providers.</p>
+      <p>Bruhs turns off built-in usage analytics for Claude Code, Codex, and Grok agent sessions it starts, and disables automatic error reporting for Claude Code and Grok. Other runtimes can send telemetry according to their own settings. Providers still handle service requests under their own privacy policies.</p>
 
       <h2>Downloads and updates</h2>
       <p>Downloads and source code come from GitHub, under <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">its own privacy statement</a>. The app checks GitHub for a newer release, and npm or Homebrew for newer Claude Code and Codex CLIs, unless you turn off <strong>Check for updates</strong> in Settings → Updates. Those checks send no account or usage data.</p>
@@ -26,7 +30,7 @@ import Base from "../layouts/Base.astro";
       <h2>Questions</h2>
       <p>For general questions, open an issue on <a href="https://github.com/bryantleft/bruhs-ai/issues">GitHub</a>. Keep personal data out of public issues.</p>
 
-      <p class="subtle">Last updated November 19, 2026.</p>
+      <p class="subtle">Last updated November 25, 2026.</p>
     </div>
   </main>
 </Base>

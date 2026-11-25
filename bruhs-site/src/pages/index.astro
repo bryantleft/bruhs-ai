@@ -96,7 +96,8 @@ const surfaces = [
         </details>
         <details>
           <summary>What leaves my device?</summary>
-          <p>Only what you explicitly send. Prompts and attached files go to whichever model provider you choose, and meeting transcripts go to Claude when you ask for a summary. If you connect Google Calendar, it syncs from there, and update checks can be turned off in Settings. Your audio recordings never leave your machine unless you point transcription at your own server.</p>
+          <p>Cloud models receive the prompts, attachments, and context they need to respond. Audio is transcribed locally by default. Choosing cloud speech or a remote transcription endpoint sends audio to that service. Connected services such as Google Calendar sync with their providers.</p>
+          <p>Bruhs disables built-in analytics for the Claude Code, Codex, and Grok agent sessions it starts. Other runtimes can send their own telemetry. Update checks run by default and can be turned off in Settings. Diagnostic export starts off and sends request metadata to the receiver you configure. <a href="/privacy">Read the privacy details.</a></p>
         </details>
         <details>
           <summary>Does it work with my calendar?</summary>

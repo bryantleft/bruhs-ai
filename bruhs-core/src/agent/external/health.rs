@@ -297,11 +297,11 @@ fn sign_in_status(success: bool, text: &str) -> Status {
 
 async fn probe_cli(program: &Path, row: &mut ProviderHealth) -> io::Result<Status> {
     let cwd = tempfile::tempdir()?;
-    let (ok, output) = run(program, &["--version"], cwd.path()).await?;
+    let (ok, version_output) = run(program, &["--version"], cwd.path()).await?;
     if !ok {
         return Ok(Status::Failed);
     }
-    row.version = version(&output);
+    row.version = version(&version_output);
     match row.provider {
         AgentProvider::Cursor => {
             let (ok, text) = run(program, &["status"], cwd.path()).await?;
@@ -319,7 +319,13 @@ async fn probe_cli(program: &Path, row: &mut ProviderHealth) -> io::Result<Statu
             Ok(status)
         }
         AgentProvider::Grok => {
-            let (ok, text) = run(program, &["models"], cwd.path()).await?;
+            let (ok, stdout, stderr) = output(
+                command(program, cwd.path())
+                    .envs(crate::agent::CLI_TELEMETRY_OPT_OUT)
+                    .arg("models"),
+            )
+            .await?;
+            let text = format!("{stdout}\n{stderr}");
             if ok {
                 let models = text
                     .lines()

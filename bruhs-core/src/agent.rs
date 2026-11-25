@@ -1474,6 +1474,9 @@ fn restrict_unattended(
         ProviderQueryOptions::Claude(options) => {
             options.inherit_env = false;
             options.env = environment;
+            options
+                .env
+                .extend(CLI_TELEMETRY_OPT_OUT.map(|(key, value)| (key.into(), value.into())));
             let read_tools = || {
                 claude_sdk_rs::Tools::Allow(
                     UNATTENDED_READ_TOOLS
@@ -1533,6 +1536,9 @@ fn restrict_unattended(
             };
             options.enable_web_search = false;
             options.config.clear();
+            options
+                .config
+                .push(codex_sdk_rs::ConfigOverride::disable_analytics());
             for (key, value) in [
                 ("features.plugins", "false"),
                 ("features.apps", "false"),
@@ -1724,7 +1730,7 @@ fn build_query_options(
                 "<response_format>\n{}\n</response_format>\n\n{prompt}",
                 response_instructions()
             );
-            let mut options = codex_sdk_rs::QueryOptions::new(prompt)
+            let mut options = codex_query_options(prompt)
                 .cwd(project_path)
                 .model(runtime_model)
                 .access(codex_access(permission_mode))
@@ -1733,9 +1739,6 @@ fn build_query_options(
                 options.model = None;
             }
             // New threads are saved (not ephemeral) so the next turn can resume them.
-            for key in crate::connections::PRIVATE_ENV {
-                options = options.env_remove(key);
-            }
             if let Some(thread_id) = session_id {
                 options = options.resume(thread_id);
             }
@@ -1815,6 +1818,23 @@ const PARENT_SESSION_ENV: [&str; 12] = [
     "AI_AGENT",
 ];
 
+const CLI_TELEMETRY_OPT_OUT: [(&str, &str); 2] =
+    [("DISABLE_TELEMETRY", "1"), ("DISABLE_ERROR_REPORTING", "1")];
+
+pub(crate) fn codex_query_options(prompt: impl Into<String>) -> codex_sdk_rs::QueryOptions {
+    let mut options = codex_sdk_rs::QueryOptions::new(prompt)
+        .config(codex_sdk_rs::ConfigOverride::disable_analytics());
+    for key in crate::connections::PRIVATE_ENV {
+        options = options.env_remove(key);
+    }
+    options
+}
+
+pub(crate) fn disable_codex_analytics(command: &mut tokio::process::Command) {
+    let entry = codex_sdk_rs::ConfigOverride::disable_analytics();
+    command.arg(format!("--config={}={}", entry.key(), entry.value()));
+}
+
 /// Base options for every Claude run bruhs starts. Claude Code is meant to
 /// use the user's OAuth login; an `ANTHROPIC_API_KEY` inherited from whatever
 /// launched bruhs would silently switch it to API billing, so it is removed
@@ -1825,6 +1845,9 @@ pub(crate) fn claude_query_options(
     keep_api_key: bool,
 ) -> claude_sdk_rs::QueryOptions {
     let mut options = claude_sdk_rs::QueryOptions::new(prompt);
+    for (key, value) in CLI_TELEMETRY_OPT_OUT {
+        options = options.env(key, value);
+    }
     for key in PARENT_SESSION_ENV
         .into_iter()
         .chain(crate::connections::PRIVATE_ENV)
@@ -3239,6 +3262,9 @@ mod tests {
             match options {
                 ProviderQueryOptions::Claude(options) => {
                     assert!(!options.inherit_env);
+                    for key in ["DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"] {
+                        assert!(options.env.contains(&(key.into(), "1".into())));
+                    }
                     assert_eq!(options.tools, claude_sdk_rs::Tools::ReadOnly);
                     assert_eq!(
                         options.permission_mode,
@@ -3262,7 +3288,10 @@ mod tests {
                         }
                     );
                     assert!(!options.enable_web_search);
-                    assert_eq!(options.config.len(), 4);
+                    assert_eq!(options.config.len(), 5);
+                    assert!(options
+                        .config
+                        .contains(&codex_sdk_rs::ConfigOverride::disable_analytics()));
                     assert!(options
                         .config
                         .iter()
@@ -4034,7 +4063,10 @@ mod tests {
         assert!(new
             .prompt
             .contains(bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS));
-        assert!(new.config.is_empty(), "no developer_instructions override");
+        assert!(new
+            .config
+            .iter()
+            .all(|entry| entry.key() != "developer_instructions"));
         let resumed = build(Some("thr-1")).prompt;
         assert!(!resumed.contains("meeting notes"), "already in the session");
         assert!(resumed.contains(bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS));
@@ -4091,13 +4123,14 @@ mod tests {
                 .map(|c| format!("{}={}", c.key(), c.value()))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(overrides(&codex_turn), ["features.plugins=false"]);
+        let expected = ["analytics.enabled=false", "features.plugins=false"];
+        assert_eq!(overrides(&codex_turn), expected);
         lean_codex(&mut codex_turn);
-        assert_eq!(overrides(&codex_turn), ["features.plugins=false"], "once");
+        assert_eq!(overrides(&codex_turn), expected, "once");
 
         let mut full_codex = options(AgentProvider::Codex, PermissionMode::Default, None);
         apply_lean_context(&mut full_codex, false);
-        assert!(codex(full_codex).config.is_empty());
+        assert_eq!(overrides(&codex(full_codex)), ["analytics.enabled=false"]);
     }
 
     /// A lean turn skips the settings files, so the safety parts come back
@@ -4359,6 +4392,28 @@ mod tests {
     }
 
     #[test]
+    fn provider_turns_disable_builtin_analytics() {
+        let claude = claude_query_options("hi", true);
+        for key in ["DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"] {
+            assert!(claude.env.contains(&(key.into(), "1".into())));
+        }
+
+        let codex = codex(build_query_options(
+            AgentProvider::Codex,
+            "hi",
+            "/tmp",
+            "model",
+            PermissionMode::Default,
+            None,
+            None,
+        ));
+        assert!(codex
+            .config
+            .iter()
+            .any(|entry| entry.key() == "analytics.enabled" && entry.value() == "false"));
+    }
+
+    #[test]
     fn both_providers_remove_service_client_secrets_from_child_environments() {
         let claude = claude_query_options("hi", true);
         let codex = codex(build_query_options(
@@ -4441,9 +4496,9 @@ mod tests {
             let ProviderQueryOptions::Codex(codex_opts) = codex_opts else {
                 panic!("expected Codex options");
             };
-            assert_eq!(codex_opts.config.len(), 1);
-            assert_eq!(codex_opts.config[0].key(), "model_reasoning_effort");
-            assert_eq!(codex_opts.config[0].value(), format!("\"{level}\""));
+            assert!(codex_opts
+                .config
+                .contains(&codex_sdk_rs::ConfigOverride::reasoning_effort(level)));
         }
 
         for level in [None, Some("nope"), Some("ultra")] {
@@ -4452,7 +4507,10 @@ mod tests {
             let ProviderQueryOptions::Codex(codex_opts) = codex_opts else {
                 panic!("expected Codex options");
             };
-            assert!(codex_opts.config.is_empty());
+            assert!(codex_opts
+                .config
+                .iter()
+                .all(|entry| entry.key() != "model_reasoning_effort"));
         }
 
         let turn = unstartable_turn(&ThreadId::new_v4()).effort(Some("xhigh"));

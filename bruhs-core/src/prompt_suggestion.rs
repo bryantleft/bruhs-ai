@@ -333,7 +333,7 @@ fn codex_options(
     cwd: &Path,
 ) -> Result<codex_sdk_rs::QueryOptions, SuggestionError> {
     use codex_sdk_rs::{ApprovalPolicy, CodexAccess, ConfigOverride, SandboxMode, Session};
-    let mut options = codex_sdk_rs::QueryOptions::new(prompt)
+    let mut options = crate::agent::codex_query_options(prompt)
         .cwd(cwd)
         .model(model)
         .session(Session::Ephemeral)
@@ -346,10 +346,7 @@ fn codex_options(
         })
         .developer_instructions(instructions.text);
     // No user MCP servers/plugins/hooks or project instructions in this empty
-    // workspace. Retain CLI authentication, but remove app-owned credentials.
-    for key in crate::connections::PRIVATE_ENV {
-        options = options.env_remove(key);
-    }
+    // workspace. Retain CLI authentication.
     for (key, value) in [
         ("features.shell_tool", "false"),
         ("features.unified_exec", "false"),

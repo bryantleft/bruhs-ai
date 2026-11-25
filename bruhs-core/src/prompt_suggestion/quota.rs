@@ -131,6 +131,7 @@ pub(crate) async fn read_codex_quota(
     with_identity: bool,
 ) -> std::io::Result<(Value, Option<String>)> {
     let mut command = Command::new("codex");
+    crate::agent::disable_codex_analytics(&mut command);
     command
         .args([
             "app-server",

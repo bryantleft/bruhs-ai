@@ -127,6 +127,14 @@ impl ConfigOverride {
         Self::new(key, toml_basic_string(text))
     }
 
+    /// Disable the CLI's built-in analytics for this invocation.
+    pub fn disable_analytics() -> Self {
+        Self {
+            key: "analytics.enabled".into(),
+            value: "false".into(),
+        }
+    }
+
     /// Set `model_reasoning_effort` to a literal string. The installed CLI
     /// validates whether the selected model supports the requested level.
     pub fn reasoning_effort(effort: &str) -> Self {

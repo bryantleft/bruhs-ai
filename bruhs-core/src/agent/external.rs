@@ -197,6 +197,7 @@ impl Options {
                 input.push(b'\n');
             }
             AgentProvider::Grok => {
+                command.envs(super::CLI_TELEMETRY_OPT_OUT);
                 let file = files.path().join("prompt.txt");
                 std::fs::write(&file, prompt)?;
                 command.arg("--prompt-file").arg(file);

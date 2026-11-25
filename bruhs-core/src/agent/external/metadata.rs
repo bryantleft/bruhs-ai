@@ -48,12 +48,15 @@ async fn read(request: Request) -> Option<(Value, ClaudeAccount)> {
     cmd.process_group(0);
     match provider {
         AgentProvider::Codex => {
+            crate::agent::disable_codex_analytics(&mut cmd);
             cmd.args(["debug", "models"]).stdin(Stdio::null());
         }
         AgentProvider::Claude => {
-            for key in crate::agent::claude_query_options_from_env("").env_remove {
+            let options = crate::agent::claude_query_options_from_env("");
+            for key in options.env_remove {
                 cmd.env_remove(key);
             }
+            cmd.envs(options.env);
             cmd.args([
                 "-p",
                 "--input-format",
