@@ -472,7 +472,7 @@ fn render_blocks(
                         ))
                         .into_any_element()
                 }
-                Block::CodeBlock { code, .. } => {
+                Block::CodeBlock { language, code } => {
                     let refinement = frame.style.code_block.clone();
                     let code_color = refinement.text.color;
                     let code_family = refinement.text.font_family.clone();
@@ -489,7 +489,14 @@ fn render_blocks(
                     let wrap = crate::theme::wrap_code();
                     let mut lines = div().when(!wrap, |el| el.whitespace_nowrap());
                     lines.style().padding = padding;
-                    let lines = lines.child(code_segment(code, frame, font, code_color, cx));
+                    let lines = lines.child(code_segment(
+                        language.as_deref(),
+                        code,
+                        frame,
+                        font,
+                        code_color,
+                        cx,
+                    ));
                     if wrap {
                         block.child(lines).into_any_element()
                     } else {
@@ -716,20 +723,68 @@ fn segment(
 }
 
 fn code_segment(
+    language: Option<&str>,
     code: &Inline,
     frame: &Frame,
     font: Font,
     color: Option<Hsla>,
     _cx: &App,
 ) -> AnyElement {
-    let runs = vec![TextRun {
-        len: code.text.len(),
-        font,
-        color: color.unwrap_or(frame.base_color),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    }];
+    let base_color = color.unwrap_or(frame.base_color);
+    let tokens = language
+        .filter(|l| !l.is_empty())
+        .map(|lang| crate::input::highlight_snippet(lang, &code.text))
+        .unwrap_or_default();
+    let runs = if tokens.is_empty() {
+        vec![TextRun {
+            len: code.text.len(),
+            font,
+            color: base_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }]
+    } else {
+        let mut runs = Vec::with_capacity(tokens.len() * 2 + 1);
+        let mut cursor = 0usize;
+        let total = code.text.len();
+        for (range, tok_color) in tokens {
+            let start = range.start.clamp(cursor, total);
+            let end = range.end.clamp(start, total);
+            if start > cursor {
+                runs.push(TextRun {
+                    len: start - cursor,
+                    font: font.clone(),
+                    color: base_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+            }
+            if end > start {
+                runs.push(TextRun {
+                    len: end - start,
+                    font: font.clone(),
+                    color: tok_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+            }
+            cursor = end;
+        }
+        if cursor < total {
+            runs.push(TextRun {
+                len: total - cursor,
+                font,
+                color: base_color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+        }
+        runs
+    };
     SegmentText::new(code, runs, frame).into_any_element()
 }
 

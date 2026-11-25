@@ -1,74 +1,59 @@
 //! Fenced Markdown metadata and syntax colors shared by the editor and its language menu.
-use super::markdown::MarkdownEdit;
+use super::{markdown::MarkdownEdit, syntax};
 use crate::theme;
-use std::{ops::Range, sync::LazyLock};
-use two_face::re_exports::syntect::{
-    easy::ScopeRangeIterator,
-    parsing::{ParseState, Scope, ScopeStack, SyntaxSet},
-};
+use std::ops::Range;
 
 pub(super) struct Language {
     pub id: &'static str,
     pub label: &'static str,
     pub aliases: &'static str,
-    extension: &'static str,
 }
 
-const fn entry(
-    id: &'static str,
-    label: &'static str,
-    aliases: &'static str,
-    extension: &'static str,
-) -> Language {
-    Language {
-        id,
-        label,
-        aliases,
-        extension,
-    }
+const fn entry(id: &'static str, label: &'static str, aliases: &'static str) -> Language {
+    Language { id, label, aliases }
 }
 
 pub(super) const LANGUAGES: &[Language] = &[
-    entry("", "Plain text", "text txt plaintext", ""),
-    entry("asm", "Assembly", "assembly nasm x86 s", "nasm"),
-    entry("bash", "Bash", "sh shell zsh", "sh"),
-    entry("c", "C", "", "c"),
-    entry("cpp", "C++", "c++ cc cxx", "cpp"),
-    entry("csharp", "C#", "cs c#", "cs"),
-    entry("css", "CSS", "", "css"),
-    entry("dart", "Dart", "", "dart"),
-    entry("diff", "Diff", "", "diff"),
-    entry("dockerfile", "Dockerfile", "docker", "Dockerfile"),
-    entry("elixir", "Elixir", "ex exs", "ex"),
-    entry("go", "Go", "", "go"),
-    entry("graphql", "GraphQL", "gql", "graphql"),
-    entry("haskell", "Haskell", "hs", "hs"),
-    entry("html", "HTML", "", "html"),
-    entry("java", "Java", "", "java"),
-    entry("javascript", "JavaScript", "js mjs cjs", "js"),
-    entry("json", "JSON", "", "json"),
-    entry("jsx", "JSX", "javascriptreact", "tsx"),
-    entry("kotlin", "Kotlin", "kt kts", "kt"),
-    entry("lua", "Lua", "", "lua"),
-    entry("markdown", "Markdown", "md", "md"),
-    entry("php", "PHP", "", "php"),
-    entry("powershell", "PowerShell", "ps1 pwsh", "ps1"),
-    entry("python", "Python", "py", "py"),
-    entry("r", "R", "", "r"),
-    entry("ruby", "Ruby", "rb", "rb"),
-    entry("rust", "Rust", "rs", "rs"),
-    entry("scala", "Scala", "", "scala"),
-    entry("scss", "SCSS", "", "scss"),
-    entry("sql", "SQL", "", "sql"),
-    entry("svelte", "Svelte", "", "svelte"),
-    entry("swift", "Swift", "", "swift"),
-    entry("toml", "TOML", "", "toml"),
-    entry("tsx", "TSX", "typescriptreact", "tsx"),
-    entry("typescript", "TypeScript", "ts mts cts", "ts"),
-    entry("vue", "Vue", "", "vue"),
-    entry("xml", "XML", "", "xml"),
-    entry("yaml", "YAML", "yml", "yaml"),
-    entry("zig", "Zig", "", "zig"),
+    entry("", "Plain text", "text txt plaintext"),
+    entry("asm", "Assembly", "assembly nasm x86 s"),
+    entry("bash", "Bash", "sh shell zsh"),
+    entry("c", "C", ""),
+    entry("cpp", "C++", "c++ cc cxx"),
+    entry("csharp", "C#", "cs c#"),
+    entry("css", "CSS", ""),
+    entry("dart", "Dart", ""),
+    entry("diff", "Diff", ""),
+    entry("dockerfile", "Dockerfile", "docker"),
+    entry("elixir", "Elixir", "ex exs"),
+    entry("go", "Go", ""),
+    entry("graphql", "GraphQL", "gql"),
+    entry("haskell", "Haskell", "hs"),
+    entry("html", "HTML", ""),
+    entry("java", "Java", ""),
+    entry("javascript", "JavaScript", "js mjs cjs"),
+    entry("json", "JSON", ""),
+    entry("jsx", "JSX", "javascriptreact"),
+    entry("kotlin", "Kotlin", "kt kts"),
+    entry("lua", "Lua", ""),
+    entry("markdown", "Markdown", "md"),
+    entry("php", "PHP", ""),
+    entry("powershell", "PowerShell", "ps1 pwsh"),
+    entry("python", "Python", "py"),
+    entry("r", "R", ""),
+    entry("ruby", "Ruby", "rb"),
+    entry("rust", "Rust", "rs"),
+    entry("scala", "Scala", ""),
+    entry("scss", "SCSS", ""),
+    entry("sql", "SQL", ""),
+    entry("svelte", "Svelte", ""),
+    entry("swift", "Swift", ""),
+    entry("toml", "TOML", ""),
+    entry("tsx", "TSX", "typescriptreact"),
+    entry("typescript", "TypeScript", "ts mts cts"),
+    entry("vue", "Vue", ""),
+    entry("xml", "XML", ""),
+    entry("yaml", "YAML", "yml"),
+    entry("zig", "Zig", ""),
 ];
 
 pub(super) fn language(tag: &str) -> Option<&'static Language> {
@@ -329,112 +314,25 @@ impl TokenColor {
 }
 
 pub(super) type Token = (Range<usize>, TokenColor);
-static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
-static COLORS: LazyLock<Vec<(Scope, TokenColor)>> = LazyLock::new(|| {
-    use TokenColor::*;
-    [
-        ("comment", Comment),
-        ("string", String),
-        ("keyword", Keyword),
-        ("storage", Keyword),
-        ("constant", Constant),
-        ("entity.name.function", Name),
-        ("support.function", Name),
-        ("entity.name.tag", Name),
-        ("entity.name.type", Type),
-        ("support.type", Type),
-        ("support.class", Type),
-        ("variable.language", Constant),
-    ]
-    .map(|(scope, color)| (Scope::new(scope).expect("valid syntax scope"), color))
-    .into()
-});
 
-// The bundled Sublime grammar collection has no PowerShell grammar.
-fn highlight_powershell(code: &str, offset: usize, tokens: &mut Vec<Token>) {
-    use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
-    static CONFIG: LazyLock<HighlightConfiguration> = LazyLock::new(|| {
-        let mut config = HighlightConfiguration::new(
-            tree_sitter_powershell::LANGUAGE.into(),
-            "powershell",
-            tree_sitter_powershell::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        )
-        .expect("the PowerShell grammar includes its highlight query");
-        config.configure(&["comment", "string", "keyword", "number", "function", "type"]);
-        config
-    });
-    let colors = [
-        TokenColor::Comment,
-        TokenColor::String,
-        TokenColor::Keyword,
-        TokenColor::Constant,
-        TokenColor::Name,
-        TokenColor::Type,
-    ];
-    let mut highlighter = Highlighter::new();
-    let Ok(events) = highlighter.highlight(&CONFIG, code.as_bytes(), None, |_| None) else {
-        return;
-    };
-    let mut stack = Vec::new();
-    for event in events {
-        match event {
-            Ok(HighlightEvent::HighlightStart(index)) => stack.push(colors[index.0]),
-            Ok(HighlightEvent::HighlightEnd) => {
-                stack.pop();
-            }
-            Ok(HighlightEvent::Source { start, end }) => {
-                if let Some(color) = stack.last() {
-                    tokens.push((offset + start..offset + end, *color));
-                }
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-/// Run on the background executor. Each block starts its own parser state, which
-/// preserves multiline strings and comments without leaking into the next fence.
+/// Run on the background executor. Each block starts its own scanner state,
+/// preserving multiline strings and comments without leaking into the next fence.
 pub(super) fn highlight(source: &str, fences: &[Fence]) -> Vec<Token> {
     let mut tokens = Vec::new();
     for fence in fences {
         let tag = &source[fence.tag.clone()];
-        let ext = language(tag).map_or(tag, |l| l.extension);
-        if ext.is_empty() || fence.body.is_empty() {
-            continue;
-        }
-        if ext.eq_ignore_ascii_case("ps1") {
-            highlight_powershell(&source[fence.body.clone()], fence.body.start, &mut tokens);
-            continue;
-        }
-        let Some(syntax) = SYNTAXES.find_syntax_by_token(ext) else {
+        let Some(lang) = language(tag) else {
             continue;
         };
-        let mut parser = ParseState::new(syntax);
-        let mut scopes = ScopeStack::new();
-        let mut start = fence.body.start;
-        for line in source[fence.body.clone()].split_inclusive('\n') {
-            let Ok(ops) = parser.parse_line(line, &SYNTAXES) else {
-                break;
-            };
-            for (range, op) in ScopeRangeIterator::new(&ops, line) {
-                let _ = scopes.apply(op);
-                if range.is_empty() {
-                    continue;
-                }
-                let color = scopes.as_slice().iter().rev().find_map(|scope| {
-                    COLORS
-                        .iter()
-                        .find(|(prefix, _)| prefix.is_prefix_of(*scope))
-                        .map(|(_, color)| *color)
-                });
-                if let Some(color) = color {
-                    tokens.push((start + range.start..start + range.end, color));
-                }
-            }
-            start += line.len();
+        if lang.id.is_empty() || fence.body.is_empty() {
+            continue;
         }
+        syntax::highlight_code(
+            lang.id,
+            &source[fence.body.clone()],
+            fence.body.start,
+            &mut tokens,
+        );
     }
     tokens
 }
@@ -446,19 +344,20 @@ mod tests {
     #[test]
     fn language_choices_and_aliases_use_native_grammars() {
         assert_eq!(LANGUAGES.len(), 40);
-        for language in &LANGUAGES[1..] {
-            if language.id == "powershell" {
-                let mut colors = Vec::new();
-                highlight_powershell("if ($x) { Get-Item '猫' }", 0, &mut colors);
-                assert!(colors.iter().any(|(_, color)| *color == TokenColor::String));
-                continue;
-            }
+        for lang in &LANGUAGES[1..] {
             assert!(
-                SYNTAXES.find_syntax_by_token(language.extension).is_some(),
-                "{}",
-                language.label
+                syntax::supports(lang.id),
+                "missing highlighter for {}",
+                lang.label
             );
         }
+        let mut colors = Vec::new();
+        syntax::highlight_code("powershell", "if ($x) { Get-Item '猫' }", 0, &mut colors);
+        assert!(colors
+            .iter()
+            .any(|(_, color)| *color == TokenColor::Keyword));
+        assert!(colors.iter().any(|(_, color)| *color == TokenColor::Name));
+        assert!(colors.iter().any(|(_, color)| *color == TokenColor::String));
         assert_eq!(language("s").unwrap().id, "asm");
         assert_eq!(language("RS").unwrap().id, "rust");
         assert_eq!(language("js").unwrap().id, "javascript");

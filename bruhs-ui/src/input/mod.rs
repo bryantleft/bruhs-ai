@@ -16,6 +16,7 @@ mod list;
 mod list_layout;
 mod markdown;
 mod state;
+mod syntax;
 mod text_layout;
 mod view;
 
@@ -36,6 +37,21 @@ pub use state::{
     TextareaState,
 };
 pub use view::{Input, Sizable, Size, Textarea};
+
+pub(crate) fn highlight_snippet(
+    lang_tag: &str,
+    code: &str,
+) -> Vec<(std::ops::Range<usize>, gpui::Hsla)> {
+    let Some(lang) = code_fence::language(lang_tag) else {
+        return Vec::new();
+    };
+    if lang.id.is_empty() || code.is_empty() {
+        return Vec::new();
+    }
+    let mut raw = Vec::new();
+    syntax::highlight_code(lang.id, code, 0, &mut raw);
+    raw.into_iter().map(|(r, c)| (r, c.color())).collect()
+}
 
 /// Every field's focus handle, so the app can ask whether one has focus.
 #[derive(Default)]
