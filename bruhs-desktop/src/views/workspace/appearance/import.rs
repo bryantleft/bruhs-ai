@@ -6,7 +6,7 @@ use bruhs_ui::theme::ThemeMode;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 pub(super) enum Selection {
     Canceled,
@@ -106,23 +106,61 @@ pub(super) fn unique_names(parsed: Vec<(PathBuf, InstalledTheme)>) -> Vec<Instal
         .collect()
 }
 
+fn is_ascii_word(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Remove ASCII word-bounded `light` / `dark` tokens (case-insensitive),
+/// returning `None` if neither token appears.
+fn strip_mode_words(name: &str) -> Option<String> {
+    let bytes = name.as_bytes();
+    let mut out = String::with_capacity(name.len());
+    let mut matched = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let prev_word = i > 0 && is_ascii_word(bytes[i - 1]);
+        if !prev_word {
+            let word_len = if bytes[i..].len() >= 5
+                && bytes[i..i + 5].eq_ignore_ascii_case(b"light")
+                && !bytes.get(i + 5).copied().is_some_and(is_ascii_word)
+            {
+                Some(5)
+            } else if bytes[i..].len() >= 4
+                && bytes[i..i + 4].eq_ignore_ascii_case(b"dark")
+                && !bytes.get(i + 4).copied().is_some_and(is_ascii_word)
+            {
+                Some(4)
+            } else {
+                None
+            };
+            if let Some(len) = word_len {
+                matched = true;
+                out.push(' ');
+                i += len;
+                continue;
+            }
+        }
+        let Some(ch) = name[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    matched.then(|| out.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 pub(super) fn pair_variants(
     themes: Vec<InstalledTheme>,
     paired_id: impl Fn(&str, &str) -> String,
 ) -> Vec<InstalledTheme> {
-    static MODE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"(?i-u)\b(?:light|dark)\b").expect("valid static regex")
-    });
     let mut groups = BTreeMap::<String, Vec<usize>>::new();
     for (index, theme) in themes.iter().enumerate() {
-        if !theme.file.variants.is_empty() || !MODE.is_match(&theme.file.name) {
+        if !theme.file.variants.is_empty() {
             continue;
         }
-        let name = MODE
-            .replace_all(&theme.file.name, " ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let Some(name) = strip_mode_words(&theme.file.name) else {
+            continue;
+        };
         if name.bytes().any(|c| c.is_ascii_alphanumeric()) {
             groups.entry(name).or_default().push(index);
         }

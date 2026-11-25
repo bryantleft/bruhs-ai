@@ -385,8 +385,7 @@ impl InstalledTheme {
         }
         // T3's native schema uses strict JSON. VS Code additionally accepts
         // line comments, block comments and trailing commas.
-        let value: Value =
-            serde_json_lenient::from_str(json).map_err(|e| format!("Invalid theme JSON. {e}"))?;
+        let value: Value = parse_jsonc(json).map_err(|e| format!("Invalid theme JSON. {e}"))?;
         let file: ThemeFile = if super::vscode::recognizes(&value) {
             super::vscode::convert(&value)?
         } else {
@@ -526,9 +525,106 @@ impl ThemeFile {
     }
 }
 
+/// Parse JSON with optional UTF-8 BOM, `//` and `/* */` comments, and trailing
+/// commas before `}` or `]` (VS Code theme / extension manifest format).
+pub(super) fn parse_jsonc<T: serde::de::DeserializeOwned>(
+    input: &str,
+) -> Result<T, serde_json::Error> {
+    let stripped = strip_jsonc(input);
+    serde_json::from_str(&stripped)
+}
+
+fn strip_jsonc(input: &str) -> String {
+    let input = input.strip_prefix('\u{feff}').unwrap_or(input);
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    // Pass 1: strip // and /* ... */ comments while preserving string literals.
+    let mut no_comments = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        match bytes[i] {
+            b'"' => {
+                no_comments.push(b'"');
+                i += 1;
+                while i < len {
+                    let b = bytes[i];
+                    no_comments.push(b);
+                    i += 1;
+                    if b == b'\\' && i < len {
+                        no_comments.push(bytes[i]);
+                        i += 1;
+                    } else if b == b'"' {
+                        break;
+                    }
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                i += 2;
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    if bytes[i] == b'\n' {
+                        no_comments.push(b'\n');
+                    }
+                    i += 1;
+                }
+                i = (i + 2).min(len);
+            }
+            b => {
+                no_comments.push(b);
+                i += 1;
+            }
+        }
+    }
+
+    // Pass 2: drop trailing commas immediately preceding `}` or `]` outside strings.
+    let mut out = Vec::with_capacity(no_comments.len());
+    let mut j = 0;
+    while j < no_comments.len() {
+        match no_comments[j] {
+            b'"' => {
+                out.push(b'"');
+                j += 1;
+                while j < no_comments.len() {
+                    let b = no_comments[j];
+                    out.push(b);
+                    j += 1;
+                    if b == b'\\' && j < no_comments.len() {
+                        out.push(no_comments[j]);
+                        j += 1;
+                    } else if b == b'"' {
+                        break;
+                    }
+                }
+            }
+            b',' => {
+                let mut k = j + 1;
+                while k < no_comments.len() && no_comments[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if k < no_comments.len() && matches!(no_comments[k], b'}' | b']') {
+                    j += 1;
+                } else {
+                    out.push(b',');
+                    j += 1;
+                }
+            }
+            b => {
+                out.push(b);
+                j += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{InstalledTheme, ThemeFamily, ThemeFile, ThemeLibrary, ThemeMode};
+    use super::{parse_jsonc, InstalledTheme, ThemeFamily, ThemeFile, ThemeLibrary, ThemeMode};
 
     #[test]
     fn theme_file_round_trips_both_builtin_palettes() {
@@ -585,5 +681,13 @@ mod tests {
             .unwrap();
         assert_eq!(lib.selection(ThemeMode::Light), Some("day"));
         assert_eq!(lib.selection(ThemeMode::Dark), None);
+    }
+
+    #[test]
+    fn jsonc_strips_comments_trailing_commas_and_bom_without_touching_strings() {
+        let input = "\u{feff}{\n  // line comment\n  \"url\": \"https://example.com/*not*/\",\n  /* block\n     comment */\n  \"list\": [1, 2,],\n}\n";
+        let value: serde_json::Value = parse_jsonc(input).unwrap();
+        assert_eq!(value["url"], "https://example.com/*not*/");
+        assert_eq!(value["list"], serde_json::json!([1, 2]));
     }
 }

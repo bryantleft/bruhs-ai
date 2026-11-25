@@ -117,7 +117,8 @@ fn check_license(manifest: &Value, license: &str) -> bool {
         .is_some_and(|s| s.trim().eq_ignore_ascii_case(license))
 }
 fn jsonc(bytes: &[u8]) -> Result<Value, String> {
-    serde_json_lenient::from_slice(bytes).map_err(|e| format!("Invalid extension JSON. {e}"))
+    let text = std::str::from_utf8(bytes).map_err(|e| format!("Invalid extension JSON. {e}"))?;
+    super::library::parse_jsonc(text).map_err(|e| format!("Invalid extension JSON. {e}"))
 }
 async fn bytes(mut response: Response, limit: usize) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
