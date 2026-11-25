@@ -26,7 +26,7 @@ pub struct FilesResponse {
 /// ranked by git hotspots. A failed search is an error status, never an
 /// empty list that reads as "no matches".
 pub async fn post_files(Json(body): Json<FilesRequest>) -> Result<Json<FilesResponse>, AppError> {
-    let root = HomePath::or_home_in(body.path.as_deref(), home::home_dir().as_deref()).await?;
+    let root = HomePath::or_home_in(body.path.as_deref(), std::env::home_dir().as_deref()).await?;
     let query = body.query.unwrap_or_default();
     let files = files::search(root.as_path(), &query)
         .await

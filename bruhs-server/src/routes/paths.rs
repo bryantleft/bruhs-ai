@@ -59,7 +59,7 @@ impl From<HomePathError> for AppError {
 impl HomePath {
     /// Resolve `path` inside the current user's home directory.
     pub async fn resolve(path: &str) -> Result<Self, HomePathError> {
-        Self::resolve_in(path, home::home_dir().as_deref()).await
+        Self::resolve_in(path, std::env::home_dir().as_deref()).await
     }
 
     /// [`HomePath::resolve`] for an optional request field; empty counts as
@@ -73,7 +73,7 @@ impl HomePath {
 
     /// The home directory itself.
     pub async fn home() -> Result<Self, HomePathError> {
-        Self::home_in(home::home_dir().as_deref()).await
+        Self::home_in(std::env::home_dir().as_deref()).await
     }
 
     /// The home directory `home` itself (`None`: the home directory is

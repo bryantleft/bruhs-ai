@@ -19,7 +19,7 @@ pub(super) async fn run(
         .expect("private confined filesystem fixture");
     let base = directory.path().canonicalize().expect("fixture path");
     assert!(base.starts_with(
-        home::home_dir()
+        std::env::home_dir()
             .expect("real home")
             .canonicalize()
             .expect("canonical home")

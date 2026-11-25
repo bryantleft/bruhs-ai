@@ -226,7 +226,11 @@ pub async fn post_agent(
     }
     bruhs_core::agent::validate_execution_budget(body.execution_timeout_seconds)?;
     crate::routes::uploads::reject_foreign_uploads(&body.file_attachments).await?;
-    let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
+    let project = turn_dir(
+        body.project_path.as_deref(),
+        std::env::home_dir().as_deref(),
+    )
+    .await?;
     let model = body.model.unwrap_or_else(ModelId::default_agent_model);
     // The same routing the pickers use, so the UI and the server agree on
     // which CLI serves a model.
@@ -289,7 +293,11 @@ pub async fn post_second_opinion(
             "a second opinion needs an answer".into(),
         ));
     }
-    let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
+    let project = turn_dir(
+        body.project_path.as_deref(),
+        std::env::home_dir().as_deref(),
+    )
+    .await?;
     let reviewer = bruhs_models::logic::handoff::reviewer_for(body.thread_provider);
     // The other provider reviews; it cannot run this provider's models.
     if body
