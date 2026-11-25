@@ -1,7 +1,7 @@
 // Page-lifetime browser glue the WASM app calls through `window`: the
-// xterm session host (`window.bruhsTerminal`) and the lazy KaTeX/Mermaid
-// loaders (`window.ensureMath`, `window.ensureMermaid`). Loaded as a file,
-// not inline, so the Content-Security-Policy can forbid inline scripts.
+// xterm session host (`window.bruhsTerminal`) and its lazy loader
+// (`window.ensureXterm`). Loaded as a file, not inline, so the
+// Content-Security-Policy can forbid inline scripts.
 'use strict';
 
 // Sessions live here for the life of the page: xterm instance, its
@@ -184,9 +184,8 @@ window.bruhsTerminal = (() => {
   return api;
 })();
 
-// Lazy loaders for highlight.js, xterm, math, and diagrams. Each is
-// idempotent: one shared promise, scripts injected once. render_pass.rs and
-// terminal_panel.rs call them the first time a message or terminal needs them.
+// Lazy loader for xterm.js. Idempotent: one shared promise, scripts injected
+// once when terminal_panel.rs opens a terminal.
 (() => {
   const loadScript = (src) =>
     new Promise((resolve, reject) => {
@@ -212,12 +211,6 @@ window.bruhsTerminal = (() => {
       return promise;
     };
   };
-  window.ensureHighlight = once(() =>
-    Promise.all([
-      loadStyle('/vendor/highlight-11.10.0/github-dark.min.css'),
-      loadScript('/vendor/highlight-11.10.0/highlight.min.js'),
-    ]),
-  );
   window.ensureXterm = once(() =>
     Promise.all([
       loadStyle('/vendor/xterm-5.5.0/xterm.css'),
@@ -226,30 +219,4 @@ window.bruhsTerminal = (() => {
       ),
     ]),
   );
-  window.ensureMath = once(async () => {
-    await loadScript('/vendor/katex-0.16.11/katex.min.js');
-    await loadScript('/vendor/katex-0.16.11/contrib/auto-render.min.js');
-  });
-  window.ensureMermaid = once(async () => {
-    // Mermaid dark theme on bruhs longan-950 canvas tokens.
-    const mermaid = (await import('/vendor/mermaid-11.17.2/mermaid.esm.min.mjs')).default;
-    mermaid.initialize({
-      startOnLoad: false,
-      // Diagram text comes from assistant replies: no HTML labels or
-      // click handlers (Mermaid's default, stated so it cannot drift).
-      securityLevel: 'strict',
-      theme: 'dark',
-      themeVariables: {
-        background: '#141210',
-        primaryColor: '#2f2922',
-        primaryTextColor: '#dfcfc3',
-        primaryBorderColor: '#594a36',
-        lineColor: '#c3afa1',
-        fontFamily: 'MonaspaceNeonVariable, Monaspace Neon, ui-monospace, monospace',
-      },
-    });
-    window.mermaid = mermaid;
-  });
-  // Both, for callers that want everything.
-  window.ensureMathTools = () => Promise.all([window.ensureMath(), window.ensureMermaid()]);
 })();

@@ -13,7 +13,7 @@
          separate sandboxed document. Rich responses offer a Load control for
          remote images and media before creating a fetching element. Markdown
          outside that component still converts remote images to links.
-         Styles stay inline-capable: Leptos, KaTeX, Mermaid and xterm set
+         Styles stay inline-capable: Leptos, inline math SVGs, and xterm set
          style attributes. -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -27,22 +27,32 @@
 
     <link data-trunk rel="tailwind-css" href="tailwind.css" />
 
-    <!-- highlight.js loads on demand via ensureHighlight() in js/bruhs-glue.js.
-         These token colors stay here so diff rows are themed as soon as the
-         stylesheet arrives. Third-party libraries are vendored under vendor/lib
-         (served at /vendor/…; provenance and sha256 in vendor/lib-sources.json). -->
+    <!-- Native Rust/WASM syntax highlighting (bruhs_models::syntax) emits
+         .hljs-* classes styled directly on bruhs fruit tokens for both diff
+         rows and fenced prose code blocks. -->
     <style>
-      /* Diff rows: highlight.js tokens on bruhs fruit tokens (github-dark
-         only styles code blocks in messages). */
-      .diff-code .hljs-keyword, .diff-code .hljs-selector-tag, .diff-code .hljs-doctag { color: var(--color-blueberry-300); }
-      .diff-code .hljs-string, .diff-code .hljs-regexp, .diff-code .hljs-addition { color: var(--color-pandan-300); }
-      .diff-code .hljs-number, .diff-code .hljs-literal, .diff-code .hljs-symbol { color: var(--color-durian-300); }
-      .diff-code .hljs-comment, .diff-code .hljs-quote { color: var(--color-rambutan-500); }
-      .diff-code .hljs-title, .diff-code .hljs-function, .diff-code .hljs-section, .diff-code .hljs-name { color: var(--color-rambutan-100); }
-      .diff-code .hljs-type, .diff-code .hljs-built_in, .diff-code .hljs-class { color: var(--color-mangosteen-300); }
-      .diff-code .hljs-attr, .diff-code .hljs-attribute, .diff-code .hljs-variable, .diff-code .hljs-template-variable { color: var(--color-blueberry-200); }
-      .diff-code .hljs-meta, .diff-code .hljs-punctuation, .diff-code .hljs-operator { color: var(--color-rambutan-400); }
-      .diff-code .hljs-deletion { color: var(--color-lychee-300); }
+      .diff-code .hljs-keyword, .diff-code .hljs-selector-tag, .diff-code .hljs-doctag,
+      .prose-msg pre code .hljs-keyword, .prose-msg pre code .hljs-selector-tag, .prose-msg pre code .hljs-doctag { color: var(--color-blueberry-300); }
+      .diff-code .hljs-string, .diff-code .hljs-regexp, .diff-code .hljs-addition,
+      .prose-msg pre code .hljs-string, .prose-msg pre code .hljs-regexp, .prose-msg pre code .hljs-addition { color: var(--color-pandan-300); }
+      .diff-code .hljs-number, .diff-code .hljs-literal, .diff-code .hljs-symbol,
+      .prose-msg pre code .hljs-number, .prose-msg pre code .hljs-literal, .prose-msg pre code .hljs-symbol { color: var(--color-durian-300); }
+      .diff-code .hljs-comment, .diff-code .hljs-quote,
+      .prose-msg pre code .hljs-comment, .prose-msg pre code .hljs-quote { color: var(--color-rambutan-500); }
+      .diff-code .hljs-title, .diff-code .hljs-function, .diff-code .hljs-section, .diff-code .hljs-name,
+      .prose-msg pre code .hljs-title, .prose-msg pre code .hljs-function, .prose-msg pre code .hljs-section, .prose-msg pre code .hljs-name { color: var(--color-rambutan-100); }
+      .diff-code .hljs-type, .diff-code .hljs-built_in, .diff-code .hljs-class,
+      .prose-msg pre code .hljs-type, .prose-msg pre code .hljs-built_in, .prose-msg pre code .hljs-class { color: var(--color-mangosteen-300); }
+      .diff-code .hljs-attr, .diff-code .hljs-attribute, .diff-code .hljs-variable, .diff-code .hljs-template-variable,
+      .prose-msg pre code .hljs-attr, .prose-msg pre code .hljs-attribute, .prose-msg pre code .hljs-variable, .prose-msg pre code .hljs-template-variable { color: var(--color-blueberry-200); }
+      .diff-code .hljs-meta, .diff-code .hljs-punctuation, .diff-code .hljs-operator,
+      .prose-msg pre code .hljs-meta, .prose-msg pre code .hljs-punctuation, .prose-msg pre code .hljs-operator { color: var(--color-rambutan-400); }
+      .diff-code .hljs-deletion,
+      .prose-msg pre code .hljs-deletion { color: var(--color-lychee-300); }
+      .prose-msg .mermaid { overflow-x: auto; }
+      .prose-msg .mermaid svg { max-width: 100%; height: auto; display: block; }
+      .prose-msg .bruhs-math-display svg { display: inline-block; max-width: 100%; height: auto; }
+      .prose-msg .bruhs-math-inline svg { display: inline-block; }
     </style>
 
     <!-- xterm.js loads on demand via ensureXterm() in js/bruhs-glue.js.
@@ -53,18 +63,11 @@
       [data-terminal-mount] .xterm .xterm-viewport { background-color: transparent !important; }
     </style>
 
-    <!-- KaTeX stylesheet stays eager (cheap, needed at render time). KaTeX,
-         Mermaid, highlight.js, and xterm scripts load on demand from
-         js/bruhs-glue.js, so a chat that never needs them never downloads them. -->
-    <link rel="stylesheet" href="/vendor/katex-0.16.11/katex.min.css" />
-    <!-- Terminal host + math loader; a file, not inline (see the CSP above). -->
+    <!-- Terminal host + xterm loader; a file, not inline (see the CSP above). -->
     <script src="/js/bruhs-glue.js"></script>
     <!-- Typography role classes (bruhs design system) -->
     <style>
       html, body { height: 100dvh; margin: 0; padding: 0; }
-      /* The app root already uses h-full. Keep floating library helpers out
-         of document scrolling until they receive their inline position. */
-      .mermaidTooltip { top: 0; left: 0; }
 
       /* Monaspace from this origin (the theme's CDN-relative @font-face src fails
          cross-origin in some browsers, which silently fell back to the system mono). */

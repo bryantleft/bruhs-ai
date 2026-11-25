@@ -60,9 +60,6 @@ def generate(destination):
             "https://github.com/microsoft/onnxruntime")
     web = {
         "addon-fit": ("MIT", "https://github.com/xtermjs/xterm.js"),
-        "highlight": ("BSD-3-Clause", "https://github.com/highlightjs/highlight.js"),
-        "katex": ("MIT", "https://github.com/KaTeX/KaTeX"),
-        "mermaid": ("MIT", "https://github.com/mermaid-js/mermaid"),
         "xterm": ("MIT", "https://github.com/xtermjs/xterm.js"),
     }
     for file in sorted(Path("bruhs-web/vendor/lib").glob("*/LICENSE")):

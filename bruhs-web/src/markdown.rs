@@ -10,8 +10,8 @@
 //! protocol-relative) is rendered as a link to it, never as `<img>`: loading
 //! it would send whatever a prompt injection put in its URL to that host with
 //! no click, on every view. Only same-origin (relative) images load inline.
-//! Code highlighting, KaTeX and Mermaid run afterwards on the sanitized DOM
-//! (`components/render_pass.rs`).
+//! Code highlighting, TeX math, and Mermaid rendering run afterwards on the
+//! sanitized DOM (`components/render_pass.rs`) using `bruhs-models`.
 //!
 //! Streaming behavior: the fragment the model has emitted so far is
 //! re-rendered on every signal tick. pulldown-cmark handles unclosed

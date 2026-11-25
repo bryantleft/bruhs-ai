@@ -30,7 +30,7 @@ wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "FontFaceSet",
     "Clipboard",
-    "KeyboardEvent", "Element", "Node", "NodeList", "ScrollIntoViewOptions", "ScrollLogicalPosition",
+    "KeyboardEvent", "Element", "Node", "NodeList", "Text", "ScrollIntoViewOptions", "ScrollLogicalPosition",
     "HtmlElement", "HtmlImageElement", "HtmlAnchorElement", "HtmlTextAreaElement", "HtmlInputElement", "HtmlSelectElement", "HtmlIFrameElement",
     "MouseEvent", "WheelEvent", "FocusOptions", "EventSource", "MessageEvent",
     "Window", "Document", "History", "EventTarget", "Event",
