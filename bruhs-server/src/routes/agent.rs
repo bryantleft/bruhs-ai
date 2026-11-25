@@ -1,9 +1,6 @@
 use axum::{
     extract::{rejection::JsonRejection, State},
-    response::{
-        sse::{Event, Sse},
-        IntoResponse,
-    },
+    response::IntoResponse,
     Json,
 };
 use bruhs_core::{write_paste_files, AgentTurn, AppState, OrchestratorEvent, QueryEvent};
@@ -17,6 +14,7 @@ use tokio_stream::StreamExt;
 
 use crate::error::AppError;
 use crate::routes::paths::{HomePath, HomePathError};
+use crate::sse::{Event, KeepAlive, Sse};
 
 /// `POST /api/agent`. Deserializing validates the thread id, the model id
 /// and the permission mode, so a malformed one is a 400 before anything
@@ -276,7 +274,7 @@ pub async fn post_agent(
 
     // Idle proxies drop long agent turns without periodic bytes; the tasks
     // stream already keeps itself alive the same way.
-    Ok(Sse::new(sse_stream).keep_alive(axum::response::sse::KeepAlive::default()))
+    Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
 }
 
 /// `POST /api/agent/second-opinion`. Runs the other provider read-only on

@@ -7,6 +7,7 @@ mod reactive_events;
 mod restore_control;
 mod routes;
 mod service;
+pub(crate) mod sse;
 mod static_assets;
 mod telemetry;
 #[cfg(unix)]

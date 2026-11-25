@@ -1,38 +1,32 @@
 //! Build the same task event while batching small JSON serializer writes.
 
-use std::io::{BufWriter, Write as _};
-
-use axum::response::sse::Event;
 use bruhs_core::BackgroundTask;
 use serde::Serialize;
+
+use crate::sse::Event;
 
 // The constructor sweep covered 256 through 16,384 bytes. Eight KiB batches
 // per-field framing work without a full JSON temporary. See the buffered task
 // event section in docs/performance-goal-2026-11-09.md for CPU/peak tradeoffs.
 const BUFFER_BYTES: usize = 8 * 1024;
 
-pub(super) fn encode(tasks: Vec<BackgroundTask>) -> Result<Event, axum::Error> {
+pub(super) fn encode(tasks: Vec<BackgroundTask>) -> Result<Event, serde_json::Error> {
     // The exact empty payload needs no staging allocation.
     if tasks.is_empty() {
-        return Event::default().json_data(tasks);
+        return Ok(Event::default().data("[]"));
     }
     buffered(&tasks, BUFFER_BYTES)
 }
 
-fn buffered<T: Serialize + ?Sized>(data: &T, capacity: usize) -> Result<Event, axum::Error> {
-    let mut event = Event::default().into_data_writer();
-    {
-        let mut writer = BufWriter::with_capacity(capacity, event.as_io_write());
-        serde_json::to_writer(&mut writer, data).map_err(axum::Error::new)?;
-        writer.flush().map_err(axum::Error::new)?;
-    }
-    Ok(event.into_event())
+fn buffered<T: Serialize + ?Sized>(data: &T, capacity: usize) -> Result<Event, serde_json::Error> {
+    Event::default().json_data_buffered(data, capacity)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::response::{IntoResponse as _, Sse};
+    use crate::sse::Sse;
+    use axum::response::IntoResponse as _;
     use serde::ser::{SerializeSeq as _, Serializer};
     use serde_json::json;
     use std::convert::Infallible;
@@ -47,6 +41,15 @@ mod tests {
             .to_vec()
     }
 
+    fn reference_frame<T: Serialize>(value: &T, named: bool) -> Result<Vec<u8>, serde_json::Error> {
+        let json = serde_json::to_string(value)?;
+        let mut event = Event::default().data(json);
+        if named {
+            event = event.event("tasks");
+        }
+        Ok(event.finalize().to_vec())
+    }
+
     #[tokio::test]
     async fn buffering_preserves_every_raw_frame_byte_at_small_and_large_boundaries() {
         let values = [
@@ -57,14 +60,10 @@ mod tests {
         for value in values {
             for capacity in [0, 1, 2, 3, 4, 7, 256, BUFFER_BYTES] {
                 for named in [false, true] {
-                    let old = Event::default().json_data(&value).expect("reference event");
+                    let old = reference_frame(&value, named).expect("reference event");
                     let new = buffered(&value, capacity).expect("buffered event");
-                    let (old, new) = if named {
-                        (old.event("tasks"), new.event("tasks"))
-                    } else {
-                        (old, new)
-                    };
-                    assert_eq!(frame(new).await, frame(old).await);
+                    let new = if named { new.event("tasks") } else { new };
+                    assert_eq!(frame(new).await, old);
                 }
             }
         }
@@ -76,15 +75,11 @@ mod tests {
             "{\r\n\"text\":\"Ω😀\",\n\"n\":null\n}".to_owned(),
         )
         .expect("raw JSON");
+        let expected = reference_frame(&raw, false).expect("reference raw JSON");
         for capacity in [0, 1, 2, 3, 4, 7, BUFFER_BYTES] {
             assert_eq!(
                 frame(buffered(&raw, capacity).expect("buffered raw JSON")).await,
-                frame(
-                    Event::default()
-                        .json_data(&raw)
-                        .expect("reference raw JSON")
-                )
-                .await
+                expected
             );
         }
     }
@@ -100,9 +95,7 @@ mod tests {
 
     #[test]
     fn partial_serialization_failure_returns_an_error_without_an_event() {
-        let old = Event::default()
-            .json_data(Failing)
-            .expect_err("reference fails");
+        let old = serde_json::to_string(&Failing).expect_err("reference fails");
         for capacity in [0, 1, BUFFER_BYTES] {
             let new = buffered(&Failing, capacity).expect_err("buffered event fails");
             assert_eq!(new.to_string(), old.to_string());

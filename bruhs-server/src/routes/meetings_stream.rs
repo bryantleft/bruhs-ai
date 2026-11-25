@@ -1,10 +1,8 @@
 //! A process-owned capture subscription feeds the shared meeting broadcast.
 //! HTTP subscribers only observe events; connecting a client never starts work.
 
-use axum::{
-    extract::State,
-    response::sse::{Event, KeepAlive, Sse},
-};
+use crate::sse::{Event, KeepAlive, Sse};
+use axum::extract::State;
 use bruhs_core::AppState;
 use bruhs_models::MeetingEvent;
 use futures_core::Stream;

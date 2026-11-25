@@ -230,16 +230,16 @@ pub async fn stream(
     State(config): State<Arc<Config>>,
     headers: HeaderMap,
 ) -> Result<
-    axum::response::sse::Sse<
-        impl futures_core::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+    crate::sse::Sse<
+        impl futures_core::Stream<Item = Result<crate::sse::Event, std::convert::Infallible>>,
     >,
     AppError,
 > {
     let runtime = runtime(value)?;
     let owner = config.access.owner_request(&headers);
     Ok(
-        axum::response::sse::Sse::new(super::events_stream::reactive_signals(Some(runtime), owner))
-            .keep_alive(axum::response::sse::KeepAlive::default()),
+        crate::sse::Sse::new(super::events_stream::reactive_signals(Some(runtime), owner))
+            .keep_alive(crate::sse::KeepAlive::default()),
     )
 }
 

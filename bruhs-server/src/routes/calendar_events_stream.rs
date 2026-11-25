@@ -4,10 +4,8 @@
 //! a full resync, which replays every event in the sync window (upserts and
 //! deletes are idempotent on the client).
 
-use axum::{
-    extract::State,
-    response::sse::{Event, KeepAlive, Sse},
-};
+use crate::sse::{Event, KeepAlive, Sse};
+use axum::extract::State;
 use bruhs_core::AppState;
 use futures_core::Stream;
 use std::convert::Infallible;

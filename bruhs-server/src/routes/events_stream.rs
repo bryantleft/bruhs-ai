@@ -13,10 +13,10 @@
 //! calendar events this client missed; a reopen asks for a full calendar
 //! resync, which replays the sync window (the client applies it idempotently).
 
+use crate::sse::{Event, KeepAlive, Sse};
 use axum::{
     extract::{Query, State},
     http::HeaderMap,
-    response::sse::{Event, KeepAlive, Sse},
 };
 use bruhs_core::AppState;
 #[cfg(unix)]

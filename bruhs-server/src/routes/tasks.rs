@@ -1,7 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use bruhs_core::{AppState, BackgroundTask, BackgroundTaskRegistry, RemoveTaskError};
@@ -11,6 +10,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use crate::error::AppError;
+use crate::sse::{Event, KeepAlive, Sse};
 
 mod snapshot_event;
 
