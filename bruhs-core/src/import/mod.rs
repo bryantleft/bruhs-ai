@@ -4,7 +4,7 @@
 //!
 //! Every reader opens the other tool's files read-only and never writes to
 //! them. The formats are the tools' private ones (Claude Code transcripts,
-//! Codex rollouts, T3's state database, Cursor's `state.vscdb`), so a reader
+//! Codex rollouts and Cursor's `state.vscdb`), so a reader
 //! skips records it does not understand instead of failing the import.
 //! Everything here is blocking file I/O: async callers use
 //! `spawn_blocking`.
@@ -18,10 +18,8 @@ mod claude_ai;
 mod codex;
 mod cursor;
 mod cursor_agent;
-mod export;
 mod grok;
 mod json_stream;
-mod t3;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 mod text;
@@ -30,7 +28,6 @@ mod text;
 pub use archive::Limits;
 
 pub use batch::{ImportHost, ImportUpload};
-pub use export::export_to_t3;
 
 use bruhs_models::logic::portable::{ImportCandidate, ImportSource, ImportedThread};
 use bruhs_models::EpochMs;
@@ -43,8 +40,6 @@ pub struct ImportRoots {
     pub claude: PathBuf,
     /// Codex's home (`~/.codex`, or `CODEX_HOME`).
     pub codex: PathBuf,
-    /// T3 Code's data dir (`~/.t3`, or `T3CODE_HOME`).
-    pub t3: PathBuf,
     /// Cursor's `User` dir (the editor's chats).
     pub cursor: PathBuf,
     /// `~/.cursor` (agent transcripts, the only record of the Cursor Agent
@@ -66,7 +61,6 @@ impl ImportRoots {
         Self {
             claude: var("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from),
             codex: var("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from),
-            t3: var("T3CODE_HOME").map_or_else(|| home.join(".t3"), PathBuf::from),
             cursor,
             cursor_home: home.join(".cursor"),
         }
@@ -78,7 +72,6 @@ impl ImportRoots {
         Self {
             claude: home.join(".claude"),
             codex: home.join(".codex"),
-            t3: home.join(".t3"),
             cursor: home.join("Cursor/User"),
             cursor_home: home.join(".cursor"),
         }
@@ -175,33 +168,9 @@ pub fn list(
                     .is_some_and(|cwd| cwd.to_lowercase().contains(q))
         })
     };
-    // A session T3 runs is listed under T3, with T3's title. Older T3
-    // builds left no mark on the session itself, so ask T3's database.
-    let t3_sessions: std::collections::HashSet<String> = match source {
-        ImportSource::ClaudeCode | ImportSource::Codex => t3::list(&roots.t3, &|_| true)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|candidate| candidate.session_id)
-            .collect(),
-        ImportSource::T3
-        | ImportSource::Cursor
-        | ImportSource::ChatGpt
-        | ImportSource::ClaudeAi
-        | ImportSource::Grok
-        | ImportSource::OpenClaw
-        | ImportSource::Hermes => std::collections::HashSet::new(),
-    };
-    let keep = |candidate: &ImportCandidate| {
-        keep(candidate)
-            && candidate
-                .session_id
-                .as_ref()
-                .is_none_or(|session| !t3_sessions.contains(session))
-    };
     let mut found = match source {
         ImportSource::ClaudeCode => claude::list(&roots.claude, limit, &keep)?,
         ImportSource::Codex => codex::list(&roots.codex, limit, &keep)?,
-        ImportSource::T3 => t3::list(&roots.t3, &keep)?,
         ImportSource::Cursor => cursor::list(roots, limit, &keep)?,
         ImportSource::ChatGpt
         | ImportSource::ClaudeAi
@@ -229,7 +198,6 @@ pub fn load(
     let (candidate, messages) = match source {
         ImportSource::ClaudeCode => claude::load(&roots.claude, id)?,
         ImportSource::Codex => codex::load(&roots.codex, id)?,
-        ImportSource::T3 => t3::load(roots, id)?,
         ImportSource::Cursor => cursor::load(roots, id)?,
         ImportSource::ChatGpt
         | ImportSource::ClaudeAi

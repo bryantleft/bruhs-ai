@@ -387,7 +387,7 @@ const until = async (label, test, timeout = 15000, interval = 150) => {
 };
 
 const COPY = {
-  tabs: ['Claude Code', 'Codex', 'T3 Code', 'Cursor', 'Export file'],
+  tabs: ['Claude Code', 'Codex', 'Cursor', 'Export file'],
   helps: [
     'ChatGPT: Settings, Data controls, Export data. Upload the ZIP from the email.',
     'Claude.ai: Settings, Privacy, Export data. Upload the ZIP, or conversations-000.zip and memories-000.zip from the newer list of files.',

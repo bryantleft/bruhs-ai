@@ -586,7 +586,7 @@ enum TopLayer {
         for_terminal: bool,
         thread: Option<EntityId>,
     },
-    /// Import a thread from Claude Code, Codex, T3 Code or Cursor.
+    /// Import a thread from Claude Code, Codex or Cursor.
     ImportThread,
     /// Move in: a bruh from OpenClaw or Hermes Agent, or memory By prompt.
     MoveIn,

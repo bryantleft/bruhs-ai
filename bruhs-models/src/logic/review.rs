@@ -329,7 +329,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifies_paths_the_way_t3_does() {
+    fn classifies_generated_paths_for_review() {
         let cases = [
             ("src/contest.py", DiffFileKind::Code),
             ("test/fixtures/pr.json", DiffFileKind::Mocks),

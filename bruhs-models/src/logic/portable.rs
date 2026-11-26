@@ -1,17 +1,6 @@
-//! Threads that move between bruhs and the other agent tools (Claude Code,
-//! Codex, T3 Code, Cursor), in either direction.
-//!
-//! bruhs drives the same CLIs as most of them, so a thread usually moves
-//! without losing anything: a Claude Code session or a Codex rollout (T3
-//! threads are one of the two underneath) is resumed by id, and the thread
-//! continues in whichever tool opens it next. Cursor keeps its chats in its
-//! own database with no session another tool can resume, so a Cursor chat
-//! comes in as its transcript, sent along with the first bruhs turn. Going
-//! out, Claude Code and Codex get a resume command; T3 and Cursor get the
-//! transcript as Markdown.
-//!
-//! [`PortableMessage`] is the shape every importer produces and every
-//! exporter reads; each surface converts its own message type to and from it.
+//! Conversation data shared by Bruhs import and export. Native provider sessions
+//! can resume by ID. Other imports carry their transcripts into a new thread.
+//! Portable messages also support Markdown export.
 
 use crate::agent::{AgentProvider, Role};
 use crate::time::EpochMs;
@@ -27,7 +16,6 @@ use std::fmt::Write as _;
 pub enum ImportSource {
     ClaudeCode,
     Codex,
-    T3,
     Cursor,
     #[serde(rename = "chatgpt")]
     ChatGpt,
@@ -40,10 +28,9 @@ pub enum ImportSource {
 
 impl ImportSource {
     /// Every source: the local tools, then the exports, then the agents.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::ClaudeCode,
         Self::Codex,
-        Self::T3,
         Self::Cursor,
         Self::ChatGpt,
         Self::ClaudeAi,
@@ -53,7 +40,7 @@ impl ImportSource {
     ];
 
     /// The agent tools on this machine, in picker order.
-    pub const LOCAL: [Self; 4] = [Self::ClaudeCode, Self::Codex, Self::T3, Self::Cursor];
+    pub const LOCAL: [Self; 3] = [Self::ClaudeCode, Self::Codex, Self::Cursor];
 
     /// The chat services whose data exports bruhs reads.
     pub const EXPORTS: [Self; 3] = [Self::ChatGpt, Self::ClaudeAi, Self::Grok];
@@ -66,7 +53,6 @@ impl ImportSource {
         match self {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
-            Self::T3 => "t3",
             Self::Cursor => "cursor",
             Self::ChatGpt => "chatgpt",
             Self::ClaudeAi => "claude_ai",
@@ -86,7 +72,6 @@ impl ImportSource {
         match self {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
-            Self::T3 => "T3 Code",
             Self::Cursor => "Cursor",
             Self::ChatGpt => "ChatGPT",
             Self::ClaudeAi => "Claude.ai",
@@ -162,8 +147,7 @@ impl PortableMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportCandidate {
     pub source: ImportSource,
-    /// The source's own id: a Claude session id, a Codex thread id, a T3
-    /// thread id or a Cursor composer id.
+    /// The source’s own identifier.
     pub id: String,
     pub title: String,
     /// Working directory the thread ran in, when known.
@@ -447,32 +431,6 @@ fn shell_quote(text: &str) -> String {
     }
 }
 
-/// `POST /api/export/t3`: start a T3 Code thread in `project_path` that
-/// carries this transcript.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportT3Request {
-    pub project_path: String,
-    pub title: String,
-    /// Model the T3 thread runs on (its provider follows from it).
-    pub model: String,
-    pub markdown: String,
-}
-
-/// The T3 thread [`ExportT3Request`] started.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExportT3Response {
-    pub thread_id: String,
-}
-
-/// The first message of a T3 thread that continues a bruhs thread. T3
-/// runs it as a turn, so it asks for a one-word reply.
-pub fn t3_export_prompt(markdown: &str) -> String {
-    format!(
-        "This thread continues a conversation from bruhs. Read it as context, \
-         then reply only \"Ready.\" and wait for my next message.\n\n{markdown}"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,7 +473,6 @@ mod tests {
             [
                 ImportSource::ClaudeCode,
                 ImportSource::Codex,
-                ImportSource::T3,
                 ImportSource::Cursor
             ]
         );

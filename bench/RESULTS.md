@@ -4,7 +4,7 @@ Historical measurements below predate the benchmark integrity changes. Their
 raw run artifacts are not present in this checkout and have not been rescored
 with terminal-state, coverage and complete-usage checks. Retain these as prior
 observations; rerun matched campaigns before using them to claim current
-leadership. No Capy comparison is recorded here.
+leadership.
 
 Measured in November 2026 with `scripts/task-bench.sh` and
 `scripts/token-bench.sh` (see [README.md](README.md)) on one Mac. Claude
@@ -30,10 +30,8 @@ runs, so differences under ~5% are noise.
 |---|---|---|---|
 | Claude Code (plain) | 21/22 | 278,346 | — |
 | **bruhs → Claude** | 21/22 | **248,674** | **−11%** |
-| T3 Code → Claude | 22/22 | 424,120 | +52% |
 | Codex CLI (plain) | 22/22 | 179,417 | — |
 | bruhs → Codex | 22/22 | 191,017 | +6% |
-| T3 Code → Codex | 22/22 | 200,730 | +12% |
 
 The single misses are on tasks Haiku fails at random
 (`concurrency-keyed-jobs`, `rootcause-paging`), so no tool is shown to be
@@ -75,10 +73,8 @@ One trivial turn in an empty git repo:
 |---|---|
 | Claude Code (user config) | 47.2k |
 | Claude Code (plain, no plugins or MCP) | 32.1–33.7k |
-| T3 Code → Claude | 47.3k |
 | bruhs → Claude (lean) | 32.3k |
 | Codex CLI (user config) | 24.0k |
-| T3 Code → Codex | 21.4k |
 | **bruhs → Codex (lean)** | **17.9k** |
 | OpenCode (its free `big-pickle` model) | 17.9k |
 | Aider (system prompt + repo map, no tool loop) | 2.0k |

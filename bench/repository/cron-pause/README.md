@@ -116,7 +116,7 @@ is not adversarial attestation; provider sandboxing is not a hidden-check secrec
 test. Model familiarity with this public repository is unknown.
 
 One additional feature and language do not establish market leadership or a
-speed/cost advantage. No Capy, T3 Code, product-default comparison, physical capture or PR
+speed/cost advantage. No product-default comparison, physical capture or PR
 publication ran in those Codex cohorts. The separate Claude profile below
 uses a different model and constrained tool configuration. The
 [competitive goal](../../../docs/competitive-evaluation-goal-2026-11-15.md)

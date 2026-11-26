@@ -31,7 +31,7 @@ def rescore(directory: Path) -> None:
         row["check_pass"] = row.get("check_pass") or row["pass"]
         tool = row["tool"]
         fmt = {"bruhs": "bruhs-claude", "bruhs-review": "bruhs-review-claude",
-               "bruhs-codex-review": "bruhs-review-codex", "t3": "t3-claude"}.get(tool, tool)
+               "bruhs-codex-review": "bruhs-review-codex"}.get(tool, tool)
         stem = row.get("log_stem") or f"{tool}-{row['task']}" + ("" if legacy else f"-{row['run']}")
         if Path(stem).name != stem:
             raise ValueError(f"invalid log filename stem {stem!r}")

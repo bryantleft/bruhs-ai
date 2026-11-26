@@ -8250,7 +8250,7 @@ fn saved_snooze_choices_set_the_selected_threads_wake_time(cx: &mut gpui::TestAp
 }
 
 #[gpui::test]
-fn update_confirm_responsive_geometry_matches_t3_beta_breakpoints(cx: &mut gpui::TestAppContext) {
+fn update_confirm_uses_responsive_panel_breakpoints(cx: &mut gpui::TestAppContext) {
     use bruhs_models::updates::AppUpdateState;
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
     let updates = workspace.read_with(cx, |workspace, _| workspace.updates.clone());

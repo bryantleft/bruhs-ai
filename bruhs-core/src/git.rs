@@ -1283,7 +1283,7 @@ fn read_project_config(project: &Path) -> Option<serde_json::Value> {
     use std::io::Read;
 
     const MAX_BYTES: u64 = 64 * 1024;
-    let path = project.join("t3.json");
+    let path = project.join("bruhs.json");
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1966,7 +1966,7 @@ mod tests {
 
         // The caller sees an uncommitted repository preference on the original checkout
         // once the repository is trusted (or uses an explicit submodule policy).
-        repo.write("t3.json", r#"{"worktreeSubmodules":"none"}"#);
+        repo.write("bruhs.json", r#"{"worktreeSubmodules":"none"}"#);
         assert_eq!(
             project_submodules(repo.path()),
             Some(WorktreeSubmodules::None)
@@ -1985,7 +1985,7 @@ mod tests {
         .await
         .unwrap();
         assert!(!dest.join("module/README.md").exists());
-        repo.write("t3.json", r#"{"worktreeSubmodules":"recursive"}"#);
+        repo.write("bruhs.json", r#"{"worktreeSubmodules":"recursive"}"#);
         assert_eq!(
             project_submodules(repo.path()),
             Some(WorktreeSubmodules::Recursive)

@@ -29,7 +29,7 @@ fn versions_order_numerically_with_prereleases_first() {
 }
 
 #[test]
-fn compatibility_follows_t3s_ranges() {
+fn compatibility_checks_supported_ranges() {
     assert_eq!(compat(K, "2.1.319"), Some(Compat::Supported));
     assert_eq!(compat(K, "2.1.280"), Some(Compat::Supported));
     assert_eq!(compat(K, "2.1.279"), Some(Compat::Limited));
@@ -64,7 +64,7 @@ fn detect(provider: AgentProvider, on_path: &str, resolved: &str) -> Install {
 }
 
 #[test]
-fn installs_are_classified_in_t3s_order() {
+fn installs_are_classified_by_path_precedence() {
     let cases: &[Case] = &[
         (
             C,
@@ -227,7 +227,7 @@ fn line(install: &Install, latest: Option<&str>, pnpm: Option<&str>) -> Option<S
 }
 
 #[test]
-fn each_installer_has_t3s_update_command() {
+fn each_installer_has_an_update_command() {
     let at = |p, on, r| detect(p, on, r);
     assert_eq!(
         line(
@@ -486,7 +486,7 @@ fn report_summarizes_what_is_behind_and_what_runs() {
 }
 
 #[test]
-fn runs_read_like_t3s_pill() {
+fn runs_have_compact_status_labels() {
     let done = |outcome| run(3, C, RunPhase::Done, Some(outcome));
     assert_eq!(
         done(RunOutcome::Updated).pill_label(),

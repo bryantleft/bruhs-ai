@@ -1,5 +1,5 @@
-//! Import thread: pick a thread from Claude Code, Codex, T3 Code or Cursor
-//! and continue it here. A Claude Code, Codex or T3 thread resumes its own
+//! Import thread: pick a thread from Claude Code, Codex or Cursor
+//! and continue it here. A Claude Code or Codex thread resumes its own
 //! session (and stays usable in the tool it came from); a Cursor chat comes
 //! in as its transcript. See `bruhs_models::logic::portable`.
 //!
@@ -7,7 +7,7 @@
 //! data export, as transcripts (`export_tab`).
 //!
 //! Also the thread's way back out: [`portable_messages`] feeds the
-//! palette's "Copy thread as Markdown" and "Continue in T3 Code".
+//! palette's "Copy thread as Markdown".
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -456,7 +456,6 @@ pub fn ImportThreadDialog() -> impl IntoView {
                 <div class="mt-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Import from">
                     {ImportSource::LOCAL
                         .into_iter()
-                        .filter(|source| *source != ImportSource::T3)
                         .map(ImportTab::Local)
                         .chain([ImportTab::Export])
                         .map(|each| {

@@ -79,9 +79,6 @@ def generate(destination):
         sections.append(f"<details>\n<summary>{name}</summary>\n\n````text\n{text}\n````\n</details>\n\n")
 
     section("Bruhs design tokens", "MIT", "Web", "bruhs-web/vendor/BRUHS-LICENSE")
-    section("Composer file icons from @pierre/trees", "Apache-2.0", "Assets", "bruhs-ui/assets/language-icons/LICENSE-PIERRE")
-    section("@pierre/trees notices", "NOTICE", "Assets", "bruhs-ui/assets/language-icons/NOTICE-PIERRE")
-    section("T3 Code language icons and Simple Icons logos", "MIT / CC0", "Assets", "bruhs-ui/assets/language-icons/LICENSE-T3")
     section("Lucide icons", "ISC / MIT", "Assets", "bruhs-ui/assets/icons/LICENSE-LUCIDE")
     section("Monaspace fonts", "OFL-1.1", "Assets", "bruhs-desktop/assets/fonts/LICENSE",
             "https://github.com/githubnext/monaspace")

@@ -54,8 +54,8 @@ fn inert(text: &str) -> std::borrow::Cow<'_, str> {
         let rest = &text[pos..];
         let (split, advance) = if starts_with_ignore_ascii_case(rest, "webhook-data") {
             (Some(pos + 7), "webhook-data".len())
-        } else if starts_with_ignore_ascii_case(rest, "t3-context:") {
-            (Some(pos + 10), "t3-context:".len())
+        } else if starts_with_ignore_ascii_case(rest, "bruhs-context:") {
+            (Some(pos + "bruhs-context".len()), "bruhs-context:".len())
         } else if let Some(ch) = rest.chars().next() {
             let step = ch.len_utf8();
             if ch == '@' || is_currency_symbol(ch) {

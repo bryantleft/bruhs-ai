@@ -2960,7 +2960,7 @@ fn worktree_submodules_source_opens_advanced_project_and_resets_to_repo(
     cx.simulate_resize(gpui::size(px(1040.), px(820.)));
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(
-        repo.path().join("t3.json"),
+        repo.path().join("bruhs.json"),
         r#"{"worktreeSubmodules":"top-level"}"#,
     )
     .unwrap();
@@ -2997,7 +2997,7 @@ fn worktree_submodules_source_opens_advanced_project_and_resets_to_repo(
         );
     });
     std::fs::write(
-        repo.path().join("t3.json"),
+        repo.path().join("bruhs.json"),
         r#"{"worktreeSubmodules":"recursive"}"#,
     )
     .unwrap();
@@ -3104,7 +3104,7 @@ fn new_thread_workspace_uses_scoped_defaults_and_preserves_draft_selection(
     let (workspace, cx, _, _) = thread_menu_workspace(cx);
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(
-        repo.path().join("t3.json"),
+        repo.path().join("bruhs.json"),
         r#"{"defaultThreadEnvMode":"worktree"}"#,
     )
     .unwrap();

@@ -48,7 +48,7 @@
     "One feature in one additional public repository; familiarity or training overlap is unknown.",
     "All upstream test files run with the race detector; JSON identity accounting covers top-level tests and rejects observed child failures/skips. It is not adversarial attestation.",
     "Provider sandbox permits some host reads; hidden checks/reference are withheld from workspace and prompt, not an adversarial secrecy guarantee.",
-    "No Capy, Claude Code, T3 Code or product-default campaign; installed baseline and Bruhs Codex path only.",
+    "No external-product or product-default campaign; installed baseline and Bruhs Codex path only.",
     "No actual PR delivery, physical capture or connected daily workflow.",
     "Billed and complete human/machine cost remain unknown."
   ],

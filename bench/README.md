@@ -132,8 +132,6 @@ the T3 limitation is described below.
 | `opencode` | `opencode run --format json [--model $BENCH_OPENCODE_MODEL]` — only when on PATH | `step_finish` token parts |
 | `bruhs-review` | `bruhs`, then review mode (below) with Codex reviewing | complete usage from every executed turn plus the endpoint's reviewer usage; otherwise unknown |
 | `bruhs-codex-review` | `bruhs-codex`, then review mode with Claude reviewing | same |
-| `t3` | `t3 thread start --provider claudeAgent --model $BENCH_MODEL --wait --json <workdir> <prompt>` on an isolated T3 server (below) | every top-level Claude transcript in `~/.claude/projects/<workdir>/` (assistant messages deduped by id; matched `result.usage` exactly on two plain-`claude` runs) |
-| `t3-codex` | same with `--provider codex` and the bruhs-codex model | every Codex rollout whose `session_meta.cwd` is the workdir |
 
 `aider` and `opencode` are skipped silently when missing (with a message only
 if you named them in `BENCH_TOOLS`). Their parsers were written against the
@@ -189,26 +187,10 @@ checks still grade the files/reply left behind, but a failed or unfinished
 review workflow cannot pass the complete run.
 `BENCH_TIMEOUT` applies to each of the three steps.
 
-### T3 Code
-
-`t3` and `t3-codex` start a T3 server of their own once per bench run
-(`t3 serve --base-dir <work root>/<run>/t3home --port $BENCH_T3_PORT`,
-default 3998), so the runs never touch your T3 projects or threads. Each run
-adds its workdir as a project and starts one thread through the CLI. Code
-tasks only: every T3 thread belongs to a project. A timeout stops the CLI
-client, not the thread; the server is stopped when the bench exits.
 
 ### Parent sessions
 
-The bench unsets the variables an agent host sets for its own session
-(`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, the messaging socket, …) before it
-runs anything. Started from a T3 or Claude Code terminal, every tool would
-otherwise run as that host's child, and `CLAUDE_CODE_ENTRYPOINT=t3-code`
-alone adds T3's Artifact tools to Claude (32k -> 46k tokens per turn). T3
-sets that entrypoint itself for its own threads, so `t3` still pays it, as
-it does in the app. Runs before 2026-11-08 evening were made from a T3
-terminal: their `claude` and `bruhs` rows include the extra ~14k per
-request, equally for both.
+The benchmark clears inherited provider session variables so each run measures its own context.
 
 ## Reading the numbers
 
@@ -332,14 +314,13 @@ Caveats:
 | variable | default | |
 |---|---|---|
 | `BENCH_TASKS` | all | space/comma list of task names |
-| `BENCH_TOOLS` | `claude codex bruhs bruhs-codex bruhs-review bruhs-codex-review aider opencode t3 t3-codex` | space/comma list |
+| `BENCH_TOOLS` | `claude codex bruhs bruhs-codex bruhs-review bruhs-codex-review aider opencode` | space/comma list |
 | `BENCH_RUNS` | `1` | repeats per (tool, task) |
 | `BENCH_MODEL` | `haiku` | claude `--model` |
 | `BENCH_CODEX_MODEL` | codex config | codex `-m` |
 | `BENCH_BRUHS_MODEL` | `$BENCH_MODEL` | model id sent to bruhs |
 | `BENCH_BRUHS_CODEX_MODEL` | `$BENCH_CODEX_MODEL` or codex config | |
 | `BENCH_AIDER_MODEL`, `BENCH_OPENCODE_MODEL` | tool default | |
-| `BENCH_T3_BIN`, `BENCH_T3_PORT` | `t3` on PATH, else `~/.t3/bin/t3`; `3998` | T3's CLI and its isolated server |
 | `BENCH_CLAUDE_ARGS`, `BENCH_CODEX_ARGS` | none | extra flags, word-split |
 | `BENCH_TIMEOUT` | `600` | seconds per provider or grading step |
 | `BENCH_WORK_ROOT` | `~/.cache/bruhs-bench` | must be under `$HOME` for bruhs |

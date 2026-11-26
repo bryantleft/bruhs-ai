@@ -270,7 +270,7 @@ fn variable(role: &str) -> String {
     key
 }
 
-// Public CSS variables read by T3's surfaces. Most use the underlying role's
+// Public CSS variables read by theme surfaces. Most use the underlying role's
 // kebab-case spelling. These names differ from their --app-theme-* role.
 fn public_variable(internal: &str) -> String {
     let name = internal.trim_start_matches("--app-theme-");

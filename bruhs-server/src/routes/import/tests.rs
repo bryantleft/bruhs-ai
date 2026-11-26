@@ -27,7 +27,7 @@ const OTHER_PAGE: &str = "http://localhost:5173";
 /// An id of the right shape that names no batch.
 const NO_BATCH: &str = "0123456789abcdef0123456789abcdef";
 
-/// Every import route, `/api/export/t3` included (F20).
+/// Every import route is restricted to the owner.
 const ROUTES: [(&str, &str); 8] = [
     ("GET", "/api/import/sessions"),
     ("GET", "/api/import/thread"),
@@ -42,7 +42,6 @@ const ROUTES: [(&str, &str); 8] = [
     ),
     ("POST", "/api/import/files"),
     ("GET", "/api/import/agents"),
-    ("POST", "/api/export/t3"),
 ];
 
 struct Fixture {
@@ -260,19 +259,6 @@ async fn pages_can_not_import() {
             assert_ne!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");
         }
     }
-
-    // The owner still sends a transcript to T3 Code as before: a project
-    // folder that doesn't exist is refused by the same check as today,
-    // before T3's database is opened.
-    let project = fixture.home.join("no-such-project");
-    let (status, _) = Fixture::send(fixture.request("POST", "/api/export/t3").json(&json!({
-        "project_path": project,
-        "title": "A chat",
-        "model": "gpt-5",
-        "markdown": "# A chat",
-    })))
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

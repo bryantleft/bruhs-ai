@@ -1,12 +1,9 @@
-//! File-type artwork used on fenced Markdown blocks.
-use crate::{theme::ActiveTheme, zoom::px};
+//! Compact, theme-aware language marks for fenced Markdown blocks.
+use crate::{
+    theme::{self, ActiveTheme},
+    zoom::px,
+};
 use gpui::*;
-
-struct Mark {
-    path: &'static str,
-    bytes: &'static [u8],
-    color: Color,
-}
 
 #[derive(Clone, Copy)]
 enum Color {
@@ -40,84 +37,77 @@ impl Color {
     }
 }
 
-macro_rules! mark {
-    ($file:literal, $color:ident) => {
-        Mark {
-            path: concat!("bruhs-ui/language-icons/", $file, ".svg"),
-            bytes: include_bytes!(concat!("../assets/language-icons/", $file, ".svg")),
-            color: Color::$color,
-        }
-    };
-}
-
-const GENERIC: Mark = mark!("default", Neutral);
-const LANGUAGES: &[(&str, Mark)] = &[
-    ("", mark!("text", Neutral)),
-    ("asm", GENERIC),
-    ("bash", mark!("bash", Green)),
-    ("c", mark!("c", Blue)),
-    ("cpp", mark!("cpp", Blue)),
-    ("csharp", mark!("csharp", Purple)),
-    ("css", mark!("css", Purple)),
-    ("dart", mark!("dart", Cyan)),
-    ("diff", mark!("diff", Green)),
-    ("dockerfile", mark!("docker", Blue)),
-    ("elixir", mark!("elixir", Magenta)),
-    ("go", mark!("go", Cyan)),
-    ("graphql", mark!("graphql", Pink)),
-    ("haskell", mark!("haskell", Purple)),
-    ("html", mark!("html", Orange)),
-    ("java", mark!("java", Orange)),
-    ("javascript", mark!("javascript", Yellow)),
-    ("json", mark!("json", Orange)),
-    ("jsx", mark!("react", Cyan)),
-    ("kotlin", mark!("kotlin", Purple)),
-    ("lua", mark!("lua", Blue)),
-    ("markdown", mark!("markdown", Green)),
-    ("php", mark!("php", Purple)),
-    ("powershell", mark!("powershell", Blue)),
-    ("python", mark!("python", Blue)),
-    ("r", mark!("r", Blue)),
-    ("ruby", mark!("ruby", Red)),
-    ("rust", mark!("rust", Orange)),
-    ("scala", mark!("scala", Red)),
-    ("scss", mark!("sass", Pink)),
-    ("sql", mark!("database", Magenta)),
-    ("svelte", mark!("svelte", Red)),
-    ("swift", mark!("swift", Orange)),
-    ("toml", mark!("toml", Neutral)),
-    ("tsx", mark!("react", Cyan)),
-    ("typescript", mark!("typescript", Blue)),
-    ("vue", mark!("vue", Green)),
-    ("xml", mark!("xml", Orange)),
-    ("yaml", mark!("yml", Red)),
-    ("zig", mark!("zig", Orange)),
+const LANGUAGES: &[(&str, &str, Color)] = &[
+    ("", "TXT", Color::Neutral),
+    ("asm", "ASM", Color::Neutral),
+    ("bash", "SH", Color::Green),
+    ("c", "C", Color::Blue),
+    ("cpp", "C++", Color::Blue),
+    ("csharp", "C#", Color::Purple),
+    ("css", "CSS", Color::Purple),
+    ("dart", "DA", Color::Cyan),
+    ("diff", "±", Color::Green),
+    ("dockerfile", "DK", Color::Blue),
+    ("elixir", "EX", Color::Magenta),
+    ("go", "GO", Color::Cyan),
+    ("graphql", "GQL", Color::Pink),
+    ("haskell", "HS", Color::Purple),
+    ("html", "HT", Color::Orange),
+    ("java", "JV", Color::Orange),
+    ("javascript", "JS", Color::Yellow),
+    ("json", "{}", Color::Orange),
+    ("jsx", "JSX", Color::Cyan),
+    ("kotlin", "KT", Color::Purple),
+    ("lua", "LU", Color::Blue),
+    ("markdown", "MD", Color::Green),
+    ("php", "PHP", Color::Purple),
+    ("powershell", "PS", Color::Blue),
+    ("python", "PY", Color::Blue),
+    ("r", "R", Color::Blue),
+    ("ruby", "RB", Color::Red),
+    ("rust", "RS", Color::Orange),
+    ("scala", "SC", Color::Red),
+    ("scss", "SCSS", Color::Pink),
+    ("sql", "SQL", Color::Magenta),
+    ("svelte", "SV", Color::Red),
+    ("swift", "SW", Color::Orange),
+    ("toml", "TL", Color::Neutral),
+    ("tsx", "TSX", Color::Cyan),
+    ("typescript", "TS", Color::Blue),
+    ("vue", "VU", Color::Green),
+    ("xml", "XML", Color::Orange),
+    ("yaml", "YML", Color::Red),
+    ("zig", "ZG", Color::Orange),
 ];
 
-pub(crate) fn load(path: &str) -> Option<&'static [u8]> {
-    LANGUAGES
+pub(crate) fn element(language: &str) -> AnyElement {
+    let (label, color) = LANGUAGES
         .iter()
-        .find(|(_, mark)| mark.path == path)
-        .map(|(_, mark)| mark.bytes)
+        .find(|(id, _, _)| *id == language)
+        .map_or(("<>", Color::Neutral), |(_, label, color)| (*label, *color));
+    LanguageMark(label, color).into_any_element()
 }
 
 #[derive(IntoElement)]
-struct LanguageIcon(&'static Mark);
+struct LanguageMark(&'static str, Color);
 
-impl RenderOnce for LanguageIcon {
+impl RenderOnce for LanguageMark {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        svg()
-            .path(self.0.path)
-            .size(px(14.))
+        div()
             .flex_none()
-            .text_color(self.0.color.rgb(cx.theme().is_dark()))
+            .h(px(14.))
+            .min_w(px(16.))
+            .px(px(2.))
+            .rounded(px(3.))
+            .bg(theme::longan_700())
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(8.))
+            .line_height(px(12.))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(self.1.rgb(cx.theme().is_dark()))
+            .child(self.0)
     }
-}
-
-pub(crate) fn element(language: &str) -> AnyElement {
-    let mark = LANGUAGES
-        .iter()
-        .find(|(id, _)| *id == language)
-        .map_or(&GENERIC, |(_, mark)| mark);
-    LanguageIcon(mark).into_any_element()
 }

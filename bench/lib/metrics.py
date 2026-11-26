@@ -6,10 +6,7 @@ usage: metrics.py FORMAT LOG
 FORMAT is claude | codex | bruhs-claude | bruhs-codex | aider | opencode,
 bruhs-review-claude | bruhs-review-codex for a review-mode run (LOG is turn
 1's log; the review and turn 2 are read from the sibling files
-LOG-stem.review.json, .review.time, .review.body.json and .t2.log), or
-t3-claude | t3-codex for T3 Code (LOG is `t3 thread start --json` output;
-tokens come from the provider's session logs in the workdir named by the
-sibling LOG-stem.cwd).
+LOG-stem.review.json, .review.time, .review.body.json and .t2.log).
 
 --reply prints the run's final reply text (Claude `result.result`, Codex's
 last `agent_message`, bruhs's `result` or last text): chat tasks are graded
@@ -324,8 +321,6 @@ def reply_text(fmt, path):
     if not os.path.exists(path):
         return ""
     rows = read_jsonl(path)
-    if fmt.startswith("t3-"):
-        return str((rows[-1] if rows else {}).get("reply") or "")
     if fmt == "claude":
         return claude_reply(rows)
     if fmt == "codex":
@@ -504,57 +499,6 @@ def opencode_metrics(rows):
     return tokens, peak, turns, tools, ""
 
 
-# ---------------------------------------------------------------- T3 Code
-
-
-CODEX_TOOL_PAYLOADS = {"function_call", "custom_tool_call", "local_shell_call"}
-
-
-def t3_metrics(provider, path):
-    """A T3 thread's run, read from the session logs its provider left in
-    the workdir: every top-level Claude transcript there (the same scope as
-    bruhs's session transcript: subagent logs are not counted for either),
-    or every Codex rollout whose cwd is the workdir."""
-    rows = read_jsonl(path)
-    reply = rows[-1] if rows else {}
-    note = ""
-    if reply.get("status") != "completed":
-        note = f"t3 status {reply.get('status')}: {str(reply.get('error'))[:120]}"
-    cwd = read_text(sibling(path, ".cwd"))
-    if not cwd:
-        return "-", "-", "-", "-", note or "no .cwd file"
-    if provider == "claude":
-        messages = {}
-        for transcript in sorted(glob.glob(os.path.join(claude_project_dir(cwd), "*.jsonl"))):
-            messages.update(claude_transcript_messages(read_jsonl(transcript)))
-        if not messages:
-            return "-", "-", "-", "-", note or "no Claude transcript in the workdir"
-        if not all(has_usage(message.get("usage")) for message in messages.values()):
-            return "-", "-", len(messages), count_tool_uses(messages), note or "Claude transcript missing complete usage"
-        tokens = sum(claude_total(m.get("usage") or {}) for m in messages.values())
-        peak = max(claude_prompt(m.get("usage") or {}) for m in messages.values())
-        return tokens, peak, len(messages), count_tool_uses(messages), note
-    tokens = peak = turns = tools = 0
-    rollouts = codex_rollouts_in(cwd)
-    unknown = 0
-    for rollout, session in rollouts:
-        request_peak, request_turns, spent = codex_requests(session)
-        unknown += spent is None
-        tokens += spent or 0
-        peak = max(peak, request_peak or 0)
-        turns += request_turns or 0
-        for row in read_jsonl(rollout):
-            payload = row.get("payload") or {}
-            if row.get("type") == "response_item" and payload.get("type") in CODEX_TOOL_PAYLOADS:
-                tools += 1
-    if not rollouts:
-        return "-", "-", "-", "-", note or "no Codex rollout in the workdir"
-    if unknown:
-        detail = f"observed {tokens} tokens (lower bound); {unknown} Codex rollouts missing usage"
-        return "-", peak or "-", turns or "-", tools, "; ".join(filter(None, [note, detail]))
-    return tokens, peak or "-", turns or "-", tools, note
-
-
 def main():
     if len(sys.argv) < 3:
         print(__doc__, file=sys.stderr)
@@ -572,8 +516,6 @@ def main():
         fields = aider_metrics(path)
     elif fmt in ("bruhs-review-claude", "bruhs-review-codex"):
         fields = review_metrics(fmt, path)
-    elif fmt in ("t3-claude", "t3-codex"):
-        fields = t3_metrics(fmt[len("t3-"):], path)
     else:
         rows = read_jsonl(path)
         handler = {

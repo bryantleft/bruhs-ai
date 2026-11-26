@@ -78,9 +78,9 @@ class ReportTests(unittest.TestCase):
         self.assertIn("1/2", report)
 
     def test_selected_but_unavailable_tool_remains_in_denominator(self) -> None:
-        manifest = {"tools": ["codex", "capy"], "tasks": [{"name": "bugfix", "kind": "code"}], "runs": 1}
+        manifest = {"tools": ["codex", "external"], "tasks": [{"name": "bugfix", "kind": "code"}], "runs": 1}
         report = self.render([run_row()], manifest)
-        self.assertIn("| capy | code | 0/1 |", report.split("## Per tool\n", 1)[1])
+        self.assertIn("| external | code | 0/1 |", report.split("## Per tool\n", 1)[1])
         self.assertIn("missing", report)
 
     def test_complete_usage_keeps_all_attempts_in_cost_per_success(self) -> None:
@@ -137,32 +137,6 @@ class MetricsTests(unittest.TestCase):
                 self.assertEqual(parsed[0], "-")
                 self.assertIn("turn 2 log empty", parsed[4])
 
-    def test_t3_claude_missing_message_usage_is_unknown(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            path = root / "run.log"
-            path.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
-            path.with_suffix(".cwd").write_text("fixture", encoding="utf-8")
-            (root / "session.jsonl").write_text(json.dumps({"type": "assistant", "message": {"id": "one"}}), encoding="utf-8")
-            with patch.object(metrics, "claude_project_dir", return_value=str(root)):
-                parsed = metrics.t3_metrics("claude", str(path))
-            self.assertEqual(parsed[0], "-")
-            self.assertIn("missing complete usage", parsed[4])
-
-    def test_t3_codex_rollout_without_usage_is_unknown(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            path = root / "run.log"
-            path.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
-            path.with_suffix(".cwd").write_text("fixture", encoding="utf-8")
-            rollout = root / "rollout.jsonl"
-            rollout.write_text(json.dumps({"type": "session_meta"}), encoding="utf-8")
-            with patch.object(metrics, "codex_rollouts_in", return_value=[(str(rollout), "one")]), \
-                 patch.object(metrics, "codex_requests", return_value=(None, None, None)):
-                parsed = metrics.t3_metrics("codex", str(path))
-            self.assertEqual(parsed[0], "-")
-            self.assertIn("missing usage", parsed[4])
-
     def test_codex_rollout_missing_usage_fields_is_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rollout.jsonl"
@@ -193,8 +167,6 @@ class CompletionTests(unittest.TestCase):
             ("codex", {"type": "thread.started"}, "unknown"),
             ("bruhs-claude", {"envelope": "query", "type": "error"}, "failed"),
             ("bruhs-codex", {"envelope": "query", "type": "usage"}, "completed"),
-            ("t3-codex", {"status": "failed"}, "failed"),
-            ("t3-claude", {"status": "completed"}, "completed"),
         ]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "run.log"

@@ -246,7 +246,7 @@ pub fn tool_label(call: &impl ToolCallView, state: ToolState, root: Option<&str>
                     format!("{} agent: {}", tense("Spawning", "Spawned"), role)
                 }
             }
-            "delegate_task" | "mcp__t3-code__delegate_task" => {
+            "delegate_task" => {
                 let title = if !s("title").is_empty() {
                     s("title")
                 } else {

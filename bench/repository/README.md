@@ -114,7 +114,7 @@ network or access to the user's home. Tests share an interpreter with submitted
 Python and are not an adversarial attestation boundary. The provider sandbox
 also permits some host reads; this is not a test-secrecy evaluation.
 
-One public repository may overlap model training. No Capy, Claude Code, T3 Code,
+One public repository may overlap model training. This benchmark excludes external products,
 product-default campaign or complete personal-workflow delivery is measured.
 Token counts do not establish billed cost. Broader repository coverage, matched
 external-product runs, human/machine costs and complete capture-to-delivery

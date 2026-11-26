@@ -4,7 +4,7 @@
 //!
 //! The user's prompts are `event_msg` `user_message` records in older
 //! rollouts and `response_item` user messages in newer ones (which also
-//! carry injected context: AGENTS.md, the environment, T3's
+//! carry injected context: AGENTS.md, the environment, and
 //! instructions, all filtered out).
 
 use super::claude::last_model;
@@ -20,9 +20,6 @@ use bruhs_models::logic::portable::{
 use serde_json::Value;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-
-/// T3 Code's `originator`: its threads are listed under T3.
-const T3_ORIGINATOR: &str = "T3 Code";
 
 const HEAD_LINES: usize = 400;
 
@@ -49,7 +46,6 @@ fn rollouts(root: &Path) -> Vec<PathBuf> {
 struct Meta {
     id: Option<String>,
     cwd: Option<String>,
-    originator: Option<String>,
     /// A subagent's thread (it has a parent), not one the user started.
     child: bool,
 }
@@ -63,7 +59,6 @@ fn meta_of(row: &Value) -> Option<Meta> {
     Some(Meta {
         id: text("id"),
         cwd: text("cwd"),
-        originator: text("originator"),
         child: payload
             .get("parent_thread_id")
             .is_some_and(|parent| !parent.is_null()),
@@ -128,7 +123,7 @@ pub(super) fn list(
         let Some(meta) = rows.iter().find_map(meta_of) else {
             continue;
         };
-        if meta.child || meta.originator.as_deref() == Some(T3_ORIGINATOR) {
+        if meta.child {
             continue;
         }
         let events = rows.iter().any(is_user_event);

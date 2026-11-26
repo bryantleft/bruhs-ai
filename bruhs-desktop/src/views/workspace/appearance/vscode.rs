@@ -270,9 +270,7 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn vscode_palette_matches_installed_t3_reference() {
-        // Each column contains the rendered sRGB values from T3 Code Beta's
-        // importer for one input. Include derived roles as well as overrides.
+    fn vscode_palette_preserves_derived_roles_and_overrides() {
         let reference: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/vscode-theme-import.json"
@@ -301,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn vscode_accepts_comments_and_trailing_commas_but_keeps_t3_files_strict() {
+    fn vscode_accepts_comments_and_trailing_commas() {
         let jsonc = r##"{ // VS Code accepts comments in a color theme.
             "displayName":"Lake", "colors":{"editor.background":"#cde",}, /* toolbar inherits */
         }"##;

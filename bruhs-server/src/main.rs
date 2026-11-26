@@ -820,7 +820,6 @@ fn router_with_capture_daemon(
         )
         .route("/api/import/sessions", get(routes::import::get_sessions))
         .route("/api/import/thread", get(routes::import::get_thread))
-        .route("/api/export/t3", post(routes::import::post_export_t3))
         .merge(routes::import::router())
         .route("/api/agent/files", post(routes::files::post_files))
         .route(

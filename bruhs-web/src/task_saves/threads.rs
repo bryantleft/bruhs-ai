@@ -89,7 +89,10 @@ impl TaskSaves {
         original: Option<Arc<DraftRecord>>,
         draft: Option<Arc<DraftRecord>>,
     ) {
-        if self.conversations.with_value(|state| state.deleted.contains(&id)) {
+        if self
+            .conversations
+            .with_value(|state| state.deleted.contains(&id))
+        {
             return;
         }
         self.queue.update(|queue| {

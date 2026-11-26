@@ -1,7 +1,4 @@
-//! Import thread: pick a thread from Claude Code, Codex, T3 Code or Cursor
-//! and continue it here, plus the palette's ways back out (resume command,
-//! Markdown, a new T3 thread). Matches the web's `import_thread_dialog`.
-//! See `bruhs_models::logic::portable` for what moves and how.
+//! Import and export conversations. See `bruhs_models::logic::portable` for what moves and how.
 //!
 //! Listing, loading and exporting read other tools' files or run their
 //! CLIs, so all of it runs on the background executor.
@@ -752,7 +749,6 @@ impl Workspace {
         .children(
             ImportSource::LOCAL
                 .into_iter()
-                .filter(|source| *source != ImportSource::T3)
                 .map(ImportTab::Local)
                 .chain([ImportTab::Export])
                 .enumerate()

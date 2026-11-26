@@ -381,7 +381,7 @@ def main() -> int:
             "Hidden tests and reference fixes are withheld from workspace/prompt; native Codex sandbox does not deny all host reads.",
             "Bruhs includes its normal response contract and app tools backed by private synthetic stores.",
             "Token volume is not money; subscription/compute/human costs are not measured.",
-            "No Capy, Claude Code, T3 Code or connected daily-workflow execution in this pilot.",
+            "The pilot covers the listed runs and excludes connected daily workflows.",
         ],
     }
     report_path = campaign.output / "report.json"

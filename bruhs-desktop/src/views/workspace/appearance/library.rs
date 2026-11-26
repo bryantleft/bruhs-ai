@@ -383,7 +383,7 @@ impl InstalledTheme {
         if json.len() > MAX_THEME_BYTES {
             return Err("Theme files must be 256 KiB or smaller.".into());
         }
-        // T3's native schema uses strict JSON. VS Code additionally accepts
+        // The native theme schema uses strict JSON. VS Code additionally accepts
         // line comments, block comments and trailing commas.
         let value: Value = parse_jsonc(json).map_err(|e| format!("Invalid theme JSON. {e}"))?;
         let file: ThemeFile = if super::vscode::recognizes(&value) {

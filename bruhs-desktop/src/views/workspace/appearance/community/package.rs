@@ -58,7 +58,7 @@ fn read_json(zip: &mut Archive<'_>, path: &str) -> Result<Value, String> {
     jsonc(&buf)
 }
 
-// Open VSX packages contribute only the workbench keys used by T3's
+// Open VSX packages contribute only the workbench keys used by the
 // extension importer. Standalone local theme files use the full converter.
 fn supported_color(key: &str) -> bool {
     matches!(

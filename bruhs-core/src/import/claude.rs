@@ -16,10 +16,6 @@ use serde_json::Value;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-/// T3 Code runs Claude with this entrypoint; its threads are listed under
-/// T3, with T3's titles.
-const T3_ENTRYPOINT: &str = "t3-code";
-
 /// Lines read from the top of a transcript to list it: enough for the
 /// directory, the title and the first prompt.
 const HEAD_LINES: usize = 400;
@@ -37,7 +33,6 @@ fn sessions(root: &Path) -> Vec<PathBuf> {
 #[derive(Default)]
 struct Head {
     cwd: Option<String>,
-    entrypoint: Option<String>,
     title: Option<String>,
     prompt: Option<String>,
 }
@@ -52,9 +47,6 @@ fn read_head(path: &Path) -> Option<Head> {
         };
         if head.cwd.is_none() {
             head.cwd = str_field(&row, "cwd");
-        }
-        if head.entrypoint.is_none() {
-            head.entrypoint = str_field(&row, "entrypoint");
         }
         if let Some(title) = title_of(&row) {
             head.title = Some(title);
@@ -111,9 +103,6 @@ pub(super) fn list(
         let Some(head) = read_head(&path) else {
             continue;
         };
-        if head.entrypoint.as_deref() == Some(T3_ENTRYPOINT) {
-            continue;
-        }
         let Some(prompt) = head.prompt else {
             continue;
         };

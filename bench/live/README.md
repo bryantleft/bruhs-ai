@@ -63,7 +63,7 @@ and failed or unstarted attempts remain visible. A nonzero driver exit can mean
 a product failure or a harness error; inspect the report before interpreting it.
 
 This pilot has fixed entrant order, one attempt per cell and two internal
-fixtures. It measures neither Capy nor other competitors, statistically reliable
+fixtures. It makes no claims about external products, statistically reliable
 speed differences, monetary cost, PR delivery or connected daily work. Keep
 aborted harness runs alongside valid campaigns, with the reason recorded, and
 use fresh campaigns to verify changes rather than overwriting earlier results.

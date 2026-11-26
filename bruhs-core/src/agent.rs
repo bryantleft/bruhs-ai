@@ -1943,13 +1943,7 @@ fn keep_anthropic_api_key() -> bool {
     std::env::var_os(CLAUDE_API_KEY_OPT_IN).is_some_and(|value| value == "1")
 }
 
-/// Variables an agent host sets for the Claude Code session it runs, which a
-/// bruhs started from that session's terminal (T3 Code, Claude Code, Claude
-/// desktop) would otherwise pass on. They describe the parent, not bruhs:
-/// `CLAUDE_CODE_ENTRYPOINT=t3-code` alone turns on the host's Artifact tools
-/// and skills, 32k -> 46k tokens on every turn (measured, Claude Code
-/// 2.1.319); the messaging socket and token would point the child at the
-/// parent session, and `CLAUDE_EFFORT` would set the child's effort.
+/// Remove inherited session and messaging variables before launching a provider.
 const PARENT_SESSION_ENV: [&str; 12] = [
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
@@ -2683,7 +2677,7 @@ impl TurnContext {
                         }
                         created.push(task);
                     }
-                    "delegate_task" | "mcp__t3-code__delegate_task" => {
+                    "delegate_task" => {
                         let wait =
                             input.get("mode").and_then(serde_json::Value::as_str) == Some("wait");
                         let kind = if wait {
@@ -2885,7 +2879,7 @@ impl TurnContext {
                             _ => {}
                         }
                     }
-                    "task_cancel" | "mcp__t3-code__task_cancel" => {
+                    "task_cancel" => {
                         if let Some(ext_id) =
                             input.get("taskId").and_then(serde_json::Value::as_str)
                         {
@@ -2903,7 +2897,7 @@ impl TurnContext {
                             }
                         }
                     }
-                    "t3_workflow_stop" | "mcp__t3-code__t3_workflow_stop" => {
+                    "workflow_stop" => {
                         self.registry.finish_thread_kind(
                             thread_id,
                             TaskKind::BackgroundAgent,
@@ -4586,9 +4580,6 @@ mod tests {
             .any(|key| key == "ANTHROPIC_API_KEY"));
     }
 
-    /// A bruhs launched from a T3 Code or Claude Code terminal must not run
-    /// Claude as that host's session (T3's entrypoint alone costs +14k per
-    /// turn).
     #[test]
     fn claude_runs_drop_a_parent_agent_session() {
         for keep_api_key in [false, true] {

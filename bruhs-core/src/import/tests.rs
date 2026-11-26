@@ -35,10 +35,9 @@ fn a_claude_code_session_imports_as_a_resumable_thread() {
     let home = tempfile::tempdir().unwrap();
     let roots = ImportRoots::under(home.path());
     claude_session(&roots, "sess-1", "/work/shop", "cli");
-    claude_session(&roots, "sess-t3", "/work/shop", "t3-code");
 
     let listed = list(&roots, ImportSource::ClaudeCode, None, None).unwrap();
-    assert_eq!(listed.len(), 1, "T3's sessions are listed under T3");
+    assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "sess-1");
     assert_eq!(listed[0].title, "Fix the paging bug");
     assert_eq!(listed[0].cwd.as_deref(), Some("/work/shop"));
@@ -104,7 +103,7 @@ fn codex_rollouts_of_both_layouts_import() {
         "codex_exec",
         &[
             json!({"type":"turn_context","payload":{"model":"gpt-6.1-sol"}}),
-            json!({"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<t3_code_orchestration>"}]}}),
+            json!({"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<session_instructions>"}]}}),
             json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work/api"},{"type":"input_text","text":"<environment_context>x</environment_context>"}]}}),
             json!({"type":"response_item","timestamp":"2026-11-08T10:00:00.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Add a timeout"}]}}),
             json!({"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Finding the client**"}]}}),
@@ -124,12 +123,6 @@ fn codex_rollouts_of_both_layouts_import() {
             json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Rename the field"}]}}),
             json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Renamed."}]}}),
         ],
-    );
-    codex_rollout(
-        &roots,
-        "019a-t3",
-        "T3 Code",
-        &[json!({"type":"event_msg","payload":{"type":"user_message","message":"hi"}})],
     );
 
     let mut ids: Vec<String> = list(&roots, ImportSource::Codex, None, None)
@@ -154,44 +147,6 @@ fn codex_rollouts_of_both_layouts_import() {
     let old = load(&roots, ImportSource::Codex, "019a-old").unwrap();
     let roles: Vec<Role> = old.messages.iter().map(|m| m.role).collect();
     assert_eq!(roles, [Role::User, Role::Assistant]);
-}
-
-#[test]
-fn a_t3_thread_imports_its_session_with_t3s_title() {
-    let home = tempfile::tempdir().unwrap();
-    let roots = ImportRoots::under(home.path());
-    claude_session(&roots, "native-1", "/work/shop-worktree", "t3-code");
-    let db = roots.t3.join("userdata/statev2.sqlite");
-    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
-    let connection = rusqlite::Connection::open(&db).unwrap();
-    connection
-        .execute_batch(
-            "CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, project_id TEXT, title TEXT, active_provider_thread_id TEXT, updated_at TEXT, archived_at TEXT, deleted_at TEXT);
-             CREATE TABLE projection_projects (project_id TEXT, workspace_root TEXT);
-             CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT, thread_id TEXT, updated_at TEXT, payload_json TEXT);
-             INSERT INTO projection_projects VALUES ('p1', '/work/shop');
-             INSERT INTO orchestration_v2_projection_threads VALUES ('t-1', 'p1', 'Paging fix', 'pt-1', '2026-11-08T10:00:00.000Z', NULL, NULL);
-             INSERT INTO orchestration_v2_projection_threads VALUES ('t-gone', 'p1', 'Deleted', 'pt-2', '2026-11-08T10:00:00.000Z', NULL, '2026-11-08');
-             INSERT INTO orchestration_v2_projection_provider_threads VALUES ('pt-1', 't-1', '2026-11-08', '{\"nativeThreadRef\":{\"driver\":\"claudeAgent\",\"nativeId\":\"native-1\"}}');
-             INSERT INTO orchestration_v2_projection_provider_threads VALUES ('pt-2', 't-gone', '2026-11-08', '{\"nativeThreadRef\":{\"driver\":\"claudeAgent\",\"nativeId\":\"native-1\"}}');",
-        )
-        .unwrap();
-    drop(connection);
-
-    let listed = list(&roots, ImportSource::T3, None, None).unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].title, "Paging fix");
-    assert_eq!(listed[0].session_id.as_deref(), Some("native-1"));
-
-    let thread = load(&roots, ImportSource::T3, "t-1").unwrap();
-    assert_eq!(thread.candidate.source, ImportSource::T3);
-    assert_eq!(thread.candidate.title, "Paging fix");
-    assert_eq!(
-        thread.candidate.cwd.as_deref(),
-        Some("/work/shop-worktree"),
-        "the session's own directory"
-    );
-    assert_eq!(thread.messages.len(), 3);
 }
 
 #[test]
@@ -291,7 +246,7 @@ fn a_tool_that_is_not_installed_has_no_threads() {
 
 /// Reads this machine's real stores: `cargo test -p bruhs-core import::tests::real -- --ignored --nocapture`.
 #[test]
-#[ignore = "reads the real ~/.claude, ~/.codex, ~/.t3 and Cursor data"]
+#[ignore = "reads the real ~/.claude, ~/.codex and Cursor data"]
 fn real_stores_list_and_load() {
     let roots = ImportRoots::from_env();
     for source in ImportSource::LOCAL {
@@ -330,40 +285,6 @@ fn injected_blocks_are_not_part_of_the_prompt() {
     assert_eq!(
         user_text("<environment_context>cwd</environment_context>"),
         ""
-    );
-}
-
-/// Starts a real T3 thread: run against an isolated T3 server
-/// (`t3 serve --base-dir D`) with `T3CODE_HOME=D BRUHS_T3_EXPORT_DIR=<project>`.
-#[test]
-#[ignore = "starts a thread in the T3 server T3CODE_HOME points at"]
-fn real_export_to_t3() {
-    let project = std::env::var("BRUHS_T3_EXPORT_DIR").expect("BRUHS_T3_EXPORT_DIR");
-    let id = export_to_t3(
-        Path::new(&project),
-        "Exported from bruhs",
-        "claude-haiku-4-5",
-        "# Paging\n\n## User\n\nFix the paging bug\n\n## Assistant\n\nFixed: the last page is kept.\n",
-    )
-    .unwrap();
-    println!("T3 thread {id}");
-    assert!(!id.is_empty());
-}
-
-/// A model T3 doesn't run is refused with fixed copy before T3's CLI is
-/// looked for (I Task 9 I2).
-#[test]
-fn t3_refuses_a_runtime_it_does_not_run_with_fixed_copy() {
-    let project = tempfile::tempdir().unwrap();
-    let refused = export_to_t3(project.path(), "A chat", "opencode/some-model", "# A chat");
-    assert!(
-        matches!(
-            refused,
-            Err(ImportError::Refused(
-                bruhs_models::imports::T3_RUNTIME_UNSUPPORTED
-            ))
-        ),
-        "{refused:?}"
     );
 }
 

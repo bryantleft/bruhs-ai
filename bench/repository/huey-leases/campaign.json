@@ -49,7 +49,7 @@
     "Only selected standard-library regressions run; unavailable optional-backend matrices and one absolute-host-path FileLock case are excluded before model access.",
     "Provider sandbox permits some host reads. Hidden checks/reference are withheld from workspace and prompt but this is not an adversarial secrecy evaluation.",
     "Token volume is not money; billed cost and complete human/machine cost remain unknown.",
-    "No Capy, Claude Code, T3 Code, product-default campaign or complete personal-workflow delivery is included."
+    "No external-product or product-default campaign or complete personal-workflow delivery is included."
   ],
   "inputs": {
     "upstream_pin": "source.json",

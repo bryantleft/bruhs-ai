@@ -1,5 +1,5 @@
 //! Threads from the other agent tools on this machine, chat service
-//! exports, local agents' personas, and sending one thread to T3 Code.
+//! exports and local agent personas.
 //! See `bruhs_core::import`.
 //!
 //! - `GET /api/import/sessions?source=&q=&limit=`: a local tool's threads.
@@ -12,12 +12,11 @@
 //! - `GET` and `DELETE /api/import/uploads/{id}`: a read's state, and
 //!   ending it or discarding its batch.
 //! - `GET /api/import/agents?source=&path=`: an [`AgentScan`].
-//! - `POST /api/export/t3`: starts a T3 thread carrying a bruhs transcript.
 //!
 //! Every route sits behind the shared loopback guard and checks
 //! [`Policy::owner_request`] before anything else (D15, F20): other
 //! loopback pages may neither read the owner's other tools nor write to
-//! T3. Every answer is fixed copy from `bruhs_models::imports`, and the
+//! private files. Every answer is fixed copy from `bruhs_models::imports`, and the
 //! guard marks each one `Cache-Control: no-store`. No handler logs a body,
 //! a path, a name or an I/O error's text.
 
@@ -46,15 +45,13 @@ use bruhs_models::imports::{
     OWNER_ONLY_IMPORT, TOO_MANY_FILES,
 };
 use bruhs_models::logic::portable::{
-    ExportT3Request, ExportT3Response, ImportCandidate, ImportListQuery, ImportSource,
-    ImportThreadQuery, ImportedThread,
+    ImportCandidate, ImportListQuery, ImportSource, ImportThreadQuery, ImportedThread,
 };
 use futures_util::StreamExt as _;
 
 use crate::config::{Config, ServerState};
 use crate::error::AppError;
 use crate::local_access::Policy;
-use crate::routes::paths::HomePath;
 
 #[cfg(test)]
 mod tests;
@@ -69,7 +66,7 @@ const WATCH_EVERY: Duration = Duration::from_millis(200);
 /// through in pieces far smaller.
 const MAX_HELD: u64 = 8 << 20;
 
-/// The read and agent routes; `main` adds the sessions, thread and T3
+/// The read and agent routes; `main` adds the sessions and thread
 /// routes beside them. Only the upload lifts the body limit: the core
 /// upload enforces its own caps.
 pub fn router() -> Router<ServerState> {
@@ -495,24 +492,4 @@ pub async fn get_agents(
     let picked = path.filter(|path| !path.is_empty()).map(PathBuf::from);
     let scan = blocking(move || host.scan(source, picked.as_deref())).await?;
     Ok(Json(scan))
-}
-
-/// `POST /api/export/t3`: a T3 thread carrying a bruhs transcript, in a
-/// project folder inside the home. Owner only (F20): it writes to T3's
-/// database.
-pub async fn post_export_t3(
-    State(config): State<Arc<Config>>,
-    headers: HeaderMap,
-    body: Result<Json<ExportT3Request>, JsonRejection>,
-) -> Result<Json<ExportT3Response>, Refusal> {
-    owner_only_import(&config.access, &headers)?;
-    let Json(body) = body.map_err(|_| invalid())?;
-    let project = HomePath::resolve(&body.project_path)
-        .await
-        .map_err(AppError::from)?
-        .into_path_buf();
-    let thread_id =
-        blocking(move || import::export_to_t3(&project, &body.title, &body.model, &body.markdown))
-            .await?;
-    Ok(Json(ExportT3Response { thread_id }))
 }

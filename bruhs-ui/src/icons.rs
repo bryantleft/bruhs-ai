@@ -323,7 +323,6 @@ pub fn load(path: &str) -> Option<&'static [u8]> {
         WRAP_TEXT => Some(WRAP_TEXT_SVG),
         WRENCH => Some(WRENCH_SVG),
         ZAP => Some(ZAP_SVG),
-        _ if path.starts_with("bruhs-ui/language-icons/") => crate::language_icons::load(path),
         _ => IconName::ALL
             .into_iter()
             .find(|name| name.path() == path)

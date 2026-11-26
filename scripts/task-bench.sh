@@ -18,8 +18,7 @@
 # BENCH_RUNS (repeat each tool/task cell N times, default 1),
 # BENCH_MODEL (claude + bruhs, default haiku), BENCH_CODEX_MODEL (codex; unset
 # = codex's configured default), BENCH_BRUHS_MODEL, BENCH_BRUHS_CODEX_MODEL,
-# BENCH_AIDER_MODEL, BENCH_OPENCODE_MODEL, BENCH_T3_BIN (default `t3` on PATH,
-# else ~/.t3/bin/t3), BENCH_T3_PORT (its isolated server, default 3998),
+# BENCH_AIDER_MODEL, BENCH_OPENCODE_MODEL
 # BENCH_CLAUDE_ARGS / BENCH_CODEX_ARGS
 # (extra flags, word-split), BENCH_TIMEOUT (seconds per provider/grading step,
 # default 600), BENCH_WORK_ROOT (default ~/.cache/bruhs-bench), BRUHS_URL
@@ -34,7 +33,7 @@ BENCH="$ROOT/bench"
 TASKS_DIR="$BENCH/tasks"
 LIB="$BENCH/lib"
 
-ALL_TOOLS="claude codex bruhs bruhs-codex bruhs-review bruhs-codex-review aider opencode t3 t3-codex"
+ALL_TOOLS="claude codex bruhs bruhs-codex bruhs-review bruhs-codex-review aider opencode"
 MODEL="${BENCH_MODEL:-haiku}"
 CODEX_MODEL="${BENCH_CODEX_MODEL:-}"
 BRUHS_URL="${BRUHS_URL:-http://127.0.0.1:3001}"
@@ -45,20 +44,11 @@ WORK_ROOT="${BENCH_WORK_ROOT:-$HOME/.cache/bruhs-bench}"
 RUNS="${BENCH_RUNS:-1}"
 case "$RUNS" in '' | *[!0-9]* | 0) echo "task-bench: BENCH_RUNS must be a positive integer" >&2 && exit 1 ;; esac
 
-T3_BIN="${BENCH_T3_BIN:-$(command -v t3 2>/dev/null || echo "$HOME/.t3/bin/t3")}"
-T3_PORT="${BENCH_T3_PORT:-3998}"
-T3_HOME=""
-T3_PID=""
-
-# Variables an agent host (T3 Code, Claude Code) sets for its own session.
-# Started from such a terminal, every tool here would run as a child of that
-# session: CLAUDE_CODE_ENTRYPOINT=t3-code alone gives Claude the host's
-# Artifact tools and skills, 32k -> 46k tokens per turn (Claude Code 2.1.319).
-# T3 sets its own entrypoint for the threads it starts, so `t3` still pays it.
+# Keep parent session settings out of benchmark runs.
 for parent_var in CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID \
   CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET \
   CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_EXECPATH CLAUDE_PID CLAUDE_AGENT_SDK_VERSION \
-  CLAUDE_EFFORT AI_AGENT T3CODE_THREAD_ID T3CODE_CLI_PATH T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING; do
+  CLAUDE_EFFORT AI_AGENT; do
   unset "$parent_var"
 done
 
@@ -109,7 +99,7 @@ task_kind() { # code (the default) or chat, from bench/tasks/<task>/kind
 
 # Chat tasks need a harness that can answer without a project and hand back
 # its final reply: the four headless ones. Review mode reviews code changes,
-# aider/opencode are file editors here, and every T3 thread has a project.
+# The file-editing providers need a project.
 tool_runs_kind() { # tool_runs_kind <tool> <kind>
   [ "$2" = code ] && return 0
   case "$1" in claude | codex | bruhs | bruhs-codex | bruhs-review | bruhs-codex-review) return 0 ;; esac
@@ -228,7 +218,7 @@ self_check_chat() { # self_check_chat <task> <scratch>
     [ -f "$sample" ] || continue
     wrong=$((wrong + 1))
     cp "$sample" "$dir/reply.txt"
-    if grade "$task" "$dir" "$dir.wrong.log"; then
+    if grade "$task" "$dir" "$dir.wrong.$wrong.log"; then
       wrong_bad=$((wrong_bad + 1))
       bad=1
       say "    $(basename "$sample") passed but should fail"
@@ -258,9 +248,6 @@ tool_status() { # one-line availability for --list
       ;;
     bruhs | bruhs-codex | bruhs-review | bruhs-codex-review)
       if bruhs_reachable; then echo "server at $BRUHS_URL"; else echo "server not reachable at $BRUHS_URL"; fi
-      ;;
-    t3 | t3-codex)
-      if [ -x "$T3_BIN" ]; then echo "available ($T3_BIN, isolated server on :$T3_PORT)"; else echo "t3 CLI not found"; fi
       ;;
   esac
 }
@@ -455,52 +442,6 @@ run_bruhs_codex_review() {
   run_review_with codex "$BRUHS_CODEX_MODEL" "$@"
 }
 
-# T3 Code: a server of its own (`t3 serve --base-dir` under the run's work
-# root, port BENCH_T3_PORT), so runs never touch the user's T3 data, and one
-# thread per run through the CLI (`t3 thread start --wait --json`), each in
-# a project made from its workdir. Tokens come from the provider's session
-# logs in the workdir (<logbase>.cwd names it; metrics.py t3-*).
-t3_start() {
-  [ -n "$T3_HOME" ] && return 0
-  T3_HOME="$WORK_ROOT/$RUN_ID/t3home"
-  mkdir -p "$T3_HOME"
-  "$T3_BIN" serve --base-dir "$T3_HOME" --port "$T3_PORT" --no-browser >"$T3_HOME/serve.log" 2>&1 &
-  T3_PID=$!
-  trap t3_stop EXIT
-  local tries=0
-  until curl -s -m 2 -o /dev/null "http://127.0.0.1:$T3_PORT/"; do
-    tries=$((tries + 1))
-    if [ "$tries" -ge 60 ] || ! kill -0 "$T3_PID" 2>/dev/null; then
-      say "T3 server did not start on :$T3_PORT (log: $T3_HOME/serve.log)"
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-t3_stop() {
-  [ -n "$T3_PID" ] && kill "$T3_PID" 2>/dev/null || true
-}
-
-run_t3_with() { # run_t3_with <provider instance> <model> <task> <workdir> <logbase> <prompt-file>
-  local work="$4" logbase="$5"
-  echo "$work" >"$logbase.cwd"
-  if ! "$T3_BIN" project add --base-dir "$T3_HOME" "$work" >"$logbase.project" 2>&1; then
-    say "  t3: project add failed: $(head -c 300 "$logbase.project")"
-    return 1
-  fi
-  run_cmd "$work" "$logbase" "$T3_BIN" thread start --base-dir "$T3_HOME" --provider "$1" \
-    --model "$2" --wait --json "$work" "$(cat "$6")"
-}
-
-run_t3() {
-  run_t3_with claudeAgent "$MODEL" "$@"
-}
-
-run_t3_codex() {
-  run_t3_with codex "$BRUHS_CODEX_MODEL" "$@"
-}
-
 run_aider() {
   local model_args=()
   [ -n "${BENCH_AIDER_MODEL:-}" ] && model_args=(--model "$BENCH_AIDER_MODEL")
@@ -544,20 +485,6 @@ tool_ready() {
           fi
           ;;
       esac
-      ;;
-    t3 | t3-codex)
-      [ -x "$T3_BIN" ] || {
-        skip "skip $1: the t3 CLI is not installed (set BENCH_T3_BIN)"
-        return 1
-      }
-      if [ "$1" = t3-codex ] && [ -z "$BRUHS_CODEX_MODEL" ]; then
-        skip "skip $1: no codex model (set BENCH_BRUHS_CODEX_MODEL or BENCH_CODEX_MODEL)"
-        return 1
-      fi
-      t3_start || {
-        skip "skip $1: the T3 server did not start"
-        return 1
-      }
       ;;
   esac
 }
@@ -670,7 +597,6 @@ format_for() { # metrics.py format of a tool's log
     bruhs) echo bruhs-claude ;;
     bruhs-review) echo bruhs-review-claude ;;
     bruhs-codex-review) echo bruhs-review-codex ;;
-    t3) echo t3-claude ;;
     *) echo "$1" ;;
   esac
 }

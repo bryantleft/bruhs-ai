@@ -70,7 +70,7 @@ fn named_route(source: &str) -> Option<&'static str> {
 fn the_guard_sees_a_route_however_it_is_written() {
     for source in [
         r#"let url = format!("{base}/api/import/uploads");"#,
-        r##"const PATH: &str = r#"/API/Export/t3"#;"##,
+        r##"const PATH: &str = r#"/API/Export/thread"#;"##,
         "// calls /api/import/thread",
     ] {
         assert!(named_route(source).is_some(), "{source}");
@@ -79,7 +79,7 @@ fn the_guard_sees_a_route_however_it_is_written() {
     assert_eq!(named_route(r#"let path = "/api/exports-list";"#), None);
     assert_eq!(named_route("an api/importer and api/export_all"), None);
     assert_eq!(
-        named_route(r#"let path = "/api/exports"; let t3 = "/api/export";"#),
+        named_route(r#"let path = "/api/exports"; let base = "/api/export";"#),
         Some("api/export")
     );
 }
