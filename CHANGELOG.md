@@ -23,6 +23,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - Backup: make one encrypted file of all your Bruhs data in Settings, Backup, and restore it here or on another computer. Bruhs checks the file and shows what's inside before it replaces anything, moves paths to the new home, keeps your logins in the keychain, and keeps the replaced data aside until you delete it. See `docs/backup.md`.
 - Imports: bring your ChatGPT, Claude.ai and Grok chats into Bruhs from their data exports (Grok is best effort), and move an OpenClaw or Hermes Agent persona in as a bruh. Imported memory waits for your approval on the bruh's Memory tab, and Move in asks another assistant what it knows about you. See `docs/imports.md`.
 
+### Removed
+
+- Bruhs retired the legacy workspace importer and export endpoint. Existing imported threads stay available, and you can copy a thread as Markdown or hand it off within Bruhs.
+
 ## [0.2.0] - 2026-11-18
 
 ### Added
