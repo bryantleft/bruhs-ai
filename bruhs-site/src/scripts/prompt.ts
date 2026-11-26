@@ -1,4 +1,4 @@
-import { parsePromptFragment, promptAppUrl, promptFragment } from '../../../bruhs-mobile/src/promptLink.ts';
+import { parsePromptFragment, promptAppUrl, promptFragment } from '../../../bruhs-mobile/shared/promptLink.ts';
 
 const choiceKey = 'bruhs-prompt-opener';
 
