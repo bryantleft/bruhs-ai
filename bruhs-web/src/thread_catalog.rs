@@ -33,7 +33,8 @@ pub struct ThreadCatalog {
     threads: ReadSignal<Vec<Thread>>,
     set_threads: WriteSignal<Vec<Thread>>,
     active: ReadSignal<Option<String>>,
-    set_active: WriteSignal<Option<String>>,
+    set_active: crate::state::ActiveThreadWriter,
+    drafts: crate::state::Drafts,
     messages: WriteSignal<Vec<AgentMessage>>,
     turns: Turns,
     history: crate::thread_history::ThreadHistory,
@@ -46,6 +47,10 @@ impl ThreadCatalog {
         self.status.get().empty_message()
     }
 
+    pub fn loading(self) -> bool {
+        matches!(self.status.get(), Status::Pending | Status::Loading)
+    }
+
     pub fn install() {
         provide_context(Self {
             status: RwSignal::new(Status::Pending),
@@ -55,6 +60,7 @@ impl ThreadCatalog {
             set_threads: expect_context::<crate::state::SetThreadsSignal>().0,
             active: expect_context::<crate::state::ActiveThreadId>().0,
             set_active: expect_context::<crate::state::SetActiveThreadId>().0,
+            drafts: expect_context(),
             messages: expect_context::<crate::state::SetMessagesSignal>().0,
             turns: expect_context(),
             history: expect_context(),
@@ -70,10 +76,15 @@ impl ThreadCatalog {
         self.touched.set_value(true);
         self.edits
             .update_value(|edits| edits.edit(&thread.id, Some(&thread)));
+        let new_id = expected.is_none().then(|| thread.id.clone());
         self.saves.edit_thread(expected, thread);
+        if let Some(id) = new_id {
+            self.drafts.register_new(&id);
+        }
     }
 
     pub fn forget(self, original: Thread) {
+        self.drafts.forget(&original.id);
         self.touched.set_value(true);
         self.edits
             .update_value(|edits| edits.edit(&original.id, None));

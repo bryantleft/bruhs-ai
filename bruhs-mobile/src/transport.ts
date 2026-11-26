@@ -13,7 +13,7 @@ export const transport: Transport = async (url, init) => {
     headers: {
       'Cache-Control': 'no-store',
       ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
-      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(init.contentType ? { 'Content-Type': init.contentType } : {}),
     },
   });
   if (response.redirected)

@@ -452,7 +452,7 @@ fn untracked(dir: &Path, paths: &[u8], budget: usize) -> MobileResult<(Vec<u8>, 
     Ok((result, truncated))
 }
 #[cfg(unix)]
-fn confined_file(dir: &Path, raw: &[u8]) -> std::io::Result<std::fs::File> {
+pub(super) fn confined_file(dir: &Path, raw: &[u8]) -> std::io::Result<std::fs::File> {
     use std::{
         ffi::CString,
         os::{
@@ -499,7 +499,7 @@ fn confined_file(dir: &Path, raw: &[u8]) -> std::io::Result<std::fs::File> {
     Err(std::io::Error::other("invalid repository path"))
 }
 #[cfg(not(unix))]
-fn confined_file(_dir: &Path, _raw: &[u8]) -> std::io::Result<std::fs::File> {
+pub(super) fn confined_file(_dir: &Path, _raw: &[u8]) -> std::io::Result<std::fs::File> {
     // A path-only check would race junctions. Tracked diffs still work on this platform.
     Err(std::io::Error::other(
         "untracked mobile preview requires a confined file handle",

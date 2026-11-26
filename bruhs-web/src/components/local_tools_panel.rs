@@ -368,8 +368,7 @@ pub fn DictationButton(on_text: Callback<String>) -> impl IntoView {
                     recording.set_value(Some(captured));
                     generation.update(|value| *value = value.wrapping_add(1));
                     let current_generation = generation.get_untracked();
-                    // Match the five-minute dictation limit in the researched T3
-                    // voice-input contract; stopping always shuts down microphone tracks.
+                    // Stop capturing after five minutes and release the microphone.
                     wasm_bindgen_futures::spawn_local(async move {
                         gloo_timers::future::TimeoutFuture::new(300_000).await;
                         if active.try_get_untracked() == Some(true)

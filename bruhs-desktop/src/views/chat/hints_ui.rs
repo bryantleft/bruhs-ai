@@ -246,6 +246,25 @@ pub(super) fn desktop_mention_icon(is_dir: bool) -> &'static str {
     }
 }
 
+fn composer_hint_header(heading: &'static str) -> AnyElement {
+    div()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .border_b_1()
+        .border_color(gpui::white().opacity(0.10))
+        .px_3()
+        .py_1p5()
+        .text_size(px(COMPOSER_HINT_SUB_TEXT_SIZE_PX))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_color(theme::rambutan_500())
+        .child(heading)
+        .child("Enter to select  Esc to close")
+        .into_any_element()
+}
+
 impl ChatView {
     /// ⌘P: put an `@` in the composer so the file picker opens.
     pub fn mention_file(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -421,11 +440,12 @@ impl ChatView {
                         .aria_label(format!("{}: {}", command.label, command.description))
                         .aria_selected(is_selected)
                         .flex_shrink_0()
-                        .w_full()
+                        .mx_1()
+                        .rounded(px(4.0))
                         .flex()
                         .items_center()
                         .gap_2()
-                        .px_3()
+                        .px_2p5()
                         .py_1p5()
                         .text_size(px(COMPOSER_HINT_ROW_TEXT_SIZE_PX))
                         .text_color(if is_selected {
@@ -489,30 +509,40 @@ impl ChatView {
 
         div()
             .id("desktop-slash-command-hints")
-            .role(if no_matches {
-                Role::Status
-            } else {
-                Role::ListBox
-            })
-            .aria_label(if no_matches {
-                COMPOSER_HINT_EMPTY_LABEL
-            } else {
-                "Commands"
-            })
             .debug_selector(|| "desktop-slash-command-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
             .border_1()
             .border_color(theme::ring_floating())
             .bg(theme::longan_700())
-            .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .track_scroll(&self.composer_hint_scroll)
-            .overflow_y_scroll()
-            .children(rows)
-            .vertical_scrollbar(&self.composer_hint_scroll)
+            .child(composer_hint_header("Commands"))
+            .child(
+                div()
+                    .id("desktop-slash-command-hints-list")
+                    .role(if no_matches {
+                        Role::Status
+                    } else {
+                        Role::ListBox
+                    })
+                    .aria_label(if no_matches {
+                        COMPOSER_HINT_EMPTY_LABEL
+                    } else {
+                        "Commands"
+                    })
+                    .min_h_0()
+                    .flex_1()
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .track_scroll(&self.composer_hint_scroll)
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .vertical_scrollbar(&self.composer_hint_scroll),
+            )
             .into_any_element()
     }
 
@@ -1073,11 +1103,12 @@ impl ChatView {
                         .aria_label(format!("Thread {title}"))
                         .aria_selected(is_selected)
                         .flex_shrink_0()
-                        .w_full()
+                        .mx_1()
+                        .rounded(px(4.0))
                         .flex()
                         .items_center()
                         .gap_2()
-                        .px_3()
+                        .px_2p5()
                         .py_1p5()
                         .text_size(px(COMPOSER_HINT_ROW_TEXT_SIZE_PX))
                         .text_color(if is_selected {
@@ -1147,11 +1178,12 @@ impl ChatView {
                     ))
                     .aria_selected(is_selected)
                     .flex_shrink_0()
-                    .w_full()
+                    .mx_1()
+                    .rounded(px(4.0))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .px_3()
+                    .px_2p5()
                     .py_1p5()
                     .text_size(px(COMPOSER_HINT_ROW_TEXT_SIZE_PX))
                     .text_color(if is_selected {
@@ -1217,34 +1249,44 @@ impl ChatView {
 
         div()
             .id("desktop-file-mention-hints")
-            .role(
-                if self.thread_hits.is_empty() && self.mention_items.is_empty() {
-                    Role::Status
-                } else {
-                    Role::ListBox
-                },
-            )
-            .aria_label(
-                if self.thread_hits.is_empty() && self.mention_items.is_empty() {
-                    COMPOSER_HINT_EMPTY_LABEL
-                } else {
-                    "Threads and files"
-                },
-            )
             .debug_selector(|| "desktop-file-mention-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
             .border_1()
             .border_color(theme::ring_floating())
             .bg(theme::longan_700())
-            .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .track_scroll(&self.composer_hint_scroll)
-            .overflow_y_scroll()
-            .children(rows)
-            .vertical_scrollbar(&self.composer_hint_scroll)
+            .child(composer_hint_header("Files and threads"))
+            .child(
+                div()
+                    .id("desktop-file-mention-hints-list")
+                    .role(
+                        if self.thread_hits.is_empty() && self.mention_items.is_empty() {
+                            Role::Status
+                        } else {
+                            Role::ListBox
+                        },
+                    )
+                    .aria_label(
+                        if self.thread_hits.is_empty() && self.mention_items.is_empty() {
+                            COMPOSER_HINT_EMPTY_LABEL
+                        } else {
+                            "Threads and files"
+                        },
+                    )
+                    .min_h_0()
+                    .flex_1()
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .track_scroll(&self.composer_hint_scroll)
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .vertical_scrollbar(&self.composer_hint_scroll),
+            )
             .into_any_element()
     }
 
@@ -1290,10 +1332,11 @@ impl ChatView {
                         .aria_label(format!("{label}: {description}"))
                         .aria_selected(is_selected)
                         .flex_shrink_0()
-                        .w_full()
+                        .mx_1()
+                        .rounded(px(4.0))
                         .flex()
                         .items_center()
-                        .px_3()
+                        .px_2p5()
                         .py_1p5()
                         .text_size(px(COMPOSER_HINT_ROW_TEXT_SIZE_PX))
                         .text_color(if is_selected {
@@ -1347,32 +1390,42 @@ impl ChatView {
         };
         div()
             .id("desktop-skill-hints")
-            .role(if self.skill_items.is_empty() {
-                Role::Status
-            } else {
-                Role::ListBox
-            })
-            .aria_label(if self.skill_items.is_empty() {
-                self.skill_error
-                    .clone()
-                    .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
-            } else {
-                "Skills".to_string()
-            })
             .debug_selector(|| "desktop-skill-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
             .border_1()
             .border_color(theme::ring_floating())
             .bg(theme::longan_700())
-            .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .track_scroll(&self.composer_hint_scroll)
-            .overflow_y_scroll()
-            .children(rows)
-            .vertical_scrollbar(&self.composer_hint_scroll)
+            .child(composer_hint_header("Skills"))
+            .child(
+                div()
+                    .id("desktop-skill-hints-list")
+                    .role(if self.skill_items.is_empty() {
+                        Role::Status
+                    } else {
+                        Role::ListBox
+                    })
+                    .aria_label(if self.skill_items.is_empty() {
+                        self.skill_error
+                            .clone()
+                            .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
+                    } else {
+                        "Skills".to_string()
+                    })
+                    .min_h_0()
+                    .flex_1()
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .track_scroll(&self.composer_hint_scroll)
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .vertical_scrollbar(&self.composer_hint_scroll),
+            )
             .into_any_element()
     }
 
@@ -1415,10 +1468,11 @@ impl ChatView {
                         .aria_label(label.clone())
                         .aria_selected(is_selected)
                         .flex_shrink_0()
-                        .w_full()
+                        .mx_1()
+                        .rounded(px(4.0))
                         .flex()
                         .items_center()
-                        .px_3()
+                        .px_2p5()
                         .py_1p5()
                         .text_size(px(COMPOSER_HINT_ROW_TEXT_SIZE_PX))
                         .text_color(if is_selected {
@@ -1465,32 +1519,42 @@ impl ChatView {
         };
         div()
             .id("desktop-pull-hints")
-            .role(if self.pull_items.is_empty() {
-                Role::Status
-            } else {
-                Role::ListBox
-            })
-            .aria_label(if self.pull_items.is_empty() {
-                self.pull_error
-                    .clone()
-                    .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
-            } else {
-                "Pull requests".to_string()
-            })
             .debug_selector(|| "desktop-pull-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
             .border_1()
             .border_color(theme::ring_floating())
             .bg(theme::longan_700())
-            .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .track_scroll(&self.composer_hint_scroll)
-            .overflow_y_scroll()
-            .children(rows)
-            .vertical_scrollbar(&self.composer_hint_scroll)
+            .child(composer_hint_header("Pull requests"))
+            .child(
+                div()
+                    .id("desktop-pull-hints-list")
+                    .role(if self.pull_items.is_empty() {
+                        Role::Status
+                    } else {
+                        Role::ListBox
+                    })
+                    .aria_label(if self.pull_items.is_empty() {
+                        self.pull_error
+                            .clone()
+                            .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
+                    } else {
+                        "Pull requests".to_string()
+                    })
+                    .min_h_0()
+                    .flex_1()
+                    .py_1()
+                    .flex()
+                    .flex_col()
+                    .track_scroll(&self.composer_hint_scroll)
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .vertical_scrollbar(&self.composer_hint_scroll),
+            )
             .into_any_element()
     }
 }

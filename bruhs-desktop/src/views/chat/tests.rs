@@ -6,15 +6,15 @@ use super::{
     desktop_mention_icon, desktop_permission_request_from_raw, desktop_permission_summary,
     desktop_scroll_to_bottom_control_visible, desktop_tool_body_text, desktop_tool_input_summary,
     desktop_tool_options, detect_mention_query, detect_pull_query, element_key,
-    filter_models_like_web, group_models_like_web, mark_streaming_message_stopped_like_web,
-    move_composer_hint_index, normalize_claude_command_error, parse_desktop_auth_status,
-    replace_mention_trigger, select_composer_hint_index_on_hover, slash_command_query,
-    thread_title_after_clear_slash, thread_title_after_submit_like_web, truncate_tool_output,
-    turn_duration_ms, turn_fold_label, AgentProvider, ChatView, ComposerHintDirection,
-    DesktopAssistantContentBlock, DesktopAuthStatus, DesktopDiffLineKind, DesktopMathRender,
-    DesktopMermaidRender, DesktopPermissionRequest, DesktopToolCall, Message, MessageRole,
-    PermissionMode, TurnState, CHAT_COMPOSER_BOTTOM_PADDING_PX, CHAT_COMPOSER_MAX_ROWS,
-    CHAT_COMPOSER_MIN_ROWS, CHAT_CONTENT_BLOCK_MAX_WIDTH, CHAT_DIAGRAM_ERROR_BORDER_OPACITY,
+    filter_models_like_web, mark_streaming_message_stopped_like_web, move_composer_hint_index,
+    normalize_claude_command_error, parse_desktop_auth_status, replace_mention_trigger,
+    select_composer_hint_index_on_hover, slash_command_query, thread_title_after_clear_slash,
+    thread_title_after_submit_like_web, truncate_tool_output, turn_duration_ms, turn_fold_label,
+    AgentProvider, ChatView, ComposerHintDirection, DesktopAssistantContentBlock,
+    DesktopAuthStatus, DesktopDiffLineKind, DesktopMathRender, DesktopMermaidRender,
+    DesktopPermissionRequest, DesktopToolCall, Message, MessageRole, PermissionMode, TurnState,
+    CHAT_COMPOSER_BOTTOM_PADDING_PX, CHAT_COMPOSER_MAX_ROWS, CHAT_COMPOSER_MIN_ROWS,
+    CHAT_CONTENT_BLOCK_MAX_WIDTH, CHAT_DIAGRAM_ERROR_BORDER_OPACITY,
     CHAT_DIAGRAM_ERROR_FONT_FAMILY, CHAT_DIAGRAM_ERROR_LINE_HEIGHT, CHAT_DIAGRAM_ERROR_RADIUS_PX,
     CHAT_DIAGRAM_ERROR_TEXT_SIZE_PX, CHAT_DIAGRAM_ERROR_X_PADDING_PX,
     CHAT_DIAGRAM_ERROR_Y_PADDING_PX, CHAT_INPUT_PLACEHOLDER, CHAT_MATH_DISPLAY_Y_PADDING_PX,
@@ -228,7 +228,7 @@ fn desktop_chat_shell_layout_should_match_web_reference() {
     assert_eq!(CHAT_MESSAGE_LIST_GAP_PX, 0.0);
     assert_eq!(CHAT_COMPOSER_BOTTOM_PADDING_PX, 12.0);
     assert_eq!(CHAT_COMPOSER_MIN_ROWS, 2);
-    assert_eq!(CHAT_COMPOSER_MAX_ROWS, 8);
+    assert_eq!(CHAT_COMPOSER_MAX_ROWS, 10);
 }
 
 #[test]
@@ -704,6 +704,7 @@ fn desktop_permission_summary_should_match_web_supported_tools() {
 #[test]
 fn clear_permission_if_matches_should_only_drop_the_named_request() {
     let mut pending = Some(DesktopPermissionRequest {
+        can_answer: false,
         id: "perm-1".to_string(),
         tool: "Bash".to_string(),
         input: json!({ "command": "cargo test" }),
@@ -770,6 +771,7 @@ fn desktop_permission_prompt_approve_should_clear_inline_banner_like_web(
 
     chat.update(cx, |chat, cx| {
         chat.pending_permission = Some(DesktopPermissionRequest {
+            can_answer: false,
             id: "perm-1".to_string(),
             tool: "Bash".to_string(),
             input: json!({ "command": "cargo test -p bruhs-desktop" }),
@@ -925,23 +927,10 @@ fn filter_models_matches_every_word() {
         .all(|m| m.provider == AgentProvider::Claude));
     assert!(anthropic.iter().all(|m| m.label.contains("Opus")));
     assert!(filter_models_like_web(&catalog, "gpt claude").is_empty());
-}
-
-#[test]
-fn group_models_keeps_provider_order() {
-    let matches = filter_models_like_web(&bruhs_models::runtime_models::listed_models(&[]), "");
-    let groups = group_models_like_web(&matches);
-    let providers: Vec<AgentProvider> = groups.iter().map(|(p, _)| *p).collect();
-    let mut expected: Vec<AgentProvider> = Vec::new();
-    for m in MODEL_CATALOG {
-        if !expected.contains(&m.provider) {
-            expected.push(m.provider);
-        }
-    }
-    assert_eq!(providers, expected);
+    assert_eq!(filter_models_like_web(&catalog, "gpt-5.4")[0].id, "gpt-5.4");
     assert_eq!(
-        groups.iter().map(|(_, ms)| ms.len()).sum::<usize>(),
-        MODEL_CATALOG.len()
+        filter_models_like_web(&catalog, "snt46")[0].id,
+        "claude-sonnet-4-6"
     );
 }
 
@@ -984,10 +973,13 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
     assert_chat_rendered_bounds(cx, option);
     click_chat_debug_selector(cx, option);
     cx.run_until_parked();
-    chat.update(cx, |chat, _cx| {
+    chat.update_in(cx, |chat, window, cx| {
         assert_eq!(chat.model_id, "gpt-5.4");
-        assert!(!chat.model_picker_open, "selecting closes the picker");
+        assert!(chat.model_picker_open, "model options stay available");
+        assert!(chat.composer_effort_focus.is_focused(window));
+        chat.close_model_picker(window, cx);
     });
+    cx.run_until_parked();
     assert_chat_no_rendered_bounds(cx, "desktop-model-picker");
 
     // Reopening retains the current selection; ↓ then ↵ picks the next
@@ -995,20 +987,19 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
     chat.update_in(cx, |chat, window, cx| {
         chat.toggle_model_picker(window, cx);
         assert!(chat.model_picker_open);
-        let selected = MODEL_CATALOG
+        let rows = chat.model_picker_matches(cx);
+        let selected = rows
             .iter()
             .position(|model| model.id == chat.model_id)
             .unwrap();
         assert_eq!(chat.model_picker_index, selected);
-        let next = MODEL_CATALOG.iter().cycle().nth(selected + 1).unwrap().id;
+        let next = &rows[(selected + 1) % rows.len()].id;
         assert!(chat.handle_model_picker_key("down", None, window, cx));
         assert!(chat.handle_model_picker_key("enter", None, window, cx));
-        assert_eq!(chat.model_id, next);
-        assert!(!chat.model_picker_open);
-        chat.toggle_model_picker(window, cx);
+        assert_eq!(&chat.model_id, next);
+        assert!(chat.model_picker_open);
         assert!(chat.handle_model_picker_key("3", Some(3), window, cx));
-        assert_eq!(chat.model_id, MODEL_CATALOG[2].id);
-        chat.toggle_model_picker(window, cx);
+        assert_eq!(chat.model_id, rows[2].id);
         assert!(chat.handle_model_picker_key("escape", None, window, cx));
         assert!(!chat.model_picker_open);
     });

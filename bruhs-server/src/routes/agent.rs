@@ -35,6 +35,8 @@ pub struct AgentRequest {
     /// value is rejected.
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
+    #[serde(default)]
+    pub interactive_questions: bool,
     /// Provider session to resume (from a previous turn's `init`/`result`).
     #[serde(default)]
     pub session_id: Option<String>,
@@ -150,13 +152,17 @@ fn query_event_to_json(event: &QueryEvent) -> Value {
             tool,
             input,
             tool_use_id,
+            can_answer,
         } => json!({
             "type": "permission_request",
             "id": id,
             "tool": tool,
             "input": input,
             "tool_use_id": tool_use_id,
+            "can_answer": can_answer,
+            "can_attach": can_answer,
         }),
+        QueryEvent::QuestionFiles(files) => json!({"type": "question_files", "files": files}),
         QueryEvent::PermissionCancelled { id } => json!({
             "type": "permission_cancelled",
             "id": id,
@@ -253,6 +259,7 @@ pub async fn post_agent(
         provider,
         body.permission_mode.unwrap_or_default(),
     )
+    .interactive_questions(body.interactive_questions)
     .resume(body.session_id)
     .effort(body.effort.as_deref())
     .autocompact(body.autocompact.as_deref())
@@ -797,12 +804,14 @@ mod tests {
                     tool: "Edit".into(),
                     input: json!({ "file_path": "a.rs" }),
                     tool_use_id: Some("t-2".into()),
+                    can_answer: false,
                 },
                 Typed::PermissionRequest {
                     id: "p-1".into(),
                     tool: "Edit".into(),
                     input: json!({ "file_path": "a.rs" }),
                     tool_use_id: Some("t-2".into()),
+                    can_answer: false,
                 },
             ),
             (
@@ -811,12 +820,14 @@ mod tests {
                     tool: "Edit".into(),
                     input: Value::Null,
                     tool_use_id: None,
+                    can_answer: false,
                 },
                 Typed::PermissionRequest {
                     id: "p-2".into(),
                     tool: "Edit".into(),
                     input: Value::Null,
                     tool_use_id: None,
+                    can_answer: false,
                 },
             ),
             (
@@ -851,6 +862,7 @@ mod tests {
                 | QueryEvent::Usage(_)
                 | QueryEvent::Result { .. }
                 | QueryEvent::PermissionRequest { .. }
+                | QueryEvent::QuestionFiles(_)
                 | QueryEvent::PermissionCancelled { .. }
                 | QueryEvent::Error(_)
                 | QueryEvent::Raw(_) => {}

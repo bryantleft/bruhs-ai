@@ -2,7 +2,7 @@
 //! a search field, provider-grouped rows, ↑/↓ + Enter, and a one-line
 //! auth status for the provider under the cursor.
 
-use leptos::html::{Div, Input};
+use leptos::html::{Button, Div, Input};
 use leptos::prelude::*;
 
 use bruhs_models::agent::{custom_model_selection, provider_for_model_id, AgentProvider};
@@ -12,9 +12,9 @@ use bruhs_models::runtime_models::{
 };
 
 use crate::auth::AuthStatus;
-use crate::components::provider::{provider_label, provider_logo_src, PROVIDER_LOGO_CLASS};
+use crate::components::provider::{provider_label, provider_logo_src, provider_logo_src_for_model};
 use crate::state::{CodexAuthSignal, ModelSelectOpen, RuntimeModelsSignal, SetModelSelectOpen};
-use crate::ui::{Icon, Kbd};
+use crate::ui::{BrandMark, Icon, Kbd};
 
 /// Models whose label, id or provider contains every word of `query`.
 pub fn filter_models(models: &[ModelChoice], query: &str) -> Vec<ModelChoice> {
@@ -100,12 +100,18 @@ pub fn auth_line(
 }
 
 #[component]
-pub fn ModelPicker() -> impl IntoView {
+pub fn ModelPicker(anchor: NodeRef<Button>) -> impl IntoView {
     let ModelSelectOpen(open) = expect_context::<ModelSelectOpen>();
     let SetModelSelectOpen(set_open) = expect_context::<SetModelSelectOpen>();
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let set_current_model = expect_context::<crate::state::SetCurrentModel>().0;
-    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
+    let crate::state::LastComposerModel(last_model) =
+        expect_context::<crate::state::LastComposerModel>();
+    let crate::state::ActiveThreadId(active_thread) =
+        expect_context::<crate::state::ActiveThreadId>();
+    let crate::state::SetThreadsSignal(set_threads) =
+        expect_context::<crate::state::SetThreadsSignal>();
+    let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let auth_status = expect_context::<crate::state::ClaudeAuthSignal>().0;
     let CodexAuthSignal(codex_auth) = expect_context::<CodexAuthSignal>();
     let RuntimeModelsSignal(runtime_models) = expect_context::<RuntimeModelsSignal>();
@@ -276,11 +282,36 @@ pub fn ModelPicker() -> impl IntoView {
         q
     });
 
-    // The pick is this thread's model, and the one new threads start on.
+    // Keep the provider's saved session available until the next send
+    // decides whether it can resume it.
     let choose = move |id: String| {
-        default_model.set(id.clone());
-        set_current_model.set(id);
+        batch(|| {
+            if let Some(thread_id) = active_thread.get_untracked() {
+                set_threads.maybe_update(|rows| {
+                    let Some(thread) = rows.iter_mut().find(|row| row.id == thread_id) else {
+                        return false;
+                    };
+                    if thread.composer_model.as_deref() == Some(id.as_str()) {
+                        return false;
+                    }
+                    let original = thread.clone();
+                    thread.composer_model = Some(id.clone());
+                    catalog.persist(Some(original), thread.clone());
+                    true
+                });
+            }
+            last_model.set(Some(id.clone()));
+            set_current_model.set(id);
+        });
+        if let Some(input) = input_ref.get_untracked() {
+            let _ = input.focus();
+        }
+    };
+    let dismiss = move || {
         set_open.set(false);
+        if let Some(trigger) = anchor.get_untracked() {
+            let _ = trigger.focus();
+        }
     };
     let choose_index = move |index: usize| {
         if let Some(id) =
@@ -321,10 +352,6 @@ pub fn ModelPicker() -> impl IntoView {
                 ev.prevent_default();
                 choose_index(highlight.get_untracked().min(n.saturating_sub(1)));
             }
-            "Escape" => {
-                ev.prevent_default();
-                set_open.set(false);
-            }
             _ => {}
         }
     };
@@ -342,11 +369,18 @@ pub fn ModelPicker() -> impl IntoView {
 
     view! {
         {move || open.get().then(|| view! {
-            <div class="fixed inset-0 z-40" aria-hidden="true" on:click=move |_| set_open.set(false)></div>
+            <div class="fixed inset-0 z-40" aria-hidden="true" on:click=move |_| dismiss()></div>
             <div
                 node_ref=menu_ref
                 role="dialog"
                 aria-label="Choose model"
+                on:keydown=move |ev: leptos::ev::KeyboardEvent| {
+                    if ev.key() == "Escape" {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        dismiss();
+                    }
+                }
                 style=move || menu_position.get()
                 class="fixed z-50 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15"
             >
@@ -364,7 +398,7 @@ pub fn ModelPicker() -> impl IntoView {
                     />
                     <Kbd class="text-rambutan-400">"esc"</Kbd>
                 </label>
-                <div node_ref=list_ref role="listbox" aria-label="Models" class="min-h-0 max-h-72 overflow-y-auto p-1">
+                <div node_ref=list_ref role="listbox" aria-label="Models" class="model-picker-options min-h-0 max-h-72 overflow-y-auto p-1">
                     {move || {
                         let gs = groups.get();
                         if gs.is_empty() && custom.get().is_none() {
@@ -398,10 +432,10 @@ pub fn ModelPicker() -> impl IntoView {
                                         on:mouseenter=move |_| set_highlight.set(i)
                                         on:click=move |_| choose(id_choose.clone())
                                     >
+                                        <BrandMark src=logo />
                                         <div class="min-w-0 flex-1">
                                             <div class="truncate text-label text-rambutan-100">{label}</div>
                                             <div class="mt-0.5 flex items-center gap-1.5 text-label-sm text-rambutan-400">
-                                                <img src=logo alt="" aria-hidden="true" class=PROVIDER_LOGO_CLASS />
                                                 <span class="truncate">{id_text}</span>
                                             </div>
                                         </div>
@@ -426,6 +460,7 @@ pub fn ModelPicker() -> impl IntoView {
                         let index = flat.with(|models| models.len());
                         let id_choose = id.clone();
                         let is_selected_id = id.clone();
+                        let logo = provider_logo_src_for_model(&id);
                         view! {
                             <button
                                 type="button"
@@ -436,7 +471,7 @@ pub fn ModelPicker() -> impl IntoView {
                                 on:mouseenter=move |_| set_highlight.set(index)
                                 on:click=move |_| choose(id_choose.clone())
                             >
-                                <Icon name="bot" size=16 class="shrink-0 text-rambutan-400" />
+                                <BrandMark src=logo />
                                 <div class="min-w-0 flex-1">
                                     <div class="truncate text-label text-rambutan-100">"Use "{id}</div>
                                     <div class="mt-0.5 text-label-sm text-rambutan-400">"Use the model configured with this provider."</div>

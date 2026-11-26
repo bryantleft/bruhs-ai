@@ -44,6 +44,7 @@ impl Workspace {
     fn cancel_picker_tasks(&mut self) {
         self.clone_editor.generation = self.clone_editor.generation.wrapping_add(1);
         self.clone_editor.open = false;
+        self.clone_editor.linked_prompt = None;
         self.project_picker_task = None;
         self.import_picker.cancel();
     }
@@ -430,6 +431,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.cancel_sidebar_rename(window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if self.escape_usage(window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.settings_visible()
             && self.settings_section == SettingsSection::Keyboard
             && self.dismiss_binding_editor(window, cx)
@@ -902,10 +911,10 @@ impl Workspace {
                 } else {
                     Role::Dialog
                 },
+                &self.blur_scrim,
                 cx,
             )
             .debug_selector(|| "desktop-modal-dialog".to_string())
-            .child(self.blur_scrim.backdrop())
             .w(px(width_px))
             .max_h(dialog_max_height(window))
             .track_focus(&self.modal_start_focus_handle)

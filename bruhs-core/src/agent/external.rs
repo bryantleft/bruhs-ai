@@ -32,6 +32,7 @@ pub(crate) struct Options {
     instructions: String,
     mcp: HashMap<String, Mcp>,
     unattended: bool,
+    pub(super) workspace_trusted: bool,
     agent_defaults: Value,
     permission_defaults: Vec<Value>,
 }
@@ -66,6 +67,7 @@ impl Options {
             instructions: String::new(),
             mcp: HashMap::new(),
             unattended: false,
+            workspace_trusted: false,
             agent_defaults: json!({}),
             permission_defaults: Vec::new(),
         }
@@ -148,6 +150,17 @@ impl Options {
             return Err(io::Error::other(
                 "The saved provider session ID is invalid. Start a fresh session.",
             ));
+        }
+        if self.provider != AgentProvider::OpenCode && !self.workspace_trusted {
+            if let Some(files) =
+                crate::workspace_trust::has_unisolatable_external_agent_config(&self.cwd)
+            {
+                return Err(io::Error::other(format!(
+                    "{} cannot isolate repository configuration ({files}) in an untrusted folder. Review those files and trust this folder before running {} here.",
+                    self.provider.label(),
+                    self.provider.label(),
+                )));
+            }
         }
         let files = tempfile::tempdir()?;
         let mut command = Command::new(executable(self.provider)?);
@@ -433,6 +446,9 @@ fn opencode_config(options: &Options, command: &mut Command) -> io::Result<Strin
     }
     command.env("OPENCODE_CONFIG_CONTENT", config.to_string());
     command.env("OPENCODE_PERMISSION", permissions.to_string());
+    if !options.workspace_trusted {
+        command.env("OPENCODE_DISABLE_PROJECT_CONFIG", "true");
+    }
     Ok(agent)
 }
 
@@ -499,11 +515,20 @@ async fn opencode_agent_defaults(
     options: &Options,
     turn: &TurnContext,
 ) -> io::Result<(Value, Value)> {
+    let neutral = (!options.workspace_trusted)
+        .then(tempfile::tempdir)
+        .transpose()?;
+    let config_cwd = neutral
+        .as_ref()
+        .map_or(options.cwd.as_path(), tempfile::TempDir::path);
     let mut command = Command::new(executable(AgentProvider::OpenCode)?);
     command
         .args(["debug", "config"])
-        .current_dir(&options.cwd)
+        .current_dir(config_cwd)
         .stdin(Stdio::null());
+    if !options.workspace_trusted {
+        command.env("OPENCODE_DISABLE_PROJECT_CONFIG", "true");
+    }
     process::apply_env(
         &mut command,
         true,

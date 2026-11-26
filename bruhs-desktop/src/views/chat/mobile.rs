@@ -1,6 +1,6 @@
 //! The mobile projection borrows the native conversation, never the companion store.
 use super::*;
-use bruhs_core::mobile::{MobileError, MobileResult};
+use bruhs_core::mobile::{MobileError, MobileQuestionFile, MobileResult};
 use bruhs_models::mobile::*;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -24,8 +24,14 @@ impl Write for Review {
     }
 }
 impl ChatView {
+    pub(crate) fn mobile_needs_answer(&self) -> bool {
+        self.pending_permission
+            .as_ref()
+            .is_some_and(|request| request.can_answer)
+    }
+
     pub(crate) fn mobile_state(&self) -> MobileThreadState {
-        if self.pending_secret.is_some() {
+        if self.pending_secret.is_some() || self.mobile_needs_answer() {
             MobileThreadState::LaptopAction
         } else if self.pending_permission.is_some() {
             MobileThreadState::NeedsApproval
@@ -37,17 +43,10 @@ impl ChatView {
     }
     fn mobile_permission(&self) -> Option<MobilePermission> {
         let request = self.pending_permission.as_ref()?;
-        if request.id.is_empty() || request.id.len() > 128 {
+        if request.can_answer || request.id.is_empty() || request.id.len() > 128 {
             return None;
         }
-        let mut review = Review {
-            digest: Sha256::new(),
-            prefix: Vec::new(),
-            bytes: 0,
-        };
-        review.digest.update(request.tool.len().to_le_bytes());
-        review.digest.update(request.tool.as_bytes());
-        serde_json::to_writer(&mut review, &request.input).ok()?;
+        let review = review_request(request)?;
         let full = review.bytes;
         let hash = format!("{:x}", review.digest.finalize());
         let prefix = String::from_utf8_lossy(&review.prefix);
@@ -64,6 +63,130 @@ impl ChatView {
             can_allow,
         })
     }
+
+    fn mobile_question(&self) -> Option<MobileQuestion> {
+        let request = self.pending_permission.as_ref()?;
+        if self.pending_secret.is_some()
+            || !request.can_answer
+            || request.id.is_empty()
+            || request.id.len() > 128
+        {
+            return None;
+        }
+        let mut questions = bruhs_models::logic::user_question::questions(&request.input)?;
+        for question in &mut questions {
+            question.question = mobile_question_text(&question.question);
+            question.header = mobile_question_text(&question.header);
+            for option in &mut question.options {
+                option.label = mobile_question_text(&option.label);
+                option.description = mobile_question_text(&option.description);
+                option.preview = option.preview.as_deref().map(mobile_question_text);
+            }
+        }
+        let response = self.current_question_response();
+        let mut question = MobileQuestion {
+            request_id: request.id.clone(),
+            turn_generation: self.turn_generation,
+            review_hash: format!("{:x}", review_request(request)?.digest.finalize()),
+            questions,
+            responding: response.is_some_and(|response| response.responding()),
+            error: response
+                .and_then(|response| response.error.as_ref())
+                .map(|_| "The answer could not be delivered. Try again.".to_owned()),
+            can_attach: true,
+            markdown: Vec::new(),
+        };
+        // Keep enough space for the thread metadata and history. A partial
+        // question could omit an option or change what the device is reviewing.
+        let budget = RESPONSE_BYTES - TEXT_BYTES;
+        if serde_json::to_vec(&question).ok()?.len() > budget {
+            return None;
+        }
+        question.markdown = question
+            .questions
+            .iter()
+            .map(|item| MobileQuestionMarkdown {
+                question: mobile_question_markdown(&item.question),
+                previews: item
+                    .options
+                    .iter()
+                    .map(|option| option.preview.as_deref().and_then(mobile_question_markdown))
+                    .collect(),
+            })
+            .collect();
+        if question
+            .markdown
+            .iter()
+            .all(|item| item.question.is_none() && item.previews.iter().all(Option::is_none))
+            || serde_json::to_vec(&question).ok()?.len() > budget
+        {
+            question.markdown.clear();
+        }
+        Some(question)
+    }
+
+    fn mobile_question_review(
+        &self,
+        turn_generation: u64,
+        request_id: &str,
+        review_hash: &str,
+    ) -> MobileResult<MobileQuestion> {
+        let question = self.mobile_question().ok_or_else(changed)?;
+        if question.turn_generation != turn_generation
+            || question.request_id != request_id
+            || question.review_hash != review_hash
+        {
+            return Err(changed());
+        }
+        if question.responding {
+            return Err(MobileError::Conflict(
+                "An answer is already being sent.".into(),
+            ));
+        }
+        Ok(question)
+    }
+
+    pub(crate) fn check_mobile_question_file(&self, file: &MobileQuestionFile) -> MobileResult<()> {
+        let question = self.mobile_question_review(
+            file.turn_generation,
+            &file.upload.request_id,
+            &file.review_hash,
+        )?;
+        if question
+            .questions
+            .get(file.upload.question)
+            .is_none_or(|question| !question.allow_custom)
+        {
+            return Err(MobileError::Invalid(
+                "This question does not accept files.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn mobile_question_link(
+        &self,
+        read: &MobileQuestionLink,
+    ) -> MobileResult<MobileProjectLink> {
+        let review =
+            self.mobile_question_review(read.turn_generation, &read.request_id, &read.review_hash)?;
+        if !self.project_scoped {
+            return Err(MobileError::Forbidden);
+        }
+        review
+            .questions
+            .iter()
+            .flat_map(|item| {
+                std::iter::once(item.question.as_str()).chain(
+                    item.options
+                        .iter()
+                        .filter_map(|option| option.preview.as_deref()),
+                )
+            })
+            .find_map(|markdown| mobile_question_project_link(markdown, &read.link))
+            .ok_or_else(changed)
+    }
+
     pub(crate) fn mobile_snapshot(
         &self,
         thread: MobileThread,
@@ -78,6 +201,7 @@ impl ChatView {
             .as_deref()
             .map_or(0, |id| self.prompt_queue.for_thread(id).len());
         let permission = self.mobile_permission();
+        let question = self.mobile_question();
         let laptop_action_required = self.pending_secret.is_some()
             || (self.pending_permission.is_some() && permission.is_none());
         let mut snapshot = MobileThreadSnapshot {
@@ -85,6 +209,7 @@ impl ChatView {
             messages: Vec::new(),
             next_before: None,
             permission,
+            question,
             queued_prompts: queued,
             laptop_action_required,
         };
@@ -159,9 +284,13 @@ impl ChatView {
     pub(crate) fn mobile_action(
         &mut self,
         action: &MobileAction,
+        device: uuid::Uuid,
         cx: &mut Context<'_, Self>,
     ) -> MobileResult<MobileCommandOutcome> {
         match action {
+            MobileAction::OpenLinkedDraft { .. } | MobileAction::ContinueLinkedDraft { .. } => Err(
+                MobileError::Invalid("Open draft links through the workspace.".into()),
+            ),
             MobileAction::Prompt { text, .. } => {
                 let thread = self.thread_id.as_deref().ok_or_else(changed)?;
                 let busy = self.is_streaming
@@ -197,9 +326,42 @@ impl ChatView {
                 self.respond_to_permission(*decision == MobileDecision::Allow, cx);
                 Ok(MobileCommandOutcome::Accepted { queued: false })
             }
+            MobileAction::AnswerQuestion {
+                turn_generation,
+                request_id,
+                review_hash,
+                reply,
+                ..
+            } => {
+                self.mobile_question_review(*turn_generation, request_id, review_hash)?;
+                self.start_question_reply(request_id, reply.clone().into(), Some(device), cx)
+                    .map_err(|error| MobileError::Invalid(error.into()))?;
+                self.mark_question_prompt_sending(cx);
+                Ok(MobileCommandOutcome::Accepted { queued: false })
+            }
         }
     }
 }
+
+fn review_request(request: &DesktopPermissionRequest) -> Option<Review> {
+    let mut review = Review {
+        digest: Sha256::new(),
+        prefix: Vec::new(),
+        bytes: 0,
+    };
+    review.digest.update(request.tool.len().to_le_bytes());
+    review.digest.update(request.tool.as_bytes());
+    serde_json::to_writer(&mut review, &request.input).ok()?;
+    Some(review)
+}
+
+fn mobile_question_text(text: &str) -> String {
+    text.split('\n')
+        .map(bruhs_models::secrets::review_text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn mobile_label(text: &str, budget: usize) -> String {
     let visible = bruhs_models::secrets::review_text(text);
     text_slice(&visible, 0, budget).map_or_else(|_| String::new(), |(s, _)| s.to_owned())
@@ -215,7 +377,7 @@ fn message_reference(message: &Message, index: usize) -> String {
 }
 fn changed() -> MobileError {
     MobileError::Conflict(
-        "This thread, message or approval changed. Reload its current state before continuing."
+        "This thread, message or request changed. Reload its current state before continuing."
             .into(),
     )
 }
@@ -229,6 +391,7 @@ impl ChatView {
         });
         self.turn_generation = 17;
         self.pending_permission = Some(DesktopPermissionRequest {
+            can_answer: false,
             id: "fixture-permission".into(),
             tool: "Read".into(),
             input: serde_json::json!({"file_path":"synthetic.rs"}),
@@ -258,6 +421,7 @@ impl ChatView {
     }
     pub(crate) fn mobile_fixture_change_permission(&mut self, large: bool) {
         self.pending_permission = Some(DesktopPermissionRequest {
+            can_answer: false,
             id: "fixture-permission".into(),
             tool: "Read".into(),
             input: serde_json::json!({"file_path":if large{"x".repeat(TEXT_BYTES*2)}else{"changed.rs".into()}}),

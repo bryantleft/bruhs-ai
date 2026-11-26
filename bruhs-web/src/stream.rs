@@ -98,6 +98,10 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
             }
             StreamEffect::None
         }
+        AgentStreamEvent::QuestionFiles { files } => {
+            msg.files.extend(files.iter().cloned());
+            StreamEffect::None
+        }
         AgentStreamEvent::ResponseMedia { bindings } => {
             rewrite_media(msg, bindings);
             StreamEffect::None
@@ -190,7 +194,12 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
             StreamEffect::Finished { is_error: true }
         }
         AgentStreamEvent::PermissionRequest {
-            id, tool, input, ..
+            id,
+            tool,
+            input,
+            can_answer,
+            can_attach,
+            ..
         } => match present(id) {
             // The turn that receives it stamps its thread.
             Some(id) => StreamEffect::PermissionRequest(PermissionRequest {
@@ -198,6 +207,9 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
                 id: id.to_owned(),
                 tool: tool.clone(),
                 input: input.clone(),
+                can_answer: *can_answer,
+                can_attach: *can_attach,
+                question_draft: None,
             }),
             None => {
                 log::warn!("agent stream: a permission request has no id; it cannot be answered");

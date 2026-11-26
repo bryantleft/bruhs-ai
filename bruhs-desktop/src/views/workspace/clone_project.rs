@@ -6,6 +6,7 @@ pub(super) struct CloneEditor {
     pub open: bool,
     running: bool,
     pub generation: u64,
+    pub(super) linked_prompt: Option<super::app_links::CloneTarget>,
 }
 
 impl CloneEditor {
@@ -17,11 +18,32 @@ impl CloneEditor {
             open: false,
             running: false,
             generation: 0,
+            linked_prompt: None,
         }
     }
 }
 
 impl Workspace {
+    pub(super) fn open_link_clone(
+        &mut self,
+        repository: &bruhs_models::logic::app_link::PromptRepository,
+        target: super::app_links::CloneTarget,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_project_picker(&OpenProjectPicker, window, cx);
+        self.clone_editor.open = true;
+        self.clone_editor.linked_prompt = Some(target);
+        self.clone_editor.remote.update(cx, |field, cx| {
+            field.set_value(
+                format!("https://github.com/{}.git", repository.slug()),
+                window,
+                cx,
+            );
+        });
+        cx.notify();
+    }
+
     pub(super) fn clone_project_controls(&self, cx: &Context<'_, Self>) -> AnyElement {
         let mut form = div().px_3().py_1().flex().flex_col().gap_2();
         let toggle = web_button(
@@ -38,6 +60,14 @@ impl Workspace {
             "Clone repository…"
         });
         form = form.child(on_press_view(toggle, cx, |this, window, cx| {
+            if this.clone_editor.linked_prompt.is_some() {
+                this.clone_editor
+                    .remote
+                    .update(cx, |field, cx| field.set_value("", window, cx));
+                this.close_transient_surfaces();
+                cx.notify();
+                return;
+            }
             this.clone_editor.open = !this.clone_editor.open;
             if this.clone_editor.open {
                 this.clone_editor
@@ -63,7 +93,10 @@ impl Workspace {
                         div().min_w_0().flex_1().child(
                             Input::new(&self.clone_editor.remote)
                                 .aria_label("Repository URL")
-                                .disabled(self.clone_editor.running),
+                                .disabled(
+                                    self.clone_editor.running
+                                        || self.clone_editor.linked_prompt.is_some(),
+                                ),
                         ),
                     )
                     .child(on_press_view(clone, cx, |this, window, cx| {
@@ -113,7 +146,11 @@ impl Workspace {
                         this.clone_editor
                             .remote
                             .update(cx, |field, cx| field.set_value("", window, cx));
-                        this.apply_thread_project(Some(project), window, cx);
+                        if let Some(target) = this.clone_editor.linked_prompt.take() {
+                            this.finish_link_clone(project, target, window, cx);
+                        } else {
+                            this.apply_thread_project(Some(project), window, cx);
+                        }
                     }
                     Ok(project) => {
                         let path = project.path.clone();

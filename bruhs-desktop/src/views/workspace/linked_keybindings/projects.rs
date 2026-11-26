@@ -29,6 +29,8 @@ struct ProjectInventory {
     read_threads: bool,
     reply_threads: bool,
     usage: bool,
+    usage_history: bool,
+    edit_usage_prices: bool,
     provider_updates: bool,
     schedules: Option<Result<Vec<bruhs_models::reactive::ScheduledTaskSummary>, String>>,
 }
@@ -247,6 +249,15 @@ impl ProjectHost {
             .headers()
             .get("x-bruhs-read-usage")
             .is_some_and(|v| v == "true");
+        let usage_history = response
+            .headers()
+            .get("x-bruhs-read-usage-history")
+            .is_some_and(|v| v == "true");
+        let edit_usage_prices = usage_history
+            && response
+                .headers()
+                .get("x-bruhs-edit-usage-prices")
+                .is_some_and(|v| v == "true");
         let read_threads = response
             .headers()
             .get("x-bruhs-read-task-threads")
@@ -322,6 +333,8 @@ impl ProjectHost {
             read_threads,
             reply_threads,
             usage,
+            usage_history,
+            edit_usage_prices,
             schedules,
         })
     }
@@ -374,6 +387,8 @@ impl Workspace {
         let read = crate::app_state::spawn_tokio(cx, async move {
             host.data = host.read_projects(false).await?;
             host.share_usage = host.data.usage;
+            host.share_usage_history = host.data.usage_history;
+            host.edit_usage_prices = host.data.edit_usage_prices;
             host.save_token(vault).await?;
             Ok::<_, String>(host)
         });
@@ -537,6 +552,8 @@ impl Workspace {
                     match read {
                         Ok(projects) => {
                             h.share_usage = projects.usage;
+                            h.share_usage_history = projects.usage_history;
+                            h.edit_usage_prices = projects.edit_usage_prices;
                             h.data = projects;
                             h.problem = None;
                         }
@@ -755,8 +772,7 @@ impl Workspace {
         let mut slot = 0;
         for group in self.grouped_projects() {
             rows.push(self.group_name_row(&group, cx));
-            // T3 shows each path as a row for a single environment. In a
-            // multi-environment group, keep repeated checkouts under their machine.
+            // Keep repeated checkouts grouped by machine.
             let multiple_checkouts = group.members.len() > 1;
             let permitted = group.members.iter().all(|p| p.host.is_none());
             let title = if multiple_checkouts {

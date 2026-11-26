@@ -295,6 +295,39 @@ async fn merged_workbench_services_preserve_the_local_origin_boundary() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // Owner-only endpoints also reject other loopback ports.
+    for (method, path) in [
+        (reqwest::Method::POST, "/api/terminal/sessions"),
+        (reqwest::Method::GET, "/api/terminal/sessions"),
+        (reqwest::Method::POST, "/api/agent"),
+        (
+            reqwest::Method::POST,
+            bruhs_models::logic::attachments::RETIRE_QUESTION_FILES_PATH,
+        ),
+        (reqwest::Method::POST, "/api/open-in-editor"),
+        (reqwest::Method::POST, "/api/open-in-terminal"),
+        (reqwest::Method::POST, "/api/agent/git-checkout"),
+        (reqwest::Method::POST, "/api/agent/prompt-pull-checkout"),
+        (reqwest::Method::POST, "/api/agent/prompt-clone"),
+        (reqwest::Method::POST, "/api/agent/worktree"),
+        (reqwest::Method::GET, bruhs_models::workspace_trust::PATH),
+        (reqwest::Method::HEAD, bruhs_models::workspace_trust::PATH),
+        (reqwest::Method::PUT, bruhs_models::workspace_trust::PATH),
+        (reqwest::Method::DELETE, bruhs_models::workspace_trust::PATH),
+    ] {
+        let response = client
+            .request(method.clone(), format!("{base}{path}"))
+            .header("origin", "http://localhost:3000")
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{method} {path} must reject foreign loopback origin"
+        );
+    }
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 }

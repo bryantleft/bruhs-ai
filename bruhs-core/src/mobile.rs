@@ -2,8 +2,9 @@
 pub mod authority;
 mod broker;
 pub mod diff;
+pub mod question_link;
 mod server;
-pub use broker::{MobileBroker, MobilePending, MobileResponder};
+pub use broker::{MobileBroker, MobilePending, MobileQuestionFile, MobileResponder};
 pub use server::{MobileHost, MobileHostConfig, MobileTransport};
 use std::time::Duration;
 

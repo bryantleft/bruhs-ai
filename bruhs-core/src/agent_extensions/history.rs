@@ -157,18 +157,27 @@ fn atomic<T: Serialize>(root: &Path, path: &Path, value: &T) -> io::Result<()> {
 }
 fn aggregate(
     records: &BTreeMap<String, UsageRecord>,
-    prices: &BTreeMap<String, ModelPrice>,
+    config: &ExtensionConfig,
     at: Option<i64>,
 ) -> ImportedUsageSnapshot {
     let mut out = ImportedUsageSnapshot {
-        records: records.len(),
         imported_at: at,
         ..Default::default()
     };
     for record in records.values() {
-        let price = prices.get(&record.model);
+        let runtime = bruhs_models::agent::AgentProvider::for_model(&record.model);
+        if config
+            .usage_model_filter
+            .as_ref()
+            .is_some_and(|filter| !filter.allows(runtime, &record.model))
+        {
+            continue;
+        }
+        out.records += 1;
+        let model = config.usage_model(&record.model);
+        let price = config.prices.get(model);
         out.by_model
-            .entry(record.model.clone())
+            .entry(model.to_owned())
             .or_default()
             .add(record, price);
         out.by_project
@@ -184,12 +193,9 @@ fn aggregate(
     }
     out
 }
-pub fn snapshot_at(
-    root: &Path,
-    prices: &BTreeMap<String, ModelPrice>,
-) -> io::Result<ImportedUsageSnapshot> {
+pub fn snapshot_at(root: &Path, config: &ExtensionConfig) -> io::Result<ImportedUsageSnapshot> {
     let ledger = read_ledger(root)?;
-    Ok(aggregate(&ledger.records, prices, ledger.imported_at))
+    Ok(aggregate(&ledger.records, config, ledger.imported_at))
 }
 fn discover(root: &Path, budget: u64) -> io::Result<(Vec<PathBuf>, bool)> {
     let mut pending = vec![root.to_path_buf()];
@@ -539,6 +545,7 @@ fn parse_file(
         let record = UsageRecord {
             id,
             thread_id: session.clone(),
+            session_id: Some(session.clone()),
             model,
             project: project.clone(),
             at,
@@ -546,6 +553,8 @@ fn parse_file(
             output: counters.output,
             cache_read: counters.read,
             cache_write: counters.write,
+            requested_speed: Default::default(),
+            cli_cost_usd: None,
         };
         if !records.contains_key(&record.id) {
             retained = retained
@@ -640,7 +649,7 @@ pub fn preview_at(store: &Path, request: UsageHistoryRequest) -> io::Result<Usag
         minimum_next_bytes,
         limited,
         warnings,
-        usage: aggregate(&records, &config.prices, None),
+        usage: aggregate(&records, &config, None),
     };
     let _guard = WRITER
         .lock()
@@ -667,11 +676,7 @@ pub fn commit_at(store: &Path, id: &str) -> io::Result<ImportedUsageSnapshot> {
     if ledger.last_committed_preview.as_deref() == Some(id) {
         drop(_process);
         drop(_guard);
-        return Ok(aggregate(
-            &ledger.records,
-            &config.prices,
-            ledger.imported_at,
-        ));
+        return Ok(aggregate(&ledger.records, &config, ledger.imported_at));
     }
     let path = store.join(PREVIEW);
     let frozen: Frozen = bounded_json(&path).map_err(|error| {
@@ -697,11 +702,7 @@ pub fn commit_at(store: &Path, id: &str) -> io::Result<ImportedUsageSnapshot> {
     File::open(store)?.sync_all()?;
     drop(_process);
     drop(_guard);
-    Ok(aggregate(
-        &ledger.records,
-        &config.prices,
-        ledger.imported_at,
-    ))
+    Ok(aggregate(&ledger.records, &config, ledger.imported_at))
 }
 
 #[cfg(test)]

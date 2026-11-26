@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::views::sidebar_order::SidebarOrder;
-use bruhs_models::logic::sidebar::FoldOpen;
+use bruhs_models::logic::sidebar::{drag_effect, place_id, ranks_for, DragEffect, FoldOpen};
+use std::collections::HashMap;
 pub(super) const THREAD_TITLE_GENERAL: &str = "New thread";
 
 pub(super) fn thread_selection_after_delete(
@@ -107,6 +108,7 @@ impl Workspace {
             pinned: false,
             settled: false,
             settled_at_ms: None,
+            idle_settle_resumed_at: None,
             pin_rank: None,
             active_rank: None,
             snoozed_until_ms: None,
@@ -213,6 +215,7 @@ impl Workspace {
             pinned: persisted.pinned,
             settled: persisted.settled,
             settled_at_ms: persisted.settled_at_ms,
+            idle_settle_resumed_at: persisted.idle_settle_resumed_at,
             pin_rank: persisted.pin_rank,
             active_rank: persisted.active_rank,
             snoozed_until_ms: persisted.snoozed_until_ms,
@@ -257,6 +260,9 @@ impl Workspace {
                     this.persist_and_notify(cx);
                 }
                 ChatViewEvent::ThreadOptionsChanged => this.persist_and_notify(cx),
+                ChatViewEvent::QuestionFilesRemoved(files) => {
+                    this.retire_question_files(files.iter())
+                }
                 ChatViewEvent::MessagesChanged => {
                     // A queued message another thread waits on may be gone.
                     this.settle_thread_waits(chat, cx);
@@ -663,6 +669,21 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let thread = self.build_project_thread(project_name, project_path, window, cx);
+        self.active_thread_id = Some(thread.id.clone());
+        self.threads.push(thread);
+        self.active_view = AppView::Chat;
+        self.close_transient_surfaces();
+        self.persist_and_notify(cx);
+    }
+
+    pub(super) fn build_project_thread(
+        &self,
+        project_name: String,
+        project_path: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> DesktopThread {
         let scoped_access = self
             .project_defaults
             .get(&project_path)
@@ -685,11 +706,7 @@ impl Workspace {
             chat.diff_panel_visible = self.diff_panel_visible;
             cx.notify();
         });
-        self.active_thread_id = Some(thread.id.clone());
-        self.threads.push(thread);
-        self.active_view = AppView::Chat;
-        self.close_transient_surfaces();
-        self.persist_and_notify(cx);
+        thread
     }
 
     /// A `/handoff` finished in `source`: open a fresh thread in the same
@@ -1038,6 +1055,14 @@ impl Workspace {
     }
 
     pub(super) fn forget_thread(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        if let Some(chat) = self
+            .threads
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.chat.clone())
+        {
+            self.retire_question_files(chat.read(cx).messages.iter().flat_map(|m| &m.files));
+        }
         self.title_requests.remove(id);
         self.end_thread_waits_on(id, cx);
         self.cancel_quota_recovery(id);
@@ -1072,6 +1097,115 @@ impl Workspace {
         Some(pinned)
     }
 
+    pub(super) fn sidebar_drag_effect(
+        &self,
+        id: &str,
+        section: SidebarSection,
+        index: usize,
+        cx: &App,
+    ) -> DragEffect {
+        if self.labs_sidebar.enabled || !self.sidebar_query(cx).trim().is_empty() {
+            return DragEffect::None;
+        }
+        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
+            return DragEffect::None;
+        };
+        if section == SidebarSection::Settled && thread.chat.read(cx).is_working() {
+            return DragEffect::None;
+        }
+        drag_effect(
+            self.section_for_thread(thread, cx),
+            section,
+            index,
+            self.sidebar_working_section,
+        )
+    }
+
+    pub(super) fn commit_sidebar_drag(
+        &mut self,
+        id: &str,
+        section: SidebarSection,
+        index: usize,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let effect = self.sidebar_drag_effect(id, section, index, cx);
+        let (pinned, index) = match effect {
+            DragEffect::None => return,
+            DragEffect::Settle => {
+                self.sidebar_viewport
+                    .borrow_mut()
+                    .retain_arrangement_scroll();
+                self.toggle_settled_by_id(id, cx);
+                return;
+            }
+            DragEffect::PinAt(index) | DragEffect::ReorderPinned(index) => (true, index),
+            DragEffect::UnpinAt(index)
+            | DragEffect::UnsettleAt(index)
+            | DragEffect::WakeAt(index)
+            | DragEffect::ReorderActive(index) => (false, index),
+        };
+        let shelves = self.sidebar_shelves(cx);
+        let destination = if pinned {
+            shelves.pinned
+        } else {
+            shelves.active
+        };
+        let previous_order: Vec<_> = destination
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect();
+        let order = place_id(&previous_order, id, index);
+        if order.iter().map(String::as_str).eq(previous_order) {
+            return;
+        }
+        self.sidebar_viewport
+            .borrow_mut()
+            .retain_arrangement_scroll();
+        let undo = if matches!(effect, DragEffect::UnpinAt(_)) {
+            self.shelf_snapshot(id)
+        } else {
+            None
+        };
+        let restoring = matches!(
+            self.thread_section(id, cx),
+            Some(SidebarSection::Settled | SidebarSection::Snoozed)
+        );
+        let ranks: HashMap<_, _> = ranks_for(&order).into_iter().collect();
+        for thread in &mut self.threads {
+            let Some(rank) = ranks.get(&thread.id).copied() else {
+                continue;
+            };
+            if thread.id == id {
+                match effect {
+                    DragEffect::PinAt(_) => {
+                        if restoring {
+                            set_thread_settled(thread, false);
+                        }
+                        set_thread_pinned(thread, true);
+                    }
+                    DragEffect::UnpinAt(_) => set_thread_pinned(thread, false),
+                    DragEffect::WakeAt(_) | DragEffect::UnsettleAt(_) => {
+                        thread.snoozed_until_ms = None;
+                        set_thread_settled(thread, false);
+                    }
+                    _ => {}
+                }
+            }
+            if pinned {
+                thread.pin_rank = Some(rank);
+            } else {
+                thread.active_rank = Some(rank);
+            }
+        }
+        if matches!(effect, DragEffect::WakeAt(_) | DragEffect::PinAt(_)) {
+            self.cancel_quota_recovery(id);
+        }
+        if let Some(previous) = undo {
+            self.push_sidebar_undo("Thread unpinned", SidebarUndoRestore::Shelf(previous), cx);
+        }
+        self.persist_and_notify(cx);
+    }
+
     /// Flip the manual `settled` flag on thread `id`; settling also marks it
     /// read. Returns the new state. Settling can be undone.
     pub(super) fn toggle_settled_by_id(
@@ -1080,8 +1214,9 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) -> Option<bool> {
         let previous = self.shelf_snapshot(id)?;
+        let was_settled = self.thread_section(id, cx) == Some(SidebarSection::Settled);
         let thread = self.threads.iter_mut().find(|thread| thread.id == id)?;
-        set_thread_settled(thread, !thread.settled);
+        set_thread_settled(thread, !was_settled);
         let settled = thread.settled;
         if settled {
             self.cancel_quota_recovery(id);
@@ -1115,8 +1250,7 @@ impl Workspace {
         self.cancel_quota_recovery(id);
         if let Some(thread) = self.threads.iter_mut().find(|thread| thread.id == id) {
             thread.snoozed_until_ms = None;
-            thread.settled = false;
-            thread.active_rank = None;
+            set_thread_settled(thread, false);
         }
         self.thread_menu_id = None;
         self.persist_and_notify(cx);
@@ -1201,6 +1335,7 @@ impl Workspace {
                     thread.pinned = previous.pinned;
                     thread.settled = previous.settled;
                     thread.settled_at_ms = previous.settled_at_ms;
+                    thread.idle_settle_resumed_at = previous.idle_settle_resumed_at;
                     thread.pin_rank = previous.pin_rank;
                     thread.active_rank = previous.active_rank;
                     thread.snoozed_until_ms = previous.snoozed_until_ms;
@@ -1505,7 +1640,7 @@ impl Workspace {
         }
     }
 
-    fn thread_section(&self, id: &str, cx: &App) -> Option<SidebarSection> {
+    pub(super) fn thread_section(&self, id: &str, cx: &App) -> Option<SidebarSection> {
         let thread = self.threads.iter().find(|thread| thread.id == id)?;
         Some(self.section_for_thread(thread, cx))
     }
@@ -1522,7 +1657,7 @@ impl Workspace {
             pin_rank: thread.pin_rank,
             active_rank: thread.active_rank,
             snoozed_until_ms: thread.snoozed_until_ms,
-            working: chat.is_streaming,
+            working: chat.is_working(),
             needs_you: chat.is_streaming && chat.has_pending_permission(),
             active: self.active_thread_id.as_deref() == Some(id),
             unread: self.unread_thread_ids.contains(id),
@@ -1541,6 +1676,7 @@ impl Workspace {
             pinned: thread.pinned,
             settled: thread.settled,
             settled_at_ms: thread.settled_at_ms,
+            idle_settle_resumed_at: thread.idle_settle_resumed_at,
             pin_rank: thread.pin_rank,
             active_rank: thread.active_rank,
             snoozed_until_ms: thread.snoozed_until_ms,
@@ -1590,12 +1726,14 @@ fn set_thread_settled(thread: &mut DesktopThread, settled: bool) {
     thread.settled_at_ms = settled.then(EpochMs::now);
     if settled {
         thread.settled = true;
+        thread.idle_settle_resumed_at = None;
         thread.pinned = false;
         thread.pin_rank = None;
         thread.active_rank = None;
         thread.snoozed_until_ms = None;
     } else {
         thread.settled = false;
+        thread.idle_settle_resumed_at = Some(thread.updated_at_ms);
         thread.active_rank = None;
     }
 }

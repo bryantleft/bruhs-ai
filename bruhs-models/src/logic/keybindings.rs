@@ -149,6 +149,7 @@ pub const UNBOUND_BY_DEFAULT: &[&str] = &[
 
 /// Bindings the app ships. Several rows can share a command id.
 pub fn default_keybindings() -> Vec<Keybinding> {
+    const USAGE: Option<&str> = Some("usagePageOpen && !editableFocus");
     const ROWS: &[(&str, &str, Option<&str>)] = &[
         ("mod+k", "command.palette", None),
         ("mod+shift+space", "capture.open", None),
@@ -158,6 +159,10 @@ pub fn default_keybindings() -> Vec<Keybinding> {
         ("mod+n", "chat.new", None),
         ("mod+shift+n", "chat.new", None),
         ("mod+shift+o", "chat.new", None),
+        ("f6", "workspace.focusNext", None),
+        ("shift+f6", "workspace.focusPrevious", None),
+        ("mod+f6", "workspace.focusNext", Some("isWeb")),
+        ("mod+shift+f6", "workspace.focusPrevious", Some("isWeb")),
         ("mod+b", "sidebar.toggle", None),
         ("mod+alt+b", "rightPanel.toggle", None),
         ("mod+w", "rightPanel.close", None),
@@ -207,6 +212,13 @@ pub fn default_keybindings() -> Vec<Keybinding> {
         ("mod+]", "navigation.forward", Some("!terminalFocus")),
         ("/", "composer.focus", Some("!editableFocus")),
         ("c", "task.new", Some("!editableFocus")),
+        ("c", "usage.cost", USAGE),
+        ("t", "usage.tokens", USAGE),
+        ("l", "usage.limits", USAGE),
+        ("mod+shift+1", "usage.period.day", USAGE),
+        ("mod+shift+2", "usage.period.week", USAGE),
+        ("mod+shift+3", "usage.period.month", USAGE),
+        ("mod+shift+4", "usage.period.quarter", USAGE),
     ];
     ROWS.iter()
         .copied()
@@ -413,7 +425,7 @@ pub fn gpui_shortcut(rule_key: &str) -> Option<String> {
 pub fn fill_new_defaults(saved: &[Keybinding], defaults: &[Keybinding]) -> Vec<Keybinding> {
     let mut out = saved.to_vec();
     for rule in defaults {
-        let present = out.iter().any(|saved| saved.command == rule.command);
+        let present = saved.iter().any(|saved| saved.command == rule.command);
         if !present {
             out.push(rule.clone());
         }
@@ -744,6 +756,36 @@ mod tests {
             &ctx
         ));
         assert!(when_holds(Some("!!terminalOpen"), &ctx));
+    }
+
+    #[test]
+    fn existing_profiles_receive_both_platform_variants_of_new_focus_shortcuts() {
+        let defaults = default_keybindings();
+        let saved: Vec<_> = defaults
+            .iter()
+            .filter(|rule| !rule.command.starts_with("workspace.focus"))
+            .cloned()
+            .collect();
+        let migrated = fill_new_defaults(&saved, &defaults);
+        let desktop = KeyContext {
+            is_desktop: true,
+            ..KeyContext::default()
+        };
+        let web = KeyContext {
+            is_web: true,
+            ..KeyContext::default()
+        };
+        for (native, browser, command) in [
+            ("f6", "mod+f6", "workspace.focusNext"),
+            ("shift+f6", "mod+shift+f6", "workspace.focusPrevious"),
+        ] {
+            let native = parse_chord(native, true).unwrap();
+            let browser = parse_chord(browser, true).unwrap();
+            assert_eq!(resolve(&migrated, &native, &desktop, true), Some(command));
+            assert_eq!(resolve(&migrated, &native, &web, true), Some(command));
+            assert_eq!(resolve(&migrated, &browser, &web, true), Some(command));
+            assert_eq!(resolve(&migrated, &browser, &desktop, true), None);
+        }
     }
 
     #[test]

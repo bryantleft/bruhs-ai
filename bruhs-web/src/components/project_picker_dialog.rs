@@ -33,6 +33,9 @@ pub fn ProjectPickerDialog() -> impl IntoView {
     let RecentProjectsSignal(recent_projects) = expect_context::<RecentProjectsSignal>();
     let SetRecentProjectsSignal(set_recent_projects) = expect_context::<SetRecentProjectsSignal>();
     let ProjectPickerModeSignal(picker_mode) = expect_context::<ProjectPickerModeSignal>();
+    let links = expect_context::<crate::prompt_links::PromptLinks>();
+    let cloning_mode = move || picker_mode.get() == ProjectPickerMode::PromptClone;
+    let cloning = move || cloning_mode() && links.operation_running();
     let TerminalSessions(terminal_sessions) = expect_context::<TerminalSessions>();
     let ActiveTerminalId(active_terminal_id) = expect_context::<ActiveTerminalId>();
     let TerminalOpen(terminal_open) = expect_context::<TerminalOpen>();
@@ -51,12 +54,22 @@ pub fn ProjectPickerDialog() -> impl IntoView {
     let (dirs, set_dirs) = signal::<Vec<DirEntry>>(vec![]);
     let (error, set_error) = signal::<Option<String>>(None);
     let (loading, set_loading) = signal(false);
+    let load_generation = RwSignal::new(0_u64);
 
     // Fetch directory listing for `path` (or $HOME if None) and populate state.
     let load_dir = move |path: Option<String>| {
+        if untrack(cloning) {
+            return;
+        }
+        let generation = load_generation.get_untracked().wrapping_add(1);
+        load_generation.set(generation);
         set_loading.set(true);
         spawn_local(async move {
-            match list_dir(path.as_deref()).await {
+            let reply = list_dir(path.as_deref()).await;
+            if load_generation.get_untracked() != generation {
+                return;
+            }
+            match reply {
                 Ok(resp) => {
                     set_current_path.set(resp.current);
                     set_current_name.set(resp.name);
@@ -82,8 +95,17 @@ pub fn ProjectPickerDialog() -> impl IntoView {
             picker_mode.set(ProjectPickerMode::Thread);
         }
     });
+    Effect::new(move |_| {
+        if open.get() && cloning_mode() && links.clone_repository_label().is_none() {
+            set_open.set(false);
+            picker_mode.set(ProjectPickerMode::Thread);
+        }
+    });
 
     let close = move || {
+        if untrack(cloning) {
+            return;
+        }
         set_open.set(false);
         picker_mode.set(ProjectPickerMode::Thread);
     };
@@ -161,10 +183,6 @@ pub fn ProjectPickerDialog() -> impl IntoView {
             base.set(String::new());
             let crate::state::PreviousWorktreeSignal(previous) = expect_context();
             previous.set(None);
-            let crate::state::ChipRetargetGuard(guard) = expect_context();
-            let crate::state::ComposerChips(chips) = expect_context();
-            guard.set_value(true);
-            chips.set(Vec::new());
         }
         if active_view.get_untracked() != AppView::Chat {
             expect_context::<crate::state::SetActiveView>()
@@ -175,6 +193,20 @@ pub fn ProjectPickerDialog() -> impl IntoView {
     };
     let select_project = move |path: String, name: String| {
         let project = ActiveProject { path, name };
+        if picker_mode.get_untracked() == ProjectPickerMode::PromptClone {
+            if !loading.get_untracked() && error.get_untracked().is_none() {
+                links.clone_here(
+                    project.path,
+                    Callback::new(move |cloned: ActiveProject| {
+                        set_recent_projects
+                            .set(push_recent(recent_projects.get_untracked(), &cloned));
+                        set_open.set(false);
+                        picker_mode.set(ProjectPickerMode::Thread);
+                    }),
+                );
+            }
+            return;
+        }
         if picker_mode.get_untracked() == ProjectPickerMode::NewTerminal {
             open_terminal_session(
                 terminal_sessions,
@@ -205,7 +237,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
             <div class="flex items-center justify-between border-b border-longan-800 px-4 py-3">
                 <div class="min-w-0 flex-1">
                     <h2 class="text-label-sm text-rambutan-200">
-                        "Choose project folder"
+                        {move || if cloning_mode() { "Choose clone folder" } else { "Choose project folder" }}
                     </h2>
                     {move || (!current_path.get().is_empty()).then(|| view! {
                         <p class="mt-0.5 truncate text-code-sm text-rambutan-300">
@@ -219,16 +251,23 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                     view! {
                         <button
                             type="button"
+                            disabled=move || cloning() || cloning_mode() && (loading.get() || error.with(Option::is_some))
                             on:click=move |_| select_project(path.clone(), name.clone())
-                            class="ml-3 shrink-0 rounded-grape bg-rambutan-600/20 px-3 py-1.5 text-label-sm text-rambutan-300 hover:bg-rambutan-600/30 transition-colors cursor-pointer"
+                            class="ml-3 max-w-[58%] shrink-0 rounded-grape bg-rambutan-600/20 px-3 py-1.5 text-label-sm text-rambutan-300 hover:bg-rambutan-600/30 transition-colors cursor-pointer disabled:cursor-default disabled:opacity-60"
                         >
-                            "Select this folder"
+                            {move || if cloning() { "Cloning…" } else if cloning_mode() { "Clone into this folder" } else { "Select this folder" }}
                         </button>
                     }
                 })}
             </div>
 
-            <Show when=move || picker_mode.get() != ProjectPickerMode::NewTerminal>
+            <Show when=cloning_mode>
+                <div class="border-b border-longan-800/50 px-4 py-2 text-label-sm text-rambutan-300">
+                    <p>{move || links.clone_repository_label().map(|repository| format!("Clone {repository}"))}</p>
+                    {move || links.clone_error().map(|error| view! { <p role="alert" class="mt-1 text-dragonfruit-400">{error}</p> })}
+                </div>
+            </Show>
+            <Show when=move || picker_mode.get() == ProjectPickerMode::Thread>
                 <div class="border-b border-longan-800/50 px-4 py-2">
                     <button type="button" class="bruhs-control flex min-h-control w-full items-center gap-2 rounded-grape px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/50"
                         on:click=move |_| clear_project()>
@@ -241,7 +280,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
             // ── Recent projects (only when no listing yet) ───────────────────
             {move || {
                 let recents = recent_projects.get();
-                if recents.is_empty() || !current_path.get().is_empty() {
+                if cloning_mode() || recents.is_empty() || !current_path.get().is_empty() {
                     return ().into_any();
                 }
                 let rendered: Vec<_> = recents
@@ -295,6 +334,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                     let parent_button = parent.map(|p| view! {
                         <button
                             type="button"
+                            disabled=cloning
                             on:click=move |_| load_dir(Some(p.clone()))
                             class="flex w-full items-center gap-2 px-4 py-2 text-label-sm text-rambutan-500 hover:bg-longan-800/40 transition-colors cursor-pointer"
                         >
@@ -318,8 +358,13 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                                 view! {
                                     <button
                                         type="button"
+                                        disabled=cloning
                                         on:click=move |_| load_dir(Some(nav_path.clone()))
-                                        on:dblclick=move |_| select_project(select_path.clone(), select_name.clone())
+                                        on:dblclick=move |_| {
+                                            if !untrack(cloning_mode) {
+                                                select_project(select_path.clone(), select_name.clone());
+                                            }
+                                        }
                                         class="flex w-full items-center gap-2 px-4 py-2 text-label-sm text-rambutan-400 hover:bg-longan-800/40 hover:text-rambutan-200 transition-colors cursor-pointer"
                                     >
                                         <span class="shrink-0 text-rambutan-500">
@@ -343,9 +388,10 @@ pub fn ProjectPickerDialog() -> impl IntoView {
 
             // ── Footer ──────────────────────────────────────────────────────
             <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2.5 text-label text-rambutan-300">
-                <span>"Click to browse, double click to select"</span>
+                <span>{move || if cloning_mode() { "Click a folder to browse" } else { "Click to browse, double click to select" }}</span>
                 <button
                     type="button"
+                    disabled=cloning
                     on:click=move |_| close()
                     class="text-rambutan-500 hover:text-rambutan-300 transition-colors cursor-pointer"
                 >

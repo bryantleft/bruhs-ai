@@ -22,6 +22,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 mod budget;
 mod external;
 pub(crate) mod model_options;
+mod question_files;
 pub(crate) fn opencode_executable() -> std::io::Result<std::path::PathBuf> {
     external::executable(AgentProvider::OpenCode)
 }
@@ -88,6 +89,7 @@ pub struct AgentTurn {
     /// from the model name.
     pub provider: AgentProvider,
     pub permission_mode: PermissionMode,
+    interactive_questions: bool,
     /// Provider session to resume, so earlier turns stay in the model's
     /// context. `None` resumes the session this thread's last turn with the
     /// same provider reported, if there was one.
@@ -150,6 +152,7 @@ impl AgentTurn {
             model: model.into(),
             provider,
             permission_mode,
+            interactive_questions: false,
             session_id: None,
             fresh_session: false,
             effort: None,
@@ -166,6 +169,12 @@ impl AgentTurn {
             hidden_folders: Vec::new(),
             bruh_secrets: false,
         }
+    }
+
+    /// The caller can display and answer a structured question for this turn.
+    pub fn interactive_questions(mut self, enabled: bool) -> Self {
+        self.interactive_questions = enabled;
+        self
     }
 
     /// Bound this turn without changing model, effort or provider permissions.
@@ -392,7 +401,10 @@ pub enum QueryEvent {
         tool: String,
         input: serde_json::Value,
         tool_use_id: Option<String>,
+        can_answer: bool,
     },
+    /// Files the user submitted with a question answer in this turn.
+    QuestionFiles(Vec<bruhs_models::logic::attachments::UploadedFile>),
     /// The provider withdrew a pending permission request.
     PermissionCancelled {
         id: String,
@@ -577,6 +589,9 @@ struct TurnOwner {
 struct PendingPermission<R = claude_sdk_rs::PermissionResponder> {
     owner: TurnOwner,
     input: serde_json::Value,
+    can_answer: bool,
+    question_files: Vec<question_files::QuestionFile>,
+    events: mpsc::Sender<OrchestratorEvent>,
     responder: R,
 }
 
@@ -596,6 +611,8 @@ pub enum PermissionResolveError {
     /// cancelled, or the turn ended).
     #[error("no pending permission request with that id")]
     UnknownRequest,
+    #[error("{0}")]
+    Question(&'static str),
     /// The CLI's stdin was gone when the answer was written. The cause is
     /// in the message because HTTP callers only show `Display`.
     #[error("could not deliver the permission decision: {0}")]
@@ -729,12 +746,20 @@ impl AgentOrchestrator {
         if external::acp::resolve(request_id, &decision) {
             return Ok(());
         }
-        let pending = self
-            .permissions
-            .write()
-            .await
-            .remove(request_id)
-            .ok_or(PermissionResolveError::UnknownRequest)?;
+        let pending = {
+            let mut requests = self.permissions.write().await;
+            if requests
+                .get(request_id)
+                .is_some_and(|request| request.can_answer)
+            {
+                return Err(PermissionResolveError::Question(
+                    "Send an answer to this question.",
+                ));
+            }
+            requests
+                .remove(request_id)
+                .ok_or(PermissionResolveError::UnknownRequest)?
+        };
         let decision = match decision {
             PermissionDecision::Allow => claude_sdk_rs::PermissionDecision::Allow {
                 updated_input: Some(pending.input),
@@ -748,6 +773,82 @@ impl AgentOrchestrator {
             .respond(request_id, decision)
             .await
             .map_err(PermissionResolveError::Transport)
+    }
+
+    /// Answer the exact structured question waiting on this thread's Claude turn.
+    pub async fn answer_question(
+        &self,
+        thread_id: &ThreadId,
+        request_id: &str,
+        reply: bruhs_models::logic::user_question::QuestionReply,
+    ) -> Result<(), PermissionResolveError> {
+        self.answer_question_from(thread_id, request_id, reply, None)
+            .await
+    }
+
+    pub(crate) async fn answer_question_from(
+        &self,
+        thread_id: &ThreadId,
+        request_id: &str,
+        reply: bruhs_models::logic::user_question::QuestionReply,
+        device: Option<uuid::Uuid>,
+    ) -> Result<(), PermissionResolveError> {
+        use bruhs_models::logic::user_question::{answered_input, QuestionReply};
+        use claude_sdk_rs::PermissionDecision::{Allow, Deny};
+
+        let (mut pending, decision, selected) = {
+            let mut requests = self.permissions.write().await;
+            let request = requests
+                .get(request_id)
+                .filter(|pending| &pending.owner.thread_id == thread_id && pending.can_answer)
+                .ok_or(PermissionResolveError::UnknownRequest)?;
+            let (decision, selected) = match reply {
+                QuestionReply::Answer { answers } => {
+                    let input = answered_input(&request.input, &answers, |question, ids| {
+                        request.files_for(question, ids, device)
+                    })
+                    .map_err(PermissionResolveError::Question)?;
+                    let selected = answers
+                        .into_iter()
+                        .flat_map(|answer| answer.attachments)
+                        .collect::<Vec<_>>();
+                    (
+                        Allow {
+                            updated_input: Some(input),
+                        },
+                        selected,
+                    )
+                }
+                QuestionReply::Skip => (
+                    Deny {
+                        message: "Question skipped by user".into(),
+                    },
+                    Vec::new(),
+                ),
+            };
+            let pending = requests
+                .remove(request_id)
+                .ok_or(PermissionResolveError::UnknownRequest)?;
+            (pending, decision, selected)
+        };
+        if !selected.is_empty() {
+            let files = pending.selected_files(&selected);
+            // Publish before waking the provider, which can finish the turn
+            // as soon as it accepts the answer. The transcript owns the files
+            // once it can see them, even when the provider fails to continue.
+            pending
+                .events
+                .send(OrchestratorEvent::Query(QueryEvent::QuestionFiles(files)))
+                .await
+                .map_err(|_| PermissionResolveError::UnknownRequest)?;
+            pending.preserve_files(&selected);
+        }
+        pending
+            .responder
+            .respond(request_id, decision)
+            .await
+            .map_err(PermissionResolveError::Transport)?;
+        Ok(())
     }
 
     /// Ids of permission prompts a thread is currently blocked on.
@@ -791,6 +892,7 @@ impl AgentOrchestrator {
             model,
             provider,
             permission_mode,
+            interactive_questions,
             session_id,
             fresh_session,
             model_options,
@@ -897,6 +999,7 @@ impl AgentOrchestrator {
             .then_some(lean_file)
             .flatten();
         apply_lean_context(&mut query_options, lean);
+        apply_workspace_trust(&mut query_options, &project_path, unattended);
         model_options::apply(&mut query_options, &model_options);
         // Only an unattended turn gets a bruh's tools.
         let bruh_helper = if unattended {
@@ -937,6 +1040,7 @@ impl AgentOrchestrator {
                 && permission_mode == PermissionMode::Default);
         let turn = TurnContext {
             model: model.clone(),
+            requested_speed: model_options::requested_speed(provider, &model_options),
             usage_receipt: uuid::Uuid::new_v4().to_string(),
             media_project: artifact_project.clone(),
             response_text: Mutex::new(String::new()),
@@ -1131,7 +1235,14 @@ impl AgentOrchestrator {
                 }
                 match query_options {
                     ProviderQueryOptions::Claude(options) => {
-                        stream_claude(options, turn, permissions, steers).await;
+                        stream_claude(
+                            options,
+                            turn,
+                            permissions,
+                            steers,
+                            interactive_questions && !unattended,
+                        )
+                        .await;
                     }
                     ProviderQueryOptions::Codex(options) => {
                         stream_codex(options, turn, model, record_lean).await;
@@ -1201,6 +1312,7 @@ struct PendingCommand {
 /// What a producer task needs to forward one turn's events.
 struct TurnContext {
     model: String,
+    requested_speed: bruhs_models::agent_extensions::UsageSpeed,
     usage_receipt: String,
     media_project: String,
     response_text: Mutex<String>,
@@ -1275,6 +1387,41 @@ fn apply_lean_context(options: &mut ProviderQueryOptions, lean: bool) {
         }
         ProviderQueryOptions::Codex(options) => lean_codex(options),
         ProviderQueryOptions::External(_) => {}
+    }
+}
+
+/// Isolate untrusted project repositories so headless agent CLIs cannot run
+/// repository-local hooks, `apiKeyHelper`, `statusLine`, `.mcp.json`, or
+/// project-local OpenCode/external configs before the user trusts the folder.
+pub(crate) fn apply_workspace_trust(
+    options: &mut ProviderQueryOptions,
+    project_path: &str,
+    unattended: bool,
+) {
+    if unattended {
+        return;
+    }
+    let trusted = crate::workspace_trust::is_trusted(std::path::Path::new(project_path));
+    apply_workspace_trust_flag(options, trusted);
+}
+
+pub(crate) fn apply_workspace_trust_flag(options: &mut ProviderQueryOptions, trusted: bool) {
+    match options {
+        ProviderQueryOptions::Claude(options) => {
+            if !trusted {
+                // Keep the user's own `~/.claude` settings when not already lean
+                // (`Some([])`), while excluding project `.claude/settings*.json`.
+                if options.setting_sources.is_none() {
+                    options.setting_sources = Some(vec!["user".to_string()]);
+                }
+                // Never auto-load `.mcp.json` from an untrusted repository.
+                options.strict_mcp_config = true;
+            }
+        }
+        ProviderQueryOptions::Codex(_) => {}
+        ProviderQueryOptions::External(options) => {
+            options.workspace_trusted = trusted;
+        }
     }
 }
 
@@ -1905,6 +2052,7 @@ async fn stream_claude(
     turn: TurnContext,
     permissions: Permissions,
     steers: Steers,
+    interactive_questions: bool,
 ) {
     let mut stream = match claude_sdk_rs::query(options) {
         Ok(stream) => stream,
@@ -1940,11 +2088,19 @@ async fn stream_claude(
             // that follows it adds nothing for the user.
             continue;
         }
-        let event = map_claude_event(event);
+        let cli_cost_usd = match &event {
+            claude_sdk_rs::QueryEvent::Result { total_cost_usd, .. } => *total_cost_usd,
+            _ => None,
+        };
+        let event = map_claude_event(event, interactive_questions);
         reported_error |= is_error_event(&event);
         turn.remember_session(&event);
-        if let QueryEvent::Result { usage, .. } = &event {
-            turn.record_usage(usage).await;
+        if let QueryEvent::Result {
+            usage, session_id, ..
+        } = &event
+        {
+            turn.record_usage(usage, Some(session_id), cli_cost_usd)
+                .await;
         }
         if matches!(
             event,
@@ -1959,18 +2115,32 @@ async fn stream_claude(
             continue;
         }
         match &event {
-            QueryEvent::PermissionRequest { id, input, .. } => {
+            QueryEvent::PermissionRequest {
+                id,
+                input,
+                can_answer,
+                ..
+            } => {
                 permissions.write().await.insert(
                     id.clone(),
                     PendingPermission {
                         owner: turn.owner.clone(),
                         input: input.clone(),
+                        can_answer: *can_answer,
+                        question_files: Vec::new(),
+                        events: turn.tx.clone(),
                         responder: responder.clone(),
                     },
                 );
             }
             QueryEvent::PermissionCancelled { id } => {
-                permissions.write().await.remove(id);
+                let mut pending = permissions.write().await;
+                if pending
+                    .get(id)
+                    .is_some_and(|request| request.owner == turn.owner)
+                {
+                    pending.remove(id);
+                }
             }
             _ => {}
         }
@@ -2035,7 +2205,7 @@ async fn stream_codex(
             QueryEvent::Text(text) => answer.clone_from(text),
             QueryEvent::Usage(usage) => {
                 completed_usage = Some(usage.clone());
-                turn.record_usage(usage).await;
+                turn.record_usage(usage, session_id.as_deref(), None).await;
             }
             _ => {}
         }
@@ -2134,9 +2304,15 @@ impl TurnContext {
         }
     }
 
-    async fn record_usage(&self, usage: &UsageInfo) {
+    async fn record_usage(
+        &self,
+        usage: &UsageInfo,
+        session_id: Option<&str>,
+        cli_cost_usd: Option<f64>,
+    ) {
         if cfg!(test)
-            || (usage.input_tokens == 0
+            || (cli_cost_usd.is_none()
+                && usage.input_tokens == 0
                 && usage.output_tokens == 0
                 && usage.cache_read_input_tokens == 0
                 && usage.cache_creation_input_tokens == 0)
@@ -2146,6 +2322,7 @@ impl TurnContext {
         let record = bruhs_models::agent_extensions::UsageRecord {
             id: self.usage_receipt.clone(),
             thread_id: self.owner.thread_id.as_str().into(),
+            session_id: session_id.filter(|id| !id.is_empty()).map(str::to_owned),
             model: self.model.clone(),
             project: self.media_project.clone(),
             at: chrono::Utc::now().timestamp(),
@@ -2153,6 +2330,8 @@ impl TurnContext {
             output: usage.output_tokens,
             cache_read: usage.cache_read_input_tokens,
             cache_write: usage.cache_creation_input_tokens,
+            requested_speed: self.requested_speed,
+            cli_cost_usd,
         };
         let saved = tokio::task::spawn_blocking(move || {
             crate::agent_extensions::record_at(&crate::agent_extensions::directory()?, record)
@@ -2166,11 +2345,14 @@ impl TurnContext {
     /// Send `event` (and any background task it starts) to the caller.
     /// False when the caller has dropped the stream.
     async fn forward(&self, mut event: QueryEvent) -> bool {
-        if let QueryEvent::Result { usage, .. } = &event {
+        if let QueryEvent::Result {
+            usage, session_id, ..
+        } = &event
+        {
             // Native runtimes retain reported usage independently of process
             // success. Their later completion must not record it twice.
             if !matches!(self.provider, AgentProvider::Claude | AgentProvider::Codex) {
-                self.record_usage(usage).await;
+                self.record_usage(usage, Some(session_id), None).await;
             }
         }
         if !cfg!(test) {
@@ -3097,7 +3279,7 @@ fn unhandled_sdk_event(event: &impl std::fmt::Debug) -> QueryEvent {
     QueryEvent::Raw(serde_json::json!({ "type": "unhandled", "event": format!("{event:?}") }))
 }
 
-fn map_claude_event(event: claude_sdk_rs::QueryEvent) -> QueryEvent {
+fn map_claude_event(event: claude_sdk_rs::QueryEvent, interactive_questions: bool) -> QueryEvent {
     match event {
         claude_sdk_rs::QueryEvent::Init {
             session_id,
@@ -3140,6 +3322,7 @@ fn map_claude_event(event: claude_sdk_rs::QueryEvent) -> QueryEvent {
             usage,
             is_error,
             errors,
+            ..
         } => QueryEvent::Result {
             // Error results (`error_max_turns`, `error_during_execution`)
             // carry their reason in `errors` instead of `result`.
@@ -3161,6 +3344,9 @@ fn map_claude_event(event: claude_sdk_rs::QueryEvent) -> QueryEvent {
             ..
         } => QueryEvent::PermissionRequest {
             id,
+            can_answer: interactive_questions
+                && tool == bruhs_models::logic::user_question::TOOL_NAME
+                && bruhs_models::logic::user_question::questions(&input).is_some(),
             tool,
             input,
             tool_use_id,
@@ -4082,7 +4268,8 @@ mod tests {
             "input_tokens": 2, "cache_read_input_tokens": 47_261, "cache_creation_input_tokens": 1_928,
         }))
         .unwrap();
-        let QueryEvent::Usage(usage) = map_claude_event(claude_sdk_rs::QueryEvent::Usage(request))
+        let QueryEvent::Usage(usage) =
+            map_claude_event(claude_sdk_rs::QueryEvent::Usage(request), false)
         else {
             panic!("usage event");
         };
@@ -4131,6 +4318,30 @@ mod tests {
         let mut full_codex = options(AgentProvider::Codex, PermissionMode::Default, None);
         apply_lean_context(&mut full_codex, false);
         assert_eq!(overrides(&codex(full_codex)), ["analytics.enabled=false"]);
+    }
+
+    #[test]
+    fn untrusted_workspaces_isolate_claude_project_settings_and_mcp() {
+        let mut untrusted = options(AgentProvider::Claude, PermissionMode::Default, None);
+        apply_workspace_trust_flag(&mut untrusted, false);
+        let untrusted_opts = claude(untrusted);
+        assert_eq!(untrusted_opts.setting_sources, Some(vec!["user".into()]));
+        assert!(untrusted_opts.strict_mcp_config);
+
+        // Lean turns keep `Some([])` rather than widening to `user`.
+        let mut lean = options(AgentProvider::Claude, PermissionMode::Default, None);
+        apply_lean_context(&mut lean, true);
+        apply_workspace_trust_flag(&mut lean, false);
+        let lean_opts = claude(lean);
+        assert_eq!(lean_opts.setting_sources, Some(Vec::new()));
+        assert!(lean_opts.strict_mcp_config);
+
+        // Trusted workspaces keep normal settings/MCP resolution.
+        let mut trusted = options(AgentProvider::Claude, PermissionMode::Default, None);
+        apply_workspace_trust_flag(&mut trusted, true);
+        let trusted_opts = claude(trusted);
+        assert_eq!(trusted_opts.setting_sources, None);
+        assert!(!trusted_opts.strict_mcp_config);
     }
 
     /// A lean turn skips the settings files, so the safety parts come back
@@ -4636,6 +4847,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(16);
         let context = TurnContext {
             model: "test".into(),
+            requested_speed: Default::default(),
             usage_receipt: "test".into(),
             media_project: "/tmp".into(),
             response_text: Mutex::new(String::new()),
@@ -4715,6 +4927,9 @@ mod tests {
                 PendingPermission {
                     owner: owner.clone(),
                     input: serde_json::Value::Null,
+                    can_answer: false,
+                    question_files: Vec::new(),
+                    events: mpsc::channel(1).0,
                     responder: (),
                 },
             );

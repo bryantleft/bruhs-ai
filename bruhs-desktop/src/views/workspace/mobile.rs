@@ -1,5 +1,6 @@
 //! Native session owner and narrow phone broker. Never reads companion-server threads.
 mod controls;
+mod linked_drafts;
 #[cfg(test)]
 mod tests;
 use super::*;
@@ -32,6 +33,8 @@ pub(super) struct MobileUi {
     worker: Option<Task<()>>,
     watcher: Option<Task<()>>,
     expiry: Option<Task<()>>,
+    linked_drafts: BTreeMap<uuid::Uuid, linked_drafts::LinkedDraft>,
+    scratch_owners: BTreeMap<String, uuid::Uuid>,
 }
 impl MobileUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
@@ -57,6 +60,8 @@ impl MobileUi {
             worker: None,
             watcher: None,
             expiry: None,
+            linked_drafts: BTreeMap::new(),
+            scratch_owners: BTreeMap::new(),
         }
     }
     fn host(&self) -> Option<&MobileHost> {
@@ -177,6 +182,8 @@ impl Workspace {
         let mut changes = host.authority().changes();
         let mut failures = host.authority().failures();
         self.mobile.connection = Connection::Connected { id, host };
+        self.mobile.linked_drafts.clear();
+        self.mobile.scratch_owners.clear();
         self.mobile.worker = Some(cx.spawn(async move |this, cx| {
             while let Some(pending) = requests.recv().await {
                 if pending.is_closed() {
@@ -325,10 +332,20 @@ impl Workspace {
         .detach();
         cx.notify();
     }
-    fn mobile_thread<'a>(&'a self, id: &str, cx: &App) -> MobileResult<&'a DesktopThread> {
+    fn mobile_thread_visible(&self, thread: &DesktopThread, device: uuid::Uuid, cx: &App) -> bool {
+        thread.chat.read(cx).project_scoped
+            || self.mobile.scratch_owners.get(&thread.id) == Some(&device)
+    }
+
+    fn mobile_thread<'a>(
+        &'a self,
+        id: &str,
+        device: uuid::Uuid,
+        cx: &App,
+    ) -> MobileResult<&'a DesktopThread> {
         self.threads
             .iter()
-            .find(|thread| thread.id == id && thread.chat.read(cx).project_scoped)
+            .find(|thread| thread.id == id && self.mobile_thread_visible(thread, device, cx))
             .ok_or_else(|| {
                 MobileError::Conflict(
                     "This project thread is no longer available. Reload the thread list.".into(),
@@ -343,10 +360,17 @@ impl Workspace {
             project: crate::views::chat::mobile_label(&thread.project_name, 512),
             updated_at_ms: thread.updated_at_ms.as_millis(),
             state: chat.mobile_state(),
+            needs_answer: chat.mobile_needs_answer(),
         }
     }
-    fn read_mobile(&self, read: &MobileRead, cx: &App) -> MobileResult<MobileReadReply> {
+    fn read_mobile(
+        &self,
+        read: &MobileRead,
+        device: uuid::Uuid,
+        cx: &App,
+    ) -> MobileResult<MobileReadReply> {
         match read {
+            MobileRead::LinkedDraft { link_id } => self.mobile_link_status(device, *link_id),
             MobileRead::Threads { offset } => {
                 let mut threads = Vec::new();
                 let mut used = 128;
@@ -355,7 +379,7 @@ impl Workspace {
                 for thread in self
                     .threads
                     .iter()
-                    .filter(|t| t.chat.read(cx).project_scoped)
+                    .filter(|thread| self.mobile_thread_visible(thread, device, cx))
                     .skip(*offset)
                 {
                     let row = Self::mobile_summary(thread, cx);
@@ -380,7 +404,7 @@ impl Workspace {
                 }))
             }
             MobileRead::Thread { thread_id, before } => {
-                let thread = self.mobile_thread(thread_id, cx)?;
+                let thread = self.mobile_thread(thread_id, device, cx)?;
                 Ok(MobileReadReply::Thread(
                     thread
                         .chat
@@ -395,7 +419,7 @@ impl Workspace {
                 offset,
                 revision,
             } => {
-                let thread = self.mobile_thread(thread_id, cx)?;
+                let thread = self.mobile_thread(thread_id, device, cx)?;
                 Ok(MobileReadReply::Text(thread.chat.read(cx).mobile_message(
                     *index,
                     reference,
@@ -403,9 +427,34 @@ impl Workspace {
                     revision.as_deref(),
                 )?))
             }
-            MobileRead::Diff { .. } => Err(MobileError::Invalid(
-                "Diff reads must resolve the native working folder first.".into(),
+            MobileRead::Diff { .. } | MobileRead::QuestionLink(_) => Err(MobileError::Invalid(
+                "Project reads must resolve the native working folder first.".into(),
             )),
+        }
+    }
+
+    fn mobile_project_source(
+        &self,
+        read: &MobileRead,
+        device: uuid::Uuid,
+        cx: &App,
+    ) -> MobileResult<(PathBuf, Option<MobileProjectLink>)> {
+        match read {
+            MobileRead::Diff { thread_id, .. } => {
+                let chat = self.mobile_thread(thread_id, device, cx)?.chat.read(cx);
+                Ok((PathBuf::from(&chat.project_path), None))
+            }
+            MobileRead::QuestionLink(read) => {
+                let chat = self
+                    .mobile_thread(&read.thread_id, device, cx)?
+                    .chat
+                    .read(cx);
+                Ok((
+                    PathBuf::from(&chat.project_path),
+                    Some(chat.mobile_question_link(read)?),
+                ))
+            }
+            _ => Err(MobileError::Unavailable),
         }
     }
     fn handle_mobile(
@@ -423,45 +472,120 @@ impl Workspace {
                 ticket,
                 respond,
             } => {
+                let device = lease.id();
+                let mut link_work = None;
                 let result = lease.authority().commit(&lease, &ticket, |action| {
                     let thread_id = match action {
                         MobileAction::Prompt { thread_id, .. }
-                        | MobileAction::Permission { thread_id, .. } => thread_id,
+                        | MobileAction::Permission { thread_id, .. }
+                        | MobileAction::AnswerQuestion { thread_id, .. } => thread_id,
+                        MobileAction::OpenLinkedDraft { .. }
+                        | MobileAction::ContinueLinkedDraft { .. } => {
+                            link_work =
+                                Some(self.reserve_mobile_link(device, ticket.id(), action)?);
+                            return Ok(MobileCommandOutcome::Accepted { queued: true });
+                        }
                     };
-                    let chat = self.mobile_thread(thread_id, cx)?.chat.clone();
-                    chat.update(cx, |chat, cx| chat.mobile_action(action, cx))
+                    let chat = self.mobile_thread(thread_id, device, cx)?.chat.clone();
+                    chat.update(cx, |chat, cx| chat.mobile_action(action, device, cx))
                 });
+                let accepted = result.is_ok();
                 let _ = respond.send(result);
+                if let Some(work) = link_work.filter(|_| accepted) {
+                    self.start_mobile_link(id, lease, work, cx);
+                }
+            }
+            MobilePending::QuestionFile {
+                lease,
+                file,
+                respond,
+            } => {
+                let device = lease.id();
+                let result = lease
+                    .with_scope(MobileScope::Prompt, || {
+                        self.mobile_thread(file.upload.thread_id.as_str(), device, cx)?
+                            .chat
+                            .read(cx)
+                            .check_mobile_question_file(&file)
+                    })
+                    .and_then(|result| result);
+                if let Err(error) = result {
+                    let _ = respond.send(Err(error));
+                    return;
+                }
+                let desktop = cx.global::<DesktopState>();
+                let app = Arc::clone(&desktop.app);
+                desktop.runtime.spawn(async move {
+                    let mut file = file;
+                    let result = app
+                        .stage_device_question_file(file.upload.clone(), file.bytes.take(), device)
+                        .await
+                        .map_err(|error| match error {
+                            bruhs_core::PermissionResolveError::UnknownRequest => {
+                                MobileError::Conflict(
+                                    "This question has changed. Reload it on the phone.".into(),
+                                )
+                            }
+                            bruhs_core::PermissionResolveError::Question(message) => {
+                                MobileError::Invalid(message.into())
+                            }
+                            _ => MobileError::Unavailable,
+                        });
+                    let result = if let Err(error) = lease.check(MobileScope::Prompt) {
+                        if result.is_ok() {
+                            let _ = app
+                                .stage_device_question_file(file.upload.clone(), None, device)
+                                .await;
+                        }
+                        Err(error)
+                    } else {
+                        result
+                    };
+                    drop(file);
+                    let _ = respond.send(result);
+                });
             }
             MobilePending::Read {
                 lease,
-                read:
-                    MobileRead::Diff {
-                        thread_id,
-                        offset,
-                        revision,
-                    },
+                read: read @ (MobileRead::Diff { .. } | MobileRead::QuestionLink(_)),
                 respond,
             } => {
-                let path = lease
-                    .with_scope(MobileScope::Diff, || {
-                        self.mobile_thread(&thread_id, cx)
-                            .map(|t| t.chat.read(cx).project_path.clone())
-                    })
-                    .and_then(|r| r);
-                let path = match path {
-                    Ok(p) => p,
+                let scope = read.scope();
+                let source = lease
+                    .with_scope(scope, || self.mobile_project_source(&read, lease.id(), cx))
+                    .and_then(|result| result);
+                let source = match source {
+                    Ok(source) => source,
                     Err(error) => {
                         let _ = respond.send(Err(error));
                         return;
                     }
                 };
-                let source = PathBuf::from(&path);
+                let (root, link) = source.clone();
+                let request = read.clone();
                 let (send, receive) = tokio::sync::oneshot::channel();
                 cx.global::<DesktopState>().runtime.spawn(async move {
-                    let _ = send.send(
-                        bruhs_core::mobile::diff::read(&source, offset, revision.as_deref()).await,
-                    );
+                    let result = match (request, link) {
+                        (
+                            MobileRead::Diff {
+                                offset, revision, ..
+                            },
+                            _,
+                        ) => {
+                            bruhs_core::mobile::diff::read(&root, offset, revision.as_deref()).await
+                        }
+                        (MobileRead::QuestionLink(read), Some(link)) => {
+                            bruhs_core::mobile::question_link::read(
+                                root,
+                                link,
+                                read.offset,
+                                read.revision,
+                            )
+                            .await
+                        }
+                        _ => Err(MobileError::Unavailable),
+                    };
+                    let _ = send.send(result);
                 });
                 cx.spawn(async move |this, cx| {
                     let result = receive.await.unwrap_or(Err(MobileError::Unavailable));
@@ -473,16 +597,11 @@ impl Workspace {
                             Err(MobileError::Disabled)
                         } else {
                             lease
-                                .with_scope(MobileScope::Diff, || {
-                                    if this
-                                        .mobile_thread(&thread_id, cx)?
-                                        .chat
-                                        .read(cx)
-                                        .project_path
-                                        != path
+                                .with_scope(scope, || {
+                                    if this.mobile_project_source(&read, lease.id(), cx)? != source
                                     {
                                         return Err(MobileError::Conflict(
-                                            "This thread changed working folders. Reload its diff."
+                                            "The thread changed while loading this page. Reload it."
                                                 .into(),
                                         ));
                                     }
@@ -501,7 +620,7 @@ impl Workspace {
                 respond,
             } => {
                 let result = lease
-                    .with_scope(read.scope(), || self.read_mobile(&read, cx))
+                    .with_scope(read.scope(), || self.read_mobile(&read, lease.id(), cx))
                     .and_then(|r| r);
                 let _ = respond.send(result);
             }

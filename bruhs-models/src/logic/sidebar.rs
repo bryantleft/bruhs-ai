@@ -4,12 +4,18 @@
 //! settled. Ranks are local. A missing rank means the
 //! thread has not been dragged into a spot.
 
-/// Idle threads older than this fold into Settled. T3's default is three
-/// days. Existing bruhs workspaces default to one day.
+/// Idle threads older than this fold into Settled.
 pub const SETTLED_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// How long an Undo notification stays up.
 pub const UNDO_MS: i64 = 5_000;
+
+/// Whether a focused thread row received the platform's context-menu key.
+pub fn is_thread_menu_key(key: &str, shift: bool) -> bool {
+    key.eq_ignore_ascii_case("menu")
+        || key.eq_ignore_ascii_case("contextmenu")
+        || (shift && key.eq_ignore_ascii_case("f10"))
+}
 
 /// Sidebar shelves, top to bottom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -415,6 +421,7 @@ pub enum ThreadMenuEntry {
     Snooze(SnoozePreset),
     /// Opens the custom snooze dialog.
     SnoozeCustom,
+    Rename,
     /// Disabled when the client cannot start another title request.
     RegenerateTitle {
         enabled: bool,
@@ -434,6 +441,7 @@ impl ThreadMenuEntry {
             Self::Wake => "Wake thread",
             Self::Snooze(preset) => preset.label,
             Self::SnoozeCustom => SNOOZE_CUSTOM_LABEL,
+            Self::Rename => "Rename",
             Self::RegenerateTitle { .. } => "Regenerate title",
             Self::DiscardDraft => "Discard draft",
             Self::Separator => "",
@@ -477,6 +485,7 @@ pub fn thread_menu(
     );
     rows.push(ThreadMenuEntry::SnoozeCustom);
     rows.push(ThreadMenuEntry::Separator);
+    rows.push(ThreadMenuEntry::Rename);
     rows.push(ThreadMenuEntry::RegenerateTitle {
         enabled: !facts.title_action_disabled,
     });
@@ -778,6 +787,7 @@ mod tests {
                 "Next week",
                 "Custom…",
                 "---",
+                "Rename",
                 "Regenerate title",
             ]
         );
@@ -801,6 +811,7 @@ mod tests {
                 "Next week",
                 "Custom…",
                 "---",
+                "Rename",
                 "Regenerate title",
                 "Discard draft",
             ]

@@ -517,6 +517,8 @@ pub struct AgentRequest {
     pub model: Option<String>,
     #[serde(default)]
     pub permission_mode: Option<PermissionMode>,
+    #[serde(default, skip_serializing_if = "skip_false")]
+    pub interactive_questions: bool,
     /// Provider session to resume (from a previous turn's `init`/`result`).
     #[serde(default)]
     pub session_id: Option<String>,
@@ -610,6 +612,27 @@ pub struct ApproveRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApproveResponse {
     pub success: bool,
+}
+
+/// `POST /api/agent/answer-question`: answer a structured request on its thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerQuestionRequest {
+    pub thread_id: ThreadId,
+    pub request_id: String,
+    pub reply: crate::logic::user_question::QuestionReply,
+}
+
+/// Identity of one staged file in a pending manual answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuestionUpload {
+    pub thread_id: ThreadId,
+    pub request_id: String,
+    pub question: usize,
+    /// Stable across a client's retries.
+    pub upload_id: uuid::Uuid,
+    pub name: String,
 }
 
 /// Token counts for a turn. Accepts the web's older `cache_*_tokens` names.
@@ -723,6 +746,14 @@ pub enum AgentStreamEvent {
         input: Value,
         #[serde(default)]
         tool_use_id: Option<String>,
+        #[serde(default)]
+        can_answer: bool,
+        #[serde(default)]
+        can_attach: bool,
+    },
+    /// Host-written files the user submitted with an answer.
+    QuestionFiles {
+        files: Vec<crate::logic::attachments::UploadedFile>,
     },
     /// The provider withdrew a pending permission request.
     PermissionCancelled {

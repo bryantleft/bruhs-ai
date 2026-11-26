@@ -4,11 +4,19 @@ use crate::linked_projects::connection::{self, Destination, SavedHost};
 use bruhs_models::remote_hosts::RemoteHostSnapshot;
 use futures_util::{stream, StreamExt};
 use std::{
+    collections::BTreeMap,
+    future::Future,
     io,
     path::{Path, PathBuf},
 };
 
-use bruhs_models::{agent::AgentProvider, agent_extensions::QuotaWindow};
+use bruhs_models::{
+    agent::AgentProvider,
+    agent_extensions::{
+        QuotaWindow, SharedUsageHistory, UsageHistoryPeriod, UsageModelPricing,
+        UsageModelPricingChange,
+    },
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -104,17 +112,16 @@ async fn saved(path: &Path) -> io::Result<Vec<SavedHost>> {
             .project_links
             .into_iter()
             .flat_map(|links| links.hosts)
-            .filter(|h| h.usage)
             .collect())
     })
     .await
     .map_err(io::Error::other)?
 }
 
-async fn fetch(
+async fn session(
     host: &SavedHost,
     tunnels: Option<&RemoteHostSnapshot>,
-) -> Result<Vec<SharedAccount>, String> {
+) -> Result<(reqwest::Client, reqwest::Url, zeroize::Zeroizing<String>), String> {
     let (url, tunnel) = match &host.destination {
         Destination::Https(url) => (connection::endpoint(url, false)?, None),
         Destination::Ssh { .. } => {
@@ -131,7 +138,15 @@ async fn fetch(
     let token = tokio::task::spawn_blocking(move || connection::project_token(id, &destination))
         .await
         .map_err(|_| "Could not open the environment credential.")??;
-    read(client, url, token.as_str()).await
+    Ok((client, url, token))
+}
+
+async fn fetch(
+    host: &SavedHost,
+    tunnels: Option<&RemoteHostSnapshot>,
+) -> Result<Vec<SharedAccount>, String> {
+    let (client, url, token) = session(host, tunnels).await?;
+    read(client, url, &token).await
 }
 
 pub async fn read(
@@ -174,7 +189,11 @@ pub async fn reports(
     tunnels: Option<&crate::remote_hosts::RemoteHostManager>,
 ) -> io::Result<Vec<HostReport>> {
     let Some(path) = path else { return Ok(vec![]) };
-    let hosts = saved(&path).await?;
+    let hosts: Vec<_> = saved(&path)
+        .await?
+        .into_iter()
+        .filter(|h| h.usage)
+        .collect();
     if hosts.is_empty() {
         return Ok(vec![]);
     }
@@ -201,13 +220,237 @@ pub async fn reports(
         .filter(|(h, _)| {
             current
                 .iter()
-                .any(|c| c.credential == h.credential && c.destination == h.destination)
+                .any(|c| c.usage && c.credential == h.credential && c.destination == h.destination)
         })
         .map(|(h, accounts)| HostReport {
             name: h.name,
             accounts,
         })
         .collect())
+}
+
+#[derive(Default)]
+pub struct HistoryReports {
+    pub environments: Vec<String>,
+    pub reports: Vec<(String, Result<SharedUsageHistory, String>)>,
+}
+
+pub async fn history_reports(
+    path: Option<PathBuf>,
+    environment: Option<&str>,
+    period: UsageHistoryPeriod,
+    tunnels: impl Future<Output = Option<RemoteHostSnapshot>>,
+) -> io::Result<HistoryReports> {
+    let Some(path) = path else {
+        return Ok(HistoryReports::default());
+    };
+    let selected: Vec<_> = saved(&path)
+        .await?
+        .into_iter()
+        .filter(|h| h.usage_history && environment.is_none_or(|name| name == h.name))
+        .collect();
+    let tunnels = if selected
+        .iter()
+        .any(|h| matches!(h.destination, Destination::Ssh { .. }))
+    {
+        tunnels.await
+    } else {
+        None
+    };
+    let tunnels = tunnels.as_ref();
+    let results = stream::iter(selected.into_iter().map(|host| async move {
+        let report = fetch_history(&host, tunnels, period).await;
+        (host, report)
+    }))
+    .buffered(4)
+    .collect::<Vec<_>>()
+    .await;
+    let current = saved(&path).await?;
+    Ok(HistoryReports {
+        environments: current
+            .iter()
+            .filter(|h| h.usage_history)
+            .map(|h| h.name.clone())
+            .collect(),
+        reports: results
+            .into_iter()
+            .filter_map(|(host, report)| {
+                current
+                    .iter()
+                    .find(|h| {
+                        h.usage_history
+                            && h.credential == host.credential
+                            && h.destination == host.destination
+                    })
+                    .map(|h| (h.name.clone(), report))
+            })
+            .collect(),
+    })
+}
+
+async fn fetch_history(
+    host: &SavedHost,
+    tunnels: Option<&RemoteHostSnapshot>,
+    period: UsageHistoryPeriod,
+) -> Result<SharedUsageHistory, String> {
+    let (client, mut url, token) = session(host, tunnels).await?;
+    url.set_path("/api/projects/usage/history");
+    let mut response = client
+        .get(url)
+        .query(&period)
+        .bearer_auth(token.as_str())
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|_| "Could not reach the environment.")?;
+    match response.status() {
+        reqwest::StatusCode::OK => (),
+        reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::UNAUTHORIZED => {
+            return Err(
+                "Cost and token history access was denied. Link a current grant in Environments."
+                    .into(),
+            );
+        }
+        reqwest::StatusCode::BAD_REQUEST if period.last_24h_ending_at.is_some() => {
+            return Err("Hourly history is unavailable. Check that the environment is up to date and its clock is correct.".into());
+        }
+        _ => return Err("The environment could not report cost and token history.".into()),
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "The usage history response was interrupted.")?
+    {
+        if body.len() + chunk.len() > 1024 * 1024 {
+            return Err("The usage history response is too large.".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body)
+        .map_err(|_| "The environment returned unreadable usage history.".into())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PriceDestination {
+    pub id: uuid::Uuid,
+    pub name: String,
+    destination: Destination,
+}
+
+impl PriceDestination {
+    /// A Workbench request can pin the same connection without receiving its topology.
+    pub fn request_key(&self) -> Result<String, serde_json::Error> {
+        use sha2::{Digest, Sha256};
+
+        let connection = serde_json::to_vec(&(self.id, &self.destination))?;
+        Ok(format!("{:x}", Sha256::digest(connection)))
+    }
+
+    pub fn needs_tunnel(&self) -> bool {
+        matches!(self.destination, Destination::Ssh { .. })
+    }
+}
+
+pub async fn price_destinations(path: Option<&Path>) -> io::Result<Vec<PriceDestination>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    Ok(saved(path)
+        .await?
+        .into_iter()
+        .filter(|host| host.usage_history && host.edit_usage_prices)
+        .map(|host| PriceDestination {
+            id: host.credential,
+            name: host.name,
+            destination: host.destination,
+        })
+        .collect())
+}
+
+async fn price_session(
+    path: &Path,
+    target: &PriceDestination,
+    tunnels: Option<&RemoteHostSnapshot>,
+) -> Result<(reqwest::Client, reqwest::Url, zeroize::Zeroizing<String>), String> {
+    let host = saved(path)
+        .await
+        .map_err(|_| "Could not read linked environments.")?
+        .into_iter()
+        .find(|host| {
+            host.credential == target.id
+                && host.destination == target.destination
+                && host.usage_history
+                && host.edit_usage_prices
+        })
+        .ok_or("The environment link changed. Reopen Model prices to use the current link.")?;
+    let (client, mut url, token) = session(&host, tunnels).await?;
+    url.set_path("/api/projects/usage/model-prices");
+    Ok((client, url, token))
+}
+
+fn price_request_error(status: reqwest::StatusCode) -> String {
+    use reqwest::StatusCode;
+
+    match status {
+        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => {
+            "Model price access was denied. Link a current grant in Environments."
+        }
+        StatusCode::NOT_FOUND => "Update the environment to edit model prices.",
+        StatusCode::CONFLICT => "A model price changed elsewhere. Refresh its saved values.",
+        StatusCode::BAD_REQUEST => "The environment rejected the model IDs, mappings or rates.",
+        _ => "The environment could not process model prices.",
+    }
+    .into()
+}
+
+pub async fn read_model_prices(
+    path: &Path,
+    target: &PriceDestination,
+    tunnels: Option<&RemoteHostSnapshot>,
+) -> Result<BTreeMap<String, UsageModelPricing>, String> {
+    let (client, url, token) = price_session(path, target, tunnels).await?;
+    let mut response = client
+        .get(url)
+        .bearer_auth(token.as_str())
+        .send()
+        .await
+        .map_err(|_| "Could not reach the environment.")?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(price_request_error(response.status()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "The model price response was interrupted.")?
+    {
+        if body.len() + chunk.len() > 1024 * 1024 {
+            return Err("The model price response is too large.".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| "The environment returned unreadable prices.".into())
+}
+
+pub async fn save_model_prices(
+    path: &Path,
+    target: &PriceDestination,
+    tunnels: Option<&RemoteHostSnapshot>,
+    changes: &[UsageModelPricingChange],
+) -> Result<(), String> {
+    let (client, url, token) = price_session(path, target, tunnels).await?;
+    let response = client
+        .post(url)
+        .bearer_auth(token.as_str())
+        .json(changes)
+        .send()
+        .await
+        .map_err(|_| "Could not reach the environment.")?;
+    if response.status() != reqwest::StatusCode::NO_CONTENT {
+        return Err(price_request_error(response.status()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -218,6 +461,46 @@ mod tests {
         matchers::{header, method, path},
         Mock, MockServer, ResponseTemplate,
     };
+
+    #[tokio::test]
+    async fn price_destinations_exclude_history_only_and_legacy_links() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("desktop.json");
+        let id = uuid::Uuid::new_v4();
+        let legacy = json!({"name":"Legacy","credential":uuid::Uuid::new_v4(),
+            "destination":{"Https":"https://legacy.invalid"}});
+        let reader = json!({"name":"Reader","credential":uuid::Uuid::new_v4(),
+            "usage_history":true,"destination":{"Https":"https://reader.invalid"}});
+        let writer = json!({"name":"Studio","credential":id,"usage_history":true,
+            "edit_usage_prices":true,"destination":{"Https":"https://studio.invalid"}});
+        std::fs::write(
+            &file,
+            json!({"project_links":{"hosts":[legacy,reader,writer]}}).to_string(),
+        )
+        .unwrap();
+        let destinations = price_destinations(Some(&file)).await.unwrap();
+        assert_eq!(
+            destinations,
+            vec![PriceDestination {
+                id,
+                name: "Studio".into(),
+                destination: Destination::Https("https://studio.invalid".into()),
+            }]
+        );
+        let relinked = json!({"name":"Studio","credential":id,"usage_history":true,
+            "edit_usage_prices":true,"destination":{"Https":"https://replacement.invalid"}});
+        std::fs::write(
+            &file,
+            json!({"project_links":{"hosts":[relinked]}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            save_model_prices(&file, &destinations[0], None, &[])
+                .await
+                .unwrap_err(),
+            "The environment link changed. Reopen Model prices to use the current link."
+        );
+    }
 
     #[cfg(unix)]
     #[tokio::test]

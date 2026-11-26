@@ -1,4 +1,6 @@
 use super::{authority::*, MobileError, MobileResult, BROKER_CAPACITY, REQUEST_TIMEOUT};
+use axum::body::Bytes;
+use bruhs_models::api::QuestionUpload;
 use bruhs_models::mobile::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
@@ -30,12 +32,28 @@ pub enum MobilePending {
         ticket: MobileCommandTicket,
         respond: MobileResponder<MobileCommandReceipt>,
     },
+    QuestionFile {
+        lease: MobileLease,
+        file: MobileQuestionFile,
+        respond: MobileResponder<()>,
+    },
+}
+
+pub struct MobileQuestionFile {
+    pub upload: QuestionUpload,
+    pub turn_generation: u64,
+    pub review_hash: String,
+    /// No bytes means removal. Keep admission until the native handler
+    /// releases the body, even if the HTTP request times out.
+    pub bytes: Option<Bytes>,
+    pub(super) _intake: OwnedSemaphorePermit,
 }
 impl MobilePending {
     pub fn is_closed(&self) -> bool {
         match self {
             Self::Read { respond, .. } => respond.is_closed(),
             Self::Command { respond, .. } => respond.is_closed(),
+            Self::QuestionFile { respond, .. } => respond.is_closed(),
         }
     }
 }
@@ -138,5 +156,34 @@ impl MobileBroker {
         .await
         .map_err(|_| MobileError::Unavailable)??;
         authority.finish(&lease, &ticket).await
+    }
+
+    pub(super) async fn question_file(
+        &self,
+        lease: MobileLease,
+        file: MobileQuestionFile,
+    ) -> MobileResult<()> {
+        lease.check(MobileScope::Prompt)?;
+        let permit = self
+            .1
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| MobileError::Unavailable)?;
+        let (sender, receive) = oneshot::channel();
+        self.0
+            .try_send(MobilePending::QuestionFile {
+                lease: lease.clone(),
+                file,
+                respond: MobileResponder {
+                    sender,
+                    _permit: permit,
+                },
+            })
+            .map_err(|_| MobileError::Unavailable)?;
+        tokio::time::timeout(REQUEST_TIMEOUT, receive)
+            .await
+            .map_err(|_| MobileError::Unavailable)?
+            .map_err(|_| MobileError::Unavailable)??;
+        lease.check(MobileScope::Prompt).map(|_| ())
     }
 }

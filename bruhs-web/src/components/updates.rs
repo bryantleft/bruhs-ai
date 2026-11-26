@@ -167,7 +167,7 @@ pub fn SidebarUpdateButton() -> impl IntoView {
     }
 }
 
-/// T3's "Update N machine(s)?", for this machine's providers.
+/// Confirms updates to this computer's providers.
 #[component]
 fn UpdateConfirmDialog() -> impl IntoView {
     let updates = Updates::get();

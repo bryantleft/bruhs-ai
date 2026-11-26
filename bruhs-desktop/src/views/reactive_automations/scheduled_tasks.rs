@@ -1036,7 +1036,7 @@ impl ReactiveAutomations {
         card_width: f32,
         cx: &Context<'_, Self>,
     ) -> Div {
-        // T3's task rows stack controls below 32rem of usable row width.
+        // Stack task controls when the usable row width is below the inline breakpoint.
         let stacked = card_width - 2.0 * 12.0 - 2.0 < theme::SETTINGS_INLINE_CONTENT_WIDTH_PX;
         let mut body = div().flex().flex_col().gap_3().p_3();
         if let Some(error) = self.error.as_ref().or(self.load_error.as_ref()) {

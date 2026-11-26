@@ -1,6 +1,12 @@
 //! Threads, messages and the running turn.
 
-use bruhs_models::logic::attachments::UploadedFile;
+use bruhs_models::{
+    agent::AgentProvider,
+    logic::{
+        attachments::UploadedFile,
+        user_question::{questions, QuestionAnswer},
+    },
+};
 
 use super::*;
 
@@ -16,7 +22,7 @@ pub struct SetThreadsSignal(pub WriteSignal<Vec<Thread>>);
 #[derive(Copy, Clone)]
 pub struct ActiveThreadId(pub ReadSignal<Option<String>>);
 #[derive(Copy, Clone)]
-pub struct SetActiveThreadId(pub WriteSignal<Option<String>>);
+pub struct SetActiveThreadId(pub ActiveThreadWriter);
 
 /// The visible transcript (the active thread's settled messages).
 #[derive(Copy, Clone)]
@@ -58,6 +64,9 @@ pub struct Thread {
     /// so later turns keep the conversation context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Provider that opened the saved session, even if a later turn failed to start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_provider: Option<AgentProvider>,
     /// The next turn starts a new provider session. A rewind sets this so
     /// the removed turns are not resumed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -68,6 +77,9 @@ pub struct Thread {
     /// Model id of the last turn, for the sidebar's provider mark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Explicit choice for the next turn, independent of the saved session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composer_model: Option<String>,
     /// Pinned threads stay at the top of the sidebar (⌘⇧P).
     #[serde(default)]
     pub pinned: bool,
@@ -92,6 +104,9 @@ pub struct Thread {
     /// Worktree this thread runs in, once one was created or reused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
+    /// Canonical URL of the pull request this worktree was opened to review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_pull: Option<String>,
     /// Native reasoning effort stamped on the last turn. `None` keeps the CLI default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
@@ -134,9 +149,11 @@ impl Thread {
             updated_at: now,
             project_path,
             session_id: None,
+            session_provider: None,
             fresh_session: false,
             branch: None,
             model: None,
+            composer_model: None,
             pinned: false,
             settled: false,
             pin_rank: None,
@@ -144,6 +161,7 @@ impl Thread {
             snoozed_until_ms: None,
             goal: None,
             worktree_path: None,
+            linked_pull: None,
             effort: None,
             run_locked: false,
             role: None,
@@ -153,6 +171,29 @@ impl Thread {
         }
     }
 
+    pub fn selected_model(&self) -> Option<&str> {
+        self.composer_model
+            .as_deref()
+            .filter(|model| !model.is_empty())
+            .or_else(|| self.model.as_deref().filter(|model| !model.is_empty()))
+    }
+
+    pub fn saved_session_provider(&self) -> Option<AgentProvider> {
+        self.session_id.as_deref().filter(|id| !id.is_empty())?;
+        self.session_provider.or_else(|| {
+            self.model
+                .as_deref()
+                .filter(|model| !model.is_empty())
+                .map(AgentProvider::for_model)
+        })
+    }
+
+    pub fn restart_session(&mut self) {
+        self.session_id = None;
+        self.session_provider = None;
+        self.fresh_session = true;
+    }
+
     /// Moving a conversation to another folder starts a session carrying its history.
     pub fn set_project(&mut self, name: String, path: Option<String>, context: Option<String>) {
         if self.project_name == name && self.project_path == path {
@@ -160,10 +201,10 @@ impl Thread {
         }
         self.project_name = name;
         self.project_path = path;
-        self.session_id = None;
-        self.fresh_session = true;
+        self.restart_session();
         self.branch = None;
         self.worktree_path = None;
+        self.linked_pull = None;
         self.run_locked = false;
         self.instructions_stamp = None;
         self.import_context = context.or_else(|| self.import_context.take());
@@ -526,11 +567,33 @@ impl AgentMessage {
 /// A background shell the agent started, as `/api/tasks/stream` reports it.
 pub use bruhs_models::api::BackgroundTask;
 
+#[derive(Debug, Clone, Default)]
+pub struct QuestionDraft {
+    pub answers: Vec<QuestionAnswer>,
+    pub position: usize,
+    pub collapsed_question: Option<usize>,
+    pub uploads: Vec<QuestionFileOffer>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QuestionFileOffer {
+    pub upload: bruhs_models::api::QuestionUpload,
+    pub size: u64,
+    pub phase: crate::components::file_attachments::OfferPhase,
+    pub bytes: Option<std::sync::Arc<[u8]>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PermissionRequest {
     pub id: String,
     pub tool: String,
     pub input: serde_json::Value,
+    #[serde(default)]
+    pub can_answer: bool,
+    #[serde(default)]
+    pub can_attach: bool,
+    #[serde(skip)]
+    pub question_draft: Option<ArcRwSignal<QuestionDraft>>,
     /// The thread whose turn asks. Empty until the turn that received the
     /// request stamps it.
     #[serde(default)]
@@ -545,8 +608,25 @@ pub struct PendingPermissions(Vec<PermissionRequest>);
 
 impl PendingPermissions {
     /// Add `request`, or replace the one with the same id in place.
-    pub fn insert(&mut self, request: PermissionRequest) {
-        match self.0.iter_mut().find(|r| r.id == request.id) {
+    pub fn insert(&mut self, mut request: PermissionRequest) {
+        let existing = self.0.iter_mut().find(|prior| prior.id == request.id);
+        if request.can_answer {
+            request.question_draft = existing
+                .as_deref()
+                .filter(|prior| {
+                    prior.thread_id == request.thread_id && prior.input == request.input
+                })
+                .and_then(|prior| prior.question_draft.clone())
+                .or_else(|| {
+                    questions(&request.input).map(|questions| {
+                        ArcRwSignal::new(QuestionDraft {
+                            answers: vec![QuestionAnswer::default(); questions.len()],
+                            ..QuestionDraft::default()
+                        })
+                    })
+                });
+        }
+        match existing {
             Some(slot) => *slot = request,
             None => self.0.push(request),
         }
@@ -716,7 +796,7 @@ pub fn activate_thread(
     history: crate::thread_history::ThreadHistory,
     active: ReadSignal<Option<String>>,
     id: String,
-    set_active: WriteSignal<Option<String>>,
+    set_active: ActiveThreadWriter,
     set_messages: WriteSignal<Vec<AgentMessage>>,
     turns: Turns,
     unread: RwSignal<HashSet<String>>,
@@ -898,7 +978,7 @@ pub fn auto_title(prompt: &str) -> String {
 pub fn create_thread(
     catalog: crate::thread_catalog::ThreadCatalog,
     set_threads: WriteSignal<Vec<Thread>>,
-    set_active: WriteSignal<Option<String>>,
+    set_active: ActiveThreadWriter,
     set_messages: WriteSignal<Vec<AgentMessage>>,
     project_name: String,
     project_path: Option<String>,
@@ -909,6 +989,16 @@ pub fn create_thread(
         project_path,
         now_epoch_ms(),
     );
+    insert_thread(catalog, set_threads, set_active, set_messages, thread)
+}
+
+pub(crate) fn insert_thread(
+    catalog: crate::thread_catalog::ThreadCatalog,
+    set_threads: WriteSignal<Vec<Thread>>,
+    set_active: ActiveThreadWriter,
+    set_messages: WriteSignal<Vec<AgentMessage>>,
+    thread: Thread,
+) -> String {
     let id = thread.id.clone();
     set_threads.update(|ts| ts.insert(0, thread.clone()));
     set_active.set(Some(id.clone()));
@@ -926,20 +1016,23 @@ pub(super) fn provide() {
     let (is_streaming, set_is_streaming) = signal(false);
     let (tasks, set_tasks) = signal(Vec::<BackgroundTask>::new());
 
-    // Each thread keeps its model, so opening one puts its model in the
-    // composer and its session resumes on the provider that owns it. A thread with no turn yet is on the default.
+    // A saved choice follows its thread. Only threads without a choice or a
+    // previous turn follow the starting model.
     let crate::state::SetCurrentModel(set_current_model) =
         expect_context::<crate::state::SetCurrentModel>();
-    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
+    let crate::state::NewThreadModel(new_thread_model) =
+        expect_context::<crate::state::NewThreadModel>();
     let active_model = Memo::new(move |_| {
         let id = active_thread_id.get()?;
-        threads.with(|ts| ts.iter().find(|t| t.id == id)?.model.clone())
+        threads.with(|ts| {
+            ts.iter()
+                .find(|t| t.id == id)?
+                .selected_model()
+                .map(str::to_owned)
+        })
     });
     Effect::new(move |_| {
-        let model = active_model
-            .get()
-            .filter(|model| !model.is_empty())
-            .unwrap_or_else(|| default_model.get());
+        let model = active_model.get().unwrap_or_else(|| new_thread_model.get());
         set_current_model.set(model);
     });
 
@@ -974,7 +1067,11 @@ pub(super) fn provide() {
     provide_context(ThreadsSignal(threads));
     provide_context(SetThreadsSignal(set_threads));
     provide_context(ActiveThreadId(active_thread_id));
-    provide_context(SetActiveThreadId(set_active_thread_id));
+    provide_context(SetActiveThreadId(ActiveThreadWriter {
+        active: active_thread_id,
+        set_active: set_active_thread_id,
+        drafts: Drafts::provide(active_thread_id),
+    }));
     provide_context(MessagesSignal(messages));
     provide_context(SetMessagesSignal(set_messages));
     provide_context(IsStreaming(is_streaming));
@@ -989,9 +1086,6 @@ pub(super) fn provide() {
     provide_context(UnreadThreads(RwSignal::new(HashSet::<String>::new())));
     provide_context(ThreadNotice::new());
     provide_context(PromptQueueSignal(prompt_queue));
-    provide_context(ComposerDraft(RwSignal::new(String::new())));
-    provide_context(ComposerChips(RwSignal::new(Vec::new())));
-    provide_context(ChipRetargetGuard(StoredValue::new(false)));
     provide_context(PromptStashSignal(prompt_stash));
     provide_context(StashMenuOpen(RwSignal::new(false)));
 
@@ -1043,6 +1137,32 @@ pub(super) fn provide() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_model_pick_keeps_the_model_and_session_from_the_last_turn() {
+        let raw = serde_json::json!({
+            "id": "t1",
+            "title": "Existing conversation",
+            "project_name": "",
+            "updated_at": 1_700_000_000_000_i64,
+            "session_id": "claude-session",
+            "model": "claude-sonnet-4-6",
+        });
+        let mut thread: Thread = serde_json::from_value(raw).unwrap();
+        assert_eq!(thread.selected_model(), Some("claude-sonnet-4-6"));
+        thread.composer_model = Some("gpt-5.5".into());
+        let saved = serde_json::to_value(thread).unwrap();
+        let mut reopened: Thread = serde_json::from_value(saved).unwrap();
+        assert_eq!(reopened.selected_model(), Some("gpt-5.5"));
+        assert_eq!(reopened.model.as_deref(), Some("claude-sonnet-4-6"));
+        assert_eq!(reopened.session_id.as_deref(), Some("claude-session"));
+        reopened.session_provider = reopened.saved_session_provider();
+        reopened.model = Some("gpt-5.5".into());
+        assert_eq!(
+            reopened.saved_session_provider(),
+            Some(AgentProvider::Claude)
+        );
+    }
 
     #[test]
     fn thread_records_without_a_key_still_read() {
@@ -1128,6 +1248,9 @@ mod tests {
             id: id.into(),
             tool: tool.into(),
             input: serde_json::Value::Null,
+            can_answer: false,
+            can_attach: false,
+            question_draft: None,
             thread_id: thread.into(),
         }
     }

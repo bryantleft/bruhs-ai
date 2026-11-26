@@ -68,6 +68,11 @@ impl TaskSaves {
         };
         provide_context(saves);
         saves.load_day_plan();
+        crate::storage::question_file_retirement::retry();
+        let online = window_event_listener(leptos::ev::online, |_| {
+            crate::storage::question_file_retirement::retry();
+        });
+        on_cleanup(move || online.remove());
         // A failed Apply's or Undo's banner goes with its error.
         Effect::new(move |_| {
             let Some(id) = saves
@@ -305,6 +310,8 @@ impl TaskSaves {
                                 "This contact changed in storage. Your unsaved changes are kept here; copy the recovery data before reloading to review the latest version.".into()
                             } else if pending.iter().any(|edit| edit.kind == Kind::Project) {
                                 "This project or a linked task changed in storage. Your unsaved changes are kept here; copy the recovery data before reloading to review the latest version.".into()
+                            } else if pending.iter().any(|edit| edit.kind == Kind::ComposerDraft) {
+                                "This draft or its thread changed in storage. Copy your unsaved draft from recovery before reloading.".into()
                             } else if pending.iter().any(|edit| matches!(edit.kind, Kind::Thread | Kind::Conversation)) {
                                 "This thread or its conversation changed in storage. Your unsaved changes are kept here; copy the recovery data before reloading to review the latest version.".into()
                             } else if pending.iter().any(|edit| matches!(edit.kind, Kind::Document | Kind::Attachment)) {
@@ -323,7 +330,7 @@ impl TaskSaves {
                                 Kind::Inbox => queue.failed_record(Kind::Inbox, &edit.id, message.clone(), conflict),
                                 Kind::Event => queue.failed_record(Kind::Event, &edit.id, message.clone(), conflict),
                                 Kind::Document | Kind::Attachment => queue.failed_record(edit.kind, &edit.id, message.clone(), conflict),
-                                Kind::SourceClip | Kind::Person | Kind::Project | Kind::Thread | Kind::Conversation => queue.failed_record(edit.kind, &edit.id, message.clone(), conflict),
+                                Kind::SourceClip | Kind::Person | Kind::Project | Kind::Thread | Kind::Conversation | Kind::ComposerDraft => queue.failed_record(edit.kind, &edit.id, message.clone(), conflict),
                             }
                         }
                     }),

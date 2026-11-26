@@ -515,8 +515,24 @@ impl ChatView {
                 format!("desktop-user-copy-{index}").into(),
                 "Copy message",
                 copy_text,
+                assets::COPY_ICON_PATH,
                 cx,
             ))
+            .when_some(
+                bruhs_models::logic::app_link::hosted_prompt_link(
+                    bruhs_models::thread_link::delivery_body(msg.text_for_title()),
+                )
+                .ok(),
+                |row, link| {
+                    row.child(self.render_copy_button(
+                        format!("desktop-user-prompt-link-{index}").into(),
+                        "Copy prompt link",
+                        link,
+                        assets::EXTERNAL_LINK_ICON_PATH,
+                        cx,
+                    ))
+                },
+            )
             .child(time)
             .into_any_element()
     }
@@ -548,7 +564,7 @@ impl ChatView {
         } else if in_worktree {
             "No checkpoint for this message."
         } else {
-            "The next turn starts a new session. Files stay as they are."
+            "The next turn starts a new session. Project files stay as they are."
         };
         let keep = if in_worktree {
             "Revert and keep changes"
@@ -637,6 +653,7 @@ impl ChatView {
         key: SharedString,
         label: &'static str,
         text: String,
+        glyph: &'static str,
         cx: &Context<'_, Self>,
     ) -> Stateful<Div> {
         let copied = self.copy_feedback.is_shown(&key);
@@ -667,11 +684,7 @@ impl ChatView {
             .child(if copied {
                 icon(assets::CHECK_ICON_PATH, theme::ICON_PX, theme::pandan_400())
             } else {
-                icon(
-                    assets::COPY_ICON_PATH,
-                    theme::ICON_PX,
-                    theme::rambutan_500(),
-                )
+                icon(glyph, theme::ICON_PX, theme::rambutan_500())
             })
     }
 
@@ -724,7 +737,10 @@ impl ChatView {
             .debug_selector(move || format!("desktop-assistant-message-{index}"))
             .w_full()
             .flex()
-            .flex_col();
+            .flex_col()
+            .when(!msg.files.is_empty(), |turn| {
+                turn.child(self.render_sent_files(index, msg, cx))
+            });
 
         let has_tool_error = self.tool_visibility != super::tool_visibility::Visibility::ShowAll
             && tools.iter().any(|tool| tool.state == ToolState::Error);
@@ -1175,7 +1191,13 @@ impl ChatView {
     /// "Waiting for your approval" while a permission prompt is up).
     fn render_working_row(&self, msg: &Message, thinking_only: bool) -> AnyElement {
         let awaiting = self.pending_permission.is_some() || self.pending_secret.is_some();
-        let label = if awaiting {
+        let label = if self
+            .pending_permission
+            .as_ref()
+            .is_some_and(|request| request.can_answer)
+        {
+            "Waiting for your answer".to_string()
+        } else if awaiting {
             "Waiting for your approval".to_string()
         } else {
             let elapsed = msg
@@ -1726,6 +1748,7 @@ impl ChatView {
                     format!("desktop-turn-copy-{index}").into(),
                     "Copy response",
                     msg.content.clone(),
+                    assets::COPY_ICON_PATH,
                     cx,
                 ))
                 .child(self.render_response_export(index, cx))

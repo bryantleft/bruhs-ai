@@ -137,7 +137,7 @@ impl Expanded {
 struct RowCtx {
     expanded: Expanded,
     now_ms: ReadSignal<f64>,
-    awaiting: Signal<bool>,
+    awaiting: Signal<Option<&'static str>>,
     on_retry: Callback<(String, String)>,
     on_open_diff: Callback<(String, Option<String>)>,
     can_rewind: Signal<bool>,
@@ -156,9 +156,9 @@ pub fn Timeline(
     /// The running turn's message, rebuilt per token.
     live: Memo<Option<Turn>>,
     #[prop(into)] is_streaming: Signal<bool>,
-    /// True while the turn is blocked on a permission prompt.
+    /// Status text while the turn is waiting for the user.
     #[prop(optional, into)]
-    awaiting_approval: Signal<bool>,
+    awaiting_response: Signal<Option<&'static str>>,
     /// `(failed assistant message id, prompt to resend)`.
     on_retry: Callback<(String, String)>,
     /// The thread is idle, so Edit from here can rewind it.
@@ -198,7 +198,7 @@ pub fn Timeline(
     let ctx = RowCtx {
         expanded,
         now_ms,
-        awaiting: awaiting_approval,
+        awaiting: awaiting_response,
         on_retry,
         on_open_diff,
         can_rewind,
@@ -482,6 +482,12 @@ fn render_row(row: TimelineRow, ctx: RowCtx) -> AnyView {
             />
         }
         .into_any(),
+        TimelineRow::QuestionFiles { files, .. } => view! {
+            <div class="pb-2 text-label-sm text-rambutan-400">
+                "Files attached to answers"
+                <SentFiles files=files />
+            </div>
+        }.into_any(),
         TimelineRow::AssistantText {
             markdown, streaming, message_id, key,
         } => view! {
@@ -597,6 +603,34 @@ fn fold_row(key: String, label: String, rows: Arc<Vec<TimelineRow>>, ctx: RowCtx
     .into_any()
 }
 
+#[component]
+fn SentFiles(files: Vec<bruhs_models::logic::attachments::UploadedFile>) -> impl IntoView {
+    let OpenFileSignal(open_file) = expect_context::<crate::state::OpenFileSignal>();
+    let RightPanelSignal(panel) = expect_context::<crate::state::RightPanelSignal>();
+    view! {
+        <div class="mt-2 flex flex-col gap-1">
+            {files.into_iter().map(|file| {
+                let name = file.name.clone();
+                let path = file.path;
+                view! {
+                    <button
+                        type="button"
+                        data-sent-file=name.clone()
+                        class="bruhs-control flex min-h-control items-center rounded-seed bg-longan-900/50 px-2 text-left text-label-sm text-rambutan-300 hover:text-rambutan-100 cursor-pointer"
+                        on:click=move |_| {
+                            crate::components::file_attachments::show_open_file(
+                                open_file, panel, path.clone(), name.clone(), None, false,
+                            );
+                        }
+                    >
+                        <span class="truncate">{name.clone()}</span>
+                    </button>
+                }
+            }).collect_view()}
+        </div>
+    }
+}
+
 // ── User ─────────────────────────────────────────────────────────────────────
 
 #[component]
@@ -610,8 +644,6 @@ fn UserRow(
     in_worktree: Signal<bool>,
     on_edit_from_here: Callback<(String, bool)>,
 ) -> impl IntoView {
-    let OpenFileSignal(open_file) = expect_context::<crate::state::OpenFileSignal>();
-    let RightPanelSignal(panel) = expect_context::<crate::state::RightPanelSignal>();
     // A message another thread's agent sent shows who sent it, not the
     // header written for the model. Copy still takes the whole prompt.
     let copy_text = text.clone();
@@ -619,6 +651,10 @@ fn UserRow(
         Some(delivery) => (Some(delivery.caption()), delivery.body.to_string()),
         None => (None, text),
     };
+    let prompt_link = crate::prompt_links::copyable_link(
+        bruhs_models::logic::composer_text::without_uploaded_file_labels(&text, &files),
+    )
+    .ok();
     let can_collapse = should_collapse_user_message(&text);
     let (collapsed, set_collapsed) = signal(can_collapse);
     let (confirming, set_confirming) = signal(false);
@@ -638,33 +674,7 @@ fn UserRow(
                         "whitespace-pre-wrap break-words"
                     }
                 }>{text}</div>
-                {(!files.is_empty()).then(|| view! {
-                    <div class="mt-2 flex flex-col gap-1">
-                        {files.into_iter().map(|file| {
-                            let name = file.name.clone();
-                            let path = file.path;
-                            view! {
-                                <button
-                                    type="button"
-                                    data-sent-file=name.clone()
-                                    class="flex h-8 items-center rounded-seed bg-longan-900/50 px-2 text-left text-label-sm text-rambutan-300 hover:text-rambutan-100 cursor-pointer"
-                                    on:click=move |_| {
-                                        crate::components::file_attachments::show_open_file(
-                                            open_file,
-                                            panel,
-                                            path.clone(),
-                                            name.clone(),
-                                            None,
-                                            false,
-                                        );
-                                    }
-                                >
-                                    <span class="truncate">{name.clone()}</span>
-                                </button>
-                            }
-                        }).collect_view()}
-                    </div>
-                })}
+                {(!files.is_empty()).then(|| view! { <SentFiles files=files /> })}
                 {can_collapse.then(|| view! {
                     <button
                         type="button"
@@ -694,7 +704,7 @@ fn UserRow(
                         } else if in_worktree {
                             "No checkpoint for this message."
                         } else {
-                            "The next turn starts a new session. Files stay as they are."
+                            "The next turn starts a new session. Project files stay as they are."
                         };
                         let keep = if in_worktree {
                             "Revert and keep changes"
@@ -751,6 +761,9 @@ fn UserRow(
                     }.into_any()
                 }}
                 <CopyButton text=copy_text label="Copy message" />
+                {prompt_link.map(|link| view! {
+                    <CopyButton text=link label="Copy prompt link" icon="external-link" />
+                })}
                 <span>{time}</span>
             </div>
         </div>
@@ -1096,11 +1109,11 @@ fn WorkingRow(
     started_at_ms: Option<f64>,
     thinking_only: bool,
     now_ms: ReadSignal<f64>,
-    awaiting: Signal<bool>,
+    awaiting: Signal<Option<&'static str>>,
 ) -> impl IntoView {
     let label = move || {
-        if awaiting.get() {
-            return "Waiting for your approval".to_string();
+        if let Some(status) = awaiting.get() {
+            return status.to_owned();
         }
         match started_at_ms {
             Some(start) => working_label(now_ms.get() - start),
@@ -1108,14 +1121,14 @@ fn WorkingRow(
         }
     };
     let dot = move || {
-        if awaiting.get() {
+        if awaiting.get().is_some() {
             "relative inline-flex size-1.5 rounded-orb bg-durian-400"
         } else {
             "relative inline-flex size-1.5 rounded-orb bg-blueberry-400"
         }
     };
     let ping = move || {
-        if awaiting.get() {
+        if awaiting.get().is_some() {
             "hidden"
         } else {
             "absolute inline-flex size-full animate-ping rounded-orb bg-blueberry-400 opacity-60"

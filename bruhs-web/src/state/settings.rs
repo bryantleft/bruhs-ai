@@ -7,14 +7,18 @@ use bruhs_models::TranscriptionSettings;
 
 use super::*;
 
-/// Model id the next turn uses: the open thread's, else [`DefaultModel`].
+/// Model id the next turn uses in the open thread.
 #[derive(Copy, Clone)]
 pub struct CurrentModel(pub ReadSignal<String>);
-/// Model a thread with no turn yet starts on: Settings → Model, and the
-/// last model picked in the composer. Saved; opening a thread on another
-/// model does not change it.
+/// Saved default shown in Settings → Model.
 #[derive(Copy, Clone)]
 pub struct DefaultModel(pub RwSignal<String>);
+/// The most recent composer pick, until the user changes the Settings default.
+#[derive(Copy, Clone)]
+pub struct LastComposerModel(pub RwSignal<Option<String>>);
+/// Starting model for conversations with neither a pick nor a last turn.
+#[derive(Copy, Clone)]
+pub struct NewThreadModel(pub Signal<String>);
 #[derive(Copy, Clone)]
 pub struct SetCurrentModel(pub WriteSignal<String>);
 
@@ -170,10 +174,25 @@ pub(super) fn provide() {
     let initial_model = load_pref("bruhs.model")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| bruhs_models::agent::DEFAULT_AGENT_MODEL.to_string());
-    let default_model = RwSignal::new(initial_model.clone());
-    let (current_model, set_current_model) = signal(initial_model);
+    let last_composer_model =
+        RwSignal::new(load_pref("bruhs.lastComposerModel").filter(|model| !model.is_empty()));
+    let default_model = RwSignal::new(initial_model);
+    let new_thread_model = Signal::derive(move || {
+        last_composer_model
+            .get()
+            .unwrap_or_else(|| default_model.get())
+    });
+    let (current_model, set_current_model) = signal(new_thread_model.get_untracked());
     Effect::new(move |_| {
         save_pref("bruhs.model", &default_model.get());
+    });
+    Effect::new(move |_| {
+        last_composer_model.with(|model| {
+            save_pref(
+                "bruhs.lastComposerModel",
+                model.as_deref().unwrap_or_default(),
+            );
+        });
     });
 
     let initial_permission_mode = load_pref("bruhs.permissionMode")
@@ -236,6 +255,8 @@ pub(super) fn provide() {
     provide_context(CurrentModel(current_model));
     provide_context(SetCurrentModel(set_current_model));
     provide_context(DefaultModel(default_model));
+    provide_context(LastComposerModel(last_composer_model));
+    provide_context(NewThreadModel(new_thread_model));
     provide_context(PermissionModeSignal(permission_mode));
     provide_context(SetPermissionModeSignal(set_permission_mode));
     provide_context(EditorSignal(editor_id));

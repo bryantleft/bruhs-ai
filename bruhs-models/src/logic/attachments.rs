@@ -1,8 +1,8 @@
 //! File attachments and the read-only file viewer.
 //!
-//! Limits match the current T3 composer: 100 files, 10 MiB per image, 80 MiB
-//! of images in one message, and 50 MiB for every other file. HEIC and HEIF
-//! are rejected here. Bruhs does not convert or resize photos.
+//! One message accepts up to 100 files and 80 MiB of images. Each image
+//! can be up to 10 MiB and each other file up to 50 MiB. HEIC and HEIF
+//! are rejected. Bruhs preserves supported photos at their original size.
 
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +54,28 @@ pub enum UploadPhase {
 pub struct UploadedFile {
     pub name: String,
     pub path: String,
+}
+
+pub const WEB_QUESTION_UPLOAD_PREFIX: &str = "web-answer-";
+pub const RETIRE_QUESTION_FILES_PATH: &str = "/api/agent/question-files/retire";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetireQuestionFiles {
+    pub thread_id: crate::ids::ThreadId,
+    pub files: Vec<String>,
+}
+
+pub fn web_question_upload_prefix(thread: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let owner = Sha256::digest(thread.as_bytes());
+    format!("{WEB_QUESTION_UPLOAD_PREFIX}{owner:x}-")
+}
+
+/// Use the portable file name so native paths never cross back to the host.
+pub fn web_question_upload_key<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
+    let name = path.rsplit(['/', '\\']).next()?;
+    name.starts_with(prefix).then_some(name)
 }
 
 /// Text, HTML, or a path-only preview. Media is the raw response body.

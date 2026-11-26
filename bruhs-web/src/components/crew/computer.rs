@@ -563,6 +563,7 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             data-computer-live=""
             alt=move || if live.has_frame.get() { LIVE_VIEW_LABEL } else { "" }
             draggable="false"
+            data-live-computer-input=""
             tabindex=move || input_on().then_some("0")
             aria-label=move || input_on().then_some(LIVE_VIEW_LABEL)
             aria-describedby=move || input_on().then_some("bruh-computer-hint")

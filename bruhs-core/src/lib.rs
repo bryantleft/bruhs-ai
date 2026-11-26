@@ -62,6 +62,7 @@ pub mod whiteboard;
 pub mod workbench_tools;
 #[cfg(unix)]
 pub mod workspace_bridge;
+pub mod workspace_trust;
 pub mod worktree_meter;
 pub mod worktrees;
 

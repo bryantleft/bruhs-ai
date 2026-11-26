@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 pub const WIDGET_PROTOCOL: u8 = 1;
 pub const MAX_WIDGET_STATE_BYTES: usize = super::super::attachments::TEXT_PREVIEW_BYTES;
-/// Matches the rich frame extent supported by the reference T3 renderer.
+/// Maximum height accepted from an embedded widget.
 pub const MAX_WIDGET_HEIGHT: f64 = 20_000.0;
 pub const MIN_WIDGET_HEIGHT: f64 = 80.0;
 

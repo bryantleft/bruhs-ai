@@ -4,7 +4,6 @@ use bruhs_core::secret_sources::{validate_reference, SecretReference};
 mod dialog;
 use crate::app_state::spawn_tokio;
 use bruhs_core::text_generators::{self as api, Draft, Generator, Preset};
-use bruhs_ui::dropdown::dropdown;
 use bruhs_ui::dropdown::saved_option_value;
 use uuid::Uuid;
 
@@ -182,7 +181,7 @@ impl Workspace {
         groups.extend(self.catalog_model_groups(cx, |p| !p.is_external()));
         groups.extend(self.generator_groups());
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
-        dropdown(
+        bruhs_ui::dropdown::Dropdown::new(
             id,
             label,
             current,
@@ -191,6 +190,11 @@ impl Workspace {
             toggle,
             select,
         )
+        .option_mark(|value| {
+            bruhs_models::agent::model_info(value)
+                .map(|model| provider_glyph(model.provider).into_any_element())
+        })
+        .into_any_element()
     }
     fn edit_generator(
         &mut self,

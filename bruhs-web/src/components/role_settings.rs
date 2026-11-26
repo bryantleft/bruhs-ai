@@ -9,7 +9,7 @@ use bruhs_models::roles::{
 };
 use leptos::prelude::*;
 
-use crate::components::provider::provider_label;
+use crate::components::provider::model_dropdown_option;
 use crate::components::settings_page::{SettingsRow, SettingsRowBody, ROW_CONTROL};
 use crate::state::{RolesSignal, TaskModelsSignal, ThreadsSignal};
 use crate::ui::{Dropdown, DropdownOption, Switch};
@@ -33,10 +33,7 @@ fn model_options(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownOpti
             MODEL_CATALOG
                 .iter()
                 .filter(move |model| model.provider == provider)
-                .map(|model| {
-                    DropdownOption::new(model.id, model.label)
-                        .in_group(provider_label(model.provider))
-                })
+                .map(|model| model_dropdown_option(model.id, model.label, model.provider))
         }))
         .collect()
 }
@@ -54,10 +51,11 @@ fn role_model_options(inherit: &str, current: &str, default: &str) -> Vec<Dropdo
         if bruhs_models::agent::custom_model_selection(id).is_some()
             && !options.iter().any(|option| option.value == id)
         {
-            options.push(
-                DropdownOption::new(id, bruhs_models::agent::model_label(id))
-                    .in_group(provider_label(AgentProvider::for_model(id))),
-            );
+            options.push(model_dropdown_option(
+                id,
+                bruhs_models::agent::model_label(id),
+                AgentProvider::for_model(id),
+            ));
         }
     }
     options

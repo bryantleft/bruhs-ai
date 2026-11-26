@@ -33,6 +33,18 @@ impl Queue {
             .collect()
     }
 
+    pub fn thread_creation_pending(&self, id: &str) -> bool {
+        self.0
+            .get(&(Kind::Thread, id.to_owned()))
+            .is_some_and(|pending| pending.expected.is_none() && pending.draft.is_some())
+    }
+
+    pub fn discard_composer_draft(&mut self, id: &str) {
+        // An explicit thread removal owns its draft's lifetime. The storage
+        // cascade removes any in-flight version along with the thread.
+        self.0.remove(&(Kind::ComposerDraft, id.to_owned()));
+    }
+
     pub fn conversation(&self, id: &str) -> Option<Option<Arc<crate::storage::MessagesRecord>>> {
         let pending = self.0.get(&(Kind::Conversation, id.to_owned()))?;
         Some(match &pending.draft {

@@ -1,8 +1,7 @@
 use super::*;
 use std::sync::mpsc;
 
-/// Product bound matches T3's documented five-minute composer dictation limit.
-/// See <https://github.com/pingdotgg/t3code/blob/main/docs/user/voice-input.md>.
+/// Maximum recording time for one composer dictation.
 const MAX_RECORDING: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 #[derive(Default)]

@@ -25,6 +25,7 @@ impl DesktopAuthStatus {
         matches!(self, Self::SignedIn(_))
     }
 
+    #[cfg(any(test, all(feature = "native-performance", target_os = "macos")))]
     pub(super) fn user(&self) -> Option<&str> {
         match self {
             Self::SignedIn(account) => account.user.as_deref(),

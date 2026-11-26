@@ -233,12 +233,31 @@ struct RemoteState {
     runtime: CoordinationRuntime,
     links: BoardLinks,
     desktop_state: Option<std::path::PathBuf>,
+    workbench_dir: Option<std::path::PathBuf>,
     projects: tokio::sync::Mutex<
         Option<(
             std::time::Instant,
             Vec<bruhs_core::linked_projects::Checkout>,
         )>,
     >,
+}
+
+impl RemoteState {
+    fn usage_root(&self) -> Result<std::path::PathBuf, AppError> {
+        self.workbench_dir.clone().ok_or_else(|| {
+            AppError::internal(std::io::Error::other(
+                "Private workbench directory is unavailable.",
+            ))
+        })
+    }
+
+    async fn authorize_usage_price_editor(&self, bearer: &str) -> Result<(), AppError> {
+        if self.runtime.authorize(bearer).await?.edits_usage_prices() {
+            Ok(())
+        } else {
+            Err(CoordinationError::Unauthorized.into())
+        }
+    }
 }
 
 /// Bind this router only after explicit self-hosted access configuration. It
@@ -248,6 +267,7 @@ pub fn remote_router(runtime: CoordinationRuntime, links: BoardLinks) -> Router 
         runtime,
         links,
         bruhs_core::delivery::writer::desktop_state_file(),
+        bruhs_core::agent_extensions::directory().ok(),
     )
 }
 
@@ -255,6 +275,7 @@ fn remote_router_with_state(
     runtime: CoordinationRuntime,
     links: BoardLinks,
     desktop_state: Option<std::path::PathBuf>,
+    workbench_dir: Option<std::path::PathBuf>,
 ) -> Router {
     Router::new().route("/", get(|| async { Html(include_str!("coordination/remote.html")) }))
         .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }))
@@ -273,6 +294,8 @@ fn remote_router_with_state(
         .merge(task_editor::routes(runtime.clone()))
         .merge(task_thread::routes(runtime.clone()))
         .route("/api/projects/usage", get(remote_project_usage))
+        .route("/api/projects/usage/history", get(remote_project_usage_history))
+        .route("/api/projects/usage/model-prices", get(remote_usage_model_prices).post(edit_remote_usage_model_prices))
         .route("/api/projects/scheduled-tasks", get(remote_scheduled_tasks))
         .route("/api/projects/scheduled-tasks/{id}", axum::routing::delete(delete_remote_schedule))
         .route("/api/projects/scheduled-tasks/{id}/enabled", axum::routing::put(set_remote_schedule_enabled))
@@ -290,7 +313,7 @@ fn remote_router_with_state(
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, axum::http::HeaderValue::from_static("no-referrer")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")))
-        .with_state(Arc::new(RemoteState { runtime, links, desktop_state, projects: Default::default() }))
+        .with_state(Arc::new(RemoteState { runtime, links, desktop_state, workbench_dir, projects: Default::default() }))
         .layer(remote_response_compression())
 }
 
@@ -360,6 +383,7 @@ async fn remote_projects(
         state.runtime.authorize(&bearer).await?,
         AccessScope::Projects
             | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectUsageHistory { .. }
             | AccessScope::ProjectNames
             | AccessScope::ProjectSchedules { .. }
     ) {
@@ -384,6 +408,8 @@ async fn remote_projects(
     let grant = state.runtime.authorize_grant(&bearer).await?;
     let scope = grant.scope;
     let usage = scope.shares_usage();
+    let usage_history = scope.shares_usage_history();
+    let edit_usage_prices = scope.edits_usage_prices();
     let conversations = matches!(
         scope,
         AccessScope::ProjectSchedules {
@@ -409,7 +435,9 @@ async fn remote_projects(
         );
     let task_edit = matches!(scope, AccessScope::ProjectSchedules { edit: true, .. });
     let (editable, schedules, toggle, run, delete, deliveries) = match scope {
-        AccessScope::ProjectUsage { rename } => (rename, false, false, false, false, false),
+        AccessScope::ProjectUsage { rename } | AccessScope::ProjectUsageHistory { rename, .. } => {
+            (rename, false, false, false, false, false)
+        }
         AccessScope::Projects => (false, false, false, false, false, false),
         AccessScope::ProjectNames => (true, false, false, false, false, false),
         AccessScope::ProjectSchedules {
@@ -435,6 +463,8 @@ async fn remote_projects(
             ("x-bruhs-delete-scheduled-tasks", delete.to_string()),
             ("x-bruhs-webhook-deliveries", deliveries.to_string()),
             ("x-bruhs-read-usage", usage.to_string()),
+            ("x-bruhs-read-usage-history", usage_history.to_string()),
+            ("x-bruhs-edit-usage-prices", edit_usage_prices.to_string()),
             ("x-bruhs-edit-scheduled-tasks", task_edit.to_string()),
             ("x-bruhs-task-conversations", conversations.to_string()),
             ("x-bruhs-read-task-threads", read_threads.to_string()),
@@ -462,6 +492,86 @@ async fn remote_project_usage(
         return Err(CoordinationError::Unauthorized.into());
     }
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(accounts)))
+}
+
+async fn remote_project_usage_history(
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
+    axum::extract::Query(period): axum::extract::Query<
+        bruhs_models::agent_extensions::UsageHistoryPeriod,
+    >,
+) -> Result<impl IntoResponse, AppError> {
+    use bruhs_core::agent_extensions::{shared_history_at, UsageHistoryRange};
+
+    let bearer = token(&headers)?;
+    if !state
+        .runtime
+        .authorize(&bearer)
+        .await?
+        .shares_usage_history()
+    {
+        return Err(CoordinationError::Unauthorized.into());
+    }
+    let range = UsageHistoryRange::from_period(period).ok_or_else(|| {
+        AppError::BadRequest(
+            "Choose a current rolling 24-hour period or a range from 1 to 90 days.".into(),
+        )
+    })?;
+    let root = state.usage_root()?;
+    let history =
+        tokio::task::spawn_blocking(move || shared_history_at(&root, range, period.provider))
+            .await
+            .map_err(AppError::internal)?
+            .map_err(AppError::internal)?;
+    if !state
+        .runtime
+        .authorize(&bearer)
+        .await?
+        .shares_usage_history()
+    {
+        return Err(CoordinationError::Unauthorized.into());
+    }
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(history)))
+}
+
+async fn remote_usage_model_prices(
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let bearer = token(&headers)?;
+    state.authorize_usage_price_editor(&bearer).await?;
+    let root = state.usage_root()?;
+    let rows = tokio::task::spawn_blocking(move || {
+        bruhs_core::agent_extensions::usage_model_pricing_at(&root)
+    })
+    .await
+    .map_err(AppError::internal)?
+    .map_err(AppError::internal)?;
+    state.authorize_usage_price_editor(&bearer).await?;
+    Ok(Json(rows))
+}
+
+async fn edit_remote_usage_model_prices(
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
+    Json(changes): Json<Vec<bruhs_models::agent_extensions::UsageModelPricingChange>>,
+) -> Result<StatusCode, AppError> {
+    use std::io::ErrorKind;
+
+    let bearer = token(&headers)?;
+    state.authorize_usage_price_editor(&bearer).await?;
+    let root = state.usage_root()?;
+    tokio::task::spawn_blocking(move || {
+        bruhs_core::agent_extensions::edit_usage_model_prices_at(&root, changes)
+    })
+    .await
+    .map_err(AppError::internal)?
+    .map_err(|error| match error.kind() {
+        ErrorKind::InvalidInput => AppError::BadRequest(error.to_string()),
+        ErrorKind::AlreadyExists => AppError::Conflict(error.to_string()),
+        _ => AppError::internal(error),
+    })?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn authorize_delivery_read(
@@ -609,6 +719,7 @@ async fn rename_remote_projects(
         state.runtime.authorize(&bearer).await?,
         AccessScope::ProjectNames
             | AccessScope::ProjectUsage { rename: true }
+            | AccessScope::ProjectUsageHistory { rename: true, .. }
             | AccessScope::ProjectSchedules { rename: true, .. }
     ) {
         return Err(CoordinationError::Unauthorized.into());
@@ -767,6 +878,7 @@ async fn remote_changes(
         AccessScope::Keybindings { .. }
             | AccessScope::Projects
             | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectUsageHistory { .. }
             | AccessScope::ProjectNames
             | AccessScope::ProjectSchedules { .. }
     ) {
@@ -778,6 +890,122 @@ async fn remote_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn remote_model_prices_require_an_explicit_edit_grant() {
+        use bruhs_models::agent_extensions::UsageModelPricing;
+        use serde_json::json;
+
+        let root = tempfile::tempdir().unwrap();
+        let workbench = root.path().join("workbench");
+        let desktop = root.path().join("desktop.json");
+        std::fs::write(&desktop, "{}").unwrap();
+        let runtime = CoordinationRuntime::open(
+            root.path().join("tasks.json"),
+            Arc::new(bruhs_core::AppState::new()),
+        )
+        .await
+        .unwrap();
+        let legacy = serde_json::from_value(json!({"kind":"project_usage_history"})).unwrap();
+        let reader = runtime.issue_access(legacy, 60).await.unwrap();
+        let writer = runtime
+            .issue_access(
+                AccessScope::ProjectUsageHistory {
+                    rename: false,
+                    limits: false,
+                    edit_prices: true,
+                },
+                60,
+            )
+            .await
+            .unwrap();
+        let delivery = bruhs_core::delivery::DeliveryService::open(root.path().join("delivery"))
+            .await
+            .unwrap();
+        let app = remote_router_with_state(
+            runtime.clone(),
+            BoardLinks::new(delivery),
+            Some(desktop),
+            Some(workbench.clone()),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let projects = format!("http://{}/api/projects", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::new();
+        let url = format!("{projects}/usage/model-prices");
+        let request = |token: &str, body: serde_json::Value| {
+            client.post(&url).bearer_auth(token).json(&body).send()
+        };
+        let empty = json!({"price":null,"alias":null});
+        let changes = json!([
+            {"model":"codex/canonical","expected":empty,"edit":{"price":{
+                "input_per_million":3.0,"output_per_million":4.0
+            }}},
+            {"model":"codex/preview","expected":empty,"edit":{"alias":"codex/canonical"}}
+        ]);
+        for (grant, can_edit) in [(&reader, "false"), (&writer, "true")] {
+            let inventory = client
+                .get(&projects)
+                .bearer_auth(&grant.token)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(inventory.status(), StatusCode::OK);
+            assert_eq!(inventory.headers()["x-bruhs-edit-usage-prices"], can_edit);
+        }
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth(&reader.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            request(&reader.token, changes.clone())
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(!workbench.join("agents.json").exists());
+        for _ in 0..2 {
+            assert_eq!(
+                request(&writer.token, changes.clone())
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+        let read = client
+            .get(&url)
+            .bearer_auth(&writer.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(read.headers()[header::CACHE_CONTROL], "no-store");
+        let rows: std::collections::BTreeMap<String, UsageModelPricing> =
+            read.json().await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows["codex/preview"].alias.as_deref(),
+            Some("codex/canonical")
+        );
+        let stale = json!([{"model":"codex/preview","expected":empty,"edit":{"alias":"other"}}]);
+        assert_eq!(
+            request(&writer.token, stale).await.unwrap().status(),
+            StatusCode::CONFLICT
+        );
+        runtime.revoke_access(&writer.grant.id).await.unwrap();
+        assert_eq!(
+            request(&writer.token, changes).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        server.abort();
+    }
 
     #[tokio::test]
     #[expect(
@@ -839,8 +1067,32 @@ mod tests {
             bruhs_core::reactive::ReactiveRuntime::open(root.path().join("automations.db"))
                 .await
                 .unwrap();
-        let app = remote_router_with_state(runtime.clone(), BoardLinks::new(delivery), Some(saved))
-            .layer(axum::Extension(reactive));
+        let workbench = root.path().join("workbench");
+        bruhs_core::agent_extensions::record_at(
+            &workbench,
+            bruhs_models::agent_extensions::UsageRecord {
+                id: "private-receipt".into(),
+                thread_id: "private-thread".into(),
+                session_id: Some("private-session".into()),
+                model: "gpt-5.5".into(),
+                project: "private-project".into(),
+                at: chrono::Utc::now().timestamp(),
+                input: 25,
+                output: 8,
+                cache_read: 0,
+                cache_write: 0,
+                requested_speed: Default::default(),
+                cli_cost_usd: None,
+            },
+        )
+        .unwrap();
+        let app = remote_router_with_state(
+            runtime.clone(),
+            BoardLinks::new(delivery),
+            Some(saved),
+            Some(workbench),
+        )
+        .layer(axum::Extension(reactive));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}/api", listener.local_addr().unwrap());
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -881,6 +1133,8 @@ mod tests {
                     delete: false,
                     deliveries: false,
                     usage: false,
+                    usage_history: false,
+                    edit_usage_prices: false,
                     edit: true,
                     conversations: false,
                     read_threads: false,
@@ -942,6 +1196,8 @@ mod tests {
                     delete: false,
                     deliveries: false,
                     usage: false,
+                    usage_history: false,
+                    edit_usage_prices: false,
                     edit: false,
                     conversations: false,
                     read_threads: true,
@@ -992,6 +1248,8 @@ mod tests {
                     delete: false,
                     deliveries: false,
                     usage: false,
+                    usage_history: false,
+                    edit_usage_prices: false,
                     edit: true,
                     conversations: true,
                     read_threads: false,
@@ -1043,6 +1301,14 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         let usage_url = format!("{url}/usage");
+        let history_url = format!("{usage_url}/history");
+        let get_history = |token: &str, days: u16| {
+            client
+                .get(&history_url)
+                .query(&[("days", days)])
+                .bearer_auth(token)
+                .send()
+        };
         for token in [&access.token, &writer.token, &other.token] {
             assert_eq!(
                 client
@@ -1067,6 +1333,11 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(inventory.headers()["x-bruhs-read-usage"], "true");
+            assert_eq!(inventory.headers()["x-bruhs-read-usage-history"], "false");
+            assert_eq!(
+                get_history(&grant.token, 30).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
             assert_eq!(
                 inventory.headers()["x-bruhs-edit-project-names"],
                 rename.to_string().as_str()
@@ -1100,6 +1371,81 @@ mod tests {
                 StatusCode::FORBIDDEN
             );
         }
+        let history_grant = runtime
+            .issue_access(
+                AccessScope::ProjectUsageHistory {
+                    rename: false,
+                    limits: false,
+                    edit_prices: false,
+                },
+                60,
+            )
+            .await
+            .unwrap();
+        let inventory = client
+            .get(&url)
+            .bearer_auth(&history_grant.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(inventory.headers()["x-bruhs-read-usage"], "false");
+        assert_eq!(inventory.headers()["x-bruhs-read-usage-history"], "true");
+        assert_eq!(
+            get_history(&history_grant.token, 91)
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let history = get_history(&history_grant.token, 30).await.unwrap();
+        assert_eq!(history.status(), StatusCode::OK);
+        assert_eq!(history.headers()[header::CACHE_CONTROL], "no-store");
+        let history = history.text().await.unwrap();
+        assert!(!history.contains("private-"));
+        let history: bruhs_models::agent_extensions::SharedUsageHistory =
+            serde_json::from_str(&history).unwrap();
+        assert_eq!(history.by_model["gpt-5.5"].input, 25);
+        assert_eq!(history.breakdown.sessions_by_provider["codex"], 1);
+        let hourly = client
+            .get(&history_url)
+            .query(&bruhs_models::agent_extensions::UsageHistoryPeriod {
+                days: None,
+                last_24h_ending_at: Some(chrono::Utc::now().timestamp() + 1),
+                provider: Some(bruhs_models::agent::AgentProvider::Codex),
+            })
+            .bearer_auth(&history_grant.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(hourly.status(), StatusCode::OK);
+        let hourly: bruhs_models::agent_extensions::SharedUsageHistory =
+            hourly.json().await.unwrap();
+        assert!(hourly.by_day.is_empty());
+        assert_eq!(
+            hourly.by_hour.values().map(|hour| hour.input).sum::<u64>(),
+            25
+        );
+        assert_eq!(
+            client
+                .get(&usage_url)
+                .bearer_auth(&history_grant.token)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        runtime
+            .revoke_access(&history_grant.grant.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_history(&history_grant.token, 30)
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
         let run_url = format!("{schedules_url}/missing/runs/{}", uuid::Uuid::new_v4());
         let run_request = |token: &str| client.put(&run_url).bearer_auth(token).send();
         let toggle_request = |token: &str| {
@@ -1146,6 +1492,8 @@ mod tests {
                         delete,
                         deliveries,
                         usage: false,
+                        usage_history: false,
+                        edit_usage_prices: false,
                         edit: false,
                         conversations: false,
                         read_threads: false,
@@ -1481,6 +1829,7 @@ mod tests {
             runtime.clone(),
             BoardLinks::new(delivery),
             Some(saved.clone()),
+            None,
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());

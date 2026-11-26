@@ -4,6 +4,8 @@ use super::*;
 /// Fetch the current branch's configured remote, or the repository's default remote.
 pub async fn fetch_project_remote(repo: &Path) -> Result<(), GitError> {
     let out = GitCommand::new(repo, &["fetch", "--quiet", "--no-recurse-submodules"])
+        .allow_network()
+        .respect_trusted_hooks()
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
         .run()
@@ -87,7 +89,7 @@ pub async fn fast_forward_clean_default(repo: &Path) -> Result<bool, GitError> {
     if !matches!(relation.trim().split_once('\t'),Some(("0",behind)) if behind!="0") {
         return Ok(false);
     }
-    let out = git(
+    let out = GitCommand::new(
         repo,
         &[
             "-c",
@@ -98,6 +100,8 @@ pub async fn fast_forward_clean_default(repo: &Path) -> Result<bool, GitError> {
             upstream,
         ],
     )
+    .respect_trusted_hooks()
+    .run()
     .await?;
     if !out.success() {
         return Err(out.failure());

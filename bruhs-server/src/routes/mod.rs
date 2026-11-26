@@ -57,4 +57,5 @@ pub mod uploads;
 pub mod validate_path;
 pub mod vault;
 pub mod whiteboard;
+pub mod workspace_trust;
 pub mod worktrees;

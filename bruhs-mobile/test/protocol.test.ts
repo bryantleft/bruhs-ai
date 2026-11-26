@@ -12,6 +12,7 @@ import {
   parsePairing,
   requestUrl,
   sessionSchema,
+  threadSnapshotSchema,
   validateHost,
   type NativeAction,
 } from '../src/domain.ts';
@@ -134,7 +135,9 @@ test('pairing posts the one-use secret once without bearer or query leakage', as
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.url, desktop.origin + '/api/mobile/pair');
   assert.equal(seen[0]?.init.token, undefined);
-  assert.deepEqual(JSON.parse(seen[0]?.init.body ?? ''), { name: 'Phone', secret: 'S'.repeat(43) });
+  const body = seen[0]?.init.body;
+  assert(typeof body === 'string');
+  assert.deepEqual(JSON.parse(body), { name: 'Phone', secret: 'S'.repeat(43) });
   assert.equal(
     (
       await pairDesktop(
@@ -188,6 +191,59 @@ test('approval payload requires the exact request, turn generation and review ha
   assert.equal(nextCommand(otherUuid, Number.MAX_SAFE_INTEGER + 1, command.action).ok, false);
 });
 
+test('a phone answer round-trips with optional attachment identifiers', async () => {
+  const action: NativeAction = {
+    kind: 'answer_question',
+    thread_id: uuid,
+    turn_generation: 8,
+    request_id: 'question-1',
+    review_hash: '0'.repeat(64),
+    reply: { type: 'answer', answers: [{ selected: [0], text: 'Add the examples' }] },
+  };
+  const command = { id: otherUuid, sequence: 7, action };
+  assert.deepEqual(commandSchema.parse(command), command);
+  const withFile = { ...command, action: {
+    ...action, reply: { type: 'answer', answers: [{ selected: [], text: '', attachments: [uuid] }] },
+  } };
+  assert.deepEqual(commandSchema.parse(withFile), withFile);
+  assert.equal(commandSchema.safeParse({ ...command, action: {
+    ...action, reply: { type: 'answer', answers: [{ selected: [0], text: '', attachments: ['/tmp/photo.png'] }] },
+  } }).success, false);
+
+  const snapshot = {
+    kind: 'thread',
+    value: {
+      thread: { id: uuid, title: 'Question fixture', project: 'Test', updated_at_ms: 1, state: 'laptop_action' },
+      messages: [], next_before: null, permission: null, queued_prompts: 0, laptop_action_required: true,
+    },
+  };
+  assert.equal(threadSnapshotSchema.parse(snapshot).value.question, undefined);
+  const question = {
+    request_id: action.request_id, turn_generation: action.turn_generation, review_hash: action.review_hash,
+    questions: [{ question: 'What should I include?', header: 'Contents', options: [], multiSelect: false, allowCustom: true }],
+    responding: false, error: null, can_attach: true,
+  };
+  assert.deepEqual(threadSnapshotSchema.parse({ ...snapshot, value: { ...snapshot.value, question } }).value.question, question);
+  const file = new Blob(['fixture bytes']);
+  const calls: Array<{ url: URL; init: Parameters<Transport>[1] }> = [];
+  const client = new HostClient(desktop, async (url, init) => {
+    calls.push({ url: new URL(url), init });
+    return { status: 200, text: '{"ok":true}' };
+  });
+  assert((await client.questionFile(uuid, question, 0, otherUuid, { name: 'Notes & examples.txt', body: file })).ok);
+  assert((await client.questionFile(uuid, question, 0, otherUuid)).ok);
+  assert.equal(calls[0]?.url.pathname, '/api/mobile/question-file');
+  assert.equal(calls[0]?.url.searchParams.get('name'), 'Notes & examples.txt');
+  assert.equal(calls[0]?.url.searchParams.get('review_hash'), question.review_hash);
+  assert.equal(calls[0]?.url.searchParams.get('upload_id'), otherUuid);
+  assert.equal(calls[0]?.init.token, desktop.token);
+  assert.equal(calls[0]?.init.method, 'POST');
+  assert.equal(calls[0]?.init.contentType, 'application/octet-stream');
+  assert.equal(calls[0]?.init.body, file);
+  assert.equal(calls[1]?.init.method, 'DELETE');
+  assert.equal(calls[1]?.init.body, undefined);
+});
+
 test('malformed, 5xx, and interrupted successful task responses retain uncertain delivery', async () => {
   for (const response of [
     { status: 200, text: '{}' },
@@ -229,6 +285,25 @@ test('external response validation rejects malformed session state', async () =>
       .success,
     false,
   );
+});
+
+test('a thread read rejects another conversation even when its snapshot is valid', async () => {
+  const body = {
+    kind: 'thread',
+    value: {
+      thread: { id: uuid, title: 'Work', project: 'Project', updated_at_ms: 0, state: 'idle' },
+      messages: [],
+      next_before: null,
+      permission: null,
+      queued_prompts: 0,
+      laptop_action_required: false,
+    },
+  };
+  const host = new HostClient(desktop, async () => ({ status: 200, text: JSON.stringify(body) }));
+  assert.equal((await host.thread(uuid)).ok, true);
+  const different = await host.thread(otherUuid);
+  assert.equal(different.ok, false);
+  if (!different.ok) assert.equal(different.error.kind, 'conflict');
 });
 
 test('a proxy HTML authentication rejection still ends the rejected authority session', async () => {
@@ -346,4 +421,18 @@ test('offline, expired, revoked, read-only, and pending sessions cannot mutate',
     false,
   );
   assert.equal(canMutate(tasks, true, null, session, 'prompt'), false);
+});
+
+test('linked draft routing requires its own grant and validates the exact response identifier', async () => {
+  assert.equal(canMutate(desktop, true, null, session, 'linked_drafts'), false);
+  const granted = { ...session, device: { ...session.device, scopes: [...session.device.scopes, 'linked_drafts' as const] } };
+  assert.equal(canMutate(desktop, true, null, granted, 'linked_drafts'), true);
+  const action = { kind: 'open_linked_draft', target: { repository: 'example/docs' } };
+  assert.equal(commandSchema.safeParse({id: uuid, sequence: 1, action}).success, true);
+  assert.equal(commandSchema.safeParse({id: uuid, sequence: 1, action: { ...action, target: { ...action.target, path: '/tmp', prompt: 'Hello' } }}).success, false);
+  const client = new HostClient(desktop, async url => {
+    assert.equal(new URL(url).searchParams.get('link_id'), uuid);
+    return { status: 200, text: JSON.stringify({ kind: 'linked_draft', value: { link_id: otherUuid, status: 'preparing' } }) };
+  });
+  assert.equal((await client.linkedDraft(uuid)).ok, false);
 });

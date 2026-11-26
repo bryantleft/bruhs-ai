@@ -2,12 +2,18 @@
 //! Which provider serves a model is `bruhs_models::agent::provider_for_model_id`,
 //! the routing the server uses too.
 
+use crate::ui::DropdownOption;
 use bruhs_models::agent::{provider_for_model_id, AgentProvider};
 
-/// Small monochrome provider mark: 12px, forced white, dimmed so it reads as
-/// chrome next to `text-rambutan-400` labels.
-pub const PROVIDER_LOGO_CLASS: &str =
-    "size-3 shrink-0 object-contain brightness-0 invert opacity-60";
+pub(super) fn model_dropdown_option(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    provider: AgentProvider,
+) -> DropdownOption {
+    DropdownOption::new(id, label)
+        .in_group(provider_label(provider))
+        .with_mark(provider_logo_src(provider))
+}
 
 pub fn provider_logo_src_for_model(model_id: &str) -> &'static str {
     provider_logo_src(provider_for_model_id(model_id))
@@ -27,7 +33,11 @@ pub fn provider_logo_src(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "/logos/claude.svg",
         AgentProvider::Codex => "/logos/openai.svg",
-        _ => "/logos/agent.svg",
+        AgentProvider::Cursor => "/logos/cursor.svg",
+        AgentProvider::Antigravity => "/logos/antigravity.svg",
+        AgentProvider::Grok => "/logos/grok.svg",
+        AgentProvider::OpenCode => "/logos/opencode.svg",
+        AgentProvider::Acp => "/logos/agent.svg",
     }
 }
 
@@ -46,16 +56,6 @@ pub fn provider_agent_label_for_model(model_id: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn provider_logo_class_prevents_oversized_icons() {
-        for token in ["size-3", "shrink-0", "object-contain", "opacity-60"] {
-            assert!(
-                PROVIDER_LOGO_CLASS.contains(token),
-                "missing provider logo class token {token}"
-            );
-        }
-    }
 
     #[test]
     fn providers_map_to_labels_and_logos() {

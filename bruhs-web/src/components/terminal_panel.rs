@@ -731,9 +731,11 @@ pub fn TerminalPanel(
         <section
             data-terminal-panel=""
             data-terminal-mode=if is_drawer { "drawer" } else { "page" }
+            data-workspace-focus="terminal"
             aria-label="Terminal"
+            tabindex="-1"
             class=move || format!(
-                "relative flex flex-col bg-longan-950 {}",
+                "relative flex flex-col bg-longan-950 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400 {}",
                 if is_drawer { "shrink-0 border-t border-longan-800/70" } else { "h-full min-h-0 flex-1" }
             )
             class:hidden=move || !visible.get()

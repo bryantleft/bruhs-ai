@@ -17,8 +17,7 @@ impl Workspace {
         }
         for thread in &self.threads {
             thread.chat.update(cx, |chat, cx| {
-                chat.favorite_models.clone_from(&self.favorite_models);
-                cx.notify();
+                chat.replace_picker_favorites(&self.favorite_models, cx);
             });
         }
         self.persist_and_notify(cx);
@@ -384,6 +383,7 @@ impl Workspace {
                     "desktop-model",
                     &id,
                     stars.contains(&model_browser::favorite_key(&id)),
+                    None,
                     move |window, cx| {
                         let _ = ws.update(cx, |ws, cx| {
                             ws.model_browser_tab = Some(active.clone());
@@ -408,6 +408,12 @@ impl Workspace {
                 toggle,
                 select,
             )
+            .option_mark(|id| {
+                if matches!(id, "inherit" | TYPED) {
+                    return None;
+                }
+                Some(provider_glyph(AgentProvider::for_model(id)).into_any_element())
+            })
             .option_accessories(
                 rail.map(|el| (el, self.settings_model_rail.clone())),
                 accessory,

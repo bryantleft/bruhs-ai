@@ -550,6 +550,7 @@ impl ReactiveAutomations {
         let selected_model = catalog.and_then(|c| c.model(&model));
         let model_key = selected_model.map_or(model.as_str(), |m| m.id.as_str());
         let model_label = selected_model.map_or_else(|| model.clone(), |m| m.label.clone());
+        let typed_provider = AgentProvider::for_model(query);
         let browser = Browser::new(
             models.iter().map(|m| m.id.as_str()),
             editor.picker.model_tab.as_deref(),
@@ -702,6 +703,17 @@ impl ReactiveAutomations {
                 let panel = cx.weak_entity();
                 picker
                     .selection_label(model_label.clone(), None)
+                    .option_mark(move |value| {
+                        if value.is_empty() {
+                            return None;
+                        }
+                        let provider = if value == TYPED {
+                            typed_provider
+                        } else {
+                            AgentProvider::for_model(value)
+                        };
+                        Some(crate::views::workspace::provider_glyph(provider).into_any_element())
+                    })
                     .empty_label(if browse && active == FAVORITES {
                         "No favorite models for this project."
                     } else {
@@ -720,6 +732,7 @@ impl ReactiveAutomations {
                             "task-model",
                             id,
                             selected,
+                            None,
                             move |_, cx| {
                                 let _ = panel.update(cx, |panel, _| {
                                     if let Some(Editor::Automation(e)) = &mut panel.editor {

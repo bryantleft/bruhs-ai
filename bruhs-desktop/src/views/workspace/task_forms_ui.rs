@@ -1462,9 +1462,9 @@ impl Workspace {
                 "desktop-task-create-dialog",
                 "New task",
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
-            .child(self.blur_scrim.backdrop())
             .debug_selector(|| "desktop-task-create-dialog".to_string())
             .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
             .max_h(px(dialog_height))

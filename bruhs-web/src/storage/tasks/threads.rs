@@ -1,19 +1,20 @@
-//! Thread and transcript writes share one native transaction and parent guard.
+//! Thread, transcript and draft writes share their parent guard.
 use wasm_bindgen::JsValue;
 
 use super::{Kind, Write};
 use crate::storage::{
     from_js,
     metadata::{LocalTransaction, SaveError},
-    STORE_MESSAGES, STORE_THREADS,
+    STORE_COMPOSER_DRAFTS, STORE_MESSAGES, STORE_THREADS,
 };
 
 pub(super) async fn validate_and_cascade(
     tx: &LocalTransaction,
     writes: &[Write<'_>],
-) -> Result<(), SaveError> {
+) -> Result<bool, SaveError> {
+    let mut retirement = false;
     for write in writes {
-        if write.kind == Kind::Conversation && write.draft.is_some() {
+        if matches!(write.kind, Kind::Conversation | Kind::ComposerDraft) && write.draft.is_some() {
             let raw = tx
                 .object_store(STORE_THREADS)?
                 .get(JsValue::from_str(write.id))?
@@ -32,12 +33,15 @@ pub(super) async fn validate_and_cascade(
                 if messages.thread_id() != write.id {
                     return Err(SaveError::Conflict);
                 }
+                retirement |=
+                    crate::storage::question_file_retirement::stage(tx, &messages, None).await?;
             }
             // Visited/unsaved history was compared explicitly in this group.
             // Unopened history is validated and deleted here, under the same
             // thread+messages lock; no orphan can survive a successful delete.
-            store.delete(key)?.await?;
+            store.delete(key.clone())?.await?;
+            tx.object_store(STORE_COMPOSER_DRAFTS)?.delete(key)?.await?;
         }
     }
-    Ok(())
+    Ok(retirement)
 }

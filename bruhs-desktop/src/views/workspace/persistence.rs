@@ -1,6 +1,7 @@
 //! Saving and restoring the workspace: the debounced snapshot writer, atomic writes with one backup, and what a restart restores.
 
 use super::*;
+use bruhs_core::uploads::{is_desktop_question_upload, remove_desktop_question_upload};
 pub(super) const DESKTOP_PERSIST_DEBOUNCE_MS: u64 = 150;
 
 #[cfg(not(test))]
@@ -198,9 +199,62 @@ pub(super) fn write_desktop_state_bytes(
     write_result
 }
 
+#[derive(Default)]
+pub(super) struct QuestionFileHistory {
+    referenced: BTreeSet<String>,
+    retired: BTreeSet<String>,
+}
+
+impl QuestionFileHistory {
+    fn from_snapshot(state: &PersistedWorkspaceState) -> Self {
+        let referenced = state
+            .threads
+            .iter()
+            .chain(state.archived_threads.iter().map(|record| &record.thread))
+            .flat_map(|thread| &thread.messages)
+            .chain(
+                state
+                    .interrupted_runs
+                    .values()
+                    .filter_map(|run| run.reply.as_ref()),
+            )
+            .flat_map(|message| &message.files)
+            .filter(|file| is_desktop_question_upload(&file.path))
+            .map(|file| file.path.clone())
+            .collect();
+        Self {
+            referenced,
+            retired: state.retired_question_files.clone(),
+        }
+    }
+
+    fn prepare(&self, next: &mut Self) {
+        next.retired.extend(self.retired.iter().cloned());
+        next.retired
+            .extend(self.referenced.difference(&next.referenced).cloned());
+        next.retired.retain(|path| !next.referenced.contains(path));
+    }
+
+    fn retire_after_save(&self, next: &mut Self, live: &BTreeSet<String>) {
+        next.retired.retain(|path| {
+            // The previous primary is now the recovery backup.
+            if self.referenced.contains(path) || live.contains(path) {
+                return true;
+            }
+            match remove_desktop_question_upload(path) {
+                Ok(()) => false,
+                Err(error) => {
+                    tracing::warn!(%error, "Could not reclaim a discarded answer file");
+                    true
+                }
+            }
+        });
+    }
+}
+
 pub(super) fn save_desktop_state(
     path: Option<PathBuf>,
-    state: PersistedWorkspaceState,
+    mut state: PersistedWorkspaceState,
     coordinator: Arc<PersistenceCoordinator>,
     generation: u64,
 ) -> Result<(), SaveError> {
@@ -209,9 +263,6 @@ pub(super) fn save_desktop_state(
     if coordinator.latest_generation.load(AtomicOrdering::Acquire) != generation {
         return Ok(());
     }
-    // Whitespace is not part of the state schema. Compact JSON reduces worker
-    // encoding and disk traffic; the reader still accepts existing pretty files.
-    let contents = serde_json::to_vec(&state).map_err(io::Error::other)?;
     let mut expected = coordinator
         .write_lock
         .lock()
@@ -219,9 +270,40 @@ pub(super) fn save_desktop_state(
     if coordinator.latest_generation.load(AtomicOrdering::Acquire) != generation {
         return Ok(());
     }
+    if *expected == DiskVersion::Untrusted {
+        return Err(SaveError::Conflict);
+    }
     let path = path.ok_or_else(|| SaveError::from("Desktop state path is unavailable."))?;
-    state_file::guarded_write(&path, &mut expected, &contents, |bytes| {
+    let mut cached = coordinator
+        .question_files
+        .lock()
+        .map_err(|_| SaveError::from("Desktop attachment writer lock was poisoned."))?;
+    let previous = if let Some(previous) = cached.take() {
+        previous
+    } else if *expected == DiskVersion::Missing {
+        QuestionFileHistory::default()
+    } else {
+        let (previous, version) = read_desktop_state_snapshot(&path).map_err(SaveError::Io)?;
+        if version != *expected {
+            return Err(SaveError::Conflict);
+        }
+        previous
+            .as_ref()
+            .map(QuestionFileHistory::from_snapshot)
+            .unwrap_or_default()
+    };
+    let mut next = QuestionFileHistory::from_snapshot(&state);
+    previous.prepare(&mut next);
+    state.retired_question_files.clone_from(&next.retired);
+    // Compact JSON reduces worker encoding and disk traffic.
+    let contents = serde_json::to_vec(&state).map_err(io::Error::other)?;
+    if coordinator.latest_generation.load(AtomicOrdering::Acquire) != generation {
+        *cached = Some(previous);
+        return Ok(());
+    }
+    let result = state_file::guarded_write(&path, &mut expected, &contents, |bytes| {
         write_desktop_state_bytes(&path, bytes, generation)?;
+        previous.retire_after_save(&mut next, &state.live_question_files);
         let ack = bruhs_core::linked_projects::names::acknowledge(&path, |p| {
             state.project_list.saved_title(p).or_else(|| {
                 let known = state
@@ -245,7 +327,11 @@ pub(super) fn save_desktop_state(
             tracing::warn!("Could not acknowledge saved checkout names: {err}");
         }
         Ok(())
-    })
+    });
+    if result.is_ok() {
+        *cached = Some(next);
+    }
+    result
 }
 
 pub(super) fn parse_persisted_datetime(value: &str) -> Option<NaiveDateTime> {
@@ -416,6 +502,18 @@ pub(super) fn initial_selected_calendar_event_after_start(
 }
 
 impl Workspace {
+    pub(super) fn retire_question_files<'a>(
+        &mut self,
+        files: impl IntoIterator<Item = &'a UploadedFile>,
+    ) {
+        self.retired_question_files.extend(
+            files
+                .into_iter()
+                .filter(|file| is_desktop_question_upload(&file.path))
+                .map(|file| file.path.clone()),
+        );
+    }
+
     pub(super) fn snapshot(&self, cx: &App) -> PersistedWorkspaceState {
         PersistedWorkspaceState {
             favorite_models: self.favorite_models.clone(),
@@ -442,6 +540,18 @@ impl Workspace {
                 .iter()
                 .filter(|thread| Some(&thread.id) != self.smoke_thread_id.as_ref())
                 .map(|thread| thread.snapshot(cx))
+                .collect(),
+            retired_question_files: self.retired_question_files.clone(),
+            live_question_files: self
+                .threads
+                .iter()
+                .map(|thread| thread.chat.read(cx))
+                .filter(|chat| chat.is_streaming)
+                .flat_map(|chat| &chat.messages)
+                .filter(|message| message.state.is_streaming())
+                .flat_map(|message| &message.files)
+                .filter(|file| is_desktop_question_upload(&file.path))
+                .map(|file| file.path.clone())
                 .collect(),
             projects: self
                 .projects
@@ -652,6 +762,7 @@ impl Workspace {
                 };
                 let schedule_runs = state.project_links.pending_runs.clone();
                 let scratch = state.pending_scratch_cleanups.clone();
+                let retired = state.retired_question_files.clone();
                 let result = cx
                     .background_spawn(async move {
                         save_desktop_state(path, state, coordinator, generation)
@@ -670,6 +781,8 @@ impl Workspace {
                         }
                     });
                     if saved {
+                        this.retired_question_files
+                            .retain(|path| !retired.contains(path));
                         this.dispatch_saved_scratch(scratch, cx);
                         this.dispatch_saved_quota(quota_receipts, cx);
                     }

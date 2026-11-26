@@ -14,8 +14,11 @@ use bruhs_ui::ActiveTheme;
 use gpui::prelude::*;
 use gpui::*;
 
+use bruhs_models::logic::attachments::FileKind;
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
-use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
+use bruhs_models::logic::composer_text::{
+    approaching_message_limit_hint, exceeds_message_limit_with, paste_summary, MESSAGE_LIMIT_HINT,
+};
 use bruhs_models::logic::context_chip::{extra_limit_chars, join_drafts, ContextChip};
 use bruhs_models::logic::context_meter::ContextReading;
 use bruhs_models::logic::follow_up::{
@@ -60,11 +63,11 @@ pub const CHAT_HEADER_TOGGLE_HOVER_BG_OPACITY: f32 = 0.40;
 
 // Composer.
 pub const CHAT_COMPOSER_RADIUS_PX: f32 = 16.0;
-pub const CHAT_COMPOSER_RING_OPACITY: f32 = 0.10;
-/// Web `focus-within:inset-ring-persimmon-400/40` on the composer surface.
-pub const CHAT_COMPOSER_FOCUS_RING_OPACITY: f32 = 0.40;
-pub const CHAT_COMPOSER_INPUT_X_PADDING_PX: f32 = 12.0;
-pub const CHAT_COMPOSER_INPUT_TOP_PADDING_PX: f32 = 10.0;
+pub const CHAT_COMPOSER_RING_OPACITY: f32 = 0.12;
+/// Web `focus-within:inset-ring-persimmon-400/50` on the composer surface.
+pub const CHAT_COMPOSER_FOCUS_RING_OPACITY: f32 = 0.50;
+pub const CHAT_COMPOSER_INPUT_X_PADDING_PX: f32 = 14.0;
+pub const CHAT_COMPOSER_INPUT_TOP_PADDING_PX: f32 = 12.0;
 /// Web `pb-1`.
 pub const CHAT_COMPOSER_INPUT_BOTTOM_PADDING_PX: f32 = 4.0;
 /// The composer surface's border. The web rings it with an inset ring, which
@@ -179,6 +182,7 @@ pub(super) fn composer_popover_max_height(window: &Window, trigger: Bounds<Pixel
 struct ComposerPopover {
     content: AnyElement,
     limits: Bounds<Pixels>,
+    anchor_right: Option<Pixels>,
 }
 
 impl IntoElement for ComposerPopover {
@@ -227,14 +231,22 @@ impl Element for ComposerPopover {
         cx: &mut App,
     ) {
         let content_size = window.layout_bounds(*content).size;
+        let right_limit = self.limits.right() - content_size.width;
+        // Keep an end-aligned picker in the conversation when its trigger is
+        // too far left to fit the full dock between the trigger and sidebar.
+        let leading_edge = bounds.left().min(right_limit).max(self.limits.left());
         let origin = point(
-            bounds
-                .left()
-                .min(self.limits.right() - content_size.width)
-                .max(self.limits.left()),
-            (bounds.top() - content_size.height)
-                .min(self.limits.bottom() - content_size.height)
-                .max(self.limits.top()),
+            self.anchor_right
+                .map_or(leading_edge, |right| right - content_size.width)
+                .min(right_limit)
+                .max(leading_edge),
+            if self.anchor_right.is_some() {
+                (self.limits.bottom() - content_size.height).max(self.limits.top())
+            } else {
+                (bounds.top() - content_size.height)
+                    .min(self.limits.bottom() - content_size.height)
+                    .max(self.limits.top())
+            },
         );
         let offset = origin - bounds.origin;
         let offset = point(offset.x.round(), offset.y.round());
@@ -261,6 +273,16 @@ fn composer_popover(
     window: &Window,
     trigger: Bounds<Pixels>,
 ) -> Deferred {
+    anchored_composer_popover(id, content, window, trigger, None)
+}
+
+fn anchored_composer_popover(
+    id: &'static str,
+    content: AnyElement,
+    window: &Window,
+    trigger: Bounds<Pixels>,
+    anchor_right: Option<Pixels>,
+) -> Deferred {
     let limits = composer_popover_limits(window, trigger);
     deferred(ComposerPopover {
         content: div()
@@ -276,6 +298,7 @@ fn composer_popover(
             .child(content)
             .into_any_element(),
         limits,
+        anchor_right,
     })
     .with_priority(1)
 }
@@ -376,26 +399,29 @@ fn context_meter_row(reading: ContextReading) -> AnyElement {
                 .role(Role::Image)
                 .aria_label(label)
                 .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                .child(context_ring(reading)),
+                .child(context_ring(reading, CONTEXT_RING_PX)),
         )
         .child(reading.used_label())
         .into_any_element()
 }
 
-/// The ring web draws in a 24-unit box shown at 20px: radius 9.75 and a
-/// 3-unit stroke, starting at the top and running clockwise.
+/// The ring web draws in a 24-unit box shown at 20px (or 16px in the footer):
+/// radius 9.75 and a 3-unit stroke, starting at the top and running clockwise.
 const CONTEXT_RING_PX: f32 = 20.0;
+const CONTEXT_RING_FOOTER_PX: f32 = 16.0;
 const CONTEXT_RING_BOX_UNITS: f32 = 24.0;
 const CONTEXT_RING_RADIUS_UNITS: f32 = 9.75;
 const CONTEXT_RING_STROKE_UNITS: f32 = 3.0;
 /// Web's track: rambutan-500 at a quarter.
 const CONTEXT_RING_TRACK_OPACITY: f32 = 0.25;
 
-fn context_ring(reading: ContextReading) -> impl IntoElement {
+fn context_ring(reading: ContextReading, ring_px: f32) -> impl IntoElement {
     use bruhs_models::num::ToFloatLossy;
     let fraction = (reading.percent() / 100.0).to_f32_lossy();
     let color = if reading.is_warning() {
         theme::lychee_400()
+    } else if reading.is_caution() {
+        theme::durian_300()
     } else {
         theme::rambutan_400()
     };
@@ -459,7 +485,7 @@ fn context_ring(reading: ContextReading) -> impl IntoElement {
             }
         },
     )
-    .size(px(CONTEXT_RING_PX))
+    .size(px(ring_px))
 }
 
 /// A chosen row's check, beside its 12px label.
@@ -911,6 +937,7 @@ impl ChatView {
         let hero = placement == ComposerPlacement::Hero;
         div()
             .id("composer-block")
+            .track_focus(&self.composer_area_focus)
             .debug_selector(|| "desktop-composer".to_string())
             .w_full()
             .when_some(self.chat_width.limit(), |el, limit| el.max_w(px(limit)))
@@ -922,6 +949,10 @@ impl ChatView {
             .when(hero, |el| el.child(self.render_hero_heading(cx)))
             .when_some(self.render_goal_row(), |el, row| el.child(row))
             .when_some(self.render_auth_banner(cx), |el, banner| el.child(banner))
+            .when_some(self.render_workspace_trust_banner(cx), |el, banner| {
+                el.child(banner)
+            })
+            .children(self.render_linked_prompt_banner(cx))
             .child(self.render_composer_surface(window, cx))
             .children(self.render_context_strip(window, cx))
             .when(hero, |el| el.child(self.render_hints()))
@@ -996,7 +1027,10 @@ impl ChatView {
             })
             .flex()
             .flex_col()
-            .drag_over::<ExternalPaths>(|el, _, _, _| el.border_color(theme::persimmon_400()))
+            .drag_over::<ExternalPaths>(|el, _, _, _| {
+                el.border_color(theme::persimmon_400())
+                    .bg(theme::longan_800())
+            })
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _window, cx| {
                 this.enqueue_paths(paths.paths(), cx);
             }))
@@ -1032,26 +1066,32 @@ impl ChatView {
                 )
             })
             .when_some(self.render_queued_prompts(cx), |el, rows| el.child(rows))
+            .when_some(self.render_queued_edit_banner(cx), |el, banner| {
+                el.child(banner)
+            })
             .when_some(self.render_text_attachments(cx), |el, rows| el.child(rows))
             .when_some(self.render_file_offers(cx), |el, rows| el.child(rows))
             .child(self.render_composer_input(cx))
-            .when(self.message_over_limit(cx), |el| {
-                el.child(self.render_message_limit())
+            .when_some(self.render_message_limit_notice(cx), |el, notice| {
+                el.child(notice)
             })
             .child(self.render_composer_footer(cx))
             .when(self.model_picker_open, |el| {
                 el.child(
                     div()
+                        .debug_selector(|| "desktop-model-popover-anchor".into())
                         .absolute()
                         .left(px(CHAT_COMPOSER_FOOTER_X_PADDING_PX))
                         .bottom(relative(1.0))
                         .mb_2()
                         .occlude()
-                        .child(composer_popover(
+                        .child(anchored_composer_popover(
                             "desktop-model-popover",
                             self.render_model_picker(window, cx),
                             window,
-                            self.composer_options_trigger_bounds.get(),
+                            self.model_chip_bounds.get(),
+                            (self.model_chip_bounds.get().size.width > px(0.))
+                                .then(|| self.model_chip_bounds.get().right()),
                         )),
                 )
             })
@@ -1132,6 +1172,12 @@ impl ChatView {
                     this.close_composer_menus(cx);
                     cx.stop_propagation();
                 } else if this.handle_composer_hint_key("escape", window, cx) {
+                    cx.stop_propagation();
+                } else if this.input_state.read(cx).inline_completion_text().is_some() {
+                    this.dismiss_prompt_suggestion(cx);
+                    cx.notify();
+                } else if this.queue_edit.is_some() {
+                    this.cancel_queue_edit(window, cx);
                     cx.stop_propagation();
                 } else {
                     this.dismiss_prompt_suggestion(cx);
@@ -1428,9 +1474,11 @@ impl ChatView {
                         div()
                             .min_w_0()
                             .max_w(px(CHIP_MODEL_MAX_WIDTH_PX))
-                            .on_children_prepainted(move |bounds, _, _| {
+                            .on_children_prepainted(move |bounds, _, cx| {
                                 if let Some(bounds) = bounds.first() {
-                                    model_bounds.set(*bounds);
+                                    if model_bounds.replace(*bounds) != *bounds {
+                                        cx.defer(move |cx| cx.notify(view_id));
+                                    }
                                 }
                             })
                             .child(model_chip),
@@ -1465,18 +1513,67 @@ impl ChatView {
                             ),
                     )
                     .when(!status.is_empty(), |row| {
+                        let is_plan = self.permission_mode == PermissionMode::Plan;
+                        let is_full = self.permission_mode == PermissionMode::BypassPermissions;
+                        let (icon_path, text_color, bg_color, border_color, hover_bg, tip) =
+                            if is_plan {
+                                (
+                                    assets::CLIPBOARD_LIST_ICON_PATH,
+                                    theme::blueberry_300(),
+                                    theme::blueberry_500().opacity(0.12),
+                                    theme::blueberry_400().opacity(0.25),
+                                    theme::blueberry_500().opacity(0.20),
+                                    "Plan mode is active. Open composer options",
+                                )
+                            } else if is_full {
+                                (
+                                    assets::ALERT_TRIANGLE_ICON_PATH,
+                                    theme::lychee_300(),
+                                    theme::lychee_500().opacity(0.12),
+                                    theme::lychee_400().opacity(0.25),
+                                    theme::lychee_500().opacity(0.20),
+                                    "Full access is active. Open composer options",
+                                )
+                            } else {
+                                (
+                                    assets::CHECK_ICON_PATH,
+                                    theme::rambutan_200(),
+                                    theme::longan_800().opacity(0.70),
+                                    gpui::white().opacity(0.10),
+                                    theme::longan_800(),
+                                    "Accept edits is active. Open composer options",
+                                )
+                            };
                         row.child(
                             div()
+                                .id("desktop-composer-status")
                                 .debug_selector(|| "desktop-composer-status".to_string())
+                                .h(px(theme::CONTROL_XS_PX))
                                 .flex_shrink_0()
+                                .px_2()
+                                .rounded(px(4.0))
+                                .bg(bg_color)
+                                .border_1()
+                                .border_color(border_color)
+                                .flex()
+                                .items_center()
+                                .gap_1()
                                 .text_size(px(12.0))
-                                .text_color(
-                                    if self.permission_mode == PermissionMode::BypassPermissions {
-                                        theme::durian_300()
-                                    } else {
-                                        theme::rambutan_400()
-                                    },
-                                )
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .text_color(text_color)
+                                .hover(move |el| el.bg(hover_bg))
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .aria_label(tip)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .cursor_pointer()
+                                .tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.toggle_composer_options(window, cx);
+                                    })
+                                })
+                                .child(icon(icon_path, theme::ICON_XS_PX, text_color))
                                 .child(status),
                         )
                     }),
@@ -1485,8 +1582,47 @@ impl ChatView {
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_1p5()
                     .flex_shrink_0()
+                    .when_some(self.latest_context_reading(), |el, reading| {
+                        let label: SharedString = reading.label().into();
+                        let tip = label.clone();
+                        el.child(
+                            div()
+                                .id("desktop-composer-context-ring")
+                                .debug_selector(|| "desktop-composer-context-ring".to_string())
+                                .size(px(theme::CONTROL_XS_PX))
+                                .flex_shrink_0()
+                                .rounded_full()
+                                .border_1()
+                                .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .hover(|el| {
+                                    el.bg(theme::longan_800().opacity(CHIP_HOVER_BG_OPACITY))
+                                })
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .aria_label(label)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .cursor_pointer()
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(tip.clone()).build(window, cx)
+                                })
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        if this.composer_options_open {
+                                            this.close_composer_options(window, cx);
+                                        } else {
+                                            this.open_composer_options(window, cx);
+                                            this.composer_options_reveal.set(Some(4));
+                                        }
+                                    })
+                                })
+                                .child(context_ring(reading, CONTEXT_RING_FOOTER_PX)),
+                        )
+                    })
                     .when(separate_stop, |el| el.child(self.render_stop_button(cx)))
                     .child(self.render_send_button(cx)),
             )
@@ -2316,15 +2452,133 @@ impl ChatView {
         }
     }
 
-    fn render_message_limit(&self) -> AnyElement {
-        div()
-            .id("message-limit")
-            .px(px(16.0))
-            .pb(px(4.0))
-            .text_size(px(12.0))
-            .text_color(theme::durian_300())
-            .child(MESSAGE_LIMIT_HINT)
-            .into_any_element()
+    fn render_message_limit_notice(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let draft = self.input_state.read(cx).value();
+        let extra = extra_limit_chars(&self.context_chips);
+        if exceeds_message_limit_with(&draft, extra) {
+            return Some(
+                div()
+                    .id("message-limit")
+                    .px(px(CHAT_COMPOSER_INPUT_X_PADDING_PX))
+                    .pb(px(4.0))
+                    .text_size(px(12.0))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::lychee_300())
+                    .child(MESSAGE_LIMIT_HINT)
+                    .into_any_element(),
+            );
+        }
+        approaching_message_limit_hint(&draft, extra).map(|hint| {
+            div()
+                .id("message-limit-warn")
+                .px(px(CHAT_COMPOSER_INPUT_X_PADDING_PX))
+                .pb(px(4.0))
+                .text_size(px(12.0))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_features(theme::tabular_nums())
+                .text_color(theme::durian_300())
+                .child(hint)
+                .into_any_element()
+        })
+    }
+
+    fn render_queued_edit_banner(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        self.queue_edit.as_ref()?;
+        Some(
+            div()
+                .id("queued-edit-banner")
+                .debug_selector(|| "desktop-queued-edit-banner".to_string())
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .border_b_1()
+                .border_color(theme::blueberry_400().opacity(0.20))
+                .bg(theme::blueberry_500().opacity(0.10))
+                .px(px(CHAT_COMPOSER_INPUT_X_PADDING_PX))
+                .py(px(6.0))
+                .text_size(px(12.0))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .text_color(theme::blueberry_200())
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(icon(
+                            assets::TOOL_PENCIL_ICON_PATH,
+                            theme::ICON_XS_PX,
+                            theme::blueberry_300(),
+                        ))
+                        .child("Editing queued message")
+                        .child(
+                            div()
+                                .text_color(theme::rambutan_400())
+                                .child("Enter to save  Esc to cancel"),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id("queued-edit-banner-cancel")
+                                .h(px(theme::CONTROL_XS_PX))
+                                .px_2()
+                                .rounded(px(4.0))
+                                .border_1()
+                                .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+                                .flex()
+                                .items_center()
+                                .text_color(theme::rambutan_300())
+                                .hover(|el| {
+                                    el.bg(theme::longan_800().opacity(0.60))
+                                        .text_color(theme::rambutan_100())
+                                })
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .aria_label("Cancel editing queued message")
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .cursor_pointer()
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.cancel_queue_edit(window, cx);
+                                    })
+                                })
+                                .child("Cancel"),
+                        )
+                        .child(
+                            div()
+                                .id("queued-edit-banner-save")
+                                .h(px(theme::CONTROL_XS_PX))
+                                .px_2()
+                                .rounded(px(4.0))
+                                .border_1()
+                                .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+                                .bg(theme::blueberry_500().opacity(0.20))
+                                .flex()
+                                .items_center()
+                                .text_color(theme::blueberry_200())
+                                .hover(|el| el.bg(theme::blueberry_500().opacity(0.30)))
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .aria_label("Save queued message")
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .cursor_pointer()
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.commit_queue_edit(window, cx);
+                                    })
+                                })
+                                .child("Save"),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_text_attachments(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
@@ -2334,27 +2588,53 @@ impl ChatView {
         let mut list = div()
             .id("text-attachments")
             .flex()
-            .flex_col()
+            .flex_wrap()
+            .items_center()
+            .gap_1p5()
+            .px_3()
+            .pt_2p5()
+            .pb_2()
             .border_b_1()
             .border_color(theme::longan_800());
         for (index, item) in self.text_attachments.iter().enumerate() {
             let name = item.name.clone();
+            let meta = paste_summary(&item.text);
             list = list.child(
                 div()
                     .id(SharedString::from(format!("paste-chip-{index}")))
                     .flex()
-                    .h(px(theme::CONTROL_XS_PX))
+                    .min_h(px(theme::CONTROL_PX))
+                    .max_w_full()
                     .items_center()
-                    .gap_1()
-                    .px(px(8.0))
+                    .gap_1p5()
+                    .rounded(px(CHIP_RADIUS_PX))
+                    .bg(theme::longan_800().opacity(0.75))
+                    .border_1()
+                    .border_color(gpui::white().opacity(0.10))
+                    .py_1()
+                    .pl_2p5()
+                    .pr_1()
                     .text_size(px(12.0))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .child(icon(
+                        assets::FILE_TEXT_ICON_PATH,
+                        theme::ICON_XS_PX,
+                        theme::rambutan_400(),
+                    ))
                     .child(
                         div()
                             .min_w_0()
-                            .flex_1()
+                            .max_w(px(160.0))
                             .truncate()
-                            .text_color(theme::rambutan_300())
+                            .text_color(theme::rambutan_200())
                             .child(name),
+                    )
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .font_features(theme::tabular_nums())
+                            .text_color(theme::rambutan_500())
+                            .child(meta),
                     )
                     .child(self.queue_icon_button(
                         SharedString::from(format!("paste-chip-remove-{index}")),
@@ -2381,7 +2661,12 @@ impl ChatView {
             .id("file-offers")
             .debug_selector(|| "desktop-file-offers".to_string())
             .flex()
-            .flex_col()
+            .flex_wrap()
+            .items_center()
+            .gap_1p5()
+            .px_3()
+            .pt_2p5()
+            .pb_2()
             .border_b_1()
             .border_color(theme::longan_800());
         for offer in &self.file_offers {
@@ -2404,26 +2689,58 @@ impl ChatView {
         let status_error = offer.status_is_error();
         let can_open = offer.can_open();
         let can_retry = offer.can_retry();
+        let size_label = (offer.declared_bytes > 0)
+            .then(|| bruhs_models::backup::format_bytes(offer.declared_bytes));
+        let kind_icon = match offer.kind {
+            FileKind::Image => assets::EYE_ICON_PATH,
+            FileKind::Text | FileKind::Pdf | FileKind::Html => assets::FILE_TEXT_ICON_PATH,
+            FileKind::Audio => assets::MIC_ICON_PATH,
+            FileKind::Video | FileKind::Other => assets::TOOL_FILE_ICON_PATH,
+        };
         div()
             .id(SharedString::from(format!("file-offer-{id}")))
             .debug_selector(|| format!("desktop-file-offer-{id}"))
             .flex()
-            .h(px(32.0))
+            .min_h(px(theme::CONTROL_PX))
+            .max_w_full()
             .items_center()
-            .gap_1()
-            .px(px(8.0))
+            .gap_1p5()
+            .rounded(px(CHIP_RADIUS_PX))
+            .bg(if status_error {
+                theme::lychee_500().opacity(0.10)
+            } else {
+                theme::longan_800().opacity(0.75)
+            })
+            .border_1()
+            .border_color(if status_error {
+                theme::lychee_400().opacity(0.25)
+            } else {
+                gpui::white().opacity(0.10)
+            })
+            .py_1()
+            .pl_2p5()
+            .pr_1()
             .text_size(px(12.0))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .child(icon(
+                kind_icon,
+                theme::ICON_XS_PX,
+                if status_error {
+                    theme::lychee_300()
+                } else {
+                    theme::rambutan_400()
+                },
+            ))
             .child({
                 let mut name_button = div()
                     .id(SharedString::from(format!("file-offer-name-{open_id}")))
                     .min_w_0()
-                    .flex_1()
+                    .max_w(px(180.0))
                     .h(px(theme::CONTROL_XS_PX))
                     .flex()
                     .items_center()
                     .truncate()
-                    .text_color(theme::rambutan_300())
+                    .text_color(theme::rambutan_200())
                     .child(name);
                 if can_open {
                     name_button = name_button
@@ -2439,14 +2756,22 @@ impl ChatView {
                 }
                 name_button
             })
+            .children(size_label.map(|size| {
+                div()
+                    .flex_shrink_0()
+                    .font_features(theme::tabular_nums())
+                    .text_color(theme::rambutan_500())
+                    .child(size)
+            }))
             .children(status.map(|text| {
                 div()
                     .flex_shrink_0()
+                    .max_w(px(160.0))
                     .truncate()
                     .text_color(if status_error {
-                        theme::rambutan_400()
+                        theme::lychee_300()
                     } else {
-                        theme::rambutan_500()
+                        theme::rambutan_400()
                     })
                     .child(text)
             }))
@@ -2463,8 +2788,11 @@ impl ChatView {
                         .tab_index(0)
                         .role(Role::Button)
                         .aria_label("Retry upload")
-                        .text_color(theme::rambutan_400())
-                        .hover(|el| el.text_color(theme::rambutan_100()))
+                        .text_color(theme::rambutan_300())
+                        .hover(|el| {
+                            el.bg(theme::longan_700().opacity(0.60))
+                                .text_color(theme::rambutan_100())
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             this.retry_file_offer(&retry_id, cx);
@@ -2513,6 +2841,11 @@ impl ChatView {
             .debug_selector(|| "desktop-queued-prompts".to_string())
             .flex()
             .flex_col()
+            .gap_1()
+            .rounded_t(px(CHAT_COMPOSER_RADIUS_PX))
+            .bg(theme::longan_950().opacity(0.35))
+            .px_2()
+            .py_1p5()
             .border_b_1()
             .border_color(theme::longan_800());
         for prompt in rows {
@@ -2534,13 +2867,24 @@ impl ChatView {
         let remove_id = prompt.id.clone();
         div()
             .id(SharedString::from(format!("queued-{}", prompt.id)))
-            .when(editing, |el| el.bg(theme::longan_800()))
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(if editing {
+                theme::blueberry_400().opacity(0.25)
+            } else {
+                hsla(0.0, 0.0, 0.0, 0.0)
+            })
+            .when(editing, |el| el.bg(theme::blueberry_500().opacity(0.10)))
+            .when(!editing, |el| {
+                el.hover(|el| el.bg(theme::longan_800().opacity(0.40)))
+            })
             .flex()
             .items_center()
-            .gap_1()
-            .px(px(8.0))
-            .py(px(4.0))
+            .gap_1p5()
+            .px_1p5()
+            .py_1()
             .text_size(px(12.0))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
             .child(self.queue_nudge_button(
                 "Move queued message earlier",
                 "↑",
@@ -2560,7 +2904,11 @@ impl ChatView {
             .child(
                 div()
                     .flex_shrink_0()
-                    .text_color(theme::blueberry_400())
+                    .rounded(px(4.0))
+                    .bg(theme::blueberry_500().opacity(0.15))
+                    .px_1p5()
+                    .py(px(2.0))
+                    .text_color(theme::blueberry_300())
                     .child("Queued"),
             )
             .child(
@@ -2568,7 +2916,7 @@ impl ChatView {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .text_color(theme::rambutan_300())
+                    .text_color(theme::rambutan_200())
                     .child(prompt.text.clone()),
             )
             .when(editing, |el| {
@@ -2714,6 +3062,9 @@ impl ChatView {
             .items_center()
             .justify_center()
             .gap(px(6.0))
+            .text_size(px(12.0))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
             .when(interrupt, |el| {
                 el.bg(theme::lychee_500()).text_color(theme::lychee_50())
             })
@@ -3170,14 +3521,16 @@ impl ChatView {
                             ))
                             .child(div().min_w_0().truncate().child(branch))
                             .when(show_dirty && dirty > 0, |el| {
+                                let unit = if dirty == 1 { "file" } else { "files" };
                                 el.child(
                                     div()
                                         .debug_selector(|| "desktop-git-dirty-count".to_string())
                                         .px_1()
                                         .rounded(px(4.0))
                                         .bg(theme::durian_400().opacity(STRIP_DIRTY_BG_OPACITY))
+                                        .font_features(theme::tabular_nums())
                                         .text_color(theme::durian_300())
-                                        .child(format!("{dirty} files")),
+                                        .child(format!("{dirty} {unit}")),
                                 )
                             })
                             .child(icon(

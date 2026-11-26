@@ -183,6 +183,15 @@ async fn run_config(
             "ACP unattended runs are unavailable: isolate inherited plugins/hooks with an enforced runtime before enabling them.",
         ));
     }
+    if !options.workspace_trusted {
+        if let Some(files) =
+            crate::workspace_trust::has_unisolatable_external_agent_config(&options.cwd)
+        {
+            return Err(io::Error::other(format!(
+                "ACP agents cannot isolate repository configuration ({files}) in an untrusted folder. Review those files and trust this folder first."
+            )));
+        }
+    }
     let availability =
         crate::agent_extensions::availability::ProviderAvailability::load_for_project(
             &options.cwd,
@@ -714,6 +723,7 @@ async fn permission(
         let _ = turn
             .forward(QueryEvent::PermissionRequest {
                 id,
+                can_answer: false,
                 tool_use_id: message["params"]["toolCall"]["toolCallId"]
                     .as_str()
                     .map(str::to_string),

@@ -12,13 +12,11 @@ use serde::{Deserialize, Serialize};
 use crate::agent::AgentProvider;
 use crate::time::EpochMs;
 
-/// A report whose lookups all answered stays fresh this long (T3 caches a
-/// found latest version for an hour).
+/// How long to cache a report after every lookup succeeds.
 pub const CHECK_TTL_MS: i64 = 60 * 60 * 1000;
-/// A report with a failed lookup is retried after a minute (T3: one minute
-/// for a version it could not find).
+/// How long to wait before retrying a report with a failed lookup.
 pub const FAILED_CHECK_TTL_MS: i64 = 60 * 1000;
-/// How often an open client asks (T3's provider health refresh).
+/// How often an open client refreshes provider status.
 pub const POLL_INTERVAL_MS: u32 = 5 * 60 * 1000;
 /// How often a client asks while an update runs.
 pub const RUN_POLL_INTERVAL_MS: u32 = 1000;
@@ -158,8 +156,7 @@ pub fn is_newer(latest: &str, installed: &str) -> bool {
 // Compatibility
 // ---------------------------------------------------------------------------
 
-/// How well a CLI version works with this bruhs build (T3's manifest
-/// statuses; its `graceful` reads as limited).
+/// How well a CLI version works with this Bruhs build.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Compat {
@@ -374,7 +371,7 @@ pub struct Install {
 /// Classify a CLI from where it was found on `PATH` (`on_path`, not
 /// resolved) and where that resolves (`resolved`, symlinks followed). Shims
 /// (mise, Volta, Vite+) are read from `on_path`, because they resolve to the
-/// shim tool's own binary. T3's order: the first match wins.
+/// shim tool's own binary. The first match wins.
 pub fn detect_install(provider: AgentProvider, on_path: &str, resolved: &str) -> Install {
     let on_path = on_path.replace('\\', "/");
     let resolved = resolved.replace('\\', "/");
@@ -477,8 +474,7 @@ pub struct CommandContext<'a> {
     pub pnpm_version: Option<&'a str>,
 }
 
-/// The command that updates `install` in place, as argv (T3's per-installer
-/// commands). `None` when it must be updated by hand.
+/// The arguments for updating `install` in place. Returns `None` for manual updates.
 pub fn update_command(install: &Install, context: &CommandContext<'_>) -> Option<Vec<String>> {
     let pkg = install.package.as_str();
     let at_latest = format!("{pkg}@latest");
@@ -682,7 +678,7 @@ impl ProviderUpdate {
 
     /// The compatibility warning (title, message), when the installed
     /// version needs one. A Homebrew install whose latest is no better
-    /// hints at stale metadata, as T3 does.
+    /// may be using stale package metadata.
     pub fn compat_warning(&self) -> Option<(&'static str, String)> {
         let compat = self.compat.filter(|c| c.warns())?;
         let mut message = compat_message(self.provider, compat);
@@ -738,7 +734,7 @@ impl ProviderUpdate {
 // Provider update runs
 // ---------------------------------------------------------------------------
 
-/// Where a provider update is (T3's runner steps).
+/// The current phase of a provider update.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RunPhase {
@@ -811,7 +807,7 @@ impl ProviderRun {
         }
     }
 
-    /// The sidebar pill's text for this run (T3's provider pill).
+    /// The sidebar pill's text for this run.
     pub fn pill_label(&self) -> String {
         let label = provider_cli_label(self.provider);
         let version = self
@@ -837,8 +833,7 @@ impl ProviderRun {
     }
 }
 
-/// The sidebar pill's text while runs are active (T3: "Updating Claude
-/// Code", "Updating 2 providers").
+/// The sidebar pill names one active update or counts several.
 pub fn running_label(runs: &[ProviderRun]) -> Option<String> {
     let active: Vec<_> = runs.iter().filter(|r| r.is_active()).collect();
     match active.as_slice() {
@@ -1115,7 +1110,7 @@ impl UpdatesReport {
             .collect()
     }
 
-    /// Outdated providers the confirmation skips, with why (T3's reasons).
+    /// Outdated providers excluded from the confirmation and the reason for each.
     pub fn skipped_providers(&self) -> Vec<(AgentProvider, &'static str)> {
         self.providers
             .iter()
@@ -1137,7 +1132,7 @@ impl UpdatesReport {
         self.providers.iter().any(ProviderUpdate::is_outdated) || self.app.needs_action()
     }
 
-    /// The pill's tooltip (T3: "Update 2 providers"), then what is behind.
+    /// The pill's tooltip, including which providers need updates.
     pub fn summary(&self) -> String {
         let mut lines = Vec::new();
         match self.updatable_providers().len() {
@@ -1205,7 +1200,7 @@ pub fn sidebar_label(report: &UpdatesReport) -> &'static str {
     }
 }
 
-/// The confirmation's title (T3: "Update N machine(s)?"; here providers).
+/// The confirmation title for the number of providers being updated.
 pub fn confirm_title(count: usize) -> String {
     match count {
         1 => "Update 1 provider?".into(),

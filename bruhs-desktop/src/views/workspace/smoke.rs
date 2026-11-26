@@ -205,6 +205,58 @@ impl Workspace {
         cx.notify();
     }
 
+    fn smoke_sidebar_pin(&self, window: &Window, release: bool) -> bool {
+        let viewport = self.sidebar_viewport.borrow();
+        let (Some(first), Some(second)) = (
+            viewport.list.bounds_for_item(0),
+            viewport.list.bounds_for_item(1),
+        ) else {
+            return false;
+        };
+        let from = second.center();
+        let to = point(first.center().x, first.top() + px(4.));
+        window.on_next_frame(move |window, cx| {
+            window.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    position: from,
+                    modifiers: Modifiers::default(),
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            let move_pointer = |position| {
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position,
+                    modifiers: Modifiers::default(),
+                    pressed_button: Some(MouseButton::Left),
+                })
+            };
+            window.dispatch_event(move_pointer(point(from.x + px(8.), from.y)), cx);
+            window.on_next_frame(move |window, cx| {
+                if !cx.has_active_drag() {
+                    eprintln!("sidebar smoke: drag did not start at {from:?}");
+                    return;
+                }
+                window.dispatch_event(move_pointer(to), cx);
+                if release {
+                    window.dispatch_event(
+                        PlatformInput::MouseUp(MouseUpEvent {
+                            position: to,
+                            modifiers: Modifiers::default(),
+                            button: MouseButton::Left,
+                            click_count: 1,
+                        }),
+                        cx,
+                    );
+                }
+                eprintln!("sidebar smoke: from={from:?} to={to:?} released={release}");
+            });
+        });
+        true
+    }
+
     /// `BRUHS_DESKTOP_SMOKE_SCENE`: put the window in one named state for a
     /// comparison screenshot. Returns false for an unknown scene.
     pub fn smoke_scene(
@@ -215,6 +267,26 @@ impl Workspace {
     ) -> bool {
         match scene {
             "today" => self.activate_sidebar_view(AppView::Today, window, cx),
+            "sidebar-pin-preview" | "sidebar-pin-drop" => {
+                return self.smoke_sidebar_pin(window, scene == "sidebar-pin-drop");
+            }
+            "sidebar-card-hover" => {
+                let Some(row) = self.sidebar_viewport.borrow().list.bounds_for_item(1) else {
+                    return false;
+                };
+                let position = row.center();
+                window.on_next_frame(move |window, cx| {
+                    window.dispatch_event(
+                        PlatformInput::MouseMove(MouseMoveEvent {
+                            position,
+                            modifiers: Modifiers::default(),
+                            pressed_button: None,
+                        }),
+                        cx,
+                    );
+                    eprintln!("sidebar smoke: hover={position:?}");
+                });
+            }
             "tasks" => self.activate_primary_view(AppView::Tasks, window, cx),
             "calendar" => self.activate_primary_view(AppView::Calendar, window, cx),
             "calendar-week" | "calendar-day" => {

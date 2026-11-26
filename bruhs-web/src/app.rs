@@ -13,7 +13,7 @@ pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
     AppView::from_route(hash)
 }
 
-fn thread_route(thread_id: Option<&str>, initial_route: Option<&str>) -> String {
+pub(crate) fn thread_route(thread_id: Option<&str>, initial_route: Option<&str>) -> String {
     thread_id.map_or_else(
         || initial_route.unwrap_or("#/chat").to_string(),
         |id| format!("#thread/{id}"),
@@ -23,8 +23,10 @@ fn thread_route(thread_id: Option<&str>, initial_route: Option<&str>) -> String 
 #[component]
 pub fn App() -> impl IntoView {
     provide_app_state();
+    let prompt_links = crate::prompt_links::PromptLinks::provide();
     crate::updates::Updates::provide();
     crate::task_saves::TaskSaves::install();
+    crate::state::Drafts::install();
     crate::thread_history::ThreadHistory::install();
     crate::relationship_store::RelationshipStore::install();
     crate::navigation_guard::install();
@@ -52,6 +54,9 @@ pub fn App() -> impl IntoView {
         let initial_hash = web_sys::window()
             .and_then(|window| window.location().hash().ok())
             .unwrap_or_default();
+        let initial_hash = prompt_links
+            .receive_route(&initial_hash, None)
+            .unwrap_or(initial_hash);
         if let Some(view) = parse_hash(&initial_hash) {
             set_active_view.set(view);
         }

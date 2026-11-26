@@ -78,6 +78,7 @@ fn seed(
                             project: "Mobile fixture".into(),
                             updated_at_ms: 1,
                             state: chat.mobile_state(),
+                            needs_answer: chat.mobile_needs_answer(),
                         },
                         None,
                     )
@@ -393,7 +394,8 @@ fn mobile_native_projection_pages_live_text_and_rejects_local_racing_or_incomple
             };
             chat.mobile_fixture_local_answer(cx);
             chat.mobile_fixture_change_permission(false);
-            assert!(chat.mobile_action(&old, cx).is_err());
+            let device = uuid::Uuid::new_v4();
+            assert!(chat.mobile_action(&old, device, cx).is_err());
             assert!(chat.has_pending_permission());
             let fresh = chat
                 .mobile_snapshot(summary.clone(), None)
@@ -408,7 +410,7 @@ fn mobile_native_projection_pages_live_text_and_rejects_local_racing_or_incomple
                 decision: MobileDecision::Allow,
             };
             chat.mobile_fixture_advance_turn();
-            assert!(chat.mobile_action(&fresh_action, cx).is_err());
+            assert!(chat.mobile_action(&fresh_action, device, cx).is_err());
             assert!(chat.has_pending_permission());
             chat.mobile_fixture_change_permission(true);
             let large = chat
@@ -424,12 +426,12 @@ fn mobile_native_projection_pages_live_text_and_rejects_local_racing_or_incomple
                 review_hash: large.review_hash,
                 decision: MobileDecision::Allow,
             };
-            assert!(chat.mobile_action(&action, cx).is_err());
+            assert!(chat.mobile_action(&action, device, cx).is_err());
             if let MobileAction::Permission { decision, .. } = &mut action {
                 *decision = MobileDecision::Deny;
             }
             assert!(matches!(
-                chat.mobile_action(&action, cx),
+                chat.mobile_action(&action, device, cx),
                 Ok(MobileCommandOutcome::Accepted { .. })
             ));
             assert!(!chat.has_pending_permission());
@@ -620,4 +622,527 @@ async fn mobile_phone_browser_drives_actual_native_workspace_over_https(cx: &mut
         matches!(w.mobile.connection, Connection::Off)
     })
     .await;
+}
+
+#[gpui::test]
+#[ignore = "requires the local Claude stdio fixture and Playwright"]
+async fn mobile_phone_browser_delivers_a_structured_answer(cx: &mut TestAppContext) {
+    let directory = PathBuf::from(std::env::var_os("BRUHS_MOBILE_QUESTION_FIXTURE").unwrap());
+    let path = std::env::var_os("PATH").unwrap();
+    assert_eq!(
+        std::env::split_paths(&path).find(|dir| dir.join("claude").is_file()),
+        Some(directory.join("bin")),
+        "Run this test with the local Claude stdio fixture first on PATH."
+    );
+    let (workspace, cx) = super::super::performance_tests::fixture(cx);
+    cx.executor().allow_parking();
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("answer-example.md"),
+        format!(
+            "First line before the anchor\nLinked project example\n{}\nLast example line\n",
+            "x".repeat(5000)
+        ),
+    )
+    .unwrap();
+    std::fs::write(root.path().join(".env"), "FIXTURE_ONLY=private").unwrap();
+    let state_path = root.path().join("workspace.json");
+    let (id, chat) = workspace.update_in(cx, |w, window, cx| {
+        w.persistence_test_path = Some(state_path.clone());
+        w.threads.clear();
+        let thread = Workspace::create_thread_with_title(
+            "Phone fixture".into(),
+            root.path().to_string_lossy().into(),
+            "claude-sonnet-4-6".into(),
+            PermissionMode::Default,
+            "Phone question fixture",
+            window,
+            cx,
+        );
+        let chat = thread.chat.clone();
+        let id = thread.id.clone();
+        chat.update(cx, |chat, cx| {
+            chat.set_composer_draft("Laptop draft".into(), window, cx)
+        });
+        w.threads.push(thread);
+        w.active_view = AppView::Automations;
+        (id, chat)
+    });
+    let (origin, authority, _) = connect(&workspace, cx, root.path()).await;
+    let mut devices = Vec::new();
+    for (name, scopes) in [
+        (
+            "Second fixture phone",
+            [MobileScope::Read, MobileScope::Prompt].into(),
+        ),
+        ("Read-only fixture phone", [MobileScope::Read].into()),
+    ] {
+        let offer = authority
+            .begin_pairing(&origin.parse().unwrap(), scopes, Duration::from_secs(90))
+            .unwrap();
+        let secret = reqwest::Url::parse(&offer.url)
+            .unwrap()
+            .fragment()
+            .unwrap()
+            .strip_prefix("pair=")
+            .unwrap()
+            .to_owned();
+        let authority = authority.clone();
+        let issued = runtime(&workspace, cx, async move {
+            authority
+                .pair(MobilePairInput {
+                    secret,
+                    name: name.into(),
+                })
+                .await
+        })
+        .await
+        .unwrap();
+        devices.push(issued.token);
+    }
+    let pair = authority
+        .begin_pairing(
+            &origin.parse().unwrap(),
+            [MobileScope::Read, MobileScope::Prompt, MobileScope::Diff].into(),
+            Duration::from_secs(90),
+        )
+        .unwrap();
+    let certificate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../bruhs-core/tests/fixtures/mobile/localhost.pem");
+    let path = root.path().join("fixture.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({
+            "origin": origin,
+            "pairing": pair.url.as_str(),
+            "thread": id,
+            "certificate": certificate,
+            "other_device": devices[0],
+            "read_only_device": devices[1],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    chat.update(cx, |chat, cx| {
+        chat.submit_prompt("Draft release notes.".into(), cx)
+    });
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mobile_question_browser.mjs");
+    let output = runtime(&workspace, cx, async move {
+        tokio::time::timeout(
+            Duration::from_secs(75),
+            tokio::process::Command::new("node")
+                .arg(script)
+                .arg(path)
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+    })
+    .await;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: Value =
+        serde_json::from_slice(&std::fs::read(directory.join("reply.json")).unwrap()).unwrap();
+    let answers = &response["response"]["updatedInput"]["answers"];
+    assert_eq!(
+        answers["Which sections should I include?"],
+        "Setup, Examples"
+    );
+    let answer = answers["How should the release notes read?"]
+        .as_str()
+        .unwrap();
+    let file = answer
+        .strip_prefix(
+            "Concise\nMention the startup fix\n\nRead these attached files\nrelease-notes.txt ",
+        )
+        .unwrap();
+    assert_eq!(std::fs::read(file).unwrap(), vec![b'n'; 70_000]);
+    assert_eq!(
+        chat.read_with(cx, |chat, cx| chat.mobile_fixture_draft(cx)),
+        "Laptop draft"
+    );
+    cx.condition(&workspace, |w, _| {
+        w.save_status.is_saved()
+            && std::fs::read_to_string(&state_path).is_ok_and(|state| state.contains(file))
+    })
+    .await;
+    chat.update(cx, |chat, cx| chat.confirm_rewind(0, cx));
+    cx.condition(&workspace, |w, _| {
+        w.save_status.is_saved()
+            && std::fs::read_to_string(&state_path)
+                .is_ok_and(|state| state.contains("retired_question_files"))
+    })
+    .await;
+    assert!(
+        Path::new(file).is_file(),
+        "The previous durable workspace can still recover this answer"
+    );
+    workspace.update_in(cx, |w, _, cx| w.persist(cx));
+    cx.condition(&workspace, |w, _| {
+        w.save_status.is_saved() && !Path::new(file).exists()
+    })
+    .await;
+    eprintln!("The rewind retired the submitted file when the recovery snapshot rotated");
+    workspace.update_in(cx, |w, _, cx| w.stop_mobile(cx));
+    cx.condition(&workspace, |w, _| {
+        matches!(w.mobile.connection, Connection::Off)
+    })
+    .await;
+}
+
+#[cfg(unix)]
+#[gpui::test]
+async fn paired_link_resolves_project_reuses_pull_and_limits_scratch_to_its_device(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let (workspace, cx) = super::super::performance_tests::fixture(cx);
+    let root = tempfile::tempdir().unwrap();
+    let (thread_id, _) = seed(&workspace, cx, root.path());
+    let active_before = workspace.read_with(cx, |w, _| w.active_thread_id.clone());
+    let git = |args: &[&str]| {
+        assert!(std::process::Command::new("git")
+            .current_dir(root.path())
+            .args([
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null"
+            ])
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(root.path().join("source.rs"), "fixture PR head\n").unwrap();
+    git(&["add", "source.rs"]);
+    git(&["commit", "-qm", "PR fixture"]);
+    git(&["update-ref", "refs/pull/43/head", "HEAD"]);
+    std::fs::write(root.path().join("source.rs"), "local edit\n").unwrap();
+    git(&["config", "protocol.file.allow", "always"]);
+    let local_remote = reqwest::Url::from_file_path(root.path()).unwrap();
+    git(&[
+        "config",
+        &format!("url.{local_remote}.insteadOf"),
+        "https://github.com/fixture/docs.git",
+    ]);
+    git(&["remote", "add", "origin", "git@github.com:fixture/docs.git"]);
+    workspace.update_in(cx, |w, _, cx| {
+        super::super::project_picker_ui::push_recent_project(
+            &mut w.recent_projects,
+            super::super::DesktopProjectLocation {
+                name: "Mobile fixture".into(),
+                path: root.path().to_string_lossy().into(),
+            },
+        );
+        w.project_actions.insert(
+            root.path().to_string_lossy().into_owned(),
+            vec![bruhs_core::git::ProjectAction {
+                id: "fixture-setup".into(),
+                name: "Fixture setup".into(),
+                command: "cp source.rs setup-proof".into(),
+                shortcut: None,
+                preview_url: None,
+                auto_open_preview: false,
+                lifecycle: bruhs_core::git::ProjectActionLifecycle {
+                    run_on_worktree_create: true,
+                    wait_for_setup: true,
+                    ..Default::default()
+                },
+            }],
+        );
+        let thread = w
+            .threads
+            .iter_mut()
+            .find(|thread| thread.id == thread_id)
+            .unwrap();
+        let branch = "bruhs/linked-phone-fixture".to_owned();
+        let path = thread.project_path.clone();
+        thread.branch = Some(branch.clone());
+        assert!(thread.chat.read(cx).project_scoped);
+        w.known_thread_pulls.insert(
+            thread_id.clone(),
+            super::super::pull_settlement::Observation::linked(path, branch, 42),
+        );
+    });
+    let (origin, authority, client) = connect(&workspace, cx, root.path()).await;
+
+    async fn pair(
+        ws: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+        client: &reqwest::Client,
+        origin: &str,
+        authority: &MobileAuthority,
+        scopes: MobileScopes,
+        name: &str,
+    ) -> MobilePairResult {
+        let offer = authority
+            .begin_pairing(&origin.parse().unwrap(), scopes, Duration::from_secs(60))
+            .unwrap();
+        let secret = reqwest::Url::parse(&offer.url)
+            .unwrap()
+            .fragment()
+            .unwrap()
+            .strip_prefix("pair=")
+            .unwrap()
+            .to_owned();
+        let request = client
+            .post(format!("{origin}/api/mobile/pair"))
+            .json(&MobilePairInput {
+                secret,
+                name: name.into(),
+            });
+        runtime(ws, cx, async move {
+            request
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap()
+        })
+        .await
+    }
+
+    async fn status(
+        ws: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+        client: &reqwest::Client,
+        origin: &str,
+        token: &str,
+        link_id: uuid::Uuid,
+    ) -> MobileLinkStatus {
+        let url = format!("{origin}/api/mobile/linked-draft?link_id={link_id}");
+        let request = client.get(url).bearer_auth(token);
+        runtime(ws, cx, async move {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    let response = request
+                        .try_clone()
+                        .unwrap()
+                        .send()
+                        .await
+                        .unwrap()
+                        .error_for_status()
+                        .unwrap()
+                        .json::<MobileReadReply>()
+                        .await
+                        .unwrap();
+                    let MobileReadReply::LinkedDraft(row) = response else {
+                        panic!("unexpected response: {response:?}");
+                    };
+                    assert_eq!(row.link_id, link_id);
+                    if row.state != MobileLinkStatus::Preparing {
+                        return row.state;
+                    }
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
+            })
+            .await
+            .unwrap()
+        })
+        .await
+    }
+
+    let opted = pair(
+        &workspace,
+        cx,
+        &client,
+        &origin,
+        &authority,
+        [MobileScope::Read, MobileScope::LinkedDrafts].into(),
+        "Draft phone",
+    )
+    .await;
+    let read_only = pair(
+        &workspace,
+        cx,
+        &client,
+        &origin,
+        &authority,
+        [MobileScope::Read].into(),
+        "Read phone",
+    )
+    .await;
+    let open =
+        |pull_request: Option<&str>, repository: Option<&str>| MobileAction::OpenLinkedDraft {
+            target: MobileLinkTarget {
+                pull_request: pull_request.map(str::to_owned),
+                repository: repository.map(str::to_owned),
+                provider: None,
+                model: None,
+            },
+        };
+    let forbidden = client
+        .post(format!("{origin}/api/mobile/command"))
+        .bearer_auth(&read_only.token)
+        .json(&MobileCommand {
+            id: uuid::Uuid::new_v4(),
+            sequence: 1,
+            action: open(None, None),
+        });
+    assert_eq!(
+        runtime(&workspace, cx, async move {
+            forbidden.send().await.unwrap().status()
+        })
+        .await,
+        reqwest::StatusCode::FORBIDDEN
+    );
+    let mut link_ids = Vec::new();
+    for (sequence, action) in [
+        (1, open(Some("fixture/docs#42"), None)),
+        (2, open(None, Some("fixture/docs"))),
+        (3, open(None, None)),
+    ] {
+        let ack = send(
+            &workspace,
+            cx,
+            &client,
+            &origin,
+            &opted.token,
+            sequence,
+            action,
+        )
+        .await;
+        assert!(matches!(
+            ack.outcome,
+            MobileCommandOutcome::Accepted { queued: true }
+        ));
+        let ready = status(&workspace, cx, &client, &origin, &opted.token, ack.id).await;
+        let MobileLinkStatus::Ready { thread_id: id, .. } = ready else {
+            panic!("draft did not resolve: {ready:?}");
+        };
+        link_ids.push(id);
+    }
+    assert_eq!(link_ids[0], thread_id);
+    workspace.read_with(cx, |w, cx| {
+        let repo = w
+            .threads
+            .iter()
+            .find(|thread| thread.id == link_ids[1])
+            .unwrap();
+        assert_eq!(repo.project_name, "Mobile fixture");
+        assert!(repo.chat.read(cx).messages.is_empty());
+        assert_eq!(w.active_thread_id, active_before);
+    });
+    let scratch = format!("/api/mobile/thread?thread_id={}", link_ids[2]);
+    let view = read(&workspace, cx, &client, &origin, &opted.token, &scratch).await;
+    assert_eq!(view["value"]["thread"]["id"], link_ids[2]);
+    assert_eq!(view["value"]["messages"].as_array().unwrap().len(), 0);
+    let request = client
+        .get(format!("{origin}{scratch}"))
+        .bearer_auth(&read_only.token);
+    assert_eq!(
+        runtime(&workspace, cx, async move {
+            request.send().await.unwrap().status()
+        })
+        .await,
+        reqwest::StatusCode::CONFLICT
+    );
+
+    let checkout = send(
+        &workspace,
+        cx,
+        &client,
+        &origin,
+        &opted.token,
+        4,
+        open(Some("fixture/docs#43"), None),
+    )
+    .await;
+    assert!(matches!(
+        status(&workspace, cx, &client, &origin, &opted.token, checkout.id).await,
+        MobileLinkStatus::Checkout { error: None, .. }
+    ));
+    let project_path = root.path().canonicalize().unwrap();
+    let branch = format!("bruhs/pr-43-{}", checkout.id);
+    let dest = bruhs_core::git::worktree_dest(&project_path, &branch).unwrap();
+    assert!(!dest.exists());
+    let mismatched = send(
+        &workspace,
+        cx,
+        &client,
+        &origin,
+        &opted.token,
+        5,
+        MobileAction::ContinueLinkedDraft {
+            link_id: checkout.id,
+            choice: MobileLinkChoice::Clone,
+        },
+    )
+    .await;
+    assert!(matches!(
+        mismatched.outcome,
+        MobileCommandOutcome::Rejected { .. }
+    ));
+    assert!(!dest.exists());
+    let confirm = send(
+        &workspace,
+        cx,
+        &client,
+        &origin,
+        &opted.token,
+        6,
+        MobileAction::ContinueLinkedDraft {
+            link_id: checkout.id,
+            choice: MobileLinkChoice::Checkout,
+        },
+    )
+    .await;
+    assert!(matches!(
+        confirm.outcome,
+        MobileCommandOutcome::Accepted { queued: true }
+    ));
+    let placed = status(&workspace, cx, &client, &origin, &opted.token, checkout.id).await;
+    let MobileLinkStatus::Ready {
+        thread_id: pull_thread,
+        ..
+    } = placed
+    else {
+        panic!("checkout failed: {placed:?}");
+    };
+    assert_eq!(
+        std::fs::read_to_string(dest.join("setup-proof")).unwrap(),
+        "fixture PR head\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("source.rs")).unwrap(),
+        "local edit\n"
+    );
+    workspace.read_with(cx, |w, cx| {
+        let thread = w
+            .threads
+            .iter()
+            .find(|thread| thread.id == pull_thread)
+            .unwrap();
+        assert_eq!(thread.branch.as_deref(), Some(branch.as_str()));
+        assert!(thread.chat.read(cx).messages.is_empty());
+    });
+    git(&["worktree", "remove", "--force", dest.to_str().unwrap()]);
+
+    let path = workspace.update_in(cx, |w, _, cx| {
+        w.threads
+            .iter()
+            .find(|thread| thread.id == link_ids[2])
+            .unwrap()
+            .chat
+            .read(cx)
+            .project_path
+            .clone()
+    });
+    std::fs::remove_dir_all(path).unwrap();
+    workspace.update_in(cx, |w, _, cx| w.stop_mobile(cx));
 }

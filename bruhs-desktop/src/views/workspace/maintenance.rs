@@ -232,7 +232,9 @@ impl Workspace {
                 let repo = std::path::PathBuf::from(&path);
                 let Ok(load) = this.update(cx, |_, cx| {
                     spawn_tokio(cx, async move {
-                        if !repo.join(".git").exists() {
+                        if !repo.join(".git").exists()
+                            || !bruhs_core::workspace_trust::is_trusted(&repo)
+                        {
                             return Ok(false);
                         }
                         bruhs_core::git::fetch_project_remote(&repo)

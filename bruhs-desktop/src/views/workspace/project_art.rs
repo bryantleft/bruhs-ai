@@ -8,6 +8,147 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+#[derive(Clone)]
+pub(super) enum ProjectMark {
+    Folder,
+    Monogram(SharedString),
+    Emoji(SharedString),
+    Raster(Arc<gpui::Image>),
+    Svg(Arc<gpui::RenderImage>),
+}
+
+impl ProjectMark {
+    pub(super) fn render(&self, size: f32) -> AnyElement {
+        match self {
+            Self::Folder => svg()
+                .path(assets::FOLDER_ICON_PATH)
+                .size(px(size))
+                .text_color(theme::rambutan_500())
+                .flex_none()
+                .into_any_element(),
+            Self::Monogram(text) | Self::Emoji(text) => div()
+                .size(px(size))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .line_height(px(size))
+                .when(matches!(self, Self::Monogram(_)), |el| {
+                    el.rounded(px(size * 0.22))
+                        .bg(theme::longan_700())
+                        .text_color(theme::rambutan_100())
+                        .text_size(px(size * 0.56))
+                })
+                .when(matches!(self, Self::Emoji(_)), |el| {
+                    el.text_size(px(size * 0.88))
+                })
+                .child(text.clone())
+                .into_any_element(),
+            Self::Raster(image) => gpui::img(image.clone())
+                .size(px(size))
+                .flex_none()
+                .object_fit(gpui::ObjectFit::Contain)
+                .into_any_element(),
+            Self::Svg(image) => gpui::img(image.clone())
+                .size(px(size))
+                .flex_none()
+                .object_fit(gpui::ObjectFit::Contain)
+                .into_any_element(),
+        }
+    }
+}
+
+fn project_initials(name: &str) -> Option<SharedString> {
+    let mut words = name
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| !word.is_empty());
+    let first = words.next()?;
+    let initials = if let Some(second) = words.next() {
+        first
+            .graphemes(true)
+            .take(1)
+            .chain(second.graphemes(true).take(1))
+            .collect::<String>()
+    } else {
+        first.graphemes(true).take(2).collect::<String>()
+    };
+    Some(
+        initials
+            .to_uppercase()
+            .graphemes(true)
+            .take(2)
+            .collect::<String>()
+            .into(),
+    )
+}
+
+fn discover_project_mark(root: &Path, renderer: &SvgRenderer) -> Option<ProjectMark> {
+    const MAX_ICON_BYTES: u64 = 1024 * 1024;
+    const DIRECTORIES: &[&str] = &[
+        "",
+        "public",
+        "app",
+        "src/app",
+        "static",
+        "src/assets",
+        "assets",
+    ];
+    const NAMES: &[&str] = &[
+        "favicon.svg",
+        "favicon.png",
+        "favicon.ico",
+        "icon.svg",
+        "icon.png",
+        "apple-touch-icon.png",
+        "logo.svg",
+        "logo.png",
+    ];
+    let root = root.canonicalize().ok()?;
+    for name in NAMES {
+        for directory in DIRECTORIES {
+            let Ok(path) = root.join(directory).join(name).canonicalize() else {
+                continue;
+            };
+            if !path.starts_with(&root)
+                || !path
+                    .metadata()
+                    .is_ok_and(|meta| meta.is_file() && meta.len() <= MAX_ICON_BYTES)
+            {
+                continue;
+            }
+            let mark = if name.ends_with(".svg") {
+                let mut text = String::new();
+                let read = std::fs::File::open(&path)
+                    .and_then(|file| file.take(MAX_ICON_BYTES + 1).read_to_string(&mut text));
+                // Standalone artwork only. SVG image references can otherwise read files during rendering.
+                if !read.is_ok_and(|bytes| {
+                    u64::try_from(bytes).is_ok_and(|bytes| bytes <= MAX_ICON_BYTES)
+                }) || text.contains("href")
+                    || text.contains("<!")
+                {
+                    continue;
+                }
+                let side = DevicePixels(96);
+                renderer
+                    .parse_svg(text.as_bytes())
+                    .ok()
+                    .and_then(|parsed| {
+                        renderer
+                            .render_parsed(&parsed, SvgSize::Size(gpui::size(side, side)))
+                            .ok()
+                    })
+                    .map(ProjectMark::Svg)
+            } else {
+                Artwork::from_file(&path).ok().and_then(|art| art.mark())
+            };
+            if mark.is_some() {
+                return mark;
+            }
+        }
+    }
+    None
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Artwork {
@@ -60,19 +201,9 @@ impl Artwork {
             image: Default::default(),
         })
     }
-    fn element(&self, size: f32) -> Option<AnyElement> {
+    fn mark(&self) -> Option<ProjectMark> {
         match self {
-            Self::Emoji(text) => Some(
-                div()
-                    .size(px(size))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(size * 0.88))
-                    .child(text.clone())
-                    .into_any_element(),
-            ),
+            Self::Emoji(text) => Some(ProjectMark::Emoji(text.clone().into())),
             Self::Png { data, image } => {
                 let picture = image.get_or_init(|| {
                     if data.len() > 100_000 {
@@ -83,31 +214,70 @@ impl Artwork {
                         STANDARD.decode(data).ok()?,
                     )))
                 });
-                picture.as_ref().map(|picture| {
-                    gpui::img(picture.clone())
-                        .size(px(size))
-                        .flex_shrink_0()
-                        .object_fit(gpui::ObjectFit::Contain)
-                        .into_any_element()
-                })
+                picture.clone().map(ProjectMark::Raster)
             }
         }
     }
 }
 impl Workspace {
-    pub(super) fn project_icon(&self, scope: &str, size: f32) -> AnyElement {
-        self.project_defaults
+    pub(super) fn project_mark(
+        &self,
+        scope: &str,
+        name: &str,
+        cx: &Context<'_, Self>,
+    ) -> ProjectMark {
+        if let Some(mark) = self
+            .project_defaults
             .get(scope)
             .and_then(|p| p.artwork.as_ref())
-            .and_then(|art| art.element(size))
-            .unwrap_or_else(|| {
-                svg()
-                    .path(assets::FOLDER_ICON_PATH)
-                    .size(px(size))
-                    .text_color(theme::rambutan_500())
-                    .flex_shrink_0()
-                    .into_any_element()
-            })
+            .and_then(Artwork::mark)
+        {
+            return mark;
+        }
+        if Path::new(scope).is_absolute() {
+            let mut marks = self.discovered_project_marks.borrow_mut();
+            match marks.get(scope) {
+                Some(Some(mark)) => return mark.clone(),
+                Some(None) => {}
+                None => {
+                    let scope = scope.to_owned();
+                    marks.insert(scope.clone(), None);
+                    let renderer = cx.svg_renderer();
+                    cx.spawn(async move |this, cx| {
+                        let root = PathBuf::from(&scope);
+                        let mark = cx
+                            .background_spawn(
+                                async move { discover_project_mark(&root, &renderer) },
+                            )
+                            .await;
+                        if let Some(mark) = mark {
+                            let _ = this.update(cx, |this, cx| {
+                                this.discovered_project_marks
+                                    .get_mut()
+                                    .insert(scope, Some(mark));
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .detach();
+                }
+            }
+        }
+        project_initials(name).map_or(ProjectMark::Folder, ProjectMark::Monogram)
+    }
+
+    pub(super) fn project_icon(
+        &self,
+        scope: &str,
+        size: f32,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let name = self
+            .project_list
+            .title(scope)
+            .or_else(|| Path::new(scope).file_name().and_then(|name| name.to_str()))
+            .unwrap_or_default();
+        self.project_mark(scope, name, cx).render(size)
     }
     fn save_project_icon(
         &mut self,
@@ -174,7 +344,7 @@ impl Workspace {
                 .items_center()
                 .flex_wrap()
                 .gap_2()
-                .child(self.project_icon(scope, 24.))
+                .child(self.project_icon(scope, 24., cx))
                 .child(on_press_view(
                     button("choose-project-emoji", "Choose icon"),
                     cx,
@@ -292,6 +462,25 @@ impl Workspace {
 mod tests {
     use super::{project_defaults, Artwork, BTreeMap, SettingsSection, STANDARD};
     use base64::Engine as _;
+
+    #[test]
+    fn project_mark_finds_local_artwork_and_falls_back_to_initials() {
+        let root = tempfile::tempdir().unwrap();
+        let renderer = gpui::SvgRenderer::new(std::sync::Arc::new(crate::assets::DesktopAssets));
+        assert!(super::discover_project_mark(root.path(), &renderer).is_none());
+        assert_eq!(
+            super::project_initials("Fixture project").as_deref(),
+            Some("FP")
+        );
+        std::fs::create_dir(root.path().join("public")).unwrap();
+        std::fs::write(root.path().join("public/favicon.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="green"/></svg>"#,
+        ).unwrap();
+        assert!(matches!(
+            super::discover_project_mark(root.path(), &renderer),
+            Some(super::ProjectMark::Svg(_))
+        ));
+    }
     #[gpui::test]
     async fn project_icon_picker_keeps_a_portable_thumbnail_and_resets_only_the_selected_project(
         cx: &mut gpui::TestAppContext,
@@ -330,7 +519,7 @@ mod tests {
             };
             let thumb = image::load_from_memory(&STANDARD.decode(data).unwrap()).unwrap();
             assert_eq!((thumb.width(), thumb.height()), (96, 48));
-            assert!(art.element(18.).is_some());
+            assert!(matches!(art.mark(), Some(super::ProjectMark::Raster(_))));
             w.save_project_icon("/first".into(), None, cx);
             assert!(!w.project_defaults.contains_key("/first"));
             assert!(matches!(

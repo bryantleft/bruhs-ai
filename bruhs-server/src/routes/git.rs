@@ -101,6 +101,99 @@ pub struct RepoRequest {
 }
 
 #[derive(Deserialize)]
+pub struct PromptRepositoryRequest {
+    path: String,
+    repository: String,
+}
+
+/// Compare a saved local project with a prompt link's GitHub repository.
+/// The browser needs only the match, so the remote URL stays on the host.
+pub async fn prompt_repository_matches(
+    Json(body): Json<PromptRepositoryRequest>,
+) -> Result<Json<bool>, AppError> {
+    let repository = bruhs_models::logic::app_link::PromptRepository::parse(&body.repository)
+        .ok_or_else(|| AppError::BadRequest("The link has an unreadable repository.".into()))?;
+    let path = HomePath::resolve(&body.path).await?;
+    Ok(Json(
+        git::project_identity(path.as_path())
+            .await
+            .is_some_and(|identity| repository.matches_remote(&identity.repository)),
+    ))
+}
+
+/// Return a shareable repository slug, leaving the fetch URL on the host.
+pub async fn prompt_share_repository(
+    Json(body): Json<RepoRequest>,
+) -> Result<Json<Option<String>>, AppError> {
+    let path = HomePath::required(body.path.as_deref()).await?;
+    let repository = git::project_identity(path.as_path())
+        .await
+        .and_then(|identity| {
+            bruhs_models::logic::app_link::PromptRepository::from_remote_identity(
+                &identity.repository,
+            )
+        });
+    Ok(Json(repository.map(|repository| repository.slug())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptCloneRequest {
+    path: String,
+    repository: String,
+    clone_id: uuid::Uuid,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromptCloneResponse {
+    path: String,
+    name: String,
+}
+
+pub async fn post_prompt_clone(
+    Json(body): Json<PromptCloneRequest>,
+) -> Result<Json<PromptCloneResponse>, AppError> {
+    let repository = bruhs_models::logic::app_link::PromptRepository::parse(&body.repository)
+        .ok_or_else(|| AppError::BadRequest("The link has an unreadable repository.".into()))?;
+    let parent = HomePath::resolve(&body.path).await?;
+    let dest = git::clone_prompt_repository(parent.as_path(), &repository, body.clone_id)
+        .await
+        .map_err(map_git_error)?;
+    Ok(Json(PromptCloneResponse {
+        path: dest.to_string_lossy().into_owned(),
+        name: repository.name().to_owned(),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PullCheckoutRequest {
+    path: String,
+    pull: String,
+    checkout_id: uuid::Uuid,
+}
+
+pub async fn post_pull_checkout(
+    Json(body): Json<PullCheckoutRequest>,
+) -> Result<Json<WorktreeResponse>, AppError> {
+    let pull = bruhs_models::logic::app_link::PromptPullRequest::parse(&body.pull)
+        .ok_or_else(|| AppError::BadRequest("The link has an unreadable pull request.".into()))?;
+    let repo = HomePath::resolve(&body.path).await?;
+    let branch = pull.checkout_branch(body.checkout_id);
+    let dest = confined_worktree_dest(repo.as_path(), &branch).await?;
+    let setup = git::load_project_setup(repo.as_path())
+        .await
+        .map_err(map_git_error)?;
+    git::checkout_linked_pull_at(repo.as_path(), &pull, body.checkout_id, &dest, &setup)
+        .await
+        .map_err(map_git_error)?;
+    Ok(Json(WorktreeResponse {
+        path: dest.to_string_lossy().into_owned(),
+        branch,
+    }))
+}
+
+#[derive(Deserialize)]
 pub struct WorktreeRequest {
     pub path: Option<String>,
     pub base: Option<String>,

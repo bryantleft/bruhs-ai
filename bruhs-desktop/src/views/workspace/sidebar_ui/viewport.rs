@@ -17,6 +17,7 @@ pub(super) enum SidebarRow {
     Thread {
         index: usize,
         entity: EntityId,
+        section: SidebarSection,
         has_meta: bool,
         folder: bool,
     },
@@ -35,6 +36,13 @@ pub(super) enum SidebarRow {
 }
 
 impl SidebarRow {
+    pub(super) fn section(&self) -> SidebarSection {
+        match self {
+            Self::Thread { section, .. } | Self::Shelf { section, .. } => *section,
+            Self::Folder { .. } => SidebarSection::Active,
+        }
+    }
+
     fn target_count(&self) -> usize {
         match self {
             Self::Thread { .. } => 3,
@@ -73,20 +81,22 @@ pub(super) fn sidebar_rows(
         .enumerate()
         .map(|(index, thread)| (thread.chat.entity_id(), index))
         .collect();
-    let card = |thread: &DesktopThread, folder: bool| {
-        let chat = thread.chat.read(cx);
-        SidebarRow::Thread {
-            index: indices[&thread.chat.entity_id()],
-            entity: thread.chat.entity_id(),
-            folder,
-            has_meta: if folder {
-                workspace.labs_sidebar.two_lines
-            } else {
-                thread.branch.is_some() || !chat.messages.is_empty() || chat.role.is_some()
-            },
-        }
+    let card = |thread: &DesktopThread, section, folder: bool| SidebarRow::Thread {
+        index: indices[&thread.chat.entity_id()],
+        entity: thread.chat.entity_id(),
+        section,
+        folder,
+        has_meta: if folder {
+            workspace.labs_sidebar.two_lines
+        } else {
+            workspace.card_has_meta(thread, cx)
+        },
     };
-    let mut rows: Vec<_> = shelves.pinned.iter().map(|t| card(t, false)).collect();
+    let mut rows: Vec<_> = shelves
+        .pinned
+        .iter()
+        .map(|t| card(t, SidebarSection::Pinned, false))
+        .collect();
     if workspace.labs_sidebar.enabled {
         let mut folders = std::collections::BTreeMap::<String, Vec<&DesktopThread>>::new();
         for thread in &shelves.active {
@@ -154,11 +164,20 @@ pub(super) fn sidebar_rows(
                 open,
             });
             if open {
-                rows.extend(threads.into_iter().map(|t| card(t, true)));
+                rows.extend(
+                    threads
+                        .into_iter()
+                        .map(|t| card(t, SidebarSection::Active, true)),
+                );
             }
         }
     } else {
-        rows.extend(shelves.active.iter().map(|t| card(t, false)));
+        rows.extend(
+            shelves
+                .active
+                .iter()
+                .map(|t| card(t, SidebarSection::Active, false)),
+        );
     }
     for (section, threads, open) in [
         (
@@ -184,7 +203,7 @@ pub(super) fn sidebar_rows(
                 open,
             });
             if open {
-                rows.extend(threads.iter().map(|t| card(t, false)));
+                rows.extend(threads.iter().map(|t| card(t, section, false)));
             }
         }
     }
@@ -219,7 +238,7 @@ pub(super) struct SidebarScope {
 
 pub(in crate::views::workspace) struct SidebarViewport {
     pub(in crate::views::workspace) list: ListState,
-    rows: Rc<[SidebarRow]>,
+    pub(super) rows: Rc<[SidebarRow]>,
     focus: Rc<[SidebarRowFocus]>,
     start: FocusHandle,
     end: FocusHandle,
@@ -227,6 +246,7 @@ pub(in crate::views::workspace) struct SidebarViewport {
     scope: Option<SidebarScope>,
     needs_height_hints: bool,
     hint_width: Option<Pixels>,
+    arrangement_scroll: Option<ListOffset>,
     pub(in crate::views::workspace) first_row_bounds: Option<Bounds<Pixels>>,
 }
 
@@ -243,6 +263,7 @@ impl SidebarViewport {
             scope: None,
             needs_height_hints: true,
             hint_width: None,
+            arrangement_scroll: None,
             first_row_bounds: None,
         }
     }
@@ -251,8 +272,23 @@ impl SidebarViewport {
         (self.start.clone(), self.end.clone())
     }
 
+    pub(super) fn measured_width(&self) -> Option<Pixels> {
+        self.hint_width
+    }
+
+    pub(super) fn thread_bounds(&self, entity: EntityId) -> Option<Bounds<Pixels>> {
+        let index = self
+            .rows
+            .iter()
+            .position(|row| row.key() == RowKey::Thread(entity))?;
+        self.list.bounds_for_item(index)
+    }
+
+    pub(in crate::views::workspace) fn retain_arrangement_scroll(&mut self) {
+        self.arrangement_scroll = Some(self.list.logical_scroll_top());
+    }
+
     /// The card for chat `entity`'s focus targets: card, "…" button, delete.
-    #[cfg(test)]
     pub(in crate::views::workspace) fn row_targets(
         &self,
         entity: EntityId,
@@ -281,6 +317,7 @@ impl SidebarViewport {
         rem_size: Pixels,
         cx: &App,
     ) -> (ListState, Rc<[SidebarRow]>, Rc<[SidebarRowFocus]>) {
+        let arrangement_scroll = self.arrangement_scroll.take();
         if self.rows.as_ref() != rows.as_slice() {
             let old: HashMap<_, _> = self
                 .rows
@@ -317,6 +354,9 @@ impl SidebarViewport {
             self.rows = rows.into();
             self.focus = focus;
             self.needs_height_hints = true;
+            if let Some(offset) = arrangement_scroll {
+                self.list.scroll_to(offset);
+            }
         }
         if self.scope.as_ref() != Some(&scope) {
             // A different result set starts at its first result. In particular,
@@ -387,6 +427,31 @@ impl SidebarViewport {
             });
         }
         self.focus[index].targets()[target].focus(window, cx);
+    }
+
+    /// Move between conversation cards without activating them.
+    pub(super) fn navigate_threads(&self, key: &str, window: &mut Window, cx: &mut App) -> bool {
+        let Some((index, 0)) = self.focused(window) else {
+            return false;
+        };
+        let is_thread = |row: &SidebarRow| matches!(row, SidebarRow::Thread { .. });
+        if !is_thread(&self.rows[index]) {
+            return false;
+        }
+        let next = match key {
+            "down" => self.rows[index + 1..]
+                .iter()
+                .position(is_thread)
+                .map(|offset| index + 1 + offset),
+            "up" => self.rows[..index].iter().rposition(is_thread),
+            "home" => self.rows.iter().position(is_thread),
+            "end" => self.rows.iter().rposition(is_thread),
+            _ => return false,
+        };
+        if let Some(next) = next {
+            self.focus_target(next, 0, window, cx);
+        }
+        true
     }
 
     /// Traverse every logical row, including rows outside the viewport. Boundaries

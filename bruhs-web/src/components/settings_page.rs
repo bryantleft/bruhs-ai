@@ -8,6 +8,7 @@ use bruhs_models::backup::{BACKUP_DESCRIPTION, BACKUP_TITLE};
 use bruhs_models::logic::compact::IdleCompact;
 use bruhs_models::logic::editor::EDITORS;
 use bruhs_models::vault::{VAULT_DESCRIPTION, VAULT_TITLE};
+use bruhs_models::workspace_trust::{SETTINGS_DESCRIPTION, SETTINGS_TITLE};
 use leptos::html::Div;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -18,7 +19,7 @@ use crate::components::backup_settings::BackupSettings;
 use crate::components::diarize_settings::DiarizeSettingsPanel;
 use crate::components::google_calendar_settings::GoogleCalendarSettings;
 use crate::components::personality_settings::PersonalitySettings as PersonalitySettingsPanel;
-use crate::components::provider::provider_label;
+use crate::components::provider::model_dropdown_option;
 use crate::components::vault_settings::{CredentialSync, VaultSettings};
 use crate::components::whisper_model_settings::WhisperModelSettings;
 use crate::state::{
@@ -30,12 +31,16 @@ use crate::state::{
 use crate::ui::BrailleBruh;
 use crate::ui::{Dropdown, DropdownOption, Icon, Switch};
 
+mod trusted_folders;
+use trusted_folders::TrustedFolders;
+
 /// `(id, icon, label)` for the section nav, in page order.
-pub const SECTIONS: [(&str, &str, &str); 13] = [
+pub const SECTIONS: [(&str, &str, &str); 14] = [
     ("general", "settings", "General"),
     ("updates", "download", "Updates"),
     ("beta", "activity", "Beta"),
     ("vault", "shield", "Vault"),
+    ("trusted-folders", "shield", SETTINGS_TITLE),
     ("apps", "globe", "Apps"),
     ("calendar", "calendar", "Calendar"),
     ("recording", "mic", "Recording"),
@@ -122,6 +127,8 @@ pub const ROW_CONTROL: &str = "w-full sm:w-60";
 #[component]
 fn GeneralSettings() -> impl IntoView {
     let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
+    let crate::state::LastComposerModel(last_composer_model) =
+        expect_context::<crate::state::LastComposerModel>();
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
     let SetPermissionModeSignal(set_permission_mode) = expect_context::<SetPermissionModeSignal>();
     let EditorSignal(editor_id) = expect_context::<EditorSignal>();
@@ -142,7 +149,7 @@ fn GeneralSettings() -> impl IntoView {
             MODEL_CATALOG
                 .iter()
                 .filter(move |m| m.provider == p)
-                .map(|m| DropdownOption::new(m.id, m.label).in_group(provider_label(m.provider)))
+                .map(|m| model_dropdown_option(m.id, m.label, m.provider))
         })
         .collect();
     let model_options = Signal::derive(move || {
@@ -151,10 +158,9 @@ fn GeneralSettings() -> impl IntoView {
         if !options.iter().any(|option| option.value == current)
             && bruhs_models::agent::custom_model_selection(&current).is_some()
         {
-            options.push(
-                DropdownOption::new(current.clone(), current.clone())
-                    .in_group(provider_label(AgentProvider::for_model(&current))),
-            );
+            let provider = AgentProvider::for_model(&current);
+            let label = bruhs_models::agent::model_label(&current);
+            options.push(model_dropdown_option(current, label, provider));
         }
         options
     });
@@ -176,7 +182,12 @@ fn GeneralSettings() -> impl IntoView {
             <Dropdown
                 options=model_options
                 value=Signal::derive(move || default_model.get())
-                on_change=Callback::new(move |v: String| default_model.set(v))
+                on_change=Callback::new(move |model: String| {
+                    batch(|| {
+                        default_model.set(model);
+                        last_composer_model.set(None);
+                    });
+                })
                 label="Default model"
                 class=ROW_CONTROL
                 align_end=true
@@ -680,6 +691,37 @@ pub fn SettingsPage() -> impl IntoView {
             .find(|(id, _, _)| *id == current.get())
             .map_or("", |(_, _, label)| *label)
     };
+    let move_section_focus = |event: web_sys::KeyboardEvent, index: usize| {
+        if event.default_prevented()
+            || event.is_composing()
+            || event.alt_key()
+            || event.ctrl_key()
+            || event.meta_key()
+        {
+            return;
+        }
+        let last = SECTIONS.len() - 1;
+        let next = match event.key().as_str() {
+            "ArrowUp" => index.saturating_sub(1),
+            "ArrowDown" => (index + 1).min(last),
+            "Home" => 0,
+            "End" => last,
+            _ => return,
+        };
+        if let Some(button) = document()
+            .get_element_by_id(&format!("settings-nav-{}", SECTIONS[next].0))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            let scroll = web_sys::ScrollIntoViewOptions::new();
+            scroll.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            button.scroll_into_view_with_scroll_into_view_options(&scroll);
+            let focus = web_sys::FocusOptions::new();
+            focus.set_prevent_scroll(true);
+            let _ = button.focus_with_options(&focus);
+            event.prevent_default();
+            event.stop_propagation();
+        }
+    };
 
     view! {
         <section class="flex h-full min-h-0 flex-1 flex-col bg-longan-950">
@@ -701,17 +743,20 @@ pub fn SettingsPage() -> impl IntoView {
             <div class="flex min-h-0 flex-1">
                 <nav
                     aria-label="Settings sections"
-                    class="hidden w-[184px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-longan-800/60 p-3 md:flex"
+                    tabindex="-1"
+                    data-workspace-focus="settings-nav"
+                    class="hidden w-[184px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-longan-800/60 p-3 md:flex focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
                 >
-                    {SECTIONS.iter().map(|(id, icon, label)| {
+                    {SECTIONS.iter().enumerate().map(|(index, (id, icon, label))| {
                         let id: &'static str = id;
                         let is_on = Signal::derive(move || current.get() == id);
                         view! {
                             <button
+                                id=format!("settings-nav-{id}")
                                 type="button"
                                 aria-current=move || if is_on.get() { "true" } else { "false" }
                                 class=move || format!(
-                                    "flex h-8 items-center gap-2 rounded-grape px-2 text-left text-label transition-colors {}",
+                                    "flex h-8 items-center gap-2 rounded-grape px-2 text-left text-label transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400 {}",
                                     if is_on.get() {
                                         "bg-longan-800/60 text-rambutan-100"
                                     } else {
@@ -719,6 +764,7 @@ pub fn SettingsPage() -> impl IntoView {
                                     }
                                 )
                                 on:click=move |_| jump(id)
+                                on:keydown=move |event| move_section_focus(event, index)
                             >
                                 <Icon name=*icon size=16 class="shrink-0 text-rambutan-500" />
                                 <span>{*label}</span>
@@ -726,7 +772,15 @@ pub fn SettingsPage() -> impl IntoView {
                         }
                     }).collect_view()}
                 </nav>
-                <div node_ref=content_ref class="min-h-0 flex-1 overflow-y-auto" on:scroll=on_scroll>
+                <div
+                    node_ref=content_ref
+                    role="region"
+                    aria-label="Settings content"
+                    tabindex="-1"
+                    data-workspace-focus="settings"
+                    class="min-h-0 flex-1 overflow-y-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
+                    on:scroll=on_scroll
+                >
                     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-5 md:px-6">
                         <SettingsSection id="general" title="General">
                             <GeneralSettings />
@@ -739,6 +793,9 @@ pub fn SettingsPage() -> impl IntoView {
                         </SettingsSection>
                         <SettingsSection id="vault" title=VAULT_TITLE description=VAULT_DESCRIPTION>
                             <VaultSettings />
+                        </SettingsSection>
+                        <SettingsSection id="trusted-folders" title=SETTINGS_TITLE description=SETTINGS_DESCRIPTION>
+                            <TrustedFolders />
                         </SettingsSection>
                         <SettingsSection id="apps" title=APPS_TITLE description=APPS_DESCRIPTION>
                             <AppsSettings />
@@ -794,17 +851,17 @@ mod tests {
 
     #[test]
     fn nav_and_shortcut_tables_are_well_formed() {
-        assert_eq!(SECTIONS.len(), 13);
+        assert_eq!(SECTIONS.len(), 14);
         assert_eq!(SECTIONS[1].0, "updates");
         assert_eq!(
             SECTIONS[3],
             ("vault", "shield", bruhs_models::vault::VAULT_TITLE)
         );
         assert_eq!(
-            SECTIONS[4],
+            SECTIONS[5],
             ("apps", "globe", bruhs_models::apps::APPS_TITLE)
         );
-        assert_eq!(SECTIONS[11].2, "Keybindings");
+        assert_eq!(SECTIONS[12].2, "Keybindings");
         let rules = bruhs_models::logic::keybindings::default_keybindings();
         assert!(rules.iter().all(|rule| {
             !rule.command.is_empty()

@@ -43,6 +43,33 @@ impl ServerClient {
         )
         .await
     }
+    pub async fn usage_limits(
+        &self,
+        environment: Option<&str>,
+        provider: Option<&str>,
+    ) -> Result<bruhs_models::agent_extensions::UsageLimitSnapshot, ServerError> {
+        let path = "/api/agent-extensions/usage/pools";
+        let query: Vec<_> = [("environment", environment), ("provider", provider)]
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| (key, value)))
+            .collect();
+        let response = self.http()?.get(self.url(path)).query(&query).send().await;
+        Self::decode(
+            Self::check(response, "Read usage limits").await?,
+            "Read usage limits",
+        )
+        .await
+    }
+
+    pub async fn redeem_usage_credit(&self, handle: uuid::Uuid) -> Result<String, ServerError> {
+        self.send_json(
+            reqwest::Method::POST,
+            &format!("/api/agent-extensions/usage/pools/reset/{handle}"),
+            Some(&()),
+        )
+        .await
+    }
+
     pub async fn quota_windows(
         &self,
         provider: bruhs_models::agent::AgentProvider,

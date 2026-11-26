@@ -365,6 +365,74 @@ impl AppState {
             .await
     }
 
+    pub async fn answer_question(
+        &self,
+        thread_id: &ThreadId,
+        request_id: &str,
+        reply: bruhs_models::logic::user_question::QuestionReply,
+    ) -> Result<(), PermissionResolveError> {
+        self.orchestrator
+            .answer_question(thread_id, request_id, reply)
+            .await
+    }
+
+    pub async fn answer_question_from_device(
+        &self,
+        thread_id: &ThreadId,
+        request_id: &str,
+        reply: bruhs_models::logic::user_question::QuestionReply,
+        device: uuid::Uuid,
+    ) -> Result<(), PermissionResolveError> {
+        self.orchestrator
+            .answer_question_from(thread_id, request_id, reply, Some(device))
+            .await
+    }
+
+    pub async fn upload_question_file(
+        &self,
+        upload: bruhs_models::api::QuestionUpload,
+        bytes: impl AsRef<[u8]> + Send + 'static,
+    ) -> Result<bruhs_models::logic::attachments::UploadedFile, PermissionResolveError> {
+        self.orchestrator
+            .upload_question_file(upload, bytes, None, false)
+            .await
+    }
+
+    pub async fn upload_desktop_question_file(
+        &self,
+        upload: bruhs_models::api::QuestionUpload,
+        bytes: impl AsRef<[u8]> + Send + 'static,
+    ) -> Result<bruhs_models::logic::attachments::UploadedFile, PermissionResolveError> {
+        self.orchestrator
+            .upload_question_file(upload, bytes, None, true)
+            .await
+    }
+
+    pub async fn remove_question_file(
+        &self,
+        upload: &bruhs_models::api::QuestionUpload,
+    ) -> Result<(), PermissionResolveError> {
+        self.orchestrator.remove_question_file(upload, None).await
+    }
+
+    pub async fn stage_device_question_file(
+        &self,
+        upload: bruhs_models::api::QuestionUpload,
+        bytes: Option<axum::body::Bytes>,
+        device: uuid::Uuid,
+    ) -> Result<(), PermissionResolveError> {
+        if let Some(bytes) = bytes {
+            self.orchestrator
+                .upload_question_file(upload, bytes, Some(device), true)
+                .await
+                .map(|_| ())
+        } else {
+            self.orchestrator
+                .remove_question_file(&upload, Some(device))
+                .await
+        }
+    }
+
     /// Start an agent turn. A thread created for a meeting carries that
     /// meeting's context as the system prompt.
     ///

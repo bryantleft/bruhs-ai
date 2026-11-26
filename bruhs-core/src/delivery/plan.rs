@@ -592,36 +592,76 @@ fn validate_command(command: &Command) -> DeliveryResult<()> {
 
 impl DeliveryService {
     pub async fn scripts(&self, path: &Path) -> DeliveryResult<ProjectScripts> {
-        let file = path.join(".bruhs/config.json");
-        match tokio::fs::read(&file).await {
-            Ok(bytes) => {
-                if bytes.len() > bruhs_models::reactive::MAX_PAYLOAD_BYTES {
+        let bruhs_dir = path.join(".bruhs");
+        let file = bruhs_dir.join("config.json");
+        let file_for_read = file.clone();
+        let limit = u64::try_from(bruhs_models::reactive::MAX_PAYLOAD_BYTES).unwrap_or(64 * 1024);
+        let read = tokio::task::spawn_blocking(move || {
+            match std::fs::symlink_metadata(&bruhs_dir) {
+                Ok(meta) if meta.file_type().is_dir() => {}
+                Ok(_) => {
+                    return Err(DeliveryError::Invalid(
+                        "Project scripts path contains a link or non-directory.".into(),
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => {
+                    return Err(DeliveryError::Invalid(format!(
+                        "Could not read {}: {error}",
+                        file_for_read.display()
+                    )));
+                }
+            }
+            match std::fs::symlink_metadata(&file_for_read) {
+                Ok(meta) if !meta.file_type().is_file() => {
+                    return Err(DeliveryError::Invalid(
+                        "Project scripts file must be a regular file, not a link or special file."
+                            .into(),
+                    ));
+                }
+                Ok(meta) if meta.len() > limit => {
                     return Err(DeliveryError::Invalid(
                         "Project scripts exceed the 64 KiB automation configuration budget.".into(),
                     ));
                 }
-                let scripts: ProjectScripts = serde_json::from_slice(&bytes).map_err(|error| {
-                    DeliveryError::Invalid(format!("{} is invalid: {error}", file.display()))
-                })?;
-                for command in scripts
-                    .setup
-                    .iter()
-                    .chain(&scripts.run)
-                    .chain(&scripts.check)
-                    .chain(&scripts.teardown)
-                {
-                    validate_command(command)?;
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => {
+                    return Err(DeliveryError::Invalid(format!(
+                        "Could not read {}: {error}",
+                        file_for_read.display()
+                    )));
                 }
-                Ok(scripts)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ProjectScripts::default())
+            match crate::workspace_trust::read_regular_file_bounded(&file_for_read, limit) {
+                Ok(Some(bytes)) => Ok(Some(bytes)),
+                Ok(None) => Err(DeliveryError::Invalid(
+                    "Project scripts exceed the 64 KiB automation configuration budget or changed during read.".into(),
+                )),
+                Err(error) => Err(DeliveryError::Invalid(format!(
+                    "Could not read {}: {error}",
+                    file_for_read.display()
+                ))),
             }
-            Err(error) => Err(DeliveryError::Invalid(format!(
-                "Could not read {}: {error}",
-                file.display()
-            ))),
+        })
+        .await
+        .map_err(|error| DeliveryError::Invalid(error.to_string()))??;
+        let Some(bytes) = read else {
+            return Ok(ProjectScripts::default());
+        };
+        let scripts: ProjectScripts = serde_json::from_slice(&bytes).map_err(|error| {
+            DeliveryError::Invalid(format!("{} is invalid: {error}", file.display()))
+        })?;
+        for command in scripts
+            .setup
+            .iter()
+            .chain(&scripts.run)
+            .chain(&scripts.check)
+            .chain(&scripts.teardown)
+        {
+            validate_command(command)?;
         }
+        Ok(scripts)
     }
 
     pub(super) async fn fingerprint(

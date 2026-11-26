@@ -1,8 +1,8 @@
 //! Settings → Keybindings. Each environment owns its shortcut file. The last
 //! matching rule wins. `mod` is Command on macOS and Control elsewhere.
 //!
-//! GPUI still owns dispatch for every command except sidebar undo. Undo stays
-//! out of the keymap so a text field keeps ⌘Z. A rule whose `when` fails
+//! GPUI owns dispatch for most commands. Sidebar undo stays out of the keymap
+//! so a text field keeps ⌘Z. A rule whose `when` fails
 //! swallows a modified chord, so a customized condition can turn a shortcut
 //! off. A plain key such as `/` or `c` is left alone when its condition fails,
 //! or the character would never reach the field.
@@ -59,6 +59,8 @@ pub(super) struct InstalledBinding {
 enum KeyDecision {
     Dictation,
     Dispatch(Box<dyn Action>),
+    Usage(crate::views::usage::UsageShortcut),
+    WorkspaceFocus(bool),
     ProjectAction(super::project_actions::ProjectAction, String),
     Undo,
     SidebarFocus(bool),
@@ -353,6 +355,20 @@ fn intercept_keybinding(
             cx.stop_propagation();
             window.dispatch_action(action, cx);
         }
+        KeyDecision::Usage(shortcut) => {
+            if workspace.update(cx, |this, cx| this.apply_usage_shortcut(shortcut, cx)) {
+                window.prevent_default();
+                cx.stop_propagation();
+            }
+        }
+        KeyDecision::WorkspaceFocus(backwards) => {
+            if workspace.update(cx, |this, cx| {
+                this.step_workspace_focus(backwards, window, cx)
+            }) {
+                window.prevent_default();
+                cx.stop_propagation();
+            }
+        }
         KeyDecision::Dictation => {
             cx.stop_propagation();
             window.prevent_default();
@@ -474,8 +490,49 @@ impl Workspace {
             &ctx,
             mac,
         );
+        if ctx.usage_page_open && !editable_input {
+            let usage_rule = matched.or_else(|| {
+                if !mac || !chord.command || chord.shift || chord.alt {
+                    return None;
+                }
+                // GPUI on macOS folds Shift plus a digit into its symbol.
+                // An explicitly assigned symbol shortcut takes precedence.
+                let key = match chord.key.as_str() {
+                    "!" => "1",
+                    "@" => "2",
+                    "#" => "3",
+                    "$" => "4",
+                    _ => return None,
+                };
+                let shifted_digit = chord_from_event("", key, true, chord.ctrl, false, true);
+                bruhs_models::logic::keybindings::matching_binding(
+                    &self.keybindings,
+                    &shifted_digit,
+                    &ctx,
+                    mac,
+                )
+                .0
+            });
+            if let Some(shortcut) = usage_rule
+                .and_then(|rule| crate::views::usage::UsageShortcut::from_command(&rule.command))
+            {
+                return KeyDecision::Usage(shortcut);
+            }
+        }
         if let Some(rule) = matched {
             let command = rule.command.as_str();
+            if matches!(command, "workspace.focusNext" | "workspace.focusPrevious") {
+                if !self.workspace_focus_handle.contains_focused(window, cx)
+                    || (event.keystroke.key == "f6"
+                        && event
+                            .context_stack
+                            .iter()
+                            .any(|context| context.contains("LiveComputerInput")))
+                {
+                    return KeyDecision::Pass;
+                }
+                return KeyDecision::WorkspaceFocus(command == "workspace.focusPrevious");
+            }
             if command == "voice.dictate"
                 && !self.overlay_open()
                 && !ctx.terminal_focus
@@ -582,6 +639,8 @@ impl Workspace {
             }),
             preview_open: self.preview_panel_visible,
             model_picker_open: chat.as_ref().is_some_and(|chat| chat.model_picker_open),
+            usage_page_open: matches!(self.overlay, Some(super::Overlay::Usage { .. }))
+                && self.modal_contains_focus(window, cx),
             composer_focus,
             composer_draft,
             turn_running: chat.as_ref().is_some_and(|chat| chat.is_streaming),
@@ -1055,7 +1114,16 @@ pub(super) fn command_label(command: &str) -> String {
         "command.palette" => "Open command palette".into(),
         "settings.open" => "Open settings".into(),
         "chat.new" => "New thread".into(),
+        "workspace.focusNext" => "Focus next workspace area".into(),
+        "workspace.focusPrevious" => "Focus previous workspace area".into(),
         "snapshot.capture" => "Capture a window".into(),
+        "usage.cost" => "Show usage cost".into(),
+        "usage.tokens" => "Show usage tokens".into(),
+        "usage.limits" => "Show usage limits".into(),
+        "usage.period.day" => "Show usage for the past 24 hours".into(),
+        "usage.period.week" => "Show usage for the past 7 days".into(),
+        "usage.period.month" => "Show usage for the past 30 days".into(),
+        "usage.period.quarter" => "Show usage for the past 90 days".into(),
         _ => command
             .split('.')
             .map(|part| {
@@ -1313,10 +1381,16 @@ mod tests {
     use gpui::Action;
 
     #[test]
-    fn every_default_command_is_bound_or_is_sidebar_undo() {
+    fn every_default_command_is_bound_or_handled_by_the_interceptor() {
         for rule in default_keybindings() {
             let names = binding_names(&rule.command);
-            if rule.command == "thread.undo" {
+            if rule.command == "thread.undo"
+                || matches!(
+                    rule.command.as_str(),
+                    "workspace.focusNext" | "workspace.focusPrevious"
+                )
+                || crate::views::usage::UsageShortcut::from_command(&rule.command).is_some()
+            {
                 assert!(names.is_empty());
             } else {
                 assert!(!names.is_empty(), "{}", rule.command);

@@ -126,6 +126,21 @@ impl AssetSource for DesktopAssets {
             "logos/openai.svg" => Ok(Some(Cow::Borrowed(
                 &include_bytes!("../../bruhs-web/logos/openai.svg")[..],
             ))),
+            "logos/cursor.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../bruhs-web/logos/cursor.svg"
+            )))),
+            "logos/antigravity-color.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../bruhs-web/logos/antigravity-color.svg"
+            )))),
+            "logos/antigravity.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../bruhs-web/logos/antigravity.svg"
+            )))),
+            "logos/grok.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../bruhs-web/logos/grok.svg"
+            )))),
+            "logos/opencode.svg" => Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../bruhs-web/logos/opencode.svg"
+            )))),
             "logos/vercel.svg" => Ok(Some(Cow::Borrowed(
                 &include_bytes!("../../bruhs-web/logos/vercel.svg")[..],
             ))),
@@ -142,6 +157,11 @@ impl AssetSource for DesktopAssets {
             "logos" => Ok(vec![
                 "claude.svg".into(),
                 "openai.svg".into(),
+                "cursor.svg".into(),
+                "antigravity.svg".into(),
+                "antigravity-color.svg".into(),
+                "grok.svg".into(),
+                "opencode.svg".into(),
                 "vercel.svg".into(),
             ]),
             "icons" => {
@@ -163,7 +183,11 @@ pub fn provider_logo_path(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "logos/claude.svg",
         AgentProvider::Codex => "logos/openai.svg",
-        _ => BOT_ICON_PATH,
+        AgentProvider::Cursor => "logos/cursor.svg",
+        AgentProvider::Antigravity => "logos/antigravity.svg",
+        AgentProvider::Grok => "logos/grok.svg",
+        AgentProvider::OpenCode => "logos/opencode.svg",
+        AgentProvider::Acp => BOT_ICON_PATH,
     }
 }
 
@@ -245,6 +269,19 @@ mod tests {
             "logos/claude.svg"
         );
         assert_eq!(provider_logo_path(AgentProvider::Codex), "logos/openai.svg");
+    }
+
+    #[test]
+    fn built_in_providers_have_embedded_marks() {
+        for provider in AgentProvider::ALL
+            .into_iter()
+            .filter(|p| *p != AgentProvider::Acp)
+        {
+            let path = provider_logo_path(provider);
+            assert!(path.starts_with("logos/"));
+            let svg = DesktopAssets.load(path).unwrap().expect("embedded mark");
+            assert!(std::str::from_utf8(&svg).unwrap().contains("<svg"));
+        }
     }
 
     #[test]

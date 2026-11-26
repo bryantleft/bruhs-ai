@@ -112,7 +112,8 @@ impl Workspace {
             for (scope, label) in [
                 (MobileScope::Prompt, "Send prompts"),
                 (MobileScope::Approve, "Approve tools"),
-                (MobileScope::Diff, "Review diffs"),
+                (MobileScope::Diff, "Review diffs and linked project files"),
+                (MobileScope::LinkedDrafts, "Open linked drafts"),
             ] {
                 scopes_row = scopes_row.child(
                     control(
@@ -140,6 +141,9 @@ impl Workspace {
             }
             panel = panel
                 .child(scopes_row)
+                .when(self.mobile.scopes.contains(&MobileScope::LinkedDrafts), |panel| {
+                    panel.child(note("Linked draft access can confirm repository clones and pull request checkouts that run saved project setup."))
+                })
                 .child(field(
                     "Device lifetime in hours (1 to 24)",
                     &self.mobile.hours,

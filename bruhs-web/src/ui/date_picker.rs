@@ -104,7 +104,7 @@ pub fn DatePicker(
     };
 
     let final_class = format!(
-        "bruhs-control inline-flex min-h-control items-center gap-2 rounded-grape bg-white/5 px-3 py-1 text-body text-rambutan-100 inset-ring inset-ring-white/10 hover:inset-ring-white/20 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer {class}"
+        "bruhs-control bruhs-field-trigger inline-flex min-h-control w-full items-center gap-2 rounded-grape bg-white/5 px-2.5 py-[5px] text-body text-rambutan-100 inset-ring inset-ring-white/10 hover:inset-ring-white/20 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer {class}"
     );
 
     // The day grid for the current view month (reactive on view_year/month).
@@ -147,7 +147,7 @@ pub fn DatePicker(
     };
 
     view! {
-        <div class="relative inline-block">
+        <div class="relative min-w-0">
             <button
                 type="button"
                 class=final_class
@@ -163,7 +163,7 @@ pub fn DatePicker(
                     class="fixed inset-0 z-40"
                     on:click=move |_| open.set(false)
                 ></div>
-                <div class="absolute left-0 top-full mt-1 z-50 w-64 rounded-grape bg-longan-900 inset-ring inset-ring-longan-700 p-3 shadow-none">
+                <div class="absolute right-0 top-full mt-1 z-50 w-64 rounded-grape bg-longan-900 inset-ring inset-ring-longan-700 p-3 shadow-none">
                     <div class="flex items-center justify-between mb-2">
                         <button
                             type="button"

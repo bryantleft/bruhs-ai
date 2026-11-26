@@ -118,7 +118,7 @@ pub(super) struct DetailsUi {
     active: usize,
     options: [FocusHandle; ITEMS.len() + 1],
     trigger: FocusHandle,
-    card: FocusHandle,
+    pub(super) card: FocusHandle,
     menu_scroll: ScrollHandle,
 }
 impl DetailsUi {

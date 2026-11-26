@@ -1,30 +1,9 @@
 //! Commands explicitly saved in Settings and run in a visible project terminal.
 use super::*;
 use crate::views::terminal_panel::ProjectCommand;
+pub(super) use bruhs_core::git::ProjectAction;
+use bruhs_core::git::ProjectActionLifecycle;
 use bruhs_models::logic::keybindings::{chord_claimed, parse_chord, Chord};
-
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-struct Lifecycle {
-    run_on_worktree_create: bool,
-    wait_for_setup: bool,
-    run_on_settle: bool,
-    stop_on_settle: bool,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct ProjectAction {
-    pub id: String,
-    pub name: String,
-    pub command: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    shortcut: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    preview_url: Option<String>,
-    #[serde(default)]
-    auto_open_preview: bool,
-    #[serde(flatten)]
-    lifecycle: Lifecycle,
-}
 
 pub(super) struct ActionEditor {
     pub open: bool,
@@ -37,7 +16,7 @@ pub(super) struct ActionEditor {
     shortcut: Entity<InputState>,
     preview_url: Entity<InputState>,
     auto_open_preview: bool,
-    lifecycle: Lifecycle,
+    lifecycle: ProjectActionLifecycle,
     error: Option<String>,
 }
 
@@ -356,12 +335,7 @@ impl Workspace {
 
     pub(super) fn setup_steps(&self, scope: &str) -> Vec<bruhs_core::git::SetupAction> {
         self.actions_for_project(scope)
-            .filter(|a| a.lifecycle.run_on_worktree_create && a.lifecycle.wait_for_setup)
-            .map(|a| bruhs_core::git::SetupAction {
-                id: a.id.clone(),
-                name: a.name.clone(),
-                command: a.command.clone(),
-            })
+            .filter_map(ProjectAction::setup_step)
             .collect()
     }
 

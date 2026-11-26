@@ -3,7 +3,7 @@
 //! `rounded-mango`, tone + ring elevation, persimmon only on the primary
 //! action.
 
-use bruhs_models::agent::provider_for_model_id;
+use bruhs_models::agent::{provider_for_model_id, AgentProvider};
 use bruhs_models::PermissionMode;
 use gloo_timers::callback::Interval;
 use leptos::prelude::*;
@@ -13,28 +13,29 @@ use crate::api::{
     approve_permission, checkout_git_branch, git_status, list_git_branches, ApiError, Decision,
 };
 use crate::components::file_attachments::{
-    enqueue_browser_file, offers_block_send, FileGeneration, FileOffers, FileTiles,
+    enqueue_browser_file, offers_block_send, transfer_has_files, FileOffers, FileTiles,
 };
 use crate::components::find_bar::reveal_message;
 use crate::components::mention_editor::MentionEditor;
 use crate::components::model_picker::ModelPicker;
-use crate::components::provider::{provider_logo_src_for_model, PROVIDER_LOGO_CLASS};
+use crate::components::provider::provider_logo_src_for_model;
 use crate::state::{
     activate_thread, ActiveThreadId, ActiveView, AppView, BaseBranchSignal, BranchMenuOpen,
-    ChipRetargetGuard, CompactIdleSignal, ComposerChips, FollowUpSteerSignal, GitStatusSignal,
-    ModelSelectOpen, PendingPermissions, PendingPermissionsSignal, PermissionModeSignal,
-    PermissionRequest, PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RunChoiceSignal,
-    SetActiveThreadId, SetActiveView, SetMessagesSignal, SetModelSelectOpen, SetProjectPickerOpen,
-    ThreadNotice, ThreadsSignal, Turns, UnreadThreads, UsageInfo, WorkspaceMenuOpen,
+    ChipRetargetGuard, ClaudeEffortSignal, CompactIdleSignal, ComposerChips, EffortMenuOpen,
+    FollowUpSteerSignal, GitStatusSignal, ModelSelectOpen, PendingPermissions,
+    PendingPermissionsSignal, PermissionModeSignal, PermissionRequest, PreviousWorktreeSignal,
+    PromptQueueSignal, QueueHolds, RunChoiceSignal, SetActiveThreadId, SetActiveView,
+    SetMessagesSignal, SetModelSelectOpen, SetProjectPickerOpen, ThreadNotice, ThreadsSignal,
+    Turns, UnreadThreads, UsageInfo, WorkspaceMenuOpen,
 };
-use crate::ui::{Icon, Kbd, Menu, MenuAlign, MenuItem, MenuSide, Tooltip};
+use crate::ui::{BrandMark, Icon, Kbd, Menu, MenuAlign, MenuItem, MenuSide, Tooltip};
 use bruhs_models::agent::Role;
 use bruhs_models::logic::attachments::SEND_WAITS;
 use bruhs_models::logic::commands::COMPOSER_PLACEHOLDER;
 use bruhs_models::logic::compact::{show_return_chip, CACHE_OAUTH_MS};
 use bruhs_models::logic::composer_text::{
-    exceeds_message_limit, exceeds_message_limit_with, paste_name, TextAttachment,
-    MESSAGE_LIMIT_HINT,
+    approaching_message_limit_hint, exceeds_message_limit, exceeds_message_limit_with, paste_name,
+    paste_summary, TextAttachment, MESSAGE_LIMIT_HINT,
 };
 use bruhs_models::logic::context_chip::{extra_limit_chars, replace_kind, ChipKind, ContextChip};
 use bruhs_models::logic::context_meter::ContextReading;
@@ -44,9 +45,10 @@ use bruhs_models::logic::follow_up::{
 };
 use bruhs_models::logic::queue::PromptQueue;
 use bruhs_models::logic::recall::{recall_step, RecallAction, RecallCursor, RecallDirection};
-use bruhs_models::logic::run_place::WorkspaceChoice;
+use bruhs_models::logic::run_place::{WorkspaceChoice, CLAUDE_EFFORTS};
 
 mod options;
+mod question;
 use options::ComposerOptions;
 
 /// The mounted composer publishes the draft Edit from here should keep.
@@ -55,7 +57,7 @@ use options::ComposerOptions;
 #[derive(Copy, Clone)]
 pub struct ComposerDraftSource(pub StoredValue<Option<Callback<(), String>>>);
 
-/// Pasted text kept beside the draft until a real send. In memory only.
+/// Pasted text kept beside the draft until a real send.
 #[derive(Copy, Clone)]
 pub struct TextAttachments(pub RwSignal<Vec<TextAttachment>>);
 
@@ -135,6 +137,7 @@ const QUEUE_HIT: &str = "inline-flex size-control-xs shrink-0 items-center justi
 #[derive(Copy, Clone)]
 struct QueuedEditCtx {
     editing_id: RwSignal<Option<String>>,
+    locked: RwSignal<bool>,
     prior_draft: RwSignal<String>,
     prior_chips: RwSignal<Vec<ContextChip>>,
     value: ReadSignal<String>,
@@ -155,6 +158,7 @@ fn open_queued_edit(id: String, text: String, queued_chips: Vec<ContextChip>, ct
     }
     ctx.prior_draft.set(ctx.value.get_untracked());
     ctx.prior_chips.set(ctx.chips.get_untracked());
+    ctx.locked.set(true);
     ctx.editing_id.set(Some(id));
     ctx.guard.set_value(true);
     ctx.chips.set(queued_chips);
@@ -186,6 +190,7 @@ fn restore_queued_draft(ctx: QueuedEditCtx) {
     ctx.guard.set_value(true);
     ctx.chips.set(prior_body);
     ctx.set_value.set(prior);
+    ctx.locked.set(false);
 }
 
 fn cancel_queued_edit(ctx: QueuedEditCtx) {
@@ -222,7 +227,10 @@ pub fn Composer(
 ) -> impl IntoView {
     let is_streaming = expect_context::<crate::state::IsStreaming>().0;
     let current_model = expect_context::<crate::state::CurrentModel>().0;
+    let model_trigger = NodeRef::<leptos::html::Button>::new();
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
+    let ClaudeEffortSignal(claude_effort) = expect_context::<ClaudeEffortSignal>();
+    let EffortMenuOpen(options_open) = expect_context::<EffortMenuOpen>();
     let PendingPermissionsSignal(pending_permissions) =
         expect_context::<PendingPermissionsSignal>();
     // Re-render the panel only when the request being asked about changes,
@@ -239,13 +247,23 @@ pub fn Composer(
     let PromptQueueSignal(queue) = expect_context::<PromptQueueSignal>();
     let queue_holds = expect_context::<QueueHolds>();
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
+    let drafts = expect_context::<crate::state::Drafts>();
+    let draft_status =
+        Memo::new(move |_| active_thread_id.with(|id| id.as_deref().map(|id| drafts.status(id))));
+    let draft_blocked = move || {
+        draft_status
+            .with(|status| status.is_some_and(|status| status != crate::state::DraftStatus::Ready))
+    };
     let editing_id = RwSignal::new(None::<String>);
+    let locks = expect_context::<crate::state::ComposerLocks>();
+    let composing = locks.composing;
     let prior_draft = RwSignal::new(String::new());
     let prior_chips = RwSignal::new(Vec::<ContextChip>::new());
     let ComposerChips(context_chips) = expect_context::<ComposerChips>();
     let ChipRetargetGuard(chip_guard) = expect_context::<ChipRetargetGuard>();
     let edit_ctx = QueuedEditCtx {
         editing_id,
+        locked: locks.queue_editing,
         prior_draft,
         prior_chips,
         value,
@@ -328,8 +346,12 @@ pub fn Composer(
         chip_guard.set_value(true);
         context_chips.set(prior_body);
         set_value.set(next);
+        locks.queue_editing.set(false);
     });
     let on_editor_submit = Callback::new(move |_: ()| {
+        if draft_blocked() {
+            return;
+        }
         if editing_id.get_untracked().is_some() {
             commit_queued_edit(edit_ctx);
             return;
@@ -337,10 +359,15 @@ pub fn Composer(
         on_submit.run(());
     });
     let on_editor_opposite = Callback::new(move |_: ()| {
-        if editing_id.get_untracked().is_some() {
+        if draft_blocked() || editing_id.get_untracked().is_some() {
             return;
         }
         on_opposite.run(());
+    });
+    let on_editor_escape = Callback::new(move |_: ()| {
+        if editing_id.get_untracked().is_some() {
+            cancel_queued_edit(edit_ctx);
+        }
     });
     let on_edit_latest = Callback::new(move |_: ()| {
         let Some(tid) = active_thread_id.get_untracked() else {
@@ -354,8 +381,7 @@ pub fn Composer(
     });
     let messages = expect_context::<crate::state::MessagesSignal>().0;
     let TextAttachments(attachments) = expect_context::<TextAttachments>();
-    let FileOffers(file_offers) = expect_context::<FileOffers>();
-    let FileGeneration(file_generation) = expect_context::<FileGeneration>();
+    let file_offers = expect_context::<FileOffers>();
     let thread_notice = expect_context::<ThreadNotice>();
     let on_attach_paste = Callback::new(move |text: String| {
         attachments.update(|items| {
@@ -364,7 +390,10 @@ pub fn Composer(
         });
     });
     let on_attach_file = Callback::new(move |file: web_sys::File| {
-        if let Some(message) = enqueue_browser_file(file_offers, file_generation, file) {
+        if draft_blocked() {
+            return;
+        }
+        if let Some(message) = enqueue_browser_file(file_offers, file) {
             thread_notice.flash(message);
         }
     });
@@ -386,8 +415,23 @@ pub fn Composer(
     };
     let file_input: NodeRef<leptos::html::Input> = NodeRef::new();
     let pick_files = move |_| {
+        if draft_blocked() {
+            return;
+        }
         if let Some(input) = file_input.get() {
             input.click();
+        }
+    };
+    let drag_depth = RwSignal::new(0u32);
+    let on_drag_enter = move |event: web_sys::DragEvent| {
+        if transfer_has_files(event.data_transfer().as_ref()) {
+            event.prevent_default();
+            drag_depth.update(|depth| *depth = depth.saturating_add(1));
+        }
+    };
+    let on_drag_leave = move |event: web_sys::DragEvent| {
+        if transfer_has_files(event.data_transfer().as_ref()) {
+            drag_depth.update(|depth| *depth = depth.saturating_sub(1));
         }
     };
     let on_drag_over = move |event: web_sys::DragEvent| {
@@ -396,6 +440,7 @@ pub fn Composer(
         }
     };
     let on_drop = move |event: web_sys::DragEvent| {
+        drag_depth.set(0);
         let Some(files) = event.data_transfer().and_then(|transfer| transfer.files()) else {
             return;
         };
@@ -461,6 +506,12 @@ pub fn Composer(
                 value.get_untracked()
             }
         })));
+        on_cleanup(move || {
+            cancel_queued_edit(edit_ctx);
+            slot.set_value(None);
+            locks.composing.set(false);
+            locks.queue_editing.set(false);
+        });
     }
     let history = expect_context::<crate::thread_history::ThreadHistory>();
     let threads = expect_context::<ThreadsSignal>().0;
@@ -504,7 +555,13 @@ pub fn Composer(
     let placeholder = COMPOSER_PLACEHOLDER;
 
     view! {
-        <div class="mx-auto w-full max-w-3xl">
+        <div
+            role="region"
+            aria-label="Composer"
+            tabindex="-1"
+            data-workspace-focus="composer"
+            class="mx-auto w-full max-w-3xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
+        >
             {hero.then(|| view! {
                 <p class="mb-6 text-center text-h2 text-rambutan-100">
                     {move || match project_name.get() {
@@ -551,13 +608,37 @@ pub fn Composer(
             // No z-index: popovers inside keep their page-level stacking.
             <div
                 data-composer-surface=""
-                class="relative rounded-[16px] bg-longan-900 inset-ring inset-ring-white/10 transition-[box-shadow] focus-within:inset-ring-persimmon-400/40"
+                class=move || {
+                    if drag_depth.get() > 0 {
+                        "relative rounded-[16px] bg-longan-800/80 inset-ring inset-ring-persimmon-400/80 transition-colors"
+                    } else {
+                        "relative rounded-[16px] bg-longan-900 inset-ring inset-ring-white/12 transition-colors hover:inset-ring-white/18 focus-within:inset-ring-persimmon-400/50"
+                    }
+                }
+                on:dragenter=on_drag_enter
+                on:dragleave=on_drag_leave
                 on:dragover=on_drag_over
                 on:drop=on_drop
             >
+                {move || (drag_depth.get() > 0).then(|| view! {
+                    <div
+                        data-composer-dropzone=""
+                        class="flex items-center gap-2 rounded-t-[16px] border-b border-persimmon-400/25 bg-persimmon-500/10 px-3.5 py-1.5 text-label-sm text-persimmon-200"
+                    >
+                        <Icon name="paperclip" size=12 class="text-persimmon-300" />
+                        <span>"Drop files to attach"</span>
+                    </div>
+                })}
+
                 // Approval panel — only while the agent waits on a decision.
-                {move || asking.get().map(|req| view! {
-                    <ApprovalPanel request=req pending=pending_permissions />
+                {move || asking.get().map(|req| {
+                    if let (Some(draft), Some(questions)) = (
+                        req.question_draft.clone(),
+                        bruhs_models::logic::user_question::questions(&req.input),
+                    ) {
+                        return view! { <question::QuestionPanel request=req questions=questions draft=draft pending=pending_permissions /> }.into_any();
+                    }
+                    view! { <ApprovalPanel request=req pending=pending_permissions /> }.into_any()
                 })}
 
                 // Prompts waiting for the running turn to finish.
@@ -566,7 +647,7 @@ pub fn Composer(
                     let tid = active_thread_id.get()?;
                     let queued = queue.with(|q| q.for_thread(&tid));
                     (!queued.is_empty()).then(|| view! {
-                        <div data-queued-prompts="" class="flex flex-col border-b border-longan-800/60">
+                        <div data-queued-prompts="" class="flex flex-col gap-1 rounded-t-[16px] border-b border-longan-800/60 bg-longan-950/35 px-2 py-1.5">
                             {queued.into_iter().map(|p| {
                                 let id = p.id.clone();
                                 let nudge_id = id.clone();
@@ -580,9 +661,9 @@ pub fn Composer(
                                 let title = p.text;
                                 let editing = editing_id.with_untracked(|current| current.as_deref() == Some(id.as_str()));
                                 let row_class = if editing {
-                                    "flex items-center gap-1 bg-longan-800 px-2 py-1 text-label-sm"
+                                    "flex items-center gap-1.5 rounded-seed bg-blueberry-500/10 px-1.5 py-1 text-label-sm inset-ring inset-ring-blueberry-400/25"
                                 } else {
-                                    "flex items-center gap-1 px-2 py-1 text-label-sm"
+                                    "flex items-center gap-1.5 rounded-seed px-1.5 py-1 text-label-sm transition-colors hover:bg-longan-800/40"
                                 };
                                 view! {
                                     <div
@@ -623,8 +704,8 @@ pub fn Composer(
                                         >
                                             "⋮"
                                         </button>
-                                        <span class="shrink-0 text-blueberry-300">"Queued"</span>
-                                        <span class="min-w-0 flex-1 truncate text-rambutan-300" title=title>{text}</span>
+                                        <span class="shrink-0 rounded-seed bg-blueberry-500/15 px-1.5 py-0.5 text-label-sm text-blueberry-300">"Queued"</span>
+                                        <span class="min-w-0 flex-1 truncate text-rambutan-200" title=title>{text}</span>
                                         {editing.then(|| view! {
                                             <button
                                                 type="button"
@@ -648,6 +729,7 @@ pub fn Composer(
                                                 type="button"
                                                 aria-label="Edit queued message"
                                                 class=QUEUE_HIT
+                                                disabled=draft_blocked
                                                 on:click=move |_| open_queued_edit(edit_id.clone(), edit_text.clone(), edit_chips.clone(), edit_ctx)
                                             >
                                                 <Icon name="pencil" size=16 />
@@ -671,16 +753,51 @@ pub fn Composer(
                     })
                 }}
 
+                {move || editing_id.get().is_some().then(|| view! {
+                    <div
+                        data-queued-edit-banner=""
+                        class="flex items-center justify-between gap-2 border-b border-blueberry-400/20 bg-blueberry-500/10 px-3.5 py-1.5 text-label-sm text-blueberry-200"
+                    >
+                        <div class="flex min-w-0 items-center gap-2">
+                            <Icon name="pencil" size=12 class="shrink-0 text-blueberry-300" />
+                            <span class="truncate">"Editing queued message"</span>
+                            <span class="hidden sm:inline text-rambutan-400">"Enter to save  Esc to cancel"</span>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1">
+                            <button
+                                type="button"
+                                class="inline-flex h-control-xs items-center rounded-seed px-2 text-label-sm text-rambutan-300 transition-colors hover:bg-longan-800/60 hover:text-rambutan-100"
+                                on:click=move |_| cancel_queued_edit(edit_ctx)
+                            >
+                                "Cancel"
+                            </button>
+                            <button
+                                type="button"
+                                class="inline-flex h-control-xs items-center rounded-seed bg-blueberry-500/20 px-2 text-label-sm text-blueberry-200 transition-colors hover:bg-blueberry-500/30"
+                                on:click=move |_| commit_queued_edit(edit_ctx)
+                            >
+                                "Save"
+                            </button>
+                        </div>
+                    </div>
+                })}
+
                 {move || {
                     let items = attachments.get();
                     (!items.is_empty()).then(|| view! {
-                        <div data-text-attachments="" class="flex flex-col border-b border-longan-800/60">
+                        <div data-text-attachments="" class="flex flex-wrap items-center gap-1.5 border-b border-longan-800/60 px-3 pt-2.5 pb-2">
                             {items.into_iter().enumerate().map(|(index, item)| {
                                 let name = item.name;
                                 let label = name.clone();
+                                let meta = paste_summary(&item.text);
                                 view! {
-                                    <div class="flex h-control-xs items-center gap-1 px-2 text-label-sm" data-paste-name=name>
-                                        <span class="min-w-0 flex-1 truncate text-rambutan-300">{label}</span>
+                                    <div
+                                        class="inline-flex min-h-control max-w-full items-center gap-1.5 rounded-grape bg-longan-800/75 py-1 pl-2.5 pr-1 text-label-sm inset-ring inset-ring-white/10"
+                                        data-paste-name=name
+                                    >
+                                        <Icon name="file-text" size=12 class="text-rambutan-400" />
+                                        <span class="min-w-0 max-w-[160px] truncate text-rambutan-200">{label}</span>
+                                        <span class="shrink-0 tabular-nums text-rambutan-500">{meta}</span>
                                         <button
                                             type="button"
                                             aria-label="Remove text attachment"
@@ -703,6 +820,18 @@ pub fn Composer(
                 }}
 
                 <FileTiles />
+                <crate::prompt_links::LinkedPromptBanner locked=Signal::derive(move || editing_id.get().is_some() || composing.get()) />
+                <Show when=move || draft_status.get() == Some(crate::state::DraftStatus::Failed)>
+                    <div role="status" class="mx-3 mt-3 flex flex-wrap items-center gap-2 text-label-sm text-rambutan-300">
+                        <span>"Your saved draft couldn’t be loaded."</span>
+                        <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
+                            on:click=move |_| {
+                                if let Some(id) = active_thread_id.get_untracked() {
+                                    drafts.retry(id);
+                                }
+                            }>"Retry loading draft"</button>
+                    </div>
+                </Show>
 
                 <MentionEditor
                     value=value
@@ -710,7 +839,9 @@ pub fn Composer(
                     project_path=project_path
                     on_submit=on_editor_submit
                     on_opposite=on_editor_opposite
+                    on_escape=on_editor_escape
                     on_edit_queued=on_edit_latest
+                    on_composition=Callback::new(move |active| composing.set(active))
                     on_recall=on_recall
                     on_attach_paste=on_attach_paste
                     on_attach_file=on_attach_file
@@ -718,7 +849,8 @@ pub fn Composer(
                     on_command=on_slash
                     placeholder=placeholder.to_string()
                     chrome=false
-                    suggestion_blocked=Signal::derive(move || editing_id.get().is_some() || !attachments.with(Vec::is_empty) || !file_offers.with(Vec::is_empty) || !context_chips.with(Vec::is_empty) || active_thread_id.with(|id| id.as_deref().is_some_and(|id| queue.with(|queue| queue.has_for(id)))))
+                    disabled=Signal::derive(draft_blocked)
+                    suggestion_blocked=Signal::derive(move || editing_id.get().is_some() || !attachments.with(Vec::is_empty) || !file_offers.with(<[_]>::is_empty) || !context_chips.with(Vec::is_empty) || active_thread_id.with(|id| id.as_deref().is_some_and(|id| queue.with(|queue| queue.has_for(id)))))
                 />
 
                 {move || {
@@ -774,48 +906,106 @@ pub fn Composer(
                 }}
 
                 {move || {
+                    let draft = value.get();
                     let extra = context_chips.with(|chips| extra_limit_chars(chips));
-                    exceeds_message_limit_with(&value.get(), extra)
-                }.then(|| view! {
-                    <p data-message-limit="" class="px-4 pb-1 text-label-sm text-durian-300">{MESSAGE_LIMIT_HINT}</p>
-                })}
+                    if exceeds_message_limit_with(&draft, extra) {
+                        Some(view! {
+                            <p data-message-limit="" class="px-3.5 pb-1 text-label-sm text-lychee-300">{MESSAGE_LIMIT_HINT}</p>
+                        }.into_any())
+                    } else {
+                        approaching_message_limit_hint(&draft, extra).map(|hint| view! {
+                            <p data-message-limit-warn="" class="px-3.5 pb-1 tabular-nums text-label-sm text-durian-300">{hint}</p>
+                        }.into_any())
+                    }
+                }}
 
-                <div data-composer-footer="" class="flex min-w-0 items-center justify-between gap-2 px-3 pb-3">
+                <div data-composer-footer="" class="flex min-w-0 items-center justify-between gap-2 px-3 pb-3 pt-0.5">
                     <div data-composer-controls="" class="flex min-w-0 flex-1 items-center gap-1">
-                        <button type="button" class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
-                            data-attach-file="" aria-label="Attach file" title="Attach a file" on:click=pick_files>
+                        <button type="button" class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 disabled:opacity-50"
+                            data-attach-file="" aria-label="Attach file" title="Attach a file" disabled=draft_blocked on:click=pick_files>
                             <Icon name="paperclip" size=16 />
                         </button>
                         <input node_ref=file_input type="file" multiple=true class="sr-only" tabindex="-1" aria-hidden="true" on:change=on_file_input />
-                        <div class="relative min-w-0 max-w-[160px] flex-1">
-                            <button type="button" data-model-trigger=""
-                                class="composer-action bruhs-control inline-flex h-control w-full min-w-0 items-center gap-1.5 rounded-grape px-2 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                        <div class="relative min-w-0 max-w-[220px]">
+                            <button node_ref=model_trigger type="button" data-model-trigger=""
+                                class="composer-action bruhs-control inline-flex h-control max-w-full min-w-0 items-center gap-1.5 rounded-grape px-2.5 text-label-sm text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
                                 title=move || format!("{} ({})", model_label(&current_model.get()), current_model.get())
                                 aria-label=move || format!("Change model (⌘⇧M), {}", model_label(&current_model.get()))
                                 aria-haspopup="dialog" aria-expanded=move || model_select_open.get().to_string()
                                 on:click=move |_| set_model_select_open.update(|open| *open = !*open)>
-                                <img src=move || provider_logo_src_for_model(&current_model.get()) alt="" aria-hidden="true" class=PROVIDER_LOGO_CLASS />
-                                <span class="min-w-0 flex-1 truncate text-left">{move || {
+                                <BrandMark src=Signal::derive(move || provider_logo_src_for_model(&current_model.get())) />
+                                <span class="min-w-0 truncate text-left">{move || {
                                     let label = model_label(&current_model.get());
                                     label.strip_prefix("Claude ").unwrap_or(&label).to_string()
                                 }}</span>
+                                {move || {
+                                    let supports_effort = matches!(
+                                        provider_for_model_id(&current_model.get()),
+                                        AgentProvider::Claude | AgentProvider::Codex
+                                    );
+                                    supports_effort.then(|| view! { <EffortBars effort=claude_effort /> })
+                                }}
                                 <Icon name="chevron-down" size=12 class="text-rambutan-500" />
                             </button>
-                            <ModelPicker />
+                            <ModelPicker anchor=model_trigger />
                         </div>
                         <ComposerOptions value=value set_value=set_value on_slash=on_slash last_usage=last_usage return_compact_available=return_compact_available />
                         {move || match permission_mode.get() {
                             PermissionMode::Default => None,
-                            mode => Some(view! {
-                                <span data-composer-access="" class=if mode == PermissionMode::BypassPermissions {
-                                    "shrink-0 rounded-seed bg-lychee-500/10 px-1.5 py-1 text-label-sm text-lychee-300"
-                                } else {
-                                    "shrink-0 rounded-seed bg-longan-800/60 px-1.5 py-1 text-label-sm text-rambutan-300"
-                                }>{if mode == PermissionMode::Plan { "Plan" } else { mode.label() }}</span>
-                            }),
+                            mode => {
+                                let (icon_name, label, tone_class, tip) = match mode {
+                                    PermissionMode::Plan => (
+                                        "clipboard-list",
+                                        "Plan",
+                                        "bg-blueberry-500/12 text-blueberry-300 inset-ring inset-ring-blueberry-400/25 hover:bg-blueberry-500/20 hover:text-blueberry-200",
+                                        "Plan mode is active. Open composer options",
+                                    ),
+                                    PermissionMode::BypassPermissions => (
+                                        "alert-triangle",
+                                        mode.label(),
+                                        "bg-lychee-500/12 text-lychee-300 inset-ring inset-ring-lychee-400/25 hover:bg-lychee-500/20 hover:text-lychee-200",
+                                        "Full access is active. Open composer options",
+                                    ),
+                                    _ => (
+                                        "shield-check",
+                                        mode.label(),
+                                        "bg-longan-800/70 text-rambutan-200 inset-ring inset-ring-white/10 hover:bg-longan-800 hover:text-rambutan-100",
+                                        "Accept edits is active. Open composer options",
+                                    ),
+                                };
+                                Some(view! {
+                                    <button
+                                        type="button"
+                                        data-composer-access=""
+                                        aria-label=tip
+                                        title=tip
+                                        class=format!("bruhs-control inline-flex h-control-xs shrink-0 items-center gap-1 rounded-seed px-2 text-label-sm transition-colors cursor-pointer {tone_class}")
+                                        on:click=move |_| options_open.update(|open| *open = !*open)
+                                    >
+                                        <Icon name=icon_name size=12 />
+                                        <span>{label}</span>
+                                    </button>
+                                })
+                            }
                         }}
                     </div>
-                    <div data-composer-submit="" class="flex shrink-0 items-center gap-1">
+                    <div data-composer-submit="" class="flex shrink-0 items-center gap-1.5">
+                        {move || last_usage.get().map(|(usage, used_model)| {
+                            let reading = ContextReading::new(context_usage(&usage), &used_model);
+                            let tip = reading.label();
+                            view! {
+                                <button
+                                    type="button"
+                                    data-composer-context-ring=""
+                                    aria-label=tip.clone()
+                                    title=tip
+                                    class="bruhs-control inline-flex size-control-xs shrink-0 items-center justify-center rounded-orb text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 cursor-pointer"
+                                    on:click=move |_| options_open.update(|open| *open = !*open)
+                                >
+                                    <ContextRingSvg reading=reading size=16 />
+                                </button>
+                            }
+                        })}
                         {move || {
                             let streaming = is_streaming.get();
                             let draft = value.get();
@@ -857,11 +1047,15 @@ pub fn Composer(
                                 active_thread_id.with(|id| history.reason(id.as_deref()));
                             let history_blocks = history_reason.is_some()
                                 && matches!(action, ComposerAction::Send | ComposerAction::Queue);
+                            let draft_blocks = draft_blocked() && !matches!(action, ComposerAction::Interrupt);
                             let enabled = action_enabled_for(action, draft_empty || over_limit)
                                 && !history_blocks
+                                && !draft_blocks
                                 && !uploads_block;
                             let label = action_label(action);
-                            let title = if history_blocks {
+                            let title = if draft_blocks {
+                                "Wait for the saved draft".to_string()
+                            } else if history_blocks {
                                 history_reason.unwrap_or(action_title(action)).to_string()
                             } else if enabled || matches!(action, ComposerAction::SteerUnavailable)
                             {
@@ -877,12 +1071,18 @@ pub fn Composer(
                             };
                             let show_stop =
                                 streaming && !matches!(action, ComposerAction::Interrupt);
+                            let show_word = !matches!(action, ComposerAction::Send);
+                            let size_class = if show_word {
+                                "h-control px-3 gap-1.5 text-label-sm font-medium"
+                            } else {
+                                "size-control"
+                            };
                             let tone = match action {
                                 ComposerAction::Interrupt => "bg-lychee-500 text-lychee-50 hover:bg-lychee-400",
                                 ComposerAction::SteerUnavailable => "bg-longan-800 text-rambutan-400 opacity-40 cursor-not-allowed",
                                 _ => "bg-persimmon-500 text-longan-950 hover:bg-persimmon-400 disabled:opacity-30 disabled:hover:bg-persimmon-500 disabled:cursor-not-allowed",
                             };
-                            let class = format!("composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-orb transition-colors {tone}");
+                            let class = format!("composer-action bruhs-control inline-flex {size_class} shrink-0 items-center justify-center rounded-orb transition-colors {tone}");
                             let aria = if matches!(action, ComposerAction::Send | ComposerAction::Queue) {
                                 format!("{label} message")
                             } else {
@@ -899,7 +1099,7 @@ pub fn Composer(
                                         type="button"
                                         aria-label="Stop generation"
                                         title="Stop generation"
-                                        class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 hover:bg-lychee-400"
+                                        class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 transition-colors hover:bg-lychee-400"
                                         on:click=move |_| stop_square.run(())
                                     >
                                         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -931,6 +1131,11 @@ pub fn Composer(
                                             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
                                                 <rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" />
                                             </svg>
+                                            <span>{label}</span>
+                                        }.into_any()
+                                    } else if show_word {
+                                        view! {
+                                            <span>{label}</span>
                                         }.into_any()
                                     } else {
                                         view! { <Icon name="arrow-up" size=16 /> }.into_any()
@@ -1047,16 +1252,68 @@ fn ApprovalPanel(
 }
 
 #[component]
-fn ContextMeter(usage: UsageInfo, model: String) -> impl IntoView {
-    let reading = ContextReading::new(context_usage(&usage), &model);
+fn EffortBars(effort: RwSignal<Option<String>>) -> impl IntoView {
+    view! {
+        <span
+            aria-hidden="true"
+            data-effort-bars=""
+            class="inline-flex shrink-0 items-end gap-[1px]"
+        >
+            {move || {
+                let current = effort.get();
+                let strength = current
+                    .as_deref()
+                    .and_then(|value| CLAUDE_EFFORTS.iter().position(|level| *level == value))
+                    .map_or(0, |index| index + 1);
+                (0..CLAUDE_EFFORTS.len())
+                    .map(|index| {
+                        let height = 3 + 2 * index;
+                        let fill = if index < strength {
+                            "bg-rambutan-300"
+                        } else {
+                            "bg-longan-700"
+                        };
+                        view! {
+                            <span
+                                class=format!("w-[2px] rounded-[1px] {fill}")
+                                style=format!("height:{height}px")
+                            />
+                        }
+                    })
+                    .collect_view()
+            }}
+        </span>
+    }
+}
+
+#[component]
+fn ContextRingSvg(reading: ContextReading, size: u32) -> impl IntoView {
     let radius = 9.75_f64;
     let circumference = 2.0 * std::f64::consts::PI * radius;
     let offset = circumference * (1.0 - reading.percent() / 100.0);
     let color = if reading.is_warning() {
         "#f06b65"
+    } else if reading.is_caution() {
+        "#f0c450"
     } else {
         "#c3afa1"
     };
+    view! {
+        <svg viewBox="0 0 24 24" width=size height=size class="-rotate-90" aria-hidden="true">
+            <circle cx="12" cy="12" r=radius fill="none" stroke="rgba(171,153,143,0.25)" stroke-width="3" />
+            <circle
+                cx="12" cy="12" r=radius fill="none"
+                stroke=color stroke-width="3" stroke-linecap="round"
+                stroke-dasharray=format!("{circumference}")
+                stroke-dashoffset=format!("{offset}")
+            />
+        </svg>
+    }
+}
+
+#[component]
+fn ContextMeter(usage: UsageInfo, model: String) -> impl IntoView {
+    let reading = ContextReading::new(context_usage(&usage), &model);
     let tip = reading.label();
     view! {
         <Tooltip tip=tip.clone()>
@@ -1065,15 +1322,7 @@ fn ContextMeter(usage: UsageInfo, model: String) -> impl IntoView {
                 aria-label=tip
                 class="inline-flex size-7 items-center justify-center rounded-orb text-rambutan-400"
             >
-                <svg viewBox="0 0 24 24" width="20" height="20" class="-rotate-90" aria-hidden="true">
-                    <circle cx="12" cy="12" r=radius fill="none" stroke="rgba(171,153,143,0.25)" stroke-width="3" />
-                    <circle
-                        cx="12" cy="12" r=radius fill="none"
-                        stroke=color stroke-width="3" stroke-linecap="round"
-                        stroke-dasharray=format!("{circumference}")
-                        stroke-dashoffset=format!("{offset}")
-                    />
-                </svg>
+                <ContextRingSvg reading=reading size=20 />
             </span>
         </Tooltip>
     }
@@ -1282,10 +1531,14 @@ fn ContextStrip(
                             >
                                 <Icon name="git-branch" size=12 class="shrink-0" />
                                 <span class="truncate">{b}</span>
-                                {move || (show_dirty && dirty_count.get() > 0).then(|| view! {
-                                    <span class="rounded-seed bg-durian-400/15 px-1 tabular-nums text-durian-300" title="Uncommitted changes">
-                                        {dirty_count.get()}" changes"
-                                    </span>
+                                {move || (show_dirty && dirty_count.get() > 0).then(|| {
+                                    let count = dirty_count.get();
+                                    let unit = if count == 1 { "file" } else { "files" };
+                                    view! {
+                                        <span class="rounded-seed bg-durian-400/15 px-1 tabular-nums text-durian-300" title="Uncommitted files">
+                                            {count}" "{unit}
+                                        </span>
+                                    }
                                 })}
                                 <Icon name="chevron-down" size=12 class="shrink-0" />
                             </button>
@@ -1321,16 +1574,6 @@ fn ContextStrip(
             }})}
         </div>
     }
-}
-
-fn transfer_has_files(transfer: Option<&web_sys::DataTransfer>) -> bool {
-    let Some(transfer) = transfer else {
-        return false;
-    };
-    transfer
-        .types()
-        .iter()
-        .any(|kind| kind.as_string().as_deref() == Some("Files"))
 }
 
 #[cfg(test)]

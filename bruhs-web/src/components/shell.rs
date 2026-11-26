@@ -28,6 +28,7 @@ use crate::components::tasks_page::TasksPage;
 use crate::components::terminal_page::TerminalPage;
 use crate::components::terminal_panel::open_terminal_session;
 use crate::components::today_page::TodayPage;
+use crate::components::workspace_focus::{listen_to_workspace_keys, WorkspaceFocus};
 use crate::state::{
     activate_thread, new_thread_in_context, toggle_pinned, toggle_settled, ActiveProjectSignal,
     ActiveTerminalId, ActiveView, AppView, BranchMenuOpen, BranchPullSignal, ChipRetargetGuard,
@@ -347,6 +348,178 @@ pub fn Shell() -> impl IntoView {
         new_thread_in_context();
     };
 
+    let links = expect_context::<crate::prompt_links::PromptLinks>();
+    let composer_locks = expect_context::<crate::state::ComposerLocks>();
+    let recent_projects = expect_context::<crate::state::RecentProjectsSignal>().0;
+    let settling = move || composer_locks.composing.get() || composer_locks.queue_editing.get();
+    let resolving = RwSignal::new(
+        None::<(
+            bruhs_models::logic::app_link::PromptLink,
+            Option<crate::state::ActiveProject>,
+        )>,
+    );
+    let resolved = RwSignal::new(None::<(_, crate::prompt_links::ResolvedTarget)>);
+    Effect::new(move |_| {
+        if links.checked_out.with(Vec::is_empty) || settling() {
+            return;
+        }
+        let completed = links
+            .checked_out
+            .try_update(std::mem::take)
+            .unwrap_or_default();
+        for checkout in completed {
+            ensure_chat();
+            let mut thread = crate::state::Thread::new(
+                format!("Review PR #{}", checkout.pull.number),
+                checkout.project.name,
+                Some(checkout.placed.path.clone()),
+                crate::state::now_epoch_ms(),
+            );
+            thread.branch = Some(checkout.placed.branch);
+            thread.worktree_path = Some(checkout.placed.path);
+            thread.run_locked = true;
+            thread.linked_pull = Some(checkout.pull.url());
+            let id = crate::state::insert_thread(
+                catalog,
+                set_threads,
+                set_active_thread_id,
+                set_messages,
+                thread,
+            );
+            if let Some(prompt) = checkout.prompt {
+                links.set(id, crate::prompt_links::LinkedDraft::Incoming(prompt));
+            }
+        }
+    });
+    Effect::new(move |_| {
+        use bruhs_models::logic::app_link::PromptDestination;
+        let Some((request, selected_project)) = links.route_request() else {
+            resolving.set(None);
+            resolved.set(None);
+            return;
+        };
+        if links.operation_running() || !links.checked_out.with(Vec::is_empty) {
+            return;
+        }
+        let changing_thread = !matches!(&request.destination, PromptDestination::Thread(id)
+            if active_thread_id.get_untracked().as_ref() == Some(id));
+        if changing_thread && settling() {
+            return;
+        }
+        let is_clone = selected_project.is_some();
+        let needs_target = match &request.destination {
+            PromptDestination::Thread(id) => {
+                if threads.with(|rows| rows.iter().any(|thread| thread.id == *id)) {
+                    links.consume_route(is_clone);
+                    open_thread(id.clone());
+                    if let Some(prompt) = request.prompt {
+                        links.set(
+                            id.clone(),
+                            crate::prompt_links::LinkedDraft::Incoming(prompt),
+                        );
+                    }
+                } else if !catalog.loading() {
+                    links.consume_route(is_clone);
+                    links.warn("That thread is unavailable in this browser.");
+                }
+                return;
+            }
+            PromptDestination::PullRequest(pull) => {
+                if let Some(id) =
+                    threads.with(|rows| crate::prompt_links::existing_pull_thread(rows, pull))
+                {
+                    links.consume_route(is_clone);
+                    open_thread(id.clone());
+                    if let Some(prompt) = request.prompt {
+                        links.set(id, crate::prompt_links::LinkedDraft::Incoming(prompt));
+                    }
+                    return;
+                }
+                if catalog.loading() {
+                    return;
+                }
+                true
+            }
+            PromptDestination::New { repository, model } => {
+                if repository.is_some() && catalog.loading() {
+                    return;
+                }
+                repository.is_some() || model.is_some()
+            }
+        };
+        let target = if needs_target {
+            let source = (request.clone(), selected_project);
+            let Some((_, target)) = resolved
+                .get()
+                .filter(|(resolved_source, _)| resolved_source == &source)
+            else {
+                if resolving.get_untracked().as_ref() != Some(&source) {
+                    resolving.set(Some(source.clone()));
+                    let projects = threads.with_untracked(|threads| {
+                        crate::prompt_links::candidate_projects(
+                            threads,
+                            recent_projects.get_untracked(),
+                        )
+                    });
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let target = crate::prompt_links::resolve_target(
+                            &source.0.destination,
+                            projects,
+                            source.1.clone(),
+                        )
+                        .await;
+                        if untrack(|| links.route_request()).as_ref() == Some(&source) {
+                            resolved.set(Some((source, target)));
+                        }
+                    });
+                }
+                return;
+            };
+            target
+        } else {
+            crate::prompt_links::ResolvedTarget::default()
+        };
+        links.consume_route(is_clone);
+        if matches!(&request.destination, PromptDestination::PullRequest(_))
+            || target.project.is_none()
+                && matches!(
+                    &request.destination,
+                    PromptDestination::New {
+                        repository: Some(_),
+                        ..
+                    }
+                )
+        {
+            links.review(request, target.project);
+            return;
+        }
+        ensure_chat();
+        let (name, path) = target.project.map_or_else(
+            || (String::new(), None),
+            |project| (project.name, Some(project.path)),
+        );
+        let mut thread = crate::state::Thread::new(
+            "New thread".to_owned(),
+            name,
+            path,
+            crate::state::now_epoch_ms(),
+        );
+        thread.composer_model = target.model;
+        let id = crate::state::insert_thread(
+            catalog,
+            set_threads,
+            set_active_thread_id,
+            set_messages,
+            thread,
+        );
+        if let Some(prompt) = request.prompt {
+            links.set(id, crate::prompt_links::LinkedDraft::Incoming(prompt));
+        }
+        if target.model_fallback {
+            links.warn("The requested model is unavailable here. Check the model before sending.");
+        }
+    });
+
     // One `hashchange` listener for the page: `#thread/<id>` links (⌘⇧C
     // copies one) open that thread; routed hashes (back/forward) switch the
     // view. Startup handles the initial hash in app.rs.
@@ -354,6 +527,17 @@ pub fn Shell() -> impl IntoView {
         let hash = web_sys::window()
             .and_then(|w| w.location().hash().ok())
             .unwrap_or_default();
+        if hash.contains('?') {
+            let current = match active_view.get_untracked() {
+                AppView::Chat => {
+                    crate::app::thread_route(active_thread_id.get_untracked().as_deref(), None)
+                }
+                view => format!("#{}", view.route()),
+            };
+            if links.receive_route(&hash, Some(current)).is_some() {
+                return;
+            }
+        }
         if let Some(id) = hash.strip_prefix("#thread/") {
             if threads.with_untracked(|ts| ts.iter().any(|t| t.id == id)) {
                 open_thread(id.to_string());
@@ -388,8 +572,11 @@ pub fn Shell() -> impl IntoView {
                 })
         };
 
-        let keydown = window_event_listener(leptos::ev::keydown, move |ev: KeyboardEvent| {
-            use bruhs_models::logic::keybindings::{chord_from_event, resolve, KeyContext};
+        let mod_is_command = host_mod_is_command();
+        let resolve_shortcut = move |ev: &KeyboardEvent, workspace_only: bool| {
+            use bruhs_models::logic::keybindings::{
+                chord_from_event, parse_chord, resolve, KeyContext,
+            };
             let chord = chord_from_event(
                 &ev.code(),
                 &ev.key(),
@@ -398,6 +585,18 @@ pub fn Shell() -> impl IntoView {
                 ev.alt_key(),
                 ev.shift_key(),
             );
+            if workspace_only
+                && !keybindings.with_untracked(|rules| {
+                    rules.iter().any(|rule| {
+                        matches!(
+                            rule.command.as_str(),
+                            "workspace.focusNext" | "workspace.focusPrevious"
+                        ) && parse_chord(&rule.key, mod_is_command).as_ref() == Some(&chord)
+                    })
+                })
+            {
+                return None;
+            }
             let composer_focus = web_sys::window()
                 .and_then(|window| window.document())
                 .and_then(|document| document.active_element())
@@ -416,11 +615,39 @@ pub fn Shell() -> impl IntoView {
                 is_web: true,
                 ..KeyContext::default()
             };
-            let rules = keybindings.get_untracked();
-            let Some(command) = resolve(&rules, &chord, &ctx, host_mod_is_command()) else {
+            let command = keybindings.with_untracked(|rules| {
+                resolve(rules, &chord, &ctx, mod_is_command).map(str::to_owned)
+            })?;
+            Some((command, ctx))
+        };
+        let workspace_focus = WorkspaceFocus::new();
+        provide_context(workspace_focus);
+        listen_to_workspace_keys(move |ev| {
+            if ev.default_prevented() || ev.is_composing() {
+                return;
+            }
+            if ev.key() == "F6" && focus_within("[data-live-computer-input][tabindex]") {
+                return;
+            }
+            let backwards = match resolve_shortcut(&ev, true)
+                .as_ref()
+                .map(|(command, _)| command.as_str())
+            {
+                Some("workspace.focusNext") => false,
+                Some("workspace.focusPrevious") => true,
+                _ => return,
+            };
+            if workspace_focus.step(backwards, active_view.get_untracked() == AppView::Settings) {
+                ev.prevent_default();
+                ev.stop_propagation();
+            }
+        });
+
+        let keydown = window_event_listener(leptos::ev::keydown, move |ev: KeyboardEvent| {
+            let Some((command, ctx)) = resolve_shortcut(&ev, false) else {
                 return;
             };
-            match command {
+            match command.as_str() {
                 "thread.undo" => {
                     // Without a pending undo the textarea keeps its own undo.
                     if sidebar_undo.current().is_none() {
@@ -798,7 +1025,7 @@ pub fn Shell() -> impl IntoView {
             </Show>
 
             // Center: the active view.
-            <main id="app-main" tabindex="-1" class="flex min-w-0 flex-1 flex-col overflow-hidden md:min-w-[360px] focus:outline-none">
+            <main id="app-main" tabindex="-1" data-workspace-focus="content" class="flex min-w-0 flex-1 flex-col overflow-hidden md:min-w-[360px] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400">
                 <Show when=move || !matches!(active_view.get(), AppView::Settings | AppView::Booking { .. })>
                     <super::workspace_navigation::WorkspaceNavigation />
                 </Show>
@@ -836,6 +1063,7 @@ pub fn Shell() -> impl IntoView {
                 // Notifications float over the view below its header row, so
                 // the page and the composer stay put as they come and go.
                 <super::banner::BannerStack />
+                <crate::prompt_links::PromptTargetReview />
                 </div>
                 <crate::task_saves::TaskSaveNotice />
                 <super::scheduling_status::SchedulingStatus />

@@ -27,8 +27,8 @@ WEB_PORT="${BRUHS_WEB_PORT:-8080}"
 if [ "${PORTLESS:-1}" = "0" ]; then
   API_URL="http://127.0.0.1:$SERVER_PORT"
   WEB_OPEN="http://127.0.0.1:$WEB_PORT"
-  # Loopback origins are always allowed; no extra origin to configure.
-  WEB_ORIGIN=""
+  # Explicitly trust the dev SPA origin for owner-only APIs (terminals, agents, vault).
+  WEB_ORIGIN="$WEB_OPEN"
 else
   # Point the named routes at whatever ports we're about to bind, then bring
   # up the shared proxy and ask it for the canonical URLs (scheme + port track

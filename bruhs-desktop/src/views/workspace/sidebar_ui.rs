@@ -15,10 +15,21 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod card_hover;
+mod drag;
 mod menu_popover;
 mod viewport;
+pub(super) use drag::SidebarDrag;
 pub(super) use viewport::SidebarViewport;
 
+pub(super) struct SidebarRename {
+    id: String,
+    input: Entity<InputState>,
+    return_focus: FocusHandle,
+    _subscription: Subscription,
+}
+
+use super::project_art::ProjectMark;
 use super::{
     element_key, is_web_button_activation_key, provider_mark, redraw_on_edit, threads_ui,
     DesktopThread, KeyDownEvent, OpenProjectPicker, OpenSettings, SidebarSection, Workspace,
@@ -28,7 +39,7 @@ use crate::views::sidebar_order::relative_age;
 use crate::{assets, theme};
 use bruhs_models::logic::menu::menu_step;
 use bruhs_models::logic::sidebar::{
-    snooze_presets, thread_menu, SnoozeWhen, ThreadMenuEntry, ThreadMenuFacts,
+    is_thread_menu_key, snooze_presets, thread_menu, SnoozeWhen, ThreadMenuEntry, ThreadMenuFacts,
 };
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{AppView, EpochMs};
@@ -109,7 +120,7 @@ const SIDEBAR_LABEL_TEXT_PX: f32 = 12.0;
 /// Icons inside controls: buttons, the search field, fold headers, card
 /// actions and the footer.
 const SIDEBAR_ICON_PX: f32 = theme::ICON_PX;
-/// Icons beside a card's 12px project and branch text.
+/// Small icons beside a card's 12px text.
 const SIDEBAR_SMALL_ICON_PX: f32 = theme::ICON_INLINE_SM_PX;
 const SIDEBAR_RADIUS_GRAPE_PX: f32 = 8.0;
 const SIDEBAR_RADIUS_LYCHEE_PX: f32 = 14.0;
@@ -125,20 +136,204 @@ const SIDEBAR_CARD_LINE_GAP_PX: f32 = 4.0;
 const SIDEBAR_CARD_META_HEIGHT_PX: f32 = 16.0;
 /// Web: `max-w-24` on the role name.
 const SIDEBAR_CARD_ROLE_MAX_WIDTH_PX: f32 = 96.0;
+const SIDEBAR_CARD_MODEL_MAX_WIDTH_PX: f32 = 138.0;
+const SIDEBAR_CARD_MODEL_GAP_PX: f32 = 4.0;
 const SIDEBAR_CARD_TITLE_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CARD_ROW_GAP_PX: f32 = 6.0;
 const SIDEBAR_CARD_DOT_PX: f32 = 9.0;
 const SIDEBAR_CARD_DELETE_PX: f32 = theme::CONTROL_XS_PX;
 const SIDEBAR_CARD_DELETE_INSET_PX: f32 = 8.0;
+const SIDEBAR_CARD_SETTLE_WIDTH_PX: f32 = 62.0;
+const SIDEBAR_CARD_QUICK_GAP_PX: f32 = 2.0;
+const SIDEBAR_CARD_QUICK_WIDTH_PX: f32 =
+    SIDEBAR_CARD_DELETE_PX + SIDEBAR_CARD_QUICK_GAP_PX + SIDEBAR_CARD_SETTLE_WIDTH_PX;
 /// Web `right-9`: the actions button sits 4px left of delete.
 const SIDEBAR_CARD_MENU_RIGHT_PX: f32 = SIDEBAR_CARD_DELETE_INSET_PX + SIDEBAR_CARD_DELETE_PX + 4.0;
+
+#[derive(Clone)]
+struct CardModel {
+    id: String,
+    handoff: bool,
+    handoff_from: Option<String>,
+    chat: Entity<super::ChatView>,
+}
+
+impl CardModel {
+    fn description(&self, cx: &App) -> String {
+        let mut description = bruhs_models::agent::model_label(&self.id);
+        if let Some(from) = &self.handoff_from {
+            description.push_str("\nHandoff parent model: ");
+            description.push_str(&bruhs_models::agent::model_label(from));
+        } else if self.handoff {
+            description.push_str("\nHandoff thread");
+        }
+        let mut seen = std::collections::HashSet::from([self.id.as_str()]);
+        for model in self
+            .chat
+            .read(cx)
+            .messages
+            .iter()
+            .rev()
+            .filter(|message| message.role == super::MessageRole::Assistant)
+            .filter_map(|message| message.model.as_deref())
+            .filter(|model| seen.insert(*model))
+            .take(8)
+        {
+            description.push_str("\nEarlier model: ");
+            description.push_str(&bruhs_models::agent::model_label(model));
+        }
+        description
+    }
+
+    fn render(&self, available: Pixels, window: &Window, cx: &App) -> AnyElement {
+        let label = bruhs_models::agent::model_label(&self.id);
+        let compact_label = label.strip_prefix("Claude ").unwrap_or(&label).to_owned();
+        let label_width = sidebar_meta_text_width(&compact_label, window)
+            + px(assets::PROVIDER_LOGO_SIZE_PX + SIDEBAR_CARD_MODEL_GAP_PX);
+        let show_label = label_width <= available.min(px(SIDEBAR_CARD_MODEL_MAX_WIDTH_PX));
+        let provider = bruhs_models::agent::AgentProvider::for_model(&self.id);
+        div()
+            .id("sidebar-card-model")
+            .debug_selector(|| "desktop-thread-card-model".to_string())
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(SIDEBAR_CARD_MODEL_GAP_PX))
+            .aria_label(format!("Model {label}"))
+            .child(provider_mark(provider, cx))
+            .when(show_label, |el| {
+                el.child(
+                    div()
+                        .debug_selector(|| "desktop-thread-card-model-name".to_string())
+                        .whitespace_nowrap()
+                        .child(compact_label),
+                )
+            })
+            .into_any_element()
+    }
+}
+
+fn sidebar_meta_text_width(text: &str, window: &Window) -> Pixels {
+    let text = text.lines().next().unwrap_or_default();
+    window
+        .text_system()
+        .layout_line(
+            text,
+            px(SIDEBAR_LABEL_TEXT_PX),
+            &[TextRun {
+                len: text.len(),
+                font: font(theme::UI_SMALL_FONT_FAMILY),
+                ..Default::default()
+            }],
+            None,
+        )
+        .width
+}
+
+fn card_model_id<'a>(thread: &'a DesktopThread, chat: &'a super::ChatView) -> &'a str {
+    if chat.messages.is_empty() {
+        &chat.model_id
+    } else {
+        chat.messages
+            .iter()
+            .rev()
+            .filter(|message| message.role == super::MessageRole::Assistant)
+            .find_map(|message| message.model.as_deref())
+            .unwrap_or(&thread.model_id)
+    }
+}
+
+#[derive(Clone)]
+struct CardIdentity {
+    project: SharedString,
+    mark: ProjectMark,
+    title: SharedString,
+    branch: Option<String>,
+    role: Option<String>,
+    model: CardModel,
+    has_meta: bool,
+}
+
+impl CardIdentity {
+    fn project_line(&self) -> Div {
+        div()
+            .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
+            .flex()
+            .items_center()
+            .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
+            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .text_color(theme::rambutan_500())
+            .child(self.mark.render(14.))
+    }
+
+    fn meta_line(
+        &self,
+        card_width: Pixels,
+        pull: Option<String>,
+        debug_key: u64,
+        window: &Window,
+        cx: &App,
+    ) -> Div {
+        let gap = px(SIDEBAR_CARD_ROW_GAP_PX);
+        let branch_width = self
+            .branch
+            .as_ref()
+            .map_or(px(0.), |branch| sidebar_meta_text_width(branch, window));
+        let role_width = self.role.as_ref().map_or(px(0.), |role| {
+            sidebar_meta_text_width(role, window).min(px(SIDEBAR_CARD_ROLE_MAX_WIDTH_PX)) + gap
+        });
+        let pull_width = pull
+            .as_ref()
+            .map_or(px(0.), |pull| sidebar_meta_text_width(pull, window) + gap);
+        let model_space = card_width
+            - px(2.0 * SIDEBAR_CARD_X_PADDING_PX)
+            - gpui::px(2.0)
+            - branch_width
+            - role_width
+            - pull_width
+            - gap;
+        div()
+            .h(px(SIDEBAR_CARD_META_HEIGHT_PX))
+            .flex()
+            .items_center()
+            .gap(gap)
+            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .text_color(theme::rambutan_500())
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .when_some(self.branch.clone(), |el, branch| {
+                        el.debug_selector(move || format!("desktop-thread-card-branch-{debug_key}"))
+                            .truncate()
+                            .child(branch)
+                    }),
+            )
+            .when_some(self.role.clone(), |el, role| {
+                el.child(
+                    div()
+                        .debug_selector(move || format!("desktop-thread-card-role-{debug_key}"))
+                        .flex_shrink_0()
+                        .max_w(px(SIDEBAR_CARD_ROLE_MAX_WIDTH_PX))
+                        .truncate()
+                        .text_color(theme::rambutan_400())
+                        .child(role),
+                )
+            })
+            .children(pull.map(|pull| div().flex_none().child(pull)))
+            .child(self.model.render(model_space, window, cx))
+    }
+}
 /// Web thread menu: `w-52`.
 const THREAD_MENU_WIDTH_PX: f32 = 208.0;
 /// Thread menu rows: shadcn `DropdownMenuItem` (32px, `px-2`).
 const THREAD_MENU_ROW_PX: f32 = theme::CONTROL_PX;
 const THREAD_MENU_ROW_X_PADDING_PX: f32 = 8.0;
 /// Focus slots: one per `ThreadMenuItem`.
-pub(super) const THREAD_MENU_MAX_ITEMS: usize = 11 + super::snooze_options::MAX_OPTIONS;
+pub(super) const THREAD_MENU_MAX_ITEMS: usize =
+    ThreadMenuItem::ALL.len() + super::snooze_options::MAX_OPTIONS;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
@@ -219,11 +414,13 @@ enum ThreadMenuItem {
     Regenerate,
     Discard,
     Archive,
+    Delete,
     Custom,
+    Rename,
 }
 
 impl ThreadMenuItem {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 13] = [
         Self::Pin,
         Self::Settle,
         Self::Wake,
@@ -235,6 +432,8 @@ impl ThreadMenuItem {
         Self::Discard,
         Self::Custom,
         Self::Archive,
+        Self::Delete,
+        Self::Rename,
     ];
 
     /// The slot for a shared menu row. Separators have none.
@@ -250,6 +449,7 @@ impl ThreadMenuItem {
                 SnoozeWhen::NextWeek => Self::NextWeek,
             },
             ThreadMenuEntry::SnoozeCustom => Self::Custom,
+            ThreadMenuEntry::Rename => Self::Rename,
             ThreadMenuEntry::RegenerateTitle { .. } => Self::Regenerate,
             ThreadMenuEntry::DiscardDraft => Self::Discard,
             ThreadMenuEntry::Separator => return None,
@@ -281,6 +481,7 @@ impl ThreadMenuItem {
                 "desktop-thread-snooze-7",
             ][i],
             Self::Archive => "desktop-thread-menu-archive",
+            Self::Delete => "desktop-thread-menu-delete",
             Self::Pin => "desktop-thread-menu-pin",
             Self::Settle => "desktop-thread-menu-settle",
             Self::Wake => "desktop-thread-menu-wake",
@@ -291,6 +492,7 @@ impl ThreadMenuItem {
             Self::Regenerate => "desktop-thread-menu-regenerate",
             Self::Discard => "desktop-thread-menu-discard",
             Self::Custom => "desktop-thread-menu-custom",
+            Self::Rename => "desktop-thread-menu-rename",
         }
     }
 }
@@ -321,6 +523,9 @@ fn thread_menu_action(entry: ThreadMenuEntry) -> ThreadMenuAction {
         ThreadMenuEntry::SnoozeCustom => {
             menu_action(|this, id, window, cx| this.open_snooze_custom(id, window, cx))
         }
+        ThreadMenuEntry::Rename => {
+            menu_action(|this, id, window, cx| this.start_sidebar_rename(id, window, cx))
+        }
         ThreadMenuEntry::RegenerateTitle { .. } => {
             menu_action(|this, id, _window, cx| this.regenerate_title_by_id(id, cx))
         }
@@ -342,11 +547,69 @@ fn thread_menu_separator() -> AnyElement {
 }
 
 impl Workspace {
+    fn card_has_meta(&self, thread: &DesktopThread, cx: &App) -> bool {
+        let chat = thread.chat.read(cx);
+        thread.branch.is_some()
+            || !chat.messages.is_empty()
+            || chat.role.is_some()
+            || matches!(
+                self.thread_origins.get(&thread.id),
+                Some(super::thread_details::Origin::Handoff(_))
+            )
+    }
+
+    fn card_identity(&self, thread: &DesktopThread, cx: &Context<'_, Self>) -> CardIdentity {
+        let chat = thread.chat.read(cx);
+        let scope = chat.settings_project_path();
+        let (project, mark) = if chat.scratch_folder().is_some() {
+            ("Scratch".into(), ProjectMark::Folder)
+        } else if thread.project_name.is_empty() {
+            (SIDEBAR_NO_PROJECT_LABEL.into(), ProjectMark::Folder)
+        } else {
+            let name = self
+                .project_list
+                .title(scope)
+                .unwrap_or(&thread.project_name);
+            (name.into(), self.project_mark(scope, name, cx))
+        };
+        let (handoff, handoff_from) = match self.thread_origins.get(&thread.id) {
+            Some(super::thread_details::Origin::Handoff(parent)) => (
+                true,
+                self.threads
+                    .iter()
+                    .find(|thread| &thread.id == parent)
+                    .map(|thread| card_model_id(thread, thread.chat.read(cx)).to_owned()),
+            ),
+            _ => (false, None),
+        };
+        CardIdentity {
+            project,
+            mark,
+            title: bruhs_models::logic::text::plain_title(&chat.thread_title)
+                .into_owned()
+                .into(),
+            branch: thread.branch.clone(),
+            role: chat.role_profile.as_ref().map(|role| role.name.clone()),
+            model: CardModel {
+                id: card_model_id(thread, chat).to_owned(),
+                handoff,
+                handoff_from,
+                chat: thread.chat.clone(),
+            },
+            has_meta: self.card_has_meta(thread, cx),
+        }
+    }
+
     pub(super) fn sidebar_query(&self, cx: &App) -> String {
         self.sidebar_search.read(cx).value().to_string()
     }
 
-    pub(super) fn render_sidebar(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_sidebar(
+        &self,
+        width: Pixels,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> Div {
         let theme = cx.theme();
         let update_pill = self.render_sidebar_update_button(cx);
         let show_check = update_pill.is_none();
@@ -370,7 +633,11 @@ impl Workspace {
             .child(self.render_sidebar_header(window, cx))
             .child(self.render_sidebar_controls(cx))
             .children(self.render_crew_rail(window, cx))
-            .child(self.render_sidebar_list(cx))
+            .child(self.render_sidebar_list(
+                (width - px(2.0 * SIDEBAR_LIST_X_PADDING_PX) - gpui::px(1.0)).max(px(0.0)),
+                window,
+                cx,
+            ))
             .child(self.render_sidebar_undo(cx))
             .children(update_pill)
             .child(self.render_sidebar_footer(show_check, cx));
@@ -379,6 +646,10 @@ impl Workspace {
             .h_full()
             .relative()
             .debug_selector(|| "desktop-workspace-sidebar".to_string())
+            .track_focus(
+                self.area_focus
+                    .handle(super::workspace_focus::Area::Sidebar),
+            )
             .key_context("Sidebar")
             .bg(theme
                 .color_role("cssSidebarBackground")
@@ -534,7 +805,12 @@ impl Workspace {
     }
 
     /// Pinned and active cards, then the Working, Snoozed, and Settled folds.
-    fn render_sidebar_list(&self, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_sidebar_list(
+        &self,
+        card_width: Pixels,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let shelves = self.sidebar_shelves(cx);
         let query = self.sidebar_query(cx);
         let searching = !query.trim().is_empty();
@@ -551,11 +827,17 @@ impl Workspace {
             cx,
         );
         let (start, end) = self.sidebar_viewport.borrow().boundaries();
+        let drag_layout = self.sidebar_drag_layout(cx);
+        let drag_overlays = drag_layout.map_or_else(Vec::new, |layout| {
+            self.sidebar_drag_overlays(layout, window, cx)
+        });
         let len = rows.len();
         let content = list(
             state.clone(),
-            cx.processor(move |this, index: usize, _, cx| {
+            cx.processor(move |this, index: usize, window, cx| {
                 let row = rows[index].clone();
+                let (offset, hidden) =
+                    drag_layout.map_or((px(0.), false), |layout| layout.row(index, row.section()));
                 let element = match row {
                     viewport::SidebarRow::Thread {
                         index: thread_index,
@@ -565,6 +847,8 @@ impl Workspace {
                         &this.threads[thread_index],
                         folder,
                         &focus[index],
+                        card_width,
+                        window,
                         cx,
                     ),
                     viewport::SidebarRow::Folder {
@@ -602,7 +886,7 @@ impl Workspace {
                                     bruhs_ui::tooltip::Tooltip::new(tooltip.clone()).build(w, cx)
                                 })
                             })
-                            .child(this.project_icon(checkout.as_ref(), SIDEBAR_SMALL_ICON_PX))
+                            .child(this.project_icon(checkout.as_ref(), SIDEBAR_SMALL_ICON_PX, cx))
                             .child(div().min_w_0().flex_1().truncate().child(name))
                             .child(count.to_string())
                             .child(
@@ -635,6 +919,16 @@ impl Workspace {
                         .render_shelf_header(section, count, open, &focus[index].card, cx)
                         .into_any_element(),
                 };
+                let element = if hidden || offset != px(0.) {
+                    div()
+                        .relative()
+                        .top(offset)
+                        .when(hidden, |el| el.opacity(0.))
+                        .child(element)
+                        .into_any_element()
+                } else {
+                    element
+                };
                 div()
                     .id(("sidebar-list-row", index))
                     .w_full()
@@ -647,12 +941,23 @@ impl Workspace {
             }),
         )
         .size_full()
-        .pb(px(SIDEBAR_LIST_BOTTOM_PADDING_PX));
+        .pb(px(SIDEBAR_LIST_BOTTOM_PADDING_PX)
+            + drag_layout.map_or(px(0.), drag::DragLayout::bottom_padding));
         div()
             .id("sidebar-threads")
             .debug_selector(|| "desktop-sidebar-threads".to_string())
             .role(Role::List)
             .aria_label("Threads")
+            .on_drag_move(cx.listener(Self::update_sidebar_drag))
+            .on_drop(cx.listener(Self::drop_sidebar_drag))
+            .capture_any_mouse_up(cx.listener(|this, _, _, cx| {
+                if this.sidebar_drag.is_some() {
+                    let workspace = cx.weak_entity();
+                    cx.defer(move |cx| {
+                        let _ = workspace.update(cx, |this, cx| this.clear_sidebar_drag(cx));
+                    });
+                }
+            }))
             .flex_1()
             .min_h_0()
             .relative()
@@ -706,6 +1011,7 @@ impl Workspace {
                     .tab_stop(false),
             )
             .vertical_scrollbar(&state)
+            .children(drag_overlays)
             .into_any_element()
     }
 
@@ -741,6 +1047,10 @@ impl Workspace {
             .aria_label(label.clone())
             .border_1()
             .border_color(gpui::transparent_black())
+            .when(self.sidebar_drag_over_shelf(section, cx), |el| {
+                el.border_color(theme::persimmon_400())
+                    .text_color(theme::persimmon_400())
+            })
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_300()))
@@ -783,42 +1093,57 @@ impl Workspace {
     }
 
     /// One thread card: project (or "Chat") + pin + age/status, the title,
-    /// then branch + provider glyph. Delete shows on hover at the top right.
+    /// then branch and model. Delete shows on hover at the top right.
     fn render_thread_card(
         &self,
         thread: &DesktopThread,
         folder: bool,
         focus: &viewport::SidebarRowFocus,
+        card_width: Pixels,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let chat = thread.chat.read(cx);
-        let title = bruhs_models::logic::text::plain_title(&chat.thread_title).into_owned();
+        let identity = self.card_identity(thread, cx);
         let is_active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
         // While its menu is open the card keeps its hover look: the backdrop
         // that closes the menu covers the card.
         let menu_open = self.thread_menu_id.as_deref() == Some(thread.id.as_str());
+        let snooze_open = menu_open && self.thread_menu_snooze_only;
         let status = self.card_status(thread, cx);
+        let quick_actions = !folder
+            && identity.has_meta
+            && matches!(status, CardStatus::Idle | CardStatus::Unread)
+            && self.section_for_thread(thread, cx) == SidebarSection::Active;
         let key = thread.chat.entity_id();
         let debug_key = element_key(&thread.id);
         let row_group: SharedString = format!("desktop-thread-row-{key}").into();
         let menu_group: SharedString = format!("desktop-thread-actions-{key}").into();
         let delete_group: SharedString = format!("desktop-thread-delete-{key}").into();
         let age = relative_age(thread.updated_at_ms, EpochMs::now());
-        let project_label = if thread.chat.read(cx).scratch_folder().is_some() {
-            "Scratch".to_owned()
-        } else if thread.project_name.is_empty() {
-            SIDEBAR_NO_PROJECT_LABEL.to_string()
-        } else {
-            self.project_list
-                .title(chat.settings_project_path())
-                .unwrap_or(&thread.project_name)
-                .to_owned()
-        };
-        let provider = bruhs_models::agent::AgentProvider::for_model(&thread.model_id);
         let id_for_select = thread.id.clone();
+        let id_for_file_drop = thread.id.clone();
         let id_for_delete = thread.id.clone();
         let id_for_menu = thread.id.clone();
         let id_for_menu_key = thread.id.clone();
+        let id_for_context_key = thread.id.clone();
+        let id_for_context_click = thread.id.clone();
+        let card_focus = focus.card.clone();
+        let renaming = self
+            .sidebar_rename
+            .as_ref()
+            .filter(|edit| edit.id == thread.id);
+        let drag = (renaming.is_none() && self.sidebar_arrangement_enabled(cx))
+            .then(|| self.sidebar_drag_item(thread, identity.clone()));
+        let hover = (!menu_open && renaming.is_none() && !cx.has_active_drag()).then(|| {
+            card_hover::ThreadCardHover::new(
+                identity.clone(),
+                chat.settings_project_path(),
+                self,
+                cx.weak_entity(),
+                key,
+            )
+        });
 
         let status_slot: AnyElement = match status {
             CardStatus::Idle => div()
@@ -861,26 +1186,15 @@ impl Workspace {
             }
         };
 
-        let top_line = div()
-            .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
-            .flex()
-            .items_center()
-            .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
-            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
-            .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(theme::rambutan_500())
-            .child(icon(
-                assets::FOLDER_ICON_PATH,
-                SIDEBAR_SMALL_ICON_PX,
-                theme::rambutan_500(),
-            ))
+        let top_line = identity
+            .project_line()
             .child(
                 div()
                     .debug_selector(move || format!("desktop-thread-card-project-{debug_key}"))
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(project_label),
+                    .child(identity.project.clone()),
             )
             .when(thread.pinned, |el| {
                 el.child(
@@ -898,14 +1212,34 @@ impl Workspace {
                 )
             });
         let status_line = div()
+            .id(("desktop-thread-card-status-slot", key))
+            .relative()
             .flex_shrink_0()
             .flex()
             .items_center()
             .justify_end()
             .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
-            .group_hover(row_group.clone(), |el| el.invisible())
-            .when(menu_open, |el| el.invisible())
-            .child(status_slot);
+            .child(
+                div()
+                    .group_hover(row_group.clone(), |el| el.invisible())
+                    .when(menu_open, |el| el.invisible())
+                    .child(status_slot),
+            )
+            .when(
+                quick_actions && renaming.is_none() && !menu_open || snooze_open,
+                |el| {
+                    el.group_hover(row_group.clone(), |el| {
+                        el.w(px(SIDEBAR_CARD_QUICK_WIDTH_PX))
+                    })
+                    .when(snooze_open, |el| el.w(px(SIDEBAR_CARD_QUICK_WIDTH_PX)))
+                    .child(self.sidebar_quick_actions(
+                        thread,
+                        row_group.clone(),
+                        snooze_open,
+                        cx,
+                    ))
+                },
+            );
 
         let title_line = div()
             .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
@@ -917,7 +1251,14 @@ impl Workspace {
             })
             .truncate()
             .debug_selector(move || format!("desktop-thread-card-title-{debug_key}"))
-            .child(title)
+            .when(renaming.is_none(), |el| el.child(identity.title.clone()))
+            .when_some(renaming, |el, edit| {
+                el.child(
+                    Input::new(&edit.input)
+                        .aria_label("Thread title")
+                        .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX)),
+                )
+            })
             .when(self.title_requests.contains_key(&thread.id), |row| {
                 row.child(
                     div()
@@ -931,71 +1272,25 @@ impl Workspace {
                 )
             });
 
-        let branch = thread.branch.clone();
-        // Web: the third line exists once the thread has a branch or a turn
-        // (its model is recorded on the first send).
-        let has_turns = !chat.messages.is_empty();
         // The role's id keeps the line; its current name fills it. A deleted
         // role leaves the name out (web).
-        let role = chat.role_profile.as_ref().map(|role| role.name.clone());
-        let has_meta = branch.is_some() || has_turns || chat.role.is_some();
         let meta_line = (if folder {
             self.labs_sidebar.two_lines
         } else {
-            has_meta
+            identity.has_meta
         })
         .then(|| {
-            div()
+            let pull = folder
+                .then(|| self.known_thread_pulls.get(&thread.id))
+                .flatten()
+                .filter(|p| {
+                    thread.branch.as_ref() == Some(&p.branch)
+                        && super::labs::folder(thread, cx) == p.project
+                })
+                .map(|pull| format!("#{}", pull.number));
+            identity
+                .meta_line(card_width, pull, debug_key, window, cx)
                 .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
-                .h(px(SIDEBAR_CARD_META_HEIGHT_PX))
-                .flex()
-                .items_center()
-                .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
-                .text_size(px(SIDEBAR_LABEL_TEXT_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .text_color(theme::rambutan_500())
-                .when_some(branch.clone(), |el, branch| {
-                    el.child(icon(
-                        assets::GIT_BRANCH_ICON_PATH,
-                        SIDEBAR_SMALL_ICON_PX,
-                        theme::rambutan_500(),
-                    ))
-                    .child(
-                        div()
-                            .debug_selector(move || {
-                                format!("desktop-thread-card-branch-{debug_key}")
-                            })
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .child(branch),
-                    )
-                })
-                .when(branch.is_none(), |el| el.child(div().flex_1()))
-                .when_some(role, |el, role| {
-                    el.child(
-                        div()
-                            .debug_selector(move || format!("desktop-thread-card-role-{debug_key}"))
-                            .flex_shrink_0()
-                            .max_w(px(SIDEBAR_CARD_ROLE_MAX_WIDTH_PX))
-                            .truncate()
-                            .text_color(theme::rambutan_400())
-                            .child(role),
-                    )
-                })
-                .when_some(
-                    folder
-                        .then(|| self.known_thread_pulls.get(&thread.id))
-                        .flatten()
-                        .filter(|p| {
-                            thread.branch.as_ref() == Some(&p.branch)
-                                && super::labs::folder(thread, cx) == p.project
-                        }),
-                    |el, p| el.child(format!("#{}", p.number)),
-                )
-                .when(folder || has_turns, |el| {
-                    el.child(provider_mark(provider, cx))
-                })
         });
 
         let delete_button = div()
@@ -1012,8 +1307,10 @@ impl Workspace {
             .justify_center()
             .group(delete_group.clone())
             .invisible()
-            .group_hover(row_group.clone(), |el| el.visible())
-            .when(menu_open, |el| el.visible())
+            .when(!quick_actions, |el| {
+                el.group_hover(row_group.clone(), |el| el.visible())
+            })
+            .when(menu_open && !snooze_open, |el| el.visible())
             .hover(|el| el.bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60)))
             .tab_index(0)
             .role(Role::Button)
@@ -1053,9 +1350,11 @@ impl Workspace {
             .items_center()
             .justify_center()
             .invisible()
-            .group_hover(row_group.clone(), |el| el.visible())
+            .when(!quick_actions, |el| {
+                el.group_hover(row_group.clone(), |el| el.visible())
+            })
             .hover(|el| el.bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60)))
-            .when(menu_open, |el| {
+            .when(menu_open && !snooze_open, |el| {
                 el.visible()
                     .bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60))
             })
@@ -1096,14 +1395,19 @@ impl Workspace {
         // The menu hangs from a box over the button (same insets), so it
         // follows the card as the list scrolls.
         let menu_anchor = menu_open.then(|| {
+            let right = if snooze_open {
+                SIDEBAR_CARD_X_PADDING_PX + SIDEBAR_CARD_SETTLE_WIDTH_PX + SIDEBAR_CARD_QUICK_GAP_PX
+            } else {
+                SIDEBAR_CARD_MENU_RIGHT_PX
+            };
             div()
                 .absolute()
-                .right(px(SIDEBAR_CARD_MENU_RIGHT_PX))
+                .right(px(right))
                 .top(px(SIDEBAR_CARD_DELETE_INSET_PX))
                 .size(px(SIDEBAR_CARD_DELETE_PX))
                 .child(menu_popover::menu_popover(
                     size(px(SIDEBAR_CARD_DELETE_PX), px(SIDEBAR_CARD_DELETE_PX)),
-                    self.render_thread_menu(thread, cx),
+                    self.render_thread_menu(thread, quick_actions, cx),
                 ))
         });
 
@@ -1125,6 +1429,10 @@ impl Workspace {
             .aria_selected(is_active)
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
+            .when_some(hover, |el, hover| {
+                el.tooltip_show_delay(std::time::Duration::from_millis(450))
+                    .tooltip(move |_, cx| cx.new(|_| hover.clone()).into())
+            })
             .when(is_active, |el| {
                 el.bg(theme::longan_800())
                     .border_1()
@@ -1133,13 +1441,106 @@ impl Workspace {
             .when(!is_active, |el| {
                 el.border_1()
                     .border_color(gpui::transparent_black())
-                    .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40)))
+                    .hover(move |el| {
+                        el.bg(theme::longan_800().opacity(if quick_actions {
+                            ACTIVE_BG_OPACITY_60
+                        } else {
+                            HOVER_BG_OPACITY_40
+                        }))
+                    })
             })
-            .map(|el| {
-                on_press_view(el, cx, move |this, _window, cx| {
-                    this.select_thread_by_id(&id_for_select, cx);
-                })
+            .drag_over::<ExternalPaths>(|el, _, _, _| {
+                el.bg(theme::longan_800())
+                    .border_color(theme::persimmon_400())
             })
+            .when_some(drag, |el, item| self.attach_sidebar_drag(el, item, cx))
+            .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                if paths.paths().is_empty() {
+                    return;
+                }
+                let Some(chat) = this
+                    .threads
+                    .iter()
+                    .find(|thread| thread.id == id_for_file_drop)
+                    .map(|thread| thread.chat.clone())
+                else {
+                    return;
+                };
+                cx.stop_propagation();
+                this.select_thread_by_id(&id_for_file_drop, cx);
+                chat.update(cx, |chat, cx| {
+                    chat.enqueue_paths(paths.paths(), cx);
+                    chat.focus_composer(window, cx);
+                });
+            }))
+            .when(renaming.is_none(), |el| {
+                el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                    if event.is_keyboard() {
+                        return;
+                    }
+                    cx.stop_propagation();
+                    if event.click_count() == 2
+                        && !event.modifiers().modified()
+                        && this.active_thread_id.as_deref() == Some(id_for_select.as_str())
+                    {
+                        this.start_sidebar_rename(&id_for_select, window, cx);
+                    } else {
+                        this.select_thread_by_id(&id_for_select, cx);
+                    }
+                }))
+            })
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if card_focus.is_focused(window)
+                    && this.sidebar_rename.is_none()
+                    && is_web_button_activation_key(&event.keystroke.key)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.select_thread_by_id(&id_for_context_key, cx);
+                    return;
+                }
+                let modifiers = event.keystroke.modifiers;
+                if !card_focus.is_focused(window)
+                    || modifiers.platform
+                    || modifiers.control
+                    || modifiers.alt
+                {
+                    return;
+                }
+                if !modifiers.shift
+                    && this.sidebar_viewport.borrow().navigate_threads(
+                        &event.keystroke.key,
+                        window,
+                        cx,
+                    )
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                let rename = event.keystroke.key == "f2" && !modifiers.shift;
+                if !rename && !is_thread_menu_key(&event.keystroke.key, modifiers.shift) {
+                    return;
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+                if !event.is_held {
+                    if rename {
+                        this.start_sidebar_rename(&id_for_context_key, window, cx);
+                    } else {
+                        this.toggle_thread_menu(&id_for_context_key, window, cx);
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_thread_menu(&id_for_context_click, window, cx);
+                }),
+            )
             .child(if folder {
                 div()
                     .flex()
@@ -1155,6 +1556,190 @@ impl Workspace {
             .child(delete_button)
             .children(menu_anchor)
             .into_any_element()
+    }
+
+    fn sidebar_quick_actions(
+        &self,
+        thread: &DesktopThread,
+        row_group: SharedString,
+        snooze_open: bool,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        let key = thread.chat.entity_id();
+        let debug_key = element_key(&thread.id);
+        let snooze_id = thread.id.clone();
+        let settle_id = thread.id.clone();
+        let button = |id, name| {
+            div()
+                .id((id, key))
+                .h(px(SIDEBAR_CARD_DELETE_PX))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(4.))
+                .rounded(px(SIDEBAR_RADIUS_SEED_PX))
+                .role(Role::Button)
+                .aria_label(name)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .cursor_pointer()
+                .text_color(theme::rambutan_400())
+                .hover(|el| el.bg(theme::longan_700()).text_color(theme::rambutan_100()))
+        };
+        let snooze = button("desktop-thread-quick-snooze", "Snooze thread")
+            .debug_selector(move || format!("desktop-thread-quick-snooze-{debug_key}"))
+            .w(px(SIDEBAR_CARD_DELETE_PX))
+            .aria_expanded(snooze_open)
+            .when(snooze_open, |el| el.bg(theme::longan_700()))
+            .child(icon(
+                assets::CLOCK_ICON_PATH,
+                SIDEBAR_SMALL_ICON_PX,
+                theme::rambutan_400(),
+            ));
+        let settle = button("desktop-thread-quick-settle", "Settle thread")
+            .debug_selector(move || format!("desktop-thread-quick-settle-{debug_key}"))
+            .w(px(SIDEBAR_CARD_SETTLE_WIDTH_PX))
+            .child(icon(
+                assets::CHECK_ICON_PATH,
+                SIDEBAR_SMALL_ICON_PX,
+                theme::rambutan_400(),
+            ))
+            .child("Settle");
+        div()
+            .id(("desktop-thread-quick-actions", key))
+            .absolute()
+            .right_0()
+            .top(px(
+                (SIDEBAR_CARD_LINE_HEIGHT_PX - SIDEBAR_CARD_DELETE_PX) / 2.0
+            ))
+            .w(px(SIDEBAR_CARD_QUICK_WIDTH_PX))
+            .invisible()
+            .group_hover(row_group, |el| el.visible())
+            .when(snooze_open, |el| el.visible())
+            .flex()
+            .gap(px(SIDEBAR_CARD_QUICK_GAP_PX))
+            .child(on_press_view(snooze, cx, move |this, window, cx| {
+                this.open_sidebar_snooze(&snooze_id, window, cx);
+            }))
+            .child(on_press_view(settle, cx, move |this, window, cx| {
+                if this.thread_section(&settle_id, cx) == Some(SidebarSection::Active) {
+                    this.thread_menu_id = None;
+                    this.toggle_settled_by_id(&settle_id, cx);
+                    this.focus_thread_menu_button(&settle_id, window, cx);
+                }
+            }))
+    }
+
+    fn open_sidebar_snooze(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
+            return;
+        };
+        if self.thread_menu_id.as_deref() == Some(id) && self.thread_menu_snooze_only {
+            self.close_thread_menu(window, cx);
+            return;
+        }
+        let first = self
+            .snooze_choices(thread.chat.read(cx).settings_project_path())
+            .map_or(ThreadMenuItem::InAnHour, |choices| {
+                let now = EpochMs::now().as_millis();
+                choices
+                    .iter()
+                    .take(super::snooze_options::MAX_OPTIONS)
+                    .enumerate()
+                    .filter_map(|(index, choice)| choice.until(now).map(|until| (until, index)))
+                    .min()
+                    .map_or(ThreadMenuItem::Custom, |(_, index)| {
+                        ThreadMenuItem::UserSnooze(index)
+                    })
+            });
+        self.thread_menu_id = Some(id.to_owned());
+        self.thread_menu_snooze_only = true;
+        self.thread_menu_items[first.slot()].focus(window, cx);
+        cx.notify();
+    }
+
+    fn start_sidebar_rename(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.sidebar_rename.is_some() {
+            return;
+        }
+        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
+            return;
+        };
+        let Some([return_focus, _, _]) = self
+            .sidebar_viewport
+            .borrow()
+            .row_targets(thread.chat.entity_id())
+        else {
+            return;
+        };
+        let title = thread.chat.read(cx).thread_title.clone();
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(title.clone()));
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.finish_sidebar_rename(true, window, cx),
+                InputEvent::Blur => this.finish_sidebar_rename(false, window, cx),
+                _ => {}
+            },
+        );
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.set_selected_range(0..title.len(), cx);
+        });
+        self.sidebar_rename = Some(SidebarRename {
+            id: id.into(),
+            input,
+            return_focus,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    fn finish_sidebar_rename(
+        &mut self,
+        restore_focus: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(edit) = self.sidebar_rename.take() else {
+            return;
+        };
+        if let Some(thread) = self.threads.iter().find(|thread| thread.id == edit.id) {
+            let draft = edit.input.read(cx).value();
+            if let Some(title) = bruhs_models::logic::text::resolve_rename(
+                &draft,
+                &thread.chat.read(cx).thread_title,
+            ) {
+                thread.chat.update(cx, |chat, cx| {
+                    chat.thread_title = title;
+                    cx.notify();
+                });
+                self.title_requests.remove(&edit.id);
+                self.persist_and_notify(cx);
+            }
+        }
+        if restore_focus {
+            edit.return_focus.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn cancel_sidebar_rename(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let Some(edit) = self.sidebar_rename.as_ref() else {
+            return false;
+        };
+        if !edit.input.focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        let target = edit.return_focus.clone();
+        self.sidebar_rename = None;
+        target.focus(window, cx);
+        cx.notify();
+        true
     }
 
     fn render_sidebar_undo(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -1212,7 +1797,12 @@ impl Workspace {
     /// then title and draft actions, split by hairlines. Arrow keys, Home and
     /// End move between items; Tab and Escape close it and return focus to
     /// its button.
-    fn render_thread_menu(&self, thread: &DesktopThread, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_thread_menu(
+        &self,
+        thread: &DesktopThread,
+        quick_actions: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let id = thread.id.clone();
         let chat = thread.chat.read(cx);
         let now = EpochMs::now().as_millis();
@@ -1228,6 +1818,14 @@ impl Workspace {
         let mut enabled: Vec<ThreadMenuItem> = Vec::new();
         let mut rows: Vec<AnyElement> = Vec::new();
         for entry in thread_menu(facts, now, threads_ui::utc_offset_minutes_east()) {
+            if self.thread_menu_snooze_only
+                && !matches!(
+                    entry,
+                    ThreadMenuEntry::Snooze(_) | ThreadMenuEntry::SnoozeCustom
+                )
+            {
+                continue;
+            }
             if let Some(choices) = self.snooze_choices(chat.settings_project_path()) {
                 if let ThreadMenuEntry::Snooze(preset) = &entry {
                     if preset.when == SnoozeWhen::InAnHour {
@@ -1274,18 +1872,31 @@ impl Workspace {
             };
             rows.push(self.thread_menu_item(item, label, on, &id, cx, thread_menu_action(entry)));
         }
-        let can_archive = !chat.is_streaming;
-        rows.push(thread_menu_separator());
-        rows.push(self.thread_menu_item(
-            ThreadMenuItem::Archive,
-            "Archive thread",
-            can_archive,
-            &id,
-            cx,
-            menu_action(|this, id, window, cx| this.request_thread_archive(id, window, cx)),
-        ));
-        if can_archive {
-            enabled.push(ThreadMenuItem::Archive);
+        if !self.thread_menu_snooze_only {
+            let can_archive = !chat.is_streaming;
+            rows.push(thread_menu_separator());
+            rows.push(self.thread_menu_item(
+                ThreadMenuItem::Archive,
+                "Archive thread",
+                can_archive,
+                &id,
+                cx,
+                menu_action(|this, id, window, cx| this.request_thread_archive(id, window, cx)),
+            ));
+            if can_archive {
+                enabled.push(ThreadMenuItem::Archive);
+            }
+            if quick_actions {
+                enabled.push(ThreadMenuItem::Delete);
+                rows.push(self.thread_menu_item(
+                    ThreadMenuItem::Delete,
+                    SIDEBAR_DELETE_LABEL,
+                    true,
+                    &id,
+                    cx,
+                    menu_action(|this, id, window, cx| this.request_thread_delete(id, window, cx)),
+                ));
+            }
         }
         div()
             .id("desktop-thread-menu")
@@ -1301,7 +1912,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .role(Role::Menu)
-            .aria_label("Thread actions")
+            .aria_label(if self.thread_menu_snooze_only {
+                "Snooze thread"
+            } else {
+                "Thread actions"
+            })
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
                 if modifiers.platform || modifiers.control || modifiers.alt || modifiers.function {
@@ -1343,7 +1958,9 @@ impl Workspace {
             move |this: &mut Workspace, window: &mut Window, cx: &mut Context<'_, Workspace>| {
                 this.thread_menu_id = None;
                 action(this, &thread_id, window, cx);
-                this.focus_thread_menu_button(&thread_id, window, cx);
+                if item != ThreadMenuItem::Rename || this.sidebar_rename.is_none() {
+                    this.focus_thread_menu_button(&thread_id, window, cx);
+                }
                 cx.notify();
             };
         let run_for_key = run.clone();
@@ -1404,6 +2021,7 @@ impl Workspace {
             return;
         }
         self.thread_menu_id = Some(id.to_string());
+        self.thread_menu_snooze_only = false;
         self.thread_menu_items[ThreadMenuItem::Pin.slot()].focus(window, cx);
         cx.notify();
     }
@@ -1628,6 +2246,35 @@ impl Workspace {
                     theme::rambutan_500()
                 },
             ));
+        let usage = on_press_view(
+            bruhs_ui::press::focusable_control(
+                div()
+                    .id("desktop-sidebar-nav-usage")
+                    .debug_selector(|| "desktop-sidebar-nav-usage".into())
+                    .track_focus(&self.usage_hubs.dashboard_footer_focus)
+                    .size(px(SIDEBAR_ICON_BUTTON_PX))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
+                    .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40)))
+                    .child(icon(
+                        assets::ACTIVITY_ICON_PATH,
+                        SIDEBAR_ICON_PX,
+                        theme::rambutan_500(),
+                    )),
+                Role::Button,
+                self.ui_language().text("Usage"),
+                bruhs_ui::press::Interactivity::Enabled,
+            )
+            .tooltip(|window, cx| bruhs_ui::tooltip::Tooltip::new("Usage").build(window, cx)),
+            cx,
+            |this, window, cx| {
+                this.usage_hubs.dashboard_footer_focus.focus(window, cx);
+                this.open_usage_dashboard(window, cx);
+            },
+        );
         let mut cells = vec![
             self.render_sidebar_nav_icon(AppView::Today, assets::SUN_ICON_PATH, "Today", cx),
             self.render_sidebar_nav_icon(AppView::Inbox, assets::INBOX_ICON_PATH, "Inbox", cx),
@@ -1654,6 +2301,7 @@ impl Workspace {
             self.render_sidebar_nav_icon(AppView::Meetings, assets::MIC_ICON_PATH, "Meetings", cx),
             self.render_sidebar_nav_icon(AppView::People, assets::USERS_ICON_PATH, "People", cx),
             self.render_agent_workflows_nav(cx),
+            usage.into_any_element(),
         ];
         if show_check {
             cells.push(self.sidebar_check_button(cx));
@@ -1804,6 +2452,132 @@ impl Workspace {
 mod tests {
     use super::{status_pulse_opacity, thread_matches, CardStatus};
     use crate::app_state::DesktopState;
+
+    #[gpui::test]
+    fn sidebar_unpinned_card_hover_shows_details_and_keeps_quick_actions_local(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::Modifiers;
+        let (workspace, cx, selected, target) = super::super::tests::thread_menu_workspace(cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.crew_rail_open = false;
+            workspace.threads[1].branch = Some("main".into());
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let key = super::element_key(&target);
+        let selector = |name| Box::leak(format!("desktop-thread-{name}-{key}").into_boxed_str());
+        let row = cx.debug_bounds(selector("row")).unwrap();
+        cx.simulate_mouse_move(row.center(), None, Modifiers::default());
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        let hover = cx.debug_bounds("desktop-sidebar-thread-hover").unwrap();
+        let row = cx.debug_bounds(selector("row")).unwrap();
+        assert!(hover.left() >= row.right());
+        assert!((hover.top() - row.top()).abs() <= gpui::px(1.));
+
+        let snooze = cx.debug_bounds(selector("quick-snooze")).unwrap();
+        let project = cx
+            .debug_bounds(Box::leak(
+                format!("desktop-thread-card-project-{key}").into_boxed_str(),
+            ))
+            .unwrap();
+        assert!(project.right() <= snooze.left());
+        cx.simulate_click(snooze.center(), Modifiers::default());
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-thread-menu-hour").is_some());
+        assert!(cx.debug_bounds("desktop-thread-menu-pin").is_none());
+        assert!(cx.debug_bounds("desktop-sidebar-thread-hover").is_none());
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        cx.simulate_mouse_move(row.center(), None, Modifiers::default());
+        cx.run_until_parked();
+        let settle = cx.debug_bounds(selector("quick-settle")).unwrap();
+        cx.simulate_click(settle.center(), Modifiers::default());
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(
+                workspace.active_thread_id.as_deref(),
+                Some(selected.as_str())
+            );
+            assert!(
+                workspace
+                    .threads
+                    .iter()
+                    .find(|thread| thread.id == target)
+                    .unwrap()
+                    .settled
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn sidebar_card_keeps_only_the_provider_logo_when_the_model_name_cannot_fit(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (workspace, cx, _, _) = super::super::tests::thread_menu_workspace(cx);
+        workspace.update(cx, |workspace, cx| {
+            let thread = &mut workspace.threads[1];
+            thread.branch = Some("main".into());
+            thread
+                .chat
+                .update(cx, |chat, _| chat.model_id = "claude-sonnet-4-6".into());
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-thread-card-model-name").is_some());
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.threads[1].branch = Some("feature/longer-project-checkout-names".into());
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-thread-card-model-name").is_none());
+        let model = cx.debug_bounds("desktop-thread-card-model").unwrap();
+        assert_eq!(
+            model.size.width,
+            super::px(crate::assets::PROVIDER_LOGO_SIZE_PX)
+        );
+    }
+
+    #[gpui::test]
+    fn sidebar_card_uses_the_recorded_models_and_handoff_origin(cx: &mut gpui::TestAppContext) {
+        use crate::views::chat::Message;
+        let (workspace, cx, parent, child) = super::super::tests::thread_menu_workspace(cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .thread_origins
+                .insert(child, super::super::thread_details::Origin::Handoff(parent));
+            let source = &workspace.threads[0];
+            source.chat.update(cx, |chat, _| {
+                chat.messages.push(Message::assistant_streaming(
+                    1,
+                    Some("claude-sonnet-4-6".into()),
+                ));
+            });
+            let target = &workspace.threads[1];
+            target
+                .chat
+                .update(cx, |chat, _| chat.model_id = "gpt-5.4".into());
+            let draft = workspace.card_identity(target, cx);
+            assert!(draft.has_meta);
+            assert_eq!(draft.model.id, "gpt-5.4");
+            assert!(draft.model.description(cx).contains("Handoff parent model"));
+            target.chat.update(cx, |chat, _| {
+                chat.messages
+                    .push(Message::assistant_streaming(2, Some("gpt-5.4".into())));
+                chat.messages.push(Message::assistant_streaming(
+                    3,
+                    Some("claude-opus-4-6".into()),
+                ));
+                chat.model_id = "claude-sonnet-4-6".into();
+            });
+            let recorded = workspace.card_identity(target, cx);
+            assert_eq!(recorded.model.id, "claude-opus-4-6");
+            assert!(recorded.model.description(cx).contains("Earlier model:"));
+        });
+    }
 
     /// Web `bruhs-status-pulse`'s keyframes.
     #[test]

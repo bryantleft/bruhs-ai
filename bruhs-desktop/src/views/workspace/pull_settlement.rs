@@ -19,10 +19,29 @@ pub(super) struct Observation {
     state: String,
     /// An explicit restore or new activity must survive future checks of the same PR.
     handled: bool,
+    /// A checkout created explicitly for the pull request keeps that identity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    explicit_link: bool,
+}
+
+impl Observation {
+    pub(super) fn linked(project: String, branch: String, number: u64) -> Self {
+        Self {
+            project,
+            branch,
+            number,
+            state: String::new(),
+            handled: false,
+            explicit_link: true,
+        }
+    }
 }
 
 impl Workspace {
     pub(super) fn thread_settle_delay(&self, thread: &DesktopThread, cx: &App) -> Option<i64> {
+        if thread.idle_settle_resumed_at == Some(thread.updated_at_ms) {
+            return None;
+        }
         let path = thread.chat.read(cx).settings_project_path();
         let keep = self
             .project_defaults
@@ -68,13 +87,23 @@ impl Workspace {
             return;
         }
         self.pull_check_times.insert(id.to_owned(), started);
+        let previous = self.known_thread_pulls.get(id);
+        let linked =
+            previous.filter(|p| p.explicit_link && p.project == path && p.branch == branch);
+        if linked.is_some_and(|known| {
+            lookup
+                .pull
+                .as_ref()
+                .is_none_or(|pull| pull.number != known.number)
+        }) {
+            return;
+        }
         let Some(pull) = lookup.pull.as_ref() else {
             if self.known_thread_pulls.remove(id).is_some() {
                 self.persist_and_notify(cx)
             }
             return;
         };
-        let previous = self.known_thread_pulls.get(id);
         let handled = previous.is_some_and(|p| {
             p.handled
                 && p.project == path
@@ -100,6 +129,7 @@ impl Workspace {
             number: pull.number,
             state: pull.state.clone(),
             handled: handled || apply,
+            explicit_link: linked.is_some(),
         };
         if previous == Some(&next) {
             return;
@@ -267,6 +297,9 @@ mod tests {
             w.observe_thread_pull(&code, path, "feature", &result("open"), first, cx);
             w.observe_thread_pull(&code, path, "feature", &result("merged"), later, cx);
             assert!(!w.threads[idx].settled);
+            assert_eq!(w.thread_settle_delay(&w.threads[idx], cx), None);
+            let activity = w.threads[idx].updated_at_ms.as_millis();
+            w.threads[idx].updated_at_ms = bruhs_models::EpochMs::new(activity + 1).unwrap();
             assert!(w.thread_settle_delay(&w.threads[idx], cx).is_some());
             w.observe_thread_pull(&code, "/other", "feature", &result("closed"), later, cx);
             assert_eq!(w.known_thread_pulls[&code].state, "merged");

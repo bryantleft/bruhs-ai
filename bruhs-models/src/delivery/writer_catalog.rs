@@ -47,6 +47,9 @@ pub struct WriterCliModel {
     pub label: String,
     pub provider: AgentProvider,
     pub options: Vec<WriterOption>,
+    /// An older model that remains selectable through search or disclosure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_legacy: bool,
 }
 impl WriterCliModel {
     pub fn resolve(&self, saved: &GenerationOptions) -> Option<GenerationOptions> {
@@ -78,6 +81,7 @@ impl Default for WriterCatalog {
                     id: m.id.to_owned(),
                     label: m.label.to_owned(),
                     provider: m.provider,
+                    is_legacy: false,
                     options: model_options(m.id)
                         .into_iter()
                         .map(|o| WriterOption {

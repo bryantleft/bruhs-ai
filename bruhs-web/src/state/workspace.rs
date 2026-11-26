@@ -145,6 +145,7 @@ pub enum ProjectPickerMode {
     #[default]
     Thread,
     NewTerminal,
+    PromptClone,
 }
 
 #[derive(Copy, Clone)]

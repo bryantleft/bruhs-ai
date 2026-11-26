@@ -1,50 +1,21 @@
 //! Usage from this computer, configured hubs and paired environments.
 use super::AppError;
-use axum::{extract::Path, Json};
+use axum::{
+    extract::{Path, Query},
+    Json,
+};
 use bruhs_core::usage_hubs::{self as hubs, Hub, Origin, Reading, ResetCredit};
-use bruhs_models::agent_extensions::QuotaWindow;
+use bruhs_models::agent_extensions::{
+    UsageCreditChoice as Choice, UsageLimitAccount as Account, UsageLimitSnapshot as Snapshot,
+    UsageManagementPage as UsagePage,
+};
 use futures_util::{stream, StreamExt};
-use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
-
-#[derive(Serialize)]
-pub struct Snapshot {
-    accounts: Vec<Account>,
-    notices: Vec<String>,
-    external: Vec<UsagePage>,
-}
-#[derive(Serialize)]
-struct UsagePage {
-    label: String,
-    url: String,
-    sources: Vec<String>,
-}
-#[derive(Serialize)]
-struct Account {
-    provider: &'static str,
-    label: String,
-    email: Option<String>,
-    workspace: Option<String>,
-    on_device: bool,
-    via: Vec<String>,
-    zero_spend_cap: bool,
-    plan: Option<String>,
-    sources: Vec<String>,
-    windows: Vec<QuotaWindow>,
-    credits: usize,
-    reset: Option<Choice>,
-}
-#[derive(Serialize)]
-struct Choice {
-    handle: Uuid,
-    hub: String,
-    expires: i64,
-}
 
 // The browser receives only an opaque handle. Keep the exact confirmed hub and
 // credit available for retries even if a subsequent probe no longer lists it.
@@ -107,7 +78,14 @@ pub async fn redeem(
     }
     Ok(Json(message))
 }
+#[derive(Default, serde::Deserialize)]
+pub struct Filters {
+    environment: Option<String>,
+    provider: Option<String>,
+}
+
 pub async fn snapshot(
+    Query(filters): Query<Filters>,
     hosts: Option<axum::Extension<bruhs_core::remote_hosts::RemoteHostManager>>,
 ) -> Result<Json<Snapshot>, AppError> {
     let configured = tokio::task::spawn_blocking(hubs::list)
@@ -125,6 +103,11 @@ pub async fn snapshot(
         hosts.as_ref().map(|h| &h.0),
     );
     let (local, reports, linked) = tokio::join!(hubs::device_accounts(), reports, linked);
+    let mut environments = std::collections::BTreeSet::from(["This computer".to_owned()]);
+    environments.extend(reports.iter().map(|(hub, _)| hub.label.clone()));
+    if let Ok(linked) = &linked {
+        environments.extend(linked.iter().map(|host| host.name.clone()));
+    }
     let mut hub_notices = Vec::new();
     let mut readings: Vec<_> = local
         .iter()
@@ -190,6 +173,27 @@ pub async fn snapshot(
                 account,
             });
         }
+    }
+    let providers = readings
+        .iter()
+        .map(|r| r.account.provider.to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+    readings.retain(|reading| {
+        filters
+            .environment
+            .as_deref()
+            .is_none_or(|name| name == reading.origin.label())
+            && filters
+                .provider
+                .as_deref()
+                .is_none_or(|provider| provider == reading.account.provider)
+    });
+    if let Some(environment) = filters.environment.as_deref() {
+        hub_notices.retain(|message| {
+            message
+                .split_once(" · ")
+                .is_some_and(|(source, _)| source == environment)
+        });
     }
     let mut notices = Vec::new();
     let mut external = BTreeMap::new();
@@ -259,7 +263,7 @@ pub async fn snapshot(
             }
         }
         accounts.push(Account {
-            provider: quota.provider,
+            provider: quota.provider.to_owned(),
             zero_spend_cap: quota.zero_spend_cap,
             via,
             email: group.email().map(str::to_owned),
@@ -285,6 +289,8 @@ pub async fn snapshot(
     let mut seen = std::collections::HashSet::new();
     notices.retain(|notice| seen.insert(notice.clone()));
     Ok(Json(Snapshot {
+        environments: environments.into_iter().collect(),
+        providers: providers.into_iter().collect(),
         accounts,
         notices,
         external: external.into_values().collect(),

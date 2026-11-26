@@ -36,9 +36,9 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 /// `--version`, `brew info`, `npm view` and `git ls-remote` answer in
-/// seconds; slower is stuck or offline (T3: 10 s per probe).
+/// seconds. Bound each probe in case the installer or network stalls.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
-/// T3's registry and release-channel timeout.
+/// Timeout for registry and release-channel requests.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(4);
 const UPDATE_TIMEOUT: Duration = Duration::from_millis(UPDATE_TIMEOUT_MS);
 const NPM_REGISTRY: &str = "https://registry.npmjs.org";
@@ -157,7 +157,7 @@ pub(crate) fn find_on_path(name: &str, path: Option<&OsString>) -> Option<PathBu
 }
 
 /// The program for argv[0]: absolute paths as they are, Homebrew's own
-/// `brew` beside the install when there is one (T3 prefers it), else `PATH`.
+/// `brew` beside the install when available, then `PATH`.
 fn resolve_program(program: &str, install: &Install, path: Option<&OsString>) -> Option<PathBuf> {
     if Path::new(program).is_absolute() {
         return Some(PathBuf::from(program));
@@ -274,7 +274,7 @@ async fn check_provider_on(
 }
 
 /// Whether mise's active `tool` was requested as `latest`, which is the
-/// only case `mise upgrade` moves (T3's rule).
+/// only case `mise upgrade` moves.
 async fn mise_tracks_latest(tool: &str, path: Option<&OsString>) -> bool {
     let Some(mise) = find_on_path("mise", path) else {
         return false;
@@ -391,7 +391,7 @@ async fn mise_latest(tool: &str, path: Option<&OsString>) -> Result<String, Stri
 
 /// Claude's native installer follows a release channel: the last
 /// `autoUpdatesChannel` in the user settings, then the managed settings,
-/// default `latest` (T3's lookup).
+/// with `latest` as the default.
 async fn claude_channel_latest() -> Result<String, String> {
     let channel = claude_channel(&claude_settings_texts());
     http_version(&format!("{CLAUDE_RELEASES}/{channel}"), false).await

@@ -189,6 +189,34 @@ fn valid_port_form(authority: &axum::http::uri::Authority) -> bool {
         && (authority.as_str() == authority.host() || authority.port_u16().is_some())
 }
 
+fn requires_owner_origin(path: &str, method: &Method) -> bool {
+    matches!(
+        path,
+        "/api/agent"
+            | "/api/agent/steer"
+            | "/api/agent/approve"
+            | "/api/agent/answer-question"
+            | "/api/agent/question-files"
+            | bruhs_models::logic::attachments::RETIRE_QUESTION_FILES_PATH
+            | "/api/agent/second-opinion"
+            | "/api/agent/secret"
+            | "/api/agent/thread-reply"
+            | "/api/agent/login"
+            | "/api/agent/git-checkout"
+            | "/api/agent/worktree"
+            | "/api/agent/worktree-snapshot"
+            | "/api/agent/worktree-restore"
+            | "/api/agent/prompt-pull-checkout"
+            | "/api/agent/prompt-clone"
+            | "/api/open-in-editor"
+            | "/api/open-in-terminal"
+            | "/api/terminal/ws"
+            | "/api/terminal/sessions"
+    ) || path.starts_with("/api/terminal/sessions/")
+        || path.starts_with("/api/agent/login/")
+        || (path == bruhs_models::workspace_trust::PATH && *method != Method::POST)
+}
+
 pub async fn guard(
     State(policy): State<Policy>,
     request: Request,
@@ -256,6 +284,13 @@ pub async fn guard(
     {
         return Err(AppError::Forbidden(
             "Request origin is not allowed to use this local API.".into(),
+        ));
+    }
+    if requires_owner_origin(request.uri().path(), request.method())
+        && !policy.owner_request(headers)
+    {
+        return Err(AppError::Forbidden(
+            "This action requires the Bruhs app origin.".into(),
         ));
     }
     let mut response = next.run(request).await;

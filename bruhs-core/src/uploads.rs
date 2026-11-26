@@ -11,13 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bruhs_models::logic::attachments::{
-    admit, kind_for_name, mime_for, upload_disk_name, upload_label, FileKind, UploadedFile,
-    COULD_NOT_READ, FILE_TOO_LARGE, MAX_FILE_BYTES, TEXT_PREVIEW_BYTES, UPLOAD_DID_NOT_FINISH,
+    admit, kind_for_name, mime_for, upload_disk_name, upload_label, web_question_upload_prefix,
+    FileKind, UploadedFile, COULD_NOT_READ, FILE_TOO_LARGE, MAX_FILE_BYTES, TEXT_PREVIEW_BYTES,
+    UPLOAD_DID_NOT_FINISH,
 };
 
 pub mod browser_captures;
 
 const ATTACHMENT_DIR: &str = "bruhs-attachments";
+const DESKTOP_QUESTION_PREFIX: &str = "desktop-answer-";
 
 /// The shared output location for media in chats without a project. Merely
 /// naming it does no I/O; the agent creates the directory before writing.
@@ -83,12 +85,125 @@ pub fn write_upload(name: &str, bytes: &[u8]) -> Result<UploadedFile, &'static s
     write_in(root, name, bytes)
 }
 
+pub(crate) fn write_desktop_question_upload(
+    name: &str,
+    bytes: &[u8],
+) -> Result<UploadedFile, &'static str> {
+    let root = attachment_root().ok_or(UPLOAD_DID_NOT_FINISH)?;
+    write_in_with_prefix(root, name, bytes, DESKTOP_QUESTION_PREFIX)
+}
+
+pub(crate) fn write_web_question_upload(
+    thread: &bruhs_models::ids::ThreadId,
+    name: &str,
+    bytes: &[u8],
+) -> Result<UploadedFile, &'static str> {
+    let root = attachment_root().ok_or(UPLOAD_DID_NOT_FINISH)?;
+    write_in_with_prefix(
+        root,
+        name,
+        bytes,
+        &web_question_upload_prefix(thread.as_str()),
+    )
+}
+
+/// Retire browser answer files issued for this exact thread. Validate the
+/// whole batch before unlinking anything so a malformed request is a no-op.
+pub fn retire_web_question_uploads(
+    request: &bruhs_models::logic::attachments::RetireQuestionFiles,
+) -> std::io::Result<()> {
+    use bruhs_models::logic::attachments::MAX_FILES_PER_MESSAGE;
+    let prefix = web_question_upload_prefix(request.thread_id.as_str());
+    if request.files.len() > MAX_FILES_PER_MESSAGE
+        || request.files.iter().any(|name| {
+            !name.starts_with(&prefix)
+                || name.contains(['/', '\\'])
+                || name.len() > 255
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Invalid answer file for this thread.",
+        ));
+    }
+    let Some(root) = existing_attachment_root()? else {
+        return Ok(());
+    };
+    for name in &request.files {
+        remove_regular_upload(&root.join(name))?;
+    }
+    Ok(())
+}
+
+pub fn is_desktop_question_upload(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(DESKTOP_QUESTION_PREFIX))
+}
+
+/// Retire only desktop-owned answer files directly under the upload directory.
+pub fn remove_desktop_question_upload(path: &str) -> std::io::Result<()> {
+    let path = Path::new(path);
+    if !path.is_absolute() || !path.to_str().is_some_and(is_desktop_question_upload) {
+        return Ok(());
+    }
+    let Some(root) = existing_attachment_root()? else {
+        return Ok(());
+    };
+    if path.parent() != Some(root.as_path()) {
+        return Ok(());
+    }
+    remove_regular_upload(path)
+}
+
+fn existing_attachment_root() -> std::io::Result<Option<PathBuf>> {
+    match media_output_directory()?.canonicalize() {
+        Ok(root) => Ok(Some(root)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_regular_upload(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => std::fs::remove_file(path),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 fn write_in(root: PathBuf, name: &str, bytes: &[u8]) -> Result<UploadedFile, &'static str> {
+    write_in_with_prefix(root, name, bytes, "")
+}
+
+fn write_in_with_prefix(
+    root: PathBuf,
+    name: &str,
+    bytes: &[u8],
+    prefix: &str,
+) -> Result<UploadedFile, &'static str> {
     let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     admit(0, 0, name, len)?;
     static SEQ: AtomicU64 = AtomicU64::new(1);
     let unique = upload_unique_id(SEQ.fetch_add(1, Ordering::Relaxed));
-    let file_name = upload_disk_name(&unique, name);
+    let mut file_name = upload_disk_name(&format!("{prefix}{unique}"), name);
+    // The receipt carries the full display name. Leave room for the owner
+    // marker and retain the extension the viewer uses to recognize the file.
+    if !prefix.is_empty() && file_name.len() > 255 {
+        let extension = file_name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension)
+            .filter(|extension| extension.len() <= 16)
+            .map(|extension| format!(".{extension}"))
+            .unwrap_or_default();
+        file_name.truncate(255 - extension.len());
+        file_name.push_str(&extension);
+    }
     if file_name.contains(['/', '\\']) {
         return Err(UPLOAD_DID_NOT_FINISH);
     }

@@ -78,6 +78,7 @@ export function Field({
   onFocus,
   onBlur,
   inputRef,
+  editable = true,
 }: Readonly<{
   label: string;
   value: string;
@@ -91,6 +92,7 @@ export function Field({
   onFocus?: () => void;
   onBlur?: () => void;
   inputRef?: Ref<TextInputInstance>;
+  editable?: boolean;
 }>) {
   const [focused, focus] = useState(false);
   return (
@@ -101,6 +103,7 @@ export function Field({
         accessibilityLabel={label}
         value={value}
         onChangeText={onChange}
+        editable={editable}
         placeholder={placeholder}
         placeholderTextColor={color.muted}
         secureTextEntry={secret}
@@ -149,7 +152,7 @@ export function StateBadge({ value }: Readonly<{ value: string }>) {
             color:
               value === 'completed'
                 ? color.green
-                : value.includes('approval')
+                : value.includes('approval') || value === 'needs_answer'
                   ? color.accent
                   : color.muted,
           },

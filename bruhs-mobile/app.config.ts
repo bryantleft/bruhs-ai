@@ -42,6 +42,14 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Choose photos to include in your answers to the Bruhs agent.',
+        cameraPermission: 'Scan the one-use pairing code shown by your Bruhs computer.',
+        microphonePermission: 'Dictate a draft locally on this device.',
+      },
+    ],
     ['expo-secure-store', { configureAndroidBackup: true }],
     [
       'expo-font',

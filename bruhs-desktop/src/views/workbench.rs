@@ -54,7 +54,7 @@ impl WorkbenchPanel {
         self.preview.read(cx).smoke_evaluate(script)
     }
 
-    pub fn new(open_usage: bool, window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let server_base = std::env::var("BRUHS_SERVER_URL")
             .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());
         let (sender, page_messages) = async_channel::unbounded();
@@ -66,11 +66,7 @@ impl WorkbenchPanel {
             // Web shows the Workbench page without browser chrome.
             panel.set_url_row(false);
             panel.go_to(
-                &format!(
-                    "{}/api/workbench/ui{}",
-                    server_base.trim_end_matches('/'),
-                    if open_usage { "#usage" } else { "" }
-                ),
+                &format!("{}/api/workbench/ui", server_base.trim_end_matches('/')),
                 window,
                 cx,
             );
@@ -122,14 +118,6 @@ impl WorkbenchPanel {
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<'_, Self>) {
         self.preview.update(cx, |p, _| p.set_shown(shown));
     }
-    pub fn open_usage(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let url = format!(
-            "{}/api/workbench/ui#usage",
-            self.server_base.trim_end_matches('/')
-        );
-        self.preview
-            .update(cx, |preview, cx| preview.go_to(&url, window, cx));
-    }
     pub fn open_handoff(
         &mut self,
         id: &bruhs_models::ids::ThreadId,
@@ -167,7 +155,7 @@ mod usage_tests {
     #[gpui::test]
     fn workbench_opens_the_reported_usage_page_outside_its_webview(cx: &mut TestAppContext) {
         cx.update(bruhs_ui::init);
-        let (panel, cx) = cx.add_window_view(|window, cx| WorkbenchPanel::new(true, window, cx));
+        let (panel, cx) = cx.add_window_view(WorkbenchPanel::new);
         let base = panel.read_with(cx, |p, _| p.server_base.clone());
         let frame = format!("{base}/api/workbench/ui#usage");
         let send = |frame: &str, url: &str, cx: &mut VisualTestContext| {

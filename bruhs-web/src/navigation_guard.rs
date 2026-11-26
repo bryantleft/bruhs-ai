@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 use crate::relationship_store::RelationshipStore;
-use crate::state::{AutomationStateSignal, ComposerDraft, LifeContextSignal};
+use crate::state::{AutomationStateSignal, Drafts, LifeContextSignal};
 use crate::task_saves::TaskSaves;
 
 pub(crate) fn install() {
@@ -13,7 +13,7 @@ pub(crate) fn install() {
     let turns = expect_context::<crate::state::Turns>();
     let LifeContextSignal(life) = expect_context();
     let AutomationStateSignal(automation) = expect_context();
-    let ComposerDraft(composer) = expect_context();
+    let drafts = expect_context::<Drafts>();
     let at_risk = Memo::new(move |_| {
         let pending = saves.pending();
         // A turn running in any thread, not only the one on screen.
@@ -21,14 +21,13 @@ pub(crate) fn install() {
         let life_pending = life.pending();
         let automation_pending = automation.pending();
         let relationships_pending = relationships.pending();
-        let composer_pending = composer.with(|draft| !draft.trim().is_empty());
         pending
             || mail.pending()
             || streaming
             || life_pending
             || automation_pending
             || relationships_pending
-            || composer_pending
+            || drafts.pending()
     });
     Effect::new(move |_| {
         if !at_risk.get() {

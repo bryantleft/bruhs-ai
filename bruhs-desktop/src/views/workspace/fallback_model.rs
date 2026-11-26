@@ -60,7 +60,7 @@ impl Workspace {
         }
         let model = self.fallback_model.as_deref().unwrap_or("off");
         let (toggle, select) = self.settings_dropdown_handlers("settings-fallback-model", cx);
-        let picker = dropdown(
+        let picker = bruhs_ui::dropdown::Dropdown::new(
             "settings-fallback-model",
             "Fallback model",
             model,
@@ -72,7 +72,12 @@ impl Workspace {
             self.settings_listbox("settings-fallback-model"),
             toggle,
             select,
-        );
+        )
+        .option_mark(|value| {
+            (value != "off")
+                .then(|| provider_glyph(provider_for_model_id(value)).into_any_element())
+        })
+        .into_any_element();
         self.settings_row(
             "settings-row-fallback-model",
             "Fallback model",

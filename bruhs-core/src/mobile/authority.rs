@@ -821,7 +821,19 @@ fn validate_name(name: &str) -> MobileResult<()> {
     Ok(())
 }
 fn validate_command(command: &MobileCommand) -> MobileResult<()> {
+    if command.sequence == 0 {
+        return Err(MobileError::Invalid(
+            "Use the next device command sequence.".into(),
+        ));
+    }
     let thread = match &command.action {
+        MobileAction::OpenLinkedDraft { target } => {
+            return target
+                .destination()
+                .map(drop)
+                .map_err(|error| MobileError::Invalid(error.to_string()));
+        }
+        MobileAction::ContinueLinkedDraft { .. } => return Ok(()),
         MobileAction::Prompt { thread_id, text } => {
             if text.trim().is_empty()
                 || text.len() > RESPONSE_BYTES
@@ -836,6 +848,12 @@ fn validate_command(command: &MobileCommand) -> MobileResult<()> {
             request_id,
             review_hash,
             ..
+        }
+        | MobileAction::AnswerQuestion {
+            thread_id,
+            request_id,
+            review_hash,
+            ..
         } => {
             if request_id.is_empty()
                 || request_id.len() > 128
@@ -843,13 +861,13 @@ fn validate_command(command: &MobileCommand) -> MobileResult<()> {
                 || !review_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
             {
                 return Err(MobileError::Invalid(
-                    "Use the exact pending approval card from this thread.".into(),
+                    "Use the exact pending request from this thread.".into(),
                 ));
             }
             thread_id
         }
     };
-    if thread.is_empty() || thread.len() > 128 || command.sequence == 0 {
+    if thread.is_empty() || thread.len() > 128 {
         return Err(MobileError::Invalid(
             "Use an existing thread and the next device command sequence.".into(),
         ));

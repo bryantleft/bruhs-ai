@@ -17,6 +17,18 @@
 use leptos::prelude::*;
 use leptos::svg::Svg;
 
+/// A monochrome brand asset rendered with the current theme's icon color.
+#[component]
+pub(crate) fn BrandMark(#[prop(into)] src: Signal<&'static str>) -> impl IntoView {
+    view! {
+        <span
+            aria-hidden="true"
+            class="bruhs-provider-logo"
+            style:mask-image=move || format!("url({})", src.get())
+        ></span>
+    }
+}
+
 #[component]
 pub fn Icon(
     /// Icon name — see the match in this file for the full list.
@@ -218,6 +230,9 @@ fn icon_body(name: &str) -> &'static str {
         "panel-left" => r#"<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>"#,
         "copy" => {
             r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#
+        }
+        "external-link" => {
+            r#"<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>"#
         }
         "rotate-ccw" => {
             r#"<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>"#

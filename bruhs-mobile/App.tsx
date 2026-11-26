@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -7,6 +7,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   type ScrollViewInstance,
   type TextInputInstance,
   Text,
@@ -17,15 +18,24 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { useCompanion } from './src/useCompanion';
+import { useLinkedDraftTarget } from './src/useLinkedDraftTarget';
 import { type Pairing, type Task, parsePairing, running } from './src/domain';
+import { type LinkedPrompt, parseIncomingPromptLink, parsePromptFragment, pullRequestUrl } from './src/promptLink';
 import { ephemeralStorage } from './src/storage';
 import { Button, Field, Notice, PageNotices, PageScroll, StateBadge } from './src/components';
+import { QuestionCard } from './src/QuestionCard';
 import { Dictation } from './src/Dictation';
 import { PairScreen } from './src/PairScreen';
 import { color, styles as s } from './src/theme';
 
 type Companion = ReturnType<typeof useCompanion>;
 type Tab = 'work' | 'hosts' | 'access';
+type PromptHandoff = {
+  link: LinkedPrompt;
+  destination: { hostId: string; threadId: string } | null;
+  placed: boolean;
+  modelFallback?: string;
+};
 
 export default function App() {
   const [loaded, error] = useFonts({
@@ -60,6 +70,8 @@ function CompanionApp() {
     [incoming, setIncoming] = useState<Pairing | null>(null),
     [linkError, setLinkError] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [handoff, setHandoff] = useState<PromptHandoff | null>(null);
+  const lastHandoffRoute = useRef<{ link: LinkedPrompt; hostId: string | null } | null>(null);
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
     const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
@@ -69,8 +81,30 @@ function CompanionApp() {
     };
   }, []);
   useEffect(() => {
+    let live = true;
+    let receivedEvent = false;
     const open = (value: string | null | undefined) => {
-      if (!value || !/^(bruhs:|https?:)/.test(value) || !value.includes('pair')) return;
+      if (!live || !value) return;
+      let parsedPrompt = parseIncomingPromptLink(value);
+      if (parsedPrompt.kind === 'ignored' && Platform.OS === 'web' && /^https?:/.test(value)) {
+        try {
+          parsedPrompt = parsePromptFragment(new URL(value).hash);
+        } catch { /* The pairing parser handles malformed pairing links. */ }
+      }
+      if (parsedPrompt.kind === 'prompt') {
+        setLinkError('');
+        setHandoff({ link: parsedPrompt.link, destination: null, placed: false });
+        if (Platform.OS === 'web' && window.location.href === value) {
+          window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+        }
+        return;
+      }
+      if (parsedPrompt.kind === 'invalid') {
+        setHandoff(null);
+        setLinkError(parsedPrompt.message);
+        return;
+      }
+      if (!/^(bruhs:|https?:)/.test(value) || !value.includes('pair')) return;
       const parsed = parsePairing(value, __DEV__);
       if (parsed.ok) {
         setIncoming(parsed.value);
@@ -78,10 +112,88 @@ function CompanionApp() {
         setTab('hosts');
       } else setLinkError(parsed.error.message);
     };
-    void Linking.getInitialURL().then(open);
-    const listener = Linking.addEventListener('url', (event) => open(event.url));
-    return () => listener.remove();
+    if (Platform.OS === 'web') {
+      const browserRoute = () => open(window.location.href);
+      browserRoute();
+      window.addEventListener('hashchange', browserRoute);
+      return () => window.removeEventListener('hashchange', browserRoute);
+    }
+    void Linking.getInitialURL().then((url) => { if (!receivedEvent) open(url); });
+    const listener = Linking.addEventListener('url', (event) => {
+      receivedEvent = true;
+      open(event.url);
+    });
+    return () => {
+      live = false;
+      listener.remove();
+    };
   }, []);
+  const { host, chooseItem, placeLinkedDraft } = model;
+  const linked = handoff?.link;
+  const requestedTarget = linked?.pullRequest ? pullRequestUrl(linked.pullRequest)
+    : [linked?.repository, linked?.provider, linked?.model].filter(Boolean).join(' · ');
+  const specializedPrompt = Boolean(requestedTarget);
+  const targetReview = useLinkedDraftTarget(model, linked?.threadId === null ? linked : undefined);
+  const openingTarget = linked?.threadId === null && !handoff?.destination
+    && (specializedPrompt || targetReview.supported);
+  const routeLink = handoff?.placed || openingTarget || (handoff?.destination && !linked?.threadId) ? null : linked;
+  const prepared = targetReview.status;
+  useEffect(() => {
+    if (!linked || handoff?.destination || !host || prepared?.status !== 'ready') return;
+    const text = prepared.without_project && linked.pullRequest
+      ? [pullRequestUrl(linked.pullRequest), linked.text].filter(Boolean).join('\n\n')
+      : linked.text;
+    setHandoff((current) => current?.link === linked ? {
+      ...current,
+      link: { ...linked, text },
+      destination: { hostId: host.id, threadId: prepared.thread_id },
+      modelFallback: prepared.model_fallback ? prepared.model : undefined,
+    } : current);
+    chooseItem({ id: prepared.thread_id });
+    setTab('work');
+  }, [linked, handoff?.destination, host, prepared, chooseItem]);
+  useEffect(() => {
+    if (!routeLink) return;
+    const hostId = host?.id ?? null;
+    if (lastHandoffRoute.current?.link === routeLink && lastHandoffRoute.current.hostId === hostId) return;
+    lastHandoffRoute.current = { link: routeLink, hostId };
+    const canOpen = host && (routeLink.threadId === null || host.authority === 'desktop');
+    setTab(canOpen ? 'work' : 'hosts');
+    const threadId = routeLink.threadId;
+    if (!canOpen || !threadId) {
+      if (canOpen) chooseItem(null);
+      return;
+    }
+    chooseItem({ id: threadId });
+    setHandoff((request) => request?.link === routeLink
+      ? { ...request, destination: { hostId: host.id, threadId }, placed: false }
+      : request);
+  }, [routeLink, host, chooseItem]);
+
+  const onChooseConversation = (threadId: string) => {
+    if (host && handoff?.link.threadId === null && !handoff.placed && !openingTarget
+      && (!handoff.destination || (!specializedPrompt && !targetReview.supported))) {
+      setHandoff({ ...handoff, destination: { hostId: host.id, threadId } });
+    }
+    chooseItem({ id: threadId });
+  };
+  const destination = handoff?.destination;
+  const bound = destination && host?.id === destination.hostId && model.selection?.id === destination.threadId;
+  const destinationOpen = bound && host
+    && (host.authority === 'desktop'
+      ? model.thread?.thread.id === destination.threadId
+      : model.tasks?.tasks.some((task) => task.id === destination.threadId));
+  const draftReady = Boolean(destinationOpen && model.phase === 'online');
+  const needsReplacement = Boolean(linked?.text && model.draft.trim() && model.draft !== linked.text);
+  const place = useCallback((request: PromptHandoff, expected: string): void => {
+    const target = request.destination;
+    if (target && (!request.link.text || placeLinkedDraft(target.hostId, target.threadId, expected, request.link.text))) {
+      setHandoff((current) => current === request ? { ...request, placed: true } : current);
+    }
+  }, [placeLinkedDraft]);
+  useEffect(() => {
+    if (handoff && !handoff.placed && draftReady && !needsReplacement) place(handoff, model.draft);
+  }, [handoff, draftReady, needsReplacement, model.draft, place]);
   const online = model.phase === 'online';
   const connection =
     model.phase === 'none'
@@ -93,8 +205,70 @@ function CompanionApp() {
           : model.phase === 'expired'
             ? 'Pair again'
             : 'Offline';
+  const promptReview = handoff && (!handoff.placed || destinationOpen) ? (
+    <View style={s.banner} testID="prompt-handoff">
+      <Notice>{openingTarget ? (
+        !targetReview.supported ? 'Choose a paired computer with linked draft access.'
+        : prepared?.status === 'preparing' ? 'Preparing the linked draft…'
+        : prepared?.status === 'missing_repository' ? `${prepared.repository} is missing on this computer.`
+        : prepared?.status === 'checkout' ? `Check out this pull request for ${prepared.project}?`
+        : 'Open a draft on the paired computer.'
+      ) : handoff.placed ? (handoff.link.text ? 'Prompt added from a link. Review the draft before sending.' : 'Linked draft ready.')
+        : !host || (linked?.threadId && host.authority !== 'desktop') ? 'Choose the computer for this linked prompt.'
+        : draftReady ? 'Replace the existing draft with this prompt?'
+        : bound && model.problem ? 'Could not open the linked conversation on this computer.'
+        : bound ? 'Opening the conversation for this prompt…'
+        : 'Choose a conversation for this linked prompt.'}</Notice>
+      {requestedTarget ? (
+        <Text selectable style={s.small}>{requestedTarget}</Text>
+      ) : null}
+      {!handoff.placed && handoff.link.text ? (
+        <ScrollView nestedScrollEnabled style={{ maxHeight: 112, flexGrow: 0 }}>
+          <Text selectable style={s.text}>{handoff.link.text}</Text>
+        </ScrollView>
+      ) : null}
+      {handoff.link.removedHiddenCharacters ? <Text style={s.small}>Hidden characters were removed.</Text> : null}
+      {handoff.modelFallback ? <Text style={s.small}>Requested model unavailable. Using {handoff.modelFallback}.</Text> : null}
+      {openingTarget && prepared?.status === 'checkout' ? <Text style={s.small}>Saved setup commands run in the new worktree.</Text> : null}
+      {openingTarget && prepared?.status === 'missing_repository' ? (
+        <Text style={s.small}>{prepared.clone_parent
+          ? `Clone into ${prepared.clone_parent} on ${host?.name}.`
+          : 'Choose a project start folder in the computer’s settings to clone here.'}</Text>
+      ) : null}
+      {openingTarget && prepared && 'error' in prepared && prepared.error ? <Notice error>{prepared.error}</Notice> : null}
+      {openingTarget && prepared?.status === 'failed' ? <Notice error>{prepared.message}</Notice> : null}
+      <View style={s.row}>
+        <Button quiet disabled={openingTarget && prepared?.status === 'preparing'} onPress={() => setHandoff(null)}>
+          {handoff.placed ? 'Dismiss' : draftReady && needsReplacement ? 'Keep draft' : 'Cancel'}
+        </Button>
+        {openingTarget && targetReview.supported ? (
+          prepared?.status === 'checkout' || prepared?.status === 'missing_repository' ? <>
+            <Button quiet disabled={!targetReview.canPrepare} onPress={() => targetReview.confirm('without_project')}>Use without project</Button>
+            {prepared.status === 'checkout' ? <Button disabled={!targetReview.canPrepare} onPress={() => targetReview.confirm('checkout')}>Check out</Button>
+              : prepared.clone_parent ? <Button disabled={!targetReview.canPrepare} onPress={() => targetReview.confirm('clone')}>Clone</Button> : null}
+          </> : (!prepared || prepared.status === 'failed') ? (
+            <Button disabled={!targetReview.canPrepare} onPress={() => {
+              chooseItem(null);
+              setTab('work');
+              targetReview.prepare();
+            }}>{`Open on ${host?.name ?? 'computer'}`}</Button>
+          ) : null
+        ) : openingTarget ? (
+          <Button onPress={() => {
+            const { text, removedHiddenCharacters, pullRequest } = handoff.link;
+            const draft = pullRequest ? [pullRequestUrl(pullRequest), text].filter(Boolean).join('\n\n') : text;
+            setHandoff({ link: { threadId: null, text: draft, removedHiddenCharacters }, destination: null, placed: false });
+          }}>Use as a draft</Button>
+        ) : !handoff.placed && draftReady && needsReplacement ? (
+          <Button onPress={() => place(handoff, model.draft)}>Replace draft</Button>
+        ) : null}
+      </View>
+    </View>
+  ) : null;
+  const reviewInComposer = tab === 'work' && destinationOpen;
   const notices = (
     <>
+      {reviewInComposer ? null : promptReview}
       {model.problem || linkError ? (
         <View style={s.banner}>
           <Notice error>{model.problem || linkError}</Notice>
@@ -155,6 +329,8 @@ function CompanionApp() {
               model.host ? (
                 <WorkScreen
                   model={model}
+                  onChooseConversation={onChooseConversation}
+                  promptReview={reviewInComposer ? promptReview : null}
                   onPair={() => {
                     setAdding(true);
                     setTab('hosts');
@@ -296,7 +472,12 @@ function Empty({ onAdd }: Readonly<{ onAdd: () => void }>) {
   );
 }
 
-function WorkScreen({ model, onPair }: Readonly<{ model: Companion; onPair: () => void }>) {
+function WorkScreen({ model, onPair, onChooseConversation, promptReview }: Readonly<{
+  model: Companion;
+  onPair: () => void;
+  onChooseConversation: (id: string) => void;
+  promptReview: ReactNode;
+}>) {
   const tablet = useWindowDimensions().width >= 768;
   const notices = useContext(PageNotices);
   if (model.phase === 'expired')
@@ -317,14 +498,14 @@ function WorkScreen({ model, onPair }: Readonly<{ model: Companion; onPair: () =
       {tablet || !model.selection ? (
         <View style={tablet ? s.master : s.grow}>
           <PageNotices.Provider value={tablet && model.selection ? null : notices}>
-            <WorkList model={model} />
+            <WorkList model={model} onChooseConversation={onChooseConversation} />
           </PageNotices.Provider>
         </View>
       ) : null}
       {tablet || model.selection ? (
         <View style={s.grow}>
           {model.selection ? (
-            <WorkDetail key={`${model.host?.id}:${model.selection.id}`} model={model} />
+            <WorkDetail key={`${model.host?.id}:${model.selection.id}`} model={model} promptReview={promptReview} />
           ) : (
             <View style={[s.page, s.empty]}>
               <Text style={s.heading}>Choose a conversation</Text>
@@ -337,7 +518,10 @@ function WorkScreen({ model, onPair }: Readonly<{ model: Companion; onPair: () =
   );
 }
 
-function WorkList({ model }: Readonly<{ model: Companion }>) {
+function WorkList({ model, onChooseConversation }: Readonly<{
+  model: Companion;
+  onChooseConversation: (id: string) => void;
+}>) {
   const [creating, setCreating] = useState(false);
   const taskHost = model.host?.authority === 'tasks';
   const tasks = [...(model.tasks?.tasks ?? [])].sort(
@@ -366,7 +550,7 @@ function WorkList({ model }: Readonly<{ model: Companion }>) {
               key={task.id}
               accessibilityRole="button"
               accessibilityState={{ selected: task.id === model.selection?.id }}
-              onPress={() => model.chooseItem({ id: task.id })}
+              onPress={() => onChooseConversation(task.id)}
               style={({ pressed }) => [
                 s.listRow,
                 task.id === model.selection?.id && s.selected,
@@ -398,7 +582,7 @@ function WorkList({ model }: Readonly<{ model: Companion }>) {
             key={thread.id}
             accessibilityRole="button"
             accessibilityState={{ selected: thread.id === model.selection?.id }}
-            onPress={() => model.chooseItem({ id: thread.id })}
+            onPress={() => onChooseConversation(thread.id)}
             style={({ pressed }) => [
               s.listRow,
               thread.id === model.selection?.id && s.selected,
@@ -409,7 +593,7 @@ function WorkList({ model }: Readonly<{ model: Companion }>) {
             <Text numberOfLines={1} style={s.small}>
               {thread.project}
             </Text>
-            <StateBadge value={thread.state} />
+            <StateBadge value={thread.needs_answer ? 'needs_answer' : thread.state} />
           </Pressable>
         ))
       ) : (
@@ -435,13 +619,19 @@ function WorkList({ model }: Readonly<{ model: Companion }>) {
   );
 }
 
-function WorkDetail({ model }: Readonly<{ model: Companion }>) {
+function WorkDetail({ model, promptReview }: Readonly<{ model: Companion; promptReview: ReactNode }>) {
   const scroll = useRef<ScrollViewInstance>(null),
     composer = useRef<TextInputInstance>(null),
     followComposer = useRef(true),
     follow = useRef(true),
     bodyStart = useRef(0);
   const [composerFocused, setComposerFocused] = useState(false);
+  const showPromptReview = Boolean(promptReview);
+  useEffect(() => {
+    if (!showPromptReview) return;
+    const frame = requestAnimationFrame(() => scroll.current?.scrollToEnd({ animated: false }));
+    return () => cancelAnimationFrame(frame);
+  }, [showPromptReview]);
   const revealComposer = () => {
     if (followComposer.current && composer.current?.isFocused())
       scroll.current?.scrollToEnd({ animated: false });
@@ -450,6 +640,10 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
   const desktop = model.host?.authority === 'desktop';
   const thread = model.thread;
   const permission = thread?.permission;
+  const question = thread?.question;
+  const questionDraftKey = question && thread && model.host
+    ? JSON.stringify([model.host.id, thread.thread.id, question.turn_generation, question.request_id, question.review_hash])
+    : null;
   const online = model.phase === 'online';
   const mutable = online && !model.busy && !model.pending && !model.taskPending;
   const ownsTasks = model.tasks?.can_control === true;
@@ -467,12 +661,12 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
           ← Conversation
         </Button>
         <Text style={s.heading}>
-          {selectedText.kind === 'diff' ? 'Working tree diff' : 'Full message'}
+          {selectedText.kind === 'question-link' ? selectedText.title : selectedText.kind === 'diff' ? 'Working tree diff' : 'Full message'}
         </Text>
         {model.textPage ? (
           <>
             <Text selectable style={s.code}>
-              {model.textPage.text || 'No changes.'}
+              {model.textPage.text || (selectedText.kind === 'question-link' ? 'This file is empty.' : 'No changes.')}
             </Text>
             {model.textPage.source_truncated ? (
               <Notice>
@@ -508,7 +702,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
     );
   return (
     <View style={s.grow}>
-      {permission || task?.approvals.length ? (
+      {question || permission || task?.approvals.length ? (
         <Button
           onPress={() => {
             followComposer.current = false;
@@ -518,7 +712,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
           }}
           quiet
         >
-          Review approval ↑
+          {question ? 'Answer question ↑' : 'Review approval ↑'}
         </Button>
       ) : null}
       <PageScroll
@@ -545,7 +739,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
         onContentSizeChange={() => {
           if (
             (followComposer.current && composer.current?.isFocused()) ||
-            (follow.current && !permission && !task?.approvals.length)
+            (follow.current && !question && !permission && !task?.approvals.length)
           )
             scroll.current?.scrollToEnd({ animated: false });
         }}
@@ -578,7 +772,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
             {title ?? 'Loading conversation…'}
           </Text>
           {task ? <StateBadge value={task.state} /> : null}
-          {thread ? <StateBadge value={thread.thread.state} /> : null}
+          {thread ? <StateBadge value={thread.thread.needs_answer ? 'needs_answer' : thread.thread.state} /> : null}
         </View>
         <View
           style={[s.page, { flexGrow: 1 }]}
@@ -586,6 +780,16 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
             bodyStart.current = event.nativeEvent.layout.y;
           }}
         >
+          {question && questionDraftKey ? (
+            <QuestionCard key={questionDraftKey} request={question} draftKey={questionDraftKey} drafts={model.questionDrafts}
+              canSend={Boolean(messageAllowed)} disabled={!mutable} submit={reply => void model.answerQuestion(question, reply)}
+              stageFile={(position, id, file) => model.stageQuestionFile(question, position, id, file)}
+              canOpenProject={online && Boolean(model.session?.device.scopes.includes('diff'))}
+              previewFile={(id, title) => model.showText({
+                kind: 'question-link', title, offset: 0,
+                questionLink: { id, requestId: question.request_id, reviewHash: question.review_hash, turnGeneration: question.turn_generation },
+              })} />
+          ) : null}
           {permission ? (
             <View style={s.permission}>
               <Text style={s.subheading}>{permission.tool}</Text>
@@ -655,7 +859,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
               </View>
             </View>
           ))}
-          {thread?.laptop_action_required ? (
+          {thread?.laptop_action_required && !question ? (
             <Notice>
               A private interaction needs you on the computer. Credential forms are never sent to
               this device.
@@ -742,6 +946,7 @@ function WorkDetail({ model }: Readonly<{ model: Companion }>) {
           ) : null}
         </View>
         <View style={s.composer}>
+          {promptReview}
           <View style={s.row}>
             <Dictation value={model.draft} onText={model.setDraft} />
           </View>
@@ -1014,7 +1219,7 @@ function AccessScreen({ model, onPair }: Readonly<{ model: Companion; onPair: ()
           <Text style={s.subheading}>Granted on the computer</Text>
           <View style={s.row}>
             {model.session.device.scopes.map((scope) => (
-              <StateBadge key={scope} value={scope} />
+              <StateBadge key={scope} value={scope === 'linked_drafts' ? 'Open linked drafts' : scope} />
             ))}
           </View>
           <Text style={s.text}>

@@ -268,7 +268,7 @@ pub fn grow_height(scroll_height: i32, min: i32, max: i32) -> (i32, bool) {
 
 /// Default auto-grow bounds.
 pub const EDITOR_MIN_HEIGHT_PX: i32 = 52;
-pub const EDITOR_MAX_HEIGHT_PX: i32 = 200;
+pub const EDITOR_MAX_HEIGHT_PX: i32 = 260;
 
 #[component]
 pub fn MentionEditor(
@@ -281,9 +281,15 @@ pub fn MentionEditor(
     /// Cmd/Ctrl+Enter. The composer uses this for the opposite follow-up.
     #[prop(optional)]
     on_opposite: Option<Callback<()>>,
+    /// Plain Escape when no popover or inline suggestion consumes it.
+    #[prop(optional)]
+    on_escape: Option<Callback<()>>,
     /// Option/Alt+Up at the start of the draft edits the latest queued message.
     #[prop(optional)]
     on_edit_queued: Option<Callback<()>>,
+    /// Reports whether the browser IME is composing text.
+    #[prop(optional)]
+    on_composition: Option<Callback<bool>>,
     /// Plain ArrowUp / ArrowDown. The bools are `(older, caret on the edge
     /// for that direction)`. Returning true consumes the key.
     #[prop(optional)]
@@ -330,9 +336,9 @@ pub fn MentionEditor(
         if chrome {
             "resize-none block w-full rounded-grape bg-white/5 px-3 py-2 text-label leading-[1.45] text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         } else if value.get().is_empty() {
-            "block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-body leading-relaxed text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
+            "block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-body leading-relaxed text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         } else {
-            "block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-body leading-relaxed text-transparent caret-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
+            "block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-body leading-relaxed text-transparent caret-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         }
     };
 
@@ -379,6 +385,7 @@ pub fn MentionEditor(
     // Popover state
     let (popover_kind, set_popover_kind) = signal::<Option<PopoverKind>>(None);
     let (popover_query, set_popover_query) = signal::<String>(String::new());
+    let (popover_loading, set_popover_loading) = signal::<bool>(false);
     let (file_results, set_file_results) = signal::<Vec<FileEntry>>(vec![]);
     let (pull_results, set_pull_results) = signal::<Vec<PullHit>>(vec![]);
     let (pull_error, set_pull_error) = signal::<Option<String>>(None);
@@ -409,6 +416,7 @@ pub fn MentionEditor(
         if kind != Some(PopoverKind::Files) {
             return;
         }
+        set_popover_loading.set(true);
         let project = project_path.get_untracked();
         spawn_local(async move {
             // A failed search shows "No matches" rather than stale results.
@@ -418,8 +426,14 @@ pub fn MentionEditor(
                     log::warn!("file mention search failed: {error}");
                     Vec::new()
                 });
+            if popover_kind.get_untracked() != Some(PopoverKind::Files)
+                || popover_query.get_untracked() != query
+            {
+                return;
+            }
             set_file_results.set(entries);
             set_selected_idx.set(0);
+            set_popover_loading.set(false);
         });
     });
 
@@ -429,17 +443,21 @@ pub fn MentionEditor(
         if kind != Some(PopoverKind::Pulls) {
             return;
         }
+        set_popover_loading.set(true);
         let project = project_path.get_untracked();
         spawn_local(async move {
             let (entries, error) = list_pulls(&query, project.as_deref())
                 .await
                 .unwrap_or_else(|error| (Vec::new(), Some(error.to_string())));
-            if popover_query.get_untracked() != query {
+            if popover_kind.get_untracked() != Some(PopoverKind::Pulls)
+                || popover_query.get_untracked() != query
+            {
                 return;
             }
             set_pull_results.set(entries);
             set_pull_error.set(error);
             set_selected_idx.set(0);
+            set_popover_loading.set(false);
         });
     });
 
@@ -451,18 +469,22 @@ pub fn MentionEditor(
         if kind != Some(PopoverKind::Skills) {
             return;
         }
+        set_popover_loading.set(true);
         let project = project_path.get_untracked();
         let provider = AgentProvider::for_model(&model).as_str().to_string();
         spawn_local(async move {
             let (entries, error) = list_skills(&query, project.as_deref(), &provider)
                 .await
                 .unwrap_or_else(|error| (Vec::new(), Some(error.to_string())));
-            if popover_query.get_untracked() != query {
+            if popover_kind.get_untracked() != Some(PopoverKind::Skills)
+                || popover_query.get_untracked() != query
+            {
                 return;
             }
             set_skill_results.set(entries);
             set_skill_error.set(error);
             set_selected_idx.set(0);
+            set_popover_loading.set(false);
         });
     });
 
@@ -764,7 +786,13 @@ pub fn MentionEditor(
         let meta = ev.meta_key() || ev.ctrl_key();
         if !popover_open && !meta && !ev.alt_key() && !ev.shift_key() {
             if key == "Escape" {
+                let had_suggestion = !suggestion.suffix.get_untracked().is_empty();
                 suggestion.dismiss.run(());
+                if !had_suggestion {
+                    if let Some(on_escape) = on_escape.as_ref() {
+                        on_escape.run(());
+                    }
+                }
             } else if key == "Tab" && !ev.repeat() {
                 if let Some(ta) = textarea_ref.get_untracked() {
                     suggestion::remember_selection(&ta, suggestion.selection);
@@ -1122,7 +1150,7 @@ pub fn MentionEditor(
             {move || {
                 let suffix = suggestion.suffix.get();
                 (!suffix.is_empty()).then(|| view! {
-                    <div aria-hidden="true" data-prompt-suggestion="" class="pointer-events-none col-start-1 row-start-1 max-h-[200px] overflow-hidden whitespace-pre-wrap break-words px-3 pt-2.5 pb-1 text-body leading-relaxed">
+                    <div aria-hidden="true" data-prompt-suggestion="" class="pointer-events-none col-start-1 row-start-1 max-h-[260px] overflow-hidden whitespace-pre-wrap break-words px-3.5 pt-3 pb-1 text-body leading-relaxed">
                         <span class="text-transparent">{move || value.get()}</span><span class="text-rambutan-500">{suffix}</span>
                     </div>
                 })
@@ -1132,7 +1160,7 @@ pub fn MentionEditor(
                     node_ref=overlay_ref
                     aria-hidden="true"
                     data-composer-overlay=""
-                    class="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap px-3 pt-2.5 pb-1 text-body leading-relaxed text-rambutan-100"
+                    class="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap px-3.5 pt-3 pb-1 text-body leading-relaxed text-rambutan-100"
                     inner_html=move || styled.get()
                     on:click=move |ev: web_sys::MouseEvent| {
                         let Some(target) = ev
@@ -1185,8 +1213,14 @@ pub fn MentionEditor(
                 on:scroll=on_scroll
                 on:focus=move |_| suggestion.focused.set(true)
                 on:blur=move |_| suggestion.focused.set(false)
-                on:compositionstart=move |_| suggestion.composing.set(true)
-                on:compositionend=move |_| suggestion.composing.set(false)
+                on:compositionstart=move |_| {
+                    suggestion.composing.set(true);
+                    if let Some(report) = on_composition { report.run(true); }
+                }
+                on:compositionend=move |_| {
+                    suggestion.composing.set(false);
+                    if let Some(report) = on_composition { report.run(false); }
+                }
                 on:select=move |_| { if let Some(ta) = textarea_ref.get_untracked() { suggestion::remember_selection(&ta, suggestion.selection); } }
             />
             {(!members_mode).then(|| view! { <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span> })}
@@ -1200,27 +1234,52 @@ pub fn MentionEditor(
 
             // Floating popover (anchored above the textarea, full width).
             {move || {
-                let kind = popover_kind.get();
-                if kind.is_none() {
+                let Some(kind) = popover_kind.get() else {
                     return ().into_any();
-                }
+                };
+                let heading = match kind {
+                    PopoverKind::Files => "Files and threads",
+                    PopoverKind::Pulls => "Pull requests",
+                    PopoverKind::Skills => "Skills",
+                    PopoverKind::Slash => "Commands",
+                    PopoverKind::Members => "Members",
+                };
+                let header = view! {
+                    <div class="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-1.5 text-label-sm text-rambutan-500">
+                        <span>{heading}</span>
+                        <span class="hidden sm:inline text-rambutan-500">"Enter to select  Esc to close"</span>
+                    </div>
+                };
 
                 // Build uniform rows from whichever source is active, then
                 // render. This keeps the JSX simple and avoids
                 // For-macro pitfalls.
                 let items: Vec<PickRow> = picker_rows.get();
+                let is_async = matches!(kind, PopoverKind::Files | PopoverKind::Pulls | PopoverKind::Skills);
 
                 if items.is_empty() {
-                    let message = if matches!(kind, Some(PopoverKind::Pulls)) {
+                    if is_async && popover_loading.get() {
+                        return view! {
+                            <div class="absolute bottom-full left-0 right-0 mb-1.5 z-40 overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                                {header}
+                                <div class="flex items-center gap-2 px-3 py-2 text-label-sm text-rambutan-400">
+                                    <Icon name="loader" size=12 class="animate-spin text-rambutan-500 motion-reduce:animate-none" />
+                                    <span>"Searching…"</span>
+                                </div>
+                            </div>
+                        }.into_any();
+                    }
+                    let message = if matches!(kind, PopoverKind::Pulls) {
                         pull_error.get().unwrap_or_else(|| "No matches".into())
-                    } else if matches!(kind, Some(PopoverKind::Skills)) {
+                    } else if matches!(kind, PopoverKind::Skills) {
                         skill_error.get().unwrap_or_else(|| "No matches".into())
                     } else {
                         "No matches".into()
                     };
                     let muted = message == "No matches";
                     return view! {
-                        <div class="absolute bottom-full left-0 right-0 mb-1 z-40 rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                        <div class="absolute bottom-full left-0 right-0 mb-1.5 z-40 overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                            {header}
                             <div class=if muted { "px-3 py-2 text-label-sm text-rambutan-500" } else { "px-3 py-2 text-label-sm text-rambutan-400" }>
                                 {message}
                             </div>
@@ -1245,12 +1304,12 @@ pub fn MentionEditor(
                                     apply_selection.run(i);
                                 }
                                 class=move || format!(
-                                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer text-body-sm {} {}",
+                                    "mx-1 flex items-center gap-2 rounded-seed px-2.5 py-1.5 cursor-pointer text-body-sm transition-colors {} {}",
                                     if members_mode { "bruhs-control" } else { "" },
                                     if selected_idx.get() == i {
                                         "bg-longan-800 text-rambutan-100"
                                     } else {
-                                        "text-rambutan-300"
+                                        "text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100"
                                     }
                                 )
                             >
@@ -1273,10 +1332,11 @@ pub fn MentionEditor(
                     .collect();
 
                 view! {
-                    <div class="absolute bottom-full left-0 right-0 mb-1 z-40 max-h-72 overflow-y-auto rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                    <div class="absolute bottom-full left-0 right-0 mb-1.5 z-40 flex max-h-72 flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                        {header}
                         <ul
                             node_ref=list_ref
-                            class="py-1"
+                            class="min-h-0 flex-1 overflow-y-auto py-1"
                             role=members_mode.then_some("listbox")
                             aria-label=members_mode.then_some("Members")
                         >{rendered}</ul>
@@ -1424,7 +1484,7 @@ fn fence_languages(
         .map(|fence| {
             let open = fence.open_line_byte;
             let info = fence.info;
-            let top = 16.0 + fence.line_index.to_f64_lossy() * line_px - scrolled;
+            let top = 12.0 + fence.line_index.to_f64_lossy() * line_px - scrolled;
             let current = if info.is_empty() {
                 "text".to_string()
             } else {
@@ -1433,7 +1493,7 @@ fn fence_languages(
             let shown = current.clone();
             view! {
                 <select
-                    class="absolute right-3 z-10 h-6 max-w-32 rounded-seed bg-longan-800 px-1 text-label-sm text-rambutan-300"
+                    class="absolute right-3 z-10 h-6 max-w-32 rounded-seed bg-longan-800 px-1.5 text-label-sm text-rambutan-300 inset-ring inset-ring-white/10 transition-colors hover:text-rambutan-100"
                     style=format!("top: {top}px")
                     aria-label="Code block language"
                     data-fence-language=shown

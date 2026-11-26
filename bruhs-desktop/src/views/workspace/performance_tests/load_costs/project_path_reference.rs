@@ -104,6 +104,7 @@ impl Workspace {
             pinned: persisted.pinned,
             settled: persisted.settled,
             settled_at_ms: persisted.settled_at_ms,
+            idle_settle_resumed_at: persisted.idle_settle_resumed_at,
             pin_rank: persisted.pin_rank,
             active_rank: persisted.active_rank,
             snoozed_until_ms: persisted.snoozed_until_ms,

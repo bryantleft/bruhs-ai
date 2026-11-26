@@ -145,7 +145,7 @@ fn overlapping_codex_logs_cannot_inflate_the_same_cumulative_identity() {
     .unwrap_err();
     assert!(error.to_string().contains("conflicting deltas"));
     assert_eq!(
-        snapshot_at(store.path(), &BTreeMap::new())
+        snapshot_at(store.path(), &ExtensionConfig::default())
             .unwrap()
             .by_model["gpt-test"]
             .input,
@@ -376,6 +376,7 @@ fn committing_a_page_that_exceeds_the_cumulative_ledger_budget_preserves_both_in
     let record = |id: String| UsageRecord {
         id,
         thread_id: "fixture".into(),
+        session_id: None,
         model: "fixture-model".into(),
         project: project.clone(),
         at: 0,
@@ -383,6 +384,8 @@ fn committing_a_page_that_exceeds_the_cumulative_ledger_budget_preserves_both_in
         output: 1,
         cache_read: 0,
         cache_write: 0,
+        requested_speed: Default::default(),
+        cli_cost_usd: None,
     };
     let records = (0..49)
         .map(|index| {
@@ -407,7 +410,7 @@ fn committing_a_page_that_exceeds_the_cumulative_ledger_budget_preserves_both_in
             (row.id.clone(), row)
         })
         .collect::<BTreeMap<_, _>>();
-    preview.usage = aggregate(&records, &BTreeMap::new(), None);
+    preview.usage = aggregate(&records, &ExtensionConfig::default(), None);
     let id = preview.id.clone();
     atomic(
         store.path(),

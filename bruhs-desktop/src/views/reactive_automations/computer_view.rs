@@ -700,6 +700,7 @@ impl ComputerView {
         }
         live.when_some(hint, |live, hint| live.aria_description(hint))
             .track_focus(&self.focus)
+            .key_context("LiveComputerInput")
             .on_any_mouse_down(cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::wheel))
             .on_key_up(cx.listener(Self::key_up))

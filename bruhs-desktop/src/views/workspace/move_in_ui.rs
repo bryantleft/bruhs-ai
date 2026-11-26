@@ -940,10 +940,10 @@ impl Workspace {
                 "desktop-move-in-dialog",
                 MOVE_IN_TITLE,
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
             .debug_selector(|| "desktop-move-in-dialog".to_string())
-            .child(self.blur_scrim.backdrop())
             .w(px(IMPORT_DIALOG_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))
             .bg(theme::longan_800())

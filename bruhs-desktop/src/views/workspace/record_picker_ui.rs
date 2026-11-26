@@ -293,10 +293,10 @@ impl Workspace {
                 "desktop-record-picker",
                 target.label(),
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
             .debug_selector(|| "desktop-record-picker".to_string())
-            .child(self.blur_scrim.backdrop())
             .w(px(RECORD_PICKER_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))
             .bg(theme::longan_800())

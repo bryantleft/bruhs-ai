@@ -1,7 +1,14 @@
 //! Device-scoped projection of the running native desktop. No credential-form data.
+use crate::logic::app_link::{
+    PromptDestination, PromptLinkError, PromptModel, PromptPullRequest, PromptRepository,
+};
+use crate::logic::user_question::{QuestionAnswer, QuestionReply, UserQuestion};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
+
+mod markdown;
+pub use markdown::*;
 
 /// Matches the local workspace bridge's input frame.
 pub const REQUEST_BYTES: usize = 64 * 1024;
@@ -21,6 +28,7 @@ pub enum MobileScope {
     Prompt,
     Approve,
     Diff,
+    LinkedDrafts,
 }
 pub type MobileScopes = BTreeSet<MobileScope>;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,14 +82,102 @@ pub enum MobileAction {
         review_hash: String,
         decision: MobileDecision,
     },
+    AnswerQuestion {
+        thread_id: String,
+        turn_generation: u64,
+        request_id: String,
+        review_hash: String,
+        reply: MobileQuestionReply,
+    },
+    OpenLinkedDraft {
+        target: MobileLinkTarget,
+    },
+    ContinueLinkedDraft {
+        link_id: Uuid,
+        choice: MobileLinkChoice,
+    },
 }
 impl MobileAction {
     pub fn scope(&self) -> MobileScope {
         match self {
-            Self::Prompt { .. } => MobileScope::Prompt,
+            Self::Prompt { .. } | Self::AnswerQuestion { .. } => MobileScope::Prompt,
             Self::Permission { .. } => MobileScope::Approve,
+            Self::OpenLinkedDraft { .. } | Self::ContinueLinkedDraft { .. } => {
+                MobileScope::LinkedDrafts
+            }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MobileLinkTarget {
+    pub repository: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub pull_request: Option<String>,
+}
+
+impl MobileLinkTarget {
+    /// The host validates the target without accepting prompt text or an execution path.
+    pub fn destination(&self) -> Result<PromptDestination, PromptLinkError> {
+        if let Some(pull) = &self.pull_request {
+            if self.repository.is_some() || self.provider.is_some() || self.model.is_some() {
+                return Err(PromptLinkError::DuplicateTarget);
+            }
+            return PromptPullRequest::parse(pull)
+                .map(PromptDestination::PullRequest)
+                .ok_or(PromptLinkError::PullRequest);
+        }
+        let repository = self
+            .repository
+            .as_deref()
+            .map(|repository| {
+                PromptRepository::parse(repository).ok_or(PromptLinkError::Repository)
+            })
+            .transpose()?;
+        let model = PromptModel::parse(self.provider.as_deref(), self.model.as_deref())?;
+        Ok(PromptDestination::New { repository, model })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MobileLinkChoice {
+    Clone,
+    Checkout,
+    WithoutProject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MobileLinkStatus {
+    Preparing,
+    MissingRepository {
+        repository: String,
+        clone_parent: Option<String>,
+        error: Option<String>,
+    },
+    Checkout {
+        project: String,
+        error: Option<String>,
+    },
+    Ready {
+        thread_id: String,
+        model: String,
+        model_fallback: bool,
+        without_project: bool,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileLinkedDraft {
+    pub link_id: Uuid,
+    #[serde(flatten)]
+    pub state: MobileLinkStatus,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,6 +220,8 @@ pub struct MobileThread {
     pub project: String,
     pub updated_at_ms: i64,
     pub state: MobileThreadState,
+    #[serde(default)]
+    pub needs_answer: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MobileThreadPage {
@@ -151,11 +249,61 @@ pub struct MobilePermission {
     pub can_allow: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileQuestion {
+    pub request_id: String,
+    pub turn_generation: u64,
+    pub review_hash: String,
+    pub questions: Vec<UserQuestion>,
+    pub responding: bool,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub can_attach: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markdown: Vec<MobileQuestionMarkdown>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MobileQuestionReply {
+    Answer { answers: Vec<MobileQuestionAnswer> },
+    Skip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MobileQuestionAnswer {
+    pub selected: Vec<usize>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<uuid::Uuid>,
+}
+
+impl From<MobileQuestionReply> for QuestionReply {
+    fn from(reply: MobileQuestionReply) -> Self {
+        match reply {
+            MobileQuestionReply::Skip => Self::Skip,
+            MobileQuestionReply::Answer { answers } => Self::Answer {
+                answers: answers
+                    .into_iter()
+                    .map(|answer| QuestionAnswer {
+                        selected: answer.selected,
+                        text: answer.text,
+                        attachments: answer.attachments,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MobileThreadSnapshot {
     pub thread: MobileThread,
     pub messages: Vec<MobileMessage>,
     pub next_before: Option<usize>,
     pub permission: Option<MobilePermission>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<MobileQuestion>,
     pub queued_prompts: usize,
     pub laptop_action_required: bool,
 }
@@ -170,6 +318,9 @@ pub struct MobileTextPage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MobileRead {
+    LinkedDraft {
+        link_id: Uuid,
+    },
     Threads {
         offset: usize,
     },
@@ -189,11 +340,25 @@ pub enum MobileRead {
         offset: usize,
         revision: Option<String>,
     },
+    QuestionLink(MobileQuestionLink),
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MobileQuestionLink {
+    pub thread_id: String,
+    pub request_id: String,
+    pub turn_generation: u64,
+    pub review_hash: String,
+    pub link: String,
+    pub offset: usize,
+    pub revision: Option<String>,
+}
+
 impl MobileRead {
     pub fn scope(&self) -> MobileScope {
         match self {
-            Self::Diff { .. } => MobileScope::Diff,
+            Self::LinkedDraft { .. } => MobileScope::LinkedDrafts,
+            Self::Diff { .. } | Self::QuestionLink(_) => MobileScope::Diff,
             _ => MobileScope::Read,
         }
     }
@@ -201,6 +366,7 @@ impl MobileRead {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum MobileReadReply {
+    LinkedDraft(MobileLinkedDraft),
     Threads(MobileThreadPage),
     Thread(MobileThreadSnapshot),
     Text(MobileTextPage),

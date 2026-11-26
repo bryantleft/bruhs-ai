@@ -29,7 +29,7 @@ pub struct Updates {
     /// Why the last update did not start (a 409, the server down). Kept apart
     /// from `error`, which every successful check clears.
     pub start_error: RwSignal<Option<String>>,
-    /// Runs the user dismissed from the sidebar (T3 keeps these in memory).
+    /// Runs dismissed from the sidebar during this session.
     pub dismissed: RwSignal<HashSet<u64>>,
     /// The "Update N providers?" confirmation.
     pub confirm_open: RwSignal<bool>,

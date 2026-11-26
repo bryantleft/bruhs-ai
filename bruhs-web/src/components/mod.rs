@@ -90,4 +90,6 @@ pub mod workbench;
 pub mod workflow_history;
 pub mod workflow_payload;
 pub mod workflow_status;
+mod workspace_focus;
 pub mod workspace_navigation;
+pub mod workspace_trust_banner;

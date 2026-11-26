@@ -160,14 +160,38 @@ impl DeliveryService {
         };
         let mut command = tokio::process::Command::new(executable);
         if specification.program == "git" {
-            command
-                .args([
+            let trusted = crate::workspace_trust::is_trusted(cwd);
+            let local_overrides = if trusted {
+                Vec::new()
+            } else {
+                crate::git::repo_local_neutralizers(cwd, true).await
+            };
+            command.arg("--no-pager").args([
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.pager=cat",
+                "-c",
+                "diff.external=",
+                "-c",
+                "protocol.ext.allow=never",
+                "-c",
+                "diff.autoRefreshIndex=false",
+            ]);
+            if !trusted {
+                command.args([
                     "-c",
-                    "core.fsmonitor=false",
-                    "-c",
-                    "diff.autoRefreshIndex=false",
-                ])
-                .env("GIT_OPTIONAL_LOCKS", "0");
+                    &format!("core.hooksPath={}", crate::git::EMPTY_HOOKS_PATH),
+                ]);
+            }
+            for kv in &local_overrides {
+                command.arg("-c").arg(kv);
+            }
+            crate::git::strip_git_env(&mut command);
+            command.env("GIT_OPTIONAL_LOCKS", "0");
+        } else if matches!(specification.program.as_str(), "gh" | "glab") {
+            // Isolate internal `git` subprocesses spawned by forge CLIs.
+            crate::git::apply_safe_git_subprocess_env(&mut command);
         }
         command
             .args(&specification.args)
@@ -186,19 +210,6 @@ impl DeliveryService {
             .env_remove("CLICOLOR_FORCE")
             .env_remove("FORCE_COLOR")
             .env_remove("GH_FORCE_TTY");
-        if matches!(specification.program.as_str(), "git" | "gh" | "glab") {
-            // CWD is the reviewed repository; inherited selectors must not redirect
-            // its index, worktree or the forge CLI's internal Git commands.
-            for variable in [
-                "GIT_DIR",
-                "GIT_WORK_TREE",
-                "GIT_COMMON_DIR",
-                "GIT_INDEX_FILE",
-                "GIT_NAMESPACE",
-            ] {
-                command.env_remove(variable);
-            }
-        }
         if specification.program == "gh" {
             let repository = repository
                 .filter(|repository| repository.forge == Forge::GitHub)

@@ -61,6 +61,7 @@ pub mod weekly_reports;
 pub mod whiteboard;
 pub mod workbench_handoff;
 pub mod workspace_bridge;
+pub mod workspace_trust;
 
 pub use agent::PermissionMode;
 pub use capture_recovery::*;

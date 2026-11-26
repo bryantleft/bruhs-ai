@@ -16,7 +16,16 @@ export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : 'The operation failed. Check the host and retry.';
 
 const integer = z.number().int().nonnegative().safe();
-const scope = z.enum(['read', 'prompt', 'approve', 'diff']);
+const questionAnswerSchema = z.strictObject({
+  selected: z.array(integer).max(4),
+  text: z.string().max(8192),
+  attachments: z.array(z.uuid()).max(100).optional(),
+});
+const questionReplySchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('answer'), answers: z.array(questionAnswerSchema).min(1).max(4) }),
+  z.strictObject({ type: z.literal('skip') }),
+]);
+const scope = z.enum(['read', 'prompt', 'approve', 'diff', 'linked_drafts']);
 export const deviceSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -46,6 +55,24 @@ export const pairSchema = z.object({
   device: deviceSchema,
   next_sequence: integer,
 });
+const linkChoiceSchema = z.enum(['clone', 'checkout', 'without_project']);
+export const linkTargetSchema = z.strictObject({
+  repository: z.string().max(170).optional(),
+  provider: z.string().max(64).optional(),
+  model: z.string().max(256).optional(),
+  pull_request: z.string().max(220).optional(),
+});
+const linkedDraftStatusSchema = z.discriminatedUnion('status', [
+    z.object({ status: z.literal('preparing') }),
+    z.object({ status: z.literal('missing_repository'), repository: z.string(), clone_parent: z.string().nullable(), error: z.string().nullable() }),
+    z.object({ status: z.literal('checkout'), project: z.string(), error: z.string().nullable() }),
+    z.object({ status: z.literal('ready'), thread_id: z.string().min(1), model: z.string(), model_fallback: z.boolean(), without_project: z.boolean() }),
+    z.object({ status: z.literal('failed'), message: z.string() }),
+]);
+export const linkedDraftSchema = z.object({
+  kind: z.literal('linked_draft'),
+  value: z.intersection(z.object({ link_id: z.string().uuid() }), linkedDraftStatusSchema),
+});
 export const nativeActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('prompt'), thread_id: z.string(), text: z.string() }),
   z.object({
@@ -56,6 +83,16 @@ export const nativeActionSchema = z.discriminatedUnion('kind', [
     review_hash: z.string(),
     decision: z.enum(['allow', 'deny']),
   }),
+  z.strictObject({
+    kind: z.literal('answer_question'),
+    thread_id: z.string(),
+    turn_generation: integer,
+    request_id: z.string(),
+    review_hash: z.string(),
+    reply: questionReplySchema,
+  }),
+  z.strictObject({ kind: z.literal('open_linked_draft'), target: linkTargetSchema }),
+  z.strictObject({ kind: z.literal('continue_linked_draft'), link_id: z.string().uuid(), choice: linkChoiceSchema }),
 ]);
 export const commandSchema = z.object({
   id: z.string().uuid(),
@@ -68,6 +105,7 @@ export const threadSchema = z.object({
   project: z.string(),
   updated_at_ms: integer,
   state: z.enum(['idle', 'running', 'needs_approval', 'laptop_action']),
+  needs_answer: z.boolean().optional(),
 });
 export const threadsSchema = z.object({
   kind: z.literal('threads'),
@@ -80,6 +118,50 @@ export const permissionSchema = z.object({
   input: z.string(),
   review_hash: z.string(),
   can_allow: z.boolean(),
+});
+export type QuestionMarkdownLink =
+  | { kind: 'web'; url: string }
+  | { kind: 'project'; id: string };
+const markdownLink: z.ZodType<QuestionMarkdownLink> = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('web'), url: z.string().max(2048) }),
+  z.object({ kind: z.literal('project'), id: z.string().regex(/^[a-f0-9]{64}$/) }),
+]);
+const markdownTag = z.enum([
+  'paragraph', 'heading', 'quote', 'code_block', 'ordered_list', 'list', 'item',
+  'table', 'row', 'cell', 'strong', 'emphasis', 'strike', 'code', 'link', 'plain',
+]);
+export type QuestionMarkdownNode = string | {
+  tag: z.infer<typeof markdownTag>;
+  children: QuestionMarkdownNode[];
+  target?: QuestionMarkdownLink;
+  start?: number;
+};
+const markdownNode: z.ZodType<QuestionMarkdownNode> = z.lazy(() =>
+  z.union([z.string(), z.object({
+    tag: markdownTag,
+    children: z.array(markdownNode).max(768),
+    target: markdownLink.optional(),
+    start: integer.optional(),
+  })]));
+const markdown = z.array(markdownNode).max(768).nullable();
+const questionSchema = z.object({
+  request_id: z.string(),
+  turn_generation: integer,
+  review_hash: z.string(),
+  questions: z.array(z.object({
+    question: z.string(),
+    header: z.string(),
+    options: z.array(z.object({ label: z.string(), description: z.string(), preview: z.string().nullable() })).max(4),
+    multiSelect: z.boolean(),
+    allowCustom: z.boolean(),
+  })).min(1).max(4),
+  responding: z.boolean(),
+  error: z.string().nullable(),
+  can_attach: z.boolean().default(false),
+  markdown: z.array(z.object({
+    question: markdown,
+    previews: z.array(markdown).max(4),
+  })).max(4).optional(),
 });
 export const threadSnapshotSchema = z.object({
   kind: z.literal('thread'),
@@ -98,6 +180,7 @@ export const threadSnapshotSchema = z.object({
     ),
     next_before: integer.nullable(),
     permission: permissionSchema.nullable(),
+    question: questionSchema.optional(),
     queued_prompts: integer,
     laptop_action_required: z.boolean(),
   }),
@@ -159,6 +242,9 @@ export type Pairing = Readonly<{ origin: string; secret: string }>;
 export type Session = z.infer<typeof sessionSchema>;
 export type NativeCommand = z.infer<typeof commandSchema>;
 export type NativeAction = z.infer<typeof nativeActionSchema>;
+export type LinkedDraftTarget = z.infer<typeof linkTargetSchema>;
+export type LinkedDraftChoice = z.infer<typeof linkChoiceSchema>;
+export type LinkedDraftStatus = z.infer<typeof linkedDraftStatusSchema>;
 export type Receipt = z.infer<typeof receiptSchema>;
 export type Thread = z.infer<typeof threadSchema>;
 export type ThreadSnapshot = z.infer<typeof threadSnapshotSchema>['value'];
@@ -166,6 +252,9 @@ export type TextPage = z.infer<typeof textPageSchema>['value'];
 export type Task = z.infer<typeof taskSchema>;
 export type TaskSnapshot = z.infer<typeof taskSnapshotSchema>;
 export type Permission = z.infer<typeof permissionSchema>;
+export type PendingQuestion = z.infer<typeof questionSchema>;
+export type QuestionAnswer = z.infer<typeof questionAnswerSchema>;
+export type QuestionReply = z.infer<typeof questionReplySchema>;
 export const running = (state: Task['state']): boolean =>
   ['ready', 'running', 'waiting_approval', 'waiting_child'].includes(state);
 

@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as Crypto from 'expo-crypto';
-import { HostClient, pairDesktop } from './client';
+import { HostClient, pairDesktop, type TextPageRequest } from './client';
 import { transport } from './transport';
 import { vault } from './storage';
 import {
   type Failure,
   type Host,
+  type LinkedDraftChoice,
+  type LinkedDraftTarget,
   type NativeAction,
   type NativeCommand,
   type Pairing,
   type Permission,
+  type PendingQuestion,
+  type QuestionReply,
   type Receipt,
   type Session,
   type TaskSnapshot,
@@ -19,25 +23,21 @@ import {
   type ThreadSnapshot,
   acknowledgeDraft,
   draftKey,
+  failure,
   messageOf,
   nextCommand,
   originOf,
 } from './domain';
 import { canMutate, deliveryStatus, recoverDelivery } from './delivery';
 import type { UncertainTask } from './vault';
+import type { QuestionDraft } from './QuestionCard';
+import type { PickedQuestionFile } from './questionFiles';
 
 // Matches MobileRead's existing 1000ms coalesced snapshot cadence. Only one
 // refresh is in flight, and background apps stop making requests.
 const REFRESH_MS = 1000;
 export type Phase = 'none' | 'connecting' | 'online' | 'offline' | 'expired';
 export type Selection = Readonly<{ id: string; before?: number }>;
-export type TextSelection = Readonly<{
-  kind: 'diff' | 'message';
-  offset: number;
-  revision?: string;
-  message?: Readonly<{ index: number; reference: string }>;
-}>;
-
 export function useCompanion() {
   const [hosts, setHosts] = useState<readonly Host[]>([]);
   const [host, setHost] = useState<Host | null>(null);
@@ -51,11 +51,12 @@ export function useCompanion() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [thread, setThread] = useState<ThreadSnapshot | null>(null);
   const [tasks, setTasks] = useState<TaskSnapshot | null>(null);
-  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [textSelection, setTextSelection] = useState<TextPageRequest | null>(null);
   const [textPage, setTextPage] = useState<TextPage | null>(null);
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const draftsRef = useRef(drafts),
     draftHosts = useRef(new Set<string>());
+  const questionDrafts = useRef(new Map<string, QuestionDraft>());
   const [pending, setPending] = useState<NativeCommand | null>(null);
   const [taskPending, setTaskPending] = useState<UncertainTask | null>(null);
   const [delivery, setDelivery] = useState('');
@@ -103,6 +104,7 @@ export function useCompanion() {
     problemKind.current = error.kind;
     setProblem(error.message);
     if (error.kind === 'unauthorized') {
+      questionDrafts.current.clear();
       setPhase('expired');
       setThread(null);
       setTasks(null);
@@ -142,7 +144,8 @@ export function useCompanion() {
       });
       return;
     }
-    setDelivery(deliveryStatus(receipt));
+    const linked = command.action.kind.endsWith('linked_draft');
+    setDelivery(linked && receipt.outcome.status === 'accepted' ? '' : deliveryStatus(receipt));
     if (receipt.outcome.status === 'pending') return;
     const saved = await vault.savePending(active, null);
     if (current.current.host?.id !== active.id) return;
@@ -223,11 +226,11 @@ export function useCompanion() {
         }
         sessionRef.current = info.value;
         setSession(info.value);
-        if (page?.kind === 'diff' && !info.value.device.scopes.includes('diff')) {
+        if ((page?.kind === 'diff' || page?.kind === 'question-link') && !info.value.device.scopes.includes('diff')) {
           current.current.textSelection = null;
           setTextSelection(null);
           setTextPage(null);
-          report({ kind: 'forbidden', message: 'Diff access ended on the computer.' });
+          report({ kind: 'forbidden', message: 'Project preview access ended on the computer.' });
           setPhase('online');
           return;
         }
@@ -251,13 +254,7 @@ export function useCompanion() {
             'A saved command needs a delivery check. Retrying sends its exact original UUID, sequence and payload.',
           );
         if (item && page && loadedText.current !== generation) {
-          const result = await client.text(
-            page.kind,
-            item.id,
-            page.offset,
-            page.revision,
-            page.message,
-          );
+          const result = await client.text(item.id, page);
           if (!belongs(active, generation)) return;
           loadedText.current = generation;
           if (!result.ok) {
@@ -363,6 +360,7 @@ export function useCompanion() {
   const chooseHost = useCallback(
     (next: Host | null): void => {
       if (current.current.host) void saveDrafts(current.current.host);
+      if (current.current.host?.id !== next?.id) questionDrafts.current.clear();
       epoch.current++;
       readAbort.current?.abort();
       loaded.current = null;
@@ -394,7 +392,7 @@ export function useCompanion() {
     [refresh],
   );
 
-  const chooseItem = (next: Selection | null): void => {
+  const chooseItem = useCallback((next: Selection | null): void => {
     epoch.current++;
     readAbort.current?.abort();
     current.current.selection = next;
@@ -405,8 +403,8 @@ export function useCompanion() {
     setTextPage(null);
     setProblem('');
     void refresh();
-  };
-  const showText = (next: TextSelection | null): void => {
+  }, [refresh]);
+  const showText = (next: TextPageRequest | null): void => {
     epoch.current++;
     readAbort.current?.abort();
     current.current.textSelection = next;
@@ -540,11 +538,12 @@ export function useCompanion() {
     }
     await refresh();
   }
-  async function sendNative(action: NativeAction): Promise<void> {
+  async function sendNative(action: NativeAction, onSaved?: (id: string) => void, targetHost?: string): Promise<void> {
     const active = current.current.host,
       info = sessionRef.current;
     if (
       !active ||
+      (targetHost && active.id !== targetHost) ||
       !info ||
       mutation.current ||
       !canMutate(
@@ -552,7 +551,9 @@ export function useCompanion() {
         current.current.phase === 'online',
         pendingRef.current,
         info,
-        action.kind === 'prompt' ? 'prompt' : 'approve',
+        action.kind === 'prompt' || action.kind === 'answer_question'
+          ? 'prompt'
+          : action.kind === 'permission' ? 'approve' : 'linked_drafts',
       )
     )
       return;
@@ -575,13 +576,21 @@ export function useCompanion() {
       }
       if (current.current.host?.id !== active.id) return;
       replacePending(command.value);
-      setDelivery('Sending…');
+      onSaved?.(command.value.id);
+      setDelivery(action.kind.endsWith('linked_draft') ? 'Preparing linked draft…' : 'Sending…');
       await postNative(active, command.value);
     } finally {
       mutation.current = false;
       setBusy(false);
     }
   }
+  const readLinkedDraft = useCallback((hostId: string, linkId: string, signal: AbortSignal) => {
+    const active = current.current.host;
+    if (!active || active.id !== hostId || active.authority !== 'desktop') {
+      return Promise.resolve(failure('conflict', 'The selected computer changed.'));
+    }
+    return new HostClient(active, transport).linkedDraft(linkId, signal);
+  }, []);
   async function retry(): Promise<void> {
     const active = current.current.host,
       command = pendingRef.current;
@@ -666,6 +675,19 @@ export function useCompanion() {
   const setDraft = (text: string): void => {
     if (key) updateDrafts((previous) => ({ ...previous, [key]: text }));
   };
+  const placeLinkedDraft = useCallback((hostId: string, threadId: string, expected: string, text: string): boolean => {
+    const { host: active, selection: item, phase: state } = current.current;
+    if (active?.id !== hostId || item?.id !== threadId || state !== 'online' || !draftHosts.current.has(hostId)) {
+      return false;
+    }
+    const key = draftKey(active, threadId);
+    if ((draftsRef.current[key] ?? '') !== expected) return false;
+    if (expected !== text) {
+      updateDrafts((previous) => ({ ...previous, [key]: text }));
+      void saveDrafts(active);
+    }
+    return true;
+  }, []);
   async function sendPrompt(): Promise<void> {
     const active = current.current.host,
       item = current.current.selection,
@@ -743,7 +765,47 @@ export function useCompanion() {
           decision,
         })
       : Promise.resolve();
+  const answerQuestion = (question: PendingQuestion, reply: QuestionReply): Promise<void> =>
+    host && thread && selection?.id === thread.thread.id && thread.question?.review_hash === question.review_hash
+      ? sendNative({
+          kind: 'answer_question',
+          thread_id: thread.thread.id,
+          request_id: question.request_id,
+          turn_generation: question.turn_generation,
+          review_hash: question.review_hash,
+          reply,
+        }, undefined, host.id)
+      : Promise.resolve();
+  async function stageQuestionFile(
+    question: PendingQuestion,
+    position: number,
+    id: string,
+    file?: PickedQuestionFile,
+  ) {
+    const active = current.current;
+    if (!host || active.host?.id !== host.id || host.authority !== 'desktop'
+      || active.phase !== 'online' || !thread || active.selection?.id !== thread.thread.id
+      || thread.question?.request_id !== question.request_id
+      || thread.question.turn_generation !== question.turn_generation
+      || thread.question.review_hash !== question.review_hash
+      || thread.question.responding || !thread.question.can_attach
+      || !question.questions[position]?.allowCustom
+      || !sessionRef.current?.device.scopes.includes('prompt')
+      || mutation.current || pendingRef.current) {
+      return failure('conflict', 'Reload the pending question and try again.');
+    }
+    const result = await new HostClient(host, transport).questionFile(thread.thread.id, question, position, id, file);
+    if (!result.ok && result.error.kind === 'unauthorized' && current.current.host?.id === host.id) {
+      report(result.error);
+    }
+    return result;
+  }
   return {
+    readLinkedDraft,
+    openLinkedDraft: (hostId: string, target: LinkedDraftTarget, onSaved: (id: string) => void) =>
+      sendNative({ kind: 'open_linked_draft', target }, onSaved, hostId),
+    continueLinkedDraft: (hostId: string, id: string, choice: LinkedDraftChoice, onSaved: (id: string) => void) =>
+      sendNative({ kind: 'continue_linked_draft', link_id: id, choice }, onSaved, hostId),
     hosts,
     host,
     chooseHost,
@@ -765,6 +827,7 @@ export function useCompanion() {
     showText,
     draft,
     setDraft,
+    placeLinkedDraft,
     pending,
     taskPending,
     delivery,
@@ -777,5 +840,8 @@ export function useCompanion() {
     reviewedTask,
     sendPrompt,
     decide,
+    answerQuestion,
+    stageQuestionFile,
+    questionDrafts: questionDrafts.current,
   };
 }

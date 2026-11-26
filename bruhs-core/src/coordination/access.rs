@@ -14,6 +14,14 @@ pub enum AccessScope {
         #[serde(default)]
         rename: bool,
     },
+    ProjectUsageHistory {
+        #[serde(default)]
+        rename: bool,
+        #[serde(default)]
+        limits: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edit_prices: bool,
+    },
     ProjectSchedules {
         #[serde(default)]
         rename: bool,
@@ -35,6 +43,10 @@ pub enum AccessScope {
         reply_threads: bool,
         #[serde(default)]
         usage: bool,
+        #[serde(default)]
+        usage_history: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        edit_usage_prices: bool,
     },
     Guest {
         task_id: ThreadId,
@@ -45,7 +57,34 @@ impl AccessScope {
     pub fn shares_usage(&self) -> bool {
         matches!(
             self,
-            Self::ProjectUsage { .. } | Self::ProjectSchedules { usage: true, .. }
+            Self::ProjectUsage { .. }
+                | Self::ProjectUsageHistory { limits: true, .. }
+                | Self::ProjectSchedules { usage: true, .. }
+        )
+    }
+
+    pub fn shares_usage_history(&self) -> bool {
+        matches!(
+            self,
+            Self::ProjectUsageHistory { .. }
+                | Self::ProjectSchedules {
+                    usage_history: true,
+                    ..
+                }
+        )
+    }
+
+    pub fn edits_usage_prices(&self) -> bool {
+        matches!(
+            self,
+            Self::ProjectUsageHistory {
+                edit_prices: true,
+                ..
+            } | Self::ProjectSchedules {
+                usage_history: true,
+                edit_usage_prices: true,
+                ..
+            }
         )
     }
 }
@@ -89,6 +128,7 @@ impl CoordinationRuntime {
                 AccessScope::Projects
                     | AccessScope::ProjectNames
                     | AccessScope::ProjectUsage { .. }
+                    | AccessScope::ProjectUsageHistory { .. }
                     | AccessScope::ProjectSchedules { .. }
             )
         {
@@ -168,6 +208,7 @@ impl CoordinationRuntime {
             AccessScope::Owner => Ok(self.snapshot().await),
             AccessScope::Projects
             | AccessScope::ProjectUsage { .. }
+            | AccessScope::ProjectUsageHistory { .. }
             | AccessScope::ProjectNames
             | AccessScope::ProjectSchedules { .. }
             | AccessScope::Keybindings { .. } => Err(CoordinationError::Unauthorized),

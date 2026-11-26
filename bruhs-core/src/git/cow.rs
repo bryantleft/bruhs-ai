@@ -18,7 +18,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bruhs_models::delivery::{ProjectScripts, WorktreeConfig};
-use tokio::io::AsyncReadExt;
 
 use super::clone_fs::clone_path;
 use super::GitCommand;
@@ -27,6 +26,8 @@ use super::GitCommand;
 const MAX_DETECTED_BUILD_DIRS: usize = 64;
 /// Bytes of `.bruhs/config.json` read; the delivery budget is the same.
 const CONFIG_LIMIT: u64 = 64 * 1024;
+/// Maximum bytes read when comparing `package.json` or lockfiles.
+const LOCKFILE_LIMIT: u64 = 4 * 1024 * 1024;
 /// Lockfiles that pin what `node_modules` holds.
 const NODE_LOCKFILES: [&str; 6] = [
     "package-lock.json",
@@ -53,29 +54,43 @@ pub(super) async fn toplevel(repo: &Path) -> Option<PathBuf> {
 /// most [`CONFIG_LIMIT`] bytes or does not parse, so a typo never turns on
 /// what the owner meant to turn off.
 pub(super) async fn options(root: &Path) -> WorktreeConfig {
-    let file = root.join(".bruhs/config.json");
-    let meta = match tokio::fs::metadata(&file).await {
-        Ok(meta) => meta,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return WorktreeConfig::default();
+    let bruhs_dir = root.join(".bruhs");
+    let file = bruhs_dir.join("config.json");
+    let read_result = tokio::task::spawn_blocking(move || {
+        match std::fs::symlink_metadata(&bruhs_dir) {
+            Ok(meta) if meta.file_type().is_dir() => {}
+            Ok(_) => {
+                return Err("not a regular .bruhs directory".to_string());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.to_string()),
         }
-        Err(error) => return disabled(&file, &error.to_string()),
+        match std::fs::symlink_metadata(&file) {
+            Ok(meta) if !meta.file_type().is_file() || meta.len() > CONFIG_LIMIT => {
+                return Err("not a regular file within 64 KiB".to_string());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        }
+        match crate::workspace_trust::read_regular_file_bounded(&file, CONFIG_LIMIT) {
+            Ok(Some(bytes)) => Ok(Some(bytes)),
+            Ok(None) => Err("not a regular file within 64 KiB".to_string()),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+    .await;
+    let bytes = match read_result {
+        Ok(Ok(Some(bytes))) => bytes,
+        Ok(Ok(None)) => return WorktreeConfig::default(),
+        Ok(Err(why)) => return disabled(&root.join(".bruhs/config.json"), &why),
+        Err(error) => return disabled(&root.join(".bruhs/config.json"), &error.to_string()),
     };
-    // A FIFO or device would block or never end.
-    if !meta.is_file() || meta.len() > CONFIG_LIMIT {
-        return disabled(&file, "not a regular file within 64 KiB");
-    }
-    let mut bytes = Vec::new();
-    let read = match tokio::fs::File::open(&file).await {
-        Ok(handle) => handle.take(CONFIG_LIMIT + 1).read_to_end(&mut bytes).await,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = read {
-        return disabled(&file, &error.to_string());
-    }
     match serde_json::from_slice::<ProjectScripts>(&bytes) {
         Ok(scripts) => scripts.worktree,
-        Err(error) => disabled(&file, &error.to_string()),
+        Err(error) => disabled(&root.join(".bruhs/config.json"), &error.to_string()),
     }
 }
 
@@ -214,14 +229,23 @@ pub(super) fn node_inputs_match(root: &Path, dest: &Path, dir: &str) -> bool {
         inputs.push(lockfile.to_string());
     }
     inputs.iter().all(|file| {
+        let a_path = root.join(file);
+        let b_path = dest.join(file);
+        let a_missing = std::fs::symlink_metadata(&a_path)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        let b_missing = std::fs::symlink_metadata(&b_path)
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        if a_missing && b_missing {
+            return true;
+        }
+        if a_missing || b_missing {
+            return false;
+        }
         match (
-            std::fs::read(root.join(file)),
-            std::fs::read(dest.join(file)),
+            crate::workspace_trust::read_regular_file_bounded(&a_path, LOCKFILE_LIMIT),
+            crate::workspace_trust::read_regular_file_bounded(&b_path, LOCKFILE_LIMIT),
         ) {
-            (Ok(a), Ok(b)) => a == b,
-            (Err(a), Err(b)) => {
-                a.kind() == std::io::ErrorKind::NotFound && b.kind() == std::io::ErrorKind::NotFound
-            }
+            (Ok(Some(a)), Ok(Some(b))) => a == b,
             _ => false,
         }
     })

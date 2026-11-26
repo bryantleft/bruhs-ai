@@ -627,7 +627,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let (toggle, select) = self.settings_dropdown_handlers(id, cx);
-        dropdown(
+        let picker = bruhs_ui::dropdown::Dropdown::new(
             id,
             label,
             value,
@@ -635,7 +635,42 @@ impl Workspace {
             self.settings_listbox(id),
             toggle,
             select,
-        )
+        );
+        if !matches!(
+            id,
+            SETTINGS_ROLE_MODEL_DROPDOWN_ID
+                | SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID
+                | SETTINGS_SUMMARY_MODEL_DROPDOWN_ID
+                | SETTINGS_REVIEW_CLAUDE_DROPDOWN_ID
+                | SETTINGS_REVIEW_CODEX_DROPDOWN_ID
+                | SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID
+                | SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID
+        ) {
+            return picker.into_any_element();
+        }
+        let custom = match id {
+            SETTINGS_ROLE_MODEL_DROPDOWN_ID => {
+                self.selected_role().and_then(|role| role.model.as_deref())
+            }
+            SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID => self
+                .selected_role()
+                .and_then(|role| self.roles.override_for(&self.role_project(), &role.id))
+                .and_then(|role| role.model.as_deref()),
+            _ => None,
+        }
+        .map(AgentProvider::for_model);
+        let default = AgentProvider::for_model(&self.current_model);
+        picker
+            .option_mark(move |value| {
+                let provider = match value {
+                    INHERIT => None,
+                    CUSTOM_ROLE_MODEL => custom,
+                    DEFAULT_ROLE_MODEL => Some(default),
+                    other => Some(AgentProvider::for_model(other)),
+                }?;
+                Some(provider_glyph(provider).into_any_element())
+            })
+            .into_any_element()
     }
 
     /// The Roles rows: pick or add a role, edit it, override it per project.

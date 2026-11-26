@@ -44,9 +44,9 @@ impl Workspace {
         let used_fallback = model != *requested && self.model_for_new_thread(requested) == model;
         let options = self.kiro_defaults_for(path, &model, used_fallback);
         let native = self.thread_options_for(path, &model);
-        thread.chat.update(cx, |chat, _| {
+        thread.chat.update(cx, |chat, cx| {
             chat.model_options = native;
-            chat.model_catalog = self.thread_catalog.clone();
+            chat.replace_model_catalog(self.thread_catalog.clone(), cx);
         });
         if !options.is_empty() {
             thread.chat.update(cx, |chat, cx| {

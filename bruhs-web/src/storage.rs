@@ -20,6 +20,7 @@ use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::JsValue;
 
 pub mod backup_dump;
+pub(crate) mod composer_drafts;
 pub mod day_plans;
 pub(crate) mod mail_compose;
 pub mod meeting_generations;
@@ -45,7 +46,8 @@ const DB_NAME: &str = "bruhs";
 // before a writer can replace a structured record with a JSON envelope.
 // v14 moves scheduling policy into transactional metadata. An older tab
 // must close its old connection before this authority can be migrated.
-pub(crate) const DB_VERSION: u32 = 14;
+// v15 adds independently saved composer drafts for local threads.
+pub(crate) const DB_VERSION: u32 = 15;
 const STORE_BOARDS: &str = "whiteboards";
 const STORE_BOARD_INDEX: &str = "whiteboard_index";
 const STORE_BOARD_ASSETS: &str = "whiteboard_assets";
@@ -53,6 +55,7 @@ const STORE_MEETING_GENERATIONS: &str = "meeting_generations";
 const STORE_METADATA: &str = "metadata";
 const STORE_THREADS: &str = "threads";
 const STORE_MESSAGES: &str = "messages";
+const STORE_COMPOSER_DRAFTS: &str = "composer_drafts";
 const STORE_WORK_ITEMS: &str = "work_items";
 const STORE_PROJECTS: &str = "projects";
 const STORE_EVENTS: &str = "events";
@@ -85,6 +88,7 @@ pub async fn load_meeting_notes() -> Result<Vec<bruhs_models::MeetingNote>, idb:
 }
 
 mod messages_record;
+pub(crate) mod question_file_retirement;
 pub(crate) use messages_record::MessagesRecord;
 
 fn store_params(key: &str) -> ObjectStoreParams {
@@ -252,6 +256,7 @@ async fn open_fresh() -> Result<Database, idb::Error> {
             (STORE_METADATA, "key"),
             (STORE_THREADS, "id"),
             (STORE_MESSAGES, "thread_id"),
+            (STORE_COMPOSER_DRAFTS, "thread_id"),
             (STORE_WORK_ITEMS, "id"),
             (STORE_PROJECTS, "id"),
             (STORE_EVENTS, "id"),

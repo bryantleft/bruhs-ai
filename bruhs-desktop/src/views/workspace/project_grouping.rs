@@ -98,6 +98,14 @@ pub(super) struct Group {
 }
 
 impl Workspace {
+    pub(super) fn project_prompt_repository(
+        &self,
+        path: &str,
+    ) -> Option<bruhs_models::logic::app_link::PromptRepository> {
+        let identity = self.project_identities.values.get(path)?;
+        bruhs_models::logic::app_link::PromptRepository::from_remote_identity(&identity.repository)
+    }
+
     pub(super) fn refresh_project_identities(&mut self, cx: &mut Context<'_, Self>) {
         let now = Instant::now();
         let mut paths: BTreeSet<_> = self.listed_projects().into_iter().map(|p| p.path).collect();

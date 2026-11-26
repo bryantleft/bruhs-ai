@@ -28,24 +28,18 @@
 }
 
 .bruhs-provider-logo {
-  display: block !important;
-  aspect-ratio: 1 / 1;
-  inline-size: 0.75rem !important;
-  block-size: 0.75rem !important;
-  width: 0.75rem !important;
-  height: 0.75rem !important;
-  min-width: 0.75rem !important;
-  max-width: 0.75rem !important;
-  min-height: 0.75rem !important;
-  max-height: 0.75rem !important;
-  object-fit: contain;
-  flex-shrink: 0;
-  filter: brightness(0) invert(1);
-  opacity: 0.6;
+  display: block;
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  flex: none;
+  background-color: var(--color-rambutan-400);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
 }
 
-/* The sidebar's "Codex updated" pill drains over its three visible seconds
-   (T3's provider pill). Reduced motion keeps the pill, not the bar. */
+/* The sidebar's "Codex updated" pill drains over its three visible seconds.
+   Reduced motion keeps the pill visible without the progress bar. */
 .bruhs-update-progress {
   animation: bruhs-update-progress 3s linear forwards;
 }
@@ -63,7 +57,7 @@
   /* A month day is one tap target on touch: its date and record pills are
      too small to tap, so the tap opens the day's list (month_view.rs). */
   [data-calendar-cell] button { pointer-events: none; }
-  input:not([type="checkbox"]):not([type="radio"]), textarea[class],
+  input:not([type="checkbox"]):not([type="radio"]), textarea[class], button.bruhs-field-trigger,
   [data-composer-surface] [data-composer-overlay] { font-size: 16px; }
   [role="menuitem"], [role="option"] { min-height: 44px; }
 }
@@ -87,6 +81,15 @@
   * { scrollbar-width: auto !important; scrollbar-color: auto !important; }
   ::-webkit-scrollbar, ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner,
   ::-webkit-scrollbar-thumb { all: revert !important; }
+}
+
+.model-picker-options {
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+}
+
+.model-picker-options::-webkit-scrollbar {
+  display: none;
 }
 
 :where(button:not(:disabled)) { cursor: pointer; }

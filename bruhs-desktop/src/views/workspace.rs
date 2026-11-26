@@ -11,7 +11,7 @@ use gpui::prelude::*;
 use gpui::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet, HashSet};
 use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
@@ -207,6 +207,8 @@ mod usage_hubs;
 mod view_restore;
 mod whiteboard_ui;
 mod work_item_handoff_ui;
+mod workspace_focus;
+mod workspace_trust_settings;
 mod worktree_naming;
 mod worktree_storage;
 use calendar_ui::*;
@@ -510,6 +512,9 @@ enum TaskCreateMenu {
 )]
 enum Overlay {
     Capture,
+    Usage {
+        from_settings: bool,
+    },
     Welcome,
     Settings {
         /// Id of the settings dropdown whose listbox is open, if any.
@@ -585,6 +590,8 @@ enum TopLayer {
     ImportThread,
     /// Move in: a bruh from OpenClaw or Hermes Agent, or memory By prompt.
     MoveIn,
+    /// Review a prompt link before changing its destination or fetching a pull request.
+    PromptTarget,
     /// Connect a record or cite a source on the open document (web
     /// `RecordPicker`), with the highlighted match.
     RecordPicker {
@@ -744,6 +751,14 @@ pub(crate) fn provider_identity_mark(
     }
 }
 
+pub(crate) fn provider_glyph(provider: AgentProvider) -> gpui::Svg {
+    svg()
+        .path(assets::provider_logo_path(provider))
+        .size(px(assets::PROVIDER_LOGO_SIZE_PX))
+        .flex_none()
+        .text_color(theme::rambutan_400())
+}
+
 pub(crate) fn provider_mark(provider: AgentProvider, _cx: &App) -> AnyElement {
     let logo_size = px(assets::PROVIDER_LOGO_SIZE_PX);
     div()
@@ -900,6 +915,7 @@ struct DesktopThread {
     pinned: bool,
     settled: bool,
     settled_at_ms: Option<EpochMs>,
+    idle_settle_resumed_at: Option<EpochMs>,
     /// Drag order within Pinned. `None` sits above arranged pins.
     pin_rank: Option<i64>,
     /// Drag order within Active. Activity does not clear this.
@@ -935,6 +951,10 @@ struct PersistedWorkspaceState {
     calendar_anchor: Option<String>,
     selected_calendar_event_id: Option<String>,
     threads: Vec<PersistedThread>,
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    retired_question_files: BTreeSet<String>,
+    #[serde(skip)]
+    live_question_files: BTreeSet<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     desktop_task_links: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -1169,6 +1189,8 @@ struct PersistedThread {
     settled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     settled_at_ms: Option<EpochMs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    idle_settle_resumed_at: Option<EpochMs>,
     #[serde(default, skip_serializing_if = "skip_false")]
     cleanup_busy: bool,
     #[serde(default)]
@@ -1238,6 +1260,7 @@ struct ShelfSnapshot {
     pinned: bool,
     settled: bool,
     settled_at_ms: Option<EpochMs>,
+    idle_settle_resumed_at: Option<EpochMs>,
     pin_rank: Option<i64>,
     active_rank: Option<i64>,
     snoozed_until_ms: Option<i64>,
@@ -1429,6 +1452,7 @@ const FORM_SELECT_OPTION_Y_PADDING_PX: f32 = 6.0;
 struct PersistenceCoordinator {
     latest_generation: AtomicU64,
     write_lock: Mutex<DiskVersion>,
+    question_files: Mutex<Option<persistence::QuestionFileHistory>>,
 }
 
 fn current_dir_string() -> String {
@@ -1606,11 +1630,14 @@ pub struct Workspace {
     day_plan_test_now: Option<chrono::DateTime<Local>>,
     persistence: Arc<PersistenceCoordinator>,
     save_queue: save_queue::SaveQueue,
+    retired_question_files: BTreeSet<String>,
 
     /// Title search box in the sidebar (web: the `Search` input).
     sidebar_search: Entity<InputState>,
+    sidebar_rename: Option<sidebar_ui::SidebarRename>,
     /// Geometry and keyboard targets for visible sidebar rows.
     sidebar_viewport: RefCell<sidebar_ui::SidebarViewport>,
+    sidebar_drag: Option<sidebar_ui::SidebarDrag>,
     /// Threads whose turn finished while another thread was active.
     unread_thread_ids: HashSet<String>,
     sidebar_settled_open: bool,
@@ -1657,6 +1684,7 @@ pub struct Workspace {
     keybinding_installed: Vec<keybindings_ui::InstalledBinding>,
     /// Thread whose action menu is open.
     thread_menu_id: Option<String>,
+    thread_menu_snooze_only: bool,
     /// Focus targets for the thread menu's items (`ThreadMenuItem` slots).
     thread_menu_items: Rc<[FocusHandle]>,
     /// The thread menu's "Custom…" snooze fields.
@@ -1707,6 +1735,7 @@ pub struct Workspace {
     environments: environments::Environments,
     diagnostics: diagnostics::Monitor,
     local_tools: device_settings::Access,
+    trusted_folders: workspace_trust_settings::TrustedFolders,
     command_launcher: Option<Result<crate::launcher::Status, String>>,
     command_launcher_busy: bool,
     telemetry: telemetry::Editor,
@@ -1821,12 +1850,15 @@ pub struct Workspace {
     maintenance: maintenance::Maintenance,
     project_defaults: BTreeMap<String, project_defaults::ProjectDefaults>,
     settings_project_scope: String,
+    discovered_project_marks: RefCell<BTreeMap<String, Option<project_art::ProjectMark>>>,
     project_actions: BTreeMap<String, Vec<project_actions::ProjectAction>>,
     action_editor: project_actions::ActionEditor,
     idle_action_runs: Option<BTreeMap<String, EpochMs>>,
     snooze_editor: snooze_options::Editor,
     quota_prefs: quota_settings::Preferences,
     project_identities: project_grouping::Identities,
+    prompt_link_resolution: Option<Task<()>>,
+    prompt_link_choice: Option<app_links::TargetChoice>,
     expanded_project_groups: std::collections::BTreeSet<String>,
     project_names: project_name::SyncState,
     project_list: project_order::ProjectList,
@@ -1863,6 +1895,7 @@ pub struct Workspace {
     project_picker_task: Option<Task<()>>,
     project_picker_scroll: ScrollHandle,
     workspace_focus_handle: FocusHandle,
+    area_focus: workspace_focus::AreaFocus,
     #[cfg(target_os = "macos")]
     last_embedded_shell_focus: Option<FocusHandle>,
     palette_return_focus: Option<(AppView, FocusHandle)>,
@@ -2845,9 +2878,12 @@ impl Workspace {
                 ..Default::default()
             }),
             save_queue: save_queue::SaveQueue::default(),
+            retired_question_files: BTreeSet::new(),
             unread_thread_ids: HashSet::new(),
             sidebar_search,
+            sidebar_rename: None,
             sidebar_viewport: RefCell::new(sidebar_ui::SidebarViewport::new(cx)),
+            sidebar_drag: None,
             sidebar_settled_open: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_settled_open)
@@ -2927,6 +2963,7 @@ impl Workspace {
             crew_new_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             crew_scroll: ScrollHandle::new(),
             thread_menu_id: None,
+            thread_menu_snooze_only: false,
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
                 .collect(),
@@ -2988,6 +3025,7 @@ impl Workspace {
             environments: environments::Environments::new(window, cx),
             diagnostics: Default::default(),
             local_tools: Default::default(),
+            trusted_folders: Default::default(),
             command_launcher: None,
             command_launcher_busy: false,
             telemetry: telemetry::Editor::new(window, cx),
@@ -3195,6 +3233,8 @@ impl Workspace {
                 .unwrap_or_default(),
             capacity_task: None,
             project_identities: Default::default(),
+            prompt_link_resolution: None,
+            prompt_link_choice: None,
             expanded_project_groups: Default::default(),
             removal: Default::default(),
             project_names: Default::default(),
@@ -3226,6 +3266,7 @@ impl Workspace {
                 .map(|state| state.project_defaults.clone())
                 .unwrap_or_default(),
             settings_project_scope: String::new(),
+            discovered_project_marks: RefCell::new(BTreeMap::new()),
             project_picker_current_path: String::new(),
             project_picker_current_name: String::new(),
             project_picker_parent_path: None,
@@ -3235,6 +3276,7 @@ impl Workspace {
             project_picker_task: None,
             project_picker_scroll: ScrollHandle::new(),
             workspace_focus_handle: cx.focus_handle().tab_stop(false),
+            area_focus: workspace_focus::AreaFocus::new(window, cx),
             #[cfg(target_os = "macos")]
             last_embedded_shell_focus: None,
             palette_return_focus: None,
@@ -3891,7 +3933,7 @@ impl Workspace {
                                     px(TERMINAL_DRAWER_MIN_HEIGHT_PX)
                                         ..px(TERMINAL_DRAWER_MAX_HEIGHT_PX),
                                 )
-                                .child(self.terminal_panel.clone()),
+                                .child(self.render_focusable_terminal()),
                         );
                     div().flex_1().h_full().min_w_0().min_h_0().child(split)
                 } else {
@@ -3911,7 +3953,7 @@ impl Workspace {
                 .flex()
                 .flex_col()
                 .child(self.render_terminal_page_header())
-                .child(self.terminal_panel.clone()),
+                .child(self.render_focusable_terminal()),
             AppView::Tasks => self.render_tasks_page(window, cx),
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
@@ -4159,9 +4201,7 @@ impl Render for Workspace {
         self.preview_panel
             .update(cx, |panel, _| panel.set_shown(preview_shown));
         if self.active_view == AppView::Workbench && self.workbench_panel.is_none() {
-            let usage = std::mem::take(&mut self.usage_hubs.open_workbench_usage);
-            let panel =
-                cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(usage, window, cx));
+            let panel = cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(window, cx));
             // Verification's "Use draft" fills the composer, as on the web.
             self._subscriptions.push(cx.subscribe_in(
                 &panel,
@@ -4174,11 +4214,6 @@ impl Render for Workspace {
             self.workbench_panel = Some(panel);
         }
         if self.active_view == AppView::Workbench {
-            if std::mem::take(&mut self.usage_hubs.open_workbench_usage) {
-                if let Some(panel) = &self.workbench_panel {
-                    panel.update(cx, |panel, cx| panel.open_usage(window, cx));
-                }
-            }
             if let (Some(id), Some(panel)) = (
                 self.work_item_handoff.open.take(),
                 self.workbench_panel.as_ref(),
@@ -4263,12 +4298,17 @@ impl Render for Workspace {
                             .overflow_hidden()
                             .h_full()
                             .flex_shrink_0()
-                            .child(self.render_sidebar(window, cx)),
+                            .child(self.render_sidebar(
+                                px(WORKSPACE_SIDE_PANEL_WIDTH_PX * sidebar_fraction),
+                                window,
+                                cx,
+                            )),
                     )
                 },
             )
             .child({
                 let main_column = div()
+                    .track_focus(self.area_focus.handle(workspace_focus::Area::Content))
                     .flex_1()
                     .h_full()
                     .min_w_0()
@@ -4381,7 +4421,11 @@ impl Render for Workspace {
                             .max_w_full()
                             .h_full()
                             .occlude()
-                            .child(self.render_sidebar(window, cx)),
+                            .child(self.render_sidebar(
+                                px(WORKSPACE_SIDE_PANEL_WIDTH_PX).min(window.viewport_size().width),
+                                window,
+                                cx,
+                            )),
                     )
                 },
             )
@@ -4420,6 +4464,7 @@ impl Render for Workspace {
 
         div()
             .key_context("Workspace")
+            .capture_key_down(cx.listener(Self::cancel_sidebar_drag_on_escape))
             .capture_key_down(cx.listener(Self::quit_down))
             .capture_key_up(cx.listener(|this, event, window, cx| {
                 this.voice_shortcut_key_up(event, cx);
@@ -4565,6 +4610,7 @@ impl Render for Workspace {
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
                     Overlay::Capture => self.render_capture_dialog(window, cx),
+                    Overlay::Usage { .. } => self.render_usage_overlay(window, cx),
                     Overlay::Welcome => self.render_welcome(window, cx),
                     Overlay::Settings { .. } => self.render_settings(window, cx),
                     Overlay::TaskCreate { .. } => self.render_task_create_dialog(window, cx),
@@ -4604,6 +4650,7 @@ impl Render for Workspace {
                     TopLayer::ProjectPicker { .. } => self.render_project_picker(window, cx),
                     TopLayer::ImportThread => self.render_import_thread(window, cx),
                     TopLayer::MoveIn => self.render_move_in(window, cx),
+                    TopLayer::PromptTarget => self.render_prompt_target(window, cx),
                     TopLayer::RecordPicker {
                         target,
                         highlighted,

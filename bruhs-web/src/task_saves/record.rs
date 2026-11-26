@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::state::{CalendarEvent, CaptureRecord, InboxConversation, Project, WorkItem};
+use crate::storage::composer_drafts::DraftRecord;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -18,6 +19,7 @@ pub enum Kind {
     Project,
     Thread,
     Conversation,
+    ComposerDraft,
 }
 
 /// Keep the existing store wire shapes while distinguishing identities across
@@ -30,28 +32,20 @@ pub enum Record {
     Inbox(InboxConversation),
     Event(CalendarEvent),
     Document(KnowledgeDocument),
-    Attachment(#[serde(serialize_with = "serialize_attachment")] Arc<KnowledgeAttachment>),
+    Attachment(#[serde(serialize_with = "serialize_arc")] Arc<KnowledgeAttachment>),
     SourceClip(SourceClip),
     Person(PersonProfile),
     Project(Project),
     Thread(crate::state::Thread),
-    Conversation(
-        #[serde(serialize_with = "serialize_conversation")] Arc<crate::storage::MessagesRecord>,
-    ),
+    Conversation(#[serde(serialize_with = "serialize_arc")] Arc<crate::storage::MessagesRecord>),
+    ComposerDraft(#[serde(serialize_with = "serialize_arc")] Arc<DraftRecord>),
 }
 
-fn serialize_attachment<S: serde::Serializer>(
-    attachment: &Arc<KnowledgeAttachment>,
+fn serialize_arc<T: Serialize, S: serde::Serializer>(
+    item: &Arc<T>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    attachment.as_ref().serialize(serializer)
-}
-
-fn serialize_conversation<S: serde::Serializer>(
-    conversation: &Arc<crate::storage::MessagesRecord>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    conversation.as_ref().serialize(serializer)
+    item.as_ref().serialize(serializer)
 }
 
 impl Record {
@@ -68,6 +62,7 @@ impl Record {
             Self::Project(record) => &record.id,
             Self::Thread(record) => &record.id,
             Self::Conversation(record) => record.thread_id(),
+            Self::ComposerDraft(record) => &record.thread_id,
         }
     }
 
@@ -84,6 +79,7 @@ impl Record {
             Self::Project(_) => Kind::Project,
             Self::Thread(_) => Kind::Thread,
             Self::Conversation(_) => Kind::Conversation,
+            Self::ComposerDraft(_) => Kind::ComposerDraft,
         }
     }
 }

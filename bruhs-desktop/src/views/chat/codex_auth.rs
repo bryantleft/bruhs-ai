@@ -336,8 +336,8 @@ mod tests {
         chat.read_with(visual, |chat, _| {
             assert!(!chat.codex_auth.as_ref().unwrap().is_authenticated());
             assert_eq!(
-                chat.model_picker_status_line(AgentProvider::Codex),
-                bruhs_models::logic::cli_login::CODEX_SIGNED_OUT_LINE
+                chat.model_picker_notice(AgentProvider::Codex).as_deref(),
+                Some(bruhs_models::logic::cli_login::CODEX_SIGNED_OUT_LINE)
             );
         });
         visual.update(|window, _| window.refresh());
@@ -360,10 +360,7 @@ mod tests {
                 .is_some_and(DesktopAuthStatus::is_authenticated)
         });
         chat.read_with(visual, |chat, _| {
-            assert_eq!(
-                chat.model_picker_status_line(AgentProvider::Codex),
-                bruhs_models::logic::cli_login::CODEX_SIGNED_IN_LINE
-            );
+            assert_eq!(chat.model_picker_notice(AgentProvider::Codex), None);
         });
         visual.update(|window, _| window.refresh());
         visual.run_until_parked();

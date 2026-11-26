@@ -32,8 +32,18 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::routes::paths::HomePath;
 
+/// True for syntactically valid owner origins on WebSocket upgrades: requires
+/// an `Origin` header matching either the server's own `Host` (over `http://`)
+/// or an explicitly configured origin (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`).
+/// Other loopback ports (e.g. an untrusted local dev server on `:3000`) are
+/// refused so they cannot hijack a terminal shell.
+pub fn ws_origin_allowed(headers: &HeaderMap, policy: &crate::local_access::Policy) -> bool {
+    headers.contains_key(ORIGIN) && policy.owner_request(headers)
+}
+
 /// True for syntactically valid loopback browser origins, plus the exact
 /// configured origins (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`).
+#[cfg(test)]
 pub fn origin_allowed(origin: Option<&str>, policy: &crate::local_access::Policy) -> bool {
     origin
         .and_then(|value| value.parse::<axum::http::HeaderValue>().ok())
@@ -150,8 +160,7 @@ pub async fn ws_terminal(
     State(state): State<Arc<AppState>>,
     State(config): State<Arc<Config>>,
 ) -> Result<Response, AppError> {
-    let origin = headers.get(ORIGIN).and_then(|v| v.to_str().ok());
-    if !origin_allowed(origin, &config.access) {
+    if !ws_origin_allowed(&headers, &config.access) {
         return Err(AppError::Forbidden("origin not allowed".to_string()));
     }
     let id = q
@@ -431,6 +440,38 @@ mod tests {
             assert_eq!(message[0], 0);
             assert_eq!(&message[1..], bytes);
         }
+    }
+
+    #[test]
+    fn ws_origin_rejects_other_loopback_ports() {
+        use crate::local_access::Policy;
+        use axum::http::header::{HOST, ORIGIN};
+        let policy = Policy::from_config(None, Some("https://bruhs.localhost")).unwrap();
+        let make = |host: &str, origin: Option<&str>| {
+            let mut h = HeaderMap::new();
+            h.insert(HOST, host.parse().unwrap());
+            if let Some(o) = origin {
+                h.insert(ORIGIN, o.parse().unwrap());
+            }
+            h
+        };
+        assert!(ws_origin_allowed(
+            &make("127.0.0.1:3001", Some("http://127.0.0.1:3001")),
+            &policy
+        ));
+        assert!(ws_origin_allowed(
+            &make("127.0.0.1:3001", Some("https://bruhs.localhost")),
+            &policy
+        ));
+        assert!(!ws_origin_allowed(
+            &make("127.0.0.1:3001", Some("http://localhost:3000")),
+            &policy
+        ));
+        assert!(!ws_origin_allowed(
+            &make("127.0.0.1:3001", Some("http://127.0.0.1:5173")),
+            &policy
+        ));
+        assert!(!ws_origin_allowed(&make("127.0.0.1:3001", None), &policy));
     }
 
     #[test]

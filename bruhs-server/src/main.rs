@@ -431,8 +431,16 @@ fn router_with_capture_daemon(
             get(routes::agent_extensions::config).post(routes::agent_extensions::save),
         )
         .route(
+            "/api/agent-extensions/config/agent",
+            post(routes::agent_extensions::edit_agent),
+        )
+        .route(
             "/api/agent-extensions/pools.js",
             get(routes::agent_extensions::pools_script),
+        )
+        .route(
+            "/api/agent-extensions/prices.js",
+            get(routes::agent_extensions::prices::script),
         )
         .route(
             "/api/agent-extensions/usage/pools",
@@ -449,6 +457,24 @@ fn router_with_capture_daemon(
         .route(
             "/api/agent-extensions/usage",
             get(routes::agent_extensions::usage),
+        )
+        .route(
+            "/api/agent-extensions/usage/model-pricing",
+            post(routes::agent_extensions::edit_usage_model_pricing),
+        )
+        .route(
+            "/api/agent-extensions/usage/model-prices",
+            get(routes::agent_extensions::usage_model_prices)
+                .post(routes::agent_extensions::edit_usage_model_prices),
+        )
+        .route(
+            "/api/agent-extensions/usage/price-destinations",
+            get(routes::agent_extensions::prices::destinations),
+        )
+        .route(
+            "/api/agent-extensions/usage/model-prices/{destination}",
+            get(routes::agent_extensions::prices::read)
+                .post(routes::agent_extensions::prices::save),
         )
         .route(
             "/api/agent-extensions/usage/refresh",
@@ -714,7 +740,21 @@ fn router_with_capture_daemon(
             post(routes::updates::post_provider_update),
         )
         .route("/api/agent/approve", post(routes::approve::post_approve))
+        .route(
+            "/api/agent/answer-question",
+            post(routes::approve::post_answer_question),
+        )
+        .route(
+            "/api/agent/question-files",
+            post(routes::approve::post_question_file)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES))
+                .delete(routes::approve::delete_question_file),
+        )
         .route("/api/agent/secret", post(routes::secrets::submit))
+        .route(
+            bruhs_models::logic::attachments::RETIRE_QUESTION_FILES_PATH,
+            post(routes::approve::retire_question_files),
+        )
         .route(
             "/api/agent/thread-reply",
             post(routes::agent::post_thread_reply),
@@ -864,11 +904,34 @@ fn router_with_capture_daemon(
             post(routes::git::post_restore),
         )
         .route("/api/agent/git-status", post(routes::git::get_status))
+        .route(
+            "/api/agent/prompt-repository",
+            post(routes::git::prompt_repository_matches),
+        )
+        .route(
+            "/api/agent/prompt-share-repository",
+            post(routes::git::prompt_share_repository),
+        )
+        .route(
+            "/api/agent/prompt-pull-checkout",
+            post(routes::git::post_pull_checkout),
+        )
+        .route(
+            "/api/agent/prompt-clone",
+            post(routes::git::post_prompt_clone),
+        )
         .route("/api/agent/git-diff", post(routes::git::get_diff))
         .route("/api/agent/list-dir", post(routes::list_dir::post_list_dir))
         .route(
             "/api/agent/validate-path",
             post(routes::validate_path::post_validate),
+        )
+        .route(
+            bruhs_models::workspace_trust::PATH,
+            get(routes::workspace_trust::get_trusted)
+                .post(routes::workspace_trust::post_inspect)
+                .put(routes::workspace_trust::put_trust)
+                .delete(routes::workspace_trust::delete_trusted),
         )
         .route("/api/agent/login", post(routes::login::post_login))
         .route(

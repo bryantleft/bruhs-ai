@@ -76,11 +76,13 @@ mod git_info;
 mod git_ui;
 mod hints_ui;
 pub(crate) mod kiro;
+mod linked_prompt;
 mod mobile;
 mod model_picker_ui;
 mod native_options;
 pub(crate) use mobile::mobile_label;
 mod prompt_suggestion;
+mod question_prompt;
 pub(crate) mod response_stream;
 mod restart;
 mod rich_response;
@@ -95,6 +97,7 @@ mod title_rename;
 mod tool_output_ui;
 pub(crate) mod tool_visibility;
 mod viewport;
+mod workspace_trust_ui;
 use assistant_content::*;
 #[cfg(test)]
 use auth::*;
@@ -134,7 +137,7 @@ const CHAT_MESSAGE_ROW_HINT_PX: f32 = timeline_ui::TRANSCRIPT_BODY_TEXT_SIZE_PX 
     + timeline_ui::TRANSCRIPT_ROW_MIN_HEIGHT_PX
     + 20.0;
 const CHAT_COMPOSER_MIN_ROWS: usize = 2;
-const CHAT_COMPOSER_MAX_ROWS: usize = 8;
+const CHAT_COMPOSER_MAX_ROWS: usize = 10;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DesktopMentionItem {
@@ -394,6 +397,7 @@ struct DesktopPermissionRequest {
     id: String,
     tool: String,
     input: serde_json::Value,
+    can_answer: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -436,17 +440,7 @@ impl Message {
     /// The transcript includes a display label for each upload. The title
     /// writer receives those uploads separately from the user's message.
     pub(crate) fn text_for_title(&self) -> &str {
-        if self.files.is_empty() {
-            return &self.content;
-        }
-        let labels = files::visible_with_files("", &[], &self.files);
-        if self.content == labels {
-            return "";
-        }
-        self.content
-            .strip_suffix(&labels)
-            .and_then(|prefix| prefix.strip_suffix('\n'))
-            .map_or(&self.content, str::trim_end)
+        bruhs_models::logic::composer_text::without_uploaded_file_labels(&self.content, &self.files)
     }
 
     pub fn assistant_streaming(started_at_ms: i64, model: Option<String>) -> Self {
@@ -517,6 +511,7 @@ enum AgentUiEvent {
     },
     Usage(UsageInfo),
     ResponseMedia(std::collections::BTreeMap<String, String>),
+    QuestionFiles(Vec<UploadedFile>),
     Result {
         result: String,
         duration_ms: u64,
@@ -591,6 +586,7 @@ pub enum ChatViewEvent {
     /// or end, e.g. `/clear` or `/help`. Streaming deltas, the spinner and
     /// other view-only changes never emit this, so they never cause a save.
     MessagesChanged,
+    QuestionFilesRemoved(Vec<UploadedFile>),
     /// A changed-files card's "Open diff" (web `on_open_diff`): scope the
     /// diff panel to that turn.
     OpenDiff {
@@ -718,7 +714,8 @@ pub struct ChatView {
     messages_viewport: ListState,
     /// The page zoom the rows were measured at (`bruhs_ui::zoom`).
     messages_zoom: std::cell::Cell<f32>,
-    messages_focus: FocusHandle,
+    pub(super) messages_focus: FocusHandle,
+    pub(super) composer_area_focus: FocusHandle,
     rendered_messages: std::cell::Cell<Option<(usize, usize)>>,
     #[cfg(test)]
     rendered_message_rows: std::cell::Cell<usize>,
@@ -775,6 +772,7 @@ pub struct ChatView {
     pub queue_held: bool,
     /// Queued message open in the composer, plus the draft it replaced.
     queue_edit: Option<QueueEdit>,
+    linked_draft: Option<linked_prompt::LinkedDraft>,
     /// Composer text applied on the next paint. Stream tasks have no window.
     pending_composer: Option<String>,
     dictation: dictation::ComposerDictation,
@@ -903,6 +901,12 @@ pub struct ChatView {
     git_info_stale: bool,
     /// Reading branches and status in the background.
     git_task: Option<Task<()>>,
+    /// The project changed since workspace trust was last inspected.
+    workspace_trust_stale: bool,
+    workspace_trust: Option<bruhs_models::workspace_trust::WorkspaceTrustStatus>,
+    workspace_trust_saving: bool,
+    workspace_trust_error: Option<String>,
+    workspace_trust_task: Option<Task<()>>,
     /// A branch switch in the background.
     checkout_task: Option<Task<()>>,
     mention_query: Option<String>,
@@ -919,6 +923,8 @@ pub struct ChatView {
     codex_auth: Option<DesktopAuthStatus>,
     initial_auth_pending: bool,
     pending_permission: Option<DesktopPermissionRequest>,
+    question_prompt: Option<Entity<question_prompt::QuestionPrompt>>,
+    question_response: Option<question_prompt::QuestionResponse>,
     pending_secret: Option<bruhs_models::secrets::SecretRequest>,
     secret_prompt: Option<Entity<secret_prompt::SecretPrompt>>,
     /// Settled turns whose fold the user opened (message index).
@@ -941,7 +947,10 @@ pub struct ChatView {
     model_chip_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub(super) favorite_models: super::model_browser::Favorites,
     model_browser_tab: Option<String>,
+    model_picker_opening_model: String,
+    model_picker_expanded: std::collections::BTreeMap<String, bool>,
     model_picker_index: usize,
+    model_picker_show_highlight: bool,
     /// Models each runtime's CLI listed for the account; refreshed on open.
     pub(crate) model_options: bruhs_models::delivery::generation::GenerationOptions,
     model_catalog_load: Option<Task<()>>,
@@ -955,6 +964,12 @@ pub struct ChatView {
     runtime_models: Vec<bruhs_models::runtime_models::Listing>,
     model_picker_scroll: ScrollHandle,
     model_option_scroll: ScrollHandle,
+    model_option_focus: std::cell::RefCell<
+        std::collections::BTreeMap<
+            (bruhs_models::delivery::generation::OptionKind, usize),
+            FocusHandle,
+        >,
+    >,
     model_picker_rail: FocusHandle,
     model_picker_query: Entity<InputState>,
     _model_picker_subscription: Subscription,
@@ -1035,6 +1050,7 @@ impl ChatView {
             |this: &mut Self, _state, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
                     this.schedule_restart_checkpoint(cx);
+                    this.clear_placed_prompt_notice(cx);
                     this.retarget_chips(cx);
                     this.sync_composer_hint_suppression(cx);
                     this.composer_hint_selected_index = 0;
@@ -1066,20 +1082,21 @@ impl ChatView {
             },
         );
         let model_picker_query =
-            cx.new(|cx| InputState::new(window, cx).placeholder(super::model_browser::SEARCH_HINT));
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search models…"));
         let _model_picker_subscription = cx.subscribe_in(
             &model_picker_query,
             window,
             |this: &mut Self, _state, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
                     this.model_picker_index = 0;
+                    this.model_picker_show_highlight = false;
                     this.model_picker_scroll.set_offset(Point::default());
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => {
                     this.select_highlighted_model(window, cx);
                 }
-                _ => {}
+                InputEvent::Focus | InputEvent::Blur => cx.notify(),
             },
         );
         let chat = cx.weak_entity();
@@ -1184,6 +1201,16 @@ impl ChatView {
             };
             let plain_nav =
                 !modifiers.modified() && matches!(key, "up" | "down" | "escape" | "enter");
+            let provider_cycle = modifiers.platform
+                && modifiers.shift
+                && !modifiers.alt
+                && !modifiers.control
+                && matches!(key, "up" | "down");
+            let focus_provider_rail = key == "tab"
+                && modifiers.shift
+                && !modifiers.platform
+                && !modifiers.alt
+                && !modifiers.control;
             if !modifiers.platform
                 && !modifiers.alt
                 && !modifiers.control
@@ -1215,7 +1242,7 @@ impl ChatView {
                     }
                 }
             }
-            if !plain_nav && picker_digit.is_none() {
+            if !plain_nav && picker_digit.is_none() && !provider_cycle && !focus_provider_rail {
                 return;
             }
             let Some(chat) = chat.upgrade() else {
@@ -1223,12 +1250,26 @@ impl ChatView {
             };
             chat.update(cx, |this, cx| {
                 if this.model_picker_open {
-                    if this.model_picker_dropdown.is_none()
-                        && (key == "escape"
-                            || picker_digit.is_some()
-                            || this.model_picker_query.focus_handle(cx).is_focused(window))
-                        && this.handle_model_picker_key(key, picker_digit, window, cx)
+                    let search_focused =
+                        this.model_picker_query.focus_handle(cx).is_focused(window);
+                    let handled = if provider_cycle {
+                        this.cycle_model_picker_provider(key == "down", window, cx);
+                        true
+                    } else if focus_provider_rail
+                        && search_focused
+                        && this.model_picker_browsing(cx)
                     {
+                        this.model_picker_rail.focus(window, cx);
+                        true
+                    } else {
+                        this.model_picker_dropdown.is_none()
+                            && (key == "escape"
+                                || picker_digit.is_some()
+                                || (plain_nav && search_focused))
+                            && this.handle_model_picker_key(key, picker_digit, window, cx)
+                    };
+                    if handled {
+                        window.prevent_default();
                         cx.stop_propagation();
                     }
                     return;
@@ -1314,6 +1355,7 @@ impl ChatView {
             },
             messages_zoom: std::cell::Cell::new(bruhs_ui::zoom::zoom()),
             messages_focus: cx.focus_handle(),
+            composer_area_focus: cx.focus_handle().tab_stop(false),
             rendered_messages: std::cell::Cell::new(None),
             #[cfg(test)]
             rendered_message_rows: std::cell::Cell::new(0),
@@ -1361,6 +1403,7 @@ impl ChatView {
             prompt_queue: PromptQueue::default(),
             queue_held: false,
             queue_edit: None,
+            linked_draft: None,
             pending_composer: None,
             dictation: Default::default(),
             dictation_prefs: Default::default(),
@@ -1441,6 +1484,11 @@ impl ChatView {
             place_task: None,
             git_info_stale: false,
             git_task: None,
+            workspace_trust_stale: false,
+            workspace_trust: None,
+            workspace_trust_saving: false,
+            workspace_trust_error: None,
+            workspace_trust_task: None,
             checkout_task: None,
             mention_query: None,
             prompt_suggestion: Default::default(),
@@ -1454,6 +1502,8 @@ impl ChatView {
             codex_auth: None,
             initial_auth_pending: false,
             pending_permission: None,
+            question_prompt: None,
+            question_response: None,
             pending_secret: None,
             secret_prompt: None,
             expanded_folds: HashSet::new(),
@@ -1468,7 +1518,10 @@ impl ChatView {
             model_chip_bounds: Default::default(),
             favorite_models: Default::default(),
             model_browser_tab: None,
+            model_picker_opening_model: String::new(),
+            model_picker_expanded: Default::default(),
             model_picker_index: 0,
+            model_picker_show_highlight: false,
             model_options: Default::default(),
             model_catalog: Default::default(),
             model_catalog_load: None,
@@ -1480,6 +1533,7 @@ impl ChatView {
             runtime_models: Vec::new(),
             model_picker_scroll: ScrollHandle::new(),
             model_option_scroll: ScrollHandle::new(),
+            model_option_focus: Default::default(),
             model_picker_rail: cx.focus_handle(),
             model_picker_query,
             _model_picker_subscription,
@@ -1567,6 +1621,7 @@ impl ChatView {
         self.prompt_queue = PromptQueue::default();
         self.queue_held = false;
         self.queue_edit = None;
+        self.linked_draft = None;
         self.pending_composer = None;
         self.focus_pending_composer = false;
         self.recall = None;
@@ -1615,6 +1670,7 @@ impl ChatView {
         self.spinner_task.take();
         self.stream_started_at = None;
         self.pending_permission = None;
+        self.question_prompt = None;
         self.clear_mention_hints();
         self.abandon_turn();
         self.running_tasks = self
@@ -1810,8 +1866,10 @@ impl ChatView {
         self.project_scoped = project_scoped;
         if project_scoped {
             self.git_info_stale = true;
+            self.workspace_trust_stale = true;
         } else {
             self.clear_git_info();
+            self.clear_workspace_trust();
         }
         self.refresh_mention_hints(cx);
         cx.notify();
@@ -2561,6 +2619,9 @@ impl Render for ChatView {
         if self.git_info_stale {
             self.refresh_git_branches(cx);
         }
+        if self.workspace_trust_stale && !self.workspace_trust_saving {
+            self.refresh_workspace_trust(cx);
+        }
         // Web chat page: an empty thread centres the heading + composer; a
         // thread with messages keeps the transcript above a bottom composer.
         let hero = self.messages.is_empty();
@@ -2578,6 +2639,7 @@ impl Render for ChatView {
         div()
             .track_focus(&self.chat_focus)
             .key_context("Chat")
+            .on_key_down(cx.listener(Self::on_question_shortcut))
             .on_action(cx.listener(|this, _: &ToggleDictation, _, cx| {
                 if this.dictation.recording() {
                     this.stop_dictation(cx);
@@ -2657,7 +2719,7 @@ impl Render for ChatView {
                                 .flex_col()
                                 .items_center()
                                 .when(self.pending_permission.is_some(), |el| {
-                                    el.child(self.render_permission_prompt(cx))
+                                    el.child(self.render_pending_input(window, cx))
                                 })
                                 .when(self.pending_secret.is_some(), |el| {
                                     el.child(self.render_secret_prompt(window, cx))
@@ -2694,7 +2756,7 @@ impl Render for ChatView {
                                 }),
                         )
                         .when(self.pending_permission.is_some(), |el| {
-                            el.child(self.render_permission_prompt(cx))
+                            el.child(self.render_pending_input(window, cx))
                         })
                         .when(self.pending_secret.is_some(), |el| {
                             el.child(self.render_secret_prompt(window, cx))

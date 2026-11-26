@@ -9,6 +9,7 @@ use web_sys::KeyboardEvent;
 
 use crate::components::search_page::{preview, scroll_result_into_view, LocalSearch};
 use crate::components::terminal_panel::open_terminal_session;
+use crate::components::workspace_focus::WorkspaceFocus;
 use crate::state::{
     new_thread_in_context, toggle_pinned, toggle_settled, ActiveProjectSignal, ActiveTerminalId,
     ActiveView, AppView, BranchPullSignal, ChipRetargetGuard, CommandBarOpen, ComposerChips,
@@ -45,6 +46,8 @@ enum ActionId {
     PinThread,
     SettleThread,
     CopyThreadLink,
+    CopyPromptLink,
+    CopyPromptLinkWithContext,
     CopyResumeCommand,
     CopyThreadMarkdown,
     ContinueInWorkbench,
@@ -71,6 +74,8 @@ enum ActionId {
     StashPrompt,
     OpenInEditor,
     ModelSelect,
+    FocusNextArea,
+    FocusPreviousArea,
     Settings,
 }
 
@@ -216,6 +221,12 @@ const ACTIONS: &[Action] = &[
         group: "Actions",
         label: "Copy thread link",
         hint: "⌘⇧C",
+    },
+    Action {
+        id: ActionId::CopyPromptLink,
+        group: "Actions",
+        label: "Copy prompt link",
+        hint: "Share the composer draft",
     },
     Action {
         id: ActionId::CopyResumeCommand,
@@ -376,10 +387,28 @@ const ACTIONS: &[Action] = &[
         hint: "switch provider",
     },
     Action {
+        id: ActionId::CopyPromptLinkWithContext,
+        group: "Actions",
+        label: "Copy prompt link with repo and model",
+        hint: "",
+    },
+    Action {
         id: ActionId::Settings,
         group: "Actions",
         label: "Settings",
         hint: "preferences",
+    },
+    Action {
+        id: ActionId::FocusNextArea,
+        group: "Actions",
+        label: "Focus next workspace area",
+        hint: "F6",
+    },
+    Action {
+        id: ActionId::FocusPreviousArea,
+        group: "Actions",
+        label: "Focus previous workspace area",
+        hint: "Shift+F6",
     },
 ];
 
@@ -457,6 +486,7 @@ mod tests {
                 "Pin / unpin thread",
                 "Settle / unsettle thread",
                 "Copy thread link",
+                "Copy prompt link",
                 "Copy resume command",
                 "Copy thread as Markdown",
                 "Continue in workbench",
@@ -483,6 +513,9 @@ mod tests {
                 "Stash prompt",
                 "Open project in editor",
                 "Model",
+                "Copy prompt link with repo and model",
+                "Focus next workspace area",
+                "Focus previous workspace area",
             ]
         );
     }
@@ -711,6 +744,7 @@ pub(super) fn move_selected_index(index: usize, count: usize, key: &str) -> Opti
 #[component]
 pub fn CommandBar() -> impl IntoView {
     let local_search = expect_context::<LocalSearch>();
+    let workspace_focus = expect_context::<WorkspaceFocus>();
     let CommandBarOpen(command_bar_open) = expect_context::<CommandBarOpen>();
     let SetCommandBarOpen(set_command_bar_open) = expect_context::<SetCommandBarOpen>();
     let SetSidebarOpen(set_sidebar_open) = expect_context::<SetSidebarOpen>();
@@ -762,6 +796,33 @@ pub fn CommandBar() -> impl IntoView {
     let servers = RwSignal::new(Vec::<crate::api::LocalServer>::new());
     let servers_loading = RwSignal::new(false);
     let servers_scan = RwSignal::new(0u32);
+    let crate::state::CurrentModel(current_model) = expect_context::<crate::state::CurrentModel>();
+    let share_project = Memo::new(move |_| {
+        let id = active_thread_id.get()?;
+        threads.with(|threads| {
+            threads
+                .iter()
+                .find(|thread| thread.id == id && !thread.project_name.is_empty())?
+                .project_path
+                .clone()
+        })
+    });
+    let share_repository = LocalResource::new(move || {
+        let project = share_project.get();
+        async move {
+            let project = project?;
+            let slug = crate::api::prompt_share_repository(&project)
+                .await
+                .ok()
+                .flatten()?;
+            let repo = bruhs_models::logic::app_link::PromptRepository::parse(&slug)?;
+            Some((project, repo))
+        }
+    });
+    let share_target = move || {
+        let (path, repository) = share_repository.get().flatten()?;
+        (share_project.get().as_ref() == Some(&path)).then_some(repository)
+    };
 
     // Reset state and refocus the input every time the dialog opens, so typing
     // from an arbitrary prior state can't produce stale filter results.
@@ -783,7 +844,20 @@ pub fn CommandBar() -> impl IntoView {
             return Vec::new();
         }
         let query = query.get();
-        grouped_actions_for_query(&query)
+        let mut actions = grouped_actions_for_query(&query);
+        if active_view.get() != AppView::Chat
+            || composer_draft.with(|draft| draft.trim().is_empty())
+        {
+            actions.retain(|action| {
+                !matches!(
+                    action.id,
+                    ActionId::CopyPromptLink | ActionId::CopyPromptLinkWithContext
+                )
+            });
+        } else if share_target().is_none() {
+            actions.retain(|action| action.id != ActionId::CopyPromptLinkWithContext);
+        }
+        actions
     });
     let records = Memo::new(move |_| {
         if !command_bar_open.get()
@@ -848,6 +922,16 @@ pub fn CommandBar() -> impl IntoView {
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let execute_action = move |id: ActionId| {
         match id {
+            ActionId::FocusNextArea | ActionId::FocusPreviousArea => {
+                close();
+                request_animation_frame(move || {
+                    workspace_focus.step(
+                        id == ActionId::FocusPreviousArea,
+                        active_view.get_untracked() == AppView::Settings,
+                    );
+                });
+                return;
+            }
             ActionId::NavToday => set_active_view.set(AppView::Today),
             ActionId::NavInbox => set_active_view.set(AppView::Inbox),
             ActionId::NavKnowledge => set_active_view.set(AppView::Knowledge),
@@ -946,6 +1030,32 @@ pub fn CommandBar() -> impl IntoView {
                         .and_then(|o| o.as_string())
                         .unwrap_or_default();
                     copy_to_clipboard(&format!("{origin}/#thread/{id}"));
+                }
+            }
+            ActionId::CopyPromptLink | ActionId::CopyPromptLinkWithContext => {
+                let link = composer_draft.with_untracked(|draft| {
+                    if id == ActionId::CopyPromptLinkWithContext {
+                        let repository = share_target()?;
+                        let model = current_model.get_untracked();
+                        Some(crate::prompt_links::copyable_link_with_context(
+                            draft,
+                            bruhs_models::logic::app_link::PromptShareContext {
+                                repository: &repository,
+                                provider: bruhs_models::agent::AgentProvider::for_model(&model),
+                                model: &model,
+                            },
+                        ))
+                    } else {
+                        Some(crate::prompt_links::copyable_link(draft))
+                    }
+                });
+                match link {
+                    Some(Ok(link)) => {
+                        copy_to_clipboard(&link);
+                        thread_notice.flash("Prompt link copied.");
+                    }
+                    Some(Err(error)) => thread_notice.flash(error.to_string()),
+                    None => thread_notice.flash("This project's repository is unavailable."),
                 }
             }
             ActionId::CopyPullLink | ActionId::CopyPullNumber => {
@@ -1275,7 +1385,7 @@ pub fn CommandBar() -> impl IntoView {
                                             class=action_class
                                         >
                                             <span>{label}</span>
-                                            <span class="text-label-sm text-rambutan-300">{hint}</span>
+                                            {(!hint.is_empty()).then(|| view! { <span class="text-label-sm text-rambutan-300">{hint}</span> })}
                                         </button>
                                     }
                                 })

@@ -923,9 +923,9 @@ impl Workspace {
                 "desktop-import-thread-dialog",
                 IMPORT_DIALOG_LABEL,
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
-            .child(self.blur_scrim.backdrop())
             .debug_selector(|| "desktop-import-thread-dialog".to_string())
             .w(px(IMPORT_DIALOG_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))

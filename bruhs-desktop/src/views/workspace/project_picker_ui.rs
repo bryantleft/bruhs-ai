@@ -275,6 +275,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.clone_editor.linked_prompt.is_some() {
+            return;
+        }
         let Some(TopLayer::ProjectPicker {
             for_terminal: false,
             thread: target,
@@ -563,7 +566,7 @@ impl Workspace {
                                 }
                             })
                         })
-                        .child(self.project_icon(&project.scope(), PROJECT_PICKER_ICON_SIZE_PX))
+                        .child(self.project_icon(&project.scope(), PROJECT_PICKER_ICON_SIZE_PX, cx))
                         .child(div().min_w_0().flex_1().truncate().child(display))
                         .into_any_element(),
                 );
@@ -716,9 +719,9 @@ impl Workspace {
                 "desktop-project-picker-dialog",
                 "Choose project folder",
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
-            .child(self.blur_scrim.backdrop())
             .debug_selector(|| "desktop-project-picker-dialog".to_string())
             .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))
@@ -775,109 +778,119 @@ impl Workspace {
                                 )
                             }),
                     )
-                    .when(has_current_path, |el| {
-                        el.child(
-                            div()
-                                .id("desktop-project-select-current")
-                                .debug_selector(|| "desktop-project-select-current".to_string())
-                                .ml(px(PROJECT_PICKER_SELECT_MARGIN_LEFT_PX))
-                                .flex_shrink_0()
-                                .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
-                                .bg(theme::rambutan_500().opacity(PROJECT_PICKER_SELECT_BG_OPACITY))
-                                .px(px(PROJECT_PICKER_SELECT_X_PADDING_PX))
-                                .py(px(PROJECT_PICKER_SELECT_Y_PADDING_PX))
-                                .font_family(
-                                    crate::theme::FontFace::Interface
-                                        .with_default(PROJECT_PICKER_LABEL_FONT_FAMILY),
-                                )
-                                .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
-                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme::rambutan_300())
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .aria_label("Select this folder")
-                                .border_1()
-                                .border_color(gpui::transparent_black())
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .cursor_pointer()
-                                .hover(|el| {
-                                    el.bg(theme::rambutan_500()
-                                        .opacity(PROJECT_PICKER_SELECT_HOVER_BG_OPACITY))
-                                })
-                                .map(|el| {
-                                    on_press_view(el, cx, move |this, window, cx| {
-                                        this.select_project_location(
-                                            select_current_path.clone(),
-                                            select_current_name.clone(),
-                                            window,
-                                            cx,
-                                        );
+                    .when(
+                        has_current_path && self.clone_editor.linked_prompt.is_none(),
+                        |el| {
+                            el.child(
+                                div()
+                                    .id("desktop-project-select-current")
+                                    .debug_selector(|| "desktop-project-select-current".to_string())
+                                    .ml(px(PROJECT_PICKER_SELECT_MARGIN_LEFT_PX))
+                                    .flex_shrink_0()
+                                    .rounded(px(PROJECT_PICKER_ROW_RADIUS_PX))
+                                    .bg(theme::rambutan_500()
+                                        .opacity(PROJECT_PICKER_SELECT_BG_OPACITY))
+                                    .px(px(PROJECT_PICKER_SELECT_X_PADDING_PX))
+                                    .py(px(PROJECT_PICKER_SELECT_Y_PADDING_PX))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(PROJECT_PICKER_LABEL_FONT_FAMILY),
+                                    )
+                                    .text_size(px(PROJECT_PICKER_LABEL_TEXT_SIZE_PX))
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_300())
+                                    .tab_index(0)
+                                    .role(Role::Button)
+                                    .aria_label("Select this folder")
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                    .cursor_pointer()
+                                    .hover(|el| {
+                                        el.bg(theme::rambutan_500()
+                                            .opacity(PROJECT_PICKER_SELECT_HOVER_BG_OPACITY))
                                     })
-                                })
-                                .child("Select this folder"),
-                        )
-                    }),
+                                    .map(|el| {
+                                        on_press_view(el, cx, move |this, window, cx| {
+                                            this.select_project_location(
+                                                select_current_path.clone(),
+                                                select_current_name.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        })
+                                    })
+                                    .child("Select this folder"),
+                            )
+                        },
+                    ),
             )
             .when(
                 !self.project_picker_for_terminal() && has_current_path,
                 |el| el.child(self.clone_project_controls(cx)),
             )
-            .when(!self.project_picker_for_terminal(), |el| {
-                let general = projectless_option(
-                    "desktop-project-none",
-                    "No project",
-                    assets::MESSAGE_SQUARE_ICON_PATH,
-                );
-                let scratch = projectless_option(
-                    "new-scratch-chat",
-                    "New scratch chat",
-                    assets::SQUARE_PEN_ICON_PATH,
-                )
-                .tooltip(|window, cx| {
-                    Tooltip::new("Start a new chat in its own folder.").build(window, cx)
-                });
-                el.child(on_press_view(general, cx, |this, window, cx| {
-                    this.apply_thread_project(None, window, cx)
-                }))
-                .child(on_press_view(scratch, cx, |this, window, cx| {
-                    this.new_scratch_thread(window, cx)
-                }))
-            })
-            .when(show_recents, |el| {
-                el.child(
-                    div()
-                        .border_b_1()
-                        .border_color(
-                            theme::longan_800().opacity(PROJECT_PICKER_RECENTS_BORDER_OPACITY),
-                        )
-                        .px(px(PROJECT_PICKER_RECENTS_X_PADDING_PX))
-                        .py(px(PROJECT_PICKER_RECENTS_Y_PADDING_PX))
-                        .flex()
-                        .flex_col()
-                        .gap(px(PROJECT_PICKER_RECENTS_GAP_PX))
-                        .child(
-                            div()
-                                .mb(px(PROJECT_PICKER_RECENTS_LABEL_BOTTOM_MARGIN_PX))
-                                .font_family(
-                                    crate::theme::FontFace::Interface
-                                        .with_default(PROJECT_PICKER_BODY_FONT_FAMILY),
-                                )
-                                .text_size(px(PROJECT_PICKER_SECTION_TEXT_SIZE_PX))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme::rambutan_500())
-                                .child("PROJECTS"),
-                        )
-                        .child(
-                            div()
-                                .id("desktop-project-list")
-                                .max_h(px(132.))
-                                .min_h_0()
-                                .overflow_y_scroll()
-                                .children(recent_rows),
-                        ),
-                )
-            })
+            .when(
+                !self.project_picker_for_terminal() && self.clone_editor.linked_prompt.is_none(),
+                |el| {
+                    let general = projectless_option(
+                        "desktop-project-none",
+                        "No project",
+                        assets::MESSAGE_SQUARE_ICON_PATH,
+                    );
+                    let scratch = projectless_option(
+                        "new-scratch-chat",
+                        "New scratch chat",
+                        assets::SQUARE_PEN_ICON_PATH,
+                    )
+                    .tooltip(|window, cx| {
+                        Tooltip::new("Start a new chat in its own folder.").build(window, cx)
+                    });
+                    el.child(on_press_view(general, cx, |this, window, cx| {
+                        this.apply_thread_project(None, window, cx)
+                    }))
+                    .child(on_press_view(scratch, cx, |this, window, cx| {
+                        this.new_scratch_thread(window, cx)
+                    }))
+                },
+            )
+            .when(
+                show_recents && self.clone_editor.linked_prompt.is_none(),
+                |el| {
+                    el.child(
+                        div()
+                            .border_b_1()
+                            .border_color(
+                                theme::longan_800().opacity(PROJECT_PICKER_RECENTS_BORDER_OPACITY),
+                            )
+                            .px(px(PROJECT_PICKER_RECENTS_X_PADDING_PX))
+                            .py(px(PROJECT_PICKER_RECENTS_Y_PADDING_PX))
+                            .flex()
+                            .flex_col()
+                            .gap(px(PROJECT_PICKER_RECENTS_GAP_PX))
+                            .child(
+                                div()
+                                    .mb(px(PROJECT_PICKER_RECENTS_LABEL_BOTTOM_MARGIN_PX))
+                                    .font_family(
+                                        crate::theme::FontFace::Interface
+                                            .with_default(PROJECT_PICKER_BODY_FONT_FAMILY),
+                                    )
+                                    .text_size(px(PROJECT_PICKER_SECTION_TEXT_SIZE_PX))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_500())
+                                    .child("PROJECTS"),
+                            )
+                            .child(
+                                div()
+                                    .id("desktop-project-list")
+                                    .max_h(px(132.))
+                                    .min_h_0()
+                                    .overflow_y_scroll()
+                                    .children(recent_rows),
+                            ),
+                    )
+                },
+            )
             .child(
                 div()
                     .id("desktop-project-directory-list")

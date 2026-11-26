@@ -34,13 +34,8 @@ fn assert_model_picker_clear_of_chrome(cx: &mut VisualTestContext, width: f32) {
         picker.bottom() <= trigger.top() - px(8.0),
         "picker covers its trigger at width {width}: {picker:?}, trigger {trigger:?}"
     );
-    for selector in [
-        "desktop-model-picker-search-row",
-        "desktop-model-picker-auth-status",
-    ] {
-        let content = cx
-            .debug_bounds(selector)
-            .expect("picker search and authentication");
+    for selector in ["desktop-model-picker-search-row", "model-options-footer"] {
+        let content = cx.debug_bounds(selector).expect("picker search and footer");
         assert!(content.size.height > px(0.0));
         assert!(content.top() >= picker.top());
         assert!(content.bottom() <= picker.bottom());
@@ -59,12 +54,27 @@ fn scroll_options_to_lower_actions(cx: &mut VisualTestContext) {
 
 #[gpui::test]
 fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut TestAppContext) {
+    use bruhs_models::{
+        agent::AgentProvider,
+        delivery::writer_catalog::{WriterCatalog, WriterCliModel},
+    };
     let (chat, cx) = chat_window(cx);
     cx.simulate_resize(size(px(640.0), px(480.0)));
     chat.update_in(cx, |chat, window, cx| {
         // Start at the first catalog row so count - 1 presses reaches the
         // last entry regardless of catalog additions or provider ordering.
-        chat.set_model(bruhs_models::agent::MODEL_CATALOG[0].id, cx);
+        let first = bruhs_models::agent::MODEL_CATALOG[0].id;
+        let provider = AgentProvider::for_model(first);
+        let mut catalog = WriterCatalog::default();
+        catalog.models.extend((0..16).map(|index| WriterCliModel {
+            id: format!("{}fixture-{index}", provider.model_prefix()),
+            label: format!("Fixture {index}"),
+            provider,
+            options: Vec::new(),
+            is_legacy: false,
+        }));
+        chat.replace_model_catalog(std::sync::Arc::new(catalog), cx);
+        chat.set_model(first, cx);
         chat.open_model_picker(window, cx);
     });
     cx.run_until_parked();
@@ -91,10 +101,9 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
         selected.bottom() <= list.bottom(),
         "selected row {selected:?} below list {list:?}, offset {offset:?}"
     );
-    chat.read_with(cx, |chat, cx| {
+    chat.read_with(cx, |chat, _| {
         assert_eq!(chat.model_picker_index, count - 1);
-        let groups = crate::views::chat::group_models_like_web(&chat.model_picker_matches(cx));
-        assert_row_is_visible(&chat.model_picker_scroll, count + groups.len() - 1);
+        assert_row_is_visible(&chat.model_picker_scroll, count - 1);
         assert!(chat.model_picker_scroll.offset().y < px(0.0));
     });
     let offset = chat.read_with(cx, |chat, _| chat.model_picker_scroll.offset().y);
@@ -121,6 +130,122 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
         assert!(selected.top() >= list.top());
         assert!(selected.bottom() <= list.bottom());
     }
+}
+
+#[gpui::test]
+fn model_picker_refresh_uses_live_catalog_order_and_preserves_highlight(cx: &mut TestAppContext) {
+    use bruhs_models::{
+        agent::AgentProvider,
+        delivery::writer_catalog::{WriterCatalog, WriterCliModel},
+    };
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(1200.), px(780.)));
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("gpt-5.4", cx);
+        chat.open_model_picker(window, cx);
+        let catalog = WriterCatalog {
+            models: vec![WriterCliModel {
+                id: "codex/fixture-live".into(),
+                label: "Fixture live model".into(),
+                provider: AgentProvider::Codex,
+                options: Vec::new(),
+                is_legacy: false,
+            }],
+        };
+        chat.replace_model_catalog(std::sync::Arc::new(catalog), cx);
+        let rows = chat.model_picker_matches(cx);
+        assert_eq!(
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            ["codex/fixture-live", "gpt-5.4"]
+        );
+        assert_eq!(rows[chat.model_picker_index].id, chat.model_id);
+    });
+    cx.run_until_parked();
+    let picker = cx.debug_bounds("desktop-model-picker").unwrap();
+    let chip = cx.debug_bounds("desktop-model-status").unwrap();
+    let right_limit = px(1200. - 9.) - picker.size.width;
+    let anchor = cx.debug_bounds("desktop-model-popover-anchor").unwrap();
+    let leading_edge = anchor.left().min(right_limit).max(px(9.));
+    let right_aligned = (chip.right() - picker.size.width)
+        .min(right_limit)
+        .max(leading_edge);
+    assert!((picker.left() - right_aligned).abs() <= px(1.));
+    let row = cx.debug_bounds("desktop-model-picker-list").unwrap();
+    assert!(row.size.height > px(0.));
+}
+
+#[gpui::test]
+fn model_picker_discloses_older_models_without_hiding_favorites_or_search_results(
+    cx: &mut TestAppContext,
+) {
+    use crate::views::model_browser::favorite_key;
+    use bruhs_models::delivery::writer_catalog::WriterCatalog;
+
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(1200.), px(780.)));
+    chat.update_in(cx, |chat, window, cx| {
+        let mut catalog = WriterCatalog::default();
+        for model in &mut catalog.models {
+            model.is_legacy = matches!(model.id.as_str(), "claude-sonnet-4-6" | "claude-haiku-4-5");
+        }
+        chat.replace_model_catalog(std::sync::Arc::new(catalog), cx);
+        chat.set_model("claude-fable-5", cx);
+        chat.open_model_picker(window, cx);
+    });
+    let visible = |chat: &crate::views::chat::ChatView, cx: &gpui::App| {
+        chat.model_picker_matches(cx)
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>()
+    };
+    cx.run_until_parked();
+    assert_eq!(
+        chat.read_with(cx, visible),
+        ["claude-fable-5", "claude-opus-4-8"]
+    );
+    let disclosure = cx.debug_bounds("desktop-model-picker-disclosure").unwrap();
+    cx.simulate_keystrokes("down down enter");
+    cx.run_until_parked();
+    assert_eq!(
+        chat.read_with(cx, visible),
+        [
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5"
+        ]
+    );
+    chat.read_with(cx, |chat, _| assert_eq!(chat.model_id, "claude-fable-5"));
+    let collapse = cx.debug_bounds("desktop-model-picker-disclosure").unwrap();
+    assert!(collapse.top() > disclosure.top());
+    cx.simulate_click(collapse.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        chat.handle_model_picker_key("3", Some(3), window, cx);
+        assert_eq!(
+            chat.model_id, "claude-fable-5",
+            "hidden models and the disclosure have no jump shortcut"
+        );
+        chat.replace_picker_favorites(&[favorite_key("claude-haiku-4-5")].into(), cx);
+        assert_eq!(
+            visible(chat, cx),
+            ["claude-haiku-4-5", "claude-fable-5", "claude-opus-4-8"]
+        );
+        chat.model_picker_query
+            .update(cx, |input, cx| input.set_value("sonnet 4.6", window, cx));
+        assert_eq!(visible(chat, cx), ["claude-sonnet-4-6"]);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-model-picker-disclosure").is_none());
+    chat.update_in(cx, |chat, window, cx| {
+        chat.replace_picker_favorites(&Default::default(), cx);
+        chat.set_model("claude-sonnet-4-6", cx);
+        chat.close_model_picker(window, cx);
+        chat.open_model_picker(window, cx);
+        let models = visible(chat, cx);
+        assert_eq!(models[chat.model_picker_index], "claude-sonnet-4-6");
+        assert!(models.iter().any(|id| id == "claude-haiku-4-5"));
+    });
 }
 
 #[gpui::test]
@@ -162,8 +287,8 @@ fn listed_cursor_models_become_picker_rows(cx: &mut TestAppContext) {
             cx,
         );
         assert_eq!(
-            chat.model_picker_status_line(AgentProvider::Cursor),
-            "Cursor models unavailable: Run `cursor-agent update`."
+            chat.model_picker_notice(AgentProvider::Cursor).as_deref(),
+            Some("Cursor models unavailable: Run `cursor-agent update`.")
         );
     });
     cx.run_until_parked();
@@ -223,7 +348,9 @@ fn opening_the_picker_lists_the_accounts_cursor_models(cx: &mut TestAppContext) 
     cx.update(|_, cx| {
         cx.set_global(RuntimeModelLister(std::sync::Arc::new(|provider, _| {
             Box::pin(async move {
-                assert_eq!(provider, AgentProvider::Cursor);
+                if provider != AgentProvider::Cursor {
+                    return RuntimeModels::default();
+                }
                 RuntimeModels {
                     models: vec![ModelChoice {
                         id: "cursor/composer-2".into(),
@@ -366,6 +493,7 @@ fn permission_review_keeps_full_arguments_and_actions_in_a_short_window(cx: &mut
     chat.update(cx, |chat, cx| {
         chat.set_model("gpt-5.5", cx);
         chat.pending_permission = Some(DesktopPermissionRequest {
+            can_answer: false,
             id: "audit-permission".into(),
             tool: "mcp__provider__operation".into(),
             input,
@@ -625,6 +753,15 @@ fn model_picker_option_column_follows_keyboard_and_window_size(cx: &mut TestAppC
     let list = cx.debug_bounds("desktop-model-picker-list").unwrap();
     let column = cx.debug_bounds("model-options-column").unwrap();
     assert!(column.left() >= list.right() - px(1.));
+    let search = cx.debug_bounds("desktop-model-picker-search-row").unwrap();
+    let divider = cx
+        .debug_bounds("desktop-model-picker-favorites-divider")
+        .unwrap();
+    let heading = cx
+        .debug_bounds("desktop-model-picker-options-heading")
+        .unwrap();
+    assert_eq!(search.bottom(), divider.bottom());
+    assert_eq!(search.bottom(), heading.bottom());
     cx.simulate_keystrokes("right");
     cx.run_until_parked();
     chat.update_in(cx, |chat, window, _| {
@@ -634,6 +771,12 @@ fn model_picker_option_column_follows_keyboard_and_window_size(cx: &mut TestAppC
     cx.run_until_parked();
     chat.read_with(cx, |chat, _| {
         assert_eq!(chat.model_options.configured(Effort), Some("medium"))
+    });
+    cx.simulate_keystrokes("left");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        use gpui::Focusable;
+        assert!(chat.model_picker_query.focus_handle(cx).is_focused(window));
     });
     let tier = cx
         .debug_bounds("desktop-model-service_tier-priority")
@@ -682,19 +825,123 @@ fn model_picker_option_column_follows_keyboard_and_window_size(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn model_picker_secondary_options_close_independently(cx: &mut TestAppContext) {
-    use bruhs_models::delivery::generation::OptionKind::ContextWindow;
+fn model_picker_shows_claude_speed_as_standard_and_fast_segments(cx: &mut TestAppContext) {
+    use bruhs_models::delivery::generation::OptionKind::FastMode;
+
     let (chat, cx) = chat_window(cx);
-    cx.simulate_resize(size(px(820.), px(700.)));
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("claude-opus-4-8", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    let standard = cx.debug_bounds("desktop-model-fast_mode-off").unwrap();
+    let fast = cx.debug_bounds("desktop-model-fast_mode-on").unwrap();
+    let footer = cx.debug_bounds("model-options-footer").unwrap();
+    assert!(standard.right() <= fast.left());
+    assert!(footer.contains(&standard.center()) && footer.contains(&fast.center()));
+
+    for (segment, value) in [(fast, "on"), (standard, "off")] {
+        cx.simulate_click(segment.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        chat.read_with(cx, |chat, _| {
+            assert_eq!(chat.model_options.configured(FastMode), Some(value));
+            assert!(chat.model_picker_open);
+        });
+    }
+}
+
+#[gpui::test]
+fn model_picker_provider_keys_restore_search_and_keep_options_open(cx: &mut TestAppContext) {
+    use gpui::Focusable;
+
+    let (chat, cx) = chat_window(cx);
     chat.update_in(cx, |chat, window, cx| {
         chat.set_model("claude-sonnet-4-6", cx);
         chat.open_model_picker(window, cx);
     });
     cx.run_until_parked();
-    let trigger = cx.debug_bounds("context_window").unwrap();
-    cx.simulate_click(trigger.center(), gpui::Modifiers::default());
+    cx.simulate_keystrokes("shift-tab");
     cx.run_until_parked();
-    cx.simulate_keystrokes("escape");
+    chat.update_in(cx, |chat, window, _| {
+        assert!(chat.model_picker_rail.is_focused(window));
+    });
+    cx.simulate_keystrokes("right");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert!(chat.model_picker_query.focus_handle(cx).is_focused(window));
+        chat.model_picker_query.update(cx, |input, cx| {
+            input.set_value("gpt-5.4", window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-model-picker-rail").is_none());
+    cx.simulate_keystrokes("cmd-shift-down");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert!(chat.model_picker_browsing(cx));
+        assert_ne!(chat.model_browser_tab.as_deref(), Some("claude"));
+        assert!(chat.model_picker_query.focus_handle(cx).is_focused(window));
+        chat.model_picker_query.update(cx, |input, cx| {
+            input.set_value("gpt-5.4", window, cx);
+        });
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, _| {
+        assert_eq!(chat.model_id, "gpt-5.4");
+        assert!(chat.model_picker_open);
+        assert!(chat.composer_effort_focus.is_focused(window));
+    });
+}
+
+#[gpui::test]
+fn model_picker_secondary_options_close_independently(cx: &mut TestAppContext) {
+    use bruhs_models::delivery::generation::OptionKind::{ContextWindow, Thinking};
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(1280.), px(800.)));
+    chat.update_in(cx, |chat, window, cx| {
+        // An installed provider can offer thinking on a model with context options.
+        let mut catalog = (*chat.model_catalog).clone();
+        let thinking = catalog
+            .model("claude-haiku-4-5")
+            .unwrap()
+            .options
+            .iter()
+            .find(|option| option.kind == Thinking)
+            .unwrap()
+            .clone();
+        catalog
+            .models
+            .iter_mut()
+            .find(|model| model.id == "claude-sonnet-4-6")
+            .unwrap()
+            .options
+            .push(thinking);
+        chat.replace_model_catalog(std::sync::Arc::new(catalog), cx);
+        chat.set_model("claude-sonnet-4-6", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    let trigger = cx.debug_bounds("context_window").unwrap();
+    let thinking_row = cx.debug_bounds("thinking-switch-row").unwrap();
+    assert_eq!(trigger.left(), thinking_row.left());
+    assert_eq!(trigger.size, thinking_row.size);
+    assert!(trigger.size.height >= px(crate::theme::CONTROL_DETAIL_PX));
+    let context_caption = cx.debug_bounds("context_window-caption").unwrap();
+    let thinking_caption = cx.debug_bounds("thinking-caption").unwrap();
+    assert_eq!(context_caption.left(), thinking_caption.left());
+    let context_chevron = cx.debug_bounds("context_window-chevron").unwrap();
+    let switch = cx.debug_bounds("thinking").unwrap();
+    assert_eq!(context_chevron.right(), switch.right());
+    assert!((context_chevron.center().y - trigger.center().y).abs() <= px(1.));
+    assert!((switch.center().y - thinking_row.center().y).abs() <= px(1.));
+    cx.simulate_keystrokes("right c right");
+    cx.run_until_parked();
+    let flyout = cx.debug_bounds("context_window-list").unwrap();
+    assert!(flyout.left() >= trigger.right() || flyout.right() <= trigger.left());
+    assert!((flyout.top() - trigger.top()).abs() <= px(1.));
+    cx.simulate_keystrokes("left");
     cx.run_until_parked();
     assert!(cx.debug_bounds("context_window-list").is_none());
     assert!(cx.debug_bounds("desktop-model-picker").is_some());
@@ -707,6 +954,48 @@ fn model_picker_secondary_options_close_independently(cx: &mut TestAppContext) {
         assert!(chat.model_picker_open);
         assert!(chat.model_picker_dropdown.is_none());
         assert_eq!(chat.model_options.configured(ContextWindow), Some("1m"));
+    });
+    cx.simulate_resize(size(px(480.), px(690.)));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("space");
+    cx.run_until_parked();
+    let trigger = cx.debug_bounds("context_window").unwrap();
+    let flyout = cx.debug_bounds("context_window-list").unwrap();
+    assert!(flyout.left() >= px(0.) && flyout.right() <= px(480.));
+    assert!(
+        flyout.left() >= trigger.right()
+            || flyout.right() <= trigger.left()
+            || flyout.top() >= trigger.bottom()
+            || flyout.bottom() <= trigger.top()
+    );
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("context_window-list").is_none());
+    assert!(cx.debug_bounds("desktop-model-picker").is_some());
+}
+
+#[gpui::test]
+fn model_picker_thinking_switch_keeps_keyboard_focus_in_place(cx: &mut TestAppContext) {
+    use bruhs_models::delivery::generation::OptionKind::Thinking;
+    let (chat, cx) = chat_window(cx);
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("claude-haiku-4-5", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("thinking").is_some());
+    cx.simulate_keystrokes("right space");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, _| {
+        assert_eq!(chat.model_options.configured(Thinking), Some("off"));
+        assert!(chat.model_picker_open && chat.model_picker_dropdown.is_none());
+        assert!(chat.composer_effort_focus.is_focused(window));
+    });
+    assert!(cx.debug_bounds("thinking-list").is_none());
+    cx.simulate_keystrokes("space");
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.model_options.configured(Thinking), Some("on"));
     });
 }
 
@@ -894,5 +1183,82 @@ fn turn_actions_show_on_hover_or_focus_within_like_the_web(cx: &mut TestAppConte
             "focus inside the row shows it"
         );
         assert!(!chat.turn_actions_shown(true, 0, window, cx));
+    });
+}
+
+#[gpui::test]
+fn composer_status_pill_context_ring_and_queued_edit_banner_work(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(640.0), px(480.0)));
+    chat.update(cx, |chat, cx| {
+        chat.permission_mode = crate::views::chat::PermissionMode::Plan;
+        let mut reply =
+            super::super::Message::assistant_streaming(1, Some("claude-sonnet-4-6".into()));
+        reply.content = "Done".into();
+        reply.usage = Some(bruhs_core::UsageInfo {
+            context_tokens: Some(160_000),
+            ..Default::default()
+        });
+        chat.messages = vec![super::super::Message::user("Hi"), reply];
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    // Clicking the Plan status pill opens Composer options.
+    let status = cx
+        .debug_bounds("desktop-composer-status")
+        .expect("interactive Plan status pill");
+    cx.simulate_click(status.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-composer-options-panel").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-composer-options-panel").is_none());
+
+    // Footer context ring appears when usage exists and opens Composer options.
+    let ring = cx
+        .debug_bounds("desktop-composer-context-ring")
+        .expect("footer context ring button");
+    let send = cx.debug_bounds("desktop-send-button").unwrap();
+    assert!(ring.right() <= send.left());
+    assert!((ring.center().y - send.center().y).abs() <= px(1.0));
+    cx.simulate_click(ring.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-composer-options-panel").is_some());
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+
+    // Editing a queued message displays the banner and Escape cancels cleanly.
+    chat.update_in(cx, |chat, window, cx| {
+        let tid = bruhs_models::ids::ThreadId::new_v4();
+        chat.thread_id = Some(tid.to_string());
+        chat.input_state.update(cx, |input, cx| {
+            input.set_value("Original draft", window, cx)
+        });
+        chat.prompt_queue
+            .push(tid.as_str(), "Queued follow up", 0.0);
+        let item = chat
+            .prompt_queue
+            .latest_for(tid.as_str())
+            .expect("pushed queued item");
+        chat.begin_queue_edit(item, window, cx);
+        chat.input_state
+            .update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-queued-edit-banner").is_some(),
+        "editing a queued message shows the banner"
+    );
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-queued-edit-banner").is_none(),
+        "Escape cancels queued edit"
+    );
+    chat.read_with(cx, |chat, cx| {
+        assert!(chat.queue_edit.is_none());
+        assert_eq!(chat.input_state.read(cx).value(), "Original draft");
     });
 }

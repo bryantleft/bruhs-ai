@@ -394,13 +394,59 @@ pub async fn upload_attachment(
     name: &str,
     bytes: &[u8],
 ) -> Result<bruhs_models::logic::attachments::UploadedFile, ApiError> {
+    let route = format!("/api/agent/uploads?name={}", segment(name));
+    upload_bytes(&route, bytes).await
+}
+
+fn question_file_route(upload: &bruhs_models::api::QuestionUpload) -> String {
+    format!(
+        "/api/agent/question-files?thread_id={}&request_id={}&question={}&upload_id={}&name={}",
+        segment(upload.thread_id.as_str()),
+        segment(&upload.request_id),
+        upload.question,
+        upload.upload_id,
+        segment(&upload.name)
+    )
+}
+
+pub async fn upload_question_file(
+    upload: &bruhs_models::api::QuestionUpload,
+    bytes: &[u8],
+) -> Result<bruhs_models::logic::attachments::UploadedFile, ApiError> {
+    upload_bytes(&question_file_route(upload), bytes).await
+}
+
+pub async fn remove_question_file(
+    upload: &bruhs_models::api::QuestionUpload,
+) -> Result<(), ApiError> {
+    let request = gloo_net::http::RequestBuilder::new(&url(&question_file_route(upload)))
+        .method(Method::DELETE)
+        .build()?;
+    send_request(request).await.map(|_| ())
+}
+
+pub(crate) async fn retire_question_files(
+    request: &bruhs_models::logic::attachments::RetireQuestionFiles,
+) -> Result<(), ApiError> {
+    send(
+        Method::POST,
+        bruhs_models::logic::attachments::RETIRE_QUESTION_FILES_PATH,
+        Some(request),
+    )
+    .await
+    .map(|_| ())
+}
+
+async fn upload_bytes(
+    route: &str,
+    bytes: &[u8],
+) -> Result<bruhs_models::logic::attachments::UploadedFile, ApiError> {
     let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
     let props = web_sys::BlobPropertyBag::new();
     props.set_type("application/octet-stream");
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &props)
         .map_err(|_| ApiError::Network("the browser could not package that file".into()))?;
-    let route = format!("/api/agent/uploads?name={}", segment(name));
-    let request = gloo_net::http::RequestBuilder::new(&url(&route))
+    let request = gloo_net::http::RequestBuilder::new(&url(route))
         .method(Method::POST)
         .header("Content-Type", "application/octet-stream")
         .body(blob)?;
@@ -531,10 +577,102 @@ pub async fn git_status(path: &str) -> Result<crate::state::GitStatus, ApiError>
     send_json(Method::POST, "/api/agent/git-status", Some(&body)).await
 }
 
+pub async fn prompt_repository_matches(path: &str, repository: &str) -> Result<bool, ApiError> {
+    let body = serde_json::json!({"path": path, "repository": repository});
+    send_json(Method::POST, "/api/agent/prompt-repository", Some(&body)).await
+}
+
+pub async fn prompt_share_repository(path: &str) -> Result<Option<String>, ApiError> {
+    let body = serde_json::json!({"path": path});
+    send_json(
+        Method::POST,
+        "/api/agent/prompt-share-repository",
+        Some(&body),
+    )
+    .await
+}
+
+pub async fn clone_prompt_repository(
+    path: &str,
+    repository: &str,
+    clone_id: uuid::Uuid,
+) -> Result<crate::state::ActiveProject, ApiError> {
+    let body = serde_json::json!({"path": path, "repository": repository, "clone_id": clone_id});
+    send_json(Method::POST, "/api/agent/prompt-clone", Some(&body)).await
+}
+
+pub async fn checkout_prompt_pull(
+    path: &str,
+    pull: &str,
+    checkout_id: uuid::Uuid,
+) -> Result<WorktreeCreated, ApiError> {
+    let body = serde_json::json!({"path": path, "pull": pull, "checkout_id": checkout_id});
+    send_json(Method::POST, "/api/agent/prompt-pull-checkout", Some(&body)).await
+}
+
+pub async fn prompt_writer_models(
+    path: Option<&str>,
+) -> Result<bruhs_models::delivery::writer_catalog::WriterCatalog, ApiError> {
+    let route = "/api/delivery/writer-models";
+    let route = path.map_or_else(
+        || route.to_owned(),
+        |path| format!("{route}?path={}", http::segment(path)),
+    );
+    http::get_json(&route).await
+}
+
 /// Unified diff of the working tree against HEAD (plus untracked files).
 pub async fn git_diff(path: &str) -> Result<GitDiffResponse, ApiError> {
     let body = serde_json::json!({ "path": path });
     send_json(Method::POST, "/api/agent/git-diff", Some(&body)).await
+}
+
+/// Passively inspect a project folder for untrusted repository configs.
+pub async fn workspace_trust_status(
+    path: &str,
+) -> Result<bruhs_models::workspace_trust::WorkspaceTrustStatus, ApiError> {
+    let body = bruhs_models::workspace_trust::WorkspaceTrustQuery {
+        path: path.to_string(),
+    };
+    send_json(
+        Method::POST,
+        bruhs_models::workspace_trust::PATH,
+        Some(&body),
+    )
+    .await
+}
+
+/// Mark a project folder trusted or untrusted on this host.
+pub async fn set_workspace_trust(
+    path: &str,
+    trusted: bool,
+) -> Result<bruhs_models::workspace_trust::WorkspaceTrustStatus, ApiError> {
+    let body = bruhs_models::workspace_trust::WorkspaceTrustUpdate {
+        path: path.to_string(),
+        trusted,
+    };
+    send_json(
+        Method::PUT,
+        bruhs_models::workspace_trust::PATH,
+        Some(&body),
+    )
+    .await
+}
+
+/// List the workspace trust entries saved on this host.
+pub async fn list_trusted_folders() -> Result<Vec<String>, ApiError> {
+    get_json(bruhs_models::workspace_trust::PATH).await
+}
+
+/// Revoke a saved workspace trust entry and return the remaining list.
+pub async fn revoke_trusted_folder(path: String) -> Result<Vec<String>, ApiError> {
+    let body = bruhs_models::workspace_trust::WorkspaceTrustQuery { path };
+    send_json(
+        Method::DELETE,
+        bruhs_models::workspace_trust::PATH,
+        Some(&body),
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -624,6 +762,18 @@ pub async fn approve_permission(request_id: &str, decision: Decision) -> Result<
         Ok(())
     } else {
         Err(ApiError::Decode("approve reply had success: false".into()))
+    }
+}
+
+pub async fn answer_question(
+    request: &bruhs_models::api::AnswerQuestionRequest,
+) -> Result<(), ApiError> {
+    let reply: bruhs_models::api::ApproveResponse =
+        send_json(Method::POST, "/api/agent/answer-question", Some(request)).await?;
+    if reply.success {
+        Ok(())
+    } else {
+        Err(ApiError::Decode("question reply had success: false".into()))
     }
 }
 

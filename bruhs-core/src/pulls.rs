@@ -119,7 +119,11 @@ pub async fn view_pull(cwd: &Path, number: &str) -> Result<PullRef, String> {
 
 async fn gh(cwd: &Path, args: &[&str]) -> Result<String, String> {
     // Colored JSON is not JSON. NO_COLOR loses to CLICOLOR_FORCE and FORCE_COLOR.
-    let output = Command::new("gh")
+    // Apply safe GIT_CONFIG_COUNT overrides so `gh`'s internal `git` subprocesses
+    // cannot execute untrusted repo fsmonitor/hooks/pager/external-diff/ext-protocol.
+    let mut command = Command::new("gh");
+    crate::git::apply_safe_git_subprocess_env(&mut command);
+    let output = command
         .args(args)
         .current_dir(cwd)
         .env("NO_COLOR", "1")
@@ -223,8 +227,10 @@ pub async fn pull_for_branch(cwd: &Path, branch: &str) -> BranchPullLookup {
 
 /// `Ok(true)` is signed in. `Ok(false)` is signed out. `Err` is a missing
 /// `gh` or a timeout, which the panel can show.
-async fn github_signed_in(cwd: &Path) -> Result<bool, String> {
-    match gh(cwd, &["auth", "status"]).await {
+async fn github_signed_in(_cwd: &Path) -> Result<bool, String> {
+    // Auth status is host-wide and does not need to touch the project directory.
+    let neutral = std::env::temp_dir();
+    match gh(&neutral, &["auth", "status"]).await {
         Ok(_) => Ok(true),
         Err(error) if error == "GitHub CLI (gh) is not installed." || error == "gh timed out." => {
             Err(error)

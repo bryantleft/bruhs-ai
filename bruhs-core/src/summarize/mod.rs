@@ -172,6 +172,7 @@ mod tests {
             session_id: "s".into(),
             duration_ms: 1,
             usage: Default::default(),
+            total_cost_usd: None,
             is_error,
             errors: errors.iter().map(|e| e.to_string()).collect(),
         }

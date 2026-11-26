@@ -22,6 +22,7 @@ mod task_registry_subscription;
 pub mod tasks_panel;
 pub mod terminal_panel;
 pub mod terminal_view;
+mod usage;
 pub mod web_button;
 pub(crate) mod whiteboard;
 pub mod workbench;

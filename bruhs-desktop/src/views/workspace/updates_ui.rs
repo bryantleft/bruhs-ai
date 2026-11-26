@@ -28,8 +28,7 @@ pub(super) enum UpdateRow<'a> {
 
 const RESTART_CONFIRM_LABEL: &str = "Restart to update";
 
-/// A packaged build's own update (T3: download in the background, then
-/// "Restart to update").
+/// Background download and restart state for a packaged build.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum AppInstall {
     Idle,
@@ -99,7 +98,7 @@ pub(super) struct DesktopUpdates {
     /// Why the last update did not start; kept until the next start or
     /// Check now (web `start_error`).
     pub start_error: Option<String>,
-    /// Runs dismissed from the sidebar (kept in memory, like T3).
+    /// Runs dismissed from the sidebar during this session.
     pub dismissed: HashSet<u64>,
     /// This app's own update, when it is a packaged release.
     pub install: AppInstall,
@@ -1034,7 +1033,7 @@ impl Workspace {
         }
     }
 
-    /// T3's restart step: Later keeps working; the pill stays.
+    /// Later closes the dialog and leaves the restart action available.
     pub(super) fn render_restart_confirm(
         &self,
         window: &Window,
@@ -1358,6 +1357,19 @@ impl Workspace {
         } else {
             "Provider and desktop updates".into()
         };
+        let corners = if compact {
+            bruhs_ui::dialog::DialogCorners::TopRounded(16.0)
+        } else {
+            bruhs_ui::dialog::DialogCorners::Rounded(16.0)
+        };
+        let card = bruhs_ui::dialog::dialog_card_with_corners(
+            "desktop-modal-dialog",
+            title.clone(),
+            Role::Dialog,
+            corners,
+            &self.blur_scrim,
+            cx,
+        );
         bruhs_ui::dialog::dialog_backdrop(
             "desktop-modal-overlay",
             bruhs_ui::dialog::DialogPlacement::Centered,
@@ -1371,15 +1383,9 @@ impl Workspace {
             cx.notify();
         }))
         .child(
-            bruhs_ui::dialog::dialog_card("desktop-modal-dialog", title.clone(), Role::Dialog, cx)
-                .debug_selector(|| "desktop-modal-dialog".to_string())
-                .child(self.blur_scrim.backdrop())
-                .when(compact, |el| {
-                    el.w_full().max_w_full().rounded_none().rounded_t(px(16.0))
-                })
-                .when(!compact, |el| {
-                    el.w(px(576.0)).max_w(relative(0.9)).rounded(px(16.0))
-                })
+            card.debug_selector(|| "desktop-modal-dialog".to_string())
+                .when(compact, |el| el.w_full().max_w_full())
+                .when(!compact, |el| el.w(px(576.0)).max_w(relative(0.9)))
                 .max_h(dialog_max_height(window))
                 .track_focus(&self.modal_start_focus_handle)
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {

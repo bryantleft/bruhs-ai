@@ -2737,6 +2737,353 @@ fn press_key(cx: &mut gpui::VisualTestContext, key: &'static str) {
     cx.run_until_parked();
 }
 
+#[gpui::test]
+async fn sidebar_file_drop_opens_target_and_keeps_drafts_separate(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, source_id, target_id) = thread_menu_workspace(cx);
+    cx.executor().allow_parking();
+    let (source, target) = workspace.update_in(cx, |ws, window, cx| {
+        let source = ws.threads[0].chat.clone();
+        let target = ws.threads[1].chat.clone();
+        source.update(cx, |chat, cx| {
+            chat.set_composer_draft("Keep the source draft.".into(), window, cx)
+        });
+        target.update(cx, |chat, cx| {
+            chat.set_composer_draft("Keep the target draft.".into(), window, cx)
+        });
+        (source, target)
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("sidebar-example.txt");
+    std::fs::write(&path, b"File dropped on the conversation").unwrap();
+    let position = rendered_bounds(cx, thread_row_debug_selector(&target_id)).center();
+    cx.simulate_event(gpui::FileDropEvent::Entered {
+        position,
+        paths: gpui::ExternalPaths([path].into_iter().collect()),
+    });
+    cx.simulate_event(gpui::FileDropEvent::Pending { position });
+    cx.simulate_event(gpui::FileDropEvent::Submit { position });
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_thread_id.as_deref(), Some(target_id.as_str()))
+    });
+    workspace.update(cx, |ws, cx| ws.select_thread_by_id(&source_id, cx));
+    cx.condition(&target, |chat, _| {
+        !chat.fixture_ready_composer_files().is_empty()
+    })
+    .await;
+    let files = target.read_with(cx, |chat, cx| {
+        assert_eq!(chat.mobile_fixture_draft(cx), "Keep the target draft.");
+        assert!(chat.messages.is_empty());
+        chat.fixture_ready_composer_files()
+    });
+    source.read_with(cx, |chat, cx| {
+        assert_eq!(chat.mobile_fixture_draft(cx), "Keep the source draft.");
+        assert!(chat.fixture_ready_composer_files().is_empty());
+    });
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].name, "sidebar-example.txt");
+    assert_eq!(
+        std::fs::read(&files[0].path).unwrap(),
+        b"File dropped on the conversation"
+    );
+    std::fs::remove_file(&files[0].path).unwrap();
+}
+
+fn start_sidebar_drag(cx: &mut gpui::VisualTestContext, id: &str) {
+    let start = rendered_bounds(cx, thread_row_debug_selector(id)).center();
+    cx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::default());
+    move_sidebar_drag(cx, gpui::point(start.x + px(8.), start.y));
+    assert!(cx.update(|_, cx| cx.has_active_drag()));
+}
+
+fn move_sidebar_drag(cx: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    cx.simulate_mouse_move(
+        at,
+        Some(gpui::MouseButton::Left),
+        gpui::Modifiers::default(),
+    );
+    cx.run_until_parked();
+}
+
+fn submit_sidebar_drag(cx: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    cx.simulate_mouse_up(at, gpui::MouseButton::Left, gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(!cx.update(|_, cx| cx.has_active_drag()));
+}
+
+#[gpui::test]
+fn sidebar_drag_reorders_pins_unpins_and_cancels(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, first, second) = thread_menu_workspace(cx);
+    workspace.update(cx, |ws, cx| {
+        ws.sidebar_working_section = false;
+        ws.threads[0].active_rank = Some(0);
+        ws.threads[1].active_rank = Some(1);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    start_sidebar_drag(cx, &first);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-shelf-Pinned");
+    let second_row = rendered_bounds(cx, thread_row_debug_selector(&second));
+    let below_second = gpui::point(second_row.center().x, second_row.bottom() - px(4.));
+    move_sidebar_drag(cx, below_second);
+    assert!(rendered_bounds(cx, thread_row_debug_selector(&second)).top() < second_row.top());
+    submit_sidebar_drag(cx, below_second);
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_thread_id.as_deref(), Some(first.as_str()));
+        let order: Vec<_> = ws
+            .sidebar_shelves(cx)
+            .active
+            .iter()
+            .map(|thread| &thread.id)
+            .collect();
+        assert_eq!(order, [&second, &first]);
+    });
+
+    start_sidebar_drag(cx, &first);
+    let pin = rendered_bounds(cx, "desktop-sidebar-drop-shelf-Pinned").center();
+    move_sidebar_drag(cx, pin);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Pin");
+    let preview = rendered_bounds(cx, "desktop-sidebar-thread-drag-preview");
+    let pinned_label = rendered_bounds(cx, "desktop-sidebar-drop-shelf-Pinned");
+    let active_label = rendered_bounds(cx, "desktop-sidebar-drop-shelf-Active");
+    for (rule, label, shelf) in [
+        (
+            "desktop-sidebar-drop-rule-Pinned",
+            "desktop-sidebar-drop-label-Pinned",
+            pinned_label,
+        ),
+        (
+            "desktop-sidebar-drop-rule-Active",
+            "desktop-sidebar-drop-label-Active",
+            active_label,
+        ),
+    ] {
+        let rule = rendered_bounds(cx, rule);
+        let label = rendered_bounds(cx, label);
+        assert!(label.right() < rule.left());
+        assert!(rule.top() >= label.top() && rule.bottom() <= label.bottom());
+        assert!(label.top() > shelf.top() && label.bottom() < shelf.bottom());
+    }
+    assert!(pinned_label.bottom() <= preview.top());
+    assert!(preview.bottom() <= active_label.top());
+    assert!(active_label.bottom() <= rendered_bounds(cx, thread_row_debug_selector(&second)).top());
+    move_sidebar_drag(cx, preview.center());
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Pin");
+    move_sidebar_drag(cx, active_label.center());
+    assert_no_rendered_bounds(cx, "desktop-sidebar-drop-action-Pin");
+    move_sidebar_drag(cx, pin);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Pin");
+    press_key(cx, "escape");
+    assert_no_rendered_bounds(cx, "desktop-sidebar-drop-shelf-Pinned");
+    submit_sidebar_drag(cx, pin);
+    assert!(!workspace.read_with(cx, |ws, _| ws.threads[0].pinned));
+
+    start_sidebar_drag(cx, &first);
+    move_sidebar_drag(cx, pin);
+    submit_sidebar_drag(cx, pin);
+    workspace.read_with(cx, |ws, _| {
+        assert!(ws.threads[0].pinned);
+        assert_eq!(ws.threads[0].pin_rank, Some(0));
+        assert_eq!(ws.threads[0].active_rank, Some(1));
+    });
+    start_sidebar_drag(cx, &first);
+    let unpin = rendered_bounds(cx, "desktop-sidebar-drop-shelf-Active").center();
+    move_sidebar_drag(cx, unpin);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Unpin");
+    let unpin_preview = rendered_bounds(cx, "desktop-sidebar-thread-drag-preview");
+    move_sidebar_drag(cx, unpin_preview.center());
+    submit_sidebar_drag(cx, unpin_preview.center());
+    workspace.update_in(cx, |ws, window, cx| {
+        assert!(!ws.threads[0].pinned);
+        assert_eq!(ws.threads[0].active_rank, Some(0));
+        ws.undo_sidebar(window, cx);
+        assert!(ws.threads[0].pinned);
+        assert_eq!(ws.snapshot(cx).threads[0].pin_rank, Some(0));
+    });
+}
+
+#[gpui::test]
+fn sidebar_drag_settles_and_restores_parked_rows(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, first, second) = thread_menu_workspace(cx);
+    workspace.update(cx, |ws, cx| {
+        ws.sidebar_working_section = false;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    start_sidebar_drag(cx, &second);
+    let settled = rendered_bounds(cx, "desktop-sidebar-drop-shelf-Settled").center();
+    move_sidebar_drag(cx, settled);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Settle");
+    submit_sidebar_drag(cx, settled);
+    workspace.read_with(cx, |ws, _| assert!(ws.threads[1].settled));
+    click_debug_selector(cx, "desktop-sidebar-settled-fold");
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        ws.threads[1].updated_at_ms = bruhs_models::EpochMs::UNIX_EPOCH;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    start_sidebar_drag(cx, &second);
+    let first_row = rendered_bounds(cx, thread_row_debug_selector(&first));
+    let active = gpui::point(first_row.center().x, first_row.bottom() - px(4.));
+    move_sidebar_drag(cx, active);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Un-settle");
+    submit_sidebar_drag(cx, active);
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.thread_section(&second, cx),
+            Some(super::SidebarSection::Active)
+        );
+        let saved = &ws.snapshot(cx).threads[1];
+        assert_eq!(saved.updated_at_ms, bruhs_models::EpochMs::UNIX_EPOCH);
+        assert_eq!(saved.idle_settle_resumed_at, Some(saved.updated_at_ms));
+    });
+
+    workspace.update(cx, |ws, cx| {
+        ws.sidebar_snoozed_open = true;
+        ws.snooze_thread_by_id(
+            &second,
+            bruhs_models::EpochMs::now().as_millis() + 60_000,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    start_sidebar_drag(cx, &second);
+    let first_row = rendered_bounds(cx, thread_row_debug_selector(&first));
+    let active = gpui::point(first_row.center().x, first_row.bottom() - px(4.));
+    move_sidebar_drag(cx, active);
+    assert_rendered_bounds(cx, "desktop-sidebar-drop-action-Wake");
+    submit_sidebar_drag(cx, active);
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(
+            ws.thread_section(&second, cx),
+            Some(super::SidebarSection::Active)
+        );
+        assert!(ws.threads[1].snoozed_until_ms.is_none());
+    });
+}
+
+#[gpui::test]
+fn sidebar_drag_scrolls_held_pointer_at_viewport_edge(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, first, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.sidebar_working_section = false;
+        ws.threads[0].active_rank = Some(0);
+        ws.threads[1].active_rank = Some(1);
+        for rank in 2..24 {
+            let mut thread = Workspace::create_thread_with_title(
+                String::new(),
+                String::new(),
+                ws.current_model.clone(),
+                ws.permission_mode,
+                &format!("Conversation {rank}"),
+                window,
+                cx,
+            );
+            thread.active_rank = Some(rank);
+            ws.threads.push(thread);
+        }
+        cx.notify();
+    });
+    cx.simulate_resize(gpui::size(px(1024.), px(550.)));
+    cx.run_until_parked();
+    let viewport = workspace.read_with(cx, |ws, _| {
+        ws.sidebar_viewport.borrow().list.viewport_bounds()
+    });
+    let edge = gpui::point(viewport.center().x, viewport.bottom() - px(4.));
+    let offset = |cx: &gpui::VisualTestContext| {
+        workspace.read_with(cx, |ws, _| {
+            let offset = ws.sidebar_viewport.borrow().list.logical_scroll_top();
+            (offset.item_ix, offset.offset_in_item)
+        })
+    };
+    start_sidebar_drag(cx, &first);
+    let before = offset(cx);
+    move_sidebar_drag(cx, edge);
+    for _ in 0..12 {
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
+    let scrolled = offset(cx);
+    assert!(
+        scrolled.0 > before.0,
+        "held pointer should scroll a full row"
+    );
+    assert_no_rendered_bounds(cx, "desktop-sidebar-drop-action-Settle");
+    move_sidebar_drag(cx, viewport.center());
+    cx.update(|window, cx| window.simulate_next_frame(cx));
+    cx.run_until_parked();
+    assert_eq!(offset(cx), scrolled);
+    press_key(cx, "escape");
+    assert!(!cx.update(|_, cx| cx.has_active_drag()));
+    workspace.read_with(cx, |ws, _| assert_eq!(ws.threads[0].active_rank, Some(0)));
+}
+
+#[gpui::test]
+fn sidebar_f2_renames_an_inactive_thread_without_opening_it(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, active, target) = thread_menu_workspace(cx);
+    let row = workspace.read_with(cx, |ws, _| {
+        let thread = ws
+            .threads
+            .iter()
+            .find(|thread| thread.id == target)
+            .unwrap();
+        ws.sidebar_viewport
+            .borrow()
+            .row_targets(thread.chat.entity_id())
+            .unwrap()[0]
+            .clone()
+    });
+    cx.update(|window, cx| row.focus(window, cx));
+    press_key(cx, "f2");
+    cx.simulate_input("Discard this");
+    press_key(cx, "escape");
+    assert_eq!(keys::focused(cx), Some(row.clone()));
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.threads[1].chat.read(cx).thread_title, "Alpha session");
+    });
+    open_thread_menu_by_pointer(cx, &target);
+    click_debug_selector(cx, "desktop-thread-menu-rename");
+    cx.simulate_input("  Renamed from sidebar  ");
+    press_key(cx, "enter");
+    assert_eq!(keys::focused(cx), Some(row));
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_thread_id.as_deref(), Some(active.as_str()));
+        assert_eq!(
+            ws.threads[1].chat.read(cx).thread_title,
+            "Renamed from sidebar"
+        );
+    });
+    let selector = thread_row_debug_selector(&target);
+    click_debug_selector(cx, selector);
+    cx.run_until_parked();
+    double_click_debug_selector(cx, selector);
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| assert!(ws.sidebar_rename.is_some()));
+    press_key(cx, "escape");
+}
+
+#[gpui::test]
+fn sidebar_arrows_move_focus_without_opening_a_thread(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, active, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, window, cx| {
+        let entity = ws.threads[0].chat.entity_id();
+        ws.sidebar_viewport.borrow().row_targets(entity).unwrap()[0].focus(window, cx);
+    });
+    press_key(cx, "home");
+    let first = keys::focused(cx).expect("first conversation receives focus");
+    press_key(cx, "down");
+    let second = keys::focused(cx).expect("second conversation receives focus");
+    assert_ne!(first, second);
+    press_key(cx, "up");
+    assert_eq!(keys::focused(cx), Some(first));
+    press_key(cx, "end");
+    assert_eq!(keys::focused(cx), Some(second));
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_thread_id.as_deref(), Some(active.as_str()));
+    });
+}
+
 fn open_thread_menu_by_pointer(cx: &mut gpui::VisualTestContext, thread_id: &str) {
     hover_debug_selector(cx, thread_row_debug_selector(thread_id));
     cx.run_until_parked();
@@ -3075,6 +3422,144 @@ fn keybindings_sharing_a_chord_dispatch_the_command_for_the_current_focus(
 }
 
 #[gpui::test]
+fn workspace_focus_shortcuts_cycle_visible_areas_and_restore_the_sidebar(
+    cx: &mut gpui::TestAppContext,
+) {
+    use super::workspace_focus::Area;
+
+    cx.executor().allow_parking();
+    let (workspace, cx, thread_id, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.details.close();
+        ws.details.hidden_inline.insert(thread_id.clone());
+        ws.close_panel(&super::ClosePanel, window, cx);
+        ws.terminal_drawer_open = false;
+        cx.notify();
+    });
+    cx.simulate_resize(gpui::size(
+        bruhs_ui::zoom::window_px(1280.0),
+        bruhs_ui::zoom::window_px(800.0),
+    ));
+    cx.run_until_parked();
+    let (sidebar, content, composer, details, panel) = workspace.update_in(cx, |ws, window, cx| {
+        let sidebar = ws.sidebar_search.focus_handle(cx);
+        sidebar.focus(window, cx);
+        assert!(ws
+            .area_focus
+            .handle(Area::Sidebar)
+            .contains(&sidebar, window));
+        (
+            sidebar,
+            ws.area_focus.handle(Area::Content).clone(),
+            ws.active_thread()
+                .unwrap()
+                .chat
+                .read(cx)
+                .input_state
+                .focus_handle(cx),
+            ws.details.card.clone(),
+            ws.area_focus.handle(Area::Panel).clone(),
+        )
+    });
+    cx.run_until_parked();
+    let assert_focus =
+        |cx: &mut gpui::VisualTestContext, area: Area, handle: &gpui::FocusHandle| {
+            cx.update(|window, cx| {
+                assert!(
+                    handle.contains_focused(window, cx),
+                    "expected {area:?} ({handle:?}), got {:?}",
+                    window.focused(cx),
+                );
+            });
+        };
+    press_key(cx, "f6");
+    assert_focus(cx, Area::Content, &content);
+    press_key(cx, "f6");
+    assert_focus(cx, Area::Composer, &composer);
+    press_key(cx, "f6");
+    assert_focus(cx, Area::Sidebar, &sidebar);
+    press_key(cx, "shift-f6");
+    assert_focus(cx, Area::Composer, &composer);
+    workspace.update_in(cx, |ws, _, cx| {
+        ws.details.hidden_inline.remove(&thread_id);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    press_key(cx, "f6");
+    assert_focus(cx, Area::Details, &details);
+    press_key(cx, "shift-f6");
+    assert_focus(cx, Area::Composer, &composer);
+    workspace.update_in(cx, |ws, _, cx| {
+        ws.details.hidden_inline.insert(thread_id);
+        ws.set_tasks_panel_visible(true, cx);
+        let binding = ws
+            .keybindings
+            .iter_mut()
+            .find(|rule| rule.command == "workspace.focusNext" && rule.when.is_none())
+            .unwrap();
+        binding.key = "alt+f7".into();
+        ws.sync_keybindings(cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    press_key(cx, "f6");
+    assert_focus(cx, Area::Composer, &composer);
+    press_key(cx, "alt-f7");
+    assert_focus(cx, Area::Panel, &panel);
+    press_key(cx, "alt-f7");
+    assert_focus(cx, Area::Sidebar, &sidebar);
+    workspace.update_in(cx, |ws, window, cx| {
+        ws.open_settings(&super::OpenSettings, window, cx)
+    });
+    cx.run_until_parked();
+    let (nav, settings) = workspace.read_with(cx, |ws, _| {
+        (
+            ws.area_focus.handle(Area::SettingsNav).clone(),
+            ws.area_focus.handle(Area::SettingsContent).clone(),
+        )
+    });
+    cx.update(|window, cx| nav.focus(window, cx));
+    press_key(cx, "alt-f7");
+    assert_focus(cx, Area::SettingsContent, &settings);
+    press_key(cx, "shift-f6");
+    assert_focus(cx, Area::SettingsNav, &nav);
+}
+
+#[gpui::test]
+fn usage_metric_keybindings_can_be_remapped(cx: &mut gpui::TestAppContext) {
+    // Opening Usage starts a report load on the desktop runtime.
+    cx.executor().allow_parking();
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, window, cx| ws.open_usage_dashboard(window, cx));
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "usage-mode-Limits");
+    press_key(cx, "c");
+    assert_rendered_bounds(cx, "usage-mode-Cost");
+    let day = if cfg!(target_os = "macos") {
+        "cmd-!"
+    } else {
+        "ctrl-shift-1"
+    };
+    press_key(cx, day);
+    assert_rendered_bounds(cx, "usage-selected-period-0");
+    workspace.update_in(cx, |ws, _, cx| {
+        let binding = ws
+            .keybindings
+            .iter_mut()
+            .find(|rule| rule.command == "usage.tokens")
+            .expect("Tokens shortcut");
+        binding.key = "u".into();
+        ws.sync_keybindings(cx);
+    });
+    press_key(cx, "t");
+    assert_rendered_bounds(cx, "usage-mode-Cost");
+    press_key(cx, "u");
+    assert_rendered_bounds(cx, "usage-mode-Tokens");
+    press_key(cx, "escape");
+    assert_no_rendered_bounds(cx, "usage-mode-Tokens");
+}
+
+#[gpui::test]
 fn desktop_thread_menu_disables_regeneration_only_while_the_title_is_pending(
     cx: &mut gpui::TestAppContext,
 ) {
@@ -3138,6 +3623,7 @@ fn desktop_thread_menu_should_open_under_its_trigger_like_web(cx: &mut gpui::Tes
             "desktop-thread-menu-tomorrow",
             "desktop-thread-menu-next-week",
             "desktop-thread-menu-custom",
+            "desktop-thread-menu-rename",
             "desktop-thread-menu-regenerate",
         ]
         .into_iter()
@@ -3222,7 +3708,19 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
         })
     };
 
-    open_thread_menu_by_pointer(cx, &general_id);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .sidebar_viewport
+            .borrow()
+            .row_targets(entity)
+            .expect("the card is listed")[0]
+            .focus(window, cx);
+    });
+    press_key(cx, "shift-f10");
+    assert_eq!(
+        workspace.read_with(cx, |workspace, _| workspace.thread_menu_id.clone()),
+        Some(general_id.clone())
+    );
     assert_eq!(item_focused(&workspace, cx), Some(0), "Pin takes focus");
     cx.simulate_keystrokes("down");
     assert_eq!(item_focused(&workspace, cx), Some(1));
@@ -3319,7 +3817,22 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
 
     // A menu whose card goes away (here ⌘B hides the sidebar) takes its
     // backdrop along, so no invisible layer swallows the next click.
-    open_thread_menu_by_pointer(cx, &code_id);
+    let active_before = workspace.read_with(cx, |workspace, _| workspace.active_thread_id.clone());
+    let row = cx
+        .debug_bounds(thread_row_debug_selector(&code_id))
+        .expect("second thread row is visible");
+    cx.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Right,
+        position: row.center(),
+        modifiers: gpui::Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.thread_menu_id.as_deref(), Some(code_id.as_str()));
+        assert_eq!(workspace.active_thread_id, active_before);
+    });
     assert_rendered_bounds(cx, "desktop-thread-menu-backdrop");
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.sidebar_visible = false;
@@ -3900,7 +4413,14 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
     assert!(first.iter().all(|button| button.top() == first[0].top()));
     let second_top = first[0].top() + px(theme::CONTROL_PX + 4.0);
     assert!(second.iter().all(|button| button.top() == second_top));
-    assert_eq!(settings.top(), second_top);
+    let usage = rendered_bounds(cx, "desktop-sidebar-nav-usage");
+    assert_eq!(usage.top(), second_top);
+    let settings_top = if cx.debug_bounds("desktop-sidebar-check-updates").is_some() {
+        second_top + px(theme::CONTROL_PX + 4.0)
+    } else {
+        second_top
+    };
+    assert_eq!(settings.top(), settings_top);
     // Columns line up across the rows, edge to edge inside the 8px padding.
     for (upper, lower) in first.iter().zip(&second) {
         assert_eq!(upper.left(), lower.left());
@@ -5217,6 +5737,7 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         pinned: false,
         settled: false,
         settled_at_ms: None,
+        idle_settle_resumed_at: None,
         cleanup_busy: false,
         pin_rank: None,
         active_rank: None,
@@ -5455,6 +5976,12 @@ fn command_actions_should_match_web_reference() {
                 "agents, delivery, verification, usage and providers"
             ),
             (
+                "open-usage",
+                "Navigate",
+                "Usage",
+                "provider limits, tokens, and cost"
+            ),
+            (
                 "nav-whiteboards",
                 "Navigate",
                 "Whiteboards",
@@ -5501,6 +6028,12 @@ fn command_actions_should_match_web_reference() {
                 "⌘⇧S"
             ),
             ("copy-thread-link", "Actions", "Copy thread link", "⌘⇧C"),
+            (
+                "copy-prompt-link",
+                "Actions",
+                "Copy prompt link",
+                "Share the composer draft"
+            ),
             (
                 "copy-resume-command",
                 "Actions",
@@ -5572,7 +6105,25 @@ fn command_actions_should_match_web_reference() {
             ("stash-prompt", "Actions", "Stash prompt", "⌘S"),
             ("open-in-editor", "Actions", "Open project in editor", "⌘⌥O"),
             ("model-picker", "Actions", "Model", "switch provider"),
+            (
+                "copy-prompt-link-with-context",
+                "Actions",
+                "Copy prompt link with repo and model",
+                ""
+            ),
             ("settings", "Actions", "Settings", "preferences"),
+            (
+                "workspace.focusNext",
+                "Actions",
+                "Focus next workspace area",
+                "F6",
+            ),
+            (
+                "workspace.focusPrevious",
+                "Actions",
+                "Focus previous workspace area",
+                "Shift+F6",
+            ),
         ]
     );
 }
@@ -5597,6 +6148,7 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Agent workflows",
             "Meetings",
             "Workbench",
+            "Usage",
             "Whiteboards",
             "New whiteboard",
             "People",
@@ -5609,6 +6161,7 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Pin / unpin thread",
             "Settle / unsettle thread",
             "Copy thread link",
+            "Copy prompt link",
             "Copy resume command",
             "Copy thread as Markdown",
             "Continue in workbench",
@@ -5635,6 +6188,9 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Stash prompt",
             "Open project in editor",
             "Model",
+            "Copy prompt link with repo and model",
+            "Focus next workspace area",
+            "Focus previous workspace area",
         ]
     );
 }
@@ -7151,7 +7707,7 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
 
     assert_rendered_bounds(cx, "desktop-sidebar-check-updates");
 
-    // Codex behind: Update confirms first (T3's "Update N machine(s)?").
+    // Updating Codex requires confirmation.
     seed(
         cx,
         update_report(("0.166.0", "0.167.0"), AppUpdateState::Behind, vec![]),
@@ -7325,8 +7881,8 @@ fn desktop_sidebar_checks_for_updates_with_automatic_checks_off(cx: &mut gpui::T
     let button = rendered_bounds(cx, "desktop-sidebar-check-updates");
     let settings = rendered_bounds(cx, "desktop-sidebar-nav-settings");
     assert_eq!(button.size, settings.size);
-    assert_eq!(button.top(), settings.top());
-    assert!(button.right() <= settings.left());
+    assert_eq!(button.left(), settings.left());
+    assert!(button.bottom() <= settings.top());
     click_debug_selector(cx, "desktop-sidebar-check-updates");
     updates.read_with(cx, |u, _| {
         assert!(!u.enabled);
@@ -7399,8 +7955,7 @@ fn settings_combined_update_requires_confirmation_and_returns_to_settings(
     });
 }
 
-/// A downloaded release: "Restart to update" in the sidebar and Settings,
-/// with T3's Later. (Restart itself quits the app, so it is not clicked.)
+/// A downloaded release prompts to restart. Later closes the confirmation.
 #[gpui::test]
 fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext) {
     use bruhs_models::updates::AppUpdateState;

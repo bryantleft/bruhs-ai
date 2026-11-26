@@ -118,9 +118,9 @@ Discord    6466 bryantle   40u  IPv4 0x6466          0t0  TCP 127.0.0.1:51320 (L
 
     #[test]
     fn parse_lsof_unescapes_spaces_in_command_names() {
-        let line = "T3\\x20Cod 24852 bryantle 30u IPv4 0x1 0t0 TCP 127.0.0.1:3773 (LISTEN)\n";
+        let line = "Local\\x20Preview 24852 fixture 30u IPv4 0x1 0t0 TCP 127.0.0.1:3773 (LISTEN)\n";
         let servers = parse_lsof(line, &[]);
-        assert_eq!(servers[0].command, "T3 Cod");
+        assert_eq!(servers[0].command, "Local Preview");
     }
 
     #[test]

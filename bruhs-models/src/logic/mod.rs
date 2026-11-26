@@ -43,6 +43,7 @@ pub mod task_detail;
 pub mod terminal;
 pub mod text;
 pub mod tools;
+pub mod user_question;
 pub mod wav;
 pub mod workbench_draft;
 pub mod workflow_history;

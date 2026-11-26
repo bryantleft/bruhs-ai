@@ -25,6 +25,7 @@ fn store_name(kind: Kind) -> &'static str {
         Kind::Project => super::STORE_PROJECTS,
         Kind::Thread => super::STORE_THREADS,
         Kind::Conversation => super::STORE_MESSAGES,
+        Kind::ComposerDraft => super::STORE_COMPOSER_DRAFTS,
     }
 }
 
@@ -72,7 +73,10 @@ pub(crate) async fn load_changed(
             }
             Ok((id.clone(), item))
         });
-        futures_util::future::join_all(reads).await.into_iter().collect()
+        futures_util::future::join_all(reads)
+            .await
+            .into_iter()
+            .collect()
     }
     .await;
     finish(tx, result).await
@@ -131,12 +135,24 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
                 .chain(cascade.then_some(super::STORE_KNOWLEDGE_ATTACHMENTS))
                 .chain((write.kind == Kind::Person).then_some(super::STORE_METADATA))
                 .chain(
-                    matches!(write.kind, Kind::Thread | Kind::Conversation)
-                        .then_some(super::STORE_THREADS),
+                    (write.kind == Kind::Conversation
+                        || write.kind == Kind::Thread && write.draft.is_none())
+                    .then_some(super::STORE_METADATA),
+                )
+                .chain(
+                    matches!(
+                        write.kind,
+                        Kind::Thread | Kind::Conversation | Kind::ComposerDraft
+                    )
+                    .then_some(super::STORE_THREADS),
                 )
                 .chain(
                     matches!(write.kind, Kind::Thread | Kind::Conversation)
                         .then_some(super::STORE_MESSAGES),
+                )
+                .chain(
+                    (write.kind == Kind::Thread && write.draft.is_none())
+                        .then_some(super::STORE_COMPOSER_DRAFTS),
                 )
         })
         .chain(source_guard.stores())
@@ -146,6 +162,7 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
         .collect::<Vec<_>>();
     let tx = LocalTransaction::new(db.transaction(&stores, TransactionMode::ReadWrite)?);
     let result = async {
+        let mut retirement = false;
         for (write, value) in writes.iter().zip(values) {
             let store = tx.object_store(store_name(write.kind))?;
             let current = store
@@ -184,10 +201,20 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
                         .map_err(|_| SaveError::Corrupt),
                     Kind::Conversation => super::messages::decode(raw)
                         .map(|record| Record::Conversation(std::sync::Arc::new(record))),
+                    Kind::ComposerDraft => super::composer_drafts::decode(raw, write.id)
+                        .map(|record| Record::ComposerDraft(std::sync::Arc::new(record))),
                 })
                 .transpose()?;
             if current.as_ref() != write.expected {
                 return Err(SaveError::Conflict);
+            }
+            if let Some(Record::Conversation(previous)) = current.as_ref() {
+                let remaining = match write.draft {
+                    Some(Record::Conversation(record)) => Some(record.as_ref()),
+                    _ => None,
+                };
+                retirement |=
+                    super::question_file_retirement::stage(&tx, previous, remaining).await?;
             }
             if let Some(Record::Person(person)) = write.draft {
                 super::people::outbox::stage_capture(&tx, person).await?;
@@ -218,10 +245,13 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
         }
         source_guard.validate(&tx).await?;
         project_guard.validate(&tx).await?;
-        threads::validate_and_cascade(&tx, writes).await
+        retirement |= threads::validate_and_cascade(&tx, writes).await?;
+        Ok(retirement)
     }
     .await;
-    finish(tx, result).await?;
+    if finish(tx, result).await? {
+        super::question_file_retirement::retry();
+    }
     crate::task_saves::publish_task_changes(
         writes
             .iter()

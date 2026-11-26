@@ -4,6 +4,9 @@
 
 use crate::num::{ToFloatLossy, ToIntSaturating};
 
+/// Past this share of the window, the meter's ring turns durian.
+pub const CONTEXT_METER_CAUTION_PERCENT: f64 = 75.0;
+
 /// Past this share of the window, the meter's ring turns lychee.
 pub const CONTEXT_METER_WARN_PERCENT: f64 = 90.0;
 
@@ -61,6 +64,11 @@ impl ContextReading {
         context_percentage(self.used, self.window)
     }
 
+    /// Whether the ring shows the caution color (75% to 90%).
+    pub fn is_caution(self) -> bool {
+        self.percent() >= CONTEXT_METER_CAUTION_PERCENT && !self.is_warning()
+    }
+
     /// Whether the ring shows the warning color.
     pub fn is_warning(self) -> bool {
         self.percent() > CONTEXT_METER_WARN_PERCENT
@@ -114,8 +122,15 @@ mod tests {
         let reading = ContextReading::new(84_000, "claude-sonnet-4-6");
         assert_eq!(reading.label(), "Context window, 42%, 84k of 200k");
         assert_eq!(reading.used_label(), "42% used");
+        assert!(!reading.is_caution());
         assert!(!reading.is_warning());
-        assert!(ContextReading::new(190_000, "claude-sonnet-4-6").is_warning());
+        let caution = ContextReading::new(160_000, "claude-sonnet-4-6");
+        assert!(caution.is_caution());
+        assert!(!caution.is_warning());
+        let warning = ContextReading::new(190_000, "claude-sonnet-4-6");
+        assert!(!warning.is_caution());
+        assert!(warning.is_warning());
         assert!(!ContextReading::new(180_000, "claude-sonnet-4-6").is_warning());
+        assert!(ContextReading::new(180_000, "claude-sonnet-4-6").is_caution());
     }
 }

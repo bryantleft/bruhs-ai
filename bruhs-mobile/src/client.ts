@@ -3,8 +3,10 @@ import {
   type Host,
   type NativeCommand,
   type Pairing,
+  type PendingQuestion,
   type Result,
   failure,
+  linkedDraftSchema,
   messageOf,
   parse,
   originOf,
@@ -25,12 +27,20 @@ export const DESKTOP_RESPONSE_BYTES = 32 * 1024;
 // Reuses the companion API's default JSON body budget for a task snapshot.
 export const TASK_RESPONSE_BYTES = 2 * 1024 * 1024;
 export type WireResponse = Readonly<{ status: number; text: string }>;
+export type TextPageRequest = Readonly<{ offset: number; revision?: string }> & (
+  | Readonly<{ kind: 'diff' }>
+  | Readonly<{ kind: 'message'; message: { index: number; reference: string } }>
+  | Readonly<{ kind: 'question-link'; title: string; questionLink: {
+    id: string; requestId: string; reviewHash: string; turnGeneration: number;
+  } }>
+);
 export type Transport = (
   url: string,
   init: Readonly<{
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'DELETE';
     token?: string;
-    body?: string;
+    body?: string | Blob;
+    contentType?: string;
     signal: AbortSignal;
     maxBytes: number;
   }>,
@@ -71,28 +81,63 @@ export class HostClient {
   threads(offset = 0) {
     return this.request(`/api/mobile/threads?offset=${offset}`, threadsSchema);
   }
-  thread(id: string, before?: number) {
+  async linkedDraft(id: string, signal?: AbortSignal) {
+    const query = new URLSearchParams({ link_id: id });
+    const result = await this.request(`/api/mobile/linked-draft?${query}`, linkedDraftSchema, undefined, signal);
+    if (result.ok && result.value.value.link_id !== id) {
+      return failure('conflict', 'The computer returned a different linked draft.');
+    }
+    return result;
+  }
+  async thread(id: string, before?: number) {
     const q = new URLSearchParams({ thread_id: id });
     if (before !== undefined) q.set('before', String(before));
-    return this.request(`/api/mobile/thread?${q}`, threadSnapshotSchema);
-  }
-  text(
-    kind: 'diff' | 'message',
-    id: string,
-    offset: number,
-    revision?: string,
-    message?: Readonly<{ index: number; reference: string }>,
-  ) {
-    const q = new URLSearchParams({ thread_id: id, offset: String(offset) });
-    if (revision) q.set('revision', revision);
-    if (message) {
-      q.set('index', String(message.index));
-      q.set('reference', message.reference);
+    const result = await this.request(`/api/mobile/thread?${q}`, threadSnapshotSchema);
+    if (result.ok && result.value.value.thread.id !== id) {
+      return failure('conflict', 'The computer returned a different conversation than requested.');
     }
-    return this.request(`/api/mobile/${kind}?${q}`, textPageSchema);
+    return result;
+  }
+  text(id: string, page: TextPageRequest) {
+    const q = new URLSearchParams({ thread_id: id, offset: String(page.offset) });
+    if (page.revision) q.set('revision', page.revision);
+    if (page.kind === 'message') {
+      q.set('index', String(page.message.index));
+      q.set('reference', page.message.reference);
+    } else if (page.kind === 'question-link') {
+      const link = page.questionLink;
+      q.set('link', link.id);
+      q.set('request_id', link.requestId);
+      q.set('review_hash', link.reviewHash);
+      q.set('turn_generation', String(link.turnGeneration));
+    }
+    return this.request(`/api/mobile/${page.kind}?${q}`, textPageSchema);
   }
   command(command: NativeCommand) {
     return this.request('/api/mobile/command', receiptSchema, command);
+  }
+  questionFile(
+    thread: string,
+    requestReview: PendingQuestion,
+    position: number,
+    id: string,
+    file?: Readonly<{ name: string; body: Blob }>,
+  ) {
+    const q = new URLSearchParams({
+      thread_id: thread,
+      turn_generation: String(requestReview.turn_generation),
+      request_id: requestReview.request_id,
+      review_hash: requestReview.review_hash,
+      question: String(position),
+      upload_id: id,
+    });
+    if (file) q.set('name', file.name);
+    const target = requestUrl(this.host, `/api/mobile/question-file?${q}`);
+    if (!target.ok) return Promise.resolve(target);
+    return request(
+      this.transport, target.value, z.object({ ok: z.literal(true) }), DESKTOP_RESPONSE_BYTES,
+      this.host.token, undefined, this.signal, file ? { body: file.body } : {},
+    );
   }
   disconnect() {
     return this.request('/api/mobile/disconnect', z.object({ disconnected: z.literal(true) }), {});
@@ -139,22 +184,26 @@ async function request<T>(
   token?: string,
   body?: unknown,
   outer?: AbortSignal,
+  file?: Readonly<{ body?: Blob }>,
 ): Promise<Result<T>> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   outer?.addEventListener('abort', abort, { once: true });
   if (outer?.aborted) controller.abort();
-  const timer = setTimeout(abort, REQUEST_MS);
+  const timer = setTimeout(abort, file?.body ? 200_000 : REQUEST_MS);
+  const method = file ? file.body ? 'POST' : 'DELETE' : body === undefined ? 'GET' : 'POST';
   try {
+    const payload = file?.body ?? (body === undefined ? undefined : JSON.stringify(body));
     const response = await transport(url, {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       token,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: payload,
+      contentType: file?.body ? 'application/octet-stream' : payload === undefined ? undefined : 'application/json',
       signal: controller.signal,
       maxBytes,
     });
     const delivery =
-      body === undefined
+      method === 'GET'
         ? undefined
         : response.status >= 400 && response.status < 500 && response.status !== 408
           ? 'rejected'
@@ -198,7 +247,7 @@ async function request<T>(
       controller.signal.aborted
         ? 'The host did not answer before its delivery deadline. Reconnect and check the current state.'
         : `Could not reach the paired host. ${messageOf(error)}`,
-      body === undefined ? undefined : 'uncertain',
+      method === 'GET' ? undefined : 'uncertain',
     );
   } finally {
     clearTimeout(timer);

@@ -32,8 +32,10 @@ pub use project_identity::{project_identity, ProjectIdentity};
 mod project_setup;
 mod thread_worktree;
 pub use background::{fast_forward_clean_default, fetch_project_remote};
-pub use project_clone::clone_project;
-pub use project_setup::{run_project_setup, SetupAction};
+pub use project_clone::{clone_project, clone_prompt_repository};
+pub use project_setup::{
+    load_project_setup, run_project_setup, ProjectAction, ProjectActionLifecycle, SetupAction,
+};
 pub use thread_worktree::{prepare_thread_worktree, ThreadCheckout};
 mod cow;
 
@@ -45,16 +47,45 @@ pub const UNTRACKED_LIMIT: usize = 50;
 pub const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bytes of stderr kept for error messages.
 const STDERR_LIMIT: usize = 16 * 1024;
-/// Environment that would point `git` at a repository other than its
-/// working directory's.
-const INHERITED_REPOSITORY_ENV: [&str; 6] = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+/// Maximum bytes read from `git config --local --null --list` when neutralizing
+/// repository-local executable config entries.
+const LOCAL_CONFIG_SCAN_LIMIT: usize = 256 * 1024;
+/// Empty hooks path used to disable repository Git hooks.
+pub(crate) const EMPTY_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// Baseline Git config overrides that prevent repository-controlled code
+/// execution on passive/read-only commands and in `gh`/`glab` subprocesses.
+pub(crate) const SAFE_GIT_CONFIG_PAIRS: [(&str, &str); 5] = [
+    ("core.fsmonitor", "false"),
+    ("core.hooksPath", EMPTY_HOOKS_PATH),
+    ("core.pager", "cat"),
+    ("diff.external", ""),
+    ("protocol.ext.allow", "never"),
 ];
+
+/// Strip all inherited `GIT_*` environment variables so nothing from the
+/// parent environment can redirect the repository, index, SSH command, or
+/// config parameters.
+pub(crate) fn strip_git_env(command: &mut Command) {
+    for (key, _) in std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("GIT_")) {
+        command.env_remove(key);
+    }
+}
+
+/// Apply safe `GIT_CONFIG_COUNT` overrides to subprocesses (`gh`, `glab`) that
+/// spawn `git` internally inside a project directory.
+pub(crate) fn apply_safe_git_subprocess_env(command: &mut Command) {
+    strip_git_env(command);
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_CONFIG_COUNT", SAFE_GIT_CONFIG_PAIRS.len().to_string());
+    for (index, (key, value)) in SAFE_GIT_CONFIG_PAIRS.iter().enumerate() {
+        command.env(format!("GIT_CONFIG_KEY_{index}"), key);
+        command.env(format!("GIT_CONFIG_VALUE_{index}"), value);
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -146,6 +177,10 @@ struct GitCommand<'a> {
     stdout_cap: Option<usize>,
     /// Bytes fed to git's stdin (otherwise stdin is null).
     stdin: Option<Vec<u8>>,
+    /// Allow network fetches/transports (omits `GIT_NO_LAZY_FETCH=1`).
+    allow_network: bool,
+    /// Allow repository hooks/filters when the workspace is explicitly trusted.
+    respect_trusted_hooks: bool,
 }
 
 impl<'a> GitCommand<'a> {
@@ -153,10 +188,25 @@ impl<'a> GitCommand<'a> {
         Self {
             dir,
             args,
-            env: vec![("GIT_OPTIONAL_LOCKS", "0".into())],
+            env: vec![
+                ("GIT_OPTIONAL_LOCKS", "0".into()),
+                ("GIT_TERMINAL_PROMPT", "0".into()),
+            ],
             stdout_cap: None,
             stdin: None,
+            allow_network: false,
+            respect_trusted_hooks: false,
         }
+    }
+
+    fn allow_network(mut self) -> Self {
+        self.allow_network = true;
+        self
+    }
+
+    fn respect_trusted_hooks(mut self) -> Self {
+        self.respect_trusted_hooks = true;
+        self
     }
 
     fn stdin(mut self, bytes: Vec<u8>) -> Self {
@@ -179,7 +229,30 @@ impl<'a> GitCommand<'a> {
     }
 
     async fn run_with_timeout(self, deadline: Duration) -> Result<GitOutput, GitError> {
+        let trusted = self.respect_trusted_hooks && crate::workspace_trust::is_trusted(self.dir);
+        let neutralize_hooks = !trusted;
+        let subcommand = git_subcommand(self.args);
+        let needs_local_neutralizers = subcommand_can_exec_local_config(subcommand)
+            && (!trusted || !self.respect_trusted_hooks);
+        let local_overrides = if needs_local_neutralizers {
+            repo_local_neutralizers(self.dir, !self.allow_network || !trusted).await
+        } else {
+            Vec::new()
+        };
+
         let mut command = Command::new("git");
+        command
+            .arg("--no-pager")
+            .args(["-c", "core.fsmonitor=false"])
+            .args(["-c", "core.pager=cat"])
+            .args(["-c", "diff.external="])
+            .args(["-c", "protocol.ext.allow=never"]);
+        if neutralize_hooks {
+            command.args(["-c", &format!("core.hooksPath={EMPTY_HOOKS_PATH}")]);
+        }
+        for kv in &local_overrides {
+            command.arg("-c").arg(kv);
+        }
         command
             .args(self.args)
             .current_dir(self.dir)
@@ -191,11 +264,12 @@ impl<'a> GitCommand<'a> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        // `dir` alone names the repository. Git exports these to hooks, so a
-        // host started from one would otherwise act on the hook's repository
-        // or index instead.
-        for key in INHERITED_REPOSITORY_ENV {
-            command.env_remove(key);
+        // `dir` alone names the repository. Strip all inherited `GIT_*` vars
+        // so parent hooks/shells cannot redirect Git's directory, index, SSH,
+        // or config parameters.
+        strip_git_env(&mut command);
+        if !self.allow_network {
+            command.env("GIT_NO_LAZY_FETCH", "1");
         }
         for (key, value) in &self.env {
             command.env(key, value);
@@ -297,6 +371,150 @@ async fn read_bounded<R: AsyncRead + Unpin>(
         let room = keep.saturating_sub(kept.len());
         kept.extend_from_slice(&chunk[..n.min(room)]);
     }
+}
+
+/// First Git subcommand name in `args`, skipping leading global options like
+/// `-c key=val` or `--literal-pathspecs`.
+fn git_subcommand<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    let mut index = 0;
+    while let Some(&arg) = args.get(index) {
+        if arg == "-c" || arg == "-C" || arg == "--git-dir" || arg == "--work-tree" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
+
+/// Whether `subcommand` can invoke repo-local filters, diff drivers, hooks, or
+/// transport helpers configured in `.git/config`.
+fn subcommand_can_exec_local_config(subcommand: Option<&str>) -> bool {
+    matches!(
+        subcommand,
+        Some(
+            "status"
+                | "diff"
+                | "add"
+                | "switch"
+                | "checkout"
+                | "worktree"
+                | "fetch"
+                | "merge"
+                | "ls-remote"
+                | "submodule"
+                | "checkout-index"
+                | "read-tree"
+                | "clean"
+        )
+    )
+}
+
+/// Read `.git/config` passively via `git config --local --null --list` (which
+/// never executes hooks, filters, or helpers) and build `-c key=value`
+/// overrides that neutralize repo-local executable directives.
+pub(crate) async fn repo_local_neutralizers(dir: &Path, include_transport: bool) -> Vec<String> {
+    // Fast passive check: avoid spawning an extra `git config` process when
+    // `.git/config` has no filters, diff drivers, includes, or transport helpers.
+    if !crate::workspace_trust::repo_config_may_need_neutralizers(dir, include_transport) {
+        return Vec::new();
+    }
+    let mut command = Command::new("git");
+    strip_git_env(&mut command);
+    command
+        .current_dir(dir)
+        .args([
+            "--no-pager",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            &format!("core.hooksPath={EMPTY_HOOKS_PATH}"),
+            "-c",
+            "core.pager=cat",
+            "-c",
+            "protocol.ext.allow=never",
+            "config",
+            "--local",
+            "--null",
+            "--list",
+        ])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", EMPTY_HOOKS_PATH)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let Ok(mut child) = command.spawn() else {
+        return Vec::new();
+    };
+    let stdout = child.stdout.take();
+    let work = async move {
+        let bytes = read_bounded(stdout, LOCAL_CONFIG_SCAN_LIMIT).await?;
+        let status = child.wait().await?;
+        Ok::<_, std::io::Error>((bytes, status))
+    };
+    let Ok(Ok((bytes, status))) = tokio::time::timeout(Duration::from_secs(5), work).await else {
+        return Vec::new();
+    };
+    if !status.success() {
+        return Vec::new();
+    }
+    neutralizers_from_null_config(&bytes, include_transport)
+}
+
+/// Parse `git config --local --null --list` bytes into `-c` override strings
+/// neutralizing repo-local filters, textconv/diff commands, and transport
+/// helpers.
+fn neutralizers_from_null_config(bytes: &[u8], include_transport: bool) -> Vec<String> {
+    use std::collections::BTreeSet;
+    let mut filter_drivers: BTreeSet<String> = BTreeSet::new();
+    let mut overrides: BTreeSet<String> = BTreeSet::new();
+    for entry in bytes.split(|&b| b == 0).filter(|entry| !entry.is_empty()) {
+        let key_bytes = entry.split(|&b| b == b'\n').next().unwrap_or(entry);
+        let Ok(key) = std::str::from_utf8(key_bytes) else {
+            continue;
+        };
+        if let Some(rest) = key.strip_prefix("filter.") {
+            if let Some((driver, attr)) = rest.rsplit_once('.') {
+                if !driver.is_empty() && matches!(attr, "clean" | "smudge" | "process" | "required")
+                {
+                    filter_drivers.insert(driver.to_owned());
+                }
+            }
+        } else if let Some(rest) = key.strip_prefix("diff.") {
+            if let Some((_, attr)) = rest.rsplit_once('.') {
+                if matches!(attr, "textconv" | "command") {
+                    overrides.insert(format!("{key}="));
+                }
+            }
+        } else if include_transport {
+            match key {
+                "core.sshcommand" | "core.gitproxy" | "core.askpass" | "credential.helper" => {
+                    overrides.insert(format!("{key}="));
+                }
+                _ if key.starts_with("remote.")
+                    && (key.ends_with(".uploadpack") || key.ends_with(".receivepack")) =>
+                {
+                    overrides.insert(format!("{key}="));
+                }
+                _ => {}
+            }
+        }
+    }
+    for driver in filter_drivers {
+        overrides.insert(format!("filter.{driver}.clean="));
+        overrides.insert(format!("filter.{driver}.smudge="));
+        overrides.insert(format!("filter.{driver}.process="));
+        overrides.insert(format!("filter.{driver}.required=false"));
+    }
+    overrides.into_iter().collect()
 }
 
 async fn git(dir: &Path, args: &[&str]) -> Result<GitOutput, GitError> {
@@ -430,7 +648,7 @@ pub async fn status(dir: &Path) -> Result<GitStatus, GitError> {
     Ok(parse_porcelain(&out.stdout_lossy()))
 }
 
-const DIFF_ARGS: &[&str] = &["--no-color", "--no-ext-diff"];
+const DIFF_ARGS: &[&str] = &["--no-color", "--no-ext-diff", "--no-textconv"];
 
 /// `git diff HEAD` plus untracked files rendered as additions, as one
 /// unified diff of at most [`DIFF_LIMIT_BYTES`]. Falls back to the index
@@ -459,15 +677,9 @@ pub(crate) async fn diff_paths(
     } else {
         &[]
     };
-    let conversion: &[&str] = if files.is_empty() {
-        &[]
-    } else {
-        &["--no-textconv"]
-    };
     let head_args = [
         &["--literal-pathspecs", "diff", "HEAD"][..],
         DIFF_ARGS,
-        conversion,
         extra,
         &paths,
     ]
@@ -480,7 +692,6 @@ pub(crate) async fn diff_paths(
         let index_args = [
             &["--literal-pathspecs", "diff"][..],
             DIFF_ARGS,
-            conversion,
             extra,
             &paths,
         ]
@@ -501,7 +712,7 @@ pub(crate) async fn diff_paths(
     let (files, mut truncated) = untracked_files(dir, &paths).await?;
     if !files.is_empty() {
         let budget = DIFF_LIMIT_BYTES - bytes.len();
-        let (mut more, complete) = untracked_diff(dir, &files, budget, conversion).await?;
+        let (mut more, complete) = untracked_diff(dir, &files, budget, &[]).await?;
         truncated |= !complete || more.len() > budget;
         bytes.append(&mut more);
     }
@@ -749,6 +960,7 @@ pub async fn checkout(dir: &Path, branch: &str) -> Result<(), GitError> {
         return Err(GitError::UnknownBranch(branch.into()));
     }
     let out = GitCommand::new(dir, &["switch", "--no-guess", "--", branch.as_str()])
+        .respect_trusted_hooks()
         .run()
         .await?;
     if out.success() {
@@ -778,6 +990,130 @@ pub fn worktree_dest(project: &Path, branch: &str) -> Result<PathBuf, GitError> 
         ));
     }
     Ok(dest)
+}
+
+/// Fetch a validated GitHub pull request into a managed checkout and run saved setup.
+/// The caller must first confirm checkout and setup with the user.
+pub async fn checkout_linked_pull(
+    repo: &Path,
+    pull: &bruhs_models::logic::app_link::PromptPullRequest,
+    checkout_id: uuid::Uuid,
+    setup: &[SetupAction],
+) -> Result<(PathBuf, String), GitError> {
+    let branch = pull.checkout_branch(checkout_id);
+    let dest = worktree_dest(repo, &branch)?;
+    checkout_linked_pull_at(repo, pull, checkout_id, &dest, setup).await?;
+    Ok((dest, branch))
+}
+
+/// Check out a pull request at the managed destination that the calling surface validated.
+pub async fn checkout_linked_pull_at(
+    repo: &Path,
+    pull: &bruhs_models::logic::app_link::PromptPullRequest,
+    checkout_id: uuid::Uuid,
+    dest: &Path,
+    setup: &[SetupAction],
+) -> Result<(), GitError> {
+    if !project_identity(repo)
+        .await
+        .is_some_and(|identity| pull.repository.matches_remote(&identity.repository))
+    {
+        return Err(GitError::Failed(
+            "the project no longer matches the pull request".into(),
+        ));
+    }
+    let branch = pull.checkout_branch(checkout_id);
+    if resolve(dest) != resolve(&worktree_dest(repo, &branch)?) {
+        return Err(GitError::Failed(
+            "The pull request worktree path is invalid.".into(),
+        ));
+    }
+    let matches_branch = || async {
+        Ok::<_, GitError>(worktree_branch(repo, dest).await?.flatten().as_deref() == Some(&branch))
+    };
+    if dest.exists() {
+        if !matches_branch().await? {
+            return Err(GitError::Failed(
+                "The pull request worktree path is already in use.".into(),
+            ));
+        }
+    } else {
+        let remote = pull.repository.clone_url();
+        let result = checkout_pull_head(
+            repo,
+            dest,
+            &branch,
+            &remote,
+            pull.number,
+            uuid::Uuid::new_v4(),
+        )
+        .await;
+        if result.is_err() && (!dest.exists() || !matches_branch().await?) {
+            result?;
+        }
+    }
+    run_project_setup(dest, setup).await
+}
+
+async fn checkout_pull_head(
+    repo: &Path,
+    dest: &Path,
+    branch: &str,
+    remote: &str,
+    number: u64,
+    checkout_id: uuid::Uuid,
+) -> Result<(), GitError> {
+    let temp_ref = format!("refs/bruhs/pull-requests/{checkout_id}");
+    let refspec = format!("refs/pull/{number}/head:{temp_ref}");
+    let result = async {
+        let fetched = GitCommand::new(
+            repo,
+            &[
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--",
+                remote,
+                &refspec,
+            ],
+        )
+        .allow_network()
+        .run()
+        .await?;
+        if !fetched.success() {
+            return Err(fetched.failure());
+        }
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let path = dest
+            .to_str()
+            .ok_or_else(|| GitError::Failed("worktree path is not UTF-8".into()))?;
+        let branch_ref = format!("refs/heads/{branch}");
+        let existing = git(repo, &["rev-parse", "--verify", "--quiet", &branch_ref]).await?;
+        let added = if existing.success() {
+            let fetched = git(repo, &["rev-parse", "--verify", &temp_ref]).await?;
+            if !fetched.success() || fetched.stdout != existing.stdout {
+                return Err(GitError::Failed(
+                    "The pull request worktree branch already has a different revision.".into(),
+                ));
+            }
+            git(repo, &["worktree", "add", "--", path, branch]).await?
+        } else {
+            git(
+                repo,
+                &["worktree", "add", "-b", branch, "--", path, &temp_ref],
+            )
+            .await?
+        };
+        if !added.success() {
+            return Err(added.failure());
+        }
+        Ok(())
+    }
+    .await;
+    let _ = git(repo, &["update-ref", "-d", &temp_ref]).await;
+    result
 }
 
 /// Add a worktree of `repo` at `dest` on `branch`, starting from `base`
@@ -901,7 +1237,10 @@ async fn register_checkout(
         args.extend(["-b", branch]);
     }
     args.extend(["--", destination, start]);
-    let out = git(repo, &args).await?;
+    let out = GitCommand::new(repo, &args)
+        .respect_trusted_hooks()
+        .run()
+        .await?;
     if out.success() {
         Ok(())
     } else {
@@ -975,6 +1314,13 @@ async fn initialize_worktree_submodules(
 ) -> Result<(), GitError> {
     use bruhs_models::logic::run_place::WorktreeSubmodules;
     let mode = if mode == WorktreeSubmodules::FromProject {
+        if !crate::workspace_trust::is_trusted(project) {
+            tracing::info!(
+                "skipping automatic submodule initialization for untrusted workspace {}",
+                project.display()
+            );
+            return Ok(());
+        }
         let project = project.to_path_buf();
         tokio::task::spawn_blocking(move || project_submodules(&project))
             .await
@@ -991,6 +1337,8 @@ async fn initialize_worktree_submodules(
         }
     };
     let update = GitCommand::new(checkout, args)
+        .allow_network()
+        .respect_trusted_hooks()
         .env("GIT_TERMINAL_PROMPT", "0")
         .run()
         .await?;
@@ -1046,6 +1394,8 @@ async fn remote_worktree_base(repo: &Path, base: &str) -> Result<Option<String>,
             remote_ref,
         ],
     )
+    .allow_network()
+    .respect_trusted_hooks()
     .env("GIT_TERMINAL_PROMPT", "0")
     .run()
     .await?;
@@ -1083,6 +1433,8 @@ async fn remote_worktree_base(repo: &Path, base: &str) -> Result<Option<String>,
                 remote_ref,
             ],
         )
+        .allow_network()
+        .respect_trusted_hooks()
         .env("GIT_TERMINAL_PROMPT", "0")
         .run()
         .await?;
@@ -1335,6 +1687,63 @@ mod tests {
     use super::*;
     use bruhs_models::logic::git::{is_valid_branch, DirtyFile, FileStatus};
 
+    #[tokio::test]
+    async fn linked_pull_checkout_uses_the_pull_head_and_preserves_the_original_checkout() {
+        let source = Repo::new();
+        source.write("README.md", "pull request change\n");
+        source.git(&["commit", "-q", "-am", "pull head"]);
+        source.git(&["update-ref", "refs/pull/42/head", "HEAD"]);
+        let local = Repo::new();
+        local.write("README.md", "local change\n");
+        let output = tempfile::tempdir().unwrap();
+        let checkout = output.path().join("review");
+        checkout_pull_head(
+            local.path(),
+            &checkout,
+            "bruhs/pr-test",
+            source.path().to_str().unwrap(),
+            42,
+            uuid::Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(checkout.join("README.md")).unwrap(),
+            "pull request change\n"
+        );
+        assert_eq!(local.read("README.md"), "local change\n");
+        assert_eq!(local.git(&["branch", "--show-current"]).trim(), "main");
+        assert!(local
+            .git(&["for-each-ref", "refs/bruhs/pull-requests"])
+            .is_empty());
+        local.git(&["worktree", "remove", checkout.to_str().unwrap()]);
+        checkout_pull_head(
+            local.path(),
+            &checkout,
+            "bruhs/pr-test",
+            source.path().to_str().unwrap(),
+            42,
+            uuid::Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            worktree_branch(local.path(), &checkout)
+                .await
+                .unwrap()
+                .flatten()
+                .as_deref(),
+            Some("bruhs/pr-test")
+        );
+        let wrong =
+            bruhs_models::logic::app_link::PromptPullRequest::parse("example/demo#42").unwrap();
+        assert!(
+            checkout_linked_pull(local.path(), &wrong, uuid::Uuid::new_v4(), &[])
+                .await
+                .is_err()
+        );
+    }
+
     /// A throwaway repository with one commit on `main`. Git runs with an
     /// isolated config so the user's settings and hooks never apply.
     pub(super) struct Repo {
@@ -1538,16 +1947,43 @@ mod tests {
         ]);
         repo.git(&["commit", "-qm", "submodule"]);
         let output = tempfile::tempdir().unwrap();
-        let dest = output.path().join("thread");
-        // The caller sees an uncommitted repository preference on the original checkout.
-        repo.write("t3.json", r#"{"worktreeSubmodules":"none"}"#);
+        // An untrusted repository never initializes submodules automatically under FromProject.
+        let untrusted_dest = output.path().join("untrusted");
         let prefs = WorktreePreferences {
             submodules: WorktreeSubmodules::FromProject,
             ..Default::default()
         };
-        add_worktree_with_preferences(repo.path(), "main", &dest, "bruhs/module", prefs)
-            .await
-            .unwrap();
+        add_worktree_with_preferences(
+            repo.path(),
+            "main",
+            &untrusted_dest,
+            "bruhs/untrusted",
+            prefs,
+        )
+        .await
+        .unwrap();
+        assert!(!untrusted_dest.join("module/README.md").exists());
+
+        // The caller sees an uncommitted repository preference on the original checkout
+        // once the repository is trusted (or uses an explicit submodule policy).
+        repo.write("t3.json", r#"{"worktreeSubmodules":"none"}"#);
+        assert_eq!(
+            project_submodules(repo.path()),
+            Some(WorktreeSubmodules::None)
+        );
+        let dest = output.path().join("thread");
+        add_worktree_with_preferences(
+            repo.path(),
+            "main",
+            &dest,
+            "bruhs/module",
+            WorktreePreferences {
+                submodules: WorktreeSubmodules::None,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         assert!(!dest.join("module/README.md").exists());
         repo.write("t3.json", r#"{"worktreeSubmodules":"recursive"}"#);
         assert_eq!(
@@ -1562,9 +1998,18 @@ mod tests {
             sub.path().to_str().unwrap(),
             dest.join("module").to_str().unwrap(),
         ]);
-        add_worktree_with_preferences(repo.path(), "main", &dest, "bruhs/module", prefs)
-            .await
-            .unwrap();
+        add_worktree_with_preferences(
+            repo.path(),
+            "main",
+            &dest,
+            "bruhs/module",
+            WorktreePreferences {
+                submodules: WorktreeSubmodules::Recursive,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         assert!(dest.join("module/README.md").is_file());
     }
 
@@ -2019,5 +2464,76 @@ mod tests {
             Err(GitError::Failed(message)) if message.contains("not a bruhs worktree")
         ));
         assert!(ensure_bruhs_worktree(&repo.path().join("missing")).is_err());
+    }
+
+    /// Opening or inspecting an untrusted repository must never execute
+    /// `core.fsmonitor`, `diff.*.textconv`, `diff.external`, `filter.*`,
+    /// or `core.hooksPath` / `.git/hooks/post-checkout`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn untrusted_repo_git_queries_and_checkouts_execute_no_repo_commands() {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = Repo::new();
+        let marker_dir = tempfile::tempdir().unwrap();
+        let marker = marker_dir.path().join("ran");
+        let helper = marker_dir.path().join("probe.sh");
+        std::fs::write(
+            &helper,
+            format!("#!/bin/sh\necho ran >> '{}'\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cmd = helper.to_string_lossy().into_owned();
+
+        // Configure every local execution vector in `.git/config` + `.gitattributes`.
+        repo.git(&["config", "--local", "core.fsmonitor", &cmd]);
+        repo.git(&["config", "--local", "diff.external", &cmd]);
+        repo.git(&["config", "--local", "diff.custom.textconv", &cmd]);
+        repo.git(&["config", "--local", "diff.custom.command", &cmd]);
+        repo.git(&["config", "--local", "filter.Custom.clean", &cmd]);
+        repo.git(&["config", "--local", "filter.Custom.smudge", &cmd]);
+        repo.git(&["config", "--local", "filter.Custom.process", &cmd]);
+        repo.git(&[
+            "config",
+            "--local",
+            "core.hooksPath",
+            marker_dir.path().to_str().unwrap(),
+        ]);
+        let hook = marker_dir.path().join("post-checkout");
+        std::fs::copy(&helper, &hook).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        repo.write(".gitattributes", "*.md diff=custom filter=Custom\n");
+        repo.write("README.md", "modified content\n");
+        repo.write("untracked.md", "new file\n");
+        repo.git(&["branch", "other"]);
+
+        // Read-only queries that run on project open / diff view.
+        let st = status(repo.path()).await.unwrap();
+        assert!(!st.dirty.is_empty());
+        let br = branches(repo.path()).await.unwrap();
+        assert_eq!(br.current.as_deref(), Some("main"));
+        let df = diff(repo.path()).await.unwrap();
+        assert!(df.diff.contains("modified content"));
+        let _ = tracked_files(repo.path()).await.unwrap();
+        let _ = recently_changed_files(repo.path(), 5).await.unwrap();
+        let _ = project_identity(repo.path()).await;
+
+        // Untrusted branch switch and worktree add must also not run hooks/filters.
+        checkout(repo.path(), "other").await.unwrap();
+        let wt_root = tempfile::tempdir().unwrap();
+        add_worktree(
+            repo.path(),
+            "main",
+            &wt_root.path().join("wt"),
+            "bruhs/safe",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !marker.exists(),
+            "untrusted repository config or hook executed during Git operation"
+        );
     }
 }

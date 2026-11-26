@@ -12,7 +12,7 @@ pub(in crate::views::workspace) struct Interrupted {
     #[serde(flatten)]
     source: Source,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    reply: Option<PersistedMessage>,
+    pub(in crate::views::workspace) reply: Option<PersistedMessage>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

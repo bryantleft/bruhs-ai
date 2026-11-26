@@ -94,8 +94,12 @@ impl Render for Usage {
             .min_w_0()
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_xs()
                     .text_color(theme::rambutan_300())
+                    .child(crate::views::workspace::provider_mark(self.provider, cx))
                     .child(format!("{} usage limits", provider_label(self.provider))),
             );
         if self.failed {

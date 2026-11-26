@@ -8,6 +8,7 @@ use super::{Kind, Record, TaskSaves};
 use bruhs_models::agent::Role;
 
 use crate::state::{AgentMessage, MessageStatus, Thread};
+use crate::storage::composer_drafts::DraftRecord;
 use crate::storage::MessagesRecord;
 
 #[derive(Default)]
@@ -75,7 +76,32 @@ impl TaskSaves {
                     None,
                 );
             }
+            queue.discard_composer_draft(&id);
             queue.group_records(&[(Kind::Thread, id.clone()), (Kind::Conversation, id)]);
+        });
+        self.refresh_status();
+        self.save();
+    }
+
+    pub(crate) fn edit_composer_draft(
+        self,
+        id: String,
+        original: Option<Arc<DraftRecord>>,
+        draft: Option<Arc<DraftRecord>>,
+    ) {
+        if self.conversations.with_value(|state| state.deleted.contains(&id)) {
+            return;
+        }
+        self.queue.update(|queue| {
+            queue.edit_record(
+                Kind::ComposerDraft,
+                id.clone(),
+                original.map(Record::ComposerDraft),
+                draft.map(Record::ComposerDraft),
+            );
+            if queue.thread_creation_pending(&id) {
+                queue.group_records(&[(Kind::Thread, id.clone()), (Kind::ComposerDraft, id)]);
+            }
         });
         self.refresh_status();
         self.save();

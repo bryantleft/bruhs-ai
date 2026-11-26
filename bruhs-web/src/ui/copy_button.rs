@@ -37,6 +37,9 @@ pub fn CopyButton(
     /// Accessible name / tooltip. Default "Copy".
     #[prop(optional, into)]
     label: String,
+    /// Glyph displayed before copying.
+    #[prop(default = "copy")]
+    icon: &'static str,
     /// Extra classes for the button element.
     #[prop(optional, into)]
     class: String,
@@ -74,7 +77,7 @@ pub fn CopyButton(
                 if copied.get() {
                     view! { <Icon name="check" size=16 class="text-pandan-400" /> }
                 } else {
-                    view! { <Icon name="copy" size=16 /> }
+                    view! { <Icon name=icon size=16 /> }
                 }
             }}
         </button>

@@ -1,7 +1,27 @@
 //! Apply explicit model choices to an existing provider request.
 use super::ProviderQueryOptions;
-use bruhs_models::delivery::generation::{GenerationOptions, OptionKind};
+use bruhs_models::{
+    agent::AgentProvider,
+    agent_extensions::UsageSpeed,
+    delivery::generation::{GenerationOptions, OptionKind},
+};
 use serde_json::Value;
+
+pub(super) fn requested_speed(provider: AgentProvider, selected: &GenerationOptions) -> UsageSpeed {
+    match (
+        provider,
+        selected.configured(OptionKind::FastMode),
+        selected.configured(OptionKind::ServiceTier),
+    ) {
+        (AgentProvider::Claude, Some("on"), _) | (AgentProvider::Codex, _, Some("priority")) => {
+            UsageSpeed::Fast
+        }
+        (AgentProvider::Claude, Some("off"), _) | (AgentProvider::Codex, _, Some("default")) => {
+            UsageSpeed::Standard
+        }
+        _ => UsageSpeed::Unknown,
+    }
+}
 
 pub(super) fn apply(options: &mut ProviderQueryOptions, selected: &GenerationOptions) {
     if selected.is_empty() {

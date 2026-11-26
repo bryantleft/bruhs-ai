@@ -117,7 +117,7 @@ pub(super) fn mark_streaming_message_stopped_like_web(message: &mut Message) {
 /// Reason sent back to the CLI when the user clicks Deny.
 pub(super) const PERMISSION_DENIED_REASON: &str = "Denied by the user in bruhs-desktop";
 
-fn pasted_image_name(format: ImageFormat) -> &'static str {
+pub(super) fn pasted_image_name(format: ImageFormat) -> &'static str {
     match format {
         ImageFormat::Jpeg => "paste.jpg",
         ImageFormat::Gif => "paste.gif",
@@ -204,7 +204,12 @@ pub(super) fn desktop_permission_request_from_raw(
         .to_string();
     let input = payload.get("input").cloned().unwrap_or_default();
 
-    Some(DesktopPermissionRequest { id, tool, input })
+    Some(DesktopPermissionRequest {
+        id,
+        tool,
+        input,
+        can_answer: false,
+    })
 }
 
 #[cfg(debug_assertions)]
@@ -412,14 +417,22 @@ async fn forward_turn_events(
                 return Some(message);
             }
             OrchestratorEvent::Query(QueryEvent::PermissionRequest {
-                id, tool, input, ..
+                id,
+                tool,
+                input,
+                can_answer,
+                ..
             }) => {
                 run.wait_for(&id);
                 let _ = tx.send(AgentUiEvent::PermissionRequest(DesktopPermissionRequest {
                     id,
                     tool,
                     input,
+                    can_answer,
                 }));
+            }
+            OrchestratorEvent::Query(QueryEvent::QuestionFiles(files)) => {
+                let _ = tx.send(AgentUiEvent::QuestionFiles(files));
             }
             OrchestratorEvent::Query(QueryEvent::PermissionCancelled { id }) => {
                 run.answered(&id);
@@ -1285,14 +1298,26 @@ impl ChatView {
             || self.input_state.read(cx).value().to_string(),
             |edit| edit.prior_draft.clone(),
         );
+        let removed_files = self
+            .messages
+            .get(index..)
+            .into_iter()
+            .flatten()
+            .flat_map(|message| &message.files)
+            .filter(|file| bruhs_core::uploads::is_desktop_question_upload(&file.path))
+            .cloned()
+            .collect::<Vec<_>>();
         if self.rewind_at(index, &draft) {
+            if !removed_files.is_empty() {
+                cx.emit(ChatViewEvent::QuestionFilesRemoved(removed_files));
+            }
             cx.emit(ChatViewEvent::MessagesChanged);
             cx.notify();
         }
     }
 
     /// Drop the user message at `index` and everything after it. The next
-    /// turn starts a new provider session. Files stay as they are.
+    /// turn starts a new provider session.
     pub(super) fn rewind_at(&mut self, index: usize, draft: &str) -> bool {
         if self.is_streaming {
             return false;
@@ -1978,6 +2003,7 @@ impl ChatView {
         self.start_streaming_spinner(cx);
         self.stream_started_at = Some(Instant::now());
         self.pending_permission = None;
+        self.question_prompt = None;
         self.readout.status("Turn started");
         cx.emit(ChatViewEvent::TurnStarted {
             model_id: model_id.clone(),
@@ -2006,6 +2032,7 @@ impl ChatView {
                 provider_for_model_id(&model_id),
                 permission_mode,
             )
+            .interactive_questions(true)
             .effort(send_effort.as_deref())
             .autocompact(autocompact)
             .thread_access(self.thread_access)
@@ -2266,6 +2293,7 @@ impl ChatView {
         self.spinner_task.take();
         self.stream_started_at = None;
         self.pending_permission = None;
+        self.question_prompt = None;
         self.scroll_messages_to_bottom();
         smoke_log("done", "stopped");
         self.readout.status("Turn stopped");
@@ -2290,7 +2318,13 @@ impl ChatView {
                     .map_or("", |m| m.content.as_str());
                 self.readout.tool_start(content, tool);
             }
-            AgentUiEvent::PermissionRequest(_) => self.readout.latest_status("Needs approval"),
+            AgentUiEvent::PermissionRequest(request) => {
+                self.readout.latest_status(if request.can_answer {
+                    "Needs an answer"
+                } else {
+                    "Needs approval"
+                })
+            }
             AgentUiEvent::SecretRequest(_) => self.readout.latest_status("Needs input"),
             AgentUiEvent::Done => self.readout.status("Turn completed"),
             AgentUiEvent::Error(_) => self.readout.status("Turn failed"),
@@ -2415,12 +2449,25 @@ impl ChatView {
                 }
                 self.refresh_paragraph_progress(true);
             }
+            AgentUiEvent::QuestionFiles(files) => {
+                if let Some(message) = self.active_assistant_message_mut() {
+                    message.files.extend(files);
+                }
+            }
             AgentUiEvent::PermissionRequest(request) => {
                 smoke_log("permission_request", &request.tool);
+                if self
+                    .pending_permission
+                    .as_ref()
+                    .is_none_or(|pending| pending.id != request.id)
+                {
+                    self.question_prompt = None;
+                }
                 self.pending_permission = Some(request);
             }
             AgentUiEvent::PermissionCancelled(id) => {
                 if clear_permission_if_matches(&mut self.pending_permission, &id) {
+                    self.question_prompt = None;
                     smoke_log("permission_cancelled", &id);
                 }
             }
@@ -2444,6 +2491,7 @@ impl ChatView {
                 self.is_streaming = false;
                 self.stream_started_at = None;
                 self.pending_permission = None;
+                self.question_prompt = None;
                 smoke_log("error", &message);
             }
             AgentUiEvent::Done => {
@@ -2464,6 +2512,7 @@ impl ChatView {
                 self.is_streaming = false;
                 self.stream_started_at = None;
                 self.pending_permission = None;
+                self.question_prompt = None;
                 smoke_log("done", "");
             }
         }
@@ -2476,10 +2525,18 @@ impl ChatView {
     }
 
     pub(super) fn respond_to_permission(&mut self, approved: bool, cx: &mut Context<'_, Self>) {
+        if self
+            .pending_permission
+            .as_ref()
+            .is_some_and(|request| request.can_answer)
+        {
+            return;
+        }
         let Some(request) = self.pending_permission.take() else {
             cx.notify();
             return;
         };
+        self.question_prompt = None;
         smoke_log(
             if approved {
                 "permission_approved"

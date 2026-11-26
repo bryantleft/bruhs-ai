@@ -67,6 +67,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         hint: "agents, delivery, verification, usage and providers",
     },
     CommandAction {
+        id: "open-usage",
+        group: "Navigate",
+        label: "Usage",
+        hint: "provider limits, tokens, and cost",
+    },
+    CommandAction {
         id: "nav-whiteboards",
         group: "Navigate",
         label: "Whiteboards",
@@ -137,6 +143,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         group: "Actions",
         label: "Copy thread link",
         hint: "⌘⇧C",
+    },
+    CommandAction {
+        id: "copy-prompt-link",
+        group: "Actions",
+        label: "Copy prompt link",
+        hint: "Share the composer draft",
     },
     CommandAction {
         id: "copy-resume-command",
@@ -295,10 +307,28 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         hint: "switch provider",
     },
     CommandAction {
+        id: "copy-prompt-link-with-context",
+        group: "Actions",
+        label: "Copy prompt link with repo and model",
+        hint: "",
+    },
+    CommandAction {
         id: "settings",
         group: "Actions",
         label: "Settings",
         hint: "preferences",
+    },
+    CommandAction {
+        id: "workspace.focusNext",
+        group: "Actions",
+        label: "Focus next workspace area",
+        hint: "F6",
+    },
+    CommandAction {
+        id: "workspace.focusPrevious",
+        group: "Actions",
+        label: "Focus previous workspace area",
+        hint: "Shift+F6",
     },
 ];
 
@@ -470,6 +500,24 @@ impl Workspace {
         let query = self.command_query(cx);
         let mut actions: Vec<_> = COMMAND_ACTIONS
             .iter()
+            .filter(|action| {
+                if !matches!(
+                    action.id,
+                    "copy-prompt-link" | "copy-prompt-link-with-context"
+                ) {
+                    return true;
+                }
+                self.active_view == AppView::Chat
+                    && self.active_thread().is_some_and(|thread| {
+                        let chat = thread.chat.read(cx);
+                        !chat.prompt_link_text(cx).trim().is_empty()
+                            && (action.id == "copy-prompt-link"
+                                || chat.project_scoped
+                                    && self
+                                        .project_prompt_repository(chat.settings_project_path())
+                                        .is_some())
+                    })
+            })
             .filter(|action| Self::command_action_matches_query(action, &query))
             .collect();
         // Rendering groups rows; keyboard indices must use that same order.
@@ -541,6 +589,10 @@ impl Workspace {
             "nav-life" => self.activate_sidebar_view(AppView::Life, window, cx),
             "nav-automations" => self.activate_sidebar_view(AppView::Automations, window, cx),
             "nav-workbench" => self.activate_sidebar_view(AppView::Workbench, window, cx),
+            "open-usage" => {
+                self.top_layer = None;
+                self.open_usage_dashboard(window, cx);
+            }
             "nav-whiteboards" => self.show_whiteboard(false, window, cx),
             "new-whiteboard" => self.show_whiteboard(true, window, cx),
             "nav-terminal" => self.open_terminal_view(&OpenTerminalView, window, cx),
@@ -588,6 +640,16 @@ impl Workspace {
                 self.toggle_sidebar_for_window(window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            "workspace.focusNext" | "workspace.focusPrevious" => {
+                self.top_layer = None;
+                if let Some((view, focus)) = self.palette_return_focus.take() {
+                    if view == self.active_view {
+                        focus.focus(window, cx);
+                    }
+                }
+                self.step_workspace_focus(action_id == "workspace.focusPrevious", window, cx);
+                cx.notify();
+            }
             "toggle-diff" => self.toggle_diff(&ToggleDiff, window, cx),
             "toggle-preview" => self.toggle_preview(&TogglePreview, window, cx),
             "toggle-files" => self.toggle_files(cx),
@@ -608,6 +670,8 @@ impl Workspace {
             "pin-thread" => self.toggle_pin_active(window, cx),
             "settle-thread" => self.toggle_settle_active(cx),
             "copy-thread-link" => self.copy_active_thread_link(cx),
+            "copy-prompt-link" => self.copy_active_prompt_link(false, window, cx),
+            "copy-prompt-link-with-context" => self.copy_active_prompt_link(true, window, cx),
             "copy-resume-command" => {
                 self.close_transient_surfaces();
                 self.copy_resume_command(cx);
@@ -1158,9 +1222,9 @@ impl Workspace {
                 "desktop-command-bar",
                 "Command palette",
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
-            .child(self.blur_scrim.backdrop())
             .debug_selector(|| "desktop-command-bar".to_string())
             .w(px(DESKTOP_DIALOG_LG_WIDTH_PX))
             .max_h(modal_ui::picker_max_height(window))

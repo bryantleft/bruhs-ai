@@ -43,6 +43,8 @@ impl SavedLinks {
             let host = LinkedHost {
                 credential: h.credential,
                 share_usage: h.usage,
+                share_usage_history: h.usage_history,
+                edit_usage_prices: h.edit_usage_prices,
                 vault_checked: false,
                 endpoint,
                 token: String::new(),
@@ -75,6 +77,8 @@ impl SavedLinks {
                 .iter()
                 .map(|h| SavedHost {
                     usage: h.share_usage,
+                    usage_history: h.share_usage_history,
+                    edit_usage_prices: h.edit_usage_prices,
                     credential: h.credential,
                     destination: h.destination(),
                     name: h.name(),

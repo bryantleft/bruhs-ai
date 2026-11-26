@@ -9,13 +9,14 @@ let view = {kind:"threads",offset:0}, generation = 0, refreshTask = null, refres
 let snapshot = null, pendingCommand = null, sending = false, promptDraft = "", status = "";
 let messageSignature = "", permissionSignature = "", listSignature = "";
 const drafts = new Map();
+const questionDrafts = new Map();
 let restoredCommand=false;
 const controllers = new Set();
 const el = (tag, text, className) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
 const button = (text, action, className) => { const b = el("button",text,className); b.type="button"; b.addEventListener("click",action); return b; };
 const scopes = () => session?.device.scopes || [];
 function controls() {
-  document.querySelectorAll("[data-mutation]").forEach(n => {n.disabled = !online || sending || !!pendingCommand || !scopes().includes(n.dataset.mutation);});
+  document.querySelectorAll("[data-mutation]").forEach(n => {n.disabled = n.dataset.blocked === "true" || !online || sending || !!pendingCommand || !scopes().includes(n.dataset.mutation);});
   const retry = document.querySelector("#retry-command"); if (retry) retry.disabled = !online || sending;
   document.querySelectorAll("[data-scope]").forEach(n=>n.disabled=!online||!scopes().includes(n.dataset.scope));
   connection.textContent = !token ? (stopped?"Not paired":"Ready to pair") : online ? "Laptop connected" : "Offline · showing last received data";
@@ -28,15 +29,17 @@ function forget(message) {
   for (const c of controllers) c.abort(); controllers.clear();
   token=""; session=null; snapshot=null; pendingCommand=null; promptDraft=""; status="";
   drafts.clear();
+  questionDrafts.clear();
   try {localStorage.removeItem(storageKey);} catch {}
   try {sessionStorage.removeItem(commandKey);} catch {}
   generation++; app.replaceChildren(el("h1","Desktop access ended"),el("p",message,"muted")); controls();
 }
 async function api(path, options={}) {
+  const {timeout=16000, ...request}=options;
   const controller = new AbortController(); controllers.add(controller);
-  const timer = setTimeout(()=>controller.abort(),16000);
+  const timer = setTimeout(()=>controller.abort(),timeout);
   try {
-    const response=await fetch(path,{...options,credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(options.body?{"Content-Type":"application/json"}:{}),...options.headers}});
+    const response=await fetch(path,{...request,credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,headers:{...(token?{Authorization:`Bearer ${token}`} : {}),...(request.body?{"Content-Type":"application/json"}:{}),...request.headers}});
     const raw=await response.text();
     if (raw.length>32768) throw new Error("The desktop response is too large.");
     let value; try {value=JSON.parse(raw);} catch {throw new Error("The desktop returned an unreadable response.");}
@@ -85,18 +88,19 @@ function renderThreads(page) {
   const signature=JSON.stringify(page);if(signature===listSignature)return;listSignature=signature;
   const list=document.querySelector("#threads");if(!list)return;list.replaceChildren();
   if(!page.threads.length)list.append(el("p","No project threads on this desktop page.","muted"));
-  for(const thread of page.threads){const b=button("",()=>setView({kind:"thread",id:thread.id} ),"thread");b.append(el("strong",thread.title||"Untitled thread"),el("small",`${thread.project} · ${thread.state.replaceAll("_"," ")}`,"muted"));list.append(b);}
+  for(const thread of page.threads){const b=button("",()=>setView({kind:"thread",id:thread.id} ),"thread");b.append(el("strong",thread.title||"Untitled thread"),el("small",`${thread.project} · ${thread.needs_answer ? "needs answer" : thread.state.replaceAll("_"," ")}`,"muted"));list.append(b);}
   const row=el("div",undefined,"row");if(view.offset)row.append(button("First page",()=>setView({kind:"threads",offset:0})));if(page.next_offset!==null)row.append(button("More threads",()=>setView({kind:"threads",offset:page.next_offset})));list.append(row);
 }
 function renderThread(value) {
   const firstSnapshot=messageSignature==="",following=document.documentElement.scrollHeight-scrollY-innerHeight<=innerHeight;
   snapshot=value;
   document.querySelector("#thread-title").textContent=value.thread.title||"Untitled thread";
-  const permissionKey=JSON.stringify([value.permission,value.laptop_action_required,value.queued_prompts]);
+  const permissionKey=JSON.stringify([value.permission,value.question,value.laptop_action_required,value.queued_prompts]);
   if(permissionKey!==permissionSignature){
     permissionSignature=permissionKey;const box=document.querySelector("#permission");box.replaceChildren();
-    if(value.laptop_action_required)box.append(el("p","A private action needs the laptop. Credential forms are not shared here.","notice"));
+    if(value.laptop_action_required&&!value.question)box.append(el("p","A private action needs the laptop. Credential forms are not shared here.","notice"));
     if(value.queued_prompts)box.append(el("p",`${value.queued_prompts} prompt(s) waiting in the desktop queue.`,"muted"));
+    if(value.question)box.append(questionCard(value.thread.id,value.question));
     if(value.permission){const p=value.permission,card=el("section",undefined,"approval");card.append(el("h2",`Tool approval · ${p.tool}`),el("pre",p.input));
       if(!p.can_allow)card.append(el("p","This review is incomplete. Review and allow it on the laptop; you can deny it here.","muted"));
       const row=el("div",undefined,"row");
@@ -113,7 +117,262 @@ function renderThread(value) {
   }
   const history=document.querySelector("#history");history.replaceChildren();if(value.next_before!==null)history.append(button("Earlier messages",()=>setView({...view,before:value.next_before})));
   controls();
-  if(view.before===undefined&&!value.permission&&(firstSnapshot||following))window.scrollTo(0,document.documentElement.scrollHeight);
+  if(view.before===undefined&&!value.permission&&!value.question&&(firstSnapshot||following))window.scrollTo(0,document.documentElement.scrollHeight);
+}
+
+function questionFilePath(threadId, request, position, entry, upload) {
+  const q = new URLSearchParams({
+    thread_id: threadId,
+    turn_generation: request.turn_generation,
+    request_id: request.request_id,
+    review_hash: request.review_hash,
+    question: position,
+    upload_id: entry.id,
+  });
+  if (upload) q.set("name", entry.file.name);
+  return `/api/mobile/question-file?${q}`;
+}
+
+function questionMarkup(markdown, openProject) {
+  const tags = {
+    paragraph: "p", heading: "h3", quote: "blockquote", code_block: "pre",
+    list: "ul", ordered_list: "ol", item: "li", table: "table", row: "tr", cell: "td",
+    strong: "strong", emphasis: "em", strike: "s", code: "code",
+  };
+  function node(value) {
+    if (typeof value === "string") return document.createTextNode(value);
+    const target = value.tag === "link" ? value.target : null;
+    let element;
+    if (target?.kind === "web") {
+      try {
+        const url = new URL(target.url);
+        if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) {
+          element = el("a");
+          element.href = url.href;
+          element.target = "_blank";
+          element.rel = "noopener noreferrer";
+        }
+      } catch {}
+    } else if (target?.kind === "project") {
+      element = button("", () => openProject(target.id, element.textContent), "question-project-link");
+      element.dataset.scope = "diff";
+      if (!scopes().includes("diff")) element.title = "This device has no project file access.";
+    }
+    element ??= el(Object.hasOwn(tags, value.tag) ? tags[value.tag] : "span");
+    if (value.tag === "ordered_list" && Number.isSafeInteger(value.start)) element.start = value.start;
+    element.append(...value.children.map(node));
+    if (value.tag === "table") {
+      const scroll = el("div", undefined, "question-table");
+      scroll.append(element);
+      return scroll;
+    }
+    return element;
+  }
+  return markdown.map(node);
+}
+
+function questionCard(threadId, request) {
+  const key = JSON.stringify([threadId, request.turn_generation, request.request_id, request.review_hash]);
+  const draft = questionDrafts.get(key) || {
+    expanded: true,
+    answers: request.questions.map(() => ({ selected: [], text: "" })),
+    files: request.questions.map(() => []),
+    fileErrors: request.questions.map(() => ""),
+    transferring: false,
+  };
+  questionDrafts.delete(key);
+  questionDrafts.set(key, draft);
+  if (questionDrafts.size > 50) questionDrafts.delete(questionDrafts.keys().next().value);
+
+  const card = el("section", undefined, "approval"), body = el("div");
+  const toggle = button("Question from the agent", () => {
+    draft.expanded = !draft.expanded;
+    toggle.setAttribute("aria-expanded", String(draft.expanded));
+    body.hidden = !draft.expanded;
+  });
+  toggle.setAttribute("aria-expanded", String(draft.expanded));
+  body.hidden = !draft.expanded;
+  card.append(toggle, body);
+
+  const current = () => view.kind === "thread" && view.id === threadId
+    && snapshot?.question?.request_id === request.request_id
+    && snapshot.question.turn_generation === request.turn_generation
+    && snapshot.question.review_hash === request.review_hash;
+  const submit = reply => {
+    if (!current()) return;
+    sendCommand(command({
+      kind: "answer_question", thread_id: threadId, turn_generation: request.turn_generation,
+      request_id: request.request_id, review_hash: request.review_hash, reply,
+    }));
+  };
+  const openProject = (link, title) => {
+    if (!current() || !scopes().includes("diff")) return;
+    openText({
+      kind: "question-link", id: threadId, offset: 0, title,
+      link, request_id: request.request_id, review_hash: request.review_hash,
+      turn_generation: request.turn_generation,
+    });
+  };
+  const appendMarkdown = (group, text, markdown, className) => {
+    if (!markdown?.length) {
+      group.append(el("p", text, className));
+      return;
+    }
+    const content = el("div", undefined, `${className} question-markdown`);
+    content.append(...questionMarkup(markdown, openProject));
+    group.append(content);
+  };
+  const send = button(request.responding ? "Sending answers…" : "Send answers", () => {
+    const answers = draft.answers.map((answer, index) => {
+      const ids = draft.files[index].filter(entry => entry.state === "ready").map(entry => entry.id);
+      return ids.length ? { ...answer, attachments: ids } : answer;
+    });
+    submit({ type: "answer", answers });
+  }, "primary");
+  const skip = button("Skip", () => submit({ type: "skip" }));
+  const sizeError = el("p", "Shorten each answer to 8 KiB.", "error");
+  for (const control of [send, skip]) control.dataset.mutation = "prompt";
+  const fileControls = [];
+  const paint = () => {
+    sizeError.hidden = draft.answers.every(answer => new TextEncoder().encode(answer.text).length <= 8192);
+    const complete = draft.answers.every((answer, index) => (
+      draft.files[index].every(entry => entry.state === "ready")
+      && (answer.selected.length || answer.text.trim() || draft.files[index].length)
+    ));
+    send.dataset.blocked = String(request.responding || draft.transferring || !sizeError.hidden || !complete);
+    skip.dataset.blocked = String(request.responding || draft.transferring);
+    fileControls.forEach(render => render());
+    controls();
+  };
+  draft.paint = paint;
+
+  async function transfer(position, entries, upload) {
+    if (draft.transferring || !current() || !online || !scopes().includes("prompt")) return;
+    const device = session?.device.id;
+    draft.transferring = true;
+    draft.fileErrors[position] = "";
+    try {
+      for (const entry of entries) {
+        if (!device || session?.device.id !== device) break;
+        entry.state = upload ? "uploading" : "removing";
+        draft.paint();
+        try {
+          await api(questionFilePath(threadId, request, position, entry, upload), upload ? {
+            method: "POST", body: entry.file, headers: {"Content-Type":"application/octet-stream"}, timeout: 200000,
+          } : { method: "DELETE" });
+          if (upload) entry.state = "ready";
+          else draft.files[position] = draft.files[position].filter(item => item !== entry);
+        } catch (error) {
+          entry.state = upload ? "failed" : entry.beforeRemoval;
+          draft.fileErrors[position] = error.message;
+        }
+      }
+    } finally {
+      draft.transferring = false;
+      draft.paint();
+    }
+  }
+  request.questions.forEach((question, position) => {
+    const answer = draft.answers[position], group = el("section", undefined, "mobile-question");
+    const markup = request.markdown?.[position];
+    if (question.header) group.append(el("h2", question.header));
+    appendMarkdown(group, question.question, markup?.question, "question-body");
+    if (question.multiSelect) group.append(el("p", "Choose one or more", "muted"));
+    const options = [];
+    question.options.forEach((option, index) => {
+      const choice = button("", () => {
+        answer.selected = question.multiSelect
+          ? answer.selected.includes(index) ? answer.selected.filter(value => value !== index) : [...answer.selected, index]
+          : [index];
+        options.forEach((control, i) => control.setAttribute("aria-pressed", String(answer.selected.includes(i))));
+        paint();
+      }, "question-choice");
+      choice.append(el("strong", option.label));
+      if (option.description) choice.append(el("small", option.description));
+      choice.setAttribute("aria-pressed", String(answer.selected.includes(index)));
+      choice.dataset.mutation = "prompt";
+      choice.dataset.blocked = String(request.responding);
+      options.push(choice);
+      group.append(choice);
+      if (option.preview) appendMarkdown(group, option.preview, markup?.previews[index], "muted question-preview");
+    });
+    if (question.allowCustom) {
+      const label = el("label", "Custom answer"), input = el("textarea");
+      input.id = `custom-answer-${position}`;
+      input.maxLength = 8192;
+      input.value = answer.text;
+      input.dataset.mutation = "prompt";
+      input.dataset.blocked = String(request.responding);
+      input.addEventListener("input", () => { answer.text = input.value; paint(); });
+      label.htmlFor = input.id;
+      group.append(label, input);
+      if (request.can_attach) {
+        const fileInput = el("input");
+        fileInput.type = "file";
+        fileInput.multiple = true;
+        fileInput.hidden = true;
+        fileInput.setAttribute("aria-label", "Attach files");
+        const attach = button("Attach files", () => fileInput.click());
+        const files = el("div", undefined, "question-files");
+        const error = el("p", undefined, "error");
+        error.setAttribute("role", "status");
+        attach.dataset.mutation = "prompt";
+        fileInput.addEventListener("change", () => {
+          const picked = Array.from(fileInput.files);
+          fileInput.value = "";
+          if (!picked.length || draft.transferring || !current()) return;
+          if (draft.files.flat().length + picked.length > 100) {
+            draft.fileErrors[position] = "Add at most 100 files to the answer.";
+            paint();
+            return;
+          }
+          const entries = picked.map(file => ({ id: crypto.randomUUID(), file, state: "queued" }));
+          draft.files[position].push(...entries);
+          void transfer(position, entries, true);
+        });
+        fileControls.push(() => {
+          const blocked = String(request.responding || draft.transferring);
+          attach.dataset.blocked = blocked;
+          error.hidden = !draft.fileErrors[position];
+          error.textContent = draft.fileErrors[position];
+          files.replaceChildren(...draft.files[position].map(entry => {
+            const row = el("div", undefined, "question-file");
+            row.append(el("strong", entry.file.name));
+            const actions = el("div", undefined, "row");
+            if (entry.state === "failed" || entry.state === "queued") {
+              actions.append(button("Retry", () => transfer(position, [entry], true)));
+            } else {
+              const status = { uploading: "Uploading…", removing: "Removing…", ready: "Ready" };
+              const label = el("small", status[entry.state], "muted");
+              label.setAttribute("role", "status");
+              actions.append(label);
+            }
+            const remove = button("Remove", () => {
+              entry.beforeRemoval = entry.state;
+              void transfer(position, [entry], false);
+            });
+            remove.setAttribute("aria-label", `Remove ${entry.file.name}`);
+            actions.append(remove);
+            actions.querySelectorAll("button").forEach(control => {
+              control.dataset.mutation = "prompt";
+              control.dataset.blocked = blocked;
+            });
+            row.append(actions);
+            return row;
+          }));
+        });
+        group.append(fileInput, attach, files, error);
+      }
+    }
+    body.append(group);
+  });
+  if (request.error) body.append(el("p", request.error, "error"));
+  if (!scopes().includes("prompt")) body.append(el("p", "Send prompts was not granted for this device.", "muted"));
+  const row = el("div", undefined, "row");
+  row.append(send, skip);
+  body.append(sizeError, row);
+  paint();
+  return card;
 }
 function requestRefresh(){
   if(stopped||!token)return;
@@ -182,12 +441,14 @@ function openDiff(){if(view.kind!=="thread")return;openText({kind:"diff",id:view
 function openMessage(m){openText({kind:"message",id:view.id,index:m.index,reference:m.reference,offset:0});}
 async function openText(next){
   rememberDraft();
-  view=next;generation++;const g=generation;app.replaceChildren(button("← Thread",()=>setView({kind:"thread",id:next.id})),el("h1",next.kind==="diff"?"Working tree diff":"Full message"));controls();
+  const title=next.kind==="question-link"?next.title:next.kind==="diff"?"Working tree diff":"Full message";
+  view=next;generation++;const g=generation;app.replaceChildren(button("← Thread",()=>setView({kind:"thread",id:next.id})),el("h1",title));controls();
   try{
     const q=new URLSearchParams({thread_id:next.id,offset:next.offset});if(next.revision)q.set("revision",next.revision);if(next.kind==="message"){q.set("index",next.index);q.set("reference",next.reference);}
+    if(next.kind==="question-link")for(const field of ["link","request_id","review_hash","turn_generation"])q.set(field,next[field]);
     const result=await api(`/api/mobile/${next.kind}?${q}`);if(g!==generation)return;const page=result.value;
-    app.append(el("pre",page.text||"No changes.","text-page"));
-    if(page.source_truncated)app.append(el("p","This diff reached the desktop size limit. Review the remaining changes on the laptop.","notice"));
+    app.append(el("pre",page.text||(next.kind==="question-link"?"This file is empty.":"No changes."),"text-page"));
+    if(page.source_truncated)app.append(el("p","This preview reached the desktop size limit. Review the rest on the laptop.","notice"));
     const row=el("div",undefined,"row");if(next.offset)row.append(button("First page",()=>openText({...next,offset:0,revision:undefined})));if(page.next_offset!==null)row.append(button("Next page",()=>openText({...next,offset:page.next_offset,revision:page.revision})));row.append(button("Reload",()=>openText({...next,offset:0,revision:undefined})));app.append(row);online=true;controls();
   }catch(error){if(g===generation&&!stopped){app.append(el("p",error.message,"error"));app.append(button("Return to latest thread",()=>setView({kind:"thread",id:next.id})));}}
 }

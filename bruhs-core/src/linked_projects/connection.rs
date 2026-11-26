@@ -28,6 +28,10 @@ impl Destination {
 pub struct SavedHost {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub usage: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub usage_history: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edit_usage_prices: bool,
     pub credential: Uuid,
     pub destination: Destination,
     pub name: String,

@@ -341,6 +341,8 @@ pub enum QueryEvent {
         duration_ms: u64,
         /// Total token usage of the turn.
         usage: UsageInfo,
+        /// The CLI’s API-equivalent cost for this run, when it reports one.
+        total_cost_usd: Option<f64>,
         /// Whether the turn failed.
         is_error: bool,
         /// Why the turn failed, for error subtypes.

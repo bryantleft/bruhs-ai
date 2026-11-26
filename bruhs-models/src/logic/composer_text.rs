@@ -11,6 +11,9 @@ use super::context_chip::{chip_detail, ContextChip};
 /// A typed message longer than this stays in the composer.
 pub const MESSAGE_CHAR_LIMIT: usize = 120_000;
 
+/// Character count at which the composer shows an approaching-limit counter.
+pub const MESSAGE_WARN_CHARS: usize = 96_000;
+
 /// A paste this large, in bytes, becomes a text attachment.
 pub const LARGE_PASTE_BYTES: usize = 32 * 1024;
 
@@ -124,6 +127,41 @@ pub fn exceeds_message_limit_with(draft: &str, extra_chars: usize) -> bool {
     draft.chars().count().saturating_add(extra_chars) > MESSAGE_CHAR_LIMIT
 }
 
+/// Shown when the draft is nearing the character limit (80% to 100%) without exceeding it.
+pub fn approaching_message_limit_hint(draft: &str, extra_chars: usize) -> Option<String> {
+    let total = draft.chars().count().saturating_add(extra_chars);
+    if (MESSAGE_WARN_CHARS..=MESSAGE_CHAR_LIMIT).contains(&total) {
+        Some(format!(
+            "{} of {} characters",
+            format_grouped_usize(total),
+            format_grouped_usize(MESSAGE_CHAR_LIMIT)
+        ))
+    } else {
+        None
+    }
+}
+
+fn format_grouped_usize(value: usize) -> String {
+    let digits = value.to_string();
+    let len = digits.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0 && (len - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Compact line and size metadata for a pasted text attachment chip.
+pub fn paste_summary(text: &str) -> String {
+    let lines = text.lines().count().max(1);
+    let size = crate::backup::format_bytes(u64::try_from(text.len()).unwrap_or(u64::MAX));
+    let unit = if lines == 1 { "line" } else { "lines" };
+    format!("{} {unit}, {size}", format_grouped_usize(lines))
+}
+
 /// Empty text inserts. `force_inline` inserts even when the paste is large.
 /// A paste bigger than [`MAX_TEXT_ATTACHMENT_BYTES`] also inserts.
 pub fn paste_outcome(draft: &str, paste: &str, force_inline: bool) -> PasteOutcome {
@@ -201,6 +239,30 @@ pub fn visible_prompt(typed: &str, attachments: &[TextAttachment]) -> String {
         out.push_str(&attachment.name);
     }
     out
+}
+
+/// The message body before the transcript's trailing upload names.
+pub fn without_uploaded_file_labels<'a>(
+    text: &'a str,
+    files: &[crate::logic::attachments::UploadedFile],
+) -> &'a str {
+    if files.is_empty() {
+        return text;
+    }
+    let attachments: Vec<_> = files
+        .iter()
+        .map(|file| TextAttachment {
+            name: file.name.clone(),
+            text: String::new(),
+        })
+        .collect();
+    let labels = visible_prompt("", &attachments);
+    if text == labels {
+        return "";
+    }
+    text.strip_suffix(&labels)
+        .and_then(|prefix| prefix.strip_suffix('\n'))
+        .map_or(text, str::trim_end)
 }
 
 /// The provider prompt. The pasted bodies stay in the files.
@@ -1018,6 +1080,26 @@ mod tests {
     }
 
     #[test]
+    fn shareable_messages_exclude_the_known_upload_suffix() {
+        let files = [crate::logic::attachments::UploadedFile {
+            name: "notes.txt".into(),
+            path: "/local/notes.txt".into(),
+        }];
+        assert_eq!(
+            without_uploaded_file_labels("Review\n\nAttached: notes.txt", &files),
+            "Review"
+        );
+        assert_eq!(
+            without_uploaded_file_labels("Attached: notes.txt", &files),
+            ""
+        );
+        assert_eq!(
+            without_uploaded_file_labels("Review Attached: notes.txt", &files),
+            "Review Attached: notes.txt"
+        );
+    }
+
+    #[test]
     fn enter_opens_and_closes_fences_without_sending() {
         assert!(matches!(
             composer_edit("hello", 5, 5, ComposerKey::Enter),
@@ -1183,5 +1265,29 @@ mod tests {
         assert!(fences("````rust").is_empty());
         assert_eq!(fences("``` rust").len(), 1);
         assert_eq!(fences("``` rust")[0].info, "rust");
+    }
+
+    #[test]
+    fn paste_summary_formats_lines_and_size() {
+        assert_eq!(paste_summary("hello"), "1 line, 5 B");
+        let two_kb = "a\n".repeat(1_000);
+        assert_eq!(paste_summary(&two_kb), "1,000 lines, 2 KB");
+    }
+
+    #[test]
+    fn approaching_message_limit_warns_between_eighty_and_hundred_percent() {
+        assert_eq!(approaching_message_limit_hint("short", 0), None);
+        let at_warn = "a".repeat(MESSAGE_WARN_CHARS);
+        assert_eq!(
+            approaching_message_limit_hint(&at_warn, 0).as_deref(),
+            Some("96,000 of 120,000 characters")
+        );
+        let at_limit = "a".repeat(MESSAGE_CHAR_LIMIT);
+        assert_eq!(
+            approaching_message_limit_hint(&at_limit, 0).as_deref(),
+            Some("120,000 of 120,000 characters")
+        );
+        let over = "a".repeat(MESSAGE_CHAR_LIMIT + 1);
+        assert_eq!(approaching_message_limit_hint(&over, 0), None);
     }
 }

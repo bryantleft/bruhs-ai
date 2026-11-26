@@ -39,7 +39,11 @@ enum Dialog {
 type LinkedUsageReport = (String, Option<Result<Vec<AccountUsage>, String>>);
 
 pub(super) struct UsageHubs {
-    pub(super) open_workbench_usage: bool,
+    dashboard: Option<Entity<crate::views::usage::UsageWindow>>,
+    dashboard_subscription: Option<Subscription>,
+    dashboard_trigger: Option<FocusHandle>,
+    pub(super) dashboard_footer_focus: FocusHandle,
+    dashboard_settings_scroll: Point<Pixels>,
     rows: Vec<Hub>,
     device_accounts: Vec<AccountUsage>,
     linked: Vec<LinkedUsageReport>,
@@ -62,7 +66,11 @@ pub(super) struct UsageHubs {
 impl UsageHubs {
     pub(super) fn new(cx: &App) -> Self {
         Self {
-            open_workbench_usage: false,
+            dashboard: None,
+            dashboard_subscription: None,
+            dashboard_trigger: None,
+            dashboard_footer_focus: cx.focus_handle().tab_stop(true),
+            dashboard_settings_scroll: Point::default(),
             rows: vec![],
             device_accounts: vec![],
             linked: Vec::new(),
@@ -124,6 +132,116 @@ impl UsageHubs {
     }
 }
 impl Workspace {
+    pub(super) fn apply_usage_shortcut(
+        &mut self,
+        shortcut: crate::views::usage::UsageShortcut,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        self.usage_hubs.dashboard.as_ref().is_some_and(|dashboard| {
+            dashboard.update(cx, |dashboard, cx| dashboard.apply_shortcut(shortcut, cx))
+        })
+    }
+
+    pub(super) fn open_usage_dashboard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if matches!(self.overlay, Some(Overlay::Usage { .. })) {
+            return;
+        }
+        let from_settings = self.settings_visible();
+        self.usage_hubs.dashboard_trigger = window.focused(cx);
+        self.usage_hubs.dashboard_settings_scroll = self.modal_scroll.offset();
+        self.open_overlay(Overlay::Usage { from_settings });
+        if let Some(dashboard) = &self.usage_hubs.dashboard {
+            dashboard.update(cx, |view, cx| view.reopen(cx));
+        } else {
+            let dashboard = cx.new(crate::views::usage::UsageWindow::new);
+            self.usage_hubs.dashboard_subscription = Some(cx.subscribe_in(
+                &dashboard,
+                window,
+                |this, _, _: &crate::views::usage::CloseUsage, window, cx| {
+                    this.close_usage_dashboard(window, cx);
+                },
+            ));
+            self.usage_hubs.dashboard = Some(dashboard);
+        }
+        self.focus_modal_dialog(window, cx);
+        cx.notify();
+    }
+
+    fn close_usage_dashboard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(Overlay::Usage { from_settings }) = self.overlay else {
+            return;
+        };
+        if self
+            .usage_hubs
+            .dashboard
+            .as_ref()
+            .is_some_and(|view| !view.read(cx).can_close())
+        {
+            return;
+        }
+        if from_settings {
+            self.modal_scroll
+                .set_offset(self.usage_hubs.dashboard_settings_scroll);
+        }
+        self.overlay = from_settings.then_some(Overlay::Settings {
+            open_dropdown: None,
+        });
+        let target = self.usage_hubs.dashboard_trigger.take().unwrap_or_else(|| {
+            if from_settings {
+                self.modal_start_focus_handle.clone()
+            } else {
+                self.workspace_focus_handle.clone()
+            }
+        });
+        cx.defer_in(window, move |_, window, cx| target.focus(window, cx));
+        cx.notify();
+    }
+
+    pub(super) fn escape_usage(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> bool {
+        if self.top_layer.is_some() || !matches!(self.overlay, Some(Overlay::Usage { .. })) {
+            return false;
+        }
+        if let Some(dashboard) = &self.usage_hubs.dashboard {
+            dashboard.update(cx, |view, cx| view.escape(window, cx));
+        }
+        true
+    }
+
+    pub(super) fn render_usage_overlay(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let viewport = window.viewport_size();
+        bruhs_ui::dialog::dialog_backdrop(
+            "usage-overlay",
+            bruhs_ui::dialog::DialogPlacement::Centered,
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.close_usage_dashboard(window, cx)))
+        .child(
+            bruhs_ui::dialog::dialog_card(
+                "usage-dialog",
+                "Usage",
+                Role::Dialog,
+                &self.blur_scrim,
+                cx,
+            )
+            .debug_selector(|| "desktop-usage-dialog".into())
+            .bg(theme::glass_surface(theme::longan_950()))
+            .track_focus(&self.modal_start_focus_handle)
+            .w(viewport.width - px(40.))
+            .max_w(px(1280.))
+            .h((viewport.height * 0.9).min(px(960.)))
+            .on_key_down(
+                cx.listener(|this, event, window, cx| this.trap_modal_tab_focus(event, window, cx)),
+            )
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .children(self.usage_hubs.dashboard.clone())
+            .child(self.render_modal_focus_sentinel()),
+        )
+        .into_any_element()
+    }
+
     pub(super) fn load_usage_hubs(&mut self, cx: &mut Context<'_, Self>) {
         if self.usage_hubs.busy || self.usage_hubs.loading || self.usage_hubs.pending != 0 {
             return;
@@ -731,10 +849,7 @@ impl Workspace {
                 WebButtonVariant::Ghost,
                 false,
                 cx,
-                |ws, window, cx| {
-                    ws.usage_hubs.open_workbench_usage = true;
-                    ws.activate_sidebar_view(AppView::Workbench, window, cx);
-                },
+                Self::open_usage_dashboard,
             ))
             .child(editor_button(
                 "usage-hub-refresh",
@@ -983,5 +1098,24 @@ impl Workspace {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod dashboard_tests {
+    #[gpui::test]
+    fn usage_footer_opens_an_overlay_in_the_workspace_window(cx: &mut gpui::TestAppContext) {
+        let (_, visual, _, _) = super::super::tests::thread_menu_workspace(cx);
+        visual.run_until_parked();
+        let button = visual
+            .debug_bounds("desktop-sidebar-nav-usage")
+            .expect("Usage footer action");
+        visual.simulate_click(button.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("desktop-usage-dialog").is_some());
+        assert_eq!(visual.cx.windows().len(), 1);
+        visual.simulate_keystrokes("escape");
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("desktop-usage-dialog").is_none());
     }
 }

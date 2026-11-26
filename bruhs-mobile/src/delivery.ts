@@ -50,7 +50,7 @@ export function canMutate(
   online: boolean,
   pending: NativeCommand | null,
   session: Session | null,
-  scope: 'prompt' | 'approve',
+  scope: 'prompt' | 'approve' | 'linked_drafts',
 ): boolean {
   return (
     online &&

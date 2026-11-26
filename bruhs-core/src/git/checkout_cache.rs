@@ -112,6 +112,7 @@ const LIMIT: usize = 64 * 1024 * 1024;
 
 async fn output(repo: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let out = GitCommand::new(repo, args)
+        .respect_trusted_hooks()
         .cap_stdout(LIMIT)
         .run()
         .await
@@ -154,8 +155,11 @@ async fn describe(cache: &Cache, repo: &Path, start: &str) -> Option<Tree> {
     let mut lines = desc.lines();
     let common = Path::new(lines.next()?).canonicalize().ok()?;
     let hook = Path::new(lines.next()?);
-    if hook.try_exists().ok()? {
-        return None;
+    match hook.try_exists() {
+        Ok(true) => return None,
+        Ok(false) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotADirectory => {}
+        Err(_) => return None,
     }
     let info_attrs = PathBuf::from(lines.next()?);
     let id = lines.next()?.to_owned();
@@ -657,11 +661,14 @@ async fn publish(
         )
         .await;
     }
-    // --no-checkout defers the normal hook. It must see the final working directory.
+    // --no-checkout defers the normal hook. Only run it for trusted workspaces.
+    if !crate::workspace_trust::is_trusted(repo) {
+        return Ok(());
+    }
     let head = value(dest, &["rev-parse", "HEAD"])
         .await
         .ok_or_else(|| GitError::Failed("Git HEAD unavailable.".into()))?;
-    let out = git(
+    let out = GitCommand::new(
         dest,
         &[
             "hook",
@@ -674,6 +681,8 @@ async fn publish(
             "1",
         ],
     )
+    .respect_trusted_hooks()
+    .run()
     .await?;
     if out.success() {
         Ok(())
@@ -796,6 +805,7 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
+        crate::workspace_trust::set_trusted(project, true).unwrap();
         assert!(!enabled());
         set_enabled(true).await.unwrap();
         let first = dests.path().join("first");

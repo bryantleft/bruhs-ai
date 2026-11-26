@@ -6,7 +6,7 @@
 use leptos::html::Div;
 use leptos::prelude::*;
 
-use crate::ui::Icon;
+use crate::ui::{BrandMark, Icon};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct DropdownOption {
@@ -14,6 +14,7 @@ pub struct DropdownOption {
     pub label: String,
     pub group: Option<String>,
     pub description: Option<String>,
+    mark: Option<&'static str>,
 }
 
 impl DropdownOption {
@@ -23,6 +24,7 @@ impl DropdownOption {
             label: label.into(),
             group: None,
             description: None,
+            mark: None,
         }
     }
 
@@ -33,6 +35,11 @@ impl DropdownOption {
 
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    pub fn with_mark(mut self, src: &'static str) -> Self {
+        self.mark = Some(src);
         self
     }
 }
@@ -53,14 +60,6 @@ pub fn typeahead_index(options: &[DropdownOption], after: usize, ch: char) -> Op
             .and_then(|c| c.to_lowercase().next())
             == Some(ch)
     })
-}
-
-/// Label to show on the trigger for `value`.
-pub fn current_label(options: &[DropdownOption], value: &str) -> String {
-    options
-        .iter()
-        .find(|o| o.value == value)
-        .map_or_else(|| value.to_string(), |o| o.label.clone())
 }
 
 #[component]
@@ -140,6 +139,11 @@ pub fn Dropdown(
     });
 
     let on_trigger_key = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+        "Escape" if open.get_untracked() => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            close(true);
+        }
         "ArrowDown" | "ArrowUp" | "Enter" | " " => {
             ev.prevent_default();
             open_list();
@@ -170,7 +174,12 @@ pub fn Dropdown(
                 ev.prevent_default();
                 choose(highlight.get_untracked());
             }
-            "Escape" | "Tab" => {
+            "Escape" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                close(true);
+            }
+            "Tab" => {
                 ev.prevent_default();
                 close(true);
             }
@@ -195,7 +204,7 @@ pub fn Dropdown(
     );
 
     view! {
-        <div class=format!("relative inline-flex {class}")>
+        <div class=format!("relative inline-flex min-w-0 {class}")>
             <button
                 node_ref=trigger_ref
                 type="button"
@@ -203,24 +212,35 @@ pub fn Dropdown(
                 aria-expanded=move || open.get().to_string()
                 aria-label=label_attr
                 disabled=move || disabled.get()
-                class="bruhs-control inline-flex h-8 w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 text-left text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-60"
+                class="bruhs-control bruhs-field-trigger inline-flex min-h-control min-w-0 w-full items-center gap-2 rounded-grape bg-white/5 px-2.5 py-[5px] text-left text-body text-rambutan-100 inset-ring inset-ring-white/10 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-60"
                 on:click=move |_| if open.get_untracked() { close(false) } else { open_list() }
                 on:keydown=on_trigger_key
             >
                 {move || {
                     let v = value.get();
-                    let known = options.with(|o| o.iter().any(|x| x.value == v));
-                    if known || placeholder.is_empty() {
+                    let selected = options.with(|o| {
+                        o.iter().find(|x| x.value == v).map(|option| (option.label.clone(), option.mark))
+                    });
+                    if let Some((label, mark)) = selected {
                         view! {
-                            <span class="min-w-0 truncate">{options.with(|o| current_label(o, &v))}</span>
+                            <span class="flex min-w-0 flex-1 items-center gap-2">
+                                {mark.map(|src| view! { <BrandMark src=src /> })}
+                                <span class="min-w-0 truncate">{label}</span>
+                            </span>
+                        }.into_any()
+                    } else if placeholder.is_empty() {
+                        view! {
+                            <span class="min-w-0 flex-1 truncate">{v}</span>
                         }.into_any()
                     } else {
                         view! {
-                            <span class="min-w-0 truncate text-rambutan-500">{placeholder.clone()}</span>
+                            <span class="min-w-0 flex-1 truncate text-rambutan-500">{placeholder.clone()}</span>
                         }.into_any()
                     }
                 }}
-                <Icon name="chevron-down" size=16 class="shrink-0 text-rambutan-500" />
+                <span aria-hidden="true" class="grid size-icon shrink-0 place-items-center text-rambutan-400">
+                    <Icon name="chevron-down" size=16 />
+                </span>
             </button>
             {move || open.get().then(|| view! {
                 <div class="fixed inset-0 z-40 cursor-default" aria-hidden="true" on:click=move |_| close(false)></div>
@@ -245,6 +265,7 @@ pub fn Dropdown(
                             let is_hot = Signal::derive(move || highlight.get() == i);
                             let text = o.label.clone();
                             let desc = o.description.clone();
+                            let mark = o.mark;
                             view! {
                                 {header.map(|g| view! {
                                     <div class="px-2.5 pb-1 pt-2 text-label-sm uppercase tracking-widest text-rambutan-400">{g}</div>
@@ -255,12 +276,13 @@ pub fn Dropdown(
                                     data-index=i.to_string()
                                     aria-selected=move || is_selected.get().to_string()
                                     class=move || format!(
-                                        "flex w-full items-center gap-2 rounded-seed px-2.5 py-1.5 text-left text-label-sm transition-colors {}",
+                                        "flex min-h-control w-full items-center gap-2 rounded-seed px-2.5 py-1.5 text-left text-label-sm transition-colors {}",
                                         if is_hot.get() { "bg-white/[0.06] text-rambutan-100" } else { "text-rambutan-200" }
                                     )
                                     on:mouseenter=move |_| highlight.set(i)
                                     on:click=move |_| choose(i)
                                 >
+                                    {mark.map(|src| view! { <BrandMark src=src /> })}
                                     <span class="flex min-w-0 flex-1 flex-col">
                                         <span class="truncate">{text}</span>
                                         {desc.map(|d| view! { <span class="text-label-sm text-rambutan-400">{d}</span> })}
@@ -297,12 +319,5 @@ mod tests {
         assert_eq!(typeahead_index(&o, 2, 'A'), Some(0));
         assert_eq!(typeahead_index(&o, 1, 'z'), None);
         assert_eq!(typeahead_index(&[], 0, 'a'), None);
-    }
-
-    #[test]
-    fn current_label_falls_back_to_value() {
-        let o = opts();
-        assert_eq!(current_label(&o, "b"), "Beta");
-        assert_eq!(current_label(&o, "zzz"), "zzz");
     }
 }

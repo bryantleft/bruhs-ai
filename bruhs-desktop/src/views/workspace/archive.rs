@@ -5,7 +5,7 @@ use super::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct ArchivedRecord {
-    thread: PersistedThread,
+    pub(super) thread: PersistedThread,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     archived_at: Option<EpochMs>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -221,8 +221,12 @@ impl Workspace {
             return;
         };
         let checkout = match self.archived_threads.remove(index) {
-            ArchivedThread::Live(t, _) => self.deleted_checkout(&t, cx),
+            ArchivedThread::Live(t, _) => {
+                self.retire_question_files(t.chat.read(cx).messages.iter().flat_map(|m| &m.files));
+                self.deleted_checkout(&t, cx)
+            }
             ArchivedThread::Stored(r) => {
+                self.retire_question_files(r.thread.messages.iter().flat_map(|m| &m.files));
                 let project = r
                     .thread
                     .project_settings_root

@@ -615,9 +615,9 @@ impl Workspace {
                 "desktop-event-create-dialog",
                 dialog_label,
                 Role::Dialog,
+                &self.blur_scrim,
                 cx,
             )
-            .child(self.blur_scrim.backdrop())
             .debug_selector(|| "desktop-event-create-dialog".to_string())
             .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
             .max_h(px(dialog_height))

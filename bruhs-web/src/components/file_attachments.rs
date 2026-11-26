@@ -3,7 +3,7 @@
 //! A tile appears as soon as a file is added. Bytes upload in the background.
 //! Send stays blocked until every tile is ready or removed.
 
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use bruhs_models::logic::attachments::{
     admit, kind_for_name, upload_label, FileKind, UploadPhase, COULD_NOT_READ, TOO_MANY_FILES,
@@ -11,21 +11,157 @@ use bruhs_models::logic::attachments::{
 };
 use bruhs_models::num::ToIntSaturating;
 use leptos::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::api::{open_attachment, upload_attachment};
 use crate::state::{OpenFile, OpenFileSignal, PanelSurface, RightPanel, RightPanelSignal};
 use crate::ui::Icon;
 
-/// Offers keep file bytes in `Rc`, so the list is pinned to this thread.
-pub type OfferList = RwSignal<Vec<FileOffer>, LocalStorage>;
-
-/// In-memory offers for the open composer. A thread change drops them.
+/// In-memory file offers keyed by conversation, including uploads in progress.
 #[derive(Copy, Clone)]
-pub struct FileOffers(pub OfferList);
+pub struct FileOffers {
+    active: ReadSignal<Option<String>>,
+    lists: RwSignal<BTreeMap<String, Vec<FileOffer>>, LocalStorage>,
+    changed: StoredValue<Option<Callback<String>>>,
+}
 
-/// Bumped when the draft is discarded so a late upload cannot land on the next thread.
-#[derive(Copy, Clone)]
-pub struct FileGeneration(pub StoredValue<u32>);
+impl FileOffers {
+    pub fn new(active: ReadSignal<Option<String>>) -> Self {
+        Self {
+            active,
+            lists: RwSignal::new_local(BTreeMap::new()),
+            changed: StoredValue::new(None),
+        }
+    }
+
+    fn target(self) -> Option<OfferTarget> {
+        Some(self.target_for(self.active.get_untracked()?))
+    }
+
+    fn target_for(self, id: String) -> OfferTarget {
+        OfferTarget {
+            id,
+            lists: self.lists,
+            changed: self.changed,
+        }
+    }
+
+    pub fn with<R>(self, read: impl FnOnce(&[FileOffer]) -> R) -> R {
+        self.active.with(|id| {
+            self.lists.with(|lists| {
+                read(
+                    id.as_ref()
+                        .and_then(|id| lists.get(id))
+                        .map_or(&[], Vec::as_slice),
+                )
+            })
+        })
+    }
+
+    pub fn with_untracked<R>(self, read: impl FnOnce(&[FileOffer]) -> R) -> R {
+        match self.target() {
+            Some(target) => target.read(read),
+            None => read(&[]),
+        }
+    }
+
+    pub fn try_update<R>(self, edit: impl FnOnce(&mut Vec<FileOffer>) -> R) -> Option<R> {
+        let target = self.target()?;
+        let result = target
+            .lists
+            .try_update(|lists| edit(lists.entry(target.id.clone()).or_default()));
+        target.notify_changed();
+        result
+    }
+
+    pub fn set(self, items: Vec<FileOffer>) {
+        if let Some(id) = self.active.get_untracked() {
+            self.set_for(id, items);
+        }
+    }
+
+    pub fn set_for(self, id: String, items: Vec<FileOffer>) {
+        self.lists.update(|lists| {
+            if items.is_empty() {
+                lists.remove(&id);
+            } else {
+                lists.insert(id.clone(), items);
+            }
+        });
+        if let Some(changed) = self.changed.get_value() {
+            changed.run(id);
+        }
+    }
+
+    pub(crate) fn on_change(self, changed: Callback<String>) {
+        self.changed.set_value(Some(changed));
+    }
+
+    pub(crate) fn snapshot(self, id: &str) -> Vec<SavedFileOffer> {
+        self.lists.with_untracked(|lists| {
+            lists
+                .get(id)
+                .into_iter()
+                .flatten()
+                .map(SavedFileOffer::from)
+                .collect()
+        })
+    }
+
+    pub(crate) fn has_unsaved_uploads(self) -> bool {
+        self.lists.with(|lists| {
+            lists
+                .values()
+                .flatten()
+                .any(|offer| matches!(offer.phase, OfferPhase::Pending) || offer.bytes.is_some())
+        })
+    }
+
+    pub fn is_empty_for(self, id: &str) -> bool {
+        self.lists
+            .with_untracked(|lists| lists.get(id).is_none_or(Vec::is_empty))
+    }
+
+    pub fn forget(self, id: &str) {
+        self.lists.update(|lists| {
+            lists.remove(id);
+        });
+    }
+}
+
+struct OfferTarget {
+    id: String,
+    lists: RwSignal<BTreeMap<String, Vec<FileOffer>>, LocalStorage>,
+    changed: StoredValue<Option<Callback<String>>>,
+}
+
+impl OfferTarget {
+    fn read<R>(&self, read: impl FnOnce(&[FileOffer]) -> R) -> R {
+        self.lists
+            .with_untracked(|lists| read(lists.get(&self.id).map_or(&[], Vec::as_slice)))
+    }
+
+    fn update(&self, edit: impl FnOnce(&mut Vec<FileOffer>)) {
+        self.lists.update(|lists| {
+            if let Some(items) = lists.get_mut(&self.id) {
+                edit(items);
+            }
+        });
+        self.notify_changed();
+    }
+
+    fn push(&self, offer: FileOffer) {
+        self.lists
+            .update(|lists| lists.entry(self.id.clone()).or_default().push(offer));
+        self.notify_changed();
+    }
+
+    fn notify_changed(&self) {
+        if let Some(changed) = self.changed.try_get_value().flatten() {
+            changed.run(self.id.clone());
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct FileOffer {
@@ -37,11 +173,55 @@ pub struct FileOffer {
     pub bytes: Option<Rc<Vec<u8>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OfferPhase {
     Pending,
     Ready { path: String },
     Failed { message: String, retry: bool },
+}
+
+/// File data stays with the upload. The draft only saves the file reference
+/// or an explicit tile explaining how to recover an interrupted upload.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SavedFileOffer {
+    id: String,
+    name: String,
+    kind: FileKind,
+    declared_bytes: u64,
+    phase: OfferPhase,
+}
+
+impl From<&FileOffer> for SavedFileOffer {
+    fn from(offer: &FileOffer) -> Self {
+        let phase = match &offer.phase {
+            OfferPhase::Pending | OfferPhase::Failed { retry: true, .. } => OfferPhase::Failed {
+                message: "Remove this attachment and choose the file again.".into(),
+                retry: false,
+            },
+            phase => phase.clone(),
+        };
+        Self {
+            id: offer.id.clone(),
+            name: offer.name.clone(),
+            kind: offer.kind,
+            declared_bytes: offer.declared_bytes,
+            phase,
+        }
+    }
+}
+
+impl From<SavedFileOffer> for FileOffer {
+    fn from(saved: SavedFileOffer) -> Self {
+        Self {
+            id: saved.id,
+            name: saved.name,
+            kind: saved.kind,
+            declared_bytes: saved.declared_bytes,
+            phase: saved.phase,
+            bytes: None,
+        }
+    }
 }
 
 impl FileOffer {
@@ -72,14 +252,29 @@ pub fn offers_block_send(offers: &[FileOffer]) -> bool {
 }
 
 /// Add one browser file. `Some` is a notice when the message is already full.
-pub fn enqueue_browser_file(
-    offers: OfferList,
-    generation: StoredValue<u32>,
+pub fn enqueue_browser_file(files: FileOffers, file: web_sys::File) -> Option<&'static str> {
+    enqueue_browser_file_at(files.target()?, file)
+}
+
+pub(crate) fn enqueue_browser_file_for(
+    files: FileOffers,
+    id: &str,
     file: web_sys::File,
 ) -> Option<&'static str> {
-    if offers.with_untracked(|items| {
-        items.len() >= bruhs_models::logic::attachments::MAX_FILES_PER_MESSAGE
-    }) {
+    enqueue_browser_file_at(files.target_for(id.to_owned()), file)
+}
+
+pub(super) fn transfer_has_files(transfer: Option<&web_sys::DataTransfer>) -> bool {
+    transfer.is_some_and(|transfer| {
+        transfer
+            .types()
+            .iter()
+            .any(|kind| kind.as_string().as_deref() == Some("Files"))
+    })
+}
+
+fn enqueue_browser_file_at(offers: OfferTarget, file: web_sys::File) -> Option<&'static str> {
+    if offers.read(|items| items.len() >= bruhs_models::logic::attachments::MAX_FILES_PER_MESSAGE) {
         return Some(TOO_MANY_FILES);
     }
     let name = {
@@ -91,46 +286,41 @@ pub fn enqueue_browser_file(
         }
     };
     let declared = file.size().to_u64_saturating();
-    let (count, image_bytes) = offers.with_untracked(|items| committed(items, None));
+    let (count, image_bytes) = offers.read(|items| committed(items, None));
     let id = uuid::Uuid::new_v4().to_string();
     match admit(count, image_bytes, &name, declared) {
         Err(message) => {
-            offers.update(|items| {
-                items.push(rejected(&id, &name, declared, message));
-            });
+            offers.push(rejected(&id, &name, declared, message));
             None
         }
         Ok(kind) => {
-            offers.update(|items| {
-                items.push(FileOffer {
-                    id: id.clone(),
-                    name: name.clone(),
-                    kind,
-                    declared_bytes: declared,
-                    phase: OfferPhase::Pending,
-                    bytes: None,
-                });
+            offers.push(FileOffer {
+                id: id.clone(),
+                name: name.clone(),
+                kind,
+                declared_bytes: declared,
+                phase: OfferPhase::Pending,
+                bytes: None,
             });
-            let gen = generation.get_value();
             leptos::task::spawn_local(async move {
                 let read = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await;
-                if generation.get_value() != gen {
-                    return;
-                }
                 let Ok(buffer) = read else {
-                    mark_failed(offers, &id, COULD_NOT_READ, false, None);
+                    mark_failed(&offers, &id, COULD_NOT_READ, false, None);
                     return;
                 };
                 let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-                finish_upload(offers, generation, gen, id, name, bytes).await;
+                finish_upload(offers, id, name, bytes).await;
             });
             None
         }
     }
 }
 
-pub fn retry_offer(offers: OfferList, generation: StoredValue<u32>, id: String) {
-    let Some((name, bytes)) = offers.with_untracked(|items| {
+pub fn retry_offer(files: FileOffers, id: String) {
+    let Some(offers) = files.target() else {
+        return;
+    };
+    let Some((name, bytes)) = offers.read(|items| {
         items
             .iter()
             .find(|item| item.id == id)
@@ -143,9 +333,8 @@ pub fn retry_offer(offers: OfferList, generation: StoredValue<u32>, id: String) 
             item.phase = OfferPhase::Pending;
         }
     });
-    let gen = generation.get_value();
     leptos::task::spawn_local(async move {
-        finish_upload(offers, generation, gen, id, name, (*bytes).clone()).await;
+        finish_upload(offers, id, name, (*bytes).clone()).await;
     });
 }
 
@@ -168,8 +357,7 @@ pub fn show_open_file(
 
 #[component]
 pub fn FileTiles() -> impl IntoView {
-    let FileOffers(offers) = expect_context::<FileOffers>();
-    let FileGeneration(generation) = expect_context::<FileGeneration>();
+    let offers = expect_context::<FileOffers>();
     let active = expect_context::<crate::state::ActiveThreadId>().0;
     let threads = expect_context::<crate::state::ThreadsSignal>().0;
     let project = Memo::new(move |_| {
@@ -185,9 +373,9 @@ pub fn FileTiles() -> impl IntoView {
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
     view! {
         {move || {
-            let items = offers.get();
+            let items = offers.with(<[FileOffer]>::to_vec);
             (!items.is_empty()).then(|| view! {
-                <div data-file-offers="" class="flex flex-col border-b border-longan-800/60">
+                <div data-file-offers="" class="flex flex-wrap items-center gap-1.5 border-b border-longan-800/60 px-3 pt-2.5 pb-2">
                     {items.into_iter().map(|item| {
                         let id = item.id.clone();
                         let remove_id = id.clone();
@@ -196,19 +384,38 @@ pub fn FileTiles() -> impl IntoView {
                         let phase_name = phase_name(&item.phase);
                         let ready = item.ready_path().map(str::to_string);
                         let can_open = ready.is_some();
+                        let is_failed = matches!(item.phase, OfferPhase::Failed { .. });
                         let can_retry = matches!(item.phase, OfferPhase::Failed { retry: true, .. });
                         let label = upload_label(&name);
                         let open_label = label.clone();
+                        let size_label = (item.declared_bytes > 0)
+                            .then(|| bruhs_models::backup::format_bytes(item.declared_bytes));
+                        let kind_icon = match item.kind {
+                            FileKind::Image => "eye",
+                            FileKind::Text | FileKind::Pdf | FileKind::Html => "file-text",
+                            FileKind::Audio => "mic",
+                            FileKind::Video | FileKind::Other => "file",
+                        };
+                        let tile_class = if is_failed {
+                            "inline-flex min-h-control max-w-full items-center gap-1.5 rounded-grape bg-lychee-500/10 py-1 pl-2.5 pr-1 inset-ring inset-ring-lychee-400/25"
+                        } else {
+                            "inline-flex min-h-control max-w-full items-center gap-1.5 rounded-grape bg-longan-800/75 py-1 pl-2.5 pr-1 inset-ring inset-ring-white/10"
+                        };
                         view! {
                             <div
                                 data-file-offer=""
                                 data-file-name=name
                                 data-file-phase=phase_name
-                                class="flex h-8 items-center gap-2 px-2"
+                                class=tile_class
                             >
+                                <Icon
+                                    name=kind_icon
+                                    size=12
+                                    class={if is_failed { "text-lychee-300" } else { "text-rambutan-400" }}
+                                />
                                 <button
                                     type="button"
-                                    class="min-w-0 flex-1 truncate text-left text-label-sm text-rambutan-300 disabled:cursor-default"
+                                    class="min-w-0 max-w-[180px] truncate text-left text-label-sm text-rambutan-200 transition-colors hover:text-rambutan-100 disabled:cursor-default disabled:hover:text-rambutan-200"
                                     disabled=!can_open
                                     title=label
                                     on:click=move |_| {
@@ -220,12 +427,18 @@ pub fn FileTiles() -> impl IntoView {
                                 >
                                     {open_label.clone()}
                                 </button>
+                                {size_label.map(|size| view! {
+                                    <span class="shrink-0 tabular-nums text-label-sm text-rambutan-500">{size}</span>
+                                })}
                                 {match &item.phase {
                                     OfferPhase::Pending => view! {
-                                        <span class="shrink-0 text-label-sm text-rambutan-500">"Uploading"</span>
+                                        <span class="inline-flex shrink-0 items-center gap-1 text-label-sm text-rambutan-400">
+                                            <Icon name="loader" size=12 class="animate-spin text-rambutan-500 motion-reduce:animate-none" />
+                                            "Uploading"
+                                        </span>
                                     }.into_any(),
                                     OfferPhase::Failed { message, .. } => view! {
-                                        <span class="min-w-0 max-w-40 truncate text-label-sm text-rambutan-400" title=message.clone()>{message.clone()}</span>
+                                        <span class="min-w-0 max-w-40 truncate text-label-sm text-lychee-300" title=message.clone()>{message.clone()}</span>
                                     }.into_any(),
                                     OfferPhase::Ready { .. } => ().into_any(),
                                 }}
@@ -235,8 +448,8 @@ pub fn FileTiles() -> impl IntoView {
                                         <button
                                             type="button"
                                             aria-label="Retry upload"
-                                            class="inline-flex h-6 items-center rounded-seed px-1.5 text-label-sm text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100 cursor-pointer"
-                                            on:click=move |_| retry_offer(offers, generation, retry_id.clone())
+                                            class="inline-flex h-control-xs items-center rounded-seed px-1.5 text-label-sm text-rambutan-300 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 cursor-pointer"
+                                            on:click=move |_| retry_offer(offers, retry_id.clone())
                                         >
                                             "Retry"
                                         </button>
@@ -245,10 +458,10 @@ pub fn FileTiles() -> impl IntoView {
                                 <button
                                     type="button"
                                     aria-label="Remove file"
-                                    class="inline-flex size-6 shrink-0 items-center justify-center rounded-seed text-rambutan-500 hover:bg-longan-800/60 hover:text-rambutan-100 cursor-pointer"
+                                    class="inline-flex size-control-xs shrink-0 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 cursor-pointer"
                                     on:click=move |_| {
                                         let remove_id = remove_id.clone();
-                                        offers.update(|items| items.retain(|item| item.id != remove_id));
+                                        offers.try_update(|items| items.retain(|item| item.id != remove_id));
                                     }
                                 >
                                     <Icon name="x" size=16 />
@@ -507,7 +720,7 @@ fn committed(items: &[FileOffer], skip: Option<&str>) -> (usize, u64) {
 }
 
 fn mark_failed(
-    offers: OfferList,
+    offers: &OfferTarget,
     id: &str,
     message: &str,
     retry: bool,
@@ -525,21 +738,14 @@ fn mark_failed(
     });
 }
 
-async fn finish_upload(
-    offers: OfferList,
-    generation: StoredValue<u32>,
-    gen: u32,
-    id: String,
-    name: String,
-    bytes: Vec<u8>,
-) {
-    if generation.get_value() != gen {
+async fn finish_upload(offers: OfferTarget, id: String, name: String, bytes: Vec<u8>) {
+    if !offers.read(|items| items.iter().any(|item| item.id == id)) {
         return;
     }
     let actual = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    let (count, images) = offers.with_untracked(|items| committed(items, Some(&id)));
+    let (count, images) = offers.read(|items| committed(items, Some(&id)));
     if let Err(message) = admit(count, images, &name, actual) {
-        mark_failed(offers, &id, message, false, None);
+        mark_failed(&offers, &id, message, false, None);
         return;
     }
     offers.update(|items| {
@@ -549,7 +755,7 @@ async fn finish_upload(
         }
     });
     match upload_attachment(&name, &bytes).await {
-        Ok(uploaded) if generation.get_value() == gen => {
+        Ok(uploaded) => {
             offers.update(|items| {
                 if let Some(item) = items.iter_mut().find(|item| item.id == id) {
                     item.name = uploaded.name;
@@ -560,10 +766,8 @@ async fn finish_upload(
                 }
             });
         }
-        Ok(_) => {}
-        Err(error) if generation.get_value() == gen => {
-            mark_failed(offers, &id, &error.to_string(), true, Some(Rc::new(bytes)));
+        Err(error) => {
+            mark_failed(&offers, &id, &error.to_string(), true, Some(Rc::new(bytes)));
         }
-        Err(_) => {}
     }
 }

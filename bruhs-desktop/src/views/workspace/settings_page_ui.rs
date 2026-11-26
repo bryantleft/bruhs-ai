@@ -655,6 +655,9 @@ impl Workspace {
         if matches!(section, SettingsSection::Devices | SettingsSection::Browser) {
             self.refresh_tool_access(cx);
         }
+        if section == SettingsSection::Access {
+            self.update_trusted_folders(None, cx);
+        }
         if section == SettingsSection::Environments {
             self.open_environments(cx);
         }
@@ -1570,8 +1573,8 @@ impl Workspace {
                     }
                 }
                 if section == SettingsSection::SourceControl {
-                    // T3 keeps both search entries available while guides are off.
-                    // Both lead to the switch that reveals their controls.
+                    // Keep both search entries while guides are off.
+                    // They lead to the switch that reveals their controls.
                     entries.retain(|hit| {
                         !matches!(
                             hit.selector.as_deref(),
@@ -1877,6 +1880,10 @@ impl Workspace {
         };
         let shell = div()
             .id("desktop-settings-nav")
+            .track_focus(
+                self.area_focus
+                    .handle(super::workspace_focus::Area::SettingsNav),
+            )
             .debug_selector(|| "desktop-settings-nav".to_owned())
             .when(expanded, |nav| nav.flex_1().min_w_0())
             .when(!expanded, |nav| nav.w(px(settings_nav_width(width))))
@@ -3369,7 +3376,12 @@ impl Workspace {
                     .into_any_element();
             }
             SettingsSection::Access => {
-                return container.child(self.render_mobile(cx)).into_any_element()
+                return container
+                    .flex()
+                    .flex_col()
+                    .child(self.render_mobile(cx))
+                    .child(self.render_trusted_folders(cx))
+                    .into_any_element();
             }
             SettingsSection::Browser => self.render_browser_rows(cx),
             SettingsSection::SnapShots => self.render_snapshot_rows(cx),
@@ -3490,9 +3502,10 @@ impl Workspace {
                     .aria_label(self.ui_language().text("Settings"))
                     .debug_selector(|| "desktop-settings-dialog".to_string())
                     .theme_dialog("canvas", cx)
-                    .child(self.blur_scrim.backdrop())
+                    .map(|card| {
+                        bruhs_ui::dialog::DialogCorners::Standard.apply(card, &self.blur_scrim)
+                    })
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .rounded(px(14.0))
                     .border_1()
                     .border_color(theme::ring_modal())
                     .bg(theme::glass_surface(
@@ -3743,6 +3756,9 @@ impl Workspace {
                                     div().flex_1().min_h_0().flex().child(
                                         div()
                                             .id("desktop-settings-content")
+                                            .track_focus(self.area_focus.handle(
+                                                super::workspace_focus::Area::SettingsContent,
+                                            ))
                                             .debug_selector(|| {
                                                 "desktop-settings-content".to_string()
                                             })

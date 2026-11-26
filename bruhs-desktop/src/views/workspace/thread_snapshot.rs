@@ -14,6 +14,9 @@ impl DesktopThread {
             pinned: self.pinned,
             settled: self.settled,
             settled_at_ms: self.settled_at_ms.filter(|_| self.settled),
+            idle_settle_resumed_at: self
+                .idle_settle_resumed_at
+                .filter(|time| *time == self.updated_at_ms),
             cleanup_busy: chat.is_streaming
                 || chat.handoff_pending
                 || chat.has_pending_permission(),

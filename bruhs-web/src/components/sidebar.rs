@@ -10,27 +10,25 @@ use std::collections::{HashMap, HashSet};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::components::provider::{
-    provider_agent_label_for_model, provider_logo_src_for_model, PROVIDER_LOGO_CLASS,
-};
+use crate::components::file_attachments::transfer_has_files;
+use crate::components::provider::{provider_agent_label_for_model, provider_logo_src_for_model};
 use crate::format::relative_time;
 use crate::state::{
     activate_thread, apply_drag, effect_for, groups_for, instructions_text, new_thread_in_context,
     set_settled, snooze_until, thread_facts, titled, wake, ActiveView, AppView, ComposerDraft,
-    PendingPermissions, PendingPermissionsSignal, SetActiveView, SetProjectPickerOpen,
+    Drafts, PendingPermissions, PendingPermissionsSignal, SetActiveView, SetProjectPickerOpen,
     SetSidebarOpen, ShelfClock, SidebarChrome, SidebarUndo, Thread, TitleInstructionsSignal, Turns,
     UndoEntry, UndoRestore, UnreadThreads,
 };
-use crate::ui::{DateTimePicker, Dropdown, DropdownOption, Icon};
+use crate::ui::{BrandMark, DateTimePicker, Dropdown, DropdownOption, Icon};
 
 use bruhs_models::logic::menu::{menu_origin, menu_step, MenuRect};
 use bruhs_models::logic::sidebar::{
-    custom_snooze_until, snooze_presets, thread_menu, FoldOpen, SidebarSection, SnoozeUnit,
-    ThreadMenuEntry, ThreadMenuFacts, SNOOZE_CUSTOM_TITLE,
+    custom_snooze_until, is_thread_menu_key, snooze_presets, thread_menu, FoldOpen, SidebarSection,
+    SnoozeUnit, ThreadMenuEntry, ThreadMenuFacts, SNOOZE_CUSTOM_TITLE,
 };
 
-/// Idle this long (ms) with nothing unread, and a thread folds under
-/// "Settled". T3's default is three days; bruhs keeps one day.
+/// An idle thread without unread messages moves to Settled after this interval.
 #[cfg_attr(
     not(test),
     expect(
@@ -221,6 +219,7 @@ pub fn Sidebar() -> impl IntoView {
     });
 
     let history = expect_context::<crate::thread_history::ThreadHistory>();
+    let drafts = expect_context::<Drafts>();
     let select_thread = move |id: String| {
         dismiss_mobile_navigation();
         activate_thread(
@@ -309,6 +308,7 @@ pub fn Sidebar() -> impl IntoView {
     };
 
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
+    let prompt_links = use_context::<crate::prompt_links::PromptLinks>();
     let delete_thread = move |id: String| {
         let Some(original) =
             threads.with_untracked(|ts| ts.iter().find(|thread| thread.id == id).cloned())
@@ -324,6 +324,9 @@ pub fn Sidebar() -> impl IntoView {
             set_messages.set(vec![]);
         }
         catalog.forget(original);
+        if let Some(links) = prompt_links {
+            links.forget(&id);
+        }
     };
 
     // New thread in the current project; the folder-plus button
@@ -417,6 +420,22 @@ pub fn Sidebar() -> impl IntoView {
     });
     let viewport = viewport::Viewport::new();
     let focused = RwSignal::new(None::<String>);
+    let renaming_thread = RwSignal::new(None::<String>);
+    let rename_draft = RwSignal::new(String::new());
+    let start_rename = move |id: String| {
+        if renaming_thread.with_untracked(Option::is_some) {
+            return;
+        }
+        let title = threads.with_untracked(|rows| {
+            rows.iter()
+                .find(|thread| thread.id == id)
+                .map(|thread| thread.title.clone())
+        });
+        if let Some(title) = title {
+            rename_draft.set(title);
+            renaming_thread.set(Some(id));
+        }
+    };
     let requested_focus = RwSignal::new(None::<String>);
     let indices = Memo::new(move |_| {
         threads.with(|rows| {
@@ -436,7 +455,10 @@ pub fn Sidebar() -> impl IntoView {
         layout.with(|layout| {
             let mut slots = layout.slots(top, height);
             // Wheel scrolling must not unmount the keyboard's current focus target.
-            for id in [focused, requested, menu].into_iter().flatten() {
+            for id in [focused, requested, menu, renaming_thread.get()]
+                .into_iter()
+                .flatten()
+            {
                 let present = slots.iter().any(|slot| match slot {
                     window::Slot::Thread(row) => row.id == id,
                     window::Slot::Header(_) => false,
@@ -687,7 +709,11 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
     let drop_id = move |ev: web_sys::DragEvent| -> Option<String> {
-        ev.data_transfer()
+        let transfer = ev.data_transfer();
+        if transfer_has_files(transfer.as_ref()) {
+            return None;
+        }
+        transfer
             .and_then(|data| data.get_data("text/plain").ok())
             .filter(|id| !id.is_empty())
             .or_else(|| dragging.get_untracked())
@@ -704,6 +730,7 @@ pub fn Sidebar() -> impl IntoView {
         let id_position = id.clone();
         let id_focus = id.clone();
         let id_key = id.clone();
+        let id_context = id.clone();
         let position = Memo::new(move |_| layout.with(|layout| layout.row(&id_position).cloned()));
         let id_aria = id.clone();
         let is_active =
@@ -742,6 +769,47 @@ pub fn Sidebar() -> impl IntoView {
                 .map(|t| bruhs_models::logic::text::plain_title(&t.title).into_owned())
                 .unwrap_or_default()
         });
+        let rename_id = StoredValue::new(id.clone());
+        let rename_input = NodeRef::<leptos::html::Input>::new();
+        let row_button = NodeRef::<leptos::html::Button>::new();
+        let is_renaming = Signal::derive(move || {
+            renaming_thread.with(|value| value.as_ref() == Some(&rename_id.get_value()))
+        });
+        Effect::new(move |_| {
+            if is_renaming.get() {
+                if let Some(input) = rename_input.get() {
+                    input.set_value(&rename_draft.get_untracked());
+                    let _ = input.focus();
+                    input.select();
+                }
+            }
+        });
+        let finish_rename = move |save: bool, restore_focus: bool| {
+            if !is_renaming.get_untracked() {
+                return;
+            }
+            renaming_thread.set(None);
+            if save {
+                let id = rename_id.get_value();
+                let value = rename_draft.get_untracked();
+                set_threads.update(|threads| {
+                    if let Some(thread) = threads.iter_mut().find(|thread| thread.id == id) {
+                        if let Some(title) =
+                            bruhs_models::logic::text::resolve_rename(&value, &thread.title)
+                        {
+                            let original = thread.clone();
+                            thread.title = title;
+                            catalog.persist(Some(original), thread.clone());
+                        }
+                    }
+                });
+            }
+            if restore_focus {
+                if let Some(button) = row_button.get_untracked() {
+                    let _ = button.focus();
+                }
+            }
+        };
         let project = Signal::derive(move || {
             live.get()
                 .map(|t| {
@@ -774,6 +842,8 @@ pub fn Sidebar() -> impl IntoView {
         let suppress_click = StoredValue::new(false);
         let drag_id = id.clone();
         let drop_card_id = id.clone();
+        let file_drop_id = id.clone();
+        let files_over = RwSignal::new(false);
         let menu_id = id.clone();
         let id_menu = id.clone();
         let id_return = id.clone();
@@ -787,7 +857,11 @@ pub fn Sidebar() -> impl IntoView {
         let card_class = move || {
             let base = "w-full rounded-lychee px-2.5 py-2.5 text-left transition-colors";
             let unread = status.get() == CardStatus::Unread;
-            if is_active.get() {
+            if files_over.get() {
+                format!(
+                    "{base} bg-longan-800 text-rambutan-100 inset-ring inset-ring-persimmon-400"
+                )
+            } else if is_active.get() {
                 format!("{base} bg-longan-800 text-rambutan-100 inset-ring inset-ring-white/10")
             } else if unread {
                 format!("{base} text-rambutan-100 hover:bg-longan-800/40")
@@ -801,9 +875,34 @@ pub fn Sidebar() -> impl IntoView {
                 aria-posinset=move || layout.with(|layout| layout.position(&id_aria))
                 aria-setsize=move || layout.with(|layout| layout.count())
                 on:focusin=move |_| { focused.set(Some(id_focus.clone())); requested_focus.set(None); }
+                on:dragover=move |ev: web_sys::DragEvent| {
+                    let transfer = ev.data_transfer();
+                    if !transfer_has_files(transfer.as_ref()) { return; }
+                    ev.prevent_default();
+                    if let Some(transfer) = transfer { transfer.set_drop_effect("copy"); }
+                    if !files_over.get_untracked() { files_over.set(true); }
+                }
+                on:dragleave=move |ev: web_sys::DragEvent| {
+                    if !files_over.get_untracked() { return; }
+                    let row = ev.current_target().and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+                    let next = ev.related_target().and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+                    if !row.is_some_and(|row| row.contains(next.as_ref())) { files_over.set(false); }
+                }
+                on:drop=move |ev: web_sys::DragEvent| {
+                    files_over.set(false);
+                    let transfer = ev.data_transfer();
+                    if !transfer_has_files(transfer.as_ref()) { return; }
+                    ev.prevent_default();
+                    ev.stop_propagation();
+                    let Some(files) = transfer.and_then(|transfer| transfer.files()).filter(|files| files.length() != 0) else { return };
+                    if live.get_untracked().is_none() { return; }
+                    select_thread(file_drop_id.clone());
+                    drafts.attach_dropped_files(file_drop_id.clone(), files);
+                }
             >
                 <button
                     type="button"
+                    node_ref=row_button
                     data-thread-id=id
                     draggable="true"
                     data-sidebar-section={
@@ -811,6 +910,7 @@ pub fn Sidebar() -> impl IntoView {
                         move || layout.with(|layout| layout.row(&value).map_or("active", |row| window::section_key(row.section)))
                     }
                     aria-describedby="thread-navigation-help"
+                    aria-keyshortcuts="F2 Shift+F10"
                     class=card_class
                     aria-current=move || if is_active.get() { "page" } else { "false" }
                     on:dragstart=move |ev: web_sys::DragEvent| {
@@ -823,8 +923,10 @@ pub fn Sidebar() -> impl IntoView {
                     }
                     on:dragend=move |_| dragging.set(None)
                     on:dragover=move |ev: web_sys::DragEvent| {
+                        let transfer = ev.data_transfer();
+                        if transfer_has_files(transfer.as_ref()) { return; }
                         ev.prevent_default();
-                        if let Some(data) = ev.data_transfer() {
+                        if let Some(data) = transfer {
                             data.set_drop_effect("move");
                         }
                     }
@@ -836,15 +938,40 @@ pub fn Sidebar() -> impl IntoView {
                         }) else { return };
                         commit_drop(dragged, section, index);
                     }
-                    on:click=move |_| {
+                    on:click=move |ev: web_sys::MouseEvent| {
                         if suppress_click.get_value() {
                             suppress_click.set_value(false);
                             return;
                         }
-                        select_thread(id_select.clone());
+                        if ev.detail() == 2
+                            && !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() && !ev.shift_key()
+                            && is_active.get_untracked()
+                        {
+                            ev.prevent_default();
+                            start_rename(id_select.clone());
+                        } else {
+                            select_thread(id_select.clone());
+                        }
+                    }
+                    on:contextmenu=move |ev: web_sys::MouseEvent| {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        open_menu(id_context.clone());
                     }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         if ev.meta_key() || ev.ctrl_key() || ev.alt_key() { return; }
+                        if ev.key() == "F2" && !ev.shift_key() {
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            if !ev.repeat() { start_rename(rename_id.get_value()); }
+                            return;
+                        }
+                        if is_thread_menu_key(&ev.key(), ev.shift_key()) {
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            if !ev.repeat() { open_menu(id_key.clone()); }
+                            return;
+                        }
                         let pending = requested_focus.get_untracked();
                         let target = layout.with_untracked(|layout| layout.navigate(pending.as_deref().unwrap_or(&id_key), &ev.key()).map(str::to_owned));
                         let Some(target) = target else { return };
@@ -903,7 +1030,11 @@ pub fn Sidebar() -> impl IntoView {
                             }}
                         </span>
                     </span>
-                    <span class="mt-1 block truncate text-label leading-[21px]">{move || title.get()}</span>
+                    <span class=move || if is_renaming.get() {
+                        "invisible mt-1 block truncate text-label leading-[21px]"
+                    } else {
+                        "mt-1 block truncate text-label leading-[21px]"
+                    }>{move || title.get()}</span>
                     {move || {
                         let b = branch.get();
                         let m = model.get();
@@ -927,17 +1058,37 @@ pub fn Sidebar() -> impl IntoView {
                                     }
                                 })}
                                 {m.map(|m| view! {
-                                    <img
-                                        src=provider_logo_src_for_model(&m)
-                                        alt=provider_agent_label_for_model(&m)
-                                        title=provider_agent_label_for_model(&m)
-                                        class=PROVIDER_LOGO_CLASS
-                                    />
+                                    <span role="img" aria-label=provider_agent_label_for_model(&m)
+                                        title=provider_agent_label_for_model(&m) class="shrink-0">
+                                        <BrandMark src=provider_logo_src_for_model(&m) />
+                                    </span>
                                 })}
                             </span>
                         })
                     }}
                 </button>
+                {move || is_renaming.get().then(|| view! {
+                    <div class="pointer-events-none absolute inset-0 px-2.5 py-2.5">
+                        <div class="h-5"></div>
+                        <input
+                            node_ref=rename_input
+                            type="text"
+                            aria-label="Thread title"
+                            class="pointer-events-auto mt-1 block h-[21px] w-full rounded-seed bg-longan-900 px-1 text-label text-rambutan-100 inset-ring inset-ring-persimmon-400 focus:outline-none"
+                            on:input=move |ev| rename_draft.set(event_target_value(&ev))
+                            on:blur=move |_| finish_rename(true, false)
+                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                ev.stop_propagation();
+                                if ev.is_composing() { return; }
+                                match ev.key().as_str() {
+                                    "Enter" => { ev.prevent_default(); finish_rename(true, true); }
+                                    "Escape" => { ev.prevent_default(); finish_rename(false, true); }
+                                    _ => {}
+                                }
+                            }
+                        />
+                    </div>
+                })}
                 // Sibling (not nested) so the card stays a single button.
                 <button
                     type="button"
@@ -1191,6 +1342,7 @@ pub fn Sidebar() -> impl IntoView {
             custom_unit.set(SnoozeUnit::Hours);
             custom_for.set(Some(id));
         }
+        ThreadMenuEntry::Rename => start_rename(id),
         ThreadMenuEntry::RegenerateTitle { .. } => regenerate_title(id),
         ThreadMenuEntry::DiscardDraft => discard_draft(),
         ThreadMenuEntry::Separator => {}
@@ -1209,7 +1361,7 @@ pub fn Sidebar() -> impl IntoView {
                 disabled=!enabled
                 class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
                 on:click=move |_| {
-                    close_menu(true);
+                    close_menu(row != ThreadMenuEntry::Rename);
                     run_menu_row(id.clone(), row.clone());
                 }
             >
@@ -1222,7 +1374,9 @@ pub fn Sidebar() -> impl IntoView {
     view! {
         <nav
             aria-label="Threads"
-            class="flex h-full w-[248px] shrink-0 flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300"
+            tabindex="-1"
+            data-workspace-focus="sidebar"
+            class="flex h-full w-[248px] shrink-0 flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
         >
             // Chrome header
             <div class="flex h-11 shrink-0 items-center gap-2 px-4">
@@ -1270,7 +1424,7 @@ pub fn Sidebar() -> impl IntoView {
             <crate::components::crew::rail::CrewRail on_open=Callback::new(move |()| dismiss_mobile_navigation()) />
 
             // Thread cards: fresh first, older seen threads under "Settled".
-            <span id="thread-navigation-help" class="sr-only">"Use Up and Down to move between threads, Home and End to reach the first or last, and Enter to open. Search includes settled threads."</span>
+            <span id="thread-navigation-help" class="sr-only">"Use Up and Down to move between threads, Home and End to reach the first or last, Enter to open, F2 to rename, and Shift+F10 for thread actions. Search includes settled threads."</span>
             <ul node_ref=viewport.node role="list" aria-label="Threads" class="relative min-h-0 flex-1 overflow-y-auto px-2 pb-2"
                 data-thread-count=move || layout.with(|layout| layout.count())
                 style="overflow-anchor:none"
@@ -1527,7 +1681,7 @@ pub fn Sidebar() -> impl IntoView {
                     </button>
                 </div>
             </crate::ui::Dialog>
-            // T3's update button: only while a provider CLI or the app is behind.
+            // Show the update button while a provider CLI or the app is behind.
             <crate::components::updates::SidebarUpdateButton />
             // Footer: the other surfaces as icon buttons, settings at the end.
             // Ten views and settings would need 372px in one row of 32px
@@ -1573,9 +1727,11 @@ mod tests {
             .updated_at,
             project_path: None,
             session_id: None,
+            session_provider: None,
             fresh_session: false,
             branch: None,
             model: None,
+            composer_model: None,
             pinned: false,
             settled: false,
             pin_rank: None,
@@ -1583,6 +1739,7 @@ mod tests {
             snoozed_until_ms: None,
             goal: None,
             worktree_path: None,
+            linked_pull: None,
             effort: None,
             run_locked: false,
             role: None,

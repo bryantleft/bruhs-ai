@@ -96,7 +96,9 @@ pub fn RightPanel() -> impl IntoView {
     view! {
         <aside
             aria-label="Right panel"
-            class="relative flex h-full w-full flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300 md:w-[var(--panel-w)] md:max-w-full"
+            tabindex="-1"
+            data-workspace-focus="panel"
+            class="relative flex h-full w-full flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300 md:w-[var(--panel-w)] md:max-w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
             style=move || format!("--panel-w:{}px", width.get().round())
         >
             <div

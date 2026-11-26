@@ -44,6 +44,9 @@ pub async fn writer_catalog_for_project(project: &std::path::Path) -> WriterCata
     let mut models = codex;
     models.extend(claude);
     bundled.retain(|m| !models.iter().any(|found| found.id == m.id));
+    for model in &mut bundled {
+        model.is_legacy = claude_has_current_family(&models, &model.id);
+    }
     models.extend(bundled);
     WriterCatalog { models }
 }
@@ -112,11 +115,46 @@ fn choices(rows: &Value, id: &str, label: &str) -> Vec<WriterChoice> {
     choices
 }
 
+fn claude_family(id: &str) -> Option<&str> {
+    let id = AgentProvider::Claude.model_id(id);
+    let id = id.split('[').next()?;
+    let family = id
+        .rsplit_once("anthropic.")
+        .map_or(id, |(_, id)| id)
+        .strip_prefix("claude-")
+        .and_then(|id| id.split_once('-').map(|(family, _)| family))
+        .unwrap_or(id);
+    matches!(family, "opus" | "sonnet" | "haiku" | "fable").then_some(family)
+}
+
+fn claude_has_current_family(models: &[WriterCliModel], id: &str) -> bool {
+    claude_family(id).is_some_and(|family| {
+        models.iter().any(|model| {
+            model.provider == AgentProvider::Claude
+                && !model.is_legacy
+                && claude_family(&model.id) == Some(family)
+        })
+    })
+}
+
 fn parse(provider: AgentProvider, data: &Value) -> Option<Vec<WriterCliModel>> {
     use OptionKind::*;
     let mut models = Vec::new();
     let bundled = WriterCatalog::default();
-    for r in data["models"].as_array()?.iter().take(512) {
+    let rows = data["models"].as_array()?;
+    let claude_aliases: Vec<_> = rows
+        .iter()
+        .take(512)
+        .filter_map(|row| row["value"].as_str()?.split('[').next())
+        .filter(|alias| claude_family(alias) == Some(alias))
+        .collect();
+    let codex_has_current_generation = rows.iter().take(512).any(|row| {
+        row["visibility"].as_str().is_none_or(|v| v == "list")
+            && row["slug"].as_str().is_some_and(|slug| {
+                slug.starts_with("gpt-6.") || matches!(slug, "gpt-6-astra" | "gpt-6-luna")
+            })
+    });
+    for r in rows.iter().take(512) {
         let (wire, label) = if provider == AgentProvider::Codex {
             if r["visibility"].as_str().is_some_and(|s| s != "list") {
                 continue;
@@ -129,6 +167,15 @@ fn parse(provider: AgentProvider, data: &Value) -> Option<Vec<WriterCliModel>> {
             (r["value"].as_str(), r["displayName"].as_str())
         };
         let Some(wire) = wire else { continue };
+        let is_legacy = r["isLegacy"].as_bool().unwrap_or_else(|| {
+            if provider == AgentProvider::Codex {
+                codex_has_current_generation && (wire.starts_with("gpt-5.") || wire == "gpt-6-sol")
+            } else {
+                let bare = wire.split('[').next().unwrap_or(wire);
+                claude_family(bare)
+                    .is_some_and(|family| bare != family && claude_aliases.contains(&family))
+            }
+        });
         // Resolved Claude aliases keep their identity when the provider rolls an alias forward.
         let resolved = r["resolvedModel"]
             .as_str()
@@ -234,16 +281,26 @@ fn parse(provider: AgentProvider, data: &Value) -> Option<Vec<WriterCliModel>> {
                 }
             }
         }
+        let label: String = label
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&wire)
+            .chars()
+            .take(160)
+            .collect();
+        let label = if provider == AgentProvider::Claude
+            && claude_family(&id).is_some()
+            && !label.starts_with("Claude ")
+        {
+            format!("Claude {label}")
+        } else {
+            label
+        };
         models.push(WriterCliModel {
             id,
-            label: label
-                .filter(|s| !s.is_empty())
-                .unwrap_or(&wire)
-                .chars()
-                .take(160)
-                .collect(),
+            label,
             provider,
             options,
+            is_legacy,
         });
     }
     (!models.is_empty()).then_some(models)
@@ -254,6 +311,59 @@ mod tests {
     use super::*;
     use bruhs_models::delivery::generation::GenerationOptions;
     use serde_json::json;
+
+    #[test]
+    fn catalog_distinguishes_current_models_from_older_selectable_models() {
+        let claude = parse(
+            AgentProvider::Claude,
+            &json!({"models":[
+                {"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5"},
+                {"value":"fable[1m]","resolvedModel":"claude-fable-5-2","displayName":"Fable 5.2"},
+                {"value":"claude-opus-4-8","displayName":"Opus 4.8"},
+                {"value":"claude-fable-5-1","displayName":"Fable 5.1"},
+                {"value":"claude-sonnet-4-6","displayName":"Sonnet 4.6"}
+            ]}),
+        )
+        .unwrap();
+        assert_eq!(
+            claude
+                .iter()
+                .map(|model| (model.label.as_str(), model.is_legacy))
+                .collect::<Vec<_>>(),
+            [
+                ("Claude Opus 5.5", false),
+                ("Claude Fable 5.2", false),
+                ("Claude Opus 4.8", true),
+                ("Claude Fable 5.1", true),
+                ("Claude Sonnet 4.6", false),
+            ]
+        );
+        let codex = parse(
+            AgentProvider::Codex,
+            &json!({"models":[
+                {"slug":"gpt-6.2-sol"},
+                {"slug":"gpt-6.1-sol"},
+                {"slug":"gpt-6-astra"},
+                {"slug":"gpt-6-sol"},
+                {"slug":"gpt-5.5"},
+                {"slug":"custom","isLegacy":true}
+            ]}),
+        )
+        .unwrap();
+        assert_eq!(
+            codex
+                .iter()
+                .map(|model| model.is_legacy)
+                .collect::<Vec<_>>(),
+            [false, false, false, true, true, true]
+        );
+        let old_host = parse(
+            AgentProvider::Codex,
+            &json!({"models":[{"slug":"gpt-5.5"}]}),
+        )
+        .unwrap();
+        assert!(!old_host[0].is_legacy);
+    }
 
     #[test]
     fn codex_exposes_visible_models_and_resolves_their_reported_capabilities() {

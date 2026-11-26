@@ -168,6 +168,7 @@ fn subprocess_fixture() {
     let coordinator = std::sync::Arc::new(PersistenceCoordinator {
         latest_generation: std::sync::atomic::AtomicU64::new(1),
         write_lock: std::sync::Mutex::new(version),
+        ..Default::default()
     });
     println!("READY");
     io::stdout().flush().unwrap();

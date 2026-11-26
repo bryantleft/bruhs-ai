@@ -39,6 +39,7 @@ try{
   await page.getByRole("heading",{name:"Pair with your laptop"}).waitFor();check(!page.url().includes("#"),"pairing fragment removed before exchange");
   await page.getByLabel("Device name").fill("Touch phone");await page.getByRole("button",{name:"Pair this device"}).click();
   await page.getByRole("heading",{name:"Your desktop threads"}).waitFor();
+  await page.getByRole("button",{name:/Native phone thread/}).first().waitFor();
   check(await page.getByRole("button",{name:/Native phone thread/}).count()===1,"actual native project thread list");
   check(!await page.getByText("PRIVATE_NONPROJECT_CHAT_CANARY").count(),"nonproject chats excluded");
   await thread(page);await page.getByText("Actual native live output",{exact:true}).waitFor();

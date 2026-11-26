@@ -126,6 +126,14 @@ fn committed(offers: &[DesktopFileOffer], skip: Option<&str>) -> (usize, u64) {
 }
 
 impl ChatView {
+    #[cfg(test)]
+    pub(crate) fn fixture_ready_composer_files(&self) -> Vec<UploadedFile> {
+        self.file_offers
+            .iter()
+            .filter_map(DesktopFileOffer::ready_file)
+            .collect()
+    }
+
     pub(super) fn uploads_block_send(&self) -> bool {
         !self.is_streaming && offers_block_send(&self.file_offers)
     }
@@ -156,7 +164,7 @@ impl ChatView {
             .detach();
     }
 
-    pub(super) fn enqueue_paths(&mut self, paths: &[PathBuf], cx: &mut Context<'_, Self>) {
+    pub(crate) fn enqueue_paths(&mut self, paths: &[PathBuf], cx: &mut Context<'_, Self>) {
         for path in paths {
             self.enqueue_path_bytes(path.clone(), None, cx);
         }

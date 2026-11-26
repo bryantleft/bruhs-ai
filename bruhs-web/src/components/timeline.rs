@@ -45,6 +45,11 @@ pub enum TimelineRow {
         /// Worktree tree at send time, when this thread has one.
         checkpoint: Option<String>,
     },
+    QuestionFiles {
+        key: String,
+        message_id: String,
+        files: Vec<bruhs_models::logic::attachments::UploadedFile>,
+    },
     AssistantText {
         key: String,
         message_id: String,
@@ -107,6 +112,7 @@ impl TimelineRow {
     pub fn key(&self) -> &str {
         match self {
             TimelineRow::User { key, .. }
+            | TimelineRow::QuestionFiles { key, .. }
             | TimelineRow::AssistantText { key, .. }
             | TimelineRow::Thinking { key, .. }
             | TimelineRow::Work { key, .. }
@@ -123,6 +129,7 @@ impl TimelineRow {
     pub fn message_id(&self) -> &str {
         match self {
             TimelineRow::User { message_id, .. }
+            | TimelineRow::QuestionFiles { message_id, .. }
             | TimelineRow::AssistantText { message_id, .. }
             | TimelineRow::Thinking { message_id, .. }
             | TimelineRow::Work { message_id, .. }
@@ -422,6 +429,14 @@ impl<'a> RowBuilder<'a> {
                     });
                 }
             }
+        }
+
+        if !msg.files.is_empty() {
+            rows.push(TimelineRow::QuestionFiles {
+                key: format!("{id}:question-files"),
+                message_id: id.clone(),
+                files: msg.files.clone(),
+            });
         }
 
         if streaming {

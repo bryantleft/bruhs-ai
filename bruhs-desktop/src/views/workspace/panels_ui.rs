@@ -602,6 +602,7 @@ impl Workspace {
         };
         div()
             .debug_selector(|| "desktop-right-panel".to_string())
+            .track_focus(self.area_focus.handle(super::workspace_focus::Area::Panel))
             .w_full()
             .h_full()
             .bg(theme::longan_950())

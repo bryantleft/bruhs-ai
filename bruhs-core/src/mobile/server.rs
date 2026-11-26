@@ -3,7 +3,8 @@ mod io;
 #[cfg(test)]
 mod tests;
 use super::{
-    authority::*, MobileBroker, MobileError, MobilePending, MobileResult, REQUEST_TIMEOUT,
+    authority::*, MobileBroker, MobileError, MobilePending, MobileQuestionFile, MobileResult,
+    REQUEST_TIMEOUT,
 };
 use axum::{
     body::{to_bytes, Body},
@@ -16,6 +17,7 @@ use axum::{
     Router,
 };
 use bruhs_models::mobile::*;
+use bruhs_models::{api::QuestionUpload, logic::attachments::MAX_FILE_BYTES};
 use futures_util::stream;
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
@@ -58,6 +60,7 @@ struct HttpState {
     origin: String,
     host: String,
     proxy_host: Option<String>,
+    question_files: Arc<Semaphore>,
 }
 impl MobileHost {
     pub async fn start(
@@ -102,6 +105,7 @@ impl MobileHost {
                 origin: origin.origin().ascii_serialization(),
                 proxy_host: matches!(config.transport, MobileTransport::HttpsProxy)
                     .then(|| address.to_string()),
+                question_files: Arc::new(Semaphore::new(1)),
             };
             Router::new().fallback(dispatch).with_state(state)
         };
@@ -379,6 +383,89 @@ fn required(q: &BTreeMap<String, String>, key: &str) -> MobileResult<String> {
         .cloned()
         .ok_or_else(|| MobileError::Invalid(format!("Missing or invalid {key}.")))
 }
+
+async fn question_file(
+    state: &HttpState,
+    lease: MobileLease,
+    request: Request,
+) -> MobileResult<Response> {
+    lease.check(MobileScope::Prompt)?;
+    let q = query(
+        &request,
+        &[
+            "thread_id",
+            "request_id",
+            "turn_generation",
+            "review_hash",
+            "question",
+            "upload_id",
+            "name",
+        ],
+    )?;
+    let review_hash = required(&q, "review_hash")?;
+    if review_hash.len() != 64 || !review_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(MobileError::Invalid("Invalid question review.".into()));
+    }
+    let upload = QuestionUpload {
+        thread_id: required(&q, "thread_id")?
+            .as_str()
+            .try_into()
+            .map_err(|_| MobileError::Invalid("Invalid conversation.".into()))?,
+        request_id: required(&q, "request_id")?,
+        question: number(&q, "question")?
+            .ok_or_else(|| MobileError::Invalid("Missing question position.".into()))?,
+        upload_id: required(&q, "upload_id")?
+            .parse()
+            .map_err(|_| MobileError::Invalid("Invalid file identifier.".into()))?,
+        name: q.get("name").cloned().unwrap_or_default(),
+    };
+    let turn_generation = required(&q, "turn_generation")?
+        .parse()
+        .map_err(|_| MobileError::Invalid("Invalid question turn.".into()))?;
+    // One buffered file at a time, independently of the JSON command budget.
+    let intake = state
+        .question_files
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| MobileError::Unavailable)?;
+    let bytes = if request.method() == Method::POST {
+        if upload.name.trim().is_empty()
+            || one_header(request.headers(), "content-type")? != Some("application/octet-stream")
+        {
+            return Err(MobileError::Invalid(
+                "Provide a named file as application/octet-stream.".into(),
+            ));
+        }
+        Some(
+            tokio::time::timeout(
+                Duration::from_secs(180),
+                to_bytes(request.into_body(), MAX_FILE_BYTES as usize),
+            )
+            .await
+            .map_err(|_| MobileError::Unavailable)?
+            .map_err(|_| {
+                MobileError::Invalid("The file could not be read within the 50 MiB limit.".into())
+            })?,
+        )
+    } else {
+        None
+    };
+    state
+        .broker
+        .question_file(
+            lease,
+            MobileQuestionFile {
+                upload,
+                turn_generation,
+                review_hash,
+                bytes,
+                _intake: intake,
+            },
+        )
+        .await?;
+    json(&serde_json::json!({ "ok": true }))
+}
+
 async fn handle(state: &HttpState, request: Request) -> MobileResult<Response> {
     check_origin(state, &request)?;
     let path = request.uri().path();
@@ -414,6 +501,9 @@ async fn handle(state: &HttpState, request: Request) -> MobileResult<Response> {
     }
     let lease = lease(state, &request)?;
     match (request.method(), path) {
+        (&Method::POST | &Method::DELETE, "/api/mobile/question-file") => {
+            question_file(state, lease, request).await
+        }
         (&Method::GET, "/api/mobile/session") => json(&state.authority.session(&lease)?),
         (&Method::GET, "/api/mobile/events") => {
             lease.check(MobileScope::Read)?;
@@ -425,6 +515,18 @@ async fn handle(state: &HttpState, request: Request) -> MobileResult<Response> {
         }
         (&Method::POST, "/api/mobile/command") => {
             json(&state.broker.command(lease, body(request).await?).await?)
+        }
+        (&Method::GET, "/api/mobile/linked-draft") => {
+            let q = query(&request, &["link_id"])?;
+            let link_id = required(&q, "link_id")?.parse().map_err(|_| {
+                MobileError::Invalid("Use an existing linked draft identifier.".into())
+            })?;
+            json(
+                &state
+                    .broker
+                    .read(lease, MobileRead::LinkedDraft { link_id })
+                    .await?,
+            )
         }
         (&Method::GET, "/api/mobile/threads") => {
             let q = query(&request, &["offset"])?;
@@ -490,6 +592,40 @@ async fn handle(state: &HttpState, request: Request) -> MobileResult<Response> {
                             offset: number(&q, "offset")?.unwrap_or(0),
                             revision: q.get("revision").cloned(),
                         },
+                    )
+                    .await?,
+            )
+        }
+        (&Method::GET, "/api/mobile/question-link") => {
+            let q = query(
+                &request,
+                &[
+                    "thread_id",
+                    "request_id",
+                    "turn_generation",
+                    "review_hash",
+                    "link",
+                    "offset",
+                    "revision",
+                ],
+            )?;
+            let turn_generation = required(&q, "turn_generation")?
+                .parse()
+                .map_err(|_| MobileError::Invalid("Invalid question turn.".into()))?;
+            json(
+                &state
+                    .broker
+                    .read(
+                        lease,
+                        MobileRead::QuestionLink(MobileQuestionLink {
+                            thread_id: required(&q, "thread_id")?,
+                            request_id: required(&q, "request_id")?,
+                            turn_generation,
+                            review_hash: required(&q, "review_hash")?,
+                            link: required(&q, "link")?,
+                            offset: number(&q, "offset")?.unwrap_or(0),
+                            revision: q.get("revision").cloned(),
+                        }),
                     )
                     .await?,
             )

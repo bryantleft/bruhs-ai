@@ -560,6 +560,10 @@ fn parse_result(json: &serde_json::Value, subtype: &str) -> QueryEvent {
             .get("usage")
             .and_then(|u| serde_json::from_value::<UsageInfo>(u.clone()).ok())
             .unwrap_or_default(),
+        total_cost_usd: json
+            .get("total_cost_usd")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|cost| cost.is_finite() && *cost >= 0.),
         is_error,
         errors: json
             .get("errors")
@@ -687,6 +691,33 @@ mod tests {
                 assert!(result.is_empty());
             }
             other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_results_preserve_reported_cost_and_skip_invalid_costs() {
+        for (line, expected) in [
+            (
+                r#"{"type":"result","subtype":"success","total_cost_usd":1.25}"#,
+                Some("1.25"),
+            ),
+            (
+                r#"{"type":"result","subtype":"success","total_cost_usd":0}"#,
+                Some("0"),
+            ),
+            (
+                r#"{"type":"result","subtype":"success","total_cost_usd":-1}"#,
+                None,
+            ),
+            (r#"{"type":"result","subtype":"success"}"#, None),
+        ] {
+            let QueryEvent::Result { total_cost_usd, .. } = only(parse_cli_line(line)) else {
+                panic!("expected a result");
+            };
+            assert_eq!(
+                total_cost_usd.map(|cost| cost.to_string()).as_deref(),
+                expected
+            );
         }
     }
 

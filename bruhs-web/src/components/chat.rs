@@ -31,7 +31,7 @@ use crate::components::auth_banner::AuthBanner;
 use crate::components::chat_header::ChatHeader;
 use crate::components::composer::{Composer, ComposerDraftSource, TextAttachments};
 use crate::components::file_attachments::{
-    offers_block_send, show_open_file, FileGeneration, FileOffer, FileOffers,
+    offers_block_send, show_open_file, FileOffer, FileOffers,
 };
 use crate::components::find_bar::{clear_message_mark, reveal_message, FindBar, FindCommands};
 use crate::components::import_thread_dialog;
@@ -39,6 +39,7 @@ use crate::components::render_pass::install_render_pass;
 use crate::components::terminal_panel::{TerminalPanel, TerminalPanelMode};
 use crate::components::timeline::{build_turns, latest_assistant_id, RowBuilder};
 use crate::components::timeline_view::Timeline;
+use crate::components::workspace_trust_banner::WorkspaceTrustBanner;
 use crate::state::{
     auto_title, AgentMessage, BaseBranchSignal, ChipRetargetGuard, ClaudeAutoCompactSignal,
     ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal, ComposerChips, ComposerDraft,
@@ -283,7 +284,8 @@ pub fn ChatPage() -> impl IntoView {
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
     let turns = expect_context::<Turns>();
-    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
+    let crate::state::NewThreadModel(new_thread_model) =
+        expect_context::<crate::state::NewThreadModel>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let history = expect_context::<crate::thread_history::ThreadHistory>();
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
@@ -337,24 +339,16 @@ pub fn ChatPage() -> impl IntoView {
     let ComposerDraft(draft) = expect_context::<ComposerDraft>();
     let (input_value, set_input_value) = draft.split();
     let recall = RwSignal::new(None::<RecallCursor>);
-    let text_attachments = RwSignal::new(Vec::<TextAttachment>::new());
-    let file_offers = RwSignal::new_local(Vec::<FileOffer>::new());
-    let file_generation = StoredValue::new(0u32);
+    let TextAttachments(text_attachments) = expect_context::<TextAttachments>();
+    let file_offers = expect_context::<FileOffers>();
+    let drafts = expect_context::<crate::state::Drafts>();
     let ComposerChips(context_chips) = expect_context::<ComposerChips>();
     let ChipRetargetGuard(chip_guard) = expect_context::<ChipRetargetGuard>();
-    let draft_source: StoredValue<Option<Callback<(), String>>> = StoredValue::new(None);
-    provide_context(ComposerDraftSource(draft_source));
-    provide_context(TextAttachments(text_attachments));
-    provide_context(FileOffers(file_offers));
-    provide_context(FileGeneration(file_generation));
+    let ComposerDraftSource(draft_source) = expect_context::<ComposerDraftSource>();
     Effect::new(move |_| {
         active_thread_id.track();
         recall.set(None);
         compact_full.set(false);
-        text_attachments.set(Vec::new());
-        file_generation.update_value(|generation| *generation = generation.wrapping_add(1));
-        file_offers.set(Vec::new());
-        context_chips.set(Vec::new());
     });
     let OpenFileSignal(open_file) = expect_context::<OpenFileSignal>();
     let board_host = expect_context::<crate::whiteboard::host::WhiteboardHost>();
@@ -406,10 +400,7 @@ pub fn ChatPage() -> impl IntoView {
             link.source,
         );
     });
-    on_cleanup(move || {
-        file_generation.update_value(|generation| *generation = generation.wrapping_add(1));
-        link_listener.remove();
-    });
+    on_cleanup(move || link_listener.remove());
     // Debounced IndexedDB flush while a turn streams.
     let persist_timer = StoredValue::new_local(None::<gloo_timers::callback::Timeout>);
 
@@ -701,13 +692,12 @@ pub fn ChatPage() -> impl IntoView {
             let original = thread.clone();
             thread.role = role;
             if let Some(model) = &model {
-                thread.model = Some(model.clone());
+                thread.composer_model = Some(model.clone());
             }
             if *thread != original {
                 catalog.persist(Some(original), thread.clone());
             }
         });
-        // The composer may hold a pick that differs from the thread's model.
         if let Some(model) = model {
             set_current_model.set(model);
         }
@@ -741,7 +731,7 @@ pub fn ChatPage() -> impl IntoView {
             0
         };
         let file_count = if include_attachments {
-            file_offers.with_untracked(Vec::len)
+            file_offers.with_untracked(<[_]>::len)
         } else {
             0
         };
@@ -764,16 +754,13 @@ pub fn ChatPage() -> impl IntoView {
         else {
             return false;
         };
-        // The composer shows the model of the thread on screen; any other
-        // thread runs on the model it last used.
+        // Queued sends use the same saved model choice as the composer.
         let model = if here {
             current_model.get_untracked()
         } else {
             thread
-                .model
-                .clone()
-                .filter(|model| !model.is_empty())
-                .unwrap_or_else(|| default_model.get_untracked())
+                .selected_model()
+                .map_or_else(|| new_thread_model.get_untracked(), str::to_owned)
         };
         let provider = AgentProvider::for_model(&model);
         // A handoff turn asks for a brief; when it lands, a fresh thread in
@@ -874,19 +861,19 @@ pub fn ChatPage() -> impl IntoView {
         let role_instructions = role
             .map(|role| role.instructions)
             .filter(|text| !text.trim().is_empty());
-        let other_provider = thread.session_id.is_some()
-            && thread
-                .model
-                .as_deref()
-                .map(AgentProvider::for_model)
-                .is_some_and(|owner| owner != provider);
+        let session_provider = thread.saved_session_provider();
+        let incompatible_session = thread.session_id.as_deref().is_some_and(|session| {
+            session_provider != Some(provider)
+                || (provider == AgentProvider::Acp
+                    && !bruhs_models::agent_extensions::acp_session_matches_model(session, &model))
+        });
         // A session keeps the instructions it started with, so a role set,
         // removed or edited since then needs a new session as well. A
         // handoff only writes a brief; it keeps the session it has.
         let stamp = instructions_stamp(role_instructions.as_deref());
         let other_instructions =
             handoff.is_none() && thread.session_id.is_some() && thread.instructions_stamp != stamp;
-        let restart = other_provider || other_instructions;
+        let restart = incompatible_session || other_instructions;
         let carried = if handoff.is_some() {
             None
         } else if restart {
@@ -955,6 +942,15 @@ pub fn ChatPage() -> impl IntoView {
                     let original = t.clone();
                     t.updated_at =
                         bruhs_models::EpochMs::from_f64_floor(now_ms).unwrap_or(t.updated_at);
+                    // Capture the owner of a legacy session before updating its last-run model.
+                    if t.session_id.is_some() && session_provider.is_none() {
+                        t.restart_session();
+                        if carried.is_some() {
+                            t.import_context = carried;
+                        }
+                    } else {
+                        t.session_provider = session_provider;
+                    }
                     t.model = Some(model_now);
                     t.branch = branch_now;
                     // New activity unsettles a manually settled thread and ends a snooze.
@@ -1119,6 +1115,7 @@ pub fn ChatPage() -> impl IntoView {
                 while let Some(request_thread) = request_thread.as_ref() {
                     let resumed = resume.is_some() && !fresh;
                     let request = AgentRequest {
+                        interactive_questions: true,
                         kiro_selection: Default::default(),
                         thread_id: request_thread.clone(),
                         prompt: model_prompt.clone(),
@@ -1191,12 +1188,14 @@ pub fn ChatPage() -> impl IntoView {
                                                 t.instructions_stamp != *stamp
                                             });
                                             if t.session_id.as_deref() != Some(sess.as_str())
+                                                || t.session_provider != Some(provider)
                                                 || t.fresh_session
                                                 || t.import_context.is_some()
                                                 || restamp
                                             {
                                                 let original = t.clone();
                                                 t.session_id = Some(sess);
+                                                t.session_provider = Some(provider);
                                                 t.fresh_session = false;
                                                 if let Some(stamp) = started {
                                                     t.instructions_stamp = stamp;
@@ -1266,8 +1265,7 @@ pub fn ChatPage() -> impl IntoView {
                             set_threads.update(move |ts| {
                                 if let Some(t) = ts.iter_mut().find(|t| t.id == tid2) {
                                     let original = t.clone();
-                                    t.session_id = None;
-                                    t.fresh_session = true;
+                                    t.restart_session();
                                     catalog.persist(Some(original), t.clone());
                                 }
                             });
@@ -1514,12 +1512,19 @@ pub fn ChatPage() -> impl IntoView {
                 turns.update_messages(&thread_id, |messages| {
                     messages.retain(|message| message.id != message_id);
                 });
-                if input_value.get_untracked().is_empty() {
-                    set_input_value.set(draft);
-                    text_attachments.set(attachments);
-                    file_offers.set(offers);
-                    chip_guard.set_value(true);
-                    context_chips.set(chips);
+                if threads.with_untracked(|items| items.iter().any(|item| item.id == thread_id)) {
+                    let is_active =
+                        active_thread_id.with_untracked(|id| id.as_ref() == Some(&thread_id));
+                    drafts.restore_if_empty(
+                        thread_id,
+                        is_active,
+                        crate::state::Draft {
+                            text: draft,
+                            attachments,
+                            chips,
+                        },
+                        offers,
+                    );
                 }
                 schedule_persist();
             }
@@ -1897,8 +1902,7 @@ pub fn ChatPage() -> impl IntoView {
         set_threads.update(|ts| {
             if let Some(thread) = ts.iter_mut().find(|thread| thread.id == tid) {
                 let original = thread.clone();
-                thread.session_id = None;
-                thread.fresh_session = true;
+                thread.restart_session();
                 catalog.persist(Some(original), thread.clone());
             }
         });
@@ -2022,13 +2026,19 @@ pub fn ChatPage() -> impl IntoView {
             .map(|t| t.project_name)
             .filter(|p| !p.is_empty())
     });
-    let awaiting_approval = Signal::derive(move || {
-        let Some(thread) = active_thread_id.get() else {
-            return false;
-        };
-        pending_permissions.with(|p| p.has_for(&thread))
+    let awaiting_response = Signal::derive(move || {
+        let thread = active_thread_id.get()?;
+        if pending_permissions.with(|requests| {
+            requests
+                .first_for(&thread)
+                .is_some_and(|request| request.can_answer)
+        }) {
+            return Some("Waiting for your answer");
+        }
+        (pending_permissions.with(|p| p.has_for(&thread))
             || pending_secrets
-                .with(|items| items.iter().any(|item| item.thread_id.as_str() == thread))
+                .with(|items| items.iter().any(|item| item.thread_id.as_str() == thread)))
+        .then_some("Waiting for your approval")
     });
     // `(name, path)` the terminal drawer offers first.
     let composer_context_project =
@@ -2092,6 +2102,7 @@ pub fn ChatPage() -> impl IntoView {
                                 view! {
                                     <div class="flex flex-1 flex-col items-center justify-center gap-3 overflow-y-auto px-3 py-6 sm:px-5">
                                         <AuthBanner />
+                                        <WorkspaceTrustBanner project_path=composer_project_path />
                                         <Composer
                                             value=input_value
                                             set_value=set_input_value
@@ -2115,6 +2126,10 @@ pub fn ChatPage() -> impl IntoView {
                                     <div class="relative flex-1 overflow-hidden">
                                         <div
                                             node_ref=messages_container
+                                            tabindex="-1"
+                                            role="region"
+                                            aria-label="Conversation"
+                                            data-workspace-focus="conversation"
                                             on:scroll=move |_| {
                                                 if response_interaction.try_get_value() != Some(false) || response_has_focus() {
                                                     at_bottom.set(false);
@@ -2138,7 +2153,7 @@ pub fn ChatPage() -> impl IntoView {
                                                     }
                                                 }
                                             }
-                                            class="h-full overflow-y-auto"
+                                            class="h-full overflow-y-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400"
                                         >
                                             <Timeline
                                                 settled=settled_turns
@@ -2146,7 +2161,7 @@ pub fn ChatPage() -> impl IntoView {
                                                 thread_id=active_thread_id
                                                 live=live_turn
                                                 is_streaming=live_here
-                                                awaiting_approval=awaiting_approval
+                                                awaiting_response=awaiting_response
                                                 on_retry=on_retry
                                                 on_open_diff=on_open_diff
                                                 can_rewind=can_rewind
@@ -2271,6 +2286,7 @@ pub fn ChatPage() -> impl IntoView {
                                         }}
                                         <crate::components::secret_prompt::SecretPrompts />
                                         <AuthBanner />
+                                        <WorkspaceTrustBanner project_path=composer_project_path />
                                         <Composer
                                             value=input_value
                                             set_value=set_input_value
