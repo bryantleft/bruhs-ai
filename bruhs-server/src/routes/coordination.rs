@@ -1000,6 +1000,7 @@ mod tests {
             StatusCode::CONFLICT
         );
         runtime.revoke_access(&writer.grant.id).await.unwrap();
+        drop(runtime);
         assert_eq!(
             request(&writer.token, changes).await.unwrap().status(),
             StatusCode::FORBIDDEN
