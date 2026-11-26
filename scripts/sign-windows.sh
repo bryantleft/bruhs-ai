@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Sign the three staged Windows executables using the release operator's Azure login.
+# Sign Windows release executables using the release operator's Azure login.
 set -euo pipefail
-bin=${1:?pass the directory containing the three Windows release binaries}
+if (($# == 0)); then
+  echo "Pass the Windows executables to sign" >&2
+  exit 2
+fi
 : "${BRUHS_SIGNING_ENDPOINT:?set to the regional Azure Artifact Signing hostname}"
 : "${BRUHS_SIGNING_ACCOUNT:?set to the Azure Artifact Signing account name}"
 : "${BRUHS_SIGNING_PROFILE:?set to the Public Trust certificate profile name}"
 [[ "$BRUHS_SIGNING_ENDPOINT" =~ ^[a-z0-9]+\.codesigning\.azure\.net$ ]] || { echo "Invalid Azure signing hostname" >&2; exit 1; }
 
-files=("$bin/bruhs-desktop.exe" "$bin/bruhs-server.exe" "$bin/bruhs-capture.exe")
-for file in "${files[@]}"; do test -s "$file" || { echo "Missing Windows release binary: $file" >&2; exit 1; }; done
+for file in "$@"; do test -s "$file" || { echo "Missing Windows executable: $file" >&2; exit 1; }; done
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 jar="$work/jsign-7.6.jar"
@@ -18,4 +20,4 @@ token=$(az account get-access-token --resource https://codesigning.azure.net --q
 BRUHS_SIGNING_TOKEN="$token" "${JAVA_HOME:+$JAVA_HOME/bin/}java" -jar "$jar" \
   --storetype TRUSTEDSIGNING --keystore "$BRUHS_SIGNING_ENDPOINT" --storepass env:BRUHS_SIGNING_TOKEN \
   --alias "$BRUHS_SIGNING_ACCOUNT/$BRUHS_SIGNING_PROFILE" --alg SHA-256 --tsmode RFC3161 \
-  --tsaurl http://timestamp.acs.microsoft.com --name Bruhs --url https://bruhs.ai "${files[@]}"
+  --tsaurl http://timestamp.acs.microsoft.com --name Bruhs --url https://bruhs.ai "$@"

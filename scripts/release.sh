@@ -26,6 +26,7 @@ version=${1:-}
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-nightly\.(0|[1-9][0-9]*))?$ ]] || { echo "usage: scripts/release.sh <version like 0.1.0 or 0.1.1-nightly.1>" >&2; exit 2; }
 native_run=${2:?pass the successful release-native.yml run ID for this commit and version}
 command -v dpkg-deb >/dev/null || { echo "Install dpkg to assemble the Linux package" >&2; exit 1; }
+command -v makensis >/dev/null || { echo "Install NSIS to assemble the Windows installer" >&2; exit 1; }
 tag="v$version"
 release_flags=(--latest)
 if [[ $version == *-nightly.* ]]; then
@@ -59,6 +60,7 @@ gh auth status >/dev/null || { echo "gh is not signed in" >&2; exit 1; }
 
 scripts/bundle-macos.sh "$version" --sign --notarize
 
+gh run watch "$native_run" --repo "$repo" --exit-status
 scripts/package-native.sh "$version" "$native_run"
 
 arch=$(uname -m)
@@ -69,10 +71,10 @@ gh release create "$tag" \
   --title "Bruhs $tag" \
   --notes "$notes
 
-**Install:** On Windows x64, extract the ZIP and run bruhs-desktop.exe ([WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) required). On Ubuntu 24.04 x64, install the .deb with apt. On Mac, open \`Bruhs-macOS-$(uname -m).dmg\` and drag Bruhs to Applications (macOS 13 or later, Apple silicon). Installed Mac copies update themselves from Settings → Updates. Every release: https://bruhs.ai/changelog" \
+**Install:** On Windows x64, run \`Bruhs-Windows-x64-Setup.exe\` and launch Bruhs from Start. Install [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) if needed. On Ubuntu 24.04 x64, run \`sudo apt install ./Bruhs-Linux-x64.deb\` and launch Bruhs from Applications. On Mac, open \`Bruhs-macOS-$arch.dmg\` and drag Bruhs to Applications (macOS 13 or later, Apple silicon). Installed Mac copies update themselves from Settings → Updates. Every release: https://bruhs.ai/changelog" \
   "dist/Bruhs-macOS-$arch.dmg" \
   "dist/Bruhs-macOS-$arch.zip" \
-  dist/Bruhs-Windows-x64.zip dist/Bruhs-Linux-x64.deb \
+  dist/Bruhs-Windows-x64-Setup.exe dist/Bruhs-Linux-x64.deb \
   dist/SHA256SUMS
 gh release edit "$tag" --repo "$repo" --draft=false "${release_flags[@]}"
 git fetch -q origin "refs/tags/$tag:refs/tags/$tag"

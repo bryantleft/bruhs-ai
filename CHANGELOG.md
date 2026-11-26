@@ -9,8 +9,15 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-26
+
 ### Added
 
+- Desktop Usage shows provider limits, history, and reported costs with accessible charts and live totals.
+- Desktop thread cards show project artwork and recorded models. Hover shows the full thread details, including handoffs, and exposes Snooze and Settle on eligible unpinned threads. Drag cards to pin, reorder, settle, or restore them.
+- Windows x64 has a signed setup program with a Start menu shortcut and an uninstall entry. Ubuntu 24.04 x64 uses the desktop package with its runtime dependencies and application launcher.
+- Linked drafts and prompt links help carry a conversation between the desktop, web, and mobile companion.
+- Untrusted project folders can be reviewed before a provider runs inside them.
 - Vault: Settings, Vault (formerly Credentials) now creates logins with one-time codes, keys and 1Password references. Grant a login to a bruh and it signs in on that site in its own browser without seeing the password. Keys still ask each time. See `docs/secure-credential-requests.md`.
 - Apps: connect GitHub, Notion, Linear, Airtable, Todoist, Trello, ClickUp, HubSpot, Jira, Shopify, Stripe, Cloudflare, Slack and Figma with a token in Settings, Apps, and grant them and your Gmail or Outlook accounts to bruhs. A Claude bruh at Ask first or Full calls an app or sends email as you within its access, and never sees the token. Email, posts and payments ask first unless the bruh is at Full with Send as me on. Routines can start on new GitHub issues, pull requests and email. Each existing bruh starts one fresh session after this update. See `docs/service-connections.md`.
 - Backup: make one encrypted file of all your Bruhs data in Settings, Backup, and restore it here or on another computer. Bruhs checks the file and shows what's inside before it replaces anything, moves paths to the new home, keeps your logins in the keychain, and keeps the replaced data aside until you delete it. See `docs/backup.md`.
@@ -510,8 +517,7 @@ signed Mac app and a web app that both run on your machine.
 - A diff panel with a code, tests and docs filter, viewed marks and ⌘F find;
   a terminal drawer (⌘J); a preview panel (⌘⇧J) for local dev servers; and a
   Files tab.
-- Thread import from Claude Code, Codex, T3 Code and Cursor, and Continue in
-  Claude Code, Codex or T3 Code, or copy a thread as Markdown.
+- Thread import, provider session resume commands and Markdown export.
 - Today (⌘⇧Y): your schedule, focus tasks, overdue work and meeting
   decisions, with Plan my day to preview focus blocks you can undo.
 - Tasks and a calendar with Smart scheduling, local booking links, and

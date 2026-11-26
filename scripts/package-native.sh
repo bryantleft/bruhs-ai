@@ -25,9 +25,11 @@ for platform in Linux Windows; do
   for name in bruhs-desktop bruhs-server bruhs-capture; do install -m755 "$bin/$name$ext" "$dest/"; done
   cp -R "$resources/web" "$resources/THIRD_PARTY_LICENSES" "$resources/THIRD_PARTY_LICENSES.zip" LICENSE "$dest/"
 done
-scripts/sign-windows.sh "$work/windows/Bruhs"
-target="$PWD/dist/Bruhs-Windows-x64.zip"
-(cd "$work/windows" && zip -qr "$target" Bruhs)
+windows="$work/windows/Bruhs"
+scripts/sign-windows.sh "$windows"/bruhs-{desktop,server,capture}.exe
+installer="$PWD/dist/Bruhs-Windows-x64-Setup.exe"
+makensis -WX -V2 "-DPAYLOAD=$windows" "-DOUTPUT=$installer" "-DVERSION=$version" packaging/windows/bruhs.nsi
+scripts/sign-windows.sh "$installer"
 deb="$work/deb"
 mkdir -p "$deb/DEBIAN" "$deb/usr/share/applications" "$deb/usr/share/icons/hicolor/scalable/apps" "$deb/usr/bin"
 ln -s /opt/bruhs/bruhs-desktop "$deb/usr/bin/bruhs"
@@ -52,4 +54,4 @@ Description: Bruhs desktop workspace
 Depends: $depends, libvulkan1
 CONTROL
 dpkg-deb --root-owner-group -Zxz --build "$deb" dist/Bruhs-Linux-x64.deb
-(cd dist && shasum -a 256 Bruhs-Windows-x64.zip Bruhs-Linux-x64.deb >> SHA256SUMS && shasum -c SHA256SUMS)
+(cd dist && shasum -a 256 Bruhs-Windows-x64-Setup.exe Bruhs-Linux-x64.deb >> SHA256SUMS && shasum -c SHA256SUMS)

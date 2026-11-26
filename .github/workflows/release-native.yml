@@ -47,6 +47,34 @@ jobs:
           touch debian/control
           dpkg-shlibdeps -O native/bruhs-* | sed 's/^shlibs:Depends=//' > native/depends
           test -s native/depends
+      - name: Exercise Windows setup and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $compiler)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install the setup compiler' }
+          }
+          $payload = Join-Path $env:RUNNER_TEMP 'bruhs-installer-payload'
+          $setup = Join-Path $env:RUNNER_TEMP 'Bruhs-Setup.exe'
+          New-Item -ItemType Directory -Path "$payload\web" -Force | Out-Null
+          Copy-Item native\bruhs-*.exe $payload
+          Set-Content "$payload\web\index.html" '<title>Bruhs installer fixture</title>'
+          & $compiler /WX /V2 "/DPAYLOAD=$payload" "/DOUTPUT=$setup" "/DVERSION=$env:BRUHS_RELEASE_VERSION" packaging/windows/bruhs.nsi
+          if ($LASTEXITCODE -ne 0) { throw 'Windows setup compilation failed' }
+          $install = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Setup failed with exit code $($install.ExitCode)" }
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\Bruhs'
+          $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Bruhs.lnk'
+          $registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bruhs'
+          foreach ($file in @('bruhs-desktop.exe', 'bruhs-server.exe', 'bruhs-capture.exe', 'web\index.html', 'Uninstall.exe')) {
+            if (!(Test-Path (Join-Path $root $file))) { throw "Setup did not install $file" }
+          }
+          if (!(Test-Path $shortcut)) { throw 'Start shortcut missing' }
+          if ((Get-ItemProperty $registration).DisplayVersion -ne $env:BRUHS_RELEASE_VERSION) { throw 'Uninstall registration has the wrong version' }
+          $uninstall = Start-Process "$root\Uninstall.exe" -ArgumentList '/S', "_?=$root" -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0 -or (Test-Path "$root\bruhs-desktop.exe") -or (Test-Path $shortcut) -or (Test-Path $registration)) { throw 'Setup left an installed application behind' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: native-${{ runner.os }}

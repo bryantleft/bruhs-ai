@@ -19,8 +19,8 @@ configuration. OpenCode connects additional API providers and local models.
   diffs, a terminal drawer (`⌘J`), a preview pane (`⌘⇧J`), worktrees,
   branch and PR context, a model picker, prompt stash (`⌘S`), and threads
   that keep running in the background. Threads import from Claude Code,
-  Codex, T3 Code and Cursor, and continue in Claude Code, Codex or T3 Code
-  (or copy out as Markdown).
+  Codex and Cursor. Use Bruhs handoffs to continue a conversation or copy a
+  thread as Markdown.
 - **Local agent workbench.** Durable delegated tasks, forks, model comparisons,
   versioned specifications, supervised phone/guest access, reviewed GitHub delivery,
   browser/device verification, local dictation, ACP runtimes and measured usage.
@@ -84,7 +84,7 @@ places, shopping, and household plans.
 Choose a build on the [download page](https://bruhs.ai/download).
 
 - **macOS 13 or later, Apple silicon** — Open the signed and notarized disk image and drag Bruhs to Applications. Installed copies update from Settings.
-- **Windows x64** — Extract the ZIP and open `bruhs-desktop.exe`. Install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) if needed.
+- **Windows x64** — Run `Bruhs-Windows-x64-Setup.exe` and launch Bruhs from Start. Install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) if needed.
 - **Ubuntu 24.04 x64** — Run `sudo apt install ./Bruhs-Linux-x64.deb` from the download directory and launch Bruhs from Applications.
 
 The app starts its own server (which also serves the web app on
