@@ -16,9 +16,8 @@
 //! * Native subviews sit **above** gpui's Metal layer, so a pane covering the
 //!   whole scrim would blur the dialog too. The scrim is therefore four panes
 //!   laid out in the ring *around* the dialog, leaving the dialog crisp.
-//!   Squaring off the dialog's rounded corners that way leaves four slivers
-//!   of backdrop unblurred, which nothing distinguishes from the blurred
-//!   backdrop beside them: at 70% dimming there is no detail left to sharpen.
+//!   For rounded dialogs the panes extend around the curves, using a mask
+//!   to keep the blur off the dialog and its border.
 //! * The scrim is click-to-dismiss, and a plain `NSView` would swallow those
 //!   clicks. The panes are a subclass whose `hitTest:` returns null, so the
 //!   mouse passes through to gpui.
@@ -88,9 +87,57 @@ impl Rect {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PaneLayout {
+    frame: Rect,
+    sample: Rect,
+    cutout: Option<(Rect, f32)>,
+}
+
 /// The panes that blur `overlay` without touching `dialog` or its border.
-fn panes(overlay: Rect, dialog: Rect) -> [Rect; 4] {
-    ring(overlay, dialog.inflate(DIALOG_BORDER_PX))
+fn panes(overlay: Rect, dialog: Rect, top_radius: f32, bottom_radius: f32) -> [PaneLayout; 4] {
+    let dialog = dialog.inflate(DIALOG_BORDER_PX);
+    let max_radius = dialog.width.min(dialog.height) / 2.0;
+    let top_radius = top_radius.min(max_radius);
+    let bottom_radius = bottom_radius.min(max_radius);
+    let mut panes = ring(overlay, dialog).map(|frame| PaneLayout {
+        frame,
+        sample: frame,
+        cutout: None,
+    });
+    let [top, bottom, left, right] = &mut panes;
+    // Continue the side blur into the corners of a floating card. Leave the
+    // full-width top and bottom strips in place to avoid a seam beside it.
+    if top_radius > 0.0
+        && top_radius == bottom_radius
+        && left.sample.width > 0.0
+        && right.sample.width > 0.0
+        && left.sample.height > 0.0
+    {
+        left.frame.width = (dialog.x + top_radius).min(overlay.right()) - left.frame.x;
+        right.frame.x = (dialog.right() - top_radius).max(overlay.x);
+        right.frame.width = overlay.right() - right.frame.x;
+        left.cutout = Some((dialog, top_radius));
+        right.cutout = left.cutout;
+        return panes;
+    }
+    // A full-width sheet has no side area to sample.
+    if top_radius > 0.0 && top.sample.height > 0.0 {
+        top.frame.height = (dialog.y + top_radius).min(overlay.bottom()) - top.frame.y;
+        top.cutout = Some((dialog, top_radius));
+    }
+    if bottom_radius > 0.0 && bottom.sample.height > 0.0 {
+        bottom.frame.y = (dialog.bottom() - bottom_radius).max(overlay.y);
+        bottom.frame.height = overlay.bottom() - bottom.frame.y;
+        bottom.cutout = Some((dialog, bottom_radius));
+    }
+    // The extended panes cover the entire width at each end of the dialog.
+    // Keep the side panes between them so their filters never overlap.
+    for side in [left, right] {
+        side.frame.y = top.frame.bottom();
+        side.frame.height = (bottom.frame.y - side.frame.y).max(0.0);
+    }
+    panes
 }
 
 /// `overlay` minus `dialog`, as four rectangles: the strips above and below
@@ -130,18 +177,18 @@ pub struct BlurScrimHandle {
 enum State {
     #[default]
     Unbuilt,
-    Ready(platform::BlurScrim),
+    Ready(Box<platform::BlurScrim>),
     Unavailable,
 }
 
 impl BlurScrimHandle {
     /// Blur the window everywhere except `dialog`.
-    fn show(&self, window: &mut Window, dialog: Bounds<Pixels>) {
+    fn show(&self, window: &mut Window, dialog: Bounds<Pixels>, top: Pixels, bottom: Pixels) {
         *self.clear_bounds.borrow_mut() = Some(dialog);
         let mut state = self.state.borrow_mut();
         if matches!(*state, State::Unbuilt) {
             *state = match platform::BlurScrim::new(window) {
-                Ok(scrim) => State::Ready(scrim),
+                Ok(scrim) => State::Ready(Box::new(scrim)),
                 Err(err) => {
                     tracing::warn!("no backdrop blur: {err}");
                     State::Unavailable
@@ -158,7 +205,13 @@ impl BlurScrimHandle {
             f32::from(viewport.width),
             f32::from(viewport.height),
         );
-        if let Err(err) = scrim.show(panes(overlay, Rect::from_bounds(dialog)), overlay.height) {
+        let layout = panes(
+            overlay,
+            Rect::from_bounds(dialog),
+            f32::from(top),
+            f32::from(bottom),
+        );
+        if let Err(err) = scrim.show(layout, overlay.height) {
             tracing::warn!("no backdrop blur: {err}");
             *state = State::Unavailable;
         }
@@ -174,10 +227,10 @@ impl BlurScrimHandle {
 
     /// An element that draws nothing and blurs the window behind everything
     /// except itself. Add it as a child of a dialog and it fills that dialog.
-    pub fn backdrop(&self) -> impl IntoElement {
+    pub(crate) fn backdrop(&self, top: Pixels, bottom: Pixels) -> impl IntoElement {
         let handle = self.clone();
         canvas(
-            move |bounds, window, _cx| handle.show(window, bounds),
+            move |bounds, window, _cx| handle.show(window, bounds, top, bottom),
             |_bounds, _, _, _| {},
         )
         .absolute()
@@ -194,7 +247,10 @@ impl BlurScrimHandle {
             move |bounds, window, _cx| {
                 let dialog = *handle.clear_bounds.borrow();
                 if let Some(dialog) = dialog {
-                    handle.show(window, dialog.union(&bounds));
+                    let clear = dialog.union(&bounds);
+                    if clear != dialog {
+                        handle.show(window, clear, Pixels::ZERO, Pixels::ZERO);
+                    }
                 }
             },
             |_bounds, _, _, _| {},
@@ -216,12 +272,14 @@ impl BlurScrimHandle {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{Rect, BACKDROP_BLUR_RADIUS};
+    use super::{PaneLayout, Rect, BACKDROP_BLUR_RADIUS};
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject};
     use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::NSView;
+    use objc2_core_graphics::CGMutablePath;
     use objc2_foundation::{NSArray, NSNumber, NSPoint, NSRect, NSSize, NSString};
+    use objc2_quartz_core::{kCAFillRuleEvenOdd, CALayer, CAShapeLayer};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     // AppKit pulls in Core Image, but nothing here references a symbol from
@@ -370,6 +428,48 @@ mod platform {
         ]))
     }
 
+    fn appkit_rect(rect: Rect, parent_height: f32) -> NSRect {
+        NSRect::new(
+            NSPoint::new(f64::from(rect.x), f64::from(parent_height - rect.bottom())),
+            NSSize::new(f64::from(rect.width), f64::from(rect.height)),
+        )
+    }
+
+    fn rounded_cutout(frame: Rect, dialog: Rect, radius: f32) -> Retained<CAShapeLayer> {
+        let bounds = NSRect::new(
+            NSPoint::ZERO,
+            NSSize::new(f64::from(frame.width), f64::from(frame.height)),
+        );
+        let opening = appkit_rect(
+            Rect::new(
+                dialog.x - frame.x,
+                dialog.y - frame.y,
+                dialog.width,
+                dialog.height,
+            ),
+            frame.height,
+        );
+        let path = CGMutablePath::new();
+        // SAFETY: The null transforms leave both rectangles in pane coordinates.
+        // The new path is complete when it is assigned to the shape layer.
+        unsafe {
+            CGMutablePath::add_rect(Some(&path), std::ptr::null(), bounds);
+            CGMutablePath::add_rounded_rect(
+                Some(&path),
+                std::ptr::null(),
+                opening,
+                f64::from(radius),
+                f64::from(radius),
+            );
+        }
+        let mask = CAShapeLayer::new();
+        mask.setFrame(bounds);
+        // SAFETY: QuartzCore provides the global even-odd fill rule.
+        mask.setFillRule(unsafe { kCAFillRuleEvenOdd });
+        mask.setPath(Some(&path));
+        mask
+    }
+
     /// Run `changes` in a Core Animation transaction and push it out.
     ///
     /// gpui draws with Metal and never commits an AppKit layer tree of its
@@ -403,13 +503,13 @@ mod platform {
     /// One blur pane parented to the gpui window's content view.
     struct BlurPane {
         view: Retained<BlurPaneView>,
-        layer: Retained<AnyObject>,
+        layer: Retained<CALayer>,
         /// What the pane was last placed at, to skip rebuilding its filters
         /// on the frames that did not move it. The window's height is part of
         /// it because that is what the flip to AppKit's coordinates uses: a
         /// window resized only vertically leaves the gpui rectangle alone and
         /// still moves the pane.
-        placed: Option<(Rect, f32)>,
+        placed: Option<(PaneLayout, f32)>,
     }
 
     impl BlurPane {
@@ -421,11 +521,10 @@ mod platform {
             view.setWantsLayer(true);
             // SAFETY: the view is layer-backed as of the line above, so it
             // has a layer.
-            let layer: Option<Retained<AnyObject>> = unsafe { msg_send![&*view, layer] };
+            let layer: Option<Retained<CALayer>> = unsafe { msg_send![&*view, layer] };
             let layer = layer.ok_or("layer-backed view without a layer")?;
             // Without this the blur bleeds past the pane's edges.
-            // SAFETY: `masksToBounds` is a `BOOL` property of every CALayer.
-            unsafe { msg_send![&*layer, setMasksToBounds: true] }
+            layer.setMasksToBounds(true);
             view.setHidden(true);
             parent.addSubview(&view);
             Ok(Self {
@@ -437,28 +536,23 @@ mod platform {
 
         /// `frame` is in gpui's coordinate space (origin top-left); AppKit's
         /// content view is bottom-left, so y is flipped against its height.
-        fn show(&mut self, frame: Rect, parent_height: f32) -> Result<(), String> {
-            if self.placed != Some((frame, parent_height)) {
-                let in_window = NSRect::new(
-                    NSPoint::new(
-                        f64::from(frame.x),
-                        f64::from(parent_height - frame.y - frame.height),
-                    ),
-                    NSSize::new(
-                        f64::from(frame.width.max(0.0)),
-                        f64::from(frame.height.max(0.0)),
-                    ),
-                );
-                self.view.setFrame(in_window);
+        fn show(&mut self, layout: PaneLayout, parent_height: f32) -> Result<(), String> {
+            if self.placed != Some((layout, parent_height)) {
+                self.view.setFrame(appkit_rect(layout.frame, parent_height));
+                let mask = layout
+                    .cutout
+                    .map(|(dialog, radius)| rounded_cutout(layout.frame, dialog, radius));
+                // SAFETY: The mask is a new standalone layer without a superlayer.
+                unsafe { self.layer.setMask(mask.as_deref().map(|mask| &**mask)) };
                 // Core Animation copies the filters as they are assigned, so
-                // a moved or resized pane needs a chain cropped to where it
-                // has landed.
-                let filters = backdrop_filters(in_window)?;
+                // a moved pane needs a chain cropped to its sample area.
+                // Extended panes sample only outside the dialog's rectangle.
+                let filters = backdrop_filters(appkit_rect(layout.sample, parent_height))?;
                 // SAFETY: `backgroundFilters` is Core Animation's backdrop
                 // filter — the same thing CSS calls `backdrop-filter` — and
                 // takes an array of CIFilters.
                 unsafe { msg_send![&*self.layer, setBackgroundFilters: &*filters] }
-                self.placed = Some((frame, parent_height));
+                self.placed = Some((layout, parent_height));
             }
             // Hiding an NSView alone can leave its backdrop filter composited
             // over Metal content after the dialog closes.
@@ -520,7 +614,11 @@ mod platform {
             })
         }
 
-        pub(super) fn show(&mut self, ring: [Rect; 4], parent_height: f32) -> Result<(), String> {
+        pub(super) fn show(
+            &mut self,
+            ring: [PaneLayout; 4],
+            parent_height: f32,
+        ) -> Result<(), String> {
             let panes = &mut self.panes;
             transaction(|| -> Result<(), String> {
                 for (pane, frame) in panes.iter_mut().zip(ring) {
@@ -568,7 +666,7 @@ mod platform {
 /// Elsewhere the dialogs simply have no backdrop blur.
 #[cfg(not(target_os = "macos"))]
 mod platform {
-    use super::Rect;
+    use super::PaneLayout;
 
     pub(super) struct BlurScrim;
 
@@ -577,7 +675,11 @@ mod platform {
             Err("backdrop blur is implemented for macOS only".to_string())
         }
 
-        pub(super) fn show(&mut self, _ring: [Rect; 4], _parent_height: f32) -> Result<(), String> {
+        pub(super) fn show(
+            &mut self,
+            _ring: [PaneLayout; 4],
+            _parent_height: f32,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -633,10 +735,38 @@ mod tests {
     fn the_panes_clear_the_dialog_border_too() {
         let overlay = Rect::new(0.0, 0.0, 1000.0, 800.0);
         let dialog = Rect::new(300.0, 100.0, 400.0, 200.0);
-        let [top, bottom, left, right] = panes(overlay, dialog);
+        let [top, bottom, left, right] = panes(overlay, dialog, 0.0, 0.0).map(|pane| pane.frame);
         assert_eq!(top.bottom(), dialog.y - DIALOG_BORDER_PX);
         assert_eq!(bottom.y, dialog.bottom() + DIALOG_BORDER_PX);
         assert_eq!(left.right(), dialog.x - DIALOG_BORDER_PX);
         assert_eq!(right.x, dialog.right() + DIALOG_BORDER_PX);
+    }
+
+    #[test]
+    fn rounded_panes_extend_into_the_corners_and_sample_outside_the_dialog() {
+        let overlay = Rect::new(0.0, 0.0, 1000.0, 800.0);
+        let dialog = Rect::new(300.0, 100.0, 400.0, 200.0);
+        let [top, bottom, left, right] = panes(overlay, dialog, 14.0, 14.0);
+        let outer = dialog.inflate(DIALOG_BORDER_PX);
+        assert_eq!(top.cutout, None);
+        assert_eq!(bottom.cutout, None);
+        assert_eq!(left.cutout, Some((outer, 14.0)));
+        assert_eq!(right.cutout, left.cutout);
+        assert_eq!(left.frame.right(), outer.x + 14.0);
+        assert_eq!(right.frame.x, outer.right() - 14.0);
+        assert_eq!(left.sample.right(), outer.x);
+        assert_eq!(right.sample.x, outer.right());
+    }
+
+    #[test]
+    fn top_rounded_sheet_blurs_its_corners_even_without_side_gaps() {
+        let overlay = Rect::new(0.0, 0.0, 500.0, 400.0);
+        let dialog = Rect::new(1.0, 151.0, 498.0, 248.0);
+        let [top, bottom, left, right] = panes(overlay, dialog, 16.0, 0.0);
+        assert_eq!(top.frame, Rect::new(0.0, 0.0, 500.0, 166.0));
+        assert_eq!(top.cutout, Some((dialog.inflate(DIALOG_BORDER_PX), 16.0)));
+        assert_eq!(bottom.frame.height, 0.0);
+        assert_eq!(left.frame.width, 0.0);
+        assert_eq!(right.frame.width, 0.0);
     }
 }

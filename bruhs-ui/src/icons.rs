@@ -5,6 +5,10 @@
 
 use gpui::{svg, App, Hsla, IntoElement, Pixels, RenderOnce, Styled, Window};
 
+pub const GAUGE: &str = "icons/gauge.svg";
+pub const TRENDING_UP: &str = "icons/trending-up.svg";
+pub const TRENDING_DOWN: &str = "icons/trending-down.svg";
+pub const TICKET: &str = "icons/ticket.svg";
 pub const ACTIVITY: &str = "icons/activity.svg";
 pub const ALERT_TRIANGLE: &str = "icons/alert-triangle.svg";
 pub const ARCHIVE: &str = "icons/archive.svg";
@@ -67,12 +71,15 @@ pub const SMARTPHONE: &str = "icons/smartphone.svg";
 pub const SQUARE: &str = "icons/square.svg";
 pub const SQUARE_PEN: &str = "icons/square-pen.svg";
 pub const SQUARE_TERMINAL: &str = "icons/square-terminal.svg";
+pub const STAR: &str = "icons/star.svg";
+pub const STAR_FILLED: &str = "icons/star-filled.svg";
 pub const SUN: &str = "icons/sun.svg";
 pub const TERMINAL: &str = "icons/terminal.svg";
 pub const USER_PLUS: &str = "icons/user-plus.svg";
 pub const USERS: &str = "icons/users.svg";
 pub const WRAP_TEXT: &str = "icons/wrap-text.svg";
 pub const WRENCH: &str = "icons/wrench.svg";
+pub const ZAP: &str = "icons/zap.svg";
 
 const ACTIVITY_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>"#;
 const ALERT_TRIANGLE_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
@@ -142,9 +149,29 @@ const USER_PLUS_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24"
 const USERS_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>"#;
 const WRAP_TEXT_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></svg>"#;
 const WRENCH_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>"#;
+const ZAP_SVG: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>"#;
+
+// GPUI caches SVG masks by path. Generate the outline and fill masks from the same shape.
+macro_rules! star_svg {
+    ($fill:literal) => {
+        concat!(
+            r#"<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill=""#,
+            $fill,
+            r#"" d="M12 2.8l2.75 6.05 6.65.85-4.88 4.58 1.3 6.62L12 17.58l-5.82 3.32 1.3-6.62L2.6 9.7l6.65-.85L12 2.8Z"/></svg>"#
+        )
+        .as_bytes()
+    };
+}
+
+const STAR_SVG: &[u8] = star_svg!("none");
+const STAR_FILLED_SVG: &[u8] = star_svg!("currentColor");
 
 /// Every `icons/*.svg` path served by [`load`].
 pub const ALL_PATHS: &[&str] = &[
+    TICKET,
+    TRENDING_DOWN,
+    TRENDING_UP,
+    GAUGE,
     ACTIVITY,
     ALERT_TRIANGLE,
     ARCHIVE,
@@ -207,17 +234,24 @@ pub const ALL_PATHS: &[&str] = &[
     SQUARE,
     SQUARE_PEN,
     SQUARE_TERMINAL,
+    STAR,
+    STAR_FILLED,
     SUN,
     TERMINAL,
     USER_PLUS,
     USERS,
     WRAP_TEXT,
     WRENCH,
+    ZAP,
 ];
 
 /// The SVG for one of this crate's icon paths, or `None` for any other path.
 pub fn load(path: &str) -> Option<&'static [u8]> {
     match path {
+        GAUGE => Some(include_bytes!("../assets/icons/gauge.svg")),
+        TRENDING_UP => Some(include_bytes!("../assets/icons/trending-up.svg")),
+        TRENDING_DOWN => Some(include_bytes!("../assets/icons/trending-down.svg")),
+        TICKET => Some(include_bytes!("../assets/icons/ticket.svg")),
         ACTIVITY => Some(ACTIVITY_SVG),
         ALERT_TRIANGLE => Some(ALERT_TRIANGLE_SVG),
         ARCHIVE => Some(ARCHIVE_SVG),
@@ -280,12 +314,15 @@ pub fn load(path: &str) -> Option<&'static [u8]> {
         SQUARE => Some(SQUARE_SVG),
         SQUARE_PEN => Some(SQUARE_PEN_SVG),
         SQUARE_TERMINAL => Some(SQUARE_TERMINAL_SVG),
+        STAR => Some(STAR_SVG),
+        STAR_FILLED => Some(STAR_FILLED_SVG),
         SUN => Some(SUN_SVG),
         TERMINAL => Some(TERMINAL_SVG),
         USER_PLUS => Some(USER_PLUS_SVG),
         USERS => Some(USERS_SVG),
         WRAP_TEXT => Some(WRAP_TEXT_SVG),
         WRENCH => Some(WRENCH_SVG),
+        ZAP => Some(ZAP_SVG),
         _ if path.starts_with("bruhs-ui/language-icons/") => crate::language_icons::load(path),
         _ => IconName::ALL
             .into_iter()

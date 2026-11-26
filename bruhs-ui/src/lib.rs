@@ -27,6 +27,7 @@
 //! [`gpui::AssetSource`]; serve [`icons::load`] from yours.
 
 pub mod actions;
+pub mod animated_number;
 pub mod banner;
 pub mod button;
 pub mod card;
@@ -38,6 +39,7 @@ pub mod icons;
 pub mod input;
 pub mod kbd;
 mod language_icons;
+pub mod line_chart;
 pub mod menu_popover;
 pub mod motion;
 pub mod native_blur;

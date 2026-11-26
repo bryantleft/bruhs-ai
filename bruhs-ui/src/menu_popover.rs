@@ -41,13 +41,47 @@ pub fn menu_popover(trigger_size: Size<Pixels>, content: AnyElement) -> Deferred
     deferred(MenuPopover {
         content,
         trigger_size,
+        beside: false,
     })
     .with_priority(1)
+}
+
+/// Open a submenu beside its row, with the usual vertical placement in tight windows.
+pub(crate) fn submenu_popover(trigger_size: Size<Pixels>, content: AnyElement) -> Deferred {
+    deferred(MenuPopover {
+        content,
+        trigger_size,
+        beside: true,
+    })
+    .with_priority(1)
+}
+
+fn submenu_origin(
+    trigger: Bounds<Pixels>,
+    size: Size<Pixels>,
+    viewport: Size<Pixels>,
+) -> Point<Pixels> {
+    let gap = crate::zoom::window_px(menu::MENU_GAP_PX.to_f32_lossy());
+    let margin = crate::zoom::window_px(menu::MENU_WINDOW_MARGIN_PX.to_f32_lossy());
+    let right = trigger.right() + gap;
+    let left = trigger.left() - gap - size.width;
+    let top = trigger
+        .top()
+        .min(viewport.height - size.height - margin)
+        .max(margin);
+    if right + size.width <= viewport.width - margin {
+        point(right, top)
+    } else if left >= margin {
+        point(left, top)
+    } else {
+        menu_origin(trigger, size, viewport)
+    }
 }
 
 struct MenuPopover {
     content: AnyElement,
     trigger_size: Size<Pixels>,
+    beside: bool,
 }
 
 impl IntoElement for MenuPopover {
@@ -100,7 +134,12 @@ impl Element for MenuPopover {
             size: self.trigger_size,
         };
         let menu = window.layout_bounds(*content).size;
-        let origin = menu_origin(trigger, menu, window.viewport_size());
+        let viewport = window.viewport_size();
+        let origin = if self.beside {
+            submenu_origin(trigger, menu, viewport)
+        } else {
+            menu_origin(trigger, menu, viewport)
+        };
         let offset = origin - bounds.origin;
         let offset = point(offset.x.round(), offset.y.round());
         window.with_element_offset(offset, |window| self.content.prepaint(window, cx));
@@ -122,7 +161,7 @@ impl Element for MenuPopover {
 
 #[cfg(test)]
 mod tests {
-    use super::menu_origin;
+    use super::{menu_origin, submenu_origin};
     use gpui::{point, px, size, Bounds};
 
     // `bruhs_models::logic::menu::{MENU_GAP_PX, MENU_WINDOW_MARGIN_PX}`.
@@ -188,5 +227,25 @@ mod tests {
             size(px(640.0), px(800.0)),
         );
         assert_eq!(origin.x, px(640.0 - WINDOW_MARGIN_PX - MENU_W));
+    }
+
+    #[test]
+    fn a_submenu_uses_the_available_side_or_falls_back_to_vertical() {
+        let menu = size(px(208.), px(80.));
+        let viewport = size(px(640.), px(480.));
+        assert_eq!(
+            submenu_origin(trigger_at(178., 194.), menu, viewport),
+            point(px(206.), px(194.))
+        );
+        assert_eq!(
+            submenu_origin(trigger_at(560., 440.), menu, viewport),
+            point(px(348.), px(392.))
+        );
+        let trigger = trigger_at(178., 240.);
+        let compact = size(px(400.), px(480.));
+        assert_eq!(
+            submenu_origin(trigger, menu, compact),
+            menu_origin(trigger, menu, compact)
+        );
     }
 }

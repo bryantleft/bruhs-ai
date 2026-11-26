@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     input::{Input, InputState},
-    scroll::ScrollableElement,
+    scroll::Scrollbar,
 };
 use gpui::prelude::*;
 use gpui::*;
@@ -22,7 +22,6 @@ use crate::button::is_web_button_activation_key;
 use crate::{icons, theme};
 
 const TRIGGER_HEIGHT_PX: f32 = theme::CONTROL_PX;
-const TRIGGER_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const TRIGGER_RADIUS_PX: f32 = 8.0;
 const LIST_MAX_HEIGHT_PX: f32 = 420.0;
 const LIST_RADIUS_PX: f32 = 8.0;
@@ -136,13 +135,13 @@ struct OptionFocus {
     row: usize,
 }
 
-type OptionAccessory = Rc<dyn Fn(&str) -> Option<AnyElement>>;
+type OptionElement = Rc<dyn Fn(&str) -> Option<AnyElement>>;
 
 struct ListNavigation {
     action_menu: bool,
     destructive_command: Option<&'static str>,
-    option_mark: Option<fn(&str) -> AnyElement>,
-    accessory: Option<OptionAccessory>,
+    option_mark: Option<OptionElement>,
+    accessory: Option<OptionElement>,
     targets: Rc<[OptionFocus]>,
     scroll: ScrollHandle,
     unavailable: Option<&'static str>,
@@ -255,6 +254,18 @@ enum TriggerIcon {
     Actions(&'static str),
 }
 
+/// How a dropdown fits into the surrounding interface.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum DropdownTriggerVariant {
+    /// An outlined select field with a down chevron.
+    #[default]
+    Field,
+    /// A borderless toolbar select with a down chevron.
+    Toolbar,
+    /// A two-line settings row with a side submenu and a right chevron.
+    Submenu,
+}
+
 #[derive(IntoElement)]
 pub struct Dropdown {
     id: &'static str,
@@ -266,14 +277,16 @@ pub struct Dropdown {
     on_select: SelectHandler,
     search: Option<(Entity<InputState>, &'static str, Option<FocusHandle>)>,
     compact: bool,
+    trigger_variant: DropdownTriggerVariant,
     start_at_selection: bool,
     end_aligned_min_width: Option<Pixels>,
+    roving_focus: Option<(FocusHandle, bool)>,
     trigger_icon: Option<TriggerIcon>,
     destructive_command: Option<&'static str>,
     group_selection: Option<GroupSelection>,
     sidebar: Option<(AnyElement, FocusHandle)>,
-    option_mark: Option<fn(&str) -> AnyElement>,
-    accessory: Option<OptionAccessory>,
+    option_mark: Option<OptionElement>,
+    accessory: Option<OptionElement>,
     placeholder: Option<&'static str>,
     empty_label: &'static str,
     trigger_label: Option<String>,
@@ -304,8 +317,10 @@ impl Dropdown {
             accessory: None,
             placeholder: None,
             compact: false,
+            trigger_variant: DropdownTriggerVariant::default(),
             start_at_selection: false,
             end_aligned_min_width: None,
+            roving_focus: None,
             trigger_icon: None,
             destructive_command: None,
             group_selection: None,
@@ -328,9 +343,21 @@ impl Dropdown {
         self
     }
 
+    /// Let a parent move focus between closed controls with Up and Down.
+    pub fn roving_focus(mut self, focus: FocusHandle, tab_stop: bool) -> Self {
+        self.roving_focus = Some((focus, tab_stop));
+        self
+    }
+
     /// Fit this trigger to its text when several controls share a row.
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+
+    /// Choose the trigger presentation. Field is the default.
+    pub fn trigger_variant(mut self, variant: DropdownTriggerVariant) -> Self {
+        self.trigger_variant = variant;
         self
     }
 
@@ -343,16 +370,16 @@ impl Dropdown {
 
     /// Open a menu of commands and move focus to its first item.
     pub fn action_menu(
-        mut self,
+        self,
         icon: &'static str,
         draw: fn(&str) -> AnyElement,
         destructive_command: Option<&'static str>,
     ) -> Self {
-        self.option_mark = Some(draw);
-        self.destructive_command = destructive_command;
-        self.trigger_icon = Some(TriggerIcon::Actions(icon));
-        self.compact = true;
-        self
+        let mut this = self.option_mark(draw);
+        this.destructive_command = destructive_command;
+        this.trigger_icon = Some(TriggerIcon::Actions(icon));
+        this.compact = true;
+        this
     }
 
     /// Show an icon to the left of the selected value.
@@ -409,8 +436,11 @@ impl Dropdown {
     }
 
     /// Draw a file or object icon before the selection and each option.
-    pub(crate) fn option_mark(mut self, draw: fn(&str) -> AnyElement) -> Self {
-        self.option_mark = Some(draw);
+    pub fn option_mark<T: Into<Option<AnyElement>>>(
+        mut self,
+        draw: impl Fn(&str) -> T + 'static,
+    ) -> Self {
+        self.option_mark = Some(Rc::new(move |value| draw(value).into()));
         self
     }
 
@@ -460,7 +490,9 @@ impl RenderOnce for Dropdown {
             .search
             .as_ref()
             .and_then(|(_, _, trigger)| trigger.clone())
+            .or_else(|| self.roving_focus.as_ref().map(|(focus, _)| focus.clone()))
             .unwrap_or(trigger_focus);
+        let roving = self.roving_focus.is_some();
         let selected = targets
             .iter()
             .position(|target| target.value == self.value)
@@ -475,13 +507,17 @@ impl RenderOnce for Dropdown {
         } else {
             0
         };
-        let floating = self.listbox == Listbox::Popover;
         let open = self.listbox != Listbox::Closed;
+        let submenu = self.trigger_variant == DropdownTriggerVariant::Submenu;
+        let floating = self.listbox == Listbox::Popover || (submenu && open);
         let action_menu = matches!(self.trigger_icon, Some(TriggerIcon::Actions(_)));
-        let first_command = targets.first().filter(|_| action_menu && !open).cloned();
+        let initial_option = (!open && (action_menu || roving))
+            .then(|| targets.get(if roving { selected } else { 0 }))
+            .flatten()
+            .cloned();
         let on_toggle: ToggleHandler = Rc::new(move |window, cx| {
             (self.on_toggle)(window, cx);
-            if let Some(command) = &first_command {
+            if let Some(command) = &initial_option {
                 command.handle.focus(window, cx);
             }
         });
@@ -496,18 +532,24 @@ impl RenderOnce for Dropdown {
         let trigger_targets = targets.clone();
         let trigger_scroll = scroll.clone();
         let trigger = dropdown_trigger(
-            self.id,
-            self.label.clone(),
-            label,
-            self.trigger_icon,
-            self.option_mark
-                .filter(|_| !action_menu)
-                .map(|draw| draw(&self.value)),
-            open,
+            TriggerProps {
+                id: self.id,
+                aria_label: self.label.clone(),
+                label,
+                icon: self.trigger_icon,
+                mark: self
+                    .option_mark
+                    .as_ref()
+                    .filter(|_| self.trigger_icon.is_none())
+                    .and_then(|draw| draw(&self.value)),
+                open,
+                compact: self.compact,
+                variant: self.trigger_variant,
+            },
             &trigger_focus,
         )
-        .when(self.compact && !action_menu, |el| {
-            el.w_auto().max_w_full().px_2().gap_1()
+        .when_some(self.roving_focus.as_ref(), |el, (_, tab_stop)| {
+            el.tab_stop(*tab_stop)
         })
         .on_click(move |_, window, cx| on_toggle(window, cx))
         .on_key_down(move |event: &KeyDownEvent, window, cx| {
@@ -515,11 +557,11 @@ impl RenderOnce for Dropdown {
             if event.keystroke.modifiers.modified() {
                 return;
             }
-            if is_web_button_activation_key(key) {
+            if is_web_button_activation_key(key) || (roving && key == "right" && !open) {
                 window.prevent_default();
                 cx.stop_propagation();
                 toggle_for_key(window, cx);
-            } else if navigation_index(selected, trigger_targets.len(), key).is_some() {
+            } else if !roving && navigation_index(selected, trigger_targets.len(), key).is_some() {
                 window.prevent_default();
                 cx.stop_propagation();
                 if !open {
@@ -619,7 +661,7 @@ impl RenderOnce for Dropdown {
                     return;
                 }
                 match event.keystroke.key.as_str() {
-                    "escape" => {
+                    "escape" | "left" if event.keystroke.key == "escape" || roving => {
                         window.prevent_default();
                         cx.stop_propagation();
                         toggle_for_close(window, cx);
@@ -791,10 +833,17 @@ impl RenderOnce for Dropdown {
                 };
                 if floating {
                     let size = bounds.get().size;
-                    let min_width = self
-                        .end_aligned_min_width
-                        .unwrap_or_else(|| px(if model_options_menu { 224. } else { 192. }));
-                    let width = size.width.max(min_width).min(window.viewport_size().width);
+                    let min_width = self.end_aligned_min_width.unwrap_or_else(|| {
+                        if roving {
+                            size.width
+                        } else if model_options_menu {
+                            px(224.)
+                        } else {
+                            px(192.)
+                        }
+                    });
+                    let max_width = window.viewport_size().width;
+                    let width = size.width.max(min_width).min(max_width.max(px(1.)));
                     let left = if self.end_aligned_min_width.is_some() {
                         size.width - width
                     } else {
@@ -817,9 +866,13 @@ impl RenderOnce for Dropdown {
                             }
                         })
                         .child(list);
-                    el.child(div().absolute().left(left).top_0().child(
-                        crate::menu_popover::menu_popover(size, content.into_any_element()),
-                    ))
+                    let content = content.into_any_element();
+                    let popover = if submenu {
+                        crate::menu_popover::submenu_popover(size, content)
+                    } else {
+                        crate::menu_popover::menu_popover(size, content)
+                    };
+                    el.child(div().absolute().left(left).top_0().child(popover))
                 } else {
                     el.child(list)
                 }
@@ -827,38 +880,59 @@ impl RenderOnce for Dropdown {
     }
 }
 
-fn dropdown_trigger(
+struct TriggerProps {
     id: &'static str,
     aria_label: SharedString,
     label: String,
     icon: Option<TriggerIcon>,
     mark: Option<AnyElement>,
     open: bool,
-    focus: &FocusHandle,
-) -> Stateful<Div> {
+    compact: bool,
+    variant: DropdownTriggerVariant,
+}
+
+fn dropdown_trigger(props: TriggerProps, focus: &FocusHandle) -> Stateful<Div> {
+    let TriggerProps {
+        id,
+        aria_label,
+        label,
+        icon,
+        mark,
+        open,
+        compact,
+        variant,
+    } = props;
     let action_menu = matches!(icon, Some(TriggerIcon::Actions(_)));
+    let toolbar = variant == DropdownTriggerVariant::Toolbar;
+    let submenu = variant == DropdownTriggerVariant::Submenu;
     div()
         .id(id)
         .debug_selector(move || id.to_string())
         .w_full()
-        .h(px(TRIGGER_HEIGHT_PX))
-        .px_3()
+        .min_h(px(if submenu {
+            theme::CONTROL_DETAIL_PX
+        } else if toolbar || action_menu {
+            theme::CONTROL_SM_PX
+        } else {
+            TRIGGER_HEIGHT_PX
+        }))
+        .px(px(theme::FIELD_PADDING_X_PX))
         .rounded(px(TRIGGER_RADIUS_PX))
         .border_1()
-        .border_color(theme::longan_700())
+        .border_color(theme::ring_card())
         .bg(theme::longan_900())
         .flex()
         .items_center()
         .justify_between()
-        .gap_2()
-        .font_family(theme::FontFace::Code)
-        .text_size(px(TRIGGER_TEXT_SIZE_PX))
+        .gap(px(8.))
+        .font_family(theme::FontFace::Interface)
+        .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
         .text_color(theme::rambutan_100())
         .tab_index(0)
         .track_focus(focus)
         .when(action_menu, |el| {
             el.role(Role::Button)
-                .size(px(28.))
+                .size(px(theme::CONTROL_SM_PX))
                 .px_0()
                 .justify_center()
                 .bg(gpui::transparent_black())
@@ -867,11 +941,25 @@ fn dropdown_trigger(
         .when(!action_menu, |el| {
             el.role(Role::ComboBox).aria_value(label.clone())
         })
+        .when(compact && !action_menu, |el| {
+            el.w_auto().max_w_full().px(px(8.)).gap(px(4.))
+        })
+        .when(toolbar || submenu, |el| {
+            el.border_color(gpui::transparent_black())
+                .bg(gpui::transparent_black())
+                .text_size(px(12.))
+        })
         .aria_label(aria_label.clone())
         .aria_expanded(open)
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .cursor_pointer()
-        .hover(|el| el.border_color(theme::rambutan_500().opacity(0.5)))
+        .hover(move |el| {
+            if action_menu || toolbar || submenu {
+                el.bg(theme::longan_800())
+            } else {
+                el.border_color(theme::rambutan_500().opacity(0.5))
+            }
+        })
         .children(mark)
         .map(|el| match icon {
             Some(icon) => {
@@ -881,14 +969,16 @@ fn dropdown_trigger(
                 let el = el.child(
                     svg()
                         .path(path)
-                        .size(px(theme::ICON_PX))
+                        .size(px(if toolbar {
+                            theme::ICON_XS_PX
+                        } else {
+                            theme::ICON_PX
+                        }))
                         .flex_shrink_0()
                         .text_color(theme::rambutan_400()),
                 );
                 match icon {
-                    TriggerIcon::Leading(_) => {
-                        el.child(div().min_w_0().flex_1().truncate().child(label))
-                    }
+                    TriggerIcon::Leading(_) => el.child(trigger_value(id, label, compact)),
                     TriggerIcon::Actions(_) => el.tooltip(move |window, cx| {
                         crate::tooltip::Tooltip::new(aria_label.clone()).build(window, cx)
                     }),
@@ -897,17 +987,53 @@ fn dropdown_trigger(
                     }),
                 }
             }
-            None => el.child(div().min_w_0().truncate().child(label)),
+            None if submenu => el.child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .debug_selector(move || format!("{id}-caption"))
+                            .truncate()
+                            .text_color(theme::rambutan_400())
+                            .child(aria_label),
+                    )
+                    .child(trigger_value(id, label, compact)),
+            ),
+            None => el.child(trigger_value(id, label, compact)),
         })
         .when(!action_menu, |el| {
             el.child(
-                svg()
-                    .path(icons::CHEVRON_DOWN)
-                    .size(px(theme::ICON_PX))
-                    .flex_shrink_0()
-                    .text_color(theme::rambutan_500()),
+                div()
+                    .debug_selector(move || format!("{id}-chevron"))
+                    .flex_none()
+                    .child(
+                        svg()
+                            .path(if submenu {
+                                icons::CHEVRON_RIGHT
+                            } else {
+                                icons::CHEVRON_DOWN
+                            })
+                            .size(px(if toolbar || submenu {
+                                theme::ICON_XS_PX
+                            } else {
+                                theme::ICON_PX
+                            }))
+                            .text_color(theme::rambutan_400()),
+                    ),
             )
         })
+}
+
+fn trigger_value(id: &'static str, label: String, compact: bool) -> Div {
+    div()
+        .debug_selector(move || format!("{id}-label"))
+        .min_w_0()
+        .when(!compact, |el| el.flex_1())
+        .truncate()
+        .child(label)
 }
 
 /// The open listbox with group headers and options; callers decide where
@@ -1108,7 +1234,7 @@ fn render_dropdown_list(
                             focus_option(&key_targets[next], &key_scroll, window, cx);
                         }
                     })
-                    .children(option_mark.map(|draw| draw(option_value)))
+                    .children(option_mark.as_ref().and_then(|draw| draw(option_value)))
                     .child(
                         div()
                             .min_w_0()
@@ -1166,7 +1292,7 @@ fn render_dropdown_list(
         }
     }
 
-    div()
+    let list = div()
         .id(ElementId::Name(format!("{id}-list").into()))
         .debug_selector(move || format!("{id}-list"))
         .role(if grouped.is_some() || action_menu {
@@ -1190,9 +1316,19 @@ fn render_dropdown_list(
             el.border_t_1().border_color(theme::longan_700())
         })
         .py_1()
-        .children(rows)
-        .when(!action_menu, |el| el.vertical_scrollbar(&scroll))
-        .into_any_element()
+        .children(rows);
+    if action_menu {
+        list.into_any_element()
+    } else {
+        // Keep the bar outside the tracked content. Its absolute child bounds
+        // would otherwise count toward the list's scroll extent.
+        div()
+            .relative()
+            .w_full()
+            .child(list)
+            .child(Scrollbar::vertical(&scroll).id(SharedString::from(format!("{id}-scrollbar"))))
+            .into_any_element()
+    }
 }
 
 #[cfg(test)]
@@ -1395,30 +1531,149 @@ mod tests {
         assert!(last.top() >= list.top(), "focused row above viewport");
         assert!(last.bottom() <= list.bottom(), "focused row below viewport");
     }
+
+    struct DropdownScrollHarness {
+        scroll: gpui::ScrollHandle,
+        overflow: bool,
+    }
+
+    impl Render for DropdownScrollHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+            let values: &[_] = if self.overflow {
+                &["standard", "fast", "ultrafast"]
+            } else {
+                &["standard"]
+            };
+            let group = DropdownGroup {
+                label: None,
+                mark: None,
+                options: values
+                    .iter()
+                    .map(|&value| DropdownOption {
+                        value,
+                        label: value.into(),
+                        description: None,
+                    })
+                    .collect(),
+            };
+            let targets = values
+                .iter()
+                .enumerate()
+                .map(|(row, &value)| super::OptionFocus {
+                    value,
+                    row,
+                    handle: cx.focus_handle(),
+                })
+                .collect::<Vec<_>>()
+                .into();
+            super::render_dropdown_list(
+                "scrolling-dropdown",
+                "Service Tier".into(),
+                "standard",
+                None,
+                vec![group],
+                Rc::new(|_, _, _| {}),
+                super::ListNavigation {
+                    action_menu: false,
+                    destructive_command: None,
+                    option_mark: None,
+                    accessory: None,
+                    targets,
+                    scroll: self.scroll.clone(),
+                    unavailable: None,
+                    tab_stops: false,
+                    max_height: gpui::px(55.),
+                },
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn dropdown_scroll_extent_excludes_the_scrollbar_overlay(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| DropdownScrollHarness {
+            scroll: gpui::ScrollHandle::new(),
+            overflow: false,
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.scroll.max_offset().y, gpui::px(0.))
+        });
+        view.update(cx, |view, cx| {
+            view.overflow = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert!(view.scroll.max_offset().y > gpui::px(0.))
+        });
+    }
+
     struct TriggerGeometryHarness {
         focus: gpui::FocusHandle,
+        marked: bool,
     }
 
     impl Render for TriggerGeometryHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
             div().size_full().child(
                 super::dropdown_trigger(
-                    "focus-dropdown",
-                    "Model".into(),
-                    "Claude Sonnet 4.6".into(),
-                    None,
-                    None,
-                    false,
+                    super::TriggerProps {
+                        id: "focus-dropdown",
+                        aria_label: "Model".into(),
+                        label: "Claude Sonnet 4.6".into(),
+                        icon: None,
+                        mark: self.marked.then(|| {
+                            div()
+                                .debug_selector(|| "focus-dropdown-mark".to_string())
+                                .size(gpui::px(12.0))
+                                .flex_none()
+                                .into_any_element()
+                        }),
+                        open: false,
+                        compact: false,
+                        variant: super::DropdownTriggerVariant::Field,
+                    },
                     &self.focus,
                 )
-                .w(gpui::px(240.0))
-                .child(
-                    div()
-                        .debug_selector(|| "focus-dropdown-content".to_string())
-                        .size(gpui::px(8.0)),
-                ),
+                .w(gpui::px(240.0)),
             )
         }
+    }
+
+    #[gpui::test]
+    fn native_dropdown_keeps_the_mark_next_to_its_label(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, cx| TriggerGeometryHarness {
+            focus: cx.focus_handle(),
+            marked: true,
+        });
+        cx.run_until_parked();
+        let mark = cx.debug_bounds("focus-dropdown-mark").unwrap();
+        let label = cx.debug_bounds("focus-dropdown-label").unwrap();
+        let gap = label.left() - mark.right();
+        assert!((gpui::px(6.0)..=gpui::px(10.0)).contains(&gap));
+        assert!((label.center().y - mark.center().y).abs() <= gpui::px(1.0));
+    }
+
+    #[gpui::test]
+    fn native_select_has_aligned_value_and_chevron_insets(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, cx| TriggerGeometryHarness {
+            focus: cx.focus_handle(),
+            marked: false,
+        });
+        cx.run_until_parked();
+        let trigger = cx.debug_bounds("focus-dropdown").unwrap();
+        let label = cx.debug_bounds("focus-dropdown-label").unwrap();
+        let chevron = cx.debug_bounds("focus-dropdown-chevron").unwrap();
+        let inset = gpui::px(crate::theme::FIELD_PADDING_X_PX + 1.0);
+        assert_eq!(trigger.size.height, gpui::px(crate::theme::CONTROL_PX));
+        assert_eq!(label.left() - trigger.left(), inset);
+        assert_eq!(trigger.right() - chevron.right(), inset);
+        assert_eq!(chevron.left() - label.right(), gpui::px(8.0));
+        assert_eq!(chevron.size, gpui::size(gpui::px(16.0), gpui::px(16.0)));
+        assert!((label.center().y - chevron.center().y).abs() <= gpui::px(1.0));
     }
 
     #[gpui::test]
@@ -1426,14 +1681,15 @@ mod tests {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, cx| TriggerGeometryHarness {
             focus: cx.focus_handle(),
+            marked: false,
         });
         cx.run_until_parked();
         let before = cx.debug_bounds("focus-dropdown").unwrap();
-        let children = cx.debug_bounds("focus-dropdown-content").unwrap();
+        let children = cx.debug_bounds("focus-dropdown-chevron").unwrap();
         cx.simulate_mouse_move(before.center(), None, Modifiers::default());
         cx.run_until_parked();
         assert_eq!(cx.debug_bounds("focus-dropdown"), Some(before));
-        assert_eq!(cx.debug_bounds("focus-dropdown-content").unwrap(), children);
+        assert_eq!(cx.debug_bounds("focus-dropdown-chevron").unwrap(), children);
         cx.simulate_keystrokes("right");
         view.update_in(cx, |view, window, cx| {
             view.focus.focus(window, cx);
@@ -1441,6 +1697,6 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(cx.debug_bounds("focus-dropdown"), Some(before));
-        assert_eq!(cx.debug_bounds("focus-dropdown-content").unwrap(), children);
+        assert_eq!(cx.debug_bounds("focus-dropdown-chevron").unwrap(), children);
     }
 }

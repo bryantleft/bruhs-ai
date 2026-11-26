@@ -4,6 +4,7 @@
 //! `14px` (`lychee`) card radius, `longan-800` modal tone, and `ring_modal()` border
 //! with no drop shadows.
 
+use crate::native_blur::BlurScrimHandle;
 use crate::theme::{self, ActiveTheme};
 use crate::zoom::px;
 use gpui::prelude::*;
@@ -27,6 +28,29 @@ pub enum DialogPlacement {
     Centered,
     /// Anchored near the top (for pickers/palettes whose list height changes).
     Top,
+}
+
+/// Corner shape shared by the card and its native backdrop opening.
+#[derive(Clone, Copy, Debug)]
+pub enum DialogCorners {
+    Standard,
+    Rounded(f32),
+    TopRounded(f32),
+}
+
+impl DialogCorners {
+    /// Apply the corners and the matching blur to a custom dialog shell.
+    pub fn apply(self, card: Stateful<Div>, blur: &BlurScrimHandle) -> Stateful<Div> {
+        let (top, bottom) = match self {
+            Self::Standard => (DIALOG_RADIUS_PX, DIALOG_RADIUS_PX),
+            Self::Rounded(radius) => (radius, radius),
+            Self::TopRounded(radius) => (radius, 0.0),
+        };
+        let (top, bottom) = (px(top), px(bottom));
+        card.rounded_t(top)
+            .rounded_b(bottom)
+            .child(blur.backdrop(top, bottom))
+    }
 }
 
 /// Full-window modal scrim that blocks clicks underneath.
@@ -53,14 +77,26 @@ pub fn dialog_card(
     id: impl Into<ElementId>,
     aria_label: impl Into<SharedString>,
     role: Role,
+    blur: &BlurScrimHandle,
     cx: &App,
 ) -> Stateful<Div> {
-    div()
+    dialog_card_with_corners(id, aria_label, role, DialogCorners::Standard, blur, cx)
+}
+
+/// The shared dialog shell with a custom corner shape, such as a bottom sheet.
+pub fn dialog_card_with_corners(
+    id: impl Into<ElementId>,
+    aria_label: impl Into<SharedString>,
+    role: Role,
+    corners: DialogCorners,
+    blur: &BlurScrimHandle,
+    cx: &App,
+) -> Stateful<Div> {
+    let card = div()
         .id(id)
         .role(role)
         .aria_label(aria_label.into())
         .max_w(relative(DIALOG_MAX_WIDTH_RATIO))
-        .rounded(px(DIALOG_RADIUS_PX))
         .border_1()
         .border_color(theme::ring_modal())
         .bg(theme::glass_surface(theme::longan_800()))
@@ -68,25 +104,28 @@ pub fn dialog_card(
         .flex()
         .flex_col()
         .overflow_hidden()
-        .tab_group()
+        .tab_group();
+    corners.apply(card, blur)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{dialog_backdrop, dialog_card, DialogPlacement};
+    use crate::native_blur::BlurScrimHandle;
     use ::core::prelude::v1::test;
     use gpui::{
         div, Context, InteractiveElement, IntoElement, ParentElement, Render, Role, Styled,
         TestAppContext, Window,
     };
 
-    struct Sample;
+    #[derive(Default)]
+    struct Sample(BlurScrimHandle);
 
     impl Render for Sample {
         fn render(&mut self, _: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
             div().size_full().relative().child(
                 dialog_backdrop("sample-overlay", DialogPlacement::Centered).child(
-                    dialog_card("sample-dialog", "Sample", Role::Dialog, cx)
+                    dialog_card("sample-dialog", "Sample", Role::Dialog, &self.0, cx)
                         .debug_selector(|| "sample-dialog".to_owned())
                         .w(gpui::px(420.0))
                         .p_4()
@@ -99,10 +138,14 @@ mod tests {
     #[gpui::test]
     fn dialog_shell_renders_centered_card(cx: &mut TestAppContext) {
         cx.update(crate::init);
-        let (_, cx) = cx.add_window_view(|_, _| Sample);
+        let (sample, cx) = cx.add_window_view(|_, _| Sample::default());
         cx.run_until_parked();
         let bounds = cx.debug_bounds("sample-dialog").expect("sample-dialog");
         assert_eq!(bounds.size.width, gpui::px(420.0));
         assert!(bounds.size.height > gpui::px(0.0));
+        assert_eq!(
+            sample.read_with(cx, |sample, _| sample.0.clear_bounds()),
+            Some(bounds)
+        );
     }
 }

@@ -170,8 +170,7 @@ impl EditorText {
                         (ch * count).max(rem * 1.25)
                     }
                     Gutter::Task => {
-                        // T3 adds list padding inside an ancestor task list, in
-                        // addition to the checkbox and gap on each item.
+                        // Nested task lists add padding beyond each item's checkbox and gap.
                         let padding = if inside_task {
                             rem * 1.375
                         } else {

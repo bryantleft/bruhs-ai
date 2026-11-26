@@ -31,6 +31,10 @@ pub const CONTROL_PX: f32 = 32.0;
 pub const CONTROL_SM_PX: f32 = 28.0;
 /// Actions inside rows and cards.
 pub const CONTROL_XS_PX: f32 = 24.0;
+/// A control row with the setting name above its current value.
+pub const CONTROL_DETAIL_PX: f32 = 40.0;
+/// Inside padding for standard text and select fields.
+pub const FIELD_PADDING_X_PX: f32 = 10.0;
 /// Every icon inside a control (shadcn `size-4`).
 pub const ICON_PX: f32 = 16.0;
 /// Icons that decorate 13 to 14px text that is not clickable.
@@ -250,9 +254,9 @@ pub fn pandan_500() -> Hsla {
 // lychee — red (errors, destructive actions)
 // =====================================================================
 
-/// lychee-50 — Destructive button text
+/// Foreground for saturated destructive controls in either color scheme.
 pub fn lychee_50() -> Hsla {
-    palette_color(0xfef2f2, 0x481316)
+    toned_color(0xfef2f2)
 }
 
 /// lychee-100 — Timegrid event text
@@ -675,6 +679,7 @@ mod tests {
             let surface = longan_950();
             let text = rambutan_200();
             assert!(surface.l > text.l);
+            assert_eq!(lychee_50(), rgb(0xfef2f2).into());
             set_contrast(150, cx);
             assert!(Theme::global(cx).background.l > surface.l);
             assert!(Theme::global(cx).foreground.l < text.l);

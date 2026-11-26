@@ -32,7 +32,7 @@ impl Size {
         match self {
             Size::XSmall => 20.0,
             Size::Small => 24.0,
-            Size::Medium => 32.0,
+            Size::Medium => theme::CONTROL_PX,
             Size::Large => 44.0,
         }
     }
@@ -42,7 +42,7 @@ impl Size {
         match self {
             Size::XSmall => 4.0,
             Size::Small => 8.0,
-            Size::Medium => 10.0,
+            Size::Medium => theme::FIELD_PADDING_X_PX,
             Size::Large => 12.0,
         }
     }
