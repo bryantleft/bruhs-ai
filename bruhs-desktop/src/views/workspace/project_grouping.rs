@@ -423,7 +423,7 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         let (ws, cx, _, _) = super::super::tests::thread_menu_workspace(cx);
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir_in(project_picker_ui::project_picker_start_path()).unwrap();
         let mut paths = Vec::new();
         for (clone, remote) in [
             (

@@ -476,7 +476,7 @@ mod tests {
         assert!(catalog
             .entries
             .iter()
-            .any(|component| component.bundle == "Composer syntaxes"));
+            .any(|component| component.matches(&["lucide", "isc", "assets"])));
         assert!(Catalog::from_zip(b"incomplete download").is_err());
     }
 }

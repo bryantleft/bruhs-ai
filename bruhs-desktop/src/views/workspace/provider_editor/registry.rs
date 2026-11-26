@@ -160,6 +160,15 @@ impl Workspace {
         if e.registry.loading || e.busy {
             return;
         }
+        if cfg!(test) {
+            // Editor tests run on GPUI's deterministic scheduler and use a local catalog.
+            e.registry.catalog = Some(Catalog {
+                agents: Vec::new(),
+                cached: false,
+            });
+            cx.notify();
+            return;
+        }
         e.registry.loading = true;
         e.registry.failure = None;
         let session = e.registry.query.clone();
