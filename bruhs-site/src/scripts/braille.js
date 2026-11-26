@@ -47,6 +47,8 @@ const MOUTH_AT = unit(307, 378);
 const EYE_RX = 40 / 300;
 const MOUTH_RX = 120 / 300;
 
+export { LEFT_EYE, RIGHT_EYE, EYE_RX };
+
 // A full look (lookX or lookY of ±1) turns the head this far, in radians,
 // and shifts the ball this share of its radius.
 const MAX_YAW = 0.75;

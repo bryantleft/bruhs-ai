@@ -16,11 +16,12 @@
 // whose longan-950 tile a Mac icon needs as its own background.
 
 import { writeFileSync } from "node:fs";
-import { bruhDots, pitchFor } from "../src/scripts/braille.js";
+import { bruhDots, EYE_RX, gridFor, LEFT_EYE, pitchFor, RIGHT_EYE } from "../src/scripts/braille.js";
 
 // The site's BRUH_COLORS (src/scripts/site.js).
 const FACE = "#fada5e";
 const MOUTH = "#fc4141";
+const EYE = "#302720"; // Bruhs light rambutan-200
 const TILE = "#141210"; // longan-950
 const SMALL = 80;
 const LARGE = 200;
@@ -56,6 +57,22 @@ function bruh(r, box) {
 }
 
 /**
+ * Give the slits their own ink under the halftone dots on transparent marks.
+ * @param {number} r
+ * @param {number} box
+ */
+function eyes(r, box) {
+  const center = box / 2;
+  const halfWidth = EYE_RX * r;
+  const height = gridFor(r).rowH;
+  return [LEFT_EYE, RIGHT_EYE].map((eye) => {
+    const x = round(center + eye.x * r - halfWidth);
+    const y = round(center + eye.y * r - height / 2);
+    return `<rect x="${x}" y="${y}" width="${round(halfWidth * 2)}" height="${round(height)}" rx="${round(height / 2)}" fill="${EYE}"/>`;
+  }).join("");
+}
+
+/**
  * Transparent: the Bruh fills the box like bruhs.svg, with half a dot pitch
  * spare on each side so the rim's dots stay whole. On the tile it spans 84%
  * of it, the share the earlier mark had.
@@ -64,7 +81,7 @@ function bruh(r, box) {
 function svg(r, tile) {
   const box = round(tile ? (2 * r) / 0.84 : 2 * r + pitchFor(r));
   const bg = tile ? `<rect width="${box}" height="${box}" rx="${round((box * 14) / 64)}" fill="${TILE}"/>` : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${box} ${box}">${bg}${bruh(r, box)}</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${box} ${box}">${bg}${tile ? "" : eyes(r, box)}${bruh(r, box)}</svg>\n`;
 }
 
 const site = new URL("../public/", import.meta.url);

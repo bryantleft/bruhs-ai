@@ -16,6 +16,7 @@ interface Props {
   current?: "home" | "download" | "changelog" | "privacy";
   /** The ⌘K button needs the home page's script. */
   palette?: boolean;
+  noIndex?: boolean;
 }
 
 const {
@@ -27,6 +28,7 @@ const {
   fonts = ["Krypton", "Neon"],
   current,
   palette = false,
+  noIndex = false,
 } = Astro.props;
 const canonical = new URL(path, "https://bruhs.ai").href;
 const here = (page: Props["current"]) => (page === current ? "page" : undefined);
@@ -39,6 +41,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noIndex && <meta name="robots" content="noindex" />}
     <meta name="theme-color" content="#141210" />
     <link rel="canonical" href={canonical} />
     <meta property="og:type" content="website" />

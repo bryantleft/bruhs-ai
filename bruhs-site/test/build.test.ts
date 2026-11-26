@@ -11,7 +11,7 @@ const pages = readdirSync(DIST).filter((name) => name.endsWith(".html"));
 
 describe("built pages", () => {
   it("include the home page, download, changelog and privacy page", () => {
-    assert.deepEqual([...pages].sort(), ["changelog.html", "download.html", "index.html", "privacy.html"]);
+    assert.deepEqual([...pages].sort(), ["changelog.html", "download.html", "index.html", "privacy.html", "prompt.html"]);
   });
 
   for (const page of pages) {
