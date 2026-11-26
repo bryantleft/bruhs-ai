@@ -246,6 +246,11 @@ impl Workspace {
         if self.usage_hubs.busy || self.usage_hubs.loading || self.usage_hubs.pending != 0 {
             return;
         }
+        if cfg!(test) {
+            // Settings tests use an empty usage catalog without probing this device or its hubs.
+            self.usage_hubs.loaded = true;
+            return;
+        }
         self.usage_hubs.loading = true;
         let generation = self.usage_hubs.generation;
         let task = cx.background_spawn(async { api::list() });

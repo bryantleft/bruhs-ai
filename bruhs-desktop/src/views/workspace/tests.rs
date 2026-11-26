@@ -4931,14 +4931,16 @@ fn desktop_command_bar_filter_click_should_open_settings_like_web(cx: &mut gpui:
         assert!(workspace.settings_visible());
     });
     assert_rendered_bounds(cx, "desktop-settings-dialog");
-    // Provider logos head the model dropdown's groups once it is open.
     click_debug_selector(cx, "desktop-settings-nav-threads");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-row-model");
     click_debug_selector(cx, "desktop-model");
     cx.run_until_parked();
-    assert_provider_logo_bounds(cx, "desktop-provider-logo-claude");
-    assert_provider_logo_bounds(cx, "desktop-provider-logo-codex");
+    assert_rendered_bounds(cx, "desktop-model-tab-claude");
+    assert_rendered_bounds(cx, "desktop-model-tab-codex");
+    click_debug_selector(cx, "desktop-model-tab-codex");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-model-option-gpt-5.5");
 }
 
 #[gpui::test]
