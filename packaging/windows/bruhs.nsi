@@ -32,7 +32,8 @@ FunctionEnd
 
 Section "Bruhs"
   SetOutPath "$INSTDIR"
-  File /r "${PAYLOAD}/*"
+  !cd "${PAYLOAD}"
+  File /r "*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateShortcut "$SMPROGRAMS\Bruhs.lnk" "$INSTDIR\bruhs-desktop.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Bruhs"
