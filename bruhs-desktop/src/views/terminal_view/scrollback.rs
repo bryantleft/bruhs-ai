@@ -84,6 +84,7 @@ impl TerminalView {
                 palette.scrollbar
             })
             .group_hover(group.clone(), |el| el.bg(palette.scrollbar_hover));
+        let focus_color = palette.cursor;
         let mut track = div()
             .id("terminal-scrollback")
             .debug_selector(|| "desktop-terminal-scrollbar".into())
@@ -103,6 +104,7 @@ impl TerminalView {
             .aria_numeric_value(f64::from(bar.from_top))
             .track_focus(&self.scrollbar_focus)
             .tab_index(0)
+            .focus_visible(move |el| el.bg(focus_color.opacity(0.32)))
             .child(thumb)
             .on_mouse_down(
                 MouseButton::Left,

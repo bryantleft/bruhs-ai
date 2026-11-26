@@ -644,6 +644,7 @@ impl ChatView {
         if entry {
             return self.composer_effort_focus.clone();
         }
+        // a11y-exempt: This sets up a roving focus handle. The option renders the focus ring.
         self.model_option_focus
             .borrow_mut()
             .entry((kind, index))

@@ -641,20 +641,17 @@ impl Workspace {
             .justify_center()
             .track_focus(&self.modal_focus.restart_sidebar)
             .tab_index(0)
+            .role(if checking { Role::Status } else { Role::Button })
             .aria_label(label)
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx));
         if checking {
-            return button
-                .role(Role::Status)
-                .child(update_spinner(cx))
-                .into_any_element();
+            return button.child(update_spinner(cx)).into_any_element();
         }
         let target = cx.weak_entity();
         let button = button
-            .role(Role::Button)
             .on_a11y_action(gpui::AccessibleAction::Click, move |_, _, cx| {
                 let _ = target.update(cx, |ws, cx| {
                     ws.check_linked_providers(cx);
@@ -1301,8 +1298,6 @@ impl Workspace {
         } else {
             "Close update details"
         })
-        .tab_index(0)
-        .role(Role::Button)
         .child(if has_targets { "Cancel" } else { "Close" })
         .map(|el| {
             on_press_view(el, cx, |this, window, cx| {
@@ -1326,8 +1321,6 @@ impl Workspace {
                     .when(compact, |el| el.w_full().justify_center())
                     .debug_selector(|| "desktop-update-confirm-run".to_string())
                     .aria_label(action)
-                    .tab_index(0)
-                    .role(Role::Button)
                     .child(action)
                     .map(|el| {
                         on_press_view(el, cx, move |this, window, cx| {

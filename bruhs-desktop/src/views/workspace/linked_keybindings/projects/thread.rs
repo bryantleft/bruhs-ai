@@ -61,6 +61,10 @@ impl Workspace {
                     .min_w_0()
                     .truncate()
                     .tab_index(0)
+                    .focus_visible(|el| {
+                        el.bg(theme::longan_800())
+                            .text_color(theme::persimmon_400())
+                    })
                     .cursor_pointer()
                     .text_sm()
                     .text_color(theme::rambutan_300())
