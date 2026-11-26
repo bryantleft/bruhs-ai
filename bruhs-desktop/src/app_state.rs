@@ -24,7 +24,12 @@ impl Global for ThreadCatalog {}
 
 impl DesktopState {
     pub fn new() -> std::io::Result<Self> {
-        let runtime = Builder::new_multi_thread()
+        let mut runtime = Builder::new_multi_thread();
+        if cfg!(test) {
+            // Each GPUI fixture has its own runtime. Keep the full suite within the thread limit.
+            runtime.worker_threads(1);
+        }
+        let runtime = runtime
             .enable_all()
             .thread_name("bruhs-desktop-agent")
             .build()?;

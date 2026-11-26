@@ -4065,8 +4065,10 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
             .chat
             .read(cx);
         assert_eq!(active_chat.model_id, target);
-        assert!(!active_chat.model_picker_open);
+        assert!(active_chat.model_picker_open);
     });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
     assert_no_rendered_bounds(cx, "desktop-model-picker");
 
     click_debug_selector(cx, "desktop-composer-input");
