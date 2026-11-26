@@ -1,5 +1,6 @@
 Unicode True
 Name "Bruhs"
+BrandingText "Bruhs"
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Bruhs"
 RequestExecutionLevel user
@@ -11,6 +12,8 @@ ShowInstDetails show
 !include "x64.nsh"
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "AppIcon.ico"
+!define MUI_UNICON "AppIcon.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\bruhs-desktop.exe"
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
