@@ -328,6 +328,7 @@ pub(super) fn save_desktop_state(
         }
         Ok(())
     });
+    drop(expected);
     if result.is_ok() {
         *cached = Some(next);
     }

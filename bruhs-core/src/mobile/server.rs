@@ -439,7 +439,10 @@ async fn question_file(
         Some(
             tokio::time::timeout(
                 Duration::from_secs(180),
-                to_bytes(request.into_body(), MAX_FILE_BYTES as usize),
+                to_bytes(
+                    request.into_body(),
+                    usize::try_from(MAX_FILE_BYTES).unwrap_or(usize::MAX),
+                ),
             )
             .await
             .map_err(|_| MobileError::Unavailable)?

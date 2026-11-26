@@ -368,7 +368,7 @@ impl MobileRead {
 pub enum MobileReadReply {
     LinkedDraft(MobileLinkedDraft),
     Threads(MobileThreadPage),
-    Thread(MobileThreadSnapshot),
+    Thread(Box<MobileThreadSnapshot>),
     Text(MobileTextPage),
 }
 

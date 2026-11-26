@@ -735,7 +735,7 @@ pub fn ChatPage() -> impl IntoView {
         } else {
             0
         };
-        if include_attachments && file_offers.with_untracked(|items| offers_block_send(items)) {
+        if include_attachments && file_offers.with_untracked(offers_block_send) {
             thread_notice.flash(SEND_WAITS);
             return false;
         }
@@ -1443,7 +1443,7 @@ pub fn ChatPage() -> impl IntoView {
     };
     // Writes the draft into the Claude turn that is already streaming here.
     let steer_draft = move |raw: String| {
-        if file_offers.with_untracked(|items| offers_block_send(items)) {
+        if file_offers.with_untracked(offers_block_send) {
             thread_notice.flash(SEND_WAITS);
             return;
         }
@@ -1534,7 +1534,7 @@ pub fn ChatPage() -> impl IntoView {
     // that turn instead. Cmd+Enter asks for the other one. An empty
     // composer interrupts a running turn, or resumes a held queue.
     let submit = move |raw: String, opposite: bool| {
-        if !running_here() && file_offers.with_untracked(|items| offers_block_send(items)) {
+        if !running_here() && file_offers.with_untracked(offers_block_send) {
             thread_notice.flash(SEND_WAITS);
             return;
         }

@@ -23,7 +23,13 @@ async fn events(result: bool, exit: i32) -> Vec<QueryEvent> {
     let thread = ThreadId::new_v4();
     let (mut turn, mut receiver) = turn_context(&sessions, &registry, &thread, 1);
     turn.media_project = directory.path().display().to_string();
-    let producer = tokio::spawn(stream_claude(options, turn, Arc::default(), Arc::default()));
+    let producer = tokio::spawn(stream_claude(
+        options,
+        turn,
+        Arc::default(),
+        Arc::default(),
+        false,
+    ));
     tokio::time::timeout(crate::capture_client::REQUEST_TIMEOUT, async {
         let mut result = Vec::new();
         while let Some(event) = receiver.recv().await {

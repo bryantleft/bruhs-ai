@@ -405,12 +405,12 @@ impl Workspace {
             }
             MobileRead::Thread { thread_id, before } => {
                 let thread = self.mobile_thread(thread_id, device, cx)?;
-                Ok(MobileReadReply::Thread(
+                Ok(MobileReadReply::Thread(Box::new(
                     thread
                         .chat
                         .read(cx)
                         .mobile_snapshot(Self::mobile_summary(thread, cx), *before)?,
-                ))
+                )))
             }
             MobileRead::Message {
                 thread_id,

@@ -213,7 +213,7 @@ impl ChatView {
             queued_prompts: queued,
             laptop_action_required,
         };
-        let mut used = serde_json::to_vec(&MobileReadReply::Thread(snapshot.clone()))
+        let mut used = serde_json::to_vec(&MobileReadReply::Thread(Box::new(snapshot.clone())))
             .map_err(|_| changed())?
             .len();
         for index in (0..end).rev().take(PAGE_SIZE) {

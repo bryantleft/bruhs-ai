@@ -829,6 +829,7 @@ impl AgentOrchestrator {
             let pending = requests
                 .remove(request_id)
                 .ok_or(PermissionResolveError::UnknownRequest)?;
+            drop(requests);
             (pending, decision, selected)
         };
         if !selected.is_empty() {

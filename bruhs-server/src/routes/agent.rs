@@ -812,6 +812,7 @@ mod tests {
                     input: json!({ "file_path": "a.rs" }),
                     tool_use_id: Some("t-2".into()),
                     can_answer: false,
+                    can_attach: false,
                 },
             ),
             (
@@ -828,6 +829,7 @@ mod tests {
                     input: Value::Null,
                     tool_use_id: None,
                     can_answer: false,
+                    can_attach: false,
                 },
             ),
             (

@@ -485,10 +485,9 @@ fn parse_fragment(hash: &str) -> Option<(String, Result<PromptLink, PromptLinkEr
     let (path, query) = hash.split_once('?')?;
     let (destination, route) = if path == "#/new" {
         ("#/chat".to_string(), "bruhs://new".to_string())
-    } else if let Some(id) = path.strip_prefix("#thread/").filter(|id| !id.is_empty()) {
-        (path.to_string(), format!("bruhs://thread/{id}"))
     } else {
-        return None;
+        let id = path.strip_prefix("#thread/").filter(|id| !id.is_empty())?;
+        (path.to_string(), format!("bruhs://thread/{id}"))
     };
     match parse_prompt_link(&format!("{route}?{query}")) {
         Ok(Some(link)) => Some((destination, Ok(link))),

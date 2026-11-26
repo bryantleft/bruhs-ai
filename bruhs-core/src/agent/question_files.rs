@@ -136,7 +136,9 @@ impl AgentOrchestrator {
                 return Ok(file);
             }
             request.admit_file(&upload.name, size)?;
-            request.owner.clone()
+            let owner = request.owner.clone();
+            drop(pending);
+            owner
         };
 
         let name = upload.name.clone();
@@ -176,6 +178,7 @@ impl AgentOrchestrator {
         }
         request.admit_file(&upload.name, size)?;
         request.question_files.push(file);
+        drop(pending);
         Ok(receipt)
     }
 
@@ -192,6 +195,7 @@ impl AgentOrchestrator {
         request.question_files.retain(|file| {
             file.id != upload.upload_id || file.question != upload.question || file.device != device
         });
+        drop(pending);
         Ok(())
     }
 }

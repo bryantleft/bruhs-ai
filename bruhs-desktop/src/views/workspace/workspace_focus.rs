@@ -154,8 +154,7 @@ impl Workspace {
                 .terminal_panel
                 .read(cx)
                 .active_session(cx)
-                .map(|session| session.focus_handle(cx))
-                .unwrap_or_else(|| terminal.clone());
+                .map_or_else(|| terminal.clone(), |session| session.focus_handle(cx));
             regions.push((Area::Terminal, terminal, target));
         }
         regions

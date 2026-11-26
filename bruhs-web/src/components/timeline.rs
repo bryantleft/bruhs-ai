@@ -563,6 +563,7 @@ mod tests {
             TimelineRow::Work { .. } => "work",
             TimelineRow::AssistantText { .. } => "text",
             TimelineRow::ChangedFiles { .. } => "files",
+            TimelineRow::QuestionFiles { .. } => "question_files",
             TimelineRow::AssistantMeta { .. } => "meta",
             TimelineRow::Working { .. } => "working",
             TimelineRow::Fold { .. } => "fold",

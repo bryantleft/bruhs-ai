@@ -28,7 +28,7 @@ const OTHER_PAGE: &str = "http://localhost:5173";
 const NO_BATCH: &str = "0123456789abcdef0123456789abcdef";
 
 /// Every import route is restricted to the owner.
-const ROUTES: [(&str, &str); 8] = [
+const ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/import/sessions"),
     ("GET", "/api/import/thread"),
     ("POST", "/api/import/uploads"),
@@ -235,7 +235,7 @@ fn file(bytes: Vec<u8>, name: &str) -> Part {
 #[tokio::test]
 async fn pages_can_not_import() {
     let fixture = Fixture::new().await;
-    for (method, path) in ROUTES {
+    for &(method, path) in ROUTES {
         let (status, text) =
             Fixture::send(fixture.request(method, path).header("origin", OTHER_PAGE)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {text}");

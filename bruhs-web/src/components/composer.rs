@@ -1015,7 +1015,7 @@ pub fn Composer(
                             let ready_files = file_offers.with(|items| {
                                 items.iter().any(|item| item.ready_path().is_some())
                             });
-                            let uploads_block = !streaming && file_offers.with(|items| offers_block_send(items));
+                            let uploads_block = !streaming && file_offers.with(offers_block_send);
                             let draft_empty = if streaming {
                                 typed_empty
                             } else {

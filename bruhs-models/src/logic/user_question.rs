@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn rejects_stale_choices_duplicate_questions_and_incomplete_answers() {
         let question = json!({"question":"Pick", "options":[{"label":"A"}], "allowCustom":false});
-        assert!(questions(&json!({"questions":[question.clone(), question.clone()]})).is_none());
+        assert!(questions(&json!({"questions":[&question, &question]})).is_none());
         let input = json!({"questions":[question]});
         for answer in [
             QuestionAnswer::default(),
