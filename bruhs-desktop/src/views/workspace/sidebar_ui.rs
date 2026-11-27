@@ -62,14 +62,8 @@ fn status_pulse_opacity(progress: f32) -> f32 {
         p => fade(STATUS_PULSE_DIM_OPACITY, 1.0, (p - 0.9) / 0.1),
     }
 }
-/// Matches the chat and panel headers.
-pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
-/// Room for the macOS traffic lights (`bruhs_ui::TitleBar` puts them at x=12).
-#[cfg(target_os = "macos")]
-pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
-#[cfg(not(target_os = "macos"))]
-pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 16.0;
 const SIDEBAR_HEADER_GAP_PX: f32 = 8.0;
+const SIDEBAR_BRAND_ROW_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 const SIDEBAR_BRAND_LOGO_PX: f32 = 20.0;
 
 type BrandLogoCache = Option<(ParsedSvg, Vec<(i32, Arc<RenderImage>)>)>;
@@ -633,6 +627,7 @@ impl Workspace {
             .child(self.render_sidebar_header(window, cx))
             .child(self.render_sidebar_controls(cx))
             .children(self.render_crew_rail(window, cx))
+            .children(self.render_linked_conversations(cx))
             .child(self.render_sidebar_list(
                 (width - px(2.0 * SIDEBAR_LIST_X_PADDING_PX) - gpui::px(1.0)).max(px(0.0)),
                 window,
@@ -680,7 +675,7 @@ impl Workspace {
             .child(inner)
     }
 
-    /// Brand row; doubles as the window drag strip behind the traffic lights.
+    /// The brand starts at the same height as the workspace navigation.
     fn render_sidebar_header(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let logo_size = px(SIDEBAR_BRAND_LOGO_PX);
         let logo = match brand_logo_image(logo_size, window.scale_factor(), cx) {
@@ -690,9 +685,8 @@ impl Workspace {
         div()
             .id("sidebar-header")
             .debug_selector(|| "desktop-sidebar-header".to_string())
-            .h(px(SIDEBAR_HEADER_HEIGHT_PX))
-            .pl(self.traffic_light_inset())
-            .pr_4()
+            .h(px(SIDEBAR_BRAND_ROW_HEIGHT_PX))
+            .px_4()
             .flex()
             .items_center()
             .gap(px(SIDEBAR_HEADER_GAP_PX))
@@ -1105,7 +1099,8 @@ impl Workspace {
     ) -> AnyElement {
         let chat = thread.chat.read(cx);
         let identity = self.card_identity(thread, cx);
-        let is_active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
+        let is_active = self.active_view == AppView::Chat
+            && self.active_thread_id.as_deref() == Some(thread.id.as_str());
         // While its menu is open the card keeps its hover look: the backdrop
         // that closes the menu covers the card.
         let menu_open = self.thread_menu_id.as_deref() == Some(thread.id.as_str());
@@ -1481,6 +1476,7 @@ impl Workspace {
                     cx.stop_propagation();
                     if event.click_count() == 2
                         && !event.modifiers().modified()
+                        && this.active_view == AppView::Chat
                         && this.active_thread_id.as_deref() == Some(id_for_select.as_str())
                     {
                         this.start_sidebar_rename(&id_for_select, window, cx);

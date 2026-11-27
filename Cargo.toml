@@ -172,3 +172,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.ctr]
 opt-level = 3
+
+# Leptos view macros emit deeply nested generic types whose full DWARF
+# (`debug = 2`) pushes `bruhs-web`'s wasm32 debug objects past 3 GiB and
+# crashes `rust-lld` in `lld::wasm::CustomSection::writeTo`. Line tables keep
+# stack traces and source locations while keeping wasm debug links healthy.
+[profile.dev.package.bruhs-web]
+debug = "line-tables-only"

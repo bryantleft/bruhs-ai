@@ -468,6 +468,10 @@ impl UsageWindow {
         true
     }
 
+    pub(super) fn select_environment(&mut self, environment: String, cx: &mut Context<'_, Self>) {
+        self.change_filter(Filter::Environment, Some(environment), cx);
+    }
+
     fn change_filter(&mut self, filter: Filter, value: Option<String>, cx: &mut Context<'_, Self>) {
         self.open_filter = None;
         let field = match filter {

@@ -807,6 +807,8 @@ impl Workspace {
                 self.open_settings(&OpenSettings, window, cx);
                 self.set_settings_section(section, cx);
             }
+            "linked-thread-hero" => self.smoke_seed_linked_thread(false, window, cx),
+            "linked-thread-conversation" => self.smoke_seed_linked_thread(true, window, cx),
             "transcript"
             | "transcript-prose"
             | "transcript-diff"

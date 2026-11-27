@@ -11,11 +11,25 @@ use bruhs_core::remote_hosts::{RemoteHostError, RemoteHostManager};
 use bruhs_models::remote_hosts::RemoteHostCommand;
 
 pub fn router(manager: RemoteHostManager) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/api/remote-hosts", get(snapshot))
         .route("/api/remote-hosts/commands", post(command))
-        .route("/api/remote-hosts/ui", get(ui))
-        .with_state(manager)
+        .route("/api/remote-hosts/ui", get(ui));
+    #[cfg(unix)]
+    let router = router.route("/api/remote-hosts/previews", post(forward_preview));
+    router.with_state(manager)
+}
+
+#[cfg(unix)]
+async fn forward_preview(
+    State(manager): State<RemoteHostManager>,
+    Json(request): Json<bruhs_models::remote_hosts::ForwardPreview>,
+) -> Result<impl IntoResponse, AppError> {
+    let forwarded = tokio::spawn(async move { manager.forward_preview(request).await })
+        .await
+        .map_err(AppError::internal)?
+        .map_err(map_error)?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(forwarded)))
 }
 fn map_error(error: RemoteHostError) -> AppError {
     match error {

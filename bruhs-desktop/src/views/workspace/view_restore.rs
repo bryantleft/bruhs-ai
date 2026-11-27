@@ -69,7 +69,7 @@ impl Workspace {
             }
             AppView::MeetingDetail { meeting_id } => self.open_meeting_detail(meeting_id, cx),
             AppView::Booking { slug } => self.open_booking_page(slug, window, cx),
-            route @ AppView::LinkedTaskThread { .. } => {
+            route @ (AppView::LinkedTaskThread { .. } | AppView::LinkedProjectThread { .. }) => {
                 self.activate_sidebar_view(route, window, cx);
                 self.refresh_linked_projects(true, cx);
             }

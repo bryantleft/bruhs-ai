@@ -80,16 +80,24 @@ pub struct HubNotice {
 
 /// Where a notice's action button takes the owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "every notice action opens a destination view"
+)]
 pub enum NoticeAction {
     /// An agent update arrived; open the automations view.
     OpenAutomations,
     OpenThread(String),
+    OpenLinkedThread {
+        host: uuid::Uuid,
+        thread: bruhs_models::ids::ThreadId,
+    },
 }
 
 impl NoticeAction {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::OpenThread(_) => "Open thread",
+            Self::OpenThread(_) | Self::OpenLinkedThread { .. } => "Open thread",
             Self::OpenAutomations => "Open",
         }
     }

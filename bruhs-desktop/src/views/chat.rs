@@ -68,7 +68,7 @@ mod auth;
 #[cfg(test)]
 mod behavior_tests;
 mod codex_auth;
-mod composer_ui;
+pub(crate) mod composer_ui;
 mod content_cache;
 mod dictation;
 mod files;
@@ -92,7 +92,7 @@ mod secret_prompt;
 mod smoke;
 mod streaming;
 mod svg_cache;
-mod timeline_ui;
+pub(crate) mod timeline_ui;
 mod title_rename;
 mod tool_output_ui;
 pub(crate) mod tool_visibility;
@@ -1034,14 +1034,8 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> Self {
-        let input_state = cx.new(|cx| {
-            let mut field = TextareaState::new(window, cx);
-            field.set_markdown_enabled(true, cx);
-            field
-                .placeholder(CHAT_INPUT_PLACEHOLDER)
-                .auto_grow(CHAT_COMPOSER_MIN_ROWS, CHAT_COMPOSER_MAX_ROWS)
-                .submit_on_enter(true)
-        });
+        let input_state =
+            cx.new(|cx| composer_ui::prompt_input(window, cx, CHAT_INPUT_PLACEHOLDER));
 
         // Submit on Enter from the Input.
         let _input_subscription = cx.subscribe_in(

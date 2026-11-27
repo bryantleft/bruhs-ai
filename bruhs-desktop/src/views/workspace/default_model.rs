@@ -20,6 +20,7 @@ impl Workspace {
                 chat.replace_picker_favorites(&self.favorite_models, cx);
             });
         }
+        self.sync_linked_model_favorites(cx);
         self.persist_and_notify(cx);
     }
 

@@ -3,6 +3,7 @@ use crate::{agent::PermissionMode, ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
 
 pub mod board;
+pub mod linked_thread;
 pub mod worktree;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

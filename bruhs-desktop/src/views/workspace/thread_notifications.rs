@@ -41,14 +41,32 @@ impl Workspace {
         window: &Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let prefs = self.thread_notifications;
-        if prefs == NotificationSettings::default() {
-            return;
-        }
         let Some(thread) = self.threads.iter().find(|thread| thread.chat == *chat) else {
             return;
         };
         let title = chat.read(cx).thread_title.clone();
+        let reading_thread = self.active_view == AppView::Chat
+            && self.active_thread_id.as_deref() == Some(&thread.id);
+        self.notify_thread_attention(
+            title,
+            reason,
+            reading_thread,
+            crate::views::meetings_hub::NoticeAction::OpenThread(thread.id.clone()),
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn notify_thread_attention(
+        &self,
+        title: String,
+        reason: &'static str,
+        reading_thread: bool,
+        action: crate::views::meetings_hub::NoticeAction,
+        window: &Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let prefs = self.thread_notifications;
         if matches!(
             prefs.mode,
             NotificationMode::Sound | NotificationMode::NotificationsAndSound
@@ -56,11 +74,7 @@ impl Workspace {
             window.play_system_bell();
         }
         if window.is_window_active() {
-            let reading_thread = self.active_view == AppView::Chat
-                && self.active_thread_id.as_deref() == Some(&thread.id);
             if prefs.in_app && !reading_thread {
-                let action =
-                    crate::views::meetings_hub::NoticeAction::OpenThread(thread.id.clone());
                 self.meetings_hub.update(cx, |hub, cx| {
                     hub.show_notice_with_action(format!("{reason} · {title}"), action, cx)
                 });

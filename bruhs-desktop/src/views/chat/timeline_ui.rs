@@ -279,6 +279,40 @@ fn activity_row_button(id: impl Into<ElementId>) -> Stateful<Div> {
         .hover(|el| el.bg(theme::longan_800().opacity(0.3)))
 }
 
+pub(crate) fn user_message_bubble(cx: &App) -> Div {
+    div()
+        .max_w(relative(USER_BUBBLE_MAX_WIDTH))
+        .rounded(px(TRANSCRIPT_CARD_RADIUS_PX))
+        .bg(cx
+            .theme()
+            .color_role("cssUserBubbleBackground")
+            .or_else(|| cx.theme().color_role("messageSurface"))
+            .unwrap_or(theme::longan_800()))
+        .when(
+            cx.theme().color_role("cssUserBubbleBackground").is_none(),
+            |el| el.theme_region("messageSurface", cx),
+        )
+        .px(px(USER_BUBBLE_X_PADDING_PX))
+        .py(px(USER_BUBBLE_Y_PADDING_PX))
+        .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
+        .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
+        .line_height(relative(1.5))
+        .children(
+            crate::views::workspace::appearance::rounded_background_layer(
+                "UserBubble",
+                px(TRANSCRIPT_CARD_RADIUS_PX),
+                cx,
+            ),
+        )
+        .text_color(
+            cx.theme()
+                .color_role("cssUserBubbleForeground")
+                .unwrap_or_else(theme::rambutan_100),
+        )
+        .flex()
+        .flex_col()
+}
+
 impl ChatView {
     fn row_open(&self, key: &str, default: bool) -> bool {
         self.expanded_rows.get(key).copied().unwrap_or(default)
@@ -351,37 +385,7 @@ impl ChatView {
             .gap_1()
             .pb_4()
             .child(
-                div()
-                    .max_w(relative(USER_BUBBLE_MAX_WIDTH))
-                    .rounded(px(TRANSCRIPT_CARD_RADIUS_PX))
-                    .bg(cx
-                        .theme()
-                        .color_role("cssUserBubbleBackground")
-                        .or_else(|| cx.theme().color_role("messageSurface"))
-                        .unwrap_or(theme::longan_800()))
-                    .when(
-                        cx.theme().color_role("cssUserBubbleBackground").is_none(),
-                        |el| el.theme_region("messageSurface", cx),
-                    )
-                    .px(px(USER_BUBBLE_X_PADDING_PX))
-                    .py(px(USER_BUBBLE_Y_PADDING_PX))
-                    .font_family(crate::theme::FontFace::Interface.with_default(BODY_FONT_FAMILY))
-                    .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
-                    .line_height(relative(1.5))
-                    .children(
-                        crate::views::workspace::appearance::rounded_background_layer(
-                            "UserBubble",
-                            px(TRANSCRIPT_CARD_RADIUS_PX),
-                            cx,
-                        ),
-                    )
-                    .text_color(
-                        cx.theme()
-                            .color_role("cssUserBubbleForeground")
-                            .unwrap_or_else(theme::rambutan_100),
-                    )
-                    .flex()
-                    .flex_col()
+                user_message_bubble(cx)
                     .when_some(caption, |bubble, caption| {
                         bubble.child(
                             div()

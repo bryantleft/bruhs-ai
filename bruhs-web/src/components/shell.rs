@@ -1054,7 +1054,7 @@ pub fn Shell() -> impl IntoView {
                     AppView::Booking { slug } => view! { <BookingPage slug=slug /> }.into_any(),
                     AppView::Search => view! { <SearchPage /> }.into_any(),
                     AppView::Terminal => view! { <TerminalPage /> }.into_any(),
-                    view @ AppView::LinkedTaskThread { .. } => view! {
+                    view @ (AppView::LinkedTaskThread { .. } | AppView::LinkedProjectThread { .. }) => view! {
                         <div class="p-6"><a class="underline" href=bruhs_models::logic::app_link::view_link(&view)>"Open conversation in bruhs desktop"</a></div>
                     }.into_any(),
                     AppView::Bruh { agent_id } => view! { <crate::components::crew::page::BruhPage agent_id=agent_id /> }.into_any(),

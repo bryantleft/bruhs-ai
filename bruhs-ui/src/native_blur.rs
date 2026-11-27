@@ -23,7 +23,7 @@
 //!   mouse passes through to gpui.
 //!
 //! Callers see [`BlurScrimHandle`]: hide it when no blurred dialog is open, then
-//! hang [`BlurScrimHandle::backdrop`] inside each dialog. The backdrop is a
+//! hang `BlurScrimHandle::backdrop` inside each dialog. The backdrop is a
 //! `canvas` that reports the dialog's laid-out bounds during prepaint, the
 //! only point at which its height — driven by its content — is known.
 

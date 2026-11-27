@@ -7,6 +7,7 @@ mod deliveries;
 mod updates;
 pub(in crate::views::workspace) use updates::PeerUpdate;
 mod editor;
+mod project_thread;
 mod thread;
 pub(crate) use deliveries::LinkedDeliveries;
 pub(crate) use editor::TaskEditorHost;
@@ -28,6 +29,9 @@ struct ProjectInventory {
     task_conversations: bool,
     read_threads: bool,
     reply_threads: bool,
+    start_threads: bool,
+    share_threads: bool,
+    threads: Vec<bruhs_models::coordination::linked_thread::LinkedThreadSummary>,
     usage: bool,
     usage_history: bool,
     edit_usage_prices: bool,
@@ -43,13 +47,16 @@ pub(in crate::views::workspace) struct LinkedProjects {
     form: Option<LinkForm>,
     busy: bool,
     reading: bool,
+    reconnecting: bool,
     revision: u64,
     rule_scope: Option<String>,
     scope: Option<ProjectView>,
     editor: Option<editor::OpenEditor>,
     thread: Option<thread::OpenThread>,
+    project_thread: Option<project_thread::OpenThread>,
     opening_editor: Option<uuid::Uuid>,
     editor_error: Option<String>,
+    conversations_open: bool,
     runs: run::ScheduleRuns,
     schedule_writes: std::collections::BTreeMap<(uuid::Uuid, String), schedules::ScheduleWrite>,
     error: Option<String>,
@@ -70,13 +77,16 @@ impl LinkedProjects {
             form: None,
             busy: false,
             reading: false,
+            reconnecting: false,
             revision: 0,
             rule_scope: None,
             scope: None,
             editor: None,
             thread: None,
+            project_thread: None,
             opening_editor: None,
             editor_error: None,
+            conversations_open: true,
             runs: run::ScheduleRuns::restore(saved),
             schedule_writes: Default::default(),
             error: None,
@@ -201,6 +211,9 @@ impl LinkedProjects {
                 let socket = t.resolve(snapshot);
                 if t.socket != socket {
                     t.socket = socket;
+                    if t.socket.is_some() && host.token.is_empty() {
+                        host.vault_checked = false;
+                    }
                     host.data = ProjectInventory::default();
                     host.problem = Some(format!("Refresh projects after connecting {}.", t.name));
                     self.revision += 1;
@@ -266,6 +279,14 @@ impl ProjectHost {
             .headers()
             .get("x-bruhs-reply-task-threads")
             .is_some_and(|v| v == "true");
+        let start_threads = response
+            .headers()
+            .get("x-bruhs-start-project-threads")
+            .is_some_and(|v| v == "true");
+        let share_threads = response
+            .headers()
+            .get("x-bruhs-share-project-threads")
+            .is_some_and(|v| v == "true");
         let task_conversations = response
             .headers()
             .get("x-bruhs-task-conversations")
@@ -319,6 +340,29 @@ impl ProjectHost {
         } else {
             None
         };
+        let threads = if start_threads {
+            let mut url = self.endpoint.clone();
+            url.set_path("/api/projects/threads");
+            if let Ok(response) = self
+                .client()?
+                .get(url)
+                .bearer_auth(&self.token)
+                .send()
+                .await
+            {
+                if response.status().is_success() {
+                    schedules::schedule_reply(response, 2 * 1024 * 1024)
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
         Ok(ProjectInventory {
             projects,
             provider_updates,
@@ -332,6 +376,9 @@ impl ProjectHost {
             task_conversations,
             read_threads,
             reply_threads,
+            start_threads,
+            share_threads,
+            threads,
             usage,
             usage_history,
             edit_usage_prices,
@@ -545,6 +592,9 @@ impl Workspace {
                         t.socket = t.resolve(s);
                     }
                     let read = async {
+                        if let Some(t) = h.tunnel.as_ref().filter(|t| t.socket.is_none()) {
+                            return Err(format!("Reconnect {} in Environments.", t.name));
+                        }
                         h.restore_token(vault, manual).await?;
                         h.read_projects(load_schedules).await
                     }
@@ -692,7 +742,7 @@ impl Workspace {
         rows.push(self.settings_row(
             "settings-linked-projects",
             "Linked projects",
-            state.error.as_deref().unwrap_or("Link a Projects token from the host. Its access determines whether you can rename checkouts or view scheduled tasks."),
+            state.error.as_deref().unwrap_or("Link a Projects token from the host. Its access determines whether you can start conversations, rename checkouts, or view scheduled tasks."),
             controls.into_any_element(),
         ));
         rows
@@ -1053,6 +1103,174 @@ mod tests {
         });
         win.condition(ws, |ws, _| ws.linked_projects.hosts.len() == before + 1)
             .await;
+    }
+
+    #[gpui::test]
+    async fn linked_project_picker_opens_composer_and_reuses_first_send(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        launch::init(cx);
+        let owner = HostFixture::new("Studio", "alt+6");
+        let other = HostFixture::new("Build", "alt+5");
+        let dir = tempfile::tempdir().unwrap();
+        let (ws, win) = launch::launch(cx, &dir.path().join("state.json"));
+        win.simulate_resize(gpui::size(px(820.), px(640.)));
+        pair_schedule_fixture(&ws, win, &other, "b").await;
+        pair_schedule_fixture(&ws, win, &owner, "b").await;
+        let selector = ws.update_in(win, |ws, window, cx| {
+            let host = ws
+                .linked_projects
+                .hosts
+                .iter()
+                .find(|h| h.name() == "Studio")
+                .unwrap();
+            let scope = format!("linked:{}:/srv/editor", host.credential);
+            for group in ws.grouped_projects() {
+                if group.members.iter().any(|member| member.scope() == scope) {
+                    ws.expanded_project_groups.insert(group.key);
+                }
+            }
+            ws.open_project_picker(&OpenProjectPicker, window, cx);
+            format!("desktop-project-recent-{}", element_key(&scope))
+        });
+        win.run_until_parked();
+        let row = win
+            .debug_bounds(role_settings_ui::project_value(&selector))
+            .unwrap()
+            .center();
+        win.simulate_click(row, gpui::Modifiers::default());
+        win.condition(&ws, |ws, _| {
+            matches!(ws.active_view, AppView::LinkedProjectThread { .. })
+        })
+        .await;
+        win.condition(&ws, |ws, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .is_some_and(|thread| thread.draft_ready(cx))
+        })
+        .await;
+        assert!(win.debug_bounds("desktop-composer-surface").is_some());
+        assert!(win.debug_bounds("desktop-chat-hero").is_some());
+        let destination = win.debug_bounds("project-thread-destination").unwrap();
+        let send = win.debug_bounds("project-thread-send").unwrap();
+        assert!(destination.top() <= send.bottom() && destination.bottom() >= send.top());
+        let png_path = dir.path().join("diagram.png");
+        let png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFE];
+        std::fs::write(&png_path, &png_bytes).unwrap();
+        ws.update_in(win, |ws, _, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .unwrap()
+                .attach_paths(std::slice::from_ref(&png_path), cx);
+        });
+        let thread_panel = ws.read_with(win, |ws, _| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .unwrap()
+                .panel_handle()
+        });
+        win.condition(&thread_panel, |panel, _| {
+            panel.ready_attachment_count() == 1
+        })
+        .await;
+        let pasted_png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
+        win.update(|_, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem {
+                entries: vec![gpui::ClipboardEntry::Image(gpui::Image {
+                    format: gpui::ImageFormat::Png,
+                    bytes: pasted_png.clone(),
+                    id: 1,
+                })],
+            });
+        });
+        assert!(ws.update_in(win, |ws, window, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .unwrap()
+                .trigger_paste(window, cx)
+        }));
+        win.condition(&thread_panel, |panel, _| {
+            panel.ready_attachment_count() == 2
+        })
+        .await;
+        ws.update_in(win, |ws, _, cx| {
+            ws.send_shortcut = crate::views::chat::SendShortcut::ModEnter;
+            cx.notify();
+        });
+        win.run_until_parked();
+        win.simulate_input("Run on Studio");
+        win.simulate_keystrokes("enter");
+        win.run_until_parked();
+        assert!(ws.read_with(win, |ws, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .unwrap()
+                .prompt_has_line_break(cx)
+        }));
+        assert!(owner.thread_attempts.lock().unwrap().is_empty());
+        ws.update_in(win, |ws, _, cx| {
+            ws.send_shortcut = crate::views::chat::SendShortcut::Enter;
+            cx.notify();
+        });
+        win.run_until_parked();
+        win.simulate_keystrokes("enter");
+        win.condition(&ws, |ws, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .is_some_and(|thread| thread.send_failed(cx))
+        })
+        .await;
+        assert!(win.debug_bounds("project-thread-request-error").is_some());
+        win.simulate_keystrokes("enter");
+        win.condition(&ws, |ws, cx| {
+            ws.linked_projects
+                .project_thread
+                .as_ref()
+                .is_some_and(|thread| thread.has_thread(cx))
+        })
+        .await;
+        win.condition(&ws, |ws, _| {
+            ws.linked_conversations()
+                .any(|(_, _, thread)| thread.title == "Host conversation")
+        })
+        .await;
+        let linked_route = ws.read_with(win, |ws, _| ws.active_view.clone());
+        ws.update_in(win, |ws, window, cx| {
+            ws.activate_sidebar_view(AppView::Chat, window, cx)
+        });
+        win.run_until_parked();
+        let row = win.debug_bounds("sidebar-linked-thread").unwrap().center();
+        win.simulate_click(row, gpui::Modifiers::default());
+        win.condition(&ws, |ws, _| ws.active_view == linked_route)
+            .await;
+        let attempts = owner.thread_attempts.lock().unwrap();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0], attempts[1]);
+        assert_eq!(attempts[0].1["checkout"]["branch"], "host-branch");
+        assert_eq!(attempts[0].1["message"], "Run on Studio");
+        assert_eq!(attempts[0].1["attachments"][0]["name"], "diagram.png");
+        assert_eq!(
+            attempts[0].1["attachments"][0]["bytes"],
+            png_bytes.len() as u64
+        );
+        assert_eq!(attempts[0].1["attachments"][1]["name"], "paste.png");
+        assert_eq!(
+            attempts[0].1["attachments"][1]["bytes"],
+            pasted_png.len() as u64
+        );
+        let uploads = owner.thread_uploads.lock().unwrap();
+        assert_eq!(uploads.len(), 2);
+        assert_eq!(uploads[0].1, "diagram.png");
+        assert_eq!(uploads[0].2, png_bytes);
+        assert_eq!(uploads[1].1, "paste.png");
+        assert_eq!(uploads[1].2, pasted_png);
+        assert!(other.thread_attempts.lock().unwrap().is_empty());
     }
 
     #[gpui::test]

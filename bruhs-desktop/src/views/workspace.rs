@@ -221,7 +221,7 @@ use persistence::*;
 use project_picker_ui::*;
 use save_status::SaveStatus;
 use settings_page_ui::*;
-use sidebar_ui::{SIDEBAR_HEADER_LEFT_INSET_PX, SIDEBAR_WIDTH_PX};
+use sidebar_ui::SIDEBAR_WIDTH_PX;
 use state_file::{DiskVersion, SaveError};
 use task_forms_ui::*;
 use tasks_ui::*;
@@ -646,6 +646,12 @@ enum PaletteItem {
         name: String,
     },
     LinkedProject(project_grouping::Member),
+    LinkedThread {
+        host: uuid::Uuid,
+        id: bruhs_models::ids::ThreadId,
+        title: String,
+        hint: String,
+    },
     Thread {
         id: String,
         title: String,
@@ -3433,6 +3439,7 @@ impl Workspace {
         workspace.watch_project_names(cx);
         workspace.apply_device_appearance(window, cx);
         workspace.apply_zoom(window, cx);
+        workspace.refresh_linked_projects(false, cx);
         // With nothing focused, gpui dispatches keys from the window root,
         // past every workspace action: Tab and the shortcuts would do
         // nothing until a click. Start in the workspace, as a web page
@@ -3568,33 +3575,10 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// Draw the window's design lengths at the saved zoom (see
-    /// [`bruhs_ui::zoom`]), and keep the macOS traffic lights centred in
-    /// the zoomed header.
+    /// Draw the window's design lengths at the saved zoom.
     fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
         bruhs_ui::zoom::set_zoom(self.zoom, cx);
-        #[cfg(target_os = "macos")]
-        window.set_traffic_light_position(point(
-            bruhs_ui::zoom::window_px(12.0),
-            bruhs_ui::zoom::window_px(crate::zoom::traffic_light_top(
-                theme::APP_HEADER_HEIGHT_PX,
-                self.zoom,
-            )),
-        ));
         window.refresh();
-    }
-
-    /// Room for the macOS traffic lights, which stay in window points while
-    /// the page zooms; elsewhere a padding that zooms with the page.
-    fn traffic_light_inset(&self) -> Pixels {
-        #[cfg(target_os = "macos")]
-        {
-            bruhs_ui::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            px(SIDEBAR_HEADER_LEFT_INSET_PX)
-        }
     }
 
     fn toggle_sidebar_for_window(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -3960,6 +3944,7 @@ impl Workspace {
             AppView::Automations => self.render_automations_page(window, cx),
             AppView::Bruh { .. } => self.render_bruh_page(),
             AppView::LinkedTaskThread { .. } => self.render_linked_thread(cx),
+            AppView::LinkedProjectThread { .. } => self.render_linked_project_thread(cx),
             AppView::Room { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
@@ -4058,6 +4043,7 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.reconcile_linked_task_editor(window, cx);
         self.reconcile_linked_thread(window, cx);
+        self.reconcile_linked_project_thread(window, cx);
         self.reconcile_linked_delivery_dialog(window, cx);
         self.restore_theme_preview(window, cx);
         if self.settings_visible() && self.settings_section == SettingsSection::SourceControl {

@@ -218,6 +218,21 @@ async fn connect_and_disconnect_own_the_master_and_its_proxy_descendant() {
         .command(RemoteHostCommand::Connect { id: profile.id })
         .await
         .is_err());
+    let forward = || ForwardPreview {
+        id: profile.id,
+        host: profile.host.clone(),
+        ssh_port: profile.ssh_port,
+        task_port: profile.remote_port,
+        preview_port: 5173,
+    };
+    let mut changed = forward();
+    changed.host = "different-host".into();
+    assert!(manager.forward_preview(changed).await.is_err());
+    let preview = manager.forward_preview(forward()).await.unwrap();
+    assert_eq!(
+        manager.forward_preview(forward()).await.unwrap().local_port,
+        preview.local_port
+    );
     let master = std::fs::read_to_string(root.path().join("master.pid")).unwrap();
     let proxy = std::fs::read_to_string(root.path().join("proxy.pid")).unwrap();
     manager
@@ -225,11 +240,18 @@ async fn connect_and_disconnect_own_the_master_and_its_proxy_descendant() {
         .await
         .unwrap();
     wait_state(&manager, profile.id, RemoteHostState::Disconnected).await;
+    assert!(manager.forward_preview(forward()).await.is_err());
     assert!(!socket.parent().unwrap().exists());
     wait_stopped(&master, &proxy).await;
     let arguments = std::fs::read_to_string(root.path().join("argv.jsonl")).unwrap();
     assert!(arguments.contains("StrictHostKeyChecking=yes"));
     assert!(arguments.contains("127.0.0.1:45001:127.0.0.1:45000"));
+    assert_eq!(
+        arguments
+            .matches(&format!("127.0.0.1:{}:127.0.0.1:5173", preview.local_port))
+            .count(),
+        1
+    );
     drop(manager);
 }
 

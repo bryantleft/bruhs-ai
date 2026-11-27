@@ -18,12 +18,14 @@ use tokio_stream::StreamExt;
 mod access;
 mod board;
 mod handoffs;
+mod linked_threads;
 mod recovery;
 mod wait;
 mod wakes;
 mod worktrees;
-pub use access::{AccessGrant, AccessScope, IssuedAccess};
+pub use access::{AccessGrant, AccessScope, IssuedAccess, ProjectCapabilities};
 pub use board::{BoardLinks, LinkFuture, LinkSource};
+pub use linked_threads::checkout_branch;
 pub use recovery::{provider_quota_reset, ResetWorker};
 pub use wakes::WakeWorker;
 
@@ -63,6 +65,14 @@ struct Data {
     wakes: BTreeMap<ThreadId, TaskWake>,
     #[serde(default)]
     work_item_handoffs: BTreeMap<ThreadId, bruhs_models::workbench_handoff::WorkItemHandoff>,
+    #[serde(default)]
+    linked_threads: BTreeMap<ThreadId, linked_threads::LinkedThreadAccess>,
+}
+
+enum CreationOrigin {
+    Local,
+    WorkItem(Box<bruhs_models::workbench_handoff::WorkItemHandoff>),
+    Linked(Box<linked_threads::ProjectThreadStart>),
 }
 
 struct CoordinationOwner(std::fs::File);
@@ -473,22 +483,34 @@ impl CoordinationRuntime {
         parent_id: Option<ThreadId>,
         relationship: Relationship,
     ) -> Result<ThreadId, CoordinationError> {
-        self.create_with_handoff(request, parent_id, relationship, None)
+        self.create_with_origin(request, parent_id, relationship, CreationOrigin::Local)
             .await
     }
 
-    async fn create_with_handoff(
+    async fn create_with_origin(
         &self,
         mut request: NewTask,
         parent_id: Option<ThreadId>,
         relationship: Relationship,
-        handoff: Option<bruhs_models::workbench_handoff::WorkItemHandoff>,
+        origin: CreationOrigin,
     ) -> Result<ThreadId, CoordinationError> {
         validate_new_task(&request).map_err(invalid)?;
         crate::agent::validate_execution_budget(request.execution_timeout_seconds)
             .map_err(|error| invalid(&error.to_string()))?;
         let project_path = canonical_project(&request.project_path).await?;
-        let id = ThreadId::new_v4();
+        let id = match &origin {
+            CreationOrigin::Linked(start) => {
+                if project_path != request.project_path {
+                    return Err(conflict(
+                        "The checkout moved. Open it again before sending.",
+                    ));
+                }
+                linked_threads::check_branch(Path::new(&project_path), &start.checkout.branch)
+                    .await?;
+                start.id.clone()
+            }
+            _ => ThreadId::new_v4(),
+        };
         let (source_context, source_revision, shared_path, work_item_origin) = {
             let data = self.0.data.lock().await;
             if let Some(parent_id) = &parent_id {
@@ -534,15 +556,13 @@ impl CoordinationRuntime {
                 .and_then(|id| data.tasks.get(id))
                 .map_or_else(|| project_path.clone(), |task| task.working_path.clone());
             let source_revision = parent_id.as_ref().map(|_| data.revision);
-            let work_item_origin = handoff
-                .as_ref()
-                .map(|handoff| handoff.origin())
-                .or_else(|| {
-                    parent_id
-                        .as_ref()
-                        .and_then(|id| data.tasks.get(id))
-                        .and_then(|parent| parent.work_item_origin.clone())
-                });
+            let work_item_origin = match &origin {
+                CreationOrigin::WorkItem(handoff) => Some(handoff.origin()),
+                _ => parent_id
+                    .as_ref()
+                    .and_then(|id| data.tasks.get(id))
+                    .and_then(|parent| parent.work_item_origin.clone()),
+            };
             drop(data);
             (source, source_revision, shared_path, work_item_origin)
         };
@@ -560,15 +580,23 @@ impl CoordinationRuntime {
         };
         let now = EpochMs::now();
         let mut data = self.0.data.lock().await;
-        if let Some(handoff) = handoff {
-            let retained = data
-                .work_item_handoffs
-                .get_mut(&handoff.id)
-                .ok_or_else(|| not_found(&handoff.id))?;
-            retained.started = Some(bruhs_models::workbench_handoff::StartedWorkItemHandoff {
-                task_id: id.clone(),
-                request: request.clone(),
-            });
+        match origin {
+            CreationOrigin::WorkItem(handoff) => {
+                let retained = data
+                    .work_item_handoffs
+                    .get_mut(&handoff.id)
+                    .ok_or_else(|| not_found(&handoff.id))?;
+                retained.started = Some(bruhs_models::workbench_handoff::StartedWorkItemHandoff {
+                    task_id: id.clone(),
+                    request: request.clone(),
+                });
+            }
+            CreationOrigin::Linked(start) => {
+                if !linked_threads::record_start(&mut data, *start)? {
+                    return Ok(id);
+                }
+            }
+            CreationOrigin::Local => {}
         }
         let spec_revision = request
             .spec_id
@@ -694,19 +722,39 @@ impl CoordinationRuntime {
     }
 
     async fn send(&self, id: &ThreadId, prompt: String) -> Result<(), CoordinationError> {
+        self.send_with_receipt(id, prompt, None).await
+    }
+
+    async fn send_with_receipt(
+        &self,
+        id: &ThreadId,
+        prompt: String,
+        receipt: Option<(
+            &str,
+            &bruhs_models::coordination::linked_thread::LinkedProjectReply,
+            Vec<bruhs_models::logic::attachments::UploadedFile>,
+        )>,
+    ) -> Result<(), CoordinationError> {
         validate_text(&prompt, "Message")?;
-        if self.0.cancels.lock().await.contains_key(id) {
+        let still_stopping = self.0.cancels.lock().await.contains_key(id);
+        let mut data = self.0.data.lock().await;
+        if let Some((token, reply, _)) = &receipt {
+            if linked_threads::reply_seen(&data, token, id, reply)? {
+                return Ok(());
+            }
+        }
+        if still_stopping {
             return Err(conflict(
                 "The previous provider process is still stopping. Retry after it releases this task.",
             ));
         }
-        let mut data = self.0.data.lock().await;
         let task = data.tasks.get_mut(id).ok_or_else(|| not_found(id))?;
         if task.state.active() || task.state == TaskState::Ready {
             return Err(conflict(
                 "This task is still running or queued. Stop it before sending another message.",
             ));
         }
+        let message_index = task.messages.len();
         task.messages.push(TaskMessage {
             role: "user".into(),
             text: prompt,
@@ -719,6 +767,9 @@ impl CoordinationRuntime {
         task.approvals.clear();
         task.error = None;
         task.state = TaskState::Ready;
+        if let Some((_, reply, attachments)) = receipt {
+            linked_threads::record_reply(&mut data, id, reply, message_index, attachments)?;
+        }
         self.persist(&mut data).await?;
         drop(data);
         self.launch(id.clone()).await;
@@ -755,7 +806,7 @@ impl CoordinationRuntime {
             slot = self.0.slots.clone().acquire_owned() => slot.map_err(storage)?,
         };
         let _slot = wait::RunSlot::hold(self.clone(), id.clone(), permit)?;
-        let (task, context, prompt, fresh) = {
+        let (task, context, prompt, fresh, linked_checkout) = {
             let mut data = self.0.data.lock().await;
             let task = data.tasks.get(id).cloned().ok_or_else(|| not_found(id))?;
             if task.state != TaskState::Ready || *cancelled.borrow() {
@@ -799,11 +850,19 @@ impl CoordinationRuntime {
             if task.relationship == Relationship::Verify {
                 context.push_str("\nVerify the implementation against every acceptance criterion. Cite evidence and report unresolved failures. Do not edit files.\n");
             }
-            let prompt = task
+            let last_index = task.messages.len().checked_sub(1);
+            let mut prompt = task
                 .messages
                 .last()
                 .map(|message| message.text.clone())
                 .ok_or_else(|| invalid("This task has no message."))?;
+            if let Some(files) = last_index.and_then(|index| {
+                data.linked_threads
+                    .get(id)
+                    .and_then(|entry| entry.message_attachments.get(&index))
+            }) {
+                prompt = bruhs_models::logic::attachments::append_uploaded_files(&prompt, files);
+            }
             if context.len().saturating_add(prompt.len()) > TEXT_BUDGET {
                 return Err(invalid(
                     "Task context exceeds the composer text budget. Start a smaller task or shorten its specification.",
@@ -812,12 +871,22 @@ impl CoordinationRuntime {
             if let Some(record) = data.tasks.get_mut(id) {
                 record.state = TaskState::Running;
             }
+            let linked_checkout = data
+                .linked_threads
+                .get(id)
+                .map(|entry| (entry.checkout.clone(), entry.model_options.clone()));
             self.persist(&mut data).await?;
             drop(data);
-            (task, context, prompt, fresh)
+            (task, context, prompt, fresh, linked_checkout)
         };
         // A worktree the owner removed is checked out again from its branch.
         self.restore_worktree(id).await?;
+        if let Some((checkout, _)) = &linked_checkout {
+            if canonical_project(&task.working_path).await? != task.working_path {
+                return Err(conflict("The checkout path changed on the host."));
+            }
+            linked_threads::check_branch(Path::new(&task.working_path), &checkout.branch).await?;
+        }
         let provider = provider_for_model_id(&task.model);
         if *cancelled.borrow() {
             return Ok(());
@@ -835,6 +904,9 @@ impl CoordinationRuntime {
         .execution_timeout_seconds(task.execution_timeout_seconds)
         .instructions(Some(context))
         .thread_access(ThreadAccess::Off);
+        if let Some((_, options)) = linked_checkout {
+            turn.model_options = options;
+        }
         if fresh {
             turn = turn.fresh();
         }

@@ -272,6 +272,44 @@ impl TerminalManager {
         self.create_command(spec, None, None)
     }
 
+    /// Run OpenSSH in the same PTY used by a local terminal. The checkout is
+    /// a remote shell argument and is never used as the local working directory.
+    #[cfg(unix)]
+    pub fn create_ssh(
+        &self,
+        spec: TerminalSpec,
+        host: &str,
+        port: u16,
+        checkout: &str,
+    ) -> Result<TerminalInfo, TerminalError> {
+        if !bruhs_models::remote_hosts::valid_ssh_host(host)
+            || port == 0
+            || !checkout.starts_with('/')
+            || checkout.contains('\0')
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Choose a valid SSH profile and an absolute checkout path.",
+            )
+            .into());
+        }
+        let mut cmd = CommandBuilder::new("ssh");
+        cmd.args([
+            "-t",
+            "-o",
+            "ClearAllForwardings=yes",
+            "-p",
+            &port.to_string(),
+            "--",
+            host,
+        ]);
+        let path = checkout.replace('\'', "'\\''");
+        cmd.arg(format!(
+            r#"CDPATH= cd -- '{path}' && exec "${{SHELL:-/bin/sh}}" -i"#
+        ));
+        self.create_command(spec, Some(cmd), None)
+    }
+
     /// `create`, running `program` (program + args) instead of the login
     /// shell. Tests use it for a predictable `/bin/sh`.
     #[cfg(test)]

@@ -13,9 +13,13 @@ use std::{
     },
 };
 
+type ThreadUploads = Arc<std::sync::Mutex<Vec<(String, String, Vec<u8>)>>>;
+
 pub(super) struct HostFixture {
     pub(super) host: RemoteHost,
     pub(super) report_deleted: Arc<AtomicBool>,
+    pub(super) thread_attempts: Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+    pub(super) thread_uploads: ThreadUploads,
     pub(super) run_attempts: Arc<std::sync::Mutex<Vec<String>>>,
     pub(super) schedule_attempts: Arc<std::sync::atomic::AtomicUsize>,
     directory: tempfile::TempDir,
@@ -56,6 +60,14 @@ impl HostFixture {
         let attempts = schedule_attempts.clone();
         let run_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
         let runs = run_attempts.clone();
+        let thread_attempts = Arc::new(std::sync::Mutex::new(
+            Vec::<(String, serde_json::Value)>::new(),
+        ));
+        let threads = thread_attempts.clone();
+        let thread_uploads = Arc::new(std::sync::Mutex::new(
+            Vec::<(String, String, Vec<u8>)>::new(),
+        ));
+        let uploads = thread_uploads.clone();
         let report_deleted = Arc::new(AtomicBool::new(false));
         let deleted = report_deleted.clone();
         let delivery_id = format!("{}-request", name.to_lowercase());
@@ -91,6 +103,7 @@ impl HostFixture {
                 }
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
+                let start_threads = token == format!("Bearer {}", "b".repeat(64));
                 let editable = token == format!("Bearer {}", "a".repeat(64));
                 let toggle = token == format!("Bearer {}", "f".repeat(64));
                 let run = token == format!("Bearer {}", "d".repeat(64));
@@ -102,17 +115,97 @@ impl HostFixture {
                     || toggle
                     || token == format!("Bearer {}", "e".repeat(64));
                 let (status, body) = if revocation.load(Ordering::SeqCst)
-                    || (first.starts_with("POST") && (!editable || denied.load(Ordering::SeqCst)))
+                    || (first.starts_with("POST")
+                        && !first.starts_with("POST /api/projects/threads/")
+                        && (!editable || denied.load(Ordering::SeqCst)))
                 {
                     ("403 Forbidden", Vec::new())
+                } else if start_threads && first.starts_with("POST /api/projects/threads/") {
+                    let target = first.split_whitespace().nth(1).unwrap();
+                    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+                    let parts: Vec<_> = path.split('/').collect();
+                    if parts.len() == 6 && parts[5] == "attachments" {
+                        let id = parts[4].to_owned();
+                        let name = query
+                            .split('&')
+                            .find_map(|pair| pair.strip_prefix("name="))
+                            .unwrap_or("file")
+                            .to_owned();
+                        let bytes = body.len() as u64;
+                        uploads
+                            .lock()
+                            .unwrap()
+                            .push((id.clone(), name.clone(), body));
+                        (
+                            "200 OK",
+                            serde_json::to_vec(&serde_json::json!({
+                                "id": format!("linked-thread-fixture-{name}"),
+                                "name": name,
+                                "bytes": bytes,
+                            }))
+                            .unwrap(),
+                        )
+                    } else {
+                        ("404 Not Found", Vec::new())
+                    }
                 } else if first.starts_with("GET /api/projects ") {
-                    if schedules || token == format!("Bearer {}", "c".repeat(64)) {
+                    if start_threads || schedules || token == format!("Bearer {}", "c".repeat(64)) {
                         ("200 OK", serde_json::to_vec(&serde_json::json!([{
                             "name":"Build editor", "title":"Build editor", "path":"/srv/editor",
                             "identity":{"repository":"remote:example.org/app", "relative_path":"", "label":"example.org/app"}
                         }])).unwrap())
                     } else {
                         ("403 Forbidden", Vec::new())
+                    }
+                } else if start_threads && first.starts_with("GET /api/projects/thread-checkout?") {
+                    (
+                        "200 OK",
+                        serde_json::to_vec(&serde_json::json!({
+                            "path":"/srv/editor","branch":"host-branch","model":"opencode/default"
+                        }))
+                        .unwrap(),
+                    )
+                } else if start_threads && first.starts_with("PUT /api/projects/threads/") {
+                    let id = first
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .rsplit('/')
+                        .next()
+                        .unwrap();
+                    let mut requests = threads.lock().unwrap();
+                    requests.push((id.into(), serde_json::from_slice(&body).unwrap()));
+                    if requests.len() == 1 {
+                        // Model a first send that succeeded on the host before the response was lost.
+                        ("503 Service Unavailable", Vec::new())
+                    } else {
+                        ("200 OK", serde_json::to_vec(id).unwrap())
+                    }
+                } else if start_threads && first.starts_with("GET /api/projects/threads ") {
+                    let requests = threads.lock().unwrap();
+                    let mut seen = BTreeSet::new();
+                    let rows: Vec<_> = requests.iter().filter(|(id, _)| seen.insert(id)).map(|(id, start)|
+                        serde_json::json!({"id":id,"title":"Host conversation","checkout":start["checkout"],"updated_at":1700000000000_i64})
+                    ).collect();
+                    drop(requests);
+                    ("200 OK", serde_json::to_vec(&rows).unwrap())
+                } else if start_threads && first.starts_with("GET /api/projects/threads/") {
+                    let id = first
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .rsplit('/')
+                        .next()
+                        .unwrap();
+                    let requests = threads.lock().unwrap();
+                    if let Some((_, start)) = requests.iter().find(|(key, _)| key == id) {
+                        ("200 OK", serde_json::to_vec(&serde_json::json!({
+                            "id":id,"title":"Host conversation","checkout":start["checkout"],
+                            "state":"completed","messages":[{"role":"user","text":start["message"],"at":1700000000000_i64}],
+                            "live_output":"","error":null
+                        })).unwrap())
+                    } else {
+                        ("404 Not Found", Vec::new())
                     }
                 } else if first.starts_with("GET /api/projects/scheduled-tasks ") && schedules {
                     let daily = serde_json::json!({"id":"daily","title":"Daily review","project_path":"/srv/editor","enabled":true,"schedule":{"type":"calendar","times":["09:00"],"weekdays":[],"time_zone":"UTC"},"next_run_at":null});
@@ -192,12 +285,14 @@ impl HostFixture {
                         serde_json::to_vec(&EnvironmentKeybindings { editable, rules }).unwrap(),
                     )
                 };
-                write!(stream,"HTTP/1.1 {status}\r\nx-bruhs-read-scheduled-tasks: {schedules}\r\nx-bruhs-toggle-scheduled-tasks: {toggle}\r\nx-bruhs-run-scheduled-tasks: {run}\r\nx-bruhs-delete-scheduled-tasks: {delete}\r\nx-bruhs-webhook-deliveries: {deliveries}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",body.len()).unwrap();
+                write!(stream,"HTTP/1.1 {status}\r\nx-bruhs-start-project-threads: {start_threads}\r\nx-bruhs-read-scheduled-tasks: {schedules}\r\nx-bruhs-toggle-scheduled-tasks: {toggle}\r\nx-bruhs-run-scheduled-tasks: {run}\r\nx-bruhs-delete-scheduled-tasks: {delete}\r\nx-bruhs-webhook-deliveries: {deliveries}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",body.len()).unwrap();
                 stream.write_all(&body).unwrap();
             }
         });
         Self {
             report_deleted,
+            thread_attempts,
+            thread_uploads,
             run_attempts,
             schedule_attempts,
             host: RemoteHost {

@@ -21,14 +21,7 @@ impl RemoteHostProfile {
         if self.name.trim().is_empty() || self.name.len() > crate::mobile::REQUEST_BYTES {
             return Err("Enter a name that fits a local control request.");
         }
-        if self.host.is_empty()
-            || self.host.starts_with('-')
-            || self.host.len() > crate::mobile::REQUEST_BYTES
-            || !self
-                .host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-@[]:".contains(&b))
-        {
+        if !valid_ssh_host(&self.host) {
             return Err("Use one SSH alias or user@host without whitespace or shell expressions.");
         }
         if self.ssh_port == 0 || self.remote_port == 0 || self.local_port < 1024 {
@@ -39,6 +32,15 @@ impl RemoteHostProfile {
         }
         Ok(())
     }
+}
+
+pub fn valid_ssh_host(host: &str) -> bool {
+    !host.is_empty()
+        && !host.starts_with('-')
+        && host.len() <= crate::mobile::REQUEST_BYTES
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-@[]:".contains(&b))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +82,21 @@ pub struct RemoteHostSnapshot {
     pub hosts: Vec<RemoteHost>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForwardPreview {
+    pub id: Uuid,
+    pub host: String,
+    pub ssh_port: u16,
+    pub task_port: u16,
+    pub preview_port: u16,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ForwardedPreview {
+    pub local_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -22,6 +22,7 @@ impl MeetingsHub {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+        let had_local_contacts = !ids.is_empty();
         self.run(async move {
             let people = client.list_people().await.map_err(|error| error.to_string())?;
             let present: HashSet<_> = people.iter().map(|p| p.id.as_str()).collect();
@@ -44,7 +45,7 @@ impl MeetingsHub {
                 }
             }
             Ok::<_, String>((people, redirects))
-        }, |hub, result, cx| {
+        }, move |hub, result, cx| {
             hub.people_refreshing = false;
             hub.people_settled = true;
             hub.people_refresh_failed = result.is_err();
@@ -57,7 +58,8 @@ impl MeetingsHub {
                         hub.people_refresh_failed = true;
                     }
                 }
-                Err(_) => hub.notify_notice("Contact reconciliation failed. Local contacts and drafts are retained; retry contact sync when the server is available.", true, cx),
+                Err(_) if had_local_contacts => hub.notify_notice("Contact reconciliation failed. Local contacts and drafts are retained; retry contact sync when the server is available.", true, cx),
+                Err(_) => {}
             }
             if std::mem::take(&mut hub.people_refresh_again) { hub.refresh_people(cx); }
             cx.notify();

@@ -20,6 +20,7 @@ pub mod browser_captures;
 
 const ATTACHMENT_DIR: &str = "bruhs-attachments";
 const DESKTOP_QUESTION_PREFIX: &str = "desktop-answer-";
+const LINKED_THREAD_PREFIX: &str = "linked-thread-";
 
 /// The shared output location for media in chats without a project. Merely
 /// naming it does no I/O; the agent creates the directory before writing.
@@ -105,6 +106,99 @@ pub(crate) fn write_web_question_upload(
         bytes,
         &web_question_upload_prefix(thread.as_str()),
     )
+}
+
+pub fn linked_thread_upload_prefix(grant_id: &str, host_thread_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(grant_id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(host_thread_id.as_bytes());
+    format!("{LINKED_THREAD_PREFIX}{:x}-", hasher.finalize())
+}
+
+/// Write one binary or text attachment scoped to a linked grant and host thread.
+/// Returns an opaque filename key so the remote client never sees host paths.
+pub fn write_linked_thread_upload(
+    grant_id: &str,
+    host_thread_id: &str,
+    name: &str,
+    bytes: &[u8],
+) -> Result<bruhs_models::coordination::linked_thread::LinkedAttachment, &'static str> {
+    let root = attachment_root().ok_or(UPLOAD_DID_NOT_FINISH)?;
+    let prefix = linked_thread_upload_prefix(grant_id, host_thread_id);
+    let uploaded = write_in_with_prefix(root, name, bytes, &prefix)?;
+    let id = Path::new(&uploaded.path)
+        .file_name()
+        .and_then(|file| file.to_str())
+        .ok_or(UPLOAD_DID_NOT_FINISH)?
+        .to_owned();
+    Ok(
+        bruhs_models::coordination::linked_thread::LinkedAttachment {
+            id,
+            name: uploaded.name,
+            bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        },
+    )
+}
+
+/// Resolve and validate attachments previously uploaded for this grant and host thread.
+pub fn resolve_linked_thread_uploads(
+    grant_id: &str,
+    host_thread_id: &str,
+    attachments: &[bruhs_models::coordination::linked_thread::LinkedAttachment],
+) -> Result<Vec<UploadedFile>, &'static str> {
+    use bruhs_models::logic::attachments::MAX_FILES_PER_MESSAGE;
+    use std::collections::BTreeSet;
+    if attachments.is_empty() {
+        return Ok(Vec::new());
+    }
+    if attachments.len() > MAX_FILES_PER_MESSAGE {
+        return Err(bruhs_models::logic::attachments::TOO_MANY_FILES);
+    }
+    let root = existing_attachment_root()
+        .ok()
+        .flatten()
+        .ok_or("Attached files must be uploaded to this host first.")?;
+    let prefix = linked_thread_upload_prefix(grant_id, host_thread_id);
+    let mut seen = BTreeSet::new();
+    let mut image_bytes = 0u64;
+    let mut resolved = Vec::with_capacity(attachments.len());
+    for (count, attachment) in attachments.iter().enumerate() {
+        if !attachment.id.starts_with(&prefix)
+            || attachment.id.contains(['/', '\\'])
+            || attachment.id.len() > 255
+            || !attachment
+                .id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            || !seen.insert(attachment.id.as_str())
+        {
+            return Err("Attached files must belong to this linked conversation.");
+        }
+        let path = root.join(&attachment.id);
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|_| "An attached file is missing on this host.")?;
+        if !meta.is_file() {
+            return Err("Attached files must be regular uploads on this host.");
+        }
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| "An attached file is missing on this host.")?;
+        if canonical.parent() != Some(root.as_path()) || !canonical.is_file() {
+            return Err("Attached files must stay inside this host's attachment folder.");
+        }
+        let label = upload_label(&attachment.name);
+        let kind = admit(count, image_bytes, &label, meta.len())?;
+        if kind == FileKind::Image {
+            image_bytes = image_bytes.saturating_add(meta.len());
+        }
+        resolved.push(UploadedFile {
+            name: label,
+            path: canonical.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(resolved)
 }
 
 /// Retire browser answer files issued for this exact thread. Validate the
@@ -376,6 +470,41 @@ mod tests {
     fn heic_and_oversize_images_are_not_written() {
         assert!(write_upload("shot.heic", b"heic").is_err());
         assert!(write_upload("empty.txt", b"").is_err());
+    }
+
+    #[test]
+    fn linked_thread_uploads_scope_binary_files_to_grant_and_thread() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01];
+        let uploaded = write_linked_thread_upload("grant-a", "thread-1", "../shot.png", &png)
+            .expect("binary png should upload");
+        assert_eq!(uploaded.name, "shot.png");
+        assert_eq!(uploaded.bytes, png.len() as u64);
+        assert!(!uploaded.id.contains('/') && !uploaded.id.contains('\\'));
+        let resolved =
+            resolve_linked_thread_uploads("grant-a", "thread-1", std::slice::from_ref(&uploaded))
+                .expect("owner grant and thread should resolve");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "shot.png");
+        assert_eq!(std::fs::read(&resolved[0].path).unwrap(), png);
+        assert!(resolve_linked_thread_uploads(
+            "grant-b",
+            "thread-1",
+            std::slice::from_ref(&uploaded)
+        )
+        .is_err());
+        assert!(resolve_linked_thread_uploads(
+            "grant-a",
+            "thread-2",
+            std::slice::from_ref(&uploaded)
+        )
+        .is_err());
+        assert!(resolve_linked_thread_uploads(
+            "grant-a",
+            "thread-1",
+            &[uploaded.clone(), uploaded],
+        )
+        .is_err());
+        let _ = std::fs::remove_file(&resolved[0].path);
     }
 
     #[test]

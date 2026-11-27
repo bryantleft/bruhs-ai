@@ -6,7 +6,7 @@
 //! context strip under it, and the `/ commands · @ files · ⌘K palette`
 //! hints. Sizes are the web's Tailwind values in px.
 
-use bruhs_ui::input::{Input, Textarea};
+use bruhs_ui::input::{Input, Textarea, TextareaState};
 use bruhs_ui::scroll::ScrollableElement as _;
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
@@ -570,6 +570,168 @@ fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
         .flex_shrink_0()
 }
 
+pub(crate) fn prompt_input(
+    window: &mut Window,
+    cx: &mut Context<'_, TextareaState>,
+    placeholder: &'static str,
+) -> TextareaState {
+    let mut field = TextareaState::new(window, cx);
+    field.set_markdown_enabled(true, cx);
+    field
+        .placeholder(placeholder)
+        .auto_grow(super::CHAT_COMPOSER_MIN_ROWS, super::CHAT_COMPOSER_MAX_ROWS)
+        .submit_on_enter(true)
+}
+
+pub(crate) fn composer_hero_heading() -> Stateful<Div> {
+    div()
+        .id("chat-hero")
+        .debug_selector(|| "desktop-chat-hero".to_string())
+        .mb(px(CHAT_HERO_BOTTOM_MARGIN_PX))
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(theme::HEADING_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(CHAT_HERO_TEXT_SIZE_PX))
+        .text_color(theme::rambutan_100())
+}
+
+pub(crate) fn composer_surface(focused: bool) -> Stateful<Div> {
+    div()
+        .id("composer-surface")
+        .debug_selector(|| "desktop-composer-surface".to_string())
+        .relative()
+        .w_full()
+        .rounded(px(CHAT_COMPOSER_RADIUS_PX))
+        .bg(theme::glass_surface(theme::longan_900()))
+        .border_1()
+        .map(|el| {
+            if focused {
+                el.border_color(theme::persimmon_400().opacity(CHAT_COMPOSER_FOCUS_RING_OPACITY))
+            } else {
+                el.border_color(gpui::white().opacity(CHAT_COMPOSER_RING_OPACITY))
+            }
+        })
+        .flex()
+        .flex_col()
+}
+
+pub(crate) fn composer_textarea(input: &Entity<TextareaState>, label: &'static str) -> Textarea {
+    Textarea::new(input)
+        .aria_label(label)
+        .appearance(false)
+        // Web `px-3 pt-2.5 pb-1`, inside the textarea: text
+        // scrolls through it and the scrollbar stays clear of
+        // the text.
+        .editor_padding(Edges {
+            top: px(CHAT_COMPOSER_INPUT_TOP_PADDING_PX - CHAT_COMPOSER_SURFACE_BORDER_PX),
+            right: px(CHAT_COMPOSER_INPUT_X_PADDING_PX - CHAT_COMPOSER_SURFACE_BORDER_PX),
+            bottom: px(CHAT_COMPOSER_INPUT_BOTTOM_PADDING_PX),
+            left: px(CHAT_COMPOSER_INPUT_X_PADDING_PX - CHAT_COMPOSER_SURFACE_BORDER_PX),
+        })
+        .bordered(false)
+        .focus_bordered(false)
+        .font_family(theme::FontFace::Prompt)
+        .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
+}
+
+pub(crate) fn composer_send_control<T: 'static>(
+    id: &'static str,
+    selector: &'static str,
+    action: ComposerAction,
+    enabled: bool,
+    cx: &Context<'_, T>,
+    activate: impl Fn(&mut T, &mut Window, &mut Context<'_, T>) + 'static,
+) -> AnyElement {
+    let label = action_label(action);
+    let title = action_title(action).to_string();
+    let interrupt = matches!(action, ComposerAction::Interrupt);
+    let word = !matches!(action, ComposerAction::Send);
+    let aria = if word {
+        title
+    } else {
+        format!("{label} message")
+    };
+    div()
+        .id(id)
+        .debug_selector(move || selector.to_string())
+        .when(word, |el| el.h(px(SEND_BUTTON_SIZE_PX)).px(px(12.0)))
+        .when(!word, |el| el.size(px(SEND_BUTTON_SIZE_PX)))
+        .rounded_full()
+        .border_1()
+        .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(6.0))
+        .text_size(px(12.0))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
+        .when(interrupt, |el| {
+            el.bg(theme::lychee_500()).text_color(theme::lychee_50())
+        })
+        .when(!interrupt, |el| {
+            el.bg(theme::persimmon_500())
+                .text_color(theme::longan_950())
+        })
+        .when(!enabled, |el| {
+            el.opacity(SEND_BUTTON_DISABLED_OPACITY)
+                .cursor_not_allowed()
+        })
+        .when(enabled, |el| {
+            el.hover(|el| {
+                if interrupt {
+                    el.bg(theme::lychee_400())
+                } else {
+                    el.bg(theme::persimmon_400())
+                }
+            })
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(aria)
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .cursor_pointer()
+            .map(|el| on_press_view(el, cx, activate))
+        })
+        .when(interrupt, |el| {
+            el.child(icon(assets::SQUARE_ICON_PATH, 12.0, theme::lychee_50()))
+                .child(label)
+        })
+        .when(word && !interrupt, |el| el.child(label))
+        .when(!word, |el| {
+            el.child(icon(
+                assets::ARROW_UP_ICON_PATH,
+                SEND_BUTTON_ICON_SIZE_PX,
+                theme::longan_950(),
+            ))
+        })
+        .into_any_element()
+}
+
+pub(crate) fn chat_header(cx: &App) -> Stateful<Div> {
+    div()
+        .id("chat-header")
+        .debug_selector(|| "desktop-chat-header".to_string())
+        .when_some(cx.theme().color_role("cssHeaderBackground"), |el, color| {
+            el.bg(color)
+        })
+        .children(crate::views::workspace::appearance::background_layer(
+            "Header", cx,
+        ))
+        .when_some(cx.theme().color_role("cssHeaderForeground"), |el, color| {
+            el.text_color(color)
+        })
+        .h(px(CHAT_HEADER_HEIGHT_PX))
+        .px(px(CHAT_HEADER_X_PADDING_PX))
+        .flex()
+        .items_center()
+        .gap(px(CHAT_HEADER_GAP_PX))
+        .flex_shrink_0()
+        .font_family(theme::UI_FONT_FAMILY)
+}
+
 impl ChatView {
     fn breadcrumb_project(&self) -> Option<String> {
         (self.project_scoped && !self.project_name.is_empty()).then(|| self.project_name.clone())
@@ -584,26 +746,8 @@ impl ChatView {
         let running = self.running_tasks_count;
         // The thread's role, by its current name. A deleted role shows nothing.
         let role = self.role_profile.as_ref().map(|role| role.name.clone());
-        div()
-            .id("chat-header")
-            .debug_selector(|| "desktop-chat-header".to_string())
+        chat_header(cx)
             .group(CHAT_HEADER_GROUP)
-            .when_some(cx.theme().color_role("cssHeaderBackground"), |el, color| {
-                el.bg(color)
-            })
-            .children(crate::views::workspace::appearance::background_layer(
-                "Header", cx,
-            ))
-            .when_some(cx.theme().color_role("cssHeaderForeground"), |el, color| {
-                el.text_color(color)
-            })
-            .h(px(CHAT_HEADER_HEIGHT_PX))
-            .px(px(CHAT_HEADER_X_PADDING_PX))
-            .flex()
-            .items_center()
-            .gap(px(CHAT_HEADER_GAP_PX))
-            .flex_shrink_0()
-            .font_family(theme::UI_FONT_FAMILY)
             .child(
                 div()
                     .min_w_0()
@@ -960,18 +1104,7 @@ impl ChatView {
     }
 
     fn render_hero_heading(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let row = div()
-            .id("chat-hero")
-            .debug_selector(|| "desktop-chat-hero".to_string())
-            .mb(px(CHAT_HERO_BOTTOM_MARGIN_PX))
-            .w_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .font_family(theme::HEADING_FONT_FAMILY)
-            .font_weight(FontWeight::MEDIUM)
-            .text_size(px(CHAT_HERO_TEXT_SIZE_PX))
-            .text_color(theme::rambutan_100());
+        let row = composer_hero_heading();
         match self.breadcrumb_project() {
             Some(name) => row
                 .child(div().flex_shrink_0().child(CHAT_HERO_PROJECT_PREFIX))
@@ -980,7 +1113,6 @@ impl ChatView {
                         .id("chat-hero-project")
                         .debug_selector(|| "desktop-chat-hero-project".to_string())
                         .min_w_0()
-                        .flex_1()
                         .truncate()
                         .border_b_1()
                         .border_color(theme::rambutan_500().opacity(0.6))
@@ -1008,25 +1140,7 @@ impl ChatView {
         // Web `focus-within`: the surface rings persimmon while the input has
         // focus.
         let focused = self.input_state.focus_handle(cx).is_focused(window);
-        div()
-            .id("composer-surface")
-            .debug_selector(|| "desktop-composer-surface".to_string())
-            .relative()
-            .w_full()
-            .rounded(px(CHAT_COMPOSER_RADIUS_PX))
-            .bg(theme::glass_surface(theme::longan_900()))
-            .border_1()
-            .map(|el| {
-                if focused {
-                    el.border_color(
-                        theme::persimmon_400().opacity(CHAT_COMPOSER_FOCUS_RING_OPACITY),
-                    )
-                } else {
-                    el.border_color(gpui::white().opacity(CHAT_COMPOSER_RING_OPACITY))
-                }
-            })
-            .flex()
-            .flex_col()
+        composer_surface(focused)
             .drag_over::<ExternalPaths>(|el, _, _, _| {
                 el.border_color(theme::persimmon_400())
                     .bg(theme::longan_800())
@@ -1195,11 +1309,17 @@ impl ChatView {
                 if this.dictation.active() {
                     return;
                 }
-                let needs_modifier = this.send_shortcut.requires_modifier(&this.input_state.read(cx).value());
+                let needs_modifier = this
+                    .send_shortcut
+                    .requires_modifier(&this.input_state.read(cx).value());
                 if !action.secondary && needs_modifier {
-                    this.input_state.update(cx, |field, cx| field.insert_line_break(window, cx));
+                    this.input_state
+                        .update(cx, |field, cx| field.insert_line_break(window, cx));
                 } else if !(action.secondary && action.shift && !needs_modifier) {
-                    if this.queue_edit.is_none() && !action.secondary && this.apply_selected_composer_hint(window, cx) {
+                    if this.queue_edit.is_none()
+                        && !action.secondary
+                        && this.apply_selected_composer_hint(window, cx)
+                    {
                         return;
                     }
                     let opposite = action.secondary && (!needs_modifier || action.shift);
@@ -1207,25 +1327,7 @@ impl ChatView {
                 }
             }))
             .child(
-                Textarea::new(&self.input_state)
-                    .aria_label("Message")
-                    .appearance(false)
-                    // Web `px-3 pt-2.5 pb-1`, inside the textarea: text
-                    // scrolls through it and the scrollbar stays clear of
-                    // the text.
-                    .editor_padding(Edges {
-                        top: px(CHAT_COMPOSER_INPUT_TOP_PADDING_PX
-                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
-                        right: px(CHAT_COMPOSER_INPUT_X_PADDING_PX
-                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
-                        bottom: px(CHAT_COMPOSER_INPUT_BOTTOM_PADDING_PX),
-                        left: px(CHAT_COMPOSER_INPUT_X_PADDING_PX
-                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
-                    })
-                    .bordered(false)
-                    .focus_bordered(false)
-                    .font_family(theme::FontFace::Prompt)
-                    .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
+                composer_textarea(&self.input_state, "Message")
                     .disabled(
                         composer_input_disabled_like_web(self.is_streaming)
                             || self.dictation.active(),
@@ -3041,73 +3143,14 @@ impl ChatView {
                 action,
                 draft_empty || self.message_over_limit(cx) || self.uploads_block_send(),
             );
-        let label = action_label(action);
-        let title = action_title(action).to_string();
-        let interrupt = matches!(action, ComposerAction::Interrupt);
-        let word = !matches!(action, ComposerAction::Send);
-        let aria = if word {
-            title
-        } else {
-            format!("{label} message")
-        };
-        div()
-            .id("send-btn")
-            .debug_selector(|| "desktop-send-button".to_string())
-            .when(word, |el| el.h(px(SEND_BUTTON_SIZE_PX)).px(px(12.0)))
-            .when(!word, |el| el.size(px(SEND_BUTTON_SIZE_PX)))
-            .rounded_full()
-            .border_1()
-            .border_color(hsla(0.0, 0.0, 0.0, 0.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .text_size(px(12.0))
-            .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .font_weight(FontWeight::MEDIUM)
-            .when(interrupt, |el| {
-                el.bg(theme::lychee_500()).text_color(theme::lychee_50())
-            })
-            .when(!interrupt, |el| {
-                el.bg(theme::persimmon_500())
-                    .text_color(theme::longan_950())
-            })
-            .when(!enabled, |el| {
-                el.opacity(SEND_BUTTON_DISABLED_OPACITY)
-                    .cursor_not_allowed()
-            })
-            .when(enabled, |el| {
-                el.hover(|el| {
-                    if interrupt {
-                        el.bg(theme::lychee_400())
-                    } else {
-                        el.bg(theme::persimmon_400())
-                    }
-                })
-                .tab_index(0)
-                .role(Role::Button)
-                .aria_label(aria)
-                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                .cursor_pointer()
-                .map(|el| {
-                    on_press_view(el, cx, |this, window, cx| {
-                        this.send_follow_up(false, window, cx);
-                    })
-                })
-            })
-            .when(interrupt, |el| {
-                el.child(icon(assets::SQUARE_ICON_PATH, 12.0, theme::lychee_50()))
-                    .child(label)
-            })
-            .when(word && !interrupt, |el| el.child(label))
-            .when(!word, |el| {
-                el.child(icon(
-                    assets::ARROW_UP_ICON_PATH,
-                    SEND_BUTTON_ICON_SIZE_PX,
-                    theme::longan_950(),
-                ))
-            })
-            .into_any_element()
+        composer_send_control(
+            "send-btn",
+            "desktop-send-button",
+            action,
+            enabled,
+            cx,
+            |this, window, cx| this.send_follow_up(false, window, cx),
+        )
     }
 
     fn branch_chip_label(&self) -> Option<String> {

@@ -337,7 +337,7 @@ impl PaletteItem {
         match self {
             Self::Action(action) => action.group,
             Self::LinkedProject(_) | Self::Project { .. } => "Projects",
-            Self::Thread { .. } => "Threads",
+            Self::Thread { .. } | Self::LinkedThread { .. } => "Threads",
             Self::Server { .. } => preview::LOCAL_SERVERS_GROUP,
             Self::Record(_) => "Records",
         }
@@ -348,7 +348,7 @@ impl PaletteItem {
             Self::Action(action) => action.label.to_string(),
             Self::LinkedProject(p) => p.name.clone(),
             Self::Project { name, .. } => name.clone(),
-            Self::Thread { title, .. } => title.clone(),
+            Self::Thread { title, .. } | Self::LinkedThread { title, .. } => title.clone(),
             Self::Server { port, .. } => preview::local_server_label(*port),
             Self::Record(hit) => format!("{}: {}", hit.document.kind.label(), hit.document.title),
         }
@@ -357,9 +357,9 @@ impl PaletteItem {
     pub(super) fn hint(&self) -> String {
         match self {
             Self::Action(action) => action.hint.to_string(),
-            Self::LinkedProject(p) => format!("View in Settings · {} · {}", p.environment, p.path),
+            Self::LinkedProject(p) => format!("{} · {}", p.environment, p.path),
             Self::Project { path, .. } => path.clone(),
-            Self::Thread { hint, .. } => hint.clone(),
+            Self::Thread { hint, .. } | Self::LinkedThread { hint, .. } => hint.clone(),
             Self::Server { command, .. } => command.clone(),
             Self::Record(hit) => hit.document.subtitle.clone(),
         }
@@ -373,6 +373,10 @@ impl PaletteItem {
             }
             Self::Project { path, .. } => format!("desktop-command-project-{}", element_key(path)),
             Self::Thread { id, .. } => format!("desktop-command-thread-{}", element_key(id)),
+            Self::LinkedThread { host, id, .. } => format!(
+                "desktop-command-linked-thread-{host}-{}",
+                element_key(id.as_str())
+            ),
             Self::Server { port, .. } => format!("desktop-command-server-{port}"),
             Self::Record(hit) => format!(
                 "desktop-command-record-{}-{}",
@@ -917,6 +921,22 @@ impl Workspace {
                         }
                     }
                     items.extend(self.matching_thread_items(&query, cx));
+                    items.extend(
+                        self.linked_conversations()
+                            .filter_map(|(host, name, thread)| {
+                                (query.is_empty()
+                                    || text_matches_query(&thread.title, &query)
+                                    || text_matches_query(&name, &query)
+                                    || text_matches_query(&thread.checkout.path, &query))
+                                .then(|| PaletteItem::LinkedThread {
+                                    host,
+                                    id: thread.id.clone(),
+                                    title: thread.title.clone(),
+                                    hint: format!("{name} · {}", thread.checkout.path),
+                                })
+                            })
+                            .take(PALETTE_THREAD_LIMIT_MIXED),
+                    );
                     let thread_ids: HashSet<_> = items
                         .iter()
                         .filter_map(|item| match item {
@@ -952,9 +972,16 @@ impl Workspace {
     ) {
         match item {
             PaletteItem::Action(action) => self.execute_command_action(action.id, window, cx),
-            PaletteItem::LinkedProject(p) => self.open_linked_checkout(&p, window, cx),
+            PaletteItem::LinkedProject(p) => self.select_linked_project(&p, window, cx),
             PaletteItem::Project { path, name } => {
                 self.open_palette_project(path, name, window, cx)
+            }
+            PaletteItem::LinkedThread { host, id, .. } => {
+                self.activate_sidebar_view(
+                    AppView::LinkedProjectThread { host, thread: id },
+                    window,
+                    cx,
+                );
             }
             PaletteItem::Thread { id, .. } => {
                 self.close_transient_surfaces();

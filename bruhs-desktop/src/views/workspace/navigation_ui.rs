@@ -2,8 +2,7 @@ use super::*;
 use bruhs_ui::zoom::px;
 
 impl Workspace {
-    /// The main column's title bar row: window drag area, room for the
-    /// traffic lights when the sidebar is hidden, and the sidebar toggle.
+    /// The main column's title bar row: the window drag area and sidebar toggle.
     /// `sidebar_drawer`: the window is narrow enough that the sidebar opens
     /// as a drawer, so it is not docked beside this row.
     pub(super) fn render_workspace_navigation(
@@ -21,9 +20,10 @@ impl Workspace {
             .h(px(44.0))
             .flex_shrink_0()
             .px(px(12.0))
-            .when(sidebar_drawer || !self.sidebar_visible, |el| {
-                el.pl(self.traffic_light_inset())
-            })
+            .when(
+                !cfg!(target_os = "macos") && (sidebar_drawer || !self.sidebar_visible),
+                |el| el.pl(px(16.0)),
+            )
             .flex()
             .items_center()
             .gap(px(4.0))

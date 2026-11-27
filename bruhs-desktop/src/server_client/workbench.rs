@@ -138,6 +138,19 @@ impl ServerClient {
         Self::decode(response, "Remote environments").await
     }
 
+    #[cfg(unix)]
+    pub async fn forward_remote_preview(
+        &self,
+        request: bruhs_models::remote_hosts::ForwardPreview,
+    ) -> Result<bruhs_models::remote_hosts::ForwardedPreview, ServerError> {
+        let mut url = self.local_owner_base()?;
+        url.set_path("/api/remote-hosts/previews");
+        let http = self.local_owner_http().await?;
+        let response =
+            Self::check(http.post(url).json(&request).send().await, "Remote preview").await?;
+        Self::decode(response, "Remote preview").await
+    }
+
     pub async fn export_settings(
         &self,
         change: Option<&bruhs_models::telemetry::SetEndpoint>,

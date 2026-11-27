@@ -1,5 +1,103 @@
 use super::*;
 
+#[cfg(unix)]
+impl RemoteHostManager {
+    pub async fn forward_preview(
+        &self,
+        request: ForwardPreview,
+    ) -> RemoteHostResult<ForwardedPreview> {
+        if request.preview_port == 0 {
+            return Err(RemoteHostError::Invalid(
+                "Choose a preview port from 1 to 65535.".into(),
+            ));
+        }
+        let (profile_host, host_state, host_connection_id) = {
+            let data = self.0.data.lock().await;
+            let host = data
+                .hosts
+                .get(&request.id)
+                .ok_or(RemoteHostError::NotFound)?;
+            let profile = &host.profile;
+            if profile.host != request.host
+                || profile.ssh_port != request.ssh_port
+                || profile.remote_port != request.task_port
+            {
+                return Err(conflict(
+                    "The saved SSH profile changed. Update the link in Environments.",
+                ));
+            }
+            let summary = (profile.host.clone(), host.state, host.connection_id);
+            drop(data);
+            summary
+        };
+        let (control, generation) = {
+            let running = self
+                .0
+                .running
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let live = running
+                .get(&request.id)
+                .filter(|live| {
+                    host_state == RemoteHostState::Connected
+                        && Some(live.generation) == host_connection_id
+                })
+                .ok_or_else(|| conflict("Reconnect SSH before opening a preview."))?;
+            if let Some(local_port) = live.previews.get(&request.preview_port) {
+                let local_port = *local_port;
+                drop(running);
+                return Ok(ForwardedPreview { local_port });
+            }
+            if live.previews.len() >= 8 {
+                return Err(conflict(
+                    "Reconnect SSH to close the existing preview forwards before opening another.",
+                ));
+            }
+            let socket = live
+                .socket
+                .as_ref()
+                .ok_or_else(|| conflict("The SSH control socket is unavailable."))?;
+            let result = (socket.with_file_name("control"), live.generation);
+            drop(running);
+            result
+        };
+        let local_port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?
+            .local_addr()?
+            .port();
+        let args = [
+            "-S".into(),
+            control.to_string_lossy().into_owned(),
+            "-O".into(),
+            "forward".into(),
+            "-L".into(),
+            format!("127.0.0.1:{local_port}:127.0.0.1:{}", request.preview_port),
+            "--".into(),
+            profile_host,
+        ];
+        let (success, _, _) =
+            tokio::time::timeout(Duration::from_secs(5), output(&self.0.executable, &args))
+                .await
+                .map_err(|_| conflict("SSH did not acknowledge the preview forward."))??;
+        if !success {
+            return Err(conflict(
+                "SSH could not open the preview forward. Check the host connection and retry.",
+            ));
+        }
+        let mut running = self
+            .0
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let live = running
+            .get_mut(&request.id)
+            .filter(|live| live.generation == generation)
+            .ok_or_else(|| conflict("SSH disconnected while opening the preview."))?;
+        live.previews.insert(request.preview_port, local_port);
+        drop(running);
+        Ok(ForwardedPreview { local_port })
+    }
+}
+
 // Reuse the CLI subprocess wrapper's stderr diagnostic budget.
 const DIAGNOSTIC_BYTES: usize = 8 * 1024;
 

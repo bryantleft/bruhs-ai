@@ -2736,6 +2736,13 @@ impl Workspace {
             crate::views::meetings_hub::NoticeAction::OpenThread(id) => {
                 self.select_thread_by_id(&id, cx)
             }
+            crate::views::meetings_hub::NoticeAction::OpenLinkedThread { host, thread } => {
+                self.activate_sidebar_view(
+                    AppView::LinkedProjectThread { host, thread },
+                    window,
+                    cx,
+                );
+            }
             crate::views::meetings_hub::NoticeAction::OpenAutomations => {
                 self.activate_sidebar_view(AppView::Automations, window, cx);
             }
@@ -2752,31 +2759,30 @@ impl Workspace {
                 .is_some_and(|n| n.show_in_settings)
     }
 
-    /// Web `BannerStack`: a bounded notice rail below page content.
+    /// Web `BannerStack`: a compact top-right floating toast below the header.
     pub(super) fn render_hub_notice(
         &self,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> Option<AnyElement> {
         let notice = self.meetings_hub.read(cx).notice.clone()?;
-        // Opaque: the notice floats over content. The warning keeps the look
-        // it had on the canvas (a 15% lychee tint over longan-950).
-        let (bg, ring, fg) = if notice.warning {
+        // Elevated dark toast with a focused severity accent; top-right below
+        // the header keeps the bottom composer, send button, and transcript clear.
+        let (ring, accent, icon_path) = if notice.warning {
             (
-                theme::longan_950().blend(theme::lychee_500().opacity(0.15)),
-                theme::lychee_400().opacity(0.4),
-                theme::lychee_100(),
+                theme::lychee_500().opacity(0.40),
+                theme::lychee_400(),
+                assets::CIRCLE_ALERT_ICON_PATH,
             )
         } else {
             (
-                theme::longan_800(),
-                gpui::white().opacity(0.1),
-                theme::rambutan_200(),
+                gpui::white().opacity(0.12),
+                theme::rambutan_300(),
+                assets::CHECK_ICON_PATH,
             )
         };
-        // The rail floats over the active view, under its header row, instead
-        // of taking height from it: the page and the composer stay put as
-        // notices come and go. Only the notice itself takes pointer input.
+        let bg = theme::longan_900();
+        let fg = theme::rambutan_100();
         Some(
             div()
                 .id("desktop-notification-rail")
@@ -2789,7 +2795,7 @@ impl Workspace {
                 .right_0()
                 .px_3()
                 .flex()
-                .justify_center()
+                .justify_end()
                 .child(
                     div()
                         .id("desktop-hub-notice")
@@ -2797,29 +2803,39 @@ impl Workspace {
                         .occlude()
                         .w_full()
                         .min_w_0()
-                        .max_w(px(480.0))
+                        .max_w(px(360.0))
                         .max_h(window.viewport_size().height * 0.3)
                         .overflow_y_scroll()
                         .flex_shrink_0()
-                        .rounded(px(8.0))
+                        .rounded(px(10.0))
                         .bg(bg)
                         .border_1()
                         .border_color(ring)
-                        .px_3()
+                        .shadow_md()
+                        .pl_3()
+                        .pr_2()
                         .py_2()
                         .flex()
                         .items_center()
-                        .gap_3()
+                        .gap_2p5()
                         .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
                         .text_size(px(LABEL_PX))
+                        .line_height(relative(1.4))
                         .text_color(fg)
+                        .child(
+                            svg()
+                                .path(icon_path)
+                                .size(px(theme::ICON_PX))
+                                .flex_shrink_0()
+                                .text_color(accent),
+                        )
                         .child(div().min_w_0().flex_1().child(notice.message))
                         .children(notice.action.map(|action| {
                             text_button(
                                 "desktop-hub-notice-action",
                                 action.label(),
-                                fg,
-                                theme::rambutan_100(),
+                                theme::persimmon_300(),
+                                theme::persimmon_200(),
                             )
                             .debug_selector(|| "desktop-hub-notice-action".into())
                             .my_neg_1()
@@ -2835,34 +2851,42 @@ impl Workspace {
                                 })
                             })
                         }))
-                        .child(
-                            text_button(
-                                "desktop-hub-notice-dismiss",
-                                "Dismiss",
-                                fg,
-                                theme::rambutan_100(),
-                            )
-                            .debug_selector(|| "desktop-hub-notice-dismiss".into())
-                            .debug_selector(|| "desktop-hub-notice-dismiss".into())
-                            .my_neg_1()
-                            .min_h(px(theme::CONTROL_PX))
-                            .min_w(px(theme::CONTROL_PX))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .map(|el| {
-                                on_press_view(el, cx, |this, window, cx| {
-                                    if this.settings_visible() {
-                                        this.modal_start_focus_handle.focus(window, cx);
-                                    } else {
-                                        this.workspace_focus_handle.focus(window, cx);
-                                    }
-                                    this.meetings_hub
-                                        .update(cx, |hub, cx| hub.dismiss_notice(cx));
-                                })
-                            }),
-                        ),
+                        .child(on_press_view(
+                            div()
+                                .id("desktop-hub-notice-dismiss")
+                                .debug_selector(|| "desktop-hub-notice-dismiss".into())
+                                .role(Role::Button)
+                                .aria_label("Dismiss notification")
+                                .tab_index(0)
+                                .cursor_pointer()
+                                .my_neg_1()
+                                .size(px(theme::CONTROL_PX))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(gpui::transparent_black())
+                                .hover(|el| el.bg(theme::longan_800()))
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(theme::ICON_INLINE_SM_PX))
+                                        .text_color(theme::rambutan_400()),
+                                ),
+                            cx,
+                            |this, window, cx| {
+                                if this.settings_visible() {
+                                    this.modal_start_focus_handle.focus(window, cx);
+                                } else {
+                                    this.workspace_focus_handle.focus(window, cx);
+                                }
+                                this.meetings_hub
+                                    .update(cx, |hub, cx| hub.dismiss_notice(cx));
+                            },
+                        )),
                 )
                 .into_any_element(),
         )

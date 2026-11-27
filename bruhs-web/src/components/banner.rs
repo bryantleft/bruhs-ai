@@ -120,7 +120,7 @@ pub fn BannerStack() -> impl IntoView {
             aria-live="polite"
             aria-label="Notifications"
             data-banner-stack=""
-            class="pointer-events-none absolute inset-x-0 top-[52px] z-30 flex max-h-[30dvh] flex-col items-center gap-2 overflow-y-auto px-3"
+            class="pointer-events-none absolute inset-x-0 top-[52px] z-30 flex max-h-[30dvh] flex-col items-end gap-2 overflow-y-auto px-3"
         >
             <For
                 each=move || {
@@ -163,30 +163,21 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
         let _dismiss_timeout = StoredValue::new_local(timeout);
     }
 
-    let (bg_class, icon) = match banner.kind {
-        BannerKind::Info => (
-            "bg-rambutan-900/95 inset-ring inset-ring-rambutan-700 text-rambutan-100",
-            "ℹ",
-        ),
-        BannerKind::Warning => (
-            "bg-durian-900/95 inset-ring inset-ring-durian-700 text-durian-100",
-            "⚠",
-        ),
+    let (ring_class, icon_class, icon) = match banner.kind {
+        BannerKind::Info => ("inset-ring-white/12", "text-rambutan-300", "ℹ"),
+        BannerKind::Warning => ("inset-ring-durian-500/40", "text-durian-400", "⚠"),
         // Lychee is the system's error color; mangosteen is reserved for
         // decorative accents (design.bruhs.dev/llms.txt §color roles).
-        BannerKind::Error => (
-            "bg-lychee-900/95 inset-ring inset-ring-lychee-700 text-lychee-100",
-            "✕",
-        ),
+        BannerKind::Error => ("inset-ring-lychee-500/40", "text-lychee-400", "✕"),
     };
 
     let message = banner.message;
 
     view! {
         <div class=format!(
-            "pointer-events-auto flex w-full min-w-0 max-w-[480px] shrink-0 self-center items-center gap-2 rounded-seed px-3 py-2 text-body-sm {bg_class}"
+            "pointer-events-auto flex w-full min-w-0 max-w-[360px] shrink-0 items-center gap-2.5 rounded-[10px] bg-longan-900/95 inset-ring shadow-md pl-3 pr-2 py-2 text-body-sm text-rambutan-100 {ring_class}"
         )>
-            <span class="shrink-0 text-label" aria-hidden="true">{icon}</span>
+            <span class=format!("shrink-0 text-label {icon_class}") aria-hidden="true">{icon}</span>
             <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
             {action.map(|action| view! {
                 <button

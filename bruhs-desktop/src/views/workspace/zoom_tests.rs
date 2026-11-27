@@ -157,18 +157,3 @@ fn a_saved_zoom_outside_the_steps_opens_at_100(cx: &mut TestAppContext) {
     let (_workspace, _cx) = open(cx, Some(state));
     assert_eq!(zoom(), 1.0);
 }
-
-/// The macOS traffic lights stay in window points, so the room left for them
-/// does not grow with the page.
-#[cfg(target_os = "macos")]
-#[gpui::test]
-fn the_traffic_light_room_stays_the_same_on_screen(cx: &mut TestAppContext) {
-    let (workspace, cx) = open(cx, None);
-    let before = workspace.read_with(cx, |workspace, _| workspace.traffic_light_inset());
-    workspace.update_in(cx, |workspace, window, cx| {
-        workspace.set_zoom(2.0, window, cx)
-    });
-    workspace.read_with(cx, |workspace, _| {
-        assert_eq!(workspace.traffic_light_inset(), before);
-    });
-}

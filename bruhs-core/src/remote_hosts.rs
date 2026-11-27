@@ -41,6 +41,8 @@ struct Control {
     socket: Option<PathBuf>,
     generation: Uuid,
     cancel: watch::Sender<bool>,
+    #[cfg(unix)]
+    previews: BTreeMap<u16, u16>,
 }
 struct HostOwner(std::fs::File);
 impl Drop for HostOwner {
@@ -236,6 +238,8 @@ impl RemoteHostManager {
                     generation,
                     cancel,
                     socket: None,
+                    #[cfg(unix)]
+                    previews: BTreeMap::new(),
                 },
             );
         drop(data);

@@ -101,7 +101,8 @@ fn digest(items: &[OutboxItem]) -> (String, String) {
     (title, body)
 }
 
-/// The platform's notification command. Text is passed as arguments, never as script.
+/// The platform's notification command. Text is passed as arguments or
+/// environment variables, never interpolated into script text.
 pub fn system_notifier() -> Notifier {
     Arc::new(|title: &str, body: &str| {
         let output = if cfg!(target_os = "macos") {
@@ -122,6 +123,8 @@ pub fn system_notifier() -> Notifier {
             std::process::Command::new("notify-send")
                 .args(["--app-name=bruhs", "--", title, body])
                 .output()
+        } else if cfg!(target_os = "windows") {
+            windows_notification_command(title, body).output()
         } else {
             return Err("System notifications are not supported on this platform.".into());
         };
@@ -134,6 +137,47 @@ pub fn system_notifier() -> Notifier {
             Err(error) => Err(format!("The notification command could not start: {error}")),
         }
     })
+}
+
+const WINDOWS_TOAST_TITLE_ENV: &str = "BRUHS_NOTIFICATION_TITLE";
+const WINDOWS_TOAST_BODY_ENV: &str = "BRUHS_NOTIFICATION_BODY";
+const WINDOWS_TOAST_SCRIPT: &str = concat!(
+    "$ErrorActionPreference = 'Stop';",
+    "[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime];",
+    "[void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime];",
+    "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(",
+    "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);",
+    "$nodes = $xml.GetElementsByTagName('text');",
+    "$title = if ($env:BRUHS_NOTIFICATION_TITLE) { \"bruhs - $($env:BRUHS_NOTIFICATION_TITLE)\" } else { 'bruhs' };",
+    "$body = if ($null -ne $env:BRUHS_NOTIFICATION_BODY) { $env:BRUHS_NOTIFICATION_BODY } else { '' };",
+    "[void]$nodes.Item(0).AppendChild($xml.CreateTextNode($title));",
+    "[void]$nodes.Item(1).AppendChild($xml.CreateTextNode($body));",
+    "$toast = New-Object Windows.UI.Notifications.ToastNotification $xml;",
+    "$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';",
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)"
+);
+
+fn windows_notification_command(title: &str, body: &str) -> std::process::Command {
+    let clean = |value: &str| value.replace('\0', "");
+    let mut command = std::process::Command::new("powershell.exe");
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            WINDOWS_TOAST_SCRIPT,
+        ])
+        .env(WINDOWS_TOAST_TITLE_ENV, clean(title))
+        .env(WINDOWS_TOAST_BODY_ENV, clean(body));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 #[cfg(test)]
@@ -169,5 +213,47 @@ mod tests {
         ]);
         assert_eq!(title, "2 agent updates (1 need an answer)");
         assert_eq!(body, "Invoice due\nWhich card?");
+    }
+
+    #[test]
+    fn windows_toast_passes_text_through_env_never_as_script() {
+        let untrusted_title = "Done $(calc.exe) \0 <tag>";
+        let untrusted_body = "Body '; Start-Process calc; \0 &";
+        let command = windows_notification_command(untrusted_title, untrusted_body);
+        assert_eq!(command.get_program(), "powershell.exe");
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec![
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                WINDOWS_TOAST_SCRIPT,
+            ]
+        );
+        assert!(args.iter().all(|arg| !arg.contains("calc.exe")));
+        assert!(args.iter().all(|arg| !arg.contains("Start-Process")));
+        let envs: std::collections::BTreeMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|val| val.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get(WINDOWS_TOAST_TITLE_ENV),
+            Some(&Some("Done $(calc.exe)  <tag>".into()))
+        );
+        assert_eq!(
+            envs.get(WINDOWS_TOAST_BODY_ENV),
+            Some(&Some("Body '; Start-Process calc;  &".into()))
+        );
     }
 }

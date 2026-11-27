@@ -505,11 +505,14 @@ impl Workspace {
                 let name = project.name.clone();
                 let debug_key = element_key(&project.scope());
                 let remote = project.host.map(|_| project.clone());
+                let can_start = self.can_start_linked_project(&project);
                 let display = if remote.is_some() {
-                    format!(
-                        "View in Settings · {} · {}",
-                        project.environment, project.path
-                    )
+                    let action = if can_start {
+                        "New thread"
+                    } else {
+                        "View in Settings"
+                    };
+                    format!("{action} · {} · {}", project.environment, project.path)
                 } else {
                     project.path.clone()
                 };
@@ -538,7 +541,9 @@ impl Workspace {
                         .text_color(theme::rambutan_400())
                         .tab_index(0)
                         .role(Role::Button)
-                        .aria_label(if remote.is_some() {
+                        .aria_label(if can_start {
+                            format!("Start a thread in {name} on {}", project.environment)
+                        } else if remote.is_some() {
                             format!("View checkout {display} in Settings")
                         } else {
                             format!("Open recent project {display}")
@@ -555,7 +560,7 @@ impl Workspace {
                         .map(|el| {
                             on_press_view(el, cx, move |this, window, cx| {
                                 if let Some(member) = &remote {
-                                    this.open_linked_checkout(member, window, cx);
+                                    this.select_linked_project(member, window, cx);
                                 } else {
                                     this.select_project_location(
                                         path.clone(),

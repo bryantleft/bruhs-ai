@@ -26,6 +26,8 @@ mod voice_capture;
 mod webview_platform;
 #[cfg(feature = "whiteboard-benchmark")]
 mod whiteboard_performance;
+#[cfg(target_os = "macos")]
+mod window_chrome;
 mod zoom;
 
 use bruhs_ui::zoom::px;
@@ -234,6 +236,8 @@ fn main() {
             bruhs_ui::init(cx);
             // Native selectors route editing to an embedded WebKit first
             // responder; gpui-component handles the same actions in its inputs.
+            #[cfg(target_os = "macos")]
+            let window_menu = window_chrome::window_menu(cx);
             cx.set_menus([
                 Menu::new("bruhs.ai").items([
                     MenuItem::action("Settings…", OpenSettings),
@@ -260,6 +264,8 @@ fn main() {
                     MenuItem::action("Zoom Out", ZoomOut),
                     MenuItem::action("Actual Size", ResetZoom),
                 ]),
+                #[cfg(target_os = "macos")]
+                window_menu,
             ]);
             motion::init(cx);
 
@@ -417,7 +423,16 @@ fn main() {
                     window.remove_window();
                     false
                 });
-                let workspace = cx.new(|cx| views::workspace::Workspace::new(window, cx));
+                #[cfg(target_os = "macos")]
+                window_chrome::hide_buttons(window);
+                let workspace = cx.new(|cx| {
+                    #[cfg(target_os = "macos")]
+                    cx.observe_window_bounds(window, |_, window, _| {
+                        window_chrome::hide_buttons(window)
+                    })
+                    .detach();
+                    views::workspace::Workspace::new(window, cx)
+                });
                 *link_workspace_for_window.borrow_mut() = Some(workspace.clone());
                 #[cfg(debug_assertions)]
                 {

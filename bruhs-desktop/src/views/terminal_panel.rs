@@ -261,13 +261,59 @@ impl TerminalPanelView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.new_menu_open = false;
         let spec = TerminalSpec {
             cwd: cwd.map(std::path::PathBuf::from),
             project_name,
             title: action.as_ref().map(|a| a.name.clone()),
             ..TerminalSpec::default()
         };
+        self.open_session(
+            move |manager| manager.create(spec),
+            action,
+            focus,
+            window,
+            cx,
+        );
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn open_ssh(
+        &mut self,
+        host: String,
+        port: u16,
+        checkout: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let spec = TerminalSpec {
+            title: Some(title),
+            ..TerminalSpec::default()
+        };
+        self.open_session(
+            move |manager| manager.create_ssh(spec, &host, port, &checkout),
+            None,
+            true,
+            window,
+            cx,
+        );
+    }
+
+    fn open_session(
+        &mut self,
+        create: impl FnOnce(
+                &TerminalManager,
+            ) -> Result<
+                bruhs_core::terminal::TerminalInfo,
+                bruhs_core::terminal::TerminalError,
+            > + Send
+            + 'static,
+        action: Option<ProjectCommand>,
+        focus: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.new_menu_open = false;
         self.open_generation = self.open_generation.wrapping_add(1);
         let generation = self.open_generation;
         let stop_with = action.as_ref().and_then(|a| a.stop_on_settle_for.clone());
@@ -276,7 +322,7 @@ impl TerminalPanelView {
         }
         let manager = self.manager.clone();
         let created = cx.background_spawn(async move {
-            manager.create(spec).map(|info| PendingTerminal {
+            create(&manager).map(|info| PendingTerminal {
                 info,
                 manager,
                 adopted: false,

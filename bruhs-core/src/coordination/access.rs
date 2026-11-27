@@ -95,6 +95,14 @@ pub struct AccessGrant {
     pub scope: AccessScope,
     #[serde(default)]
     pub provider_updates: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub start_project_threads: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approve_project_threads: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub share_project_threads: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_grant: Option<String>,
     pub expires_at: EpochMs,
 }
 
@@ -106,23 +114,35 @@ pub struct IssuedAccess {
     pub token: String,
 }
 
+#[derive(Default, Deserialize)]
+pub struct ProjectCapabilities {
+    #[serde(default)]
+    pub provider_updates: bool,
+    #[serde(default)]
+    pub start_project_threads: bool,
+    #[serde(default)]
+    pub approve_project_threads: bool,
+    #[serde(default)]
+    pub share_project_threads: bool,
+}
+
 impl CoordinationRuntime {
     pub async fn issue_access(
         &self,
         scope: AccessScope,
         lifetime_seconds: u32,
     ) -> Result<IssuedAccess, CoordinationError> {
-        self.issue_access_with_updates(scope, lifetime_seconds, false)
+        self.issue_access_with_capabilities(scope, lifetime_seconds, ProjectCapabilities::default())
             .await
     }
 
-    pub async fn issue_access_with_updates(
+    pub async fn issue_access_with_capabilities(
         &self,
         scope: AccessScope,
         lifetime_seconds: u32,
-        provider_updates: bool,
+        capabilities: ProjectCapabilities,
     ) -> Result<IssuedAccess, CoordinationError> {
-        if provider_updates
+        if (capabilities.provider_updates || capabilities.start_project_threads)
             && !matches!(
                 &scope,
                 AccessScope::Projects
@@ -132,7 +152,14 @@ impl CoordinationRuntime {
                     | AccessScope::ProjectSchedules { .. }
             )
         {
-            return Err(invalid("Provider updates require a Projects grant."));
+            return Err(invalid("Project capabilities require a Projects grant."));
+        }
+        if (capabilities.approve_project_threads || capabilities.share_project_threads)
+            && !capabilities.start_project_threads
+        {
+            return Err(invalid(
+                "Conversation approvals and sharing require a grant that can start conversations.",
+            ));
         }
         if lifetime_seconds == 0 {
             return Err(invalid("Choose an access lifetime greater than zero."));
@@ -148,22 +175,35 @@ impl CoordinationRuntime {
                 return Err(not_found(task_id));
             }
         }
-        // Two independently random UUIDs supply 244 bits of OS-backed entropy.
-        let token = format!(
-            "{}{}",
-            uuid::Uuid::new_v4().simple(),
-            uuid::Uuid::new_v4().simple()
-        );
-        let grant = AccessGrant {
-            id: uuid::Uuid::new_v4().to_string(),
-            scope,
-            provider_updates,
-            expires_at,
-        };
-        data.grants.insert(digest(&token), grant.clone());
+        let issued = record_grant(&mut data, scope, expires_at, capabilities, None);
         self.persist(&mut data).await?;
         drop(data);
-        Ok(IssuedAccess { grant, token })
+        Ok(issued)
+    }
+
+    pub(super) async fn issue_linked_guest(
+        &self,
+        data: &mut Data,
+        parent: AccessGrant,
+        task_id: ThreadId,
+    ) -> Result<IssuedAccess, CoordinationError> {
+        let now = EpochMs::now();
+        let expires_at = EpochMs::new(now.as_millis().saturating_add(3_600_000))
+            .map_err(storage)?
+            .min(parent.expires_at);
+        data.grants.retain(|_, grant| {
+            grant.parent_grant.as_deref() != Some(&parent.id) || grant.expires_at > now
+        });
+        let scope = AccessScope::Guest { task_id };
+        let issued = record_grant(
+            data,
+            scope,
+            expires_at,
+            ProjectCapabilities::default(),
+            Some(parent.id),
+        );
+        self.persist(data).await?;
+        Ok(issued)
     }
 
     pub async fn access_grants(&self) -> Vec<AccessGrant> {
@@ -175,7 +215,8 @@ impl CoordinationRuntime {
         if !data.grants.values().any(|grant| grant.id == id) {
             return Err(CoordinationError::NotFound(id.into()));
         }
-        data.grants.retain(|_, grant| grant.id != id);
+        data.grants
+            .retain(|_, grant| grant.id != id && grant.parent_grant.as_deref() != Some(id));
         let result = self.persist(&mut data).await;
         drop(data);
         result
@@ -187,11 +228,7 @@ impl CoordinationRuntime {
 
     pub async fn authorize_grant(&self, token: &str) -> Result<AccessGrant, CoordinationError> {
         let data = self.0.data.lock().await;
-        let grant = data
-            .grants
-            .get(&digest(token))
-            .filter(|grant| grant.expires_at > EpochMs::now())
-            .ok_or(CoordinationError::Unauthorized)?;
+        let grant = active_grant(&data, token)?;
         if let AccessScope::Guest { task_id } = &grant.scope {
             if !data.tasks.contains_key(task_id) {
                 return Err(CoordinationError::Unauthorized);
@@ -271,6 +308,43 @@ impl CoordinationRuntime {
     }
 }
 
+fn record_grant(
+    data: &mut Data,
+    scope: AccessScope,
+    expires_at: EpochMs,
+    capabilities: ProjectCapabilities,
+    parent_grant: Option<String>,
+) -> IssuedAccess {
+    // Two independently random UUIDs supply 244 bits of OS-backed entropy.
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let grant = AccessGrant {
+        id: uuid::Uuid::new_v4().to_string(),
+        scope,
+        provider_updates: capabilities.provider_updates,
+        start_project_threads: capabilities.start_project_threads,
+        approve_project_threads: capabilities.approve_project_threads,
+        share_project_threads: capabilities.share_project_threads,
+        parent_grant,
+        expires_at,
+    };
+    data.grants.insert(digest(&token), grant.clone());
+    IssuedAccess { grant, token }
+}
+
 fn digest(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+pub(super) fn active_grant<'a>(
+    data: &'a Data,
+    token: &str,
+) -> Result<&'a AccessGrant, CoordinationError> {
+    data.grants
+        .get(&digest(token))
+        .filter(|grant| grant.expires_at > EpochMs::now())
+        .ok_or(CoordinationError::Unauthorized)
 }

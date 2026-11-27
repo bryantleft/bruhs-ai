@@ -2530,6 +2530,10 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-sidebar-search");
     assert_rendered_bounds(cx, "desktop-sidebar-new-thread");
     assert_rendered_bounds(cx, "desktop-workspace-navigation");
+    let brand = rendered_bounds(cx, "desktop-sidebar-header");
+    let navigation = rendered_bounds(cx, "desktop-workspace-navigation");
+    assert_eq!(brand.top(), navigation.top());
+    assert_eq!(brand.center().y, navigation.center().y);
     // No Threads tab: the active card (and ⌘K) return to the conversation.
     assert_no_rendered_bounds(cx, "desktop-workspace-threads");
     assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");

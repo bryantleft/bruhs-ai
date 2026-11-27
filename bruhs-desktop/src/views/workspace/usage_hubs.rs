@@ -167,6 +167,20 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(super) fn open_environment_usage(
+        &mut self,
+        environment: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_usage_dashboard(window, cx);
+        if let Some(dashboard) = &self.usage_hubs.dashboard {
+            dashboard.update(cx, |dashboard, cx| {
+                dashboard.select_environment(environment, cx)
+            });
+        }
+    }
+
     fn close_usage_dashboard(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let Some(Overlay::Usage { from_settings }) = self.overlay else {
             return;

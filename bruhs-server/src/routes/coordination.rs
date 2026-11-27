@@ -10,7 +10,9 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use bruhs_core::coordination::{AccessScope, BoardLinks, CoordinationError, CoordinationRuntime};
+use bruhs_core::coordination::{
+    AccessScope, BoardLinks, CoordinationError, CoordinationRuntime, ProjectCapabilities,
+};
 use bruhs_models::coordination::{board::TaskBoard, CoordinationCommand, CoordinationSnapshot};
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
@@ -19,6 +21,7 @@ use tower_http::compression::{
     CompressionLayer, CompressionLevel,
 };
 
+mod project_threads;
 mod provider_updates;
 mod task_editor;
 mod task_thread;
@@ -171,8 +174,8 @@ pub async fn wait_for_child(
 pub struct AccessRequest {
     scope: AccessScope,
     lifetime_seconds: u32,
-    #[serde(default)]
-    provider_updates: bool,
+    #[serde(flatten)]
+    capabilities: ProjectCapabilities,
 }
 
 pub async fn access_list(
@@ -192,10 +195,10 @@ pub async fn issue_access(
         [(header::CACHE_CONTROL, "no-store")],
         Json(
             runtime(value)?
-                .issue_access_with_updates(
+                .issue_access_with_capabilities(
                     request.scope,
                     request.lifetime_seconds,
-                    request.provider_updates,
+                    request.capabilities,
                 )
                 .await?,
         ),
@@ -291,6 +294,7 @@ fn remote_router_with_state(
             .route_layer(axum::middleware::from_fn_with_state(runtime.clone(), authorize_delivery_read)))
         .route("/api/projects", get(remote_projects))
         .merge(provider_updates::routes())
+        .merge(project_threads::routes())
         .merge(task_editor::routes(runtime.clone()))
         .merge(task_thread::routes(runtime.clone()))
         .route("/api/projects/usage", get(remote_project_usage))
@@ -468,6 +472,14 @@ async fn remote_projects(
             ("x-bruhs-edit-scheduled-tasks", task_edit.to_string()),
             ("x-bruhs-task-conversations", conversations.to_string()),
             ("x-bruhs-read-task-threads", read_threads.to_string()),
+            (
+                "x-bruhs-start-project-threads",
+                grant.start_project_threads.to_string(),
+            ),
+            (
+                "x-bruhs-share-project-threads",
+                grant.share_project_threads.to_string(),
+            ),
             ("x-bruhs-reply-task-threads", reply_threads.to_string()),
         ],
         Json(

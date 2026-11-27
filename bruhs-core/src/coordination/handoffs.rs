@@ -87,8 +87,13 @@ impl CoordinationRuntime {
             self.task(&started.task_id).await?;
             return Ok(started.task_id);
         }
-        self.create_with_handoff(request, None, Relationship::Root, Some(handoff))
-            .await
+        self.create_with_origin(
+            request,
+            None,
+            Relationship::Root,
+            CreationOrigin::WorkItem(Box::new(handoff)),
+        )
+        .await
     }
 
     pub async fn forget_work_item_handoff(&self, id: &ThreadId) -> Result<(), CoordinationError> {

@@ -69,6 +69,11 @@ pub enum AppView {
     Bruh {
         agent_id: String,
     },
+    /// A conversation started on a linked checkout.
+    LinkedProjectThread {
+        host: uuid::Uuid,
+        thread: crate::ids::ThreadId,
+    },
     /// A schedule's conversation lives on the paired environment that owns it.
     LinkedTaskThread {
         host: uuid::Uuid,
@@ -105,6 +110,10 @@ impl AppView {
             Self::Bruh { agent_id } => {
                 format!("/bruhs/{}", utf8_percent_encode(agent_id, ROUTE_COMPONENT))
             }
+            Self::LinkedProjectThread { host, thread } => format!(
+                "/linked/{host}/thread/{}",
+                utf8_percent_encode(thread.as_str(), ROUTE_COMPONENT)
+            ),
             Self::LinkedTaskThread { host, task, thread } => format!(
                 "/linked/{host}/tasks/{}/thread/{}",
                 utf8_percent_encode(task, ROUTE_COMPONENT),
@@ -136,6 +145,15 @@ impl AppView {
         }
         if let Some(rest) = route.strip_prefix("/linked/") {
             let parts: Vec<_> = rest.split('/').collect();
+            if let [host, "thread", thread] = parts.as_slice() {
+                return Some(Self::LinkedProjectThread {
+                    host: host.parse().ok()?,
+                    thread: crate::ids::ThreadId::try_from(
+                        percent_decode_str(thread).decode_utf8().ok()?.into_owned(),
+                    )
+                    .ok()?,
+                });
+            }
             let [host, "tasks", task, "thread", thread] = parts.as_slice() else {
                 return None;
             };
@@ -244,6 +262,7 @@ impl AppView {
             Self::Bruh { .. } => "bruh",
             Self::Room { .. } => "room",
             Self::LinkedTaskThread { .. } => "linked-task-thread",
+            Self::LinkedProjectThread { .. } => "linked-project-thread",
         }
     }
 }
@@ -406,6 +425,10 @@ mod tests {
             AppView::Tasks,
             AppView::Calendar,
             AppView::Life,
+            AppView::LinkedProjectThread {
+                host: uuid::Uuid::nil(),
+                thread: crate::ids::ThreadId::try_from("linked-conversation").unwrap(),
+            },
             AppView::LinkedTaskThread {
                 host: uuid::Uuid::nil(),
                 task: "reviews/daily".into(),
