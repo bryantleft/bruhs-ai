@@ -453,7 +453,13 @@ pub fn ImportThreadDialog() -> impl IntoView {
         <Dialog open=open on_close=on_close max_width="max-w-lg".to_string() label="Import thread" anchor_top=true>
             <div class="border-b border-longan-800 px-4 py-3">
                 <h2 class="text-label-sm text-rambutan-200">"Import thread"</h2>
-                <div class="mt-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Import from">
+                <div
+                    class="mt-2 flex gap-1 overflow-x-auto"
+                    role="tablist"
+                    aria-orientation="horizontal"
+                    aria-label="Import from"
+                    on:keydown=move |ev| crate::ui::tablist_keydown(&ev)
+                >
                     {ImportSource::LOCAL
                         .into_iter()
                         .map(ImportTab::Local)
@@ -468,6 +474,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
                                     type="button"
                                     role="tab"
                                     aria-selected=move || (tab.get() == each).to_string()
+                                    tabindex=move || if tab.get() == each { "0" } else { "-1" }
                                     on:click=move |_| tab.set(each)
                                     class=move || {
                                         if tab.get() == each {

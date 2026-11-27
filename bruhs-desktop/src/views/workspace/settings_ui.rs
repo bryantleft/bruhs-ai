@@ -9,15 +9,21 @@ use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::{Calendar, GoogleCalendarSyncState, WhisperModel};
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::Input;
+#[cfg(test)]
+pub use bruhs_ui::slider::slider_fraction;
+use bruhs_ui::slider::Slider;
+pub use bruhs_ui::slider::{format_value, slider_value_at, snap};
+use bruhs_ui::stepper::Stepper;
 use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
+use std::rc::Rc;
 
 use super::{Workspace, SETTINGS_ROW_CONTROL_WIDTH_PX};
+use crate::theme;
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption};
 use crate::views::meetings_hub::MeetingPrefs;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
-use crate::{assets, theme};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
 use bruhs_ui::input::{InputEvent, InputState};
@@ -33,21 +39,7 @@ const WHISPER_DROPDOWN_WIDTH_PX: f32 = 320.0;
 /// `text-body-sm` 14 / `text-code-sm` 12 (Neon 400).
 const LABEL_PX: f32 = 14.0;
 const LABEL_SM_PX: f32 = 12.0;
-const BODY_SM_PX: f32 = 14.0;
 const CODE_SM_PX: f32 = 12.0;
-/// Web `Switch`: `h-6 w-11` (24×44, the 24px target floor), `size-5` thumb
-/// at `translate-x-0.5` / `1.375rem`.
-/// Web `Stepper`: `h-8`, `w-8` side buttons, `w-12` value, `rounded-grape`.
-const STEPPER_HEIGHT_PX: f32 = theme::CONTROL_PX;
-const STEPPER_SIDE_WIDTH_PX: f32 = theme::CONTROL_PX;
-const STEPPER_VALUE_WIDTH_PX: f32 = 48.0;
-const STEPPER_ICON_PX: f32 = theme::ICON_PX;
-const STEPPER_DISABLED_OPACITY: f32 = 0.6;
-const STEPPER_SIDE_DISABLED_OPACITY: f32 = 0.4;
-/// Web `Slider`: `h-5` row, `h-1.5` track, `1rem` thumb.
-const SLIDER_HEIGHT_PX: f32 = 20.0;
-const SLIDER_TRACK_PX: f32 = 6.0;
-const SLIDER_THUMB_PX: f32 = 16.0;
 const GRAPE_RADIUS_PX: f32 = 8.0;
 const SEED_RADIUS_PX: f32 = 4.0;
 
@@ -64,54 +56,6 @@ pub(super) fn friendly_server_error(error: &impl std::fmt::Display) -> String {
     } else {
         raw
     }
-}
-
-/// Web `stepper::snap`: snap to the step grid (from `min`) and clamp.
-pub fn snap(v: f64, min: Option<f64>, max: Option<f64>, step: f64) -> f64 {
-    let step = if step > 0.0 { step } else { 1.0 };
-    let base = min.unwrap_or(0.0);
-    let mut out = base + ((v - base) / step).round() * step;
-    if let Some(lo) = min {
-        out = out.max(lo);
-    }
-    if let Some(hi) = max {
-        out = out.min(hi);
-    }
-    if step.fract() == 0.0 {
-        out = out.round();
-    }
-    if out == 0.0 {
-        0.0
-    } else {
-        out
-    }
-}
-
-/// Web `stepper::format_value`: integer grids print as integers.
-pub fn format_value(v: f64, step: f64) -> String {
-    if step.fract() == 0.0 {
-        format!("{}", v.round().to_i64_saturating())
-    } else {
-        format!("{v:.2}")
-    }
-}
-
-/// Web `slider::fill_width` fraction: where the thumb centre sits.
-pub fn slider_fraction(value: f64, min: f64, max: f64) -> f64 {
-    let span = max - min;
-    if span > 0.0 {
-        ((value - min) / span).clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
-}
-
-/// Value under a pointer `x` px into a track `width` px wide: the thumb
-/// travels the inner `width - thumb` like a native range input.
-pub fn slider_value_at(x: f32, width: f32, min: f64, max: f64, step: f64) -> f64 {
-    let inner = (width - SLIDER_THUMB_PX).max(1.0);
-    let fraction = f64::from(((x - SLIDER_THUMB_PX / 2.0) / inner).clamp(0.0, 1.0));
-    snap(min + fraction * (max - min), Some(min), Some(max), step)
 }
 
 /// Web `GoogleCalendarSettings::status_text`.
@@ -337,59 +281,6 @@ fn stepper_pref_value(kind: SettingsStepper, prefs: &MeetingPrefs) -> f64 {
     }
 }
 
-fn stepper_side<F>(
-    id: SharedString,
-    icon_path: &'static str,
-    aria_label: &'static str,
-    disabled: bool,
-    cx: &Context<'_, Workspace>,
-    action: F,
-) -> AnyElement
-where
-    F: Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + Clone + 'static,
-{
-    let selector = id.clone();
-    let group = id.clone();
-    div()
-        .id(id)
-        .debug_selector(move || selector.to_string())
-        .group(group.clone())
-        .w(px(STEPPER_SIDE_WIDTH_PX))
-        .h_full()
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .border_1()
-        .border_color(gpui::transparent_black())
-        .role(Role::Button)
-        .aria_label(aria_label)
-        .when(disabled, |el| {
-            el.opacity(STEPPER_SIDE_DISABLED_OPACITY)
-                .cursor_not_allowed()
-        })
-        .when(!disabled, |el| {
-            activate(
-                el.cursor_pointer()
-                    .tab_index(0)
-                    .focus_visible(focus_ring)
-                    .hover(|el| el.bg(gpui::white().opacity(0.05))),
-                cx,
-                action,
-            )
-        })
-        .child(
-            svg()
-                .path(icon_path)
-                .size(px(STEPPER_ICON_PX))
-                .text_color(theme::rambutan_400())
-                .when(!disabled, |el| {
-                    el.group_hover(group, |el| el.text_color(theme::rambutan_100()))
-                }),
-        )
-        .into_any_element()
-}
-
 impl Workspace {
     pub(super) fn update_meeting_prefs(
         &mut self,
@@ -464,96 +355,25 @@ impl Workspace {
     ) -> AnyElement {
         let (min, max, step) = kind.spec();
         let value = self.settings_stepper_value(kind, cx);
-        let at_min = value <= min;
-        let at_max = value >= max;
-        let selector = kind.selector();
-        let suffix = kind.suffix();
         let input = self.settings_stepper_inputs[kind.index()].clone();
-        div()
-            .id(selector)
-            .debug_selector(move || selector.to_string())
-            .h(px(STEPPER_HEIGHT_PX))
-            .flex()
-            .items_stretch()
-            .overflow_hidden()
-            .rounded(px(GRAPE_RADIUS_PX))
-            .bg(gpui::white().opacity(0.05))
-            .border_1()
-            .border_color(gpui::white().opacity(0.10))
-            .when(disabled, |el| el.opacity(STEPPER_DISABLED_OPACITY))
-            .child(stepper_side(
-                format!("{selector}-decrease").into(),
-                assets::MINUS_ICON_PATH,
-                "Decrease",
-                disabled || at_min,
-                cx,
-                move |this, window, cx| {
-                    let current = this.settings_stepper_value(kind, cx);
-                    this.set_settings_stepper_value(kind, current - step, window, cx)
-                },
-            ))
-            .child(
-                div()
-                    .id(SharedString::from(format!("{selector}-value")))
-                    .w(px(STEPPER_VALUE_WIDTH_PX))
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .font_family(theme::CODE_FONT_FAMILY)
-                    .text_size(px(BODY_SM_PX))
-                    .text_color(theme::rambutan_100())
-                    .when(disabled, |el| el.cursor_not_allowed())
-                    .when(!disabled, |el| {
-                        el.on_key_down(cx.listener(
-                            move |this, event: &KeyDownEvent, window, cx| {
-                                let dir = match event.keystroke.key.as_str() {
-                                    "up" => 1.0,
-                                    "down" => -1.0,
-                                    _ => return,
-                                };
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                let current = this.settings_stepper_value(kind, cx);
-                                this.set_settings_stepper_value(
-                                    kind,
-                                    current + dir * step,
-                                    window,
-                                    cx,
-                                );
-                            },
-                        ))
-                    })
-                    .child(
-                        Input::new(&input)
-                            .appearance(false)
-                            // Web: the stepper's value has no padding.
-                            .px_0()
-                            .disabled(disabled)
-                            .text_center()
-                            .w_full()
-                            .aria_label(kind.aria_label()),
-                    ),
-            )
-            .when(!suffix.is_empty(), |el| {
-                el.child(div().flex().items_center().pr_1().child(label_text(
-                    suffix,
-                    LABEL_SM_PX,
-                    theme::rambutan_500(),
-                )))
-            })
-            .child(stepper_side(
-                format!("{selector}-increase").into(),
-                assets::PLUS_ICON_PATH,
-                "Increase",
-                disabled || at_max,
-                cx,
-                move |this, window, cx| {
-                    let current = this.settings_stepper_value(kind, cx);
-                    this.set_settings_stepper_value(kind, current + step, window, cx)
-                },
-            ))
-            .into_any_element()
+        let entity = cx.entity().downgrade();
+        Stepper::new(
+            kind.selector(),
+            kind.aria_label(),
+            input,
+            value,
+            min,
+            max,
+            step,
+            Rc::new(move |next, window, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.set_settings_stepper_value(kind, next, window, cx);
+                });
+            }),
+        )
+        .suffix(kind.suffix())
+        .disabled(disabled)
+        .into_any_element()
     }
 
     fn settings_slider_value(&self, kind: SettingsSlider, cx: &Context<'_, Self>) -> f64 {
@@ -677,121 +497,20 @@ impl Workspace {
     ) -> AnyElement {
         let (min, max, step) = kind.spec();
         let value = self.settings_slider_value(kind, cx);
-        let fraction = slider_fraction(value, min, max).to_f32_lossy();
         let bounds_cell = self.settings_slider_bounds[kind.index()].clone();
-        let selector = kind.selector();
-        let track_top = (SLIDER_HEIGHT_PX - SLIDER_TRACK_PX) / 2.0 - 1.0;
-        let thumb_top = (SLIDER_HEIGHT_PX - SLIDER_THUMB_PX) / 2.0 - 1.0;
-        let half_thumb = SLIDER_THUMB_PX / 2.0;
-        div()
-            .id(selector)
-            .debug_selector(move || selector.to_string())
-            .relative()
-            .w_full()
-            .h(px(SLIDER_HEIGHT_PX))
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .cursor_pointer()
-            .role(Role::Slider)
-            .aria_label(kind.aria_label())
-            .aria_numeric_value(value)
-            .aria_min_numeric_value(min)
-            .aria_max_numeric_value(max)
-            .aria_numeric_value_step(step)
-            .tab_index(0)
-            .focus_visible(focus_ring)
-            .child(
-                canvas(
-                    move |bounds, _window, _cx| bounds_cell.set(Some(bounds)),
-                    |_bounds, _state, _window, _cx| {},
-                )
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full(),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(px(track_top))
-                    .h(px(SLIDER_TRACK_PX))
-                    .rounded_full()
-                    .bg(theme::longan_700())
-                    .border_1()
-                    .border_color(gpui::white().opacity(0.05)),
-            )
-            .child(
-                // The fill runs from the track's left edge to the thumb
-                // centre: a fixed half-thumb cap plus a share of the inner
-                // travel (web `calc(0.5rem + (100% - 1rem) * pct)`).
-                div()
-                    .absolute()
-                    .left(px(half_thumb))
-                    .right(px(half_thumb))
-                    .top(px(track_top))
-                    .h(px(SLIDER_TRACK_PX))
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(-half_thumb))
-                            .top_0()
-                            .w(px(half_thumb))
-                            .h_full()
-                            .rounded_tl(px(SLIDER_TRACK_PX))
-                            .rounded_bl(px(SLIDER_TRACK_PX))
-                            .bg(theme::persimmon_500()),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top_0()
-                            .w(relative(fraction))
-                            .h_full()
-                            .bg(theme::persimmon_500()),
-                    ),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(half_thumb))
-                    .right(px(half_thumb))
-                    .top(px(thumb_top))
-                    .h(px(SLIDER_THUMB_PX))
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left(relative(fraction))
-                            .ml(px(-half_thumb))
-                            .size(px(SLIDER_THUMB_PX))
-                            .rounded_full()
-                            .bg(theme::rambutan_100())
-                            .border_1()
-                            .border_color(rgba(0x14121099)),
-                    ),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    cx.stop_propagation();
-                    this.begin_settings_slider_drag(kind, event.position.x, cx);
-                }),
-            )
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                let current = this.settings_slider_value(kind, cx);
-                let next = match event.keystroke.key.as_str() {
-                    "left" | "down" => current - step,
-                    "right" | "up" => current + step,
-                    "home" => min,
-                    "end" => max,
-                    _ => return,
-                };
-                window.prevent_default();
-                cx.stop_propagation();
-                this.set_settings_slider_value(kind, next, cx);
+        let drag_entity = cx.entity().downgrade();
+        let change_entity = cx.entity().downgrade();
+        Slider::new(kind.selector(), kind.aria_label(), value, min, max, step)
+            .bounds(bounds_cell)
+            .on_drag_start(Rc::new(move |x, _, cx| {
+                let _ = drag_entity.update(cx, |this, cx| {
+                    this.begin_settings_slider_drag(kind, x, cx);
+                });
+            }))
+            .on_change(Rc::new(move |next, _, cx| {
+                let _ = change_entity.update(cx, |this, cx| {
+                    this.set_settings_slider_value(kind, next, cx);
+                });
             }))
             .into_any_element()
     }

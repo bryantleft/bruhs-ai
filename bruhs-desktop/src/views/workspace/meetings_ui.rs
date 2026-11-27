@@ -2762,132 +2762,45 @@ impl Workspace {
     /// Web `BannerStack`: a compact top-right floating toast below the header.
     pub(super) fn render_hub_notice(
         &self,
-        window: &Window,
+        _window: &Window,
         cx: &Context<'_, Self>,
     ) -> Option<AnyElement> {
         let notice = self.meetings_hub.read(cx).notice.clone()?;
-        // Elevated dark toast with a focused severity accent; top-right below
-        // the header keeps the bottom composer, send button, and transcript clear.
-        let (ring, accent, icon_path) = if notice.warning {
-            (
-                theme::lychee_500().opacity(0.40),
-                theme::lychee_400(),
-                assets::CIRCLE_ALERT_ICON_PATH,
-            )
+        let tone = if notice.warning {
+            bruhs_ui::banner::BannerTone::Error
         } else {
-            (
-                gpui::white().opacity(0.12),
-                theme::rambutan_300(),
-                assets::CHECK_ICON_PATH,
-            )
+            bruhs_ui::banner::BannerTone::Neutral
         };
-        let bg = theme::longan_900();
-        let fg = theme::rambutan_100();
+        let dismiss_ws = cx.entity().downgrade();
+        let mut card =
+            bruhs_ui::notice_stack::NoticeCard::new("desktop-hub-notice", tone, notice.message)
+                .on_dismiss(std::rc::Rc::new(move |window, cx| {
+                    let _ = dismiss_ws.update(cx, |this, cx| {
+                        if this.settings_visible() {
+                            this.modal_start_focus_handle.focus(window, cx);
+                        } else {
+                            this.workspace_focus_handle.focus(window, cx);
+                        }
+                        this.meetings_hub
+                            .update(cx, |hub, cx| hub.dismiss_notice(cx));
+                    });
+                }));
+        if let Some(action) = notice.action {
+            let action_ws = cx.entity().downgrade();
+            let label = action.label();
+            card = card.action(bruhs_ui::notice_stack::NoticeAction::new(
+                "desktop-hub-notice-action",
+                label,
+                std::rc::Rc::new(move |window, cx| {
+                    let _ = action_ws.update(cx, |this, cx| {
+                        this.run_notice_action(action.clone(), window, cx);
+                    });
+                }),
+            ));
+        }
         Some(
-            div()
-                .id("desktop-notification-rail")
-                .debug_selector(|| "desktop-notification-rail".into())
-                .role(Role::Status)
-                .aria_label("Notifications")
-                .absolute()
-                .top(px(theme::APP_HEADER_HEIGHT_PX + NOTICE_TOP_GAP_PX))
-                .left_0()
-                .right_0()
-                .px_3()
-                .flex()
-                .justify_end()
-                .child(
-                    div()
-                        .id("desktop-hub-notice")
-                        .debug_selector(|| "desktop-hub-notice".to_string())
-                        .occlude()
-                        .w_full()
-                        .min_w_0()
-                        .max_w(px(360.0))
-                        .max_h(window.viewport_size().height * 0.3)
-                        .overflow_y_scroll()
-                        .flex_shrink_0()
-                        .rounded(px(10.0))
-                        .bg(bg)
-                        .border_1()
-                        .border_color(ring)
-                        .shadow_md()
-                        .pl_3()
-                        .pr_2()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .gap_2p5()
-                        .font_family(crate::theme::FontFace::Interface.with_default(LABEL_FONT))
-                        .text_size(px(LABEL_PX))
-                        .line_height(relative(1.4))
-                        .text_color(fg)
-                        .child(
-                            svg()
-                                .path(icon_path)
-                                .size(px(theme::ICON_PX))
-                                .flex_shrink_0()
-                                .text_color(accent),
-                        )
-                        .child(div().min_w_0().flex_1().child(notice.message))
-                        .children(notice.action.map(|action| {
-                            text_button(
-                                "desktop-hub-notice-action",
-                                action.label(),
-                                theme::persimmon_300(),
-                                theme::persimmon_200(),
-                            )
-                            .debug_selector(|| "desktop-hub-notice-action".into())
-                            .my_neg_1()
-                            .min_h(px(theme::CONTROL_PX))
-                            .min_w(px(theme::CONTROL_PX))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .map(|el| {
-                                on_press_view(el, cx, move |this, window, cx| {
-                                    this.run_notice_action(action.clone(), window, cx);
-                                })
-                            })
-                        }))
-                        .child(on_press_view(
-                            div()
-                                .id("desktop-hub-notice-dismiss")
-                                .debug_selector(|| "desktop-hub-notice-dismiss".into())
-                                .role(Role::Button)
-                                .aria_label("Dismiss notification")
-                                .tab_index(0)
-                                .cursor_pointer()
-                                .my_neg_1()
-                                .size(px(theme::CONTROL_PX))
-                                .flex_shrink_0()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(6.0))
-                                .border_1()
-                                .border_color(gpui::transparent_black())
-                                .hover(|el| el.bg(theme::longan_800()))
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .child(
-                                    svg()
-                                        .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(theme::ICON_INLINE_SM_PX))
-                                        .text_color(theme::rambutan_400()),
-                                ),
-                            cx,
-                            |this, window, cx| {
-                                if this.settings_visible() {
-                                    this.modal_start_focus_handle.focus(window, cx);
-                                } else {
-                                    this.workspace_focus_handle.focus(window, cx);
-                                }
-                                this.meetings_hub
-                                    .update(cx, |hub, cx| hub.dismiss_notice(cx));
-                            },
-                        )),
-                )
+            bruhs_ui::notice_stack::NoticeStack::new("desktop-notification-rail", vec![card])
+                .top_offset_px(theme::APP_HEADER_HEIGHT_PX + NOTICE_TOP_GAP_PX)
                 .into_any_element(),
         )
     }

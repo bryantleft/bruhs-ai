@@ -29,7 +29,7 @@ use crate::state::{
     TitleInstructionsSignal,
 };
 use crate::ui::BrailleBruh;
-use crate::ui::{Dropdown, DropdownOption, Icon, Switch};
+use crate::ui::{Breadcrumb, BreadcrumbSep, Dropdown, DropdownOption, Icon, Switch};
 
 mod trusted_folders;
 use trusted_folders::TrustedFolders;
@@ -726,9 +726,11 @@ pub fn SettingsPage() -> impl IntoView {
     view! {
         <section class="flex h-full min-h-0 flex-1 flex-col bg-longan-950">
             <header class="flex h-11 shrink-0 items-center gap-2 border-b border-longan-800/60 px-4">
-                <h1 class="text-label text-rambutan-100">"Settings"</h1>
-                <span class="text-label-sm text-rambutan-500" aria-hidden="true">"/"</span>
-                <span class="text-label-sm text-rambutan-300">{current_label}</span>
+                <Breadcrumb>
+                    <h1 class="text-label text-rambutan-100">"Settings"</h1>
+                    <BreadcrumbSep />
+                    <span class="truncate text-label-sm text-rambutan-300">{current_label}</span>
+                </Breadcrumb>
                 <span class="flex-1"></span>
                 <button
                     type="button"

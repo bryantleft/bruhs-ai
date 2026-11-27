@@ -46,7 +46,7 @@ pub fn Checkbox(
                 if checked.get() {
                     "bg-persimmon-500 text-longan-950"
                 } else {
-                    "bg-white/5 text-transparent inset-ring inset-ring-white/15 hover:bg-white/10"
+                    "bg-white/5 text-transparent inset-ring inset-ring-rambutan-500 hover:bg-white/10"
                 }
             )
             on:click=toggle

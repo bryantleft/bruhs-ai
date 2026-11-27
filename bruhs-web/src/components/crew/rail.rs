@@ -21,7 +21,7 @@ use super::room_dialog::RoomDialog;
 use super::shortcuts::CrewFocusRequest;
 use crate::components::reactive_automations::local_time;
 use crate::state::{load_pref, save_pref, ActiveView, AppView, SetActiveView, ThreadNotice};
-use crate::ui::Icon;
+use crate::ui::{CountBadge, Icon};
 
 /// Where the rail's open or closed state is kept.
 const OPEN_PREF: &str = "bruhs.crewRailOpen";
@@ -96,12 +96,9 @@ fn room_block_for(protocol: Option<u32>, bruhs: Option<usize>) -> Option<&'stati
     }
 }
 
+#[cfg(test)]
 fn unread_text(unread: usize) -> String {
-    if unread > 99 {
-        "99+".into()
-    } else {
-        unread.to_string()
-    }
+    crate::ui::format_count(unread)
 }
 
 /// One bruh's row, kept current from `rows` by its id.
@@ -152,10 +149,7 @@ fn rail_row(
                     <span class="block truncate text-label text-rambutan-100">{name}</span>
                     <span class="block truncate text-label-sm text-rambutan-500">{line}</span>
                 </span>
-                <Show when=move || { unread() > 0 }>
-                    <span aria-hidden="true" class="shrink-0 rounded-orb bg-blueberry-400 px-1.5 text-label-sm text-longan-950">{move || unread_text(unread())}</span>
-                    <span class="sr-only">{move || format!("{} unread", unread())}</span>
-                </Show>
+                <CountBadge count=Signal::derive(unread) />
             </button>
         </li>
     }

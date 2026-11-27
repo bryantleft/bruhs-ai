@@ -162,6 +162,30 @@ fn FileTree() -> impl IntoView {
 
 #[component]
 pub fn FilesPanel() -> impl IntoView {
-    let mode = RwSignal::new(0u8);
-    view! {<div class="flex h-full min-h-0 flex-col"><div class="flex shrink-0 gap-2 border-b border-longan-800 p-2" role="tablist" aria-label="Project tools">{[(0u8,"Files"),(1,"Databases"),(2,"API")].into_iter().map(move |(index,label)|view!{<button type="button" role="tab" aria-selected=move ||(mode.get()==index).to_string() class=move ||if mode.get()==index{"bruhs-control min-h-control rounded-grape bg-longan-800 px-2 text-label-sm text-rambutan-100"}else{"bruhs-control min-h-control rounded-grape px-2 text-label-sm hover:bg-longan-800"} on:click=move |_|mode.set(index)>{label}</button>}).collect_view()}</div><div class="min-h-0 flex-1">{move ||match mode.get(){1=>view!{<super::database_panel::DatabasePanel />}.into_any(),2=>view!{<super::api_client_panel::ApiClientPanel />}.into_any(),_=>view!{<FileTree />}.into_any()}}</div></div>}
+    let mode = RwSignal::new("files".to_string());
+    view! {
+        <crate::ui::Tabs
+            value=Signal::derive(move || mode.get())
+            on_change=Callback::new(move |next| mode.set(next))
+            class="h-full min-h-0"
+        >
+            <crate::ui::TabsList
+                aria_label="Project tools"
+                class="flex shrink-0 gap-2 rounded-none bg-transparent inset-ring-0 border-b border-longan-800 p-2"
+            >
+                <crate::ui::TabsTrigger value="files">"Files"</crate::ui::TabsTrigger>
+                <crate::ui::TabsTrigger value="databases">"Databases"</crate::ui::TabsTrigger>
+                <crate::ui::TabsTrigger value="api">"API"</crate::ui::TabsTrigger>
+            </crate::ui::TabsList>
+            <crate::ui::TabsContent value="files" class="mt-0 min-h-0 flex-1">
+                <FileTree />
+            </crate::ui::TabsContent>
+            <crate::ui::TabsContent value="databases" class="mt-0 min-h-0 flex-1">
+                <super::database_panel::DatabasePanel />
+            </crate::ui::TabsContent>
+            <crate::ui::TabsContent value="api" class="mt-0 min-h-0 flex-1">
+                <super::api_client_panel::ApiClientPanel />
+            </crate::ui::TabsContent>
+        </crate::ui::Tabs>
+    }
 }

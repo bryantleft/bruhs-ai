@@ -2234,13 +2234,8 @@ fn registry_status(row: &registry::Installed) -> String {
 }
 
 fn up_to_date_badge() -> AnyElement {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
-        .text_color(theme::pandan_400())
-        .child(icon_svg(assets::CHECK_ICON_PATH, 12.0, theme::pandan_400()))
-        .child("Up to date")
+    bruhs_ui::badge::Badge::new("Up to date", bruhs_ui::badge::BadgeTone::Success)
+        .icon(bruhs_ui::icons::CHECK)
+        .inline()
         .into_any_element()
 }

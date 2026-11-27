@@ -777,21 +777,27 @@ impl UsageWindow {
             .border_color(theme::longan_800())
             .bg(theme::longan_900())
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.))
-                    .text_size(px(14.))
-                    .text_color(theme::rambutan_400())
-                    .child(div().pr(filter_inset).child("Usage"))
-                    .child("/")
-                    .child(
-                        div()
-                            .mr(px(-2.))
-                            .child(self.render_filter(Filter::Environment, cx)),
-                    )
-                    .child("/")
-                    .child(self.render_filter(Filter::Provider, cx)),
+                bruhs_ui::breadcrumb::Breadcrumb::new(
+                    "usage-breadcrumb",
+                    vec![
+                        bruhs_ui::breadcrumb::BreadcrumbItem::custom(
+                            div()
+                                .pr(filter_inset)
+                                .text_size(px(14.))
+                                .text_color(theme::rambutan_400())
+                                .child("Usage"),
+                        ),
+                        bruhs_ui::breadcrumb::BreadcrumbItem::custom(
+                            div()
+                                .mr(px(-2.))
+                                .child(self.render_filter(Filter::Environment, cx)),
+                        ),
+                        bruhs_ui::breadcrumb::BreadcrumbItem::custom(
+                            self.render_filter(Filter::Provider, cx),
+                        ),
+                    ],
+                )
+                .gap_px(5.0),
             )
             .child(actions)
     }

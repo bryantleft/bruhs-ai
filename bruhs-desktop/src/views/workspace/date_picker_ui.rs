@@ -4,33 +4,23 @@
 //! input states in the web's wire formats (`YYYY-MM-DD`,
 //! `YYYY-MM-DDTHH:MM`), so the create / update paths are unchanged.
 
+#[cfg(test)]
+pub use bruhs_ui::date_picker::first_weekday;
+use bruhs_ui::date_picker::MonthGrid;
+pub use bruhs_ui::date_picker::{
+    parse_iso_date, parse_iso_datetime, step_month, trigger_label, MONTHS,
+};
 use bruhs_ui::input::{Input, InputEvent, InputState};
 use bruhs_ui::tooltip::Tooltip;
 use bruhs_ui::zoom::px;
 use chrono::{Datelike, Local, NaiveDate};
 use gpui::prelude::*;
 use gpui::*;
+use std::rc::Rc;
 
 use super::Workspace;
 use crate::{assets, theme};
-use bruhs_models::time::days_in_month;
 use bruhs_ui::press::on_press_view;
-
-pub(crate) const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
-pub(crate) const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 const TRIGGER_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
 const TRIGGER_ICON_PX: f32 = theme::ICON_PX;
@@ -38,9 +28,6 @@ const POPOVER_WIDTH_PX: f32 = 256.0;
 const POPOVER_GAP_PX: f32 = 4.0;
 /// Web `disabled:opacity-60` on the date-time trigger.
 const DATE_FIELD_DISABLED_OPACITY: f32 = 0.6;
-const CELL_PX: f32 = theme::APP_COMPACT_CONTROL_HEIGHT_PX;
-const GRID_GAP_PX: f32 = 2.0;
-const MONTH_BUTTON_PX: f32 = theme::CONTROL_SM_PX;
 const TIME_FIELD_WIDTH_PX: f32 = 56.0;
 const LABEL_PX: f32 = 14.0;
 const LABEL_SM_PX: f32 = 12.0;
@@ -98,51 +85,6 @@ pub(super) struct DatePickerOpen {
     pub month: u32,
 }
 
-/// Web `date_picker::parse_iso`: `YYYY-MM-DD` → `(year, month, day)`.
-pub fn parse_iso_date(s: &str) -> Option<(i32, u32, u32)> {
-    let mut parts = s.trim().split('-');
-    let y = parts.next()?.parse::<i32>().ok()?;
-    let m = parts.next()?.parse::<u32>().ok()?;
-    let d = parts.next()?.parse::<u32>().ok()?;
-    ((1..=12).contains(&m) && (1..=31).contains(&d)).then_some((y, m, d))
-}
-
-/// Web `date_time_picker::parse_iso_datetime`: `YYYY-MM-DDTHH:MM[:SS]`.
-pub fn parse_iso_datetime(s: &str) -> Option<(i32, u32, u32, u32, u32)> {
-    let (date, time) = s.trim().split_once('T')?;
-    let (y, m, d) = parse_iso_date(date)?;
-    let (h, mi) = time.split_once(':')?;
-    let mi = mi.split(':').next()?;
-    let h = h.parse::<u32>().ok().filter(|h| *h < 24)?;
-    let mi = mi.parse::<u32>().ok().filter(|x| *x < 60)?;
-    Some((y, m, d, h, mi))
-}
-
-/// Weekday (0 = Sunday) of the 1st of the month.
-pub fn first_weekday(year: i32, month: u32) -> u32 {
-    NaiveDate::from_ymd_opt(year, month, 1).map_or(0, |d| d.weekday().num_days_from_sunday())
-}
-
-/// Web trigger labels: the value, or the placeholder.
-pub fn trigger_label(with_time: bool, value: &str) -> String {
-    if with_time {
-        match parse_iso_datetime(value) {
-            Some((y, m, d, h, mi)) => format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}"),
-            None => "Select date & time".to_string(),
-        }
-    } else if value.trim().is_empty() {
-        "Select date".to_string()
-    } else {
-        value.trim().to_string()
-    }
-}
-
-/// Month after stepping `delta` (±1) from `(year, month)`.
-pub fn step_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
-    let index = year * 12 + (i32::try_from(month).unwrap_or(1) - 1) + delta;
-    (index.div_euclid(12), (index.rem_euclid(12) + 1) as u32)
-}
-
 fn focus_ring(style: StyleRefinement) -> StyleRefinement {
     style.border_color(theme::persimmon_400())
 }
@@ -171,184 +113,26 @@ pub(crate) fn month_grid<V: 'static>(
     step: impl Fn(&mut V, i32, &mut Window, &mut Context<'_, V>) + Copy + 'static,
     pick: impl Fn(&mut V, NaiveDate, &mut Window, &mut Context<'_, V>) + Copy + 'static,
 ) -> Div {
-    let lead = first_weekday(year, month) as usize;
-    // The open month is always 1–12; 30 is never used.
-    let total = days_in_month(year, month).unwrap_or(30);
-    let slots = if navigation.is_some() {
-        42
-    } else {
-        (lead + total as usize).div_ceil(7) * 7
-    };
-    let first = NaiveDate::from_ymd_opt(year, month, 1);
-    let cells: Vec<_> = (0..slots)
-        .map(|i| {
-            let date = first?.checked_add_signed(chrono::Duration::days(
-                i64::try_from(i).ok()? - i64::try_from(lead).ok()?,
-            ))?;
-            if navigation.is_some() {
-                (1..=9999).contains(&date.year()).then_some(date)
-            } else {
-                (date.month() == month).then_some(date)
+    let step_view = cx.entity().downgrade();
+    let pick_view = cx.entity().downgrade();
+    let mut grid = MonthGrid::new(
+        year,
+        month,
+        selected,
+        Rc::new(move |delta, window, cx| {
+            let _ = step_view.update(cx, |this, cx| step(this, delta, window, cx));
+        }),
+        Rc::new(move |(y, m, d), window, cx| {
+            if let Some(date) = NaiveDate::from_ymd_opt(y, m, d) {
+                let _ = pick_view.update(cx, |this, cx| pick(this, date, window, cx));
             }
-        })
-        .collect();
-    let (day_focus, title) = match navigation {
-        Some((focus, title)) => (Some(focus), title),
-        None => (
-            None,
-            label(
-                format!("{} {year}", MONTHS[(month - 1) as usize]),
-                LABEL_PX,
-                theme::rambutan_100(),
-            )
-            .into_any_element(),
-        ),
-    };
-
-    let month_button = |id: &'static str, path: &'static str, delta: i32| {
-        div()
-            .id(id)
-            .debug_selector(move || id.to_string())
-            .size(px(MONTH_BUTTON_PX))
-            .rounded(px(SEED_RADIUS_PX))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(theme::rambutan_300())
-            .role(Role::Button)
-            .aria_label(if delta < 0 {
-                "Previous month"
-            } else {
-                "Next month"
-            })
-            .tab_index(0)
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .focus_visible(focus_ring)
-            .cursor_pointer()
-            .hover(|el| el.bg(theme::longan_800()))
-            .map(|el| {
-                on_press_view(el, cx, move |this, window, cx| {
-                    step(this, delta, window, cx);
-                })
-            })
-            .child(
-                svg()
-                    .path(path)
-                    .size(px(14.0))
-                    .text_color(theme::rambutan_300()),
-            )
-    };
-
-    let mut weekday_row = div().flex().gap(px(GRID_GAP_PX)).mb_1();
-    for day in WEEKDAYS {
-        weekday_row = weekday_row.child(
-            div()
-                .flex_1()
-                .h(px(LABEL_SM_PX * 1.5))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(label(day, LABEL_SM_PX, theme::rambutan_500())),
-        );
+        }),
+    )
+    .selector_prefix("desktop-date-picker");
+    if let Some((focus, title)) = navigation {
+        grid = grid.navigation(focus.clone(), title);
     }
-
-    let mut grid = div().flex().flex_col().gap(px(GRID_GAP_PX));
-    for (row_ix, week) in cells.chunks(7).enumerate() {
-        let mut row = div().flex().gap(px(GRID_GAP_PX));
-        for (col_ix, cell) in week.iter().enumerate() {
-            let slot = div()
-                .flex_1()
-                .h(px(CELL_PX))
-                .flex()
-                .items_center()
-                .justify_center();
-            let Some(date) = *cell else {
-                row = row.child(slot);
-                continue;
-            };
-            let day = date.day();
-            let adjacent = date.month() != month;
-            let is_selected = selected == Some((date.year(), date.month(), day));
-            let cell_ix = row_ix * 7 + col_ix;
-            row = row.child(
-                slot.child(
-                    div()
-                        .id(("desktop-date-picker-day", cell_ix))
-                        .debug_selector(move || format!("desktop-date-picker-day-{date}"))
-                        .size(px(CELL_PX))
-                        .rounded(px(SEED_RADIUS_PX))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(LABEL_PX))
-                        .font_weight(FontWeight::MEDIUM)
-                        .map(|el| {
-                            if is_selected {
-                                el.bg(theme::persimmon_500())
-                                    .text_color(theme::longan_950())
-                            } else {
-                                el.text_color(if adjacent {
-                                    theme::rambutan_500()
-                                } else {
-                                    theme::rambutan_200()
-                                })
-                                .hover(|el| el.bg(theme::longan_800()))
-                            }
-                        })
-                        .role(Role::Button)
-                        .aria_label(format!(
-                            "{} {day}, {}",
-                            MONTHS[date.month0() as usize],
-                            date.year()
-                        ))
-                        .aria_selected(is_selected)
-                        .tab_index(0)
-                        .when_some(day_focus, |el, handle| {
-                            let cursor = !adjacent
-                                && selected.map_or(1, |(_, _, day)| day.min(total)) == day;
-                            el.tab_stop(cursor)
-                                .when(cursor, |el| el.track_focus(&handle.clone().tab_stop(true)))
-                        })
-                        .border_1()
-                        .border_color(gpui::transparent_black())
-                        .focus_visible(focus_ring)
-                        .cursor_pointer()
-                        .map(|el| {
-                            on_press_view(el, cx, move |this, window, cx| {
-                                pick(this, date, window, cx);
-                            })
-                        })
-                        .child(day.to_string()),
-                ),
-            );
-        }
-        grid = grid.child(row);
-    }
-
-    div()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .mb_2()
-                .child(month_button(
-                    "desktop-date-picker-prev",
-                    assets::CHEVRON_LEFT_ICON_PATH,
-                    -1,
-                ))
-                .child(title)
-                .child(month_button(
-                    "desktop-date-picker-next",
-                    assets::CHEVRON_RIGHT_ICON_PATH,
-                    1,
-                )),
-        )
-        .child(weekday_row)
-        .child(grid)
+    div().child(grid)
 }
 
 impl Workspace {

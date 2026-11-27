@@ -20,7 +20,8 @@ use leptos::prelude::*;
 use crate::components::settings_page::SettingsRow;
 use crate::state::{AppView, SetActiveView};
 use crate::ui::{
-    button_class, Button, ButtonSize, ButtonVariant, CopyButton, Dialog, Icon, Switch,
+    button_class, Badge, BadgeTone, Button, ButtonSize, ButtonVariant, CopyButton, Dialog, Icon,
+    Switch,
 };
 use crate::updates::{now, SidebarRuns, Updates};
 
@@ -447,10 +448,7 @@ fn provider_control(updates: Updates, entry: ProviderUpdate, running: bool) -> A
         }
         .into_any(),
         (ProviderUpdateState::UpToDate, _) => view! {
-            <span class="inline-flex items-center gap-1 text-label-sm text-pandan-400">
-                <Icon name="check" size=12 />
-                "Up to date"
-            </span>
+            <Badge tone=BadgeTone::Success icon="check" inline=true>"Up to date"</Badge>
         }
         .into_any(),
         _ => ().into_any(),
@@ -470,10 +468,7 @@ fn AppRow() -> impl IntoView {
         <SettingsRow title="bruhs" live_description=line>
             {move || app.get().map(|app| match app.state {
                 AppUpdateState::UpToDate => view! {
-                    <span class="inline-flex items-center gap-1 text-label-sm text-pandan-400">
-                        <Icon name="check" size=12 />
-                        "Up to date"
-                    </span>
+                    <Badge tone=BadgeTone::Success icon="check" inline=true>"Up to date"</Badge>
                 }.into_any(),
                 _ => ().into_any(),
             })}

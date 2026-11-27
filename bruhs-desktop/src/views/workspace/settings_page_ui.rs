@@ -296,8 +296,6 @@ pub(super) fn settings_cards_width(viewport_width: f32) -> f32 {
 /// App breadcrumb header and 44rem card column.
 pub(super) const SETTINGS_PAGE_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 pub(super) const SETTINGS_PAGE_X_PADDING_PX: f32 = 20.0;
-pub(super) const SETTINGS_PAGE_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
-pub(super) const SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = theme::ICON_PX;
 pub(super) const SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX: f32 = 704.0;
 pub(super) const SETTINGS_CODE_FONT_FAMILY: &str = "Monaspace Neon";
@@ -3618,61 +3616,47 @@ impl Workspace {
                                         .flex()
                                         .items_center()
                                         .gap_2()
-                                        .child(
-                                            div()
-                                                .text_size(px(SETTINGS_PAGE_TITLE_TEXT_SIZE_PX))
-                                                .text_color(theme::rambutan_100())
-                                                .child(self.ui_language().text("Settings")),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .text_color(theme::rambutan_600())
-                                                .child("/"),
-                                        )
-                                        .when(self.license_browser.is_some(), |header| {
-                                            header
-                                                .child(on_press_view(
-                                                    web_button(
+                                        .child({
+                                            let mut crumbs = vec![
+                                                bruhs_ui::breadcrumb::BreadcrumbItem::root(
+                                                    self.ui_language().text("Settings"),
+                                                ),
+                                            ];
+                                            if self.license_browser.is_some() {
+                                                let back_ws = cx.entity().downgrade();
+                                                crumbs.push(
+                                                    bruhs_ui::breadcrumb::BreadcrumbItem::action(
                                                         "license-back-about",
-                                                        WebButtonVariant::Ghost,
-                                                        WebButtonSize::Small,
-                                                        ButtonState::Enabled,
-                                                    )
-                                                    .debug_selector(|| "license-back-about".into())
-                                                    .aria_label(
+                                                        section_label,
                                                         self.ui_language().text("Back to About"),
-                                                    )
-                                                    .child(section_label),
-                                                    cx,
-                                                    |this, window, cx| {
-                                                        this.return_to_about(window, cx);
-                                                    },
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .text_color(theme::rambutan_600())
-                                                        .child("/"),
-                                                )
+                                                        std::rc::Rc::new(move |window, cx| {
+                                                            let _ = back_ws.update(cx, |this, cx| {
+                                                                this.return_to_about(window, cx);
+                                                            });
+                                                        }),
+                                                    ),
+                                                );
+                                                crumbs.push(
+                                                    bruhs_ui::breadcrumb::BreadcrumbItem::current_with_selector(
+                                                        self.ui_language().text("Open source licenses"),
+                                                        "desktop-settings-crumb",
+                                                    ),
+                                                );
+                                            } else {
+                                                crumbs.push(
+                                                    bruhs_ui::breadcrumb::BreadcrumbItem::current_with_selector(
+                                                        section_label,
+                                                        "desktop-settings-crumb",
+                                                    ),
+                                                );
+                                            }
+                                            div().flex_1().min_w_0().child(
+                                                bruhs_ui::breadcrumb::Breadcrumb::new(
+                                                    "desktop-settings-breadcrumb",
+                                                    crumbs,
+                                                ),
+                                            )
                                         })
-                                        .child(
-                                            div()
-                                                .debug_selector(|| {
-                                                    "desktop-settings-crumb".to_string()
-                                                })
-                                                .flex_1()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_size(px(SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX))
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .text_color(theme::rambutan_400())
-                                                .child(if self.license_browser.is_some() {
-                                                    self.ui_language().text("Open source licenses")
-                                                } else {
-                                                    section_label
-                                                }),
-                                        )
                                         .when(
                                             self.settings_section == SettingsSection::General,
                                             |el| {

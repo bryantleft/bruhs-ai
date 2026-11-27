@@ -16,7 +16,7 @@ pub fn Tooltip(
 
     let wrapper_class = format!("relative inline-flex group {class}");
     let bubble_class = format!(
-        "pointer-events-none absolute {pos_class} z-50 whitespace-nowrap rounded-grape bg-longan-700 inset-ring inset-ring-white/15 px-2 py-1 text-label-sm text-rambutan-100 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+        "pointer-events-none absolute {pos_class} z-50 w-max max-w-[min(20rem,calc(100vw-1rem))] whitespace-normal break-words rounded-grape bg-longan-700 inset-ring inset-ring-white/15 px-2 py-1 text-label-sm text-rambutan-100 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
     );
 
     view! {

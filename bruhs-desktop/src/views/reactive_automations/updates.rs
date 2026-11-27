@@ -74,53 +74,18 @@ pub(super) fn selectable_text(id: impl Into<ElementId>, text: &str) -> Div {
         .child(TextView::markdown(id, literal_markdown(text)).selectable(true))
 }
 
-fn badge(text: &'static str, info: bool) -> Div {
-    div()
-        .flex_shrink_0()
-        .px(px(6.0))
-        .rounded(px(4.0))
-        .text_size(px(12.0))
-        .line_height(relative(1.5))
-        .when(info, |badge| {
-            badge
-                .bg(theme::blueberry_500().opacity(0.15))
-                .text_color(theme::blueberry_200())
-        })
-        .when(!info, |badge| {
-            badge
-                .bg(theme::longan_800())
-                .text_color(theme::rambutan_300())
-        })
-        .child(text)
-}
-
 /// An information-tone badge, shared with run cards.
 pub(super) fn badge_info(text: &'static str) -> Div {
-    badge(text, true)
+    bruhs_ui::badge::badge(text, bruhs_ui::badge::BadgeTone::Info)
 }
 
 pub(super) fn badge_plain(text: &'static str) -> Div {
-    badge(text, false)
+    bruhs_ui::badge::badge(text, bruhs_ui::badge::BadgeTone::Neutral)
 }
 
 /// The unread count on the Agent workflows navigation entry.
 pub(crate) fn unread_badge(count: usize) -> Div {
-    div()
-        .flex_shrink_0()
-        .min_w(px(18.0))
-        .px(px(5.0))
-        .rounded(px(9.0))
-        .bg(theme::blueberry_500())
-        .text_color(theme::rambutan_100())
-        .text_size(px(12.0))
-        .line_height(relative(1.5))
-        .flex()
-        .justify_center()
-        .child(if count > 99 {
-            "99+".to_string()
-        } else {
-            count.to_string()
-        })
+    bruhs_ui::badge::count_badge(count)
 }
 
 /// Accessible name for a navigation entry that carries the unread badge.
@@ -227,8 +192,8 @@ impl ReactiveAutomations {
                     .items_center()
                     .gap_2()
                     // Web order: kind and resolution chips, then the unread label.
-                    .child(badge(kind, false))
-                    .children(resolved.map(|label| badge(label, false)))
+                    .child(badge_plain(kind))
+                    .children(resolved.map(badge_plain))
                     .when(unread, |row| {
                         row.child(
                             div()

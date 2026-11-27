@@ -340,7 +340,13 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
     view! {
         <div class="border-b border-longan-800 px-4 py-3">
             <h2 class="text-label-sm text-rambutan-200">{MOVE_IN_TITLE}</h2>
-            <div class="mt-2 flex gap-1 overflow-x-auto" role="tablist" aria-label=MOVE_IN_TITLE>
+            <div
+                class="mt-2 flex gap-1 overflow-x-auto"
+                role="tablist"
+                aria-orientation="horizontal"
+                aria-label=MOVE_IN_TITLE
+                on:keydown=move |ev| crate::ui::tablist_keydown(&ev)
+            >
                 {TABS
                     .into_iter()
                     .map(|each| view! {
@@ -348,6 +354,7 @@ fn MoveInBody(start: MoveInStart, close: Callback<()>) -> impl IntoView {
                             type="button"
                             role="tab"
                             aria-selected=move || (tab.get() == each).to_string()
+                            tabindex=move || if tab.get() == each { "0" } else { "-1" }
                             on:click=move |_| tab.set(each)
                             class=move || if tab.get() == each { TAB_ON } else { TAB_OFF }
                         >{tab_label(each)}</button>
