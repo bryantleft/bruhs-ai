@@ -192,7 +192,7 @@ impl Workspace {
         projects
             .into_iter()
             .map(|(path, label)| DropdownOption {
-                value: role_settings_ui::project_value(&path),
+                value: path.clone().into(),
                 label,
                 description: Some(path),
             })

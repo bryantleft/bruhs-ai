@@ -20,7 +20,7 @@ pub fn kbd(label: impl Into<SharedString>) -> Div {
         .rounded(px(KBD_RADIUS_PX))
         .bg(theme::longan_800().opacity(0.65))
         .border_1()
-        .border_color(gpui::white().opacity(0.08))
+        .border_color(theme::ring_card())
         .flex()
         .items_center()
         .justify_center()

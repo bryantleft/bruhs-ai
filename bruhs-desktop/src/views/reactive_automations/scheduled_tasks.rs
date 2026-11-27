@@ -875,7 +875,7 @@ impl ReactiveAutomations {
         let options = TaskConversation::ALL
             .into_iter()
             .map(|mode| DropdownOption {
-                value: mode.key(),
+                value: mode.key().into(),
                 label: mode.label().into(),
                 description: None,
             })

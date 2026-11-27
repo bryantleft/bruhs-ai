@@ -491,4 +491,64 @@ mod tests {
         menu_item(cx, &field, "edit-paste");
         assert_eq!(cx.read(|cx| field.read(cx).value()), "pasted");
     }
+
+    #[gpui::test]
+    fn single_line_input_uses_min_height_and_grows_for_tall_text(cx: &mut TestAppContext) {
+        struct Inputs {
+            normal: Entity<InputState>,
+            tall: Entity<InputState>,
+        }
+        impl Render for Inputs {
+            fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.0))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .debug_selector(|| "normal-input-wrap".to_owned())
+                            .child(Input::new(&self.normal)),
+                    )
+                    .child(
+                        div().debug_selector(|| "tall-input-wrap".to_owned()).child(
+                            Input::new(&self.tall)
+                                .text_size(px(28.0))
+                                .line_height(px(36.0)),
+                        ),
+                    )
+            }
+        }
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|w, cx| {
+            let normal = cx.new(|cx| {
+                let mut state = InputState::new(w, cx);
+                state.set_value("Default", w, cx);
+                state
+            });
+            let tall = cx.new(|cx| {
+                let mut state = InputState::new(w, cx);
+                state.set_value("Tall metrics", w, cx);
+                state
+            });
+            Inputs { normal, tall }
+        });
+        cx.run_until_parked();
+        let normal = cx
+            .debug_bounds("normal-input-wrap")
+            .expect("normal input bounds");
+        let tall = cx
+            .debug_bounds("tall-input-wrap")
+            .expect("tall input bounds");
+        assert_eq!(
+            normal.size.height,
+            px(crate::theme::CONTROL_PX),
+            "default single-line input should preserve CONTROL_PX height"
+        );
+        assert!(
+            tall.size.height > px(crate::theme::CONTROL_PX),
+            "tall font metrics should grow single-line input beyond CONTROL_PX, got {:?}",
+            tall.size.height
+        );
+    }
 }

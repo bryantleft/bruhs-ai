@@ -10,8 +10,8 @@ pub(super) struct Browser {
     filter: Entity<InputState>,
     import_path: Entity<InputState>,
     importing: Option<WhisperModel>,
-    language: &'static str,
-    sort: &'static str,
+    language: String,
+    sort: String,
     installed_only: bool,
     entries: Vec<ModelEntry>,
     error: Option<String>,
@@ -45,8 +45,8 @@ impl Browser {
             filter,
             import_path,
             importing: None,
-            language: "all",
-            sort: "recommended",
+            language: "all".into(),
+            sort: "recommended".into(),
             installed_only: false,
             entries: Vec::new(),
             error: None,
@@ -131,12 +131,12 @@ impl Workspace {
     pub(super) fn select_model_filter(
         &mut self,
         id: &str,
-        value: &'static str,
+        value: &str,
         cx: &mut Context<'_, Self>,
     ) -> bool {
         match id {
-            "voice-model-sort" => self.voice_models.sort = value,
-            "voice-model-language" => self.voice_models.language = value,
+            "voice-model-sort" => self.voice_models.sort = value.to_owned(),
+            "voice-model-language" => self.voice_models.language = value.to_owned(),
             _ => return false,
         }
         cx.notify();
@@ -188,14 +188,14 @@ impl Workspace {
             .child(div().w(px(150.)).max_w_full().child(self.choice_control(
                 "voice-model-language",
                 "Browse models by language",
-                catalog.language,
+                &catalog.language,
                 &languages,
                 cx,
             )))
             .child(div().w(px(140.)).max_w_full().child(self.choice_control(
                 "voice-model-sort",
                 "Sort models",
-                catalog.sort,
+                &catalog.sort,
                 &[
                     ("recommended", "Recommended"),
                     ("size", "Smallest first"),
@@ -255,11 +255,11 @@ impl Workspace {
             .filter(|entry| {
                 let d = entry.model.descriptor();
                 (!catalog.installed_only || entry.installed)
-                    && (matches!(catalog.language, "all" | "en") || d.multilingual)
+                    && (matches!(catalog.language.as_str(), "all" | "en") || d.multilingual)
                     && (d.label.to_lowercase().contains(&query) || d.filename.contains(&query))
             })
             .collect();
-        match catalog.sort {
+        match catalog.sort.as_str() {
             "name" => entries.sort_by_key(|e| e.model.descriptor().label),
             "size" => entries.sort_by_key(|e| e.model.descriptor().size_bytes),
             _ => entries.sort_by_key(|e| {

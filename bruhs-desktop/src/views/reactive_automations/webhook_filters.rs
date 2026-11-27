@@ -110,8 +110,8 @@ impl ReactiveAutomations {
                     mark: None,
                     options: TESTS
                         .iter()
-                        .map(|(value, label)| DropdownOption {
-                            value,
+                        .map(|&(value, label)| DropdownOption {
+                            value: value.into(),
                             label: label.to_string(),
                             description: None,
                         })
@@ -138,7 +138,9 @@ impl ReactiveAutomations {
                     let _ = select.update(cx, |this, cx| {
                         if let Some(Editor::Automation(e)) = &mut this.editor {
                             if let Some(row) = e.filters.get_mut(index) {
-                                row.test = test;
+                                if let Some(&(known, _)) = TESTS.iter().find(|(k, _)| *k == test) {
+                                    row.test = known;
+                                }
                             }
                             e.open_filter = None;
                         }

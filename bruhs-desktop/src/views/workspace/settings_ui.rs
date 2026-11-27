@@ -151,7 +151,7 @@ pub(super) fn whisper_options() -> Vec<DropdownGroup> {
             .map(|m| {
                 let d = m.descriptor();
                 DropdownOption {
-                    value: m.key(),
+                    value: m.key().into(),
                     label: format!("{} ({} MB)", d.label, d.size_mb),
                     description: None,
                 }
@@ -257,10 +257,10 @@ where
 /// Web `Switch`: persimmon track when on, longan tone-step with a
 /// white/10 ring when off, no shadows.
 pub(super) fn switch<F>(
-    id: &'static str,
+    id: impl Into<SharedString>,
     checked: bool,
     disabled: bool,
-    aria_label: &'static str,
+    aria_label: impl Into<SharedString>,
     cx: &Context<'_, Workspace>,
     action: F,
 ) -> AnyElement
@@ -1184,7 +1184,7 @@ impl Workspace {
                     options: bruhs_models::TranscriptionProvider::ALL
                         .into_iter()
                         .map(|provider| DropdownOption {
-                            value: provider.key(),
+                            value: provider.key().into(),
                             label: provider.label().into(),
                             description: None,
                         })

@@ -186,12 +186,19 @@ impl Workspace {
         let editing = self.capture_edit_id.is_some();
         let selected = self.capture_kind;
         let empty = self.capture_input.read(cx).value().trim().is_empty();
-        let type_tabs = bruhs_ui::tabs::tab_list(
+        let selected_index = CaptureKind::ALL
+            .iter()
+            .position(|&kind| kind == selected)
+            .unwrap_or(0);
+        let view = cx.entity().downgrade();
+        let type_tabs = bruhs_ui::tabs::Tabs::new(
             "capture-type-tabs",
             "Capture type",
             bruhs_ui::tabs::TabStyle::Segmented,
+            selected_index,
         )
-        .children(
+        .column_triggers()
+        .items(
             CaptureKind::ALL
                 .into_iter()
                 .enumerate()
@@ -203,44 +210,41 @@ impl Workspace {
                     } else {
                         theme::rambutan_500()
                     };
-                    bruhs_ui::tabs::tab_trigger(
-                        ("capture-kind", index),
-                        kind.label(),
-                        is_selected,
-                        bruhs_ui::tabs::TabStyle::Segmented,
-                    )
-                    .group(group.clone())
-                    .debug_selector(move || {
-                        format!("desktop-capture-kind-{}", kind.label().to_lowercase())
-                    })
-                    // Web: the destination's icon above its label.
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_1()
-                    .map(|el| {
-                        on_press_view(el, cx, move |this, window, cx| {
-                            if this.capture_edit_id.is_none() {
-                                this.select_capture_kind(kind, window, cx);
-                            }
-                        })
-                    })
-                    .child(
-                        svg()
-                            .debug_selector(move || {
-                                format!("desktop-capture-kind-{}-icon", kind.label().to_lowercase())
-                            })
-                            .path(SharedString::from(format!("icons/{}.svg", kind.icon())))
-                            .size(px(theme::ICON_INLINE_PX))
-                            .flex_shrink_0()
-                            .text_color(color)
-                            .when(!is_selected, |el| {
-                                el.group_hover(group, |el| el.text_color(theme::rambutan_200()))
-                            }),
-                    )
-                    .child(div().max_w_full().truncate().child(kind.label()))
+                    bruhs_ui::tabs::TabItem::new(("capture-kind", index), kind.label())
+                        .group(group.clone())
+                        .debug_selector(format!(
+                            "desktop-capture-kind-{}",
+                            kind.label().to_lowercase()
+                        ))
+                        .disabled(editing && !is_selected)
+                        .child(
+                            svg()
+                                .debug_selector(move || {
+                                    format!(
+                                        "desktop-capture-kind-{}-icon",
+                                        kind.label().to_lowercase()
+                                    )
+                                })
+                                .path(SharedString::from(format!("icons/{}.svg", kind.icon())))
+                                .size(px(theme::ICON_INLINE_PX))
+                                .flex_shrink_0()
+                                .text_color(color)
+                                .when(!is_selected, |el| {
+                                    el.group_hover(group, |el| el.text_color(theme::rambutan_200()))
+                                }),
+                        )
+                        .child(div().max_w_full().truncate().child(kind.label()))
                 }),
-        );
+        )
+        .on_select(move |index, window, cx| {
+            if let Some(&kind) = CaptureKind::ALL.get(index) {
+                let _ = view.update(cx, |this, cx| {
+                    if this.capture_edit_id.is_none() {
+                        this.select_capture_kind(kind, window, cx);
+                    }
+                });
+            }
+        });
 
         let body = div()
             .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
@@ -250,7 +254,7 @@ impl Workspace {
             .gap_3()
             .child(type_tabs)
             .child(
-                div()
+                bruhs_ui::tabs::tab_panel("capture-kind-panel", selected.label())
                     .flex()
                     .flex_col()
                     .gap_1()

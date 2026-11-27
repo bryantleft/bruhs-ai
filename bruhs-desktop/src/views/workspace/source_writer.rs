@@ -483,7 +483,6 @@ impl Workspace {
         include_endpoints: bool,
         cx: &Context<'_, Self>,
     ) -> Vec<DropdownGroup> {
-        use bruhs_ui::dropdown::saved_option_value;
         let mut groups = Vec::new();
         for provider in [AgentProvider::Claude, AgentProvider::Codex] {
             if !self
@@ -501,14 +500,14 @@ impl Workspace {
                 .iter()
                 .filter(|m| m.provider == provider)
                 .map(|m| DropdownOption {
-                    value: saved_option_value(&m.id),
+                    value: m.id.clone().into(),
                     label: m.label.clone(),
                     description: Some(provider.model_id(&m.id).to_owned()),
                 })
                 .collect();
             if !options.is_empty() {
                 groups.push(DropdownGroup {
-                    label: Some(provider_label(provider)),
+                    label: Some(provider_label(provider).into()),
                     mark: Some(provider_mark(provider, cx)),
                     options,
                 });
@@ -528,7 +527,7 @@ impl Workspace {
         options: &GenerationOptions,
         cx: &Context<'_, Self>,
     ) -> Option<AnyElement> {
-        use bruhs_ui::dropdown::{saved_option_value, Dropdown};
+        use bruhs_ui::dropdown::Dropdown;
         let mut groups = Vec::new();
         let mut selected = Vec::new();
         let mut summary = Vec::new();
@@ -539,14 +538,14 @@ impl Workspace {
             let mut rows = Vec::new();
             for choice in &spec.choices {
                 let (value, label) = (choice.value.as_str(), choice.label.as_str());
-                let token = saved_option_value(&format!("{}={value}", spec.kind.key()));
+                let token = SharedString::from(format!("{}={value}", spec.kind.key()));
                 if options
                     .configured(spec.kind)
                     .filter(|v| spec.accepts(v))
                     .unwrap_or(&spec.default)
                     == value
                 {
-                    selected.push(token);
+                    selected.push(token.clone());
                     if spec.kind == OptionKind::Thinking {
                         summary.push(format!("Thinking {label}"));
                     } else if value == "on" {
@@ -558,7 +557,7 @@ impl Workspace {
                     }
                 }
                 if spec.default == value && !matches!(value, "on" | "off") {
-                    defaults.push(token);
+                    defaults.push(token.clone());
                 }
                 let description = match (spec.kind, value) {
                     (bruhs_models::delivery::generation::OptionKind::ServiceTier, "ultrafast") => {
@@ -574,7 +573,7 @@ impl Workspace {
                 });
             }
             groups.push(DropdownGroup {
-                label: Some(spec.label()),
+                label: Some(spec.label().into()),
                 mark: None,
                 options: rows,
             });
@@ -594,7 +593,7 @@ impl Workspace {
             Dropdown::new(
                 id,
                 label,
-                primary,
+                primary.as_ref(),
                 groups,
                 self.settings_listbox(id),
                 toggle,

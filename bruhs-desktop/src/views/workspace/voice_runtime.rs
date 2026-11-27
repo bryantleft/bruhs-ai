@@ -126,19 +126,19 @@ impl Workspace {
         };
         let mut choices = vec![
             DropdownOption {
-                value: "Auto",
+                value: "Auto".into(),
                 label: "Auto".into(),
                 description: None,
             },
             DropdownOption {
-                value: "CPU",
+                value: "CPU".into(),
                 label: "CPU".into(),
                 description: None,
             },
         ];
         if let Some(name) = &status.gpu {
             choices.push(DropdownOption {
-                value: "GPU",
+                value: "GPU".into(),
                 label: name.clone(),
                 description: None,
             });

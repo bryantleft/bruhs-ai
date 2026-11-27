@@ -30,23 +30,8 @@ const OPTION_RADIUS_PX: f32 = 6.0;
 const GROUP_TEXT_SIZE_PX: f32 = 12.0;
 const HOVER_BG_OPACITY: f32 = 0.60;
 
-/// A dropdown value is `'static` and a saved identifier is not, so each
-/// distinct identifier is kept once for the life of the app.
-pub fn saved_option_value(name: &str) -> &'static str {
-    use std::collections::BTreeSet;
-    use std::sync::{Mutex, PoisonError};
-    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(known) = values.get(name) {
-        return known;
-    }
-    let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
-    values.insert(kept);
-    kept
-}
-
 pub struct DropdownOption {
-    pub value: &'static str,
+    pub value: SharedString,
     pub label: String,
     pub description: Option<String>,
 }
@@ -70,21 +55,21 @@ impl DropdownOption {
 
 pub struct DropdownGroup {
     /// Uppercase header above the group; `None` for a flat list.
-    pub label: Option<&'static str>,
+    pub label: Option<SharedString>,
     /// Glyph rendered before the header (provider logo).
     pub mark: Option<AnyElement>,
     pub options: Vec<DropdownOption>,
 }
 
 pub type ToggleHandler = Rc<dyn Fn(&mut Window, &mut App)>;
-pub type SelectHandler = Rc<dyn Fn(&'static str, &mut Window, &mut App)>;
+pub type SelectHandler = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 /// Label of `value` in `groups`, for the trigger.
 pub fn current_label(groups: &[DropdownGroup], value: &str) -> Option<String> {
     groups
         .iter()
         .flat_map(|g| g.options.iter())
-        .find(|o| o.value == value)
+        .find(|o| o.value.as_ref() == value)
         .map(|o| o.label.clone())
 }
 
@@ -109,7 +94,7 @@ impl Listbox {
 /// Trigger + (when open) listbox stacked inline. `id` doubles as the
 /// debug-selector prefix: `{id}` (trigger), `{id}-list`, `{id}-option-{value}`.
 pub fn dropdown(
-    id: &'static str,
+    id: impl Into<SharedString>,
     aria_label: &str,
     value: &str,
     groups: Vec<DropdownGroup>,
@@ -124,13 +109,13 @@ struct DropdownFocus {
     selection_revealed: bool,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     trigger: FocusHandle,
-    options: HashMap<&'static str, FocusHandle>,
+    options: HashMap<SharedString, FocusHandle>,
     scroll: ScrollHandle,
 }
 
 #[derive(Clone)]
 struct OptionFocus {
-    value: &'static str,
+    value: SharedString,
     handle: FocusHandle,
     row: usize,
 }
@@ -139,12 +124,12 @@ type OptionElement = Rc<dyn Fn(&str) -> Option<AnyElement>>;
 
 struct ListNavigation {
     action_menu: bool,
-    destructive_command: Option<&'static str>,
+    destructive_command: Option<SharedString>,
     option_mark: Option<OptionElement>,
     accessory: Option<OptionElement>,
     targets: Rc<[OptionFocus]>,
     scroll: ScrollHandle,
-    unavailable: Option<&'static str>,
+    unavailable: Option<SharedString>,
     tab_stops: bool,
     max_height: Pixels,
 }
@@ -157,7 +142,7 @@ type FocusTargets = (
 );
 
 fn focus_targets(
-    id: &'static str,
+    id: &str,
     groups: &[DropdownGroup],
     unavailable: Option<&str>,
     reveal: Option<&str>,
@@ -180,18 +165,18 @@ fn focus_targets(
         for group in groups {
             row += usize::from(group.label.is_some());
             for option in &group.options {
-                if Some(option.value) == unavailable {
+                if Some(option.value.as_ref()) == unavailable {
                     row += 1;
                     continue;
                 }
-                current_values.insert(option.value);
+                current_values.insert(option.value.clone());
                 let handle = state
                     .options
-                    .entry(option.value)
+                    .entry(option.value.clone())
                     .or_insert_with(|| cx.focus_handle())
                     .clone();
                 targets.push(OptionFocus {
-                    value: option.value,
+                    value: option.value.clone(),
                     handle,
                     row,
                 });
@@ -199,7 +184,10 @@ fn focus_targets(
             }
         }
         if !state.selection_revealed {
-            if let Some(target) = targets.iter().find(|row| Some(row.value) == reveal) {
+            if let Some(target) = targets
+                .iter()
+                .find(|row| Some(row.value.as_ref()) == reveal)
+            {
                 // The first layout establishes the list viewport and its scroll axis.
                 let scroll = state.scroll.clone();
                 let row = target.row;
@@ -243,8 +231,8 @@ fn focus_option(target: &OptionFocus, scroll: &ScrollHandle, window: &mut Window
 
 struct GroupSelection {
     summary: String,
-    checked: Vec<&'static str>,
-    defaults: Vec<&'static str>,
+    checked: Vec<SharedString>,
+    defaults: Vec<SharedString>,
 }
 
 #[derive(Clone, Copy)]
@@ -268,7 +256,7 @@ pub enum DropdownTriggerVariant {
 
 #[derive(IntoElement)]
 pub struct Dropdown {
-    id: &'static str,
+    id: SharedString,
     label: SharedString,
     value: String,
     groups: Vec<DropdownGroup>,
@@ -282,7 +270,7 @@ pub struct Dropdown {
     end_aligned_min_width: Option<Pixels>,
     roving_focus: Option<(FocusHandle, bool)>,
     trigger_icon: Option<TriggerIcon>,
-    destructive_command: Option<&'static str>,
+    destructive_command: Option<SharedString>,
     group_selection: Option<GroupSelection>,
     sidebar: Option<(AnyElement, FocusHandle)>,
     option_mark: Option<OptionElement>,
@@ -290,12 +278,12 @@ pub struct Dropdown {
     placeholder: Option<&'static str>,
     empty_label: &'static str,
     trigger_label: Option<String>,
-    unavailable: Option<&'static str>,
+    unavailable: Option<SharedString>,
 }
 
 impl Dropdown {
     pub fn new(
-        id: &'static str,
+        id: impl Into<SharedString>,
         label: &str,
         value: &str,
         groups: Vec<DropdownGroup>,
@@ -304,7 +292,7 @@ impl Dropdown {
         on_select: SelectHandler,
     ) -> Self {
         Self {
-            id,
+            id: id.into(),
             label: label.to_owned().into(),
             value: value.into(),
             groups,
@@ -331,9 +319,9 @@ impl Dropdown {
     }
 
     /// Display the effective selection when the saved preference falls back.
-    pub fn selection_label(mut self, label: String, unavailable: Option<&'static str>) -> Self {
+    pub fn selection_label(mut self, label: String, unavailable: Option<&str>) -> Self {
         self.trigger_label = Some(label);
-        self.unavailable = unavailable;
+        self.unavailable = unavailable.map(|value| SharedString::from(value.to_owned()));
         self
     }
 
@@ -373,10 +361,11 @@ impl Dropdown {
         self,
         icon: &'static str,
         draw: fn(&str) -> AnyElement,
-        destructive_command: Option<&'static str>,
+        destructive_command: Option<&str>,
     ) -> Self {
         let mut this = self.option_mark(draw);
-        this.destructive_command = destructive_command;
+        this.destructive_command =
+            destructive_command.map(|cmd| SharedString::from(cmd.to_owned()));
         this.trigger_icon = Some(TriggerIcon::Actions(icon));
         this.compact = true;
         this
@@ -392,8 +381,8 @@ impl Dropdown {
     pub fn group_selection(
         mut self,
         summary: String,
-        checked: Vec<&'static str>,
-        defaults: Vec<&'static str>,
+        checked: Vec<SharedString>,
+        defaults: Vec<SharedString>,
     ) -> Self {
         self.group_selection = Some(GroupSelection {
             summary,
@@ -475,17 +464,24 @@ impl RenderOnce for Dropdown {
             let text = query.read(cx).value().to_lowercase();
             if self.listbox != Listbox::Closed && !text.trim().is_empty() {
                 for group in &mut self.groups {
+                    let group_label = group.label.as_deref();
                     group
                         .options
-                        .retain(|option| option.matches_search(group.label, &text));
+                        .retain(|option| option.matches_search(group_label, &text));
                 }
                 self.groups.retain(|g| !g.options.is_empty());
             }
         }
         let reveal = (self.start_at_selection && self.listbox != Listbox::Closed)
             .then_some(self.value.as_str());
-        let (trigger_focus, targets, scroll, bounds) =
-            focus_targets(self.id, &self.groups, self.unavailable, reveal, window, cx);
+        let (trigger_focus, targets, scroll, bounds) = focus_targets(
+            self.id.as_ref(),
+            &self.groups,
+            self.unavailable.as_deref(),
+            reveal,
+            window,
+            cx,
+        );
         let trigger_focus = self
             .search
             .as_ref()
@@ -495,7 +491,7 @@ impl RenderOnce for Dropdown {
         let roving = self.roving_focus.is_some();
         let selected = targets
             .iter()
-            .position(|target| target.value == self.value)
+            .position(|target| target.value.as_ref() == self.value)
             .unwrap_or(0);
         let search_start = if self.start_at_selection
             && self
@@ -533,7 +529,7 @@ impl RenderOnce for Dropdown {
         let trigger_scroll = scroll.clone();
         let trigger = dropdown_trigger(
             TriggerProps {
-                id: self.id,
+                id: self.id.clone(),
                 aria_label: self.label.clone(),
                 label,
                 icon: self.trigger_icon,
@@ -627,7 +623,7 @@ impl RenderOnce for Dropdown {
                             }
                         });
                     if let Some(row) = row {
-                        action_select(row.value, window, cx);
+                        action_select(row.value.as_ref(), window, cx);
                     } else if has_accessories
                         && !action_search
                             .as_ref()
@@ -745,7 +741,7 @@ impl RenderOnce for Dropdown {
                                     }
                                 }
                                 "enter" if !input_for_key.read(cx).is_composing() => {
-                                    choose(initial.value, window, cx)
+                                    choose(initial.value.as_ref(), window, cx)
                                 }
                                 _ => return,
                             }
@@ -782,7 +778,7 @@ impl RenderOnce for Dropdown {
                     px(LIST_MAX_HEIGHT_PX)
                 };
                 let list = render_dropdown_list(
-                    self.id,
+                    self.id.as_ref(),
                     self.label,
                     &self.value,
                     grouped.as_ref(),
@@ -881,7 +877,7 @@ impl RenderOnce for Dropdown {
 }
 
 struct TriggerProps {
-    id: &'static str,
+    id: SharedString,
     aria_label: SharedString,
     label: String,
     icon: Option<TriggerIcon>,
@@ -905,9 +901,12 @@ fn dropdown_trigger(props: TriggerProps, focus: &FocusHandle) -> Stateful<Div> {
     let action_menu = matches!(icon, Some(TriggerIcon::Actions(_)));
     let toolbar = variant == DropdownTriggerVariant::Toolbar;
     let submenu = variant == DropdownTriggerVariant::Submenu;
+    let id_for_selector = id.clone();
+    let id_for_caption = id.clone();
+    let id_for_chevron = id.clone();
     div()
-        .id(id)
-        .debug_selector(move || id.to_string())
+        .id(id.clone())
+        .debug_selector(move || id_for_selector.to_string())
         .w_full()
         .min_h(px(if submenu {
             theme::CONTROL_DETAIL_PX
@@ -978,7 +977,7 @@ fn dropdown_trigger(props: TriggerProps, focus: &FocusHandle) -> Stateful<Div> {
                         .text_color(theme::rambutan_400()),
                 );
                 match icon {
-                    TriggerIcon::Leading(_) => el.child(trigger_value(id, label, compact)),
+                    TriggerIcon::Leading(_) => el.child(trigger_value(&id, label, compact)),
                     TriggerIcon::Actions(_) => el.tooltip(move |window, cx| {
                         crate::tooltip::Tooltip::new(aria_label.clone()).build(window, cx)
                     }),
@@ -995,19 +994,19 @@ fn dropdown_trigger(props: TriggerProps, focus: &FocusHandle) -> Stateful<Div> {
                     .flex_col()
                     .child(
                         div()
-                            .debug_selector(move || format!("{id}-caption"))
+                            .debug_selector(move || format!("{id_for_caption}-caption"))
                             .truncate()
                             .text_color(theme::rambutan_400())
                             .child(aria_label),
                     )
-                    .child(trigger_value(id, label, compact)),
+                    .child(trigger_value(&id, label, compact)),
             ),
-            None => el.child(trigger_value(id, label, compact)),
+            None => el.child(trigger_value(&id, label, compact)),
         })
         .when(!action_menu, |el| {
             el.child(
                 div()
-                    .debug_selector(move || format!("{id}-chevron"))
+                    .debug_selector(move || format!("{id_for_chevron}-chevron"))
                     .flex_none()
                     .child(
                         svg()
@@ -1027,9 +1026,10 @@ fn dropdown_trigger(props: TriggerProps, focus: &FocusHandle) -> Stateful<Div> {
         })
 }
 
-fn trigger_value(id: &'static str, label: String, compact: bool) -> Div {
+fn trigger_value(id: &str, label: String, compact: bool) -> Div {
+    let selector = format!("{id}-label");
     div()
-        .debug_selector(move || format!("{id}-label"))
+        .debug_selector(move || selector)
         .min_w_0()
         .when(!compact, |el| el.flex_1())
         .truncate()
@@ -1039,14 +1039,14 @@ fn trigger_value(id: &'static str, label: String, compact: bool) -> Div {
 /// The open listbox with group headers and options; callers decide where
 /// it sits (inline under the trigger, or floated over content).
 pub fn dropdown_list(
-    id: &'static str,
+    id: impl Into<SharedString>,
     aria_label: &str,
     value: &str,
     groups: Vec<DropdownGroup>,
     on_select: SelectHandler,
 ) -> AnyElement {
     DropdownList {
-        id,
+        id: id.into(),
         label: aria_label.to_string().into(),
         value: value.into(),
         groups,
@@ -1057,7 +1057,7 @@ pub fn dropdown_list(
 
 #[derive(IntoElement)]
 struct DropdownList {
-    id: &'static str,
+    id: SharedString,
     label: SharedString,
     value: String,
     groups: Vec<DropdownGroup>,
@@ -1066,9 +1066,10 @@ struct DropdownList {
 
 impl RenderOnce for DropdownList {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let (_, targets, scroll, _) = focus_targets(self.id, &self.groups, None, None, window, cx);
+        let (_, targets, scroll, _) =
+            focus_targets(self.id.as_ref(), &self.groups, None, None, window, cx);
         render_dropdown_list(
-            self.id,
+            self.id.as_ref(),
             self.label,
             &self.value,
             None,
@@ -1090,7 +1091,7 @@ impl RenderOnce for DropdownList {
 }
 
 fn render_dropdown_list(
-    id: &'static str,
+    id: &str,
     aria_label: SharedString,
     value: &str,
     grouped: Option<&GroupSelection>,
@@ -1130,13 +1131,14 @@ fn render_dropdown_list(
             );
         }
         for option in group.options {
-            let is_current =
-                option.value == value || grouped.is_some_and(|g| g.checked.contains(&option.value));
-            if Some(option.value) == unavailable {
+            let is_current = option.value.as_ref() == value
+                || grouped.is_some_and(|g| g.checked.contains(&option.value));
+            if unavailable.as_deref() == Some(option.value.as_ref()) {
+                let unavailable_selector = format!("{id}-unavailable");
                 rows.push(
                     div()
-                        .id(ElementId::Name(format!("{id}-unavailable").into()))
-                        .debug_selector(move || format!("{id}-unavailable"))
+                        .id(ElementId::Name(unavailable_selector.clone().into()))
+                        .debug_selector(move || unavailable_selector)
                         .role(Role::ListBoxOption)
                         .aria_selected(is_current)
                         .aria_label(option.label.clone())
@@ -1151,13 +1153,18 @@ fn render_dropdown_list(
                 );
                 continue;
             }
-            let action = accessory.as_ref().and_then(|build| build(option.value));
+            let action = accessory
+                .as_ref()
+                .and_then(|build| build(option.value.as_ref()));
             let has_action = action.is_some();
             let is_default = grouped.is_some_and(|g| g.defaults.contains(&option.value));
+            let is_destructive = destructive_command.as_deref() == Some(option.value.as_ref());
             let option_value = option.value;
+            let click_value = option_value.clone();
+            let key_value = option_value.clone();
             let select_for_click = on_select.clone();
             let select_for_key = on_select.clone();
-            let selector = format!("{id}-option-{}", option.value);
+            let selector = format!("{id}-option-{option_value}");
             let check_selector = format!("{selector}-check");
             let index = option_index;
             option_index += 1;
@@ -1171,9 +1178,7 @@ fn render_dropdown_list(
             let key_scroll = scroll.clone();
             rows.push(
                 div()
-                    .id(ElementId::Name(
-                        format!("{id}-option-{}", option.value).into(),
-                    ))
+                    .id(ElementId::Name(selector.clone().into()))
                     .debug_selector(move || selector)
                     .when(has_action, |el| {
                         el.group(format!("{id}-row-{option_value}"))
@@ -1187,7 +1192,7 @@ fn render_dropdown_list(
                     .gap_2()
                     .text_size(px(OPTION_TEXT_SIZE_PX))
                     .font_family(theme::FontFace::Small)
-                    .text_color(if destructive_command == Some(option_value) {
+                    .text_color(if is_destructive {
                         theme::lychee_300()
                     } else if is_current {
                         theme::rambutan_100()
@@ -1214,7 +1219,9 @@ fn render_dropdown_list(
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
-                    .on_click(move |_ev, window, cx| select_for_click(option_value, window, cx))
+                    .on_click(move |_ev, window, cx| {
+                        select_for_click(click_value.as_ref(), window, cx)
+                    })
                     .on_key_down(move |event: &KeyDownEvent, window, cx| {
                         if event.keystroke.modifiers.modified() {
                             return;
@@ -1227,14 +1234,18 @@ fn render_dropdown_list(
                         } else if is_web_button_activation_key(key) {
                             window.prevent_default();
                             cx.stop_propagation();
-                            select_for_key(option_value, window, cx);
+                            select_for_key(key_value.as_ref(), window, cx);
                         } else if let Some(next) = navigation_index(index, key_targets.len(), key) {
                             window.prevent_default();
                             cx.stop_propagation();
                             focus_option(&key_targets[next], &key_scroll, window, cx);
                         }
                     })
-                    .children(option_mark.as_ref().and_then(|draw| draw(option_value)))
+                    .children(
+                        option_mark
+                            .as_ref()
+                            .and_then(|draw| draw(option_value.as_ref())),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -1279,7 +1290,7 @@ fn render_dropdown_list(
                     })
                     .children(action)
                     .map(|row| {
-                        if index > 0 && destructive_command == Some(option_value) {
+                        if index > 0 && is_destructive {
                             div()
                                 .child(div().h(px(1.)).my_1().bg(theme::ring_modal()))
                                 .child(row)
@@ -1292,9 +1303,10 @@ fn render_dropdown_list(
         }
     }
 
+    let list_selector = format!("{id}-list");
     let list = div()
-        .id(ElementId::Name(format!("{id}-list").into()))
-        .debug_selector(move || format!("{id}-list"))
+        .id(ElementId::Name(list_selector.clone().into()))
+        .debug_selector(move || list_selector)
         .role(if grouped.is_some() || action_menu {
             Role::Menu
         } else {
@@ -1349,10 +1361,10 @@ mod tests {
     fn current_label_finds_across_groups() {
         let groups = vec![
             DropdownGroup {
-                label: Some("A"),
+                label: Some("A".into()),
                 mark: None,
                 options: vec![DropdownOption {
-                    value: "a1",
+                    value: "a1".into(),
                     label: "First".into(),
                     description: None,
                 }],
@@ -1361,7 +1373,7 @@ mod tests {
                 label: None,
                 mark: None,
                 options: vec![DropdownOption {
-                    value: "b1",
+                    value: "b1".into(),
                     label: "Second".into(),
                     description: Some("desc".into()),
                 }],
@@ -1384,7 +1396,7 @@ mod tests {
 
     struct DropdownHarness {
         open: bool,
-        value: &'static str,
+        value: String,
         dismissed: bool,
         long: bool,
     }
@@ -1399,9 +1411,9 @@ mod tests {
                 .child(dropdown(
                     "test-dropdown",
                     "Test dropdown",
-                    self.value,
+                    &self.value,
                     vec![DropdownGroup {
-                        label: Some("Choices"),
+                        label: Some("Choices".into()),
                         mark: None,
                         options: (if self.long {
                             &[
@@ -1414,7 +1426,7 @@ mod tests {
                         .iter()
                         .copied()
                         .map(|value| DropdownOption {
-                            value,
+                            value: value.into(),
                             label: value.into(),
                             description: None,
                         })
@@ -1428,6 +1440,7 @@ mod tests {
                         });
                     }),
                     Rc::new(move |value, _, cx| {
+                        let value = value.to_owned();
                         let _ = select.update(cx, |this, cx| {
                             this.value = value;
                             this.open = false;
@@ -1446,7 +1459,7 @@ mod tests {
         });
         let (view, cx) = cx.add_window_view(|_, _| DropdownHarness {
             open: false,
-            value: "b",
+            value: "b".into(),
             dismissed: false,
             long: false,
         });
@@ -1488,7 +1501,7 @@ mod tests {
         cx.update(crate::init);
         let (_view, cx) = cx.add_window_view(|_, _| DropdownHarness {
             open: true,
-            value: "b",
+            value: "b".into(),
             dismissed: false,
             long: false,
         });
@@ -1512,7 +1525,7 @@ mod tests {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| DropdownHarness {
             open: false,
-            value: "a",
+            value: "a".into(),
             dismissed: false,
             long: true,
         });
@@ -1550,7 +1563,7 @@ mod tests {
                 options: values
                     .iter()
                     .map(|&value| DropdownOption {
-                        value,
+                        value: value.into(),
                         label: value.into(),
                         description: None,
                     })
@@ -1560,7 +1573,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(row, &value)| super::OptionFocus {
-                    value,
+                    value: value.into(),
                     row,
                     handle: cx.focus_handle(),
                 })
@@ -1619,7 +1632,7 @@ mod tests {
             div().size_full().child(
                 super::dropdown_trigger(
                     super::TriggerProps {
-                        id: "focus-dropdown",
+                        id: "focus-dropdown".into(),
                         aria_label: "Model".into(),
                         label: "Claude Sonnet 4.6".into(),
                         icon: None,
@@ -1698,5 +1711,77 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(cx.debug_bounds("focus-dropdown"), Some(before));
         assert_eq!(cx.debug_bounds("focus-dropdown-chevron").unwrap(), children);
+    }
+
+    #[gpui::test]
+    fn dynamic_dropdown_option_churn_prunes_removed_focus_entries(cx: &mut TestAppContext) {
+        struct ChurnHarness {
+            generation: usize,
+            retained: Rc<std::cell::Cell<usize>>,
+        }
+        impl Render for ChurnHarness {
+            fn render(
+                &mut self,
+                window: &mut Window,
+                cx: &mut Context<'_, Self>,
+            ) -> impl IntoElement {
+                let gen = self.generation;
+                let groups = vec![DropdownGroup {
+                    label: Some(format!("Group {gen}").into()),
+                    mark: None,
+                    options: (0..3)
+                        .map(|i| DropdownOption {
+                            value: format!("env-{gen}-{i}").into(),
+                            label: format!("Environment {gen}-{i}"),
+                            description: None,
+                        })
+                        .collect(),
+                }];
+                let (_, targets, _, _) =
+                    super::focus_targets("churn-dropdown", &groups, None, None, window, cx);
+                assert_eq!(targets.len(), 3);
+                let state = window.use_keyed_state(
+                    gpui::SharedString::from("churn-dropdown-focus"),
+                    cx,
+                    |_, cx| super::DropdownFocus {
+                        selection_revealed: false,
+                        bounds: Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
+                        trigger: cx.focus_handle(),
+                        options: std::collections::HashMap::new(),
+                        scroll: gpui::ScrollHandle::new(),
+                    },
+                );
+                self.retained.set(state.read(cx).options.len());
+                div().child(dropdown(
+                    "churn-dropdown",
+                    "Environment",
+                    &format!("env-{gen}-0"),
+                    groups,
+                    Listbox::Open,
+                    Rc::new(|_, _| {}),
+                    Rc::new(|_, _, _| {}),
+                ))
+            }
+        }
+
+        cx.update(crate::init);
+        let retained = Rc::new(std::cell::Cell::new(0));
+        let shared = retained.clone();
+        let (view, cx) = cx.add_window_view(move |_, _| ChurnHarness {
+            generation: 0,
+            retained: shared,
+        });
+        for generation in 0..80 {
+            view.update(cx, |this, cx| {
+                this.generation = generation;
+                cx.notify();
+            });
+            cx.run_until_parked();
+        }
+        assert_eq!(
+            retained.get(),
+            3,
+            "removed dynamic option IDs should be dropped instead of accumulating"
+        );
     }
 }

@@ -685,7 +685,7 @@ impl Workspace {
                     ));
             }
             rows.push(self.settings_row(
-                role_settings_ui::project_value(&format!("settings-project-action-{}", action.id)),
+                format!("settings-project-action-{}", action.id),
                 action.name.clone(),
                 if local {
                     action.command.clone()

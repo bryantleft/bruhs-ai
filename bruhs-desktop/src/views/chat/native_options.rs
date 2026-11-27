@@ -4,7 +4,7 @@ use bruhs_models::delivery::{
     writer_catalog::{WriterCliModel, WriterOption},
 };
 use bruhs_ui::dropdown::{
-    saved_option_value, Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
+    Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
 };
 use bruhs_ui::press::on_press_view;
 use std::path::PathBuf;
@@ -191,7 +191,7 @@ impl ChatView {
         let choices = modes
             .iter()
             .map(|m| DropdownOption {
-                value: m.as_str(),
+                value: m.as_str().into(),
                 label: m.label().into(),
                 description: None,
             })
@@ -527,7 +527,7 @@ impl ChatView {
                     .choices
                     .iter()
                     .map(|choice| DropdownOption {
-                        value: saved_option_value(&choice.value),
+                        value: choice.value.clone().into(),
                         label: choice.label.clone(),
                         description: choice.description.clone(),
                     })
@@ -547,11 +547,7 @@ impl ChatView {
                         cx,
                     )
                     .roving_focus(focus, entry)
-                    .group_selection(
-                        current_label,
-                        vec![],
-                        vec![saved_option_value(&spec.default)],
-                    );
+                    .group_selection(current_label, vec![], vec![spec.default.clone().into()]);
                 if kind == OptionKind::ContextWindow {
                     rows.push(
                         div()

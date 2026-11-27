@@ -739,38 +739,38 @@ impl Workspace {
 
     fn render_import_source_tabs(&self, cx: &Context<'_, Self>) -> AnyElement {
         let current = self.import_picker.tab;
+        let tabs: Vec<ImportTab> = ImportSource::LOCAL
+            .into_iter()
+            .map(ImportTab::Local)
+            .chain([ImportTab::Export])
+            .collect();
+        let selected_index = tabs.iter().position(|&tab| tab == current).unwrap_or(0);
+        let view = cx.entity().downgrade();
+        let items = tabs.iter().enumerate().map(|(index, &tab)| {
+            let (name, label) = match tab {
+                ImportTab::Local(source) => (source.as_str(), source.label()),
+                ImportTab::Export => ("export", EXPORT_TAB),
+            };
+            bruhs_ui::tabs::TabItem::new(("desktop-import-source", index), label)
+                .debug_selector(format!("desktop-import-source-{name}"))
+                .child(label)
+        });
         // Tabs scroll sideways inside the dialog, never wrap (F25).
-        bruhs_ui::tabs::tab_list(
+        bruhs_ui::tabs::Tabs::new(
             "desktop-import-sources",
             "Import from",
             bruhs_ui::tabs::TabStyle::Pill,
+            selected_index,
         )
         .mt_2()
-        .children(
-            ImportSource::LOCAL
-                .into_iter()
-                .map(ImportTab::Local)
-                .chain([ImportTab::Export])
-                .enumerate()
-                .map(|(index, tab)| {
-                    let selected = tab == current;
-                    let (name, label) = match tab {
-                        ImportTab::Local(source) => (source.as_str(), source.label()),
-                        ImportTab::Export => ("export", EXPORT_TAB),
-                    };
-                    let trigger = bruhs_ui::tabs::tab_trigger(
-                        ("desktop-import-source", index),
-                        label,
-                        selected,
-                        bruhs_ui::tabs::TabStyle::Pill,
-                    )
-                    .debug_selector(move || format!("desktop-import-source-{name}"))
-                    .child(label);
-                    on_press_view(trigger, cx, move |this, window, cx| {
-                        this.set_import_tab(tab, window, cx);
-                    })
-                }),
-        )
+        .items(items)
+        .on_select(move |index, window, cx| {
+            if let Some(&tab) = tabs.get(index) {
+                let _ = view.update(cx, |this, cx| {
+                    this.set_import_tab(tab, window, cx);
+                });
+            }
+        })
         .into_any_element()
     }
 

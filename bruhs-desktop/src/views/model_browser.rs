@@ -86,10 +86,10 @@ impl Browser {
         for group in groups.iter_mut() {
             group
                 .options
-                .retain(|option| self.includes(option.value, favorites));
+                .retain(|option| self.includes(option.value.as_ref(), favorites));
             group
                 .options
-                .sort_by_key(|option| !favorites.contains(&favorite_key(option.value)));
+                .sort_by_key(|option| !favorites.contains(&favorite_key(option.value.as_ref())));
         }
         groups.retain(|group| !group.options.is_empty());
         if let [group] = groups.as_mut_slice() {

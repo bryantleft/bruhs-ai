@@ -6,7 +6,7 @@ use bruhs_models::{
     agent_extensions::{QuotaWindow, SharedUsageHistory, UsageHistoryPeriod, UsageLimitSnapshot},
 };
 use bruhs_ui::dropdown::{
-    saved_option_value, Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
+    Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
 };
 use bruhs_ui::{press::on_press_view, zoom::px};
 use gpui::{prelude::*, *};
@@ -535,7 +535,7 @@ impl UsageWindow {
         let toggle = cx.entity().downgrade();
         let select = toggle.clone();
         let options = std::iter::once(DropdownOption {
-            value: ALL,
+            value: ALL.into(),
             label: filter.label().into(),
             description: None,
         })
@@ -544,23 +544,24 @@ impl UsageWindow {
                 .iter()
                 .chain(selected.iter().filter(|name| !choices.contains(name)))
                 .map(|name| DropdownOption {
-                    value: saved_option_value(&format!("{}:{name}", filter.id())),
+                    value: format!("{}:{name}", filter.id()).into(),
                     label: name.clone(),
                     description: None,
                 }),
         )
         .chain((filter == Filter::Environment).then(|| DropdownOption {
-            value: MODEL_PRICES,
+            value: MODEL_PRICES.into(),
             label: "Model prices".into(),
             description: None,
         }))
         .collect();
+        let selected_value = selected
+            .as_ref()
+            .map(|name| format!("{}:{name}", filter.id()));
         Dropdown::new(
             filter.id(),
             filter.label(),
-            selected.as_ref().map_or(ALL, |name| {
-                saved_option_value(&format!("{}:{name}", filter.id()))
-            }),
+            selected_value.as_deref().unwrap_or(ALL),
             vec![DropdownGroup {
                 label: None,
                 mark: None,
@@ -578,6 +579,7 @@ impl UsageWindow {
                 });
             }),
             Rc::new(move |value, window, cx| {
+                let value = value.to_owned();
                 let _ = select.update(cx, |this, cx| {
                     if value == MODEL_PRICES {
                         this.open_model_prices(None, window, cx);

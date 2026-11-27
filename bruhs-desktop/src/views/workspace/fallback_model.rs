@@ -22,7 +22,7 @@ impl Workspace {
 
     pub(super) fn fallback_row(&self, cx: &Context<'_, Self>) -> AnyElement {
         let mut options = vec![DropdownOption {
-            value: "off",
+            value: "off".into(),
             label: "Off".into(),
             description: None,
         }];
@@ -31,7 +31,7 @@ impl Workspace {
                 .iter()
                 .filter(|m| !m.provider.is_external())
                 .map(|m| DropdownOption {
-                    value: m.id,
+                    value: m.id.into(),
                     label: m.label.into(),
                     description: None,
                 }),
@@ -42,7 +42,7 @@ impl Workspace {
                 .iter()
                 .filter(|m| model_info(&m.id).is_none())
                 .map(|m| DropdownOption {
-                    value: bruhs_ui::dropdown::saved_option_value(&m.id),
+                    value: m.id.clone().into(),
                     label: m.label.clone(),
                     description: None,
                 }),
@@ -53,7 +53,7 @@ impl Workspace {
                 .is_ok_and(|prefs| i.enabled(prefs))
         }) {
             options.extend(instance.choices.iter().map(|m| DropdownOption {
-                value: bruhs_ui::dropdown::saved_option_value(&m.id),
+                value: m.id.clone().into(),
                 label: m.label.clone(),
                 description: None,
             }));

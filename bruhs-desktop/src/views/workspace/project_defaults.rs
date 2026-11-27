@@ -318,7 +318,7 @@ impl Workspace {
             .into_iter()
             .filter(|(path, _)| !path.is_empty())
             .map(|(path, name)| DropdownOption {
-                value: role_settings_ui::project_value(path),
+                value: path.to_owned().into(),
                 label: name.into(),
                 description: Some(path.into()),
             })
@@ -330,7 +330,7 @@ impl Workspace {
         options.insert(
             0,
             DropdownOption {
-                value: "",
+                value: "".into(),
                 label: "This environment".into(),
                 description: None,
             },

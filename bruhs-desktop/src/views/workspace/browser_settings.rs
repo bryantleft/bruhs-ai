@@ -571,19 +571,19 @@ impl Workspace {
                 options: [("fill", "Fill panel"), ("responsive", "Responsive")]
                     .into_iter()
                     .map(|(value, label)| DropdownOption {
-                        value,
+                        value: value.into(),
                         label: label.into(),
                         description: None,
                     })
                     .collect(),
             },
             DropdownGroup {
-                label: Some("Standard"),
+                label: Some("Standard".into()),
                 mark: None,
                 options: BrowserViewport::PRESETS
                     .iter()
                     .map(|&(value, label, w, h)| DropdownOption {
-                        value,
+                        value: value.into(),
                         label: label.into(),
                         description: Some(format!("{w} × {h}")),
                     })

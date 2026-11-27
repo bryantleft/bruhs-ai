@@ -375,14 +375,14 @@ impl Workspace {
         )
     }
 
-    pub(super) fn settings_open_dropdown(&self) -> Option<&'static str> {
-        match self.overlay {
-            Some(Overlay::Settings { open_dropdown }) => open_dropdown,
+    pub(super) fn settings_open_dropdown(&self) -> Option<&str> {
+        match &self.overlay {
+            Some(Overlay::Settings { open_dropdown }) => open_dropdown.as_deref(),
             _ => None,
         }
     }
 
-    pub(super) fn settings_listbox(&self, dropdown: &'static str) -> Listbox {
+    pub(super) fn settings_listbox(&self, dropdown: &str) -> Listbox {
         if self.settings_open_dropdown() == Some(dropdown) {
             Listbox::Popover
         } else {
@@ -390,7 +390,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn set_settings_open_dropdown(&mut self, dropdown: Option<&'static str>) {
+    pub(super) fn set_settings_open_dropdown(&mut self, dropdown: Option<SharedString>) {
         self.settings_dropdown_trigger = None;
         if let Some(Overlay::Settings { open_dropdown }) = &mut self.overlay {
             *open_dropdown = dropdown;

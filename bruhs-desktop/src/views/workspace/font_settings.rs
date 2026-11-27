@@ -74,21 +74,21 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let mut options = vec![DropdownOption {
-            value: "",
+            value: "".into(),
             label: "bruhs default".into(),
             description: None,
         }];
         // A closed control only needs the selected label. Build the system list on demand.
         if self.settings_open_dropdown() == Some(id) {
             options.extend(self.available_fonts.iter().map(|name| DropdownOption {
-                value: role_settings_ui::project_value(name),
+                value: name.clone().into(),
                 label: name.clone(),
                 description: None,
             }));
         }
-        if !current.is_empty() && !options.iter().any(|o| o.value == current) {
+        if !current.is_empty() && !options.iter().any(|o| o.value.as_ref() == current) {
             options.push(DropdownOption {
-                value: role_settings_ui::project_value(current),
+                value: current.to_owned().into(),
                 label: current.into(),
                 description: None,
             });

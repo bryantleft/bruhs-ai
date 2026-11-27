@@ -145,7 +145,7 @@ impl ReactiveAutomations {
                 options: ["hex", "base64"]
                     .into_iter()
                     .map(|value| DropdownOption {
-                        value,
+                        value: value.into(),
                         label: value.into(),
                         description: None,
                     })

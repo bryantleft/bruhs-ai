@@ -32,9 +32,9 @@ pub enum CardVariant {
 /// A bordered card container matching web's `Card`.
 pub fn card(variant: CardVariant) -> Div {
     let (bg, border) = match variant {
-        CardVariant::Solid => (theme::longan_800(), gpui::white().opacity(0.10)),
-        CardVariant::Elevated => (theme::longan_700(), gpui::white().opacity(0.15)),
-        CardVariant::Subtle => (theme::longan_900(), gpui::white().opacity(0.05)),
+        CardVariant::Solid => (theme::longan_800(), theme::ring_card()),
+        CardVariant::Elevated => (theme::longan_700(), theme::ring_floating()),
+        CardVariant::Subtle => (theme::longan_900(), theme::ring_panel()),
     };
     div()
         .rounded(px(CARD_RADIUS_PX))
@@ -162,5 +162,24 @@ mod tests {
         assert_eq!(popover.size.width, gpui::px(240.0));
         let row = cx.debug_bounds("sample-row").expect("sample-row");
         assert_eq!(row.size.height, gpui::px(MENU_ROW_HEIGHT_PX));
+    }
+
+    #[gpui::test]
+    fn component_rings_flip_polarity_between_dark_and_light_modes(cx: &mut TestAppContext) {
+        use crate::theme::{self, Theme, ThemeMode};
+
+        cx.update(|cx| {
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert!(theme::ring_panel().l > 0.5);
+            assert!(theme::ring_card().l > 0.5);
+            assert!(theme::ring_floating().l > 0.5);
+
+            Theme::change(ThemeMode::Light, None, cx);
+            assert!(theme::ring_panel().l < 0.5);
+            assert!(theme::ring_card().l < 0.5);
+            assert!(theme::ring_floating().l < 0.5);
+
+            Theme::change(ThemeMode::Dark, None, cx);
+        });
     }
 }

@@ -1,6 +1,6 @@
 use super::*;
 use bruhs_core::agent_extensions::kiro::{effort_levels, Agents, Catalog, Selection};
-use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
+use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -104,16 +104,16 @@ impl ChatView {
     pub(super) fn render_kiro_agents(&self, cx: &Context<'_, Self>) -> AnyElement {
         let agents: &Agents = self.kiro_agents.as_ref().expect("visible Kiro selector");
         let selected = self.kiro_selection().agent;
-        let index_value = |i| saved_option_value(&format!("kiro-agent-{i}"));
+        let index_value = |i| SharedString::from(format!("kiro-agent-{i}"));
         let mut options = Vec::new();
         let selected = selected
             .as_ref()
             .filter(|s| agents.choices.iter().any(|a| &a.value == *s))
             .or(agents.current.as_ref());
-        let mut value = "default";
+        let mut value = SharedString::from("default");
         if agents.current.is_none() {
             options.push(DropdownOption {
-                value,
+                value: value.clone(),
                 label: "Provider default".into(),
                 description: None,
             });
@@ -121,7 +121,7 @@ impl ChatView {
         for (i, agent) in agents.choices.iter().enumerate() {
             let key = index_value(i);
             if selected == Some(&agent.value) {
-                value = key;
+                value = key.clone();
             }
             options.push(DropdownOption {
                 value: key,
@@ -137,7 +137,7 @@ impl ChatView {
             });
         });
         let entity = cx.weak_entity();
-        let select = std::rc::Rc::new(move |value: &'static str, _: &mut Window, cx: &mut App| {
+        let select = std::rc::Rc::new(move |value: &str, _: &mut Window, cx: &mut App| {
             let _ = entity.update(cx, |chat, cx| {
                 let Some((id, _)) = chat.kiro_model() else {
                     return;
@@ -160,7 +160,7 @@ impl ChatView {
         Dropdown::new(
             "kiro-thread-agent",
             "Agent",
-            value,
+            value.as_ref(),
             vec![DropdownGroup {
                 label: None,
                 mark: None,

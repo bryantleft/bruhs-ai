@@ -2,7 +2,7 @@ use super::*;
 
 impl Workspace {
     pub(in crate::views::workspace) fn scheduled_host_field(&self, cx: &Context<'_, Self>) -> Div {
-        use bruhs_ui::dropdown::{dropdown, saved_option_value, DropdownGroup, Listbox};
+        use bruhs_ui::dropdown::{dropdown, DropdownGroup, Listbox};
         let panel = self.scheduled_panel();
         let current = self
             .linked_projects
@@ -37,14 +37,14 @@ impl Workspace {
             );
         };
         let mut options = vec![DropdownOption {
-            value: "local",
+            value: "local".into(),
             label: "This computer".into(),
             description: Some("Local desktop".into()),
         }];
         for h in &self.linked_projects.hosts {
             if h.data.can_edit_schedules && h.problem.is_none() {
                 options.push(DropdownOption {
-                    value: saved_option_value(&h.credential.to_string()),
+                    value: h.credential.to_string().into(),
                     label: h.name(),
                     description: match h.tunnel.as_ref().map(|t| &t.destination) {
                         Some(Destination::Ssh {
@@ -72,7 +72,7 @@ impl Workspace {
             if labels[&option.label] == 1 {
                 option.description = None;
             } else if addresses[&(option.label.clone(), option.description.clone())] > 1 {
-                option.description = Some(option.value.to_owned());
+                option.description = Some(option.value.to_string());
             }
         }
         let selected = current.map_or_else(|| "local".into(), |h| h.0.credential.to_string());

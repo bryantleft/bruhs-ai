@@ -16,7 +16,6 @@ pub const SWITCH_HEIGHT_PX: f32 = 24.0;
 pub const SWITCH_THUMB_PX: f32 = 20.0;
 const SWITCH_THUMB_OFF_X_PX: f32 = 2.0;
 const SWITCH_THUMB_ON_X_PX: f32 = 22.0;
-const SWITCH_RING_OPACITY: f32 = 0.10;
 const SWITCH_DISABLED_OPACITY: f32 = 0.5;
 
 /// A `role="switch"` named `label`, on when `checked`. `id` doubles as its
@@ -56,8 +55,7 @@ pub fn switch(
         if checked {
             el.bg(theme::persimmon_500())
         } else {
-            el.bg(theme::longan_700())
-                .border_color(gpui::white().opacity(SWITCH_RING_OPACITY))
+            el.bg(theme::longan_700()).border_color(theme::ring_card())
         }
     })
     .when(state == Interactivity::Disabled, |el| {

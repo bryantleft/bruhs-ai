@@ -254,9 +254,9 @@ impl Workspace {
             .selected
             .as_ref()
             .and_then(|s| list.iter().position(|m| &m.id == s));
-        let value = |i: usize| bruhs_ui::dropdown::saved_option_value(&format!("method-{i}"));
+        let value = |i: usize| SharedString::from(format!("method-{i}"));
         let mut options = vec![DropdownOption {
-            value: "default",
+            value: "default".into(),
             label: "Provider default".into(),
             description: None,
         }];
@@ -275,7 +275,8 @@ impl Workspace {
             });
         });
         let entity = cx.weak_entity();
-        let select = std::rc::Rc::new(move |choice: &'static str, _: &mut Window, cx: &mut App| {
+        let select = std::rc::Rc::new(move |choice: &str, _: &mut Window, cx: &mut App| {
+            let choice = choice.to_owned();
             let _ = entity.update(cx, |ws, cx| {
                 if let Some(e) = &mut ws.provider_editor {
                     e.account.menu = false;
@@ -290,13 +291,14 @@ impl Workspace {
                 }
             });
         });
+        let selected_value = selected.map(value);
         div()
             .w(px(182.))
             .max_w_full()
             .child(bruhs_ui::dropdown::Dropdown::new(
                 "acp-account-method",
                 "Sign-in method",
-                selected.map_or("default", value),
+                selected_value.as_deref().unwrap_or("default"),
                 vec![DropdownGroup {
                     label: None,
                     mark: None,

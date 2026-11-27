@@ -46,25 +46,6 @@ const SCOPE_DROPDOWN: &str = "desktop-vault-used-by";
 const BRUH_DROPDOWN: &str = "desktop-vault-bruh";
 const SOURCE_DROPDOWN: &str = "desktop-vault-stored-in";
 
-/// The dropdown takes `'static` values; each bruh id is kept once for the
-/// life of the app, so the set grows only with the crew.
-pub(super) fn bruh_value(id: &str) -> &'static str {
-    static VALUES: std::sync::OnceLock<Mutex<HashSet<&'static str>>> = std::sync::OnceLock::new();
-    if id.is_empty() {
-        return "";
-    }
-    let mut values = VALUES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(value) = values.get(id) {
-        return value;
-    }
-    let value: &'static str = Box::leak(id.to_owned().into_boxed_str());
-    values.insert(value);
-    value
-}
-
 #[derive(Clone, PartialEq)]
 enum Load {
     /// Not asked yet: the first draw asks.
@@ -1157,7 +1138,7 @@ impl VaultSettings {
     fn render_dropdown(
         &self,
         which: FormDropdown,
-        value: &'static str,
+        value: &str,
         options: Vec<DropdownOption>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -1206,7 +1187,7 @@ impl VaultSettings {
     fn chose(
         &mut self,
         which: FormDropdown,
-        choice: &'static str,
+        choice: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -1235,7 +1216,7 @@ impl VaultSettings {
         table
             .iter()
             .map(|(_, key, text)| DropdownOption {
-                value: key,
+                value: (*key).into(),
                 label: (*text).to_owned(),
                 description: None,
             })
@@ -1272,19 +1253,19 @@ impl VaultSettings {
                 let scopes = SCOPE_OPTIONS
                     .iter()
                     .map(|(scope, key, text)| DropdownOption {
-                        value: key,
+                        value: (*key).into(),
                         label: (*text).to_owned(),
                         description: (*scope == FormScope::Bruh && no_bruhs)
                             .then(|| NO_BRUHS.to_owned()),
                     })
                     .collect();
                 let bruhs = std::iter::once(DropdownOption {
-                    value: "",
+                    value: "".into(),
                     label: CHOOSE_BRUH.to_owned(),
                     description: None,
                 })
                 .chain(self.listing.bruhs.iter().map(|bruh| DropdownOption {
-                    value: bruh_value(&bruh.agent_id),
+                    value: bruh.agent_id.clone().into(),
                     label: bruh_choice_label(bruh),
                     description: None,
                 }))
@@ -1309,12 +1290,7 @@ impl VaultSettings {
                         ))
                     })
                     .when(form.scope == FormScope::Bruh, |el| {
-                        el.child(self.render_dropdown(
-                            FormDropdown::Bruh,
-                            bruh_value(&form.bruh),
-                            bruhs,
-                            cx,
-                        ))
+                        el.child(self.render_dropdown(FormDropdown::Bruh, &form.bruh, bruhs, cx))
                     })
                     .into_any_element()
             }

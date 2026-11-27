@@ -254,42 +254,43 @@ impl Workspace {
                 .into_any_element()
         });
         let name = format!("Actions for {}", task.title);
-        let trigger = role_settings_ui::project_value(&format!("{row}-actions"));
+        let trigger = SharedString::from(format!("{row}-actions"));
         let mut options = Vec::new();
         if host.data.can_edit_schedules {
             options.push(DropdownOption {
-                value: "edit",
+                value: "edit".into(),
                 label: "Edit task".into(),
                 description: None,
             });
         }
         if can_run {
             options.push(DropdownOption {
-                value: "run",
+                value: "run".into(),
                 label: if pending { "Retry run" } else { "Run now" }.into(),
                 description: None,
             });
         }
         if host.data.can_read_deliveries && task.schedule == SourceKind::Webhook {
             options.push(DropdownOption {
-                value: "deliveries",
+                value: "deliveries".into(),
                 label: "Deliveries".into(),
                 description: None,
             });
         }
         if host.data.can_delete_schedules {
             options.push(DropdownOption {
-                value: "delete",
+                value: "delete".into(),
                 label: "Delete".into(),
                 description: None,
             });
         }
         let menu = if !options.is_empty() && !busy && !writing {
-            let (toggle, _) = self.settings_dropdown_handlers(trigger, cx);
+            let (toggle, _) = self.settings_dropdown_handlers(trigger.clone(), cx);
             let ws = cx.entity().downgrade();
             let task_id = task.id.clone();
             let select: SelectHandler = Rc::new(move |command, window, cx| {
-                let _ = ws.update(cx, |ws, cx| match command {
+                let command = command.to_owned();
+                let _ = ws.update(cx, |ws, cx| match command.as_str() {
                     "run" => ws.request_linked_run(host_id, &task_id, cx),
                     "deliveries" => ws.open_linked_deliveries(host_id, &task_id, window, cx),
                     "edit" => {
@@ -299,6 +300,7 @@ impl Workspace {
                     _ => {}
                 });
             });
+            let listbox = self.settings_listbox(trigger.as_ref());
             Dropdown::new(
                 trigger,
                 &name,
@@ -308,7 +310,7 @@ impl Workspace {
                     mark: None,
                     options,
                 }],
-                self.settings_listbox(trigger),
+                listbox,
                 toggle,
                 select,
             )
@@ -339,12 +341,12 @@ impl Workspace {
             .into_any_element()
         } else {
             web_button(
-                trigger,
+                trigger.clone(),
                 WebButtonVariant::Ghost,
                 WebButtonSize::IconSmall,
                 ButtonState::Disabled,
             )
-            .debug_selector(move || trigger.to_owned())
+            .debug_selector(move || trigger.to_string())
             .aria_label(name)
             .size(px(28.))
             .child(svg().path(bruhs_ui::icons::ELLIPSIS).size(px(16.)))

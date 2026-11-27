@@ -2,7 +2,6 @@
 //! displays its configured state without reading its value from the keychain.
 use super::*;
 use bruhs_models::agent_extensions::{valid_environment_name, AcpEnvironment, AcpVariable};
-use bruhs_ui::dropdown::saved_option_value;
 use uuid::Uuid;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -341,28 +340,28 @@ impl Workspace {
     ) -> Option<AnyElement> {
         let source_settings = self.credential_settings.read(cx).secret_sources();
         let sources = source_settings.read(cx).sources();
-        let selected = match &row.source {
-            Source::Vault(id) => saved_option_value(&format!("source:{id}")),
-            _ => "value",
+        let selected: SharedString = match &row.source {
+            Source::Vault(id) => format!("source:{id}").into(),
+            _ => "value".into(),
         };
         if sources.is_empty() && selected == "value" {
             return None;
         }
         let mut options = vec![DropdownOption {
-            value: "value",
+            value: "value".into(),
             label: "Value".into(),
             description: None,
         }];
         for (id, source) in sources {
             options.push(DropdownOption {
-                value: saved_option_value(&format!("source:{id}")),
+                value: format!("source:{id}").into(),
                 label: source.name.clone(),
                 description: None,
             });
         }
         if !options.iter().any(|option| option.value == selected) {
             options.push(DropdownOption {
-                value: selected,
+                value: selected.clone(),
                 label: "Unavailable source".into(),
                 description: None,
             });
@@ -382,7 +381,8 @@ impl Workspace {
             });
         });
         let entity = cx.weak_entity();
-        let select = std::rc::Rc::new(move |value: &'static str, w: &mut Window, cx: &mut App| {
+        let select = std::rc::Rc::new(move |value: &str, w: &mut Window, cx: &mut App| {
+            let value = value.to_owned();
             let _ = entity.update(cx, |ws, cx| {
                 if let Some(e) = ws.provider_editor.as_mut().filter(|e| !e.busy) {
                     e.variable_source_menu = None;
@@ -418,9 +418,9 @@ impl Workspace {
         });
         let open = self.provider_editor.as_ref()?.variable_source_menu == Some(key);
         let picker = bruhs_ui::dropdown::Dropdown::new(
-            saved_option_value(&format!("acp-variable-source-{index}")),
+            format!("acp-variable-source-{index}"),
             "Variable value source",
-            selected,
+            selected.as_ref(),
             vec![DropdownGroup {
                 label: None,
                 mark: None,

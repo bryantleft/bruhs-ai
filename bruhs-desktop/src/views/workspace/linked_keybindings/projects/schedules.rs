@@ -276,8 +276,8 @@ impl Workspace {
         }
         let projects = self.settings_project_options(cx);
         self.active_project_path(cx)
-            .filter(|path| projects.iter().any(|p| p.value == path))
-            .or_else(|| projects.first().map(|p| p.value.to_owned()))
+            .filter(|path| projects.iter().any(|p| p.value.as_ref() == path.as_str()))
+            .or_else(|| projects.first().map(|p| p.value.to_string()))
             .unwrap_or_default()
     }
 

@@ -432,7 +432,7 @@ impl Workspace {
             })
             .child(on_press_view(trigger, cx, move |ws, _, cx| {
                 ws.provider_override_source.clone_from(&id);
-                ws.set_settings_open_dropdown((!open).then_some(MENU));
+                ws.set_settings_open_dropdown((!open).then_some(MENU.into()));
                 cx.notify();
             }))
             .when(open, |wrapper| {

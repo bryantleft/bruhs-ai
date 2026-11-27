@@ -4,7 +4,7 @@ use crate::views::model_browser::{self, Browser, FAVORITES};
 use bruhs_core::agent::health::Status;
 use bruhs_core::agent_extensions::availability::ProviderAvailability;
 use bruhs_models::runtime_models::{listed_models, DISCOVERABLE_PROVIDERS};
-use bruhs_ui::dropdown::{saved_option_value, Dropdown};
+use bruhs_ui::dropdown::Dropdown;
 
 const ROW: &str = "desktop-settings-row-model";
 const TYPED: &str = "typed-model-id";
@@ -208,10 +208,10 @@ impl Workspace {
             if model_info(&model.id).is_none() && self.model_enabled(&model.id) {
                 if let Some(group) = groups
                     .iter_mut()
-                    .find(|g| g.label == Some(provider_label(model.provider)))
+                    .find(|g| g.label.as_deref() == Some(provider_label(model.provider)))
                 {
                     group.options.push(DropdownOption {
-                        value: saved_option_value(&model.id),
+                        value: model.id.clone().into(),
                         label: model.label.clone(),
                         description: Some(model.id.clone()),
                     });
@@ -224,10 +224,10 @@ impl Workspace {
         {
             if let Some(group) = groups
                 .iter_mut()
-                .find(|g| g.label == Some(provider_label(choice.provider)))
+                .find(|g| g.label.as_deref() == Some(provider_label(choice.provider)))
             {
                 group.options.push(DropdownOption {
-                    value: saved_option_value(&choice.id),
+                    value: choice.id.clone().into(),
                     label: choice.label,
                     description: Some(choice.id),
                 });
@@ -240,13 +240,13 @@ impl Workspace {
                 .filter(|i| i.enabled(prefs) && !i.choices.is_empty())
             {
                 groups.push(DropdownGroup {
-                    label: Some(saved_option_value(&instance.name)),
+                    label: Some(instance.name.clone().into()),
                     mark: Some(provider_mark(AgentProvider::Acp, cx)),
                     options: instance
                         .choices
                         .iter()
                         .map(|m| DropdownOption {
-                            value: saved_option_value(&m.id),
+                            value: m.id.clone().into(),
                             label: m.label.clone(),
                             description: Some(m.id.clone()),
                         })
@@ -265,10 +265,10 @@ impl Workspace {
                     .iter()
                     .flat_map(|g| &g.options)
                     .chain(&custom)
-                    .any(|o| o.value == id)
+                    .any(|o| o.value.as_ref() == id)
             {
                 custom.push(DropdownOption {
-                    value: saved_option_value(id),
+                    value: id.to_owned().into(),
                     label: id.to_owned(),
                     description: None,
                 });
@@ -281,18 +281,19 @@ impl Workspace {
                 .iter()
                 .flat_map(|g| &g.options)
                 .chain(&custom)
-                .any(|o| o.value == query)
+                .any(|o| o.value.as_ref() == query)
         {
             custom.push(DropdownOption {
-                value: TYPED,
+                value: TYPED.into(),
                 label: format!("Use {query}"),
                 description: Some(query.to_owned()),
             });
         }
-        let custom_ids: Vec<_> = custom.iter().map(|option| option.value).collect();
+        let custom_ids: Vec<SharedString> =
+            custom.iter().map(|option| option.value.clone()).collect();
         if !custom.is_empty() {
             groups.push(DropdownGroup {
-                label: Some("Custom"),
+                label: Some("Custom".into()),
                 mark: None,
                 options: custom,
             });
@@ -301,7 +302,7 @@ impl Workspace {
             groups
                 .iter()
                 .flat_map(|g| &g.options)
-                .find(|o| o.value == id)
+                .find(|o| o.value.as_ref() == id)
                 .map_or_else(
                     || model_info(id).map_or(id, |m| m.label).to_owned(),
                     |o| o.label.clone(),
@@ -320,7 +321,7 @@ impl Workspace {
                 groups
                     .iter()
                     .flat_map(|g| &g.options)
-                    .map(|o| o.value)
+                    .map(|o| o.value.as_ref())
                     .filter(|id| *id != TYPED),
                 self.model_browser_tab.as_deref(),
                 effective.unwrap_or_default(),
@@ -353,7 +354,7 @@ impl Workspace {
                 browser.filter_groups(&mut groups, &self.favorite_models);
             }
             for option in groups.iter_mut().flat_map(|g| &mut g.options) {
-                if option.description.as_deref() == Some(option.value) {
+                if option.description.as_deref() == Some(option.value.as_ref()) {
                     option.description = None;
                 }
             }
@@ -363,7 +364,7 @@ impl Workspace {
                     label: None,
                     mark: None,
                     options: vec![DropdownOption {
-                        value: "inherit",
+                        value: "inherit".into(),
                         label: inherit.to_owned(),
                         description: None,
                     }],
@@ -373,7 +374,7 @@ impl Workspace {
             let stars = self.favorite_models.clone();
             let active = browser.active;
             let accessory = move |id: &str| {
-                if id == "inherit" || custom_ids.contains(&id) {
+                if id == "inherit" || custom_ids.iter().any(|custom_id| custom_id.as_ref() == id) {
                     return None;
                 }
                 let id = id.to_owned();

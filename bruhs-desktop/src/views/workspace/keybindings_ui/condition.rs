@@ -2,18 +2,18 @@
 use super::*;
 use crate::views::workspace::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use bruhs_models::logic::keybindings::{condition_variables, parse_when, WhenExpr};
-use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption};
+use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption};
 use bruhs_ui::press::on_press_view;
 use std::rc::Rc;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Change {
     Condition,
     Group,
     Negate,
     Operator,
     Remove,
-    Variable(&'static str),
+    Variable(String),
 }
 
 fn default_node(group: bool) -> WhenExpr {
@@ -62,7 +62,7 @@ fn change_node(node: WhenExpr, path: &[bool], change: Change) -> Option<WhenExpr
             let Not(inner) = node else { unreachable!() };
             change_node(*inner, &[], change).map(|n| Not(Box::new(n)))
         }
-        Change::Variable(name) => Some(Flag(name.into())),
+        Change::Variable(name) => Some(Flag(name)),
         Change::Operator => Some(match node {
             And(l, r) => Or(l, r),
             Or(l, r) => And(l, r),
@@ -263,7 +263,7 @@ impl Workspace {
         .when(!matches!(change, Change::Remove), |el| el.child(label));
         let path = path.to_vec();
         on_press_view(button, cx, move |ws, w, cx| {
-            ws.change_binding_condition(&path, change, w, cx)
+            ws.change_binding_condition(&path, change.clone(), w, cx)
         })
         .into_any_element()
     }
@@ -298,23 +298,25 @@ impl Workspace {
         let mut children = Vec::new();
         match node {
             Flag(name) => {
-                let id = saved_option_value(&format!("keybinding-variable-{}", path_id(&path)));
+                let id = SharedString::from(format!("keybinding-variable-{}", path_id(&path)));
                 let options = condition_variables()
                     .map(|value| DropdownOption {
-                        value,
+                        value: value.into(),
                         label: value.into(),
                         description: None,
                     })
                     .collect();
-                let (toggle, _) = self.settings_dropdown_handlers(id, cx);
+                let (toggle, _) = self.settings_dropdown_handlers(id.clone(), cx);
                 let view = cx.weak_entity();
                 let selected = path.clone();
-                let select = Rc::new(move |value: &'static str, w: &mut Window, cx: &mut App| {
+                let select = Rc::new(move |value: &str, w: &mut Window, cx: &mut App| {
+                    let value = value.to_owned();
                     let _ = view.update(cx, |ws, cx| {
                         ws.set_settings_open_dropdown(None);
                         ws.change_binding_condition(&selected, Change::Variable(value), w, cx);
                     });
                 });
+                let listbox = self.settings_listbox(id.as_ref());
                 header = header.child(
                     Dropdown::new(
                         id,
@@ -325,7 +327,7 @@ impl Workspace {
                             mark: None,
                             options,
                         }],
-                        self.settings_listbox(id),
+                        listbox,
                         toggle,
                         select,
                     )
@@ -386,7 +388,7 @@ mod tests {
     #[test]
     fn editing_a_nested_group_preserves_its_siblings_and_negation() {
         let mut node = parse_when("isDesktop && !(composerFocus || terminalFocus)").unwrap();
-        node = change_node(node, &[true, false], Change::Variable("turnRunning")).unwrap();
+        node = change_node(node, &[true, false], Change::Variable("turnRunning".into())).unwrap();
         node = change_node(node, &[true], Change::Operator).unwrap();
         assert_eq!(
             node.to_string(),

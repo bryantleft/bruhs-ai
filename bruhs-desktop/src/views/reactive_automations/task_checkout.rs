@@ -77,8 +77,12 @@ impl CheckoutEditor {
         self.branches = None;
     }
 
-    pub(super) fn select(&mut self, selected: &'static str) {
-        self.selected = selected;
+    pub(super) fn select(&mut self, selected: &str) {
+        self.selected = match selected {
+            "worktree" => "worktree",
+            "existing" => "existing",
+            _ => "project",
+        };
         self.close();
     }
 
@@ -172,9 +176,9 @@ impl ReactiveAutomations {
                 mark: None,
                 options: OPTIONS
                     .iter()
-                    .map(|(value, label)| DropdownOption {
-                        value,
-                        label: (*label).into(),
+                    .map(|&(value, label)| DropdownOption {
+                        value: value.into(),
+                        label: label.into(),
                         description: None,
                     })
                     .collect(),

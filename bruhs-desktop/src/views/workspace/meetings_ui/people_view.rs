@@ -2824,7 +2824,7 @@ impl Workspace {
             .iter()
             .filter(|p| p.id != source_id)
             .map(|p| DropdownOption {
-                value: Box::leak(p.id.clone().into_boxed_str()),
+                value: p.id.clone().into(),
                 label: p.display_name.clone(),
                 description: None,
             })

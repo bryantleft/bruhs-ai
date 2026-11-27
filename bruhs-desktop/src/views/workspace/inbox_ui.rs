@@ -22,21 +22,6 @@ const CONVERSATION_MESSAGE_WIDTH: f32 = 0.88;
 /// Web `rows=3` at `text-body` with `py-1.5`.
 const REPLY_BOX_HEIGHT_PX: f32 = 75.0;
 
-/// A dropdown value is `'static` and a person's id is not, so each distinct
-/// id is kept once for the life of the app (like Settings' project names).
-fn person_value(id: &str) -> &'static str {
-    use std::collections::BTreeSet;
-    use std::sync::{Mutex, PoisonError};
-    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(known) = values.get(id) {
-        return known;
-    }
-    let kept: &'static str = Box::leak(id.to_string().into_boxed_str());
-    values.insert(kept);
-    kept
-}
-
 /// A row's accessible name, in the order the web row reads from its
 /// content: read state, sender, date, subject, Important, preview and source.
 pub(super) fn inbox_row_label(card: &InboxCard) -> String {
@@ -277,7 +262,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let options = std::iter::once(DropdownOption {
-            value: "",
+            value: "".into(),
             label: "Unlinked".to_string(),
             description: None,
         })
@@ -287,7 +272,7 @@ impl Workspace {
                 .people
                 .iter()
                 .map(|person| DropdownOption {
-                    value: person_value(&person.id),
+                    value: person.id.clone().into(),
                     label: person.display_name.clone(),
                     description: None,
                 }),

@@ -15,23 +15,20 @@ impl Workspace {
         if sources.is_empty() && form.source.is_none() {
             return literal.into_any_element();
         }
-        let mut choices = vec![("value", "Value")];
+        let mut choices: Vec<(SharedString, String)> = vec![("value".into(), "Value".into())];
         for (id, source) in sources {
-            choices.push((
-                saved_option_value(&format!("source:{id}")),
-                saved_option_value(&source.name),
-            ));
+            choices.push((format!("source:{id}").into(), source.name.clone()));
         }
-        let selected = form
+        let selected: SharedString = form
             .source
             .as_ref()
-            .map_or("value", |id| saved_option_value(&format!("source:{id}")));
+            .map_or_else(|| "value".into(), |id| format!("source:{id}").into());
         let missing = form
             .source
             .as_ref()
             .is_some_and(|id| !sources.contains_key(id));
         if missing {
-            choices.push((selected, "Unavailable source"));
+            choices.push((selected.clone(), "Unavailable source".into()));
         }
         let id = "generator-key-source";
         let icon = if missing {
@@ -46,14 +43,14 @@ impl Workspace {
             .into_iter()
             .map(|(value, label)| DropdownOption {
                 value,
-                label: label.to_owned(),
+                label,
                 description: None,
             })
             .collect();
         let picker = bruhs_ui::dropdown::Dropdown::new(
             id,
             "API key source",
-            selected,
+            selected.as_ref(),
             vec![DropdownGroup {
                 label: None,
                 mark: None,
@@ -328,7 +325,7 @@ impl Workspace {
                         {
                             let row = row.clone();
                             let slug = slug.to_owned();
-                            let test_id = saved_option_value(&format!("{id}-test"));
+                            let test_id = SharedString::from(format!("{id}-test"));
                             control = control.child(self.gen_button(
                                 test_id,
                                 "Test",
@@ -349,7 +346,7 @@ impl Workspace {
                     {
                         assignment = assignment.child(
                             div()
-                                .id(saved_option_value(&format!("{id}-result")))
+                                .id(SharedString::from(format!("{id}-result")))
                                 .role(Role::Status)
                                 .text_sm()
                                 .text_color(theme::rambutan_400())
@@ -380,22 +377,34 @@ impl Workspace {
                 "Choose models".to_owned()
             }
             Page::Models(g, slug) => {
-                let choices = g
+                let options = g
                     .models
                     .iter()
-                    .map(|m| (saved_option_value(&m.id), saved_option_value(&m.name)))
+                    .map(|m| DropdownOption {
+                        value: m.id.clone().into(),
+                        label: m.name.clone(),
+                        description: None,
+                    })
                     .collect::<Vec<_>>();
-                if choices.is_empty() {
+                if options.is_empty() {
                     body = body.child("No models available.");
                 } else {
+                    let (toggle, select) =
+                        self.settings_dropdown_handlers("generator-test-model", cx);
                     body = body.child(field(
                         "Model",
-                        self.choice_control(
+                        dropdown(
                             "generator-test-model",
                             "Generator model",
                             slug,
-                            &choices,
-                            cx,
+                            vec![DropdownGroup {
+                                label: None,
+                                mark: None,
+                                options,
+                            }],
+                            self.settings_listbox("generator-test-model"),
+                            toggle,
+                            select,
                         ),
                     ));
                 }

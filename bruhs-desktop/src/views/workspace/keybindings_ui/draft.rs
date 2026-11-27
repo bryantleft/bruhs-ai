@@ -2,7 +2,7 @@
 use super::*;
 use crate::views::workspace::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use bruhs_models::logic::keybindings::{parse_chord, when_syntax_ok};
-use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption};
+use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption};
 use bruhs_ui::press::on_press_view;
 use std::collections::BTreeSet;
 
@@ -118,7 +118,7 @@ impl Workspace {
             .chain(defaults.iter())
             .filter(|r| commands.insert(r.command.as_str()))
             .map(|r| DropdownOption {
-                value: saved_option_value(&r.command),
+                value: r.command.clone().into(),
                 label: command_label(&r.command),
                 description: None,
             })

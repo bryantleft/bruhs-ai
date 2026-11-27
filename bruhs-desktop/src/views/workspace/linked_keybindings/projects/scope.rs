@@ -93,7 +93,7 @@ impl Workspace {
         options.insert(
             0,
             DropdownOption {
-                value: "",
+                value: "".into(),
                 label: "This environment".into(),
                 description: None,
             },
@@ -103,13 +103,13 @@ impl Workspace {
                 label: None,
                 mark: None,
                 options: vec![DropdownOption {
-                    value: ALL_ENVIRONMENTS,
+                    value: ALL_ENVIRONMENTS.into(),
                     label: "All environments".into(),
                     description: None,
                 }],
             },
             DropdownGroup {
-                label: Some("This machine"),
+                label: Some("This machine".into()),
                 mark: None,
                 options,
             },
@@ -122,7 +122,7 @@ impl Workspace {
                     host: host.credential,
                     path: path.clone(),
                 };
-                let value = role_settings_ui::project_value(&scope.key());
+                let value = SharedString::from(scope.key());
                 options.push(DropdownOption {
                     value,
                     label,
@@ -151,7 +151,7 @@ impl Workspace {
                 }
             }
             groups.push(DropdownGroup {
-                label: Some(role_settings_ui::project_value(&name)),
+                label: Some(name.into()),
                 mark: None,
                 options,
             });

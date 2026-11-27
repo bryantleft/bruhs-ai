@@ -24,10 +24,13 @@ const BOX_RADIUS_PX: f32 = 4.0;
 const CHECK_PX: f32 = 14.0;
 const LABEL_GAP_PX: f32 = 8.0;
 const LABEL_TEXT_PX: f32 = 13.0;
-const UNCHECKED_BG_OPACITY: f32 = 0.05;
-const HOVER_BG_OPACITY: f32 = 0.10;
-const RING_OPACITY: f32 = 0.15;
 const DISABLED_OPACITY: f32 = 0.5;
+
+/// Semantic border color for an unchecked checkbox box. Clears the 3:1
+/// non-text contrast benchmark across every theme family and surface.
+pub(crate) fn unchecked_border_color() -> gpui::Hsla {
+    theme::rambutan_500()
+}
 
 /// Called with the state a press asks for (the opposite of the current one).
 type ChangeHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
@@ -131,11 +134,12 @@ impl RenderOnce for Checkbox {
             if checked {
                 el.bg(theme::persimmon_500())
             } else {
-                // The ring is the control's border until it takes focus.
-                el.bg(gpui::white().opacity(UNCHECKED_BG_OPACITY))
-                    .border_color(gpui::white().opacity(RING_OPACITY))
+                // Semantic outline keeps unchecked boxes above 3:1 contrast in
+                // both light and dark modes until keyboard focus takes over.
+                el.bg(theme::control_surface())
+                    .border_color(unchecked_border_color())
                     .when(state == Interactivity::Enabled, |el| {
-                        el.hover(|el| el.bg(gpui::white().opacity(HOVER_BG_OPACITY)))
+                        el.hover(|el| el.bg(theme::ring_card()))
                     })
             }
         })
@@ -276,5 +280,58 @@ mod tests {
             Modifiers::none(),
         );
         assert!(changes.borrow().is_empty());
+    }
+
+    fn relative_luminance(color: gpui::Rgba) -> f32 {
+        let linear = |c: f32| {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn contrast_ratio(fg: gpui::Hsla, bg: gpui::Hsla) -> f32 {
+        let bg_rgb = bg.to_rgb();
+        let fg_rgb = fg.to_rgb();
+        let alpha = fg_rgb.a.clamp(0.0, 1.0);
+        let composited = gpui::Rgba {
+            r: fg_rgb.r * alpha + bg_rgb.r * (1.0 - alpha),
+            g: fg_rgb.g * alpha + bg_rgb.g * (1.0 - alpha),
+            b: fg_rgb.b * alpha + bg_rgb.b * (1.0 - alpha),
+            a: 1.0,
+        };
+        let l1 = relative_luminance(composited);
+        let l2 = relative_luminance(bg_rgb);
+        let (bright, dark) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
+        (bright + 0.05) / (dark + 0.05)
+    }
+
+    #[gpui::test]
+    fn unchecked_checkbox_border_clears_wcag_non_text_contrast(cx: &mut TestAppContext) {
+        use crate::theme::{Theme, ThemeFamily, ThemeMode};
+
+        for family in ThemeFamily::ALL {
+            for mode in [ThemeMode::Light, ThemeMode::Dark] {
+                cx.update(|cx| {
+                    Theme::use_family(family, mode, None, cx);
+                    let border = unchecked_border_color();
+                    for (surface_name, surface) in [
+                        ("canvas", theme::longan_950()),
+                        ("panel", theme::longan_900()),
+                        ("card", theme::longan_800()),
+                    ] {
+                        let ratio = contrast_ratio(border, surface);
+                        assert!(
+                            ratio >= 3.0,
+                            "{family:?} {mode:?} on {surface_name}: unchecked checkbox border contrast {ratio:.2}:1 < 3.0:1"
+                        );
+                    }
+                });
+            }
+        }
+        cx.update(|cx| Theme::use_family(ThemeFamily::Bruhs, ThemeMode::Dark, None, cx));
     }
 }

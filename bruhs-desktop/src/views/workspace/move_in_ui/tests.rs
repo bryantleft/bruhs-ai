@@ -704,13 +704,13 @@ fn tab_follows_the_agent_tab_in_order(cx: &mut gpui::TestAppContext) {
         focused(cx).as_ref() == Some(&folder),
         "Folder takes focus first"
     );
-    // From the dialog's start: the tabs, then the tab's controls in the
-    // order they show (as on the web): Folder, Look here, Choose folder,
-    // each persona, then Make this bruh.
+    // From the dialog's start: roving Tab lands once on the active tab, then
+    // follows the panel's controls in order: Folder, Look here, Choose folder,
+    // each persona, then Make this bruh. Arrow keys move between tabs.
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.modal_start_focus_handle.focus(window, cx);
     });
-    let mut expected: Vec<FocusHandle> = tabs.to_vec();
+    let mut expected: Vec<FocusHandle> = vec![tabs[0].clone()];
     expected.extend([folder, look, choose]);
     expected.extend(rows.iter().cloned());
     expected.push(make);
@@ -722,8 +722,32 @@ fn tab_follows_the_agent_tab_in_order(cx: &mut gpui::TestAppContext) {
     let again = tab_through(cx, 1);
     assert!(
         again[0].as_ref() == Some(&tabs[0]),
-        "the cycle wraps to the tabs"
+        "the cycle wraps to the active tab"
     );
+
+    // Right/Left arrows move across tabs and update the selected tab.
+    press(cx, "right");
+    assert!(
+        focused(cx).as_ref() == Some(&tabs[1]),
+        "Right moves focus to the next tab"
+    );
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(
+            workspace.move_in.open.as_ref().unwrap().tab,
+            MoveInTab::Hermes
+        );
+    });
+    press(cx, "left");
+    assert!(
+        focused(cx).as_ref() == Some(&tabs[0]),
+        "Left returns focus to the previous tab"
+    );
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(
+            workspace.move_in.open.as_ref().unwrap().tab,
+            MoveInTab::OpenClaw
+        );
+    });
 
     // Enter on a row chooses it.
     cx.update(|window, cx| window.focus(&rows[1], cx));

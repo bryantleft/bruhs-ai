@@ -2421,13 +2421,13 @@ impl ReactiveAutomations {
             });
         });
         let options = std::iter::once(DropdownOption {
-            value: "",
+            value: "".into(),
             label: "Default".into(),
             description: None,
         })
-        .chain(CLAUDE_EFFORTS.iter().map(|level| DropdownOption {
-            value: level,
-            label: (*level).to_string(),
+        .chain(CLAUDE_EFFORTS.iter().map(|&level| DropdownOption {
+            value: level.into(),
+            label: level.to_string(),
             description: None,
         }))
         .collect();

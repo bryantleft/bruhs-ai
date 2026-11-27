@@ -679,13 +679,14 @@ impl Workspace {
 
     pub(super) fn toggle_settings_dropdown(
         &mut self,
-        id: &'static str,
+        id: impl Into<SharedString>,
         cx: &mut Context<'_, Self>,
     ) {
-        let open = if self.settings_open_dropdown() == Some(id) {
+        let id = id.into();
+        let open = if self.settings_open_dropdown() == Some(id.as_ref()) {
             None
         } else {
-            Some(id)
+            Some(id.clone())
         };
         if open.is_some() && id.starts_with("settings-font-") {
             self.load_font_names(cx);
@@ -696,8 +697,8 @@ impl Workspace {
 
     pub(super) fn select_settings_option(
         &mut self,
-        id: &'static str,
-        value: &'static str,
+        id: &str,
+        value: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -1058,17 +1059,22 @@ impl Workspace {
     /// Toggle/select closures for a settings dropdown, routed back here.
     pub(super) fn settings_dropdown_handlers(
         &self,
-        id: &'static str,
+        id: impl Into<SharedString>,
         cx: &Context<'_, Self>,
     ) -> (ToggleHandler, SelectHandler) {
+        let id = id.into();
+        let toggle_id = id.clone();
         let entity = cx.entity().downgrade();
         let toggle_entity = entity.clone();
         let on_toggle: ToggleHandler = Rc::new(move |_window, cx| {
+            let id = toggle_id.clone();
             let _ = toggle_entity.update(cx, |this, cx| this.toggle_settings_dropdown(id, cx));
         });
         let on_select: SelectHandler = Rc::new(move |value, window, cx| {
+            let id = id.clone();
+            let value = value.to_owned();
             let _ = entity.update(cx, |this, cx| {
-                this.select_settings_option(id, value, window, cx)
+                this.select_settings_option(id.as_ref(), &value, window, cx)
             });
         });
         (on_toggle, on_select)
@@ -1076,21 +1082,23 @@ impl Workspace {
 
     pub(super) fn choice_control(
         &self,
-        id: &'static str,
+        id: impl Into<SharedString>,
         label: &'static str,
         current: &str,
         choices: &[(&'static str, &'static str)],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        let id = id.into();
         let options = choices
             .iter()
             .map(|&(value, label)| DropdownOption {
-                value,
+                value: value.into(),
                 label: self.ui_language().text(label).into(),
                 description: None,
             })
             .collect();
-        let (toggle, select) = self.settings_dropdown_handlers(id, cx);
+        let (toggle, select) = self.settings_dropdown_handlers(id.clone(), cx);
+        let listbox = self.settings_listbox(id.as_ref());
         dropdown(
             id,
             self.ui_language().text(label),
@@ -1100,7 +1108,7 @@ impl Workspace {
                 mark: None,
                 options,
             }],
-            self.settings_listbox(id),
+            listbox,
             toggle,
             select,
         )
@@ -1143,7 +1151,7 @@ impl Workspace {
                 .into_iter()
                 .zip(["Read and message", "Read only", "Off"])
                 .map(|(value, label)| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: label.to_string(),
                     description: None,
                 })
@@ -1169,7 +1177,7 @@ impl Workspace {
             options: THREAD_HOP_OPTIONS
                 .into_iter()
                 .map(|value| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: format!("{value} messages"),
                     description: None,
                 })
@@ -1200,7 +1208,7 @@ impl Workspace {
                 .into_iter()
                 .zip(["When you return", "Before the cache expires", "Never"])
                 .map(|(value, label)| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: label.to_string(),
                     description: None,
                 })
@@ -2112,7 +2120,7 @@ impl Workspace {
             options: bruhs_models::logic::editor::EDITORS
                 .iter()
                 .map(|editor| DropdownOption {
-                    value: editor.id,
+                    value: editor.id.into(),
                     label: editor.label.to_string(),
                     description: None,
                 })
@@ -2289,7 +2297,7 @@ impl Workspace {
             options: SendShortcut::OPTIONS
                 .into_iter()
                 .map(|(mode, value)| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: match mode {
                         SendShortcut::Enter => "Enter".to_string(),
                         SendShortcut::ModEnterMultiline => {
@@ -2707,12 +2715,12 @@ impl Workspace {
                         .is_ok_and(|prefs| prefs.enabled(*provider))
             })
             .map(|(provider, models)| DropdownGroup {
-                label: Some(provider_label(provider)),
+                label: Some(provider_label(provider).into()),
                 mark: Some(provider_mark(provider, cx)),
                 options: models
                     .into_iter()
                     .map(|(_, model)| DropdownOption {
-                        value: model.id,
+                        value: model.id.into(),
                         label: model.label.to_string(),
                         description: Some(model.id.to_string()),
                     })
@@ -2726,7 +2734,7 @@ impl Workspace {
             label: None,
             mark: None,
             options: vec![DropdownOption {
-                value: "inherit",
+                value: "inherit".into(),
                 label: format!("Use environment default ({label})"),
                 description: None,
             }],
@@ -2742,7 +2750,7 @@ impl Workspace {
             options: PermissionMode::all()
                 .iter()
                 .map(|mode| DropdownOption {
-                    value: mode.as_str(),
+                    value: mode.as_str().into(),
                     label: mode.label().to_string(),
                     description: Some(mode.description(None).to_string()),
                 })
@@ -2899,7 +2907,7 @@ impl Workspace {
     /// Web: a list of the projects threads are in, "Choose a project" first.
     fn render_title_project_control(&self, cx: &Context<'_, Self>) -> AnyElement {
         let options = std::iter::once(DropdownOption {
-            value: "",
+            value: "".into(),
             label: "Choose a project".to_string(),
             description: None,
         })
@@ -2907,7 +2915,7 @@ impl Workspace {
             self.thread_project_names()
                 .into_iter()
                 .map(|name| DropdownOption {
-                    value: role_settings_ui::project_value(&name),
+                    value: name.clone().into(),
                     label: name,
                     description: None,
                 }),
@@ -2923,7 +2931,7 @@ impl Workspace {
         dropdown(
             SETTINGS_TITLE_PROJECT_DROPDOWN_ID,
             "Project for title instructions",
-            role_settings_ui::project_value(&self.title_project),
+            &self.title_project,
             groups,
             self.settings_listbox(SETTINGS_TITLE_PROJECT_DROPDOWN_ID),
             toggle,

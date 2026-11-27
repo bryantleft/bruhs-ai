@@ -5,7 +5,6 @@ use bruhs_core::{
     secret_sources::{validate_reference, SecretReference},
     usage_hubs::{self as api, AccountUsage, Hub, ManagementKey},
 };
-use bruhs_ui::dropdown::saved_option_value;
 
 struct AddForm {
     url: Entity<InputState>,
@@ -920,28 +919,25 @@ impl Workspace {
                 let mut key = div().flex().gap_2().items_center();
                 if !sources.is_empty() || f.source.is_some() {
                     let mut options = vec![DropdownOption {
-                        value: "value",
+                        value: "value".into(),
                         label: "Value".into(),
                         description: None,
                     }];
                     for (id, s) in sources {
                         options.push(DropdownOption {
-                            value: saved_option_value(&format!("source:{id}")),
+                            value: format!("source:{id}").into(),
                             label: s.name.clone(),
                             description: None,
                         });
                     }
-                    let selected = f
-                        .source
-                        .as_ref()
-                        .map_or("value", |s| saved_option_value(&format!("source:{s}")));
+                    let selected = f.source.as_ref().map(|s| format!("source:{s}"));
                     let id = "usage-hub-key-source";
                     let (toggle, select) = self.settings_dropdown_handlers(id, cx);
                     key = key.child(
                         bruhs_ui::dropdown::Dropdown::new(
                             id,
                             "Management key source",
-                            selected,
+                            selected.as_deref().unwrap_or("value"),
                             vec![DropdownGroup {
                                 label: None,
                                 mark: None,

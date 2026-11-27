@@ -119,13 +119,13 @@ impl Workspace {
             effective_label
         };
         let mut options = vec![DropdownOption {
-            value: "auto",
+            value: "auto".into(),
             label: "Auto".into(),
             description: None,
         }];
         if unavailable {
             options.push(DropdownOption {
-                value: "unavailable",
+                value: "unavailable".into(),
                 label: format!("{} unavailable", name(saved)),
                 description: None,
             });
@@ -140,7 +140,7 @@ impl Workspace {
                     _ => true,
                 })
                 .map(|&(value, label)| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: label.into(),
                     description: None,
                 }),

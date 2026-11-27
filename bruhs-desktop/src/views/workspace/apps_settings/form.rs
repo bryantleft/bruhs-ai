@@ -6,7 +6,7 @@
 //! A token or key field is masked, never filled, is read and emptied in one
 //! step on submit, and is emptied on cancel and whenever the form closes.
 
-use super::super::vault_settings::{bruh_value, button, field, labelled, panel, small};
+use super::super::vault_settings::{button, field, labelled, panel, small};
 use super::*;
 use bruhs_models::apps::{
     connect_request, form_fields, replace_fields, replace_request, AppConnect, AppParam,
@@ -392,7 +392,7 @@ impl AppsSettings {
         cx.notify();
     }
 
-    fn chose(&mut self, which: FormDropdown, choice: &'static str, cx: &mut Context<'_, Self>) {
+    fn chose(&mut self, which: FormDropdown, choice: &str, cx: &mut Context<'_, Self>) {
         let no_bruhs = self.listing.bruhs.is_empty();
         let Some(form) = self.form.as_mut() else {
             return;
@@ -414,7 +414,7 @@ impl AppsSettings {
     fn render_dropdown(
         &self,
         which: FormDropdown,
-        value: &'static str,
+        value: &str,
         options: Vec<DropdownOption>,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -469,19 +469,19 @@ impl AppsSettings {
         let scopes = APP_SCOPE_OPTIONS
             .iter()
             .map(|(scope, key, text)| DropdownOption {
-                value: key,
+                value: (*key).into(),
                 label: (*text).to_owned(),
                 description: (*scope == FormScope::Bruh && no_bruhs)
                     .then(|| NO_BRUHS_FOR_APPS.to_owned()),
             })
             .collect();
         let bruhs = std::iter::once(DropdownOption {
-            value: "",
+            value: "".into(),
             label: CHOOSE_BRUH.to_owned(),
             description: None,
         })
         .chain(self.listing.bruhs.iter().map(|bruh| DropdownOption {
-            value: bruh_value(&bruh.agent_id),
+            value: bruh.agent_id.clone().into(),
             label: review_text(&bruh.name),
             description: None,
         }))
@@ -508,12 +508,7 @@ impl AppsSettings {
                 el.child(small(NO_BRUHS_FOR_APPS, theme::rambutan_500()))
             })
             .when(form.scope == FormScope::Bruh, |el| {
-                el.child(self.render_dropdown(
-                    FormDropdown::Bruh,
-                    bruh_value(&form.bruh),
-                    bruhs,
-                    cx,
-                ))
+                el.child(self.render_dropdown(FormDropdown::Bruh, &form.bruh, bruhs, cx))
             })
             .into_any_element()
     }

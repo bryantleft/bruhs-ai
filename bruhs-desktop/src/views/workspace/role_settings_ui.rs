@@ -61,7 +61,19 @@ pub(super) struct RoleInputs {
     project_instructions: Entity<TextareaState>,
 }
 
-pub(super) use bruhs_ui::dropdown::saved_option_value as project_value;
+#[cfg(test)]
+pub(super) fn project_value(name: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, PoisonError};
+    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(known) = values.get(name) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
+    values.insert(kept);
+    kept
+}
 
 /// Web `FIELD_LABEL`: `text-label-sm text-rambutan-300`.
 fn field_label(text: &'static str) -> Div {
@@ -188,9 +200,9 @@ impl Workspace {
     }
 }
 
-fn option(value: &'static str, label: impl Into<String>) -> DropdownOption {
+fn option(value: impl Into<SharedString>, label: impl Into<String>) -> DropdownOption {
     DropdownOption {
-        value,
+        value: value.into(),
         label: label.into(),
         description: None,
     }
@@ -232,7 +244,7 @@ fn suggestion_model_groups() -> Vec<DropdownGroup> {
     for group in &mut groups {
         group
             .options
-            .retain(|option| !AgentProvider::for_model(option.value).is_external());
+            .retain(|option| !AgentProvider::for_model(option.value.as_ref()).is_external());
     }
     groups
 }
@@ -280,7 +292,7 @@ fn role_model_value(current: Option<&str>) -> &str {
 fn effort_groups(inherit: &str) -> Vec<DropdownGroup> {
     flat(
         std::iter::once(option(INHERIT, inherit))
-            .chain(CLAUDE_EFFORTS.iter().map(|level| option(level, *level)))
+            .chain(CLAUDE_EFFORTS.iter().map(|&level| option(level, level)))
             .collect(),
     )
 }
@@ -298,11 +310,11 @@ fn access_groups(inherit: &str) -> Vec<DropdownGroup> {
 }
 
 /// The dropdown's choice as a stored value: `None` for "inherit".
-fn chosen(value: &'static str) -> Option<String> {
+fn chosen(value: &str) -> Option<String> {
     (value != INHERIT).then(|| value.to_string())
 }
 
-fn chosen_access(value: &'static str) -> Option<PermissionMode> {
+fn chosen_access(value: &str) -> Option<PermissionMode> {
     ROLE_ACCESS
         .iter()
         .copied()
@@ -528,8 +540,8 @@ impl Workspace {
     /// one of them.
     pub(super) fn select_role_setting(
         &mut self,
-        id: &'static str,
-        value: &'static str,
+        id: &str,
+        value: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> bool {
@@ -728,7 +740,7 @@ impl Workspace {
                 .chain(
                     self.thread_project_names()
                         .into_iter()
-                        .map(|name| option(project_value(&name), name)),
+                        .map(|name| option(name.clone(), name)),
                 )
                 .collect(),
         );
@@ -800,7 +812,7 @@ impl Workspace {
                     if project.is_empty() {
                         INHERIT
                     } else {
-                        project_value(&project)
+                        project.as_str()
                     },
                     project_groups,
                     cx,
@@ -1016,10 +1028,11 @@ mod tests {
 
     #[test]
     fn a_role_is_never_offered_the_loosest_access() {
-        let values: Vec<&str> = access_groups("Your access mode")[0]
+        let groups = access_groups("Your access mode");
+        let values: Vec<&str> = groups[0]
             .options
             .iter()
-            .map(|option| option.value)
+            .map(|option| option.value.as_ref())
             .collect();
         assert_eq!(values, [INHERIT, "plan", "default", "acceptEdits"]);
         assert_eq!(chosen_access(INHERIT), None);
@@ -1041,7 +1054,7 @@ mod tests {
         assert!(suggestion_model_groups()[0]
             .options
             .iter()
-            .all(|option| !AgentProvider::for_model(option.value).is_external()));
+            .all(|option| !AgentProvider::for_model(option.value.as_ref()).is_external()));
         assert_eq!(ROLE_SLOTS.len(), MAX_ROLES);
     }
 }

@@ -600,28 +600,32 @@ impl Workspace {
     }
 
     fn render_move_in_tabs(&self, open: &MoveIn, cx: &Context<'_, Self>) -> AnyElement {
-        bruhs_ui::tabs::tab_list(
+        let selected_index = TABS.iter().position(|&tab| tab == open.tab).unwrap_or(0);
+        let view = cx.entity().downgrade();
+        bruhs_ui::tabs::Tabs::new(
             "desktop-move-in-tabs",
             MOVE_IN_TITLE,
             bruhs_ui::tabs::TabStyle::Pill,
+            selected_index,
         )
         .mt_2()
-        .children(TABS.into_iter().zip(&open.tabs).map(|(tab, focus)| {
-            let selected = tab == open.tab;
+        .items(TABS.into_iter().zip(&open.tabs).map(|(tab, focus)| {
             let label = tab_label(tab);
-            let trigger = bruhs_ui::tabs::tab_trigger(
+            bruhs_ui::tabs::TabItem::new(
                 SharedString::from(format!("desktop-move-in-tab-{label}")),
                 label,
-                selected,
-                bruhs_ui::tabs::TabStyle::Pill,
             )
-            .debug_selector(move || format!("desktop-move-in-tab:{label}"))
-            .track_focus(focus)
-            .child(label);
-            on_press_view(trigger, cx, move |this, window, cx| {
-                this.show_move_in_tab(tab, window, cx);
-            })
+            .debug_selector(format!("desktop-move-in-tab:{label}"))
+            .focus_handle(focus.clone())
+            .child(label)
         }))
+        .on_select(move |index, window, cx| {
+            if let Some(&tab) = TABS.get(index) {
+                let _ = view.update(cx, |this, cx| {
+                    this.show_move_in_tab(tab, window, cx);
+                });
+            }
+        })
         .into_any_element()
     }
 

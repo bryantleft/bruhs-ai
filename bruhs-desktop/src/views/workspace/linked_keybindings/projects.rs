@@ -905,21 +905,24 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let scope = member.scope();
-        let id = role_settings_ui::project_value(&format!("linked-checkout-rule-{slot}"));
+        let id = SharedString::from(format!("linked-checkout-rule-{slot}"));
+        let toggle_id = id.clone();
         let target_scope = scope.clone();
         let workspace = cx.entity().downgrade();
         let toggle: ToggleHandler = Rc::new(move |_, cx| {
+            let toggle_id = toggle_id.clone();
             let _ = workspace.update(cx, |ws, cx| {
-                let close = ws.settings_open_dropdown() == Some(id)
+                let close = ws.settings_open_dropdown() == Some(toggle_id.as_ref())
                     && ws.linked_projects.rule_scope.as_deref() == Some(&target_scope);
                 ws.linked_projects.rule_scope = (!close).then(|| target_scope.clone());
-                ws.set_settings_open_dropdown((!close).then_some(id));
+                ws.set_settings_open_dropdown((!close).then_some(toggle_id));
                 cx.notify();
             });
         });
         let entity = cx.entity().downgrade();
         let target = member.clone();
         let select: SelectHandler = Rc::new(move |value, _, cx| {
+            let value = value.to_owned();
             let _ = entity.update(cx, |ws, cx| {
                 ws.set_settings_open_dropdown(None);
                 if let Some(host) = target.host {
@@ -932,7 +935,7 @@ impl Workspace {
                         return;
                     }
                 }
-                ws.set_checkout_grouping(target.scope(), value, cx);
+                ws.set_checkout_grouping(target.scope(), &value, cx);
             });
         });
         let label = format!(
@@ -940,7 +943,7 @@ impl Workspace {
             member.path, member.environment
         );
         let listbox = if self.linked_projects.rule_scope.as_deref() == Some(&scope) {
-            self.settings_listbox(id)
+            self.settings_listbox(id.as_ref())
         } else {
             Listbox::Closed
         };

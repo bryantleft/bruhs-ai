@@ -652,9 +652,9 @@ fn task_box(checked: bool, frame: &Frame) -> AnyElement {
                                 .text_color(crate::theme::longan_950()),
                         )
                     } else {
-                        el.bg(gpui::white().opacity(0.05))
+                        el.bg(crate::theme::control_surface())
                             .border_1()
-                            .border_color(gpui::white().opacity(0.15))
+                            .border_color(crate::checkbox::unchecked_border_color())
                     }
                 }),
         )

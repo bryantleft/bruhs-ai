@@ -229,7 +229,7 @@ impl Workspace {
             let path = option.value;
             let Some(value) = self
                 .project_defaults
-                .get(path)
+                .get(path.as_ref())
                 .and_then(|p| setting.project_label(p))
             else {
                 continue;
@@ -266,14 +266,19 @@ impl Workspace {
                             .w_full()
                             .text_xs()
                             .text_color(theme::rambutan_400())
-                            .child(path),
+                            .child(path.clone()),
                     ),
             )
             .child(source_value(value));
             first = false;
             projects = projects.child(on_press_view(button, cx, move |ws, window, cx| {
                 let trigger = ws.settings_dropdown_trigger.take();
-                ws.select_settings_option("settings-project-defaults-scope", path, window, cx);
+                ws.select_settings_option(
+                    "settings-project-defaults-scope",
+                    path.as_ref(),
+                    window,
+                    cx,
+                );
                 ws.expand_settings_row(row);
                 ws.reveal_settings_row(row.into(), cx);
                 if let Some(trigger) = trigger {
@@ -381,7 +386,7 @@ impl Workspace {
                 }
             })
             .child(on_press_view(trigger, cx, move |ws, window, cx| {
-                ws.set_settings_open_dropdown((!open).then_some(row));
+                ws.set_settings_open_dropdown((!open).then_some(row.into()));
                 if !open {
                     ws.settings_dropdown_trigger = window.focused(cx);
                     if count > 0 {

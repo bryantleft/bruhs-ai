@@ -55,6 +55,17 @@ impl Size {
             Size::Large => 10.0,
         }
     }
+
+    /// Vertical padding for single-line [`Input`]: keeps default font metrics
+    /// within [`Size::height`] while allowing tall font metrics to grow.
+    fn input_py(self) -> f32 {
+        match self {
+            Size::XSmall => 0.0,
+            Size::Small => 1.0,
+            Size::Medium => 4.0,
+            Size::Large => 8.0,
+        }
+    }
 }
 
 /// Components that come in sizes.
@@ -324,7 +335,7 @@ fn frame<K: FieldKind>(
         .line_height(rems(LINE_HEIGHT_REM))
         .text_size(css_px(theme::APP_INPUT_TEXT_SIZE_PX))
         .when(chrome.appearance, |el| {
-            el.bg(gpui::white().opacity(0.05))
+            el.bg(theme::control_surface())
                 .rounded(css_px(RADIUS_PX))
                 .when(chrome.bordered, |el| {
                     el.border_1()
@@ -459,7 +470,7 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
         crate::press::on_press(
             row.text_color(theme::rambutan_100())
                 .cursor_pointer()
-                .hover(|el| el.bg(gpui::white().opacity(0.05))),
+                .hover(|el| el.bg(theme::control_surface())),
             move |window, cx| {
                 state.update(cx, |state, cx| {
                     state.close_context_menu(cx);
@@ -640,10 +651,12 @@ impl RenderOnce for Input {
             cx,
         )
         .items_center()
-        .h(css_px(size.height()))
+        .when(self.chrome.style.size.height.is_none(), |el| {
+            el.min_h(css_px(size.height()))
+        })
         .px(css_px(size.px()))
-        .py(css_px(size.py()))
-        .child(div().flex_1().min_w_0().overflow_hidden().child(editor));
+        .py(css_px(size.input_py()))
+        .child(div().flex_1().min_w_0().overflow_x_hidden().child(editor));
         if show_clear {
             let clear = state.clone();
             el = el.child(icon_button(

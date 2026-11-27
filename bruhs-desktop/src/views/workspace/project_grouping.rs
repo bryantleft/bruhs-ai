@@ -338,7 +338,7 @@ impl Workspace {
 
     pub(super) fn checkout_rule_control(
         &self,
-        id: &'static str,
+        id: impl Into<SharedString>,
         scope: &str,
         label: &str,
         listbox: Listbox,
@@ -356,7 +356,7 @@ impl Workspace {
         ]
         .into_iter()
         .map(|(value, label)| DropdownOption {
-            value,
+            value: value.into(),
             label: label.into(),
             description: None,
         })

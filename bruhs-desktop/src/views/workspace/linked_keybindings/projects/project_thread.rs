@@ -33,7 +33,7 @@ use bruhs_models::{
     },
 };
 use bruhs_ui::dropdown::{
-    saved_option_value, Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
+    Dropdown, DropdownGroup, DropdownOption, DropdownTriggerVariant, Listbox,
 };
 use bruhs_ui::press::on_press_view;
 use std::path::PathBuf;
@@ -1673,7 +1673,7 @@ impl Composer {
         let mut other = Vec::new();
         for model in self.models.iter().flat_map(|catalog| &catalog.models) {
             let option = DropdownOption {
-                value: saved_option_value(&model.id),
+                value: model.id.clone().into(),
                 label: model.label.clone(),
                 description: Some(model.id.clone()),
             };
@@ -1686,15 +1686,18 @@ impl Composer {
                 other.push(option);
             }
         }
-        let groups = [(Some("Favorites"), favorites), (None, other)]
-            .into_iter()
-            .filter(|(_, options)| !options.is_empty())
-            .map(|(label, options)| DropdownGroup {
-                label,
-                mark: None,
-                options,
-            })
-            .collect();
+        let groups = [
+            (Some(SharedString::from("Favorites")), favorites),
+            (None, other),
+        ]
+        .into_iter()
+        .filter(|(_, options)| !options.is_empty())
+        .map(|(label, options)| DropdownGroup {
+            label,
+            mark: None,
+            options,
+        })
+        .collect();
         let toggle = cx.weak_entity();
         let select = cx.weak_entity();
         let favorite = cx.weak_entity();
@@ -1787,9 +1790,9 @@ impl Composer {
                 options: option
                     .choices
                     .iter()
-                    .map(|(value, label)| DropdownOption {
-                        value,
-                        label: (*label).into(),
+                    .map(|&(value, label)| DropdownOption {
+                        value: value.into(),
+                        label: label.into(),
                         description: None,
                     })
                     .collect(),

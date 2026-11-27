@@ -64,26 +64,6 @@ pub(super) struct RoomDialog {
     _subscriptions: Vec<gpui::Subscription>,
 }
 
-/// The dropdown takes `'static` values; each agent id is kept once for the
-/// life of the app, so the set grows only with the crew.
-fn lead_value(id: &str) -> &'static str {
-    static VALUES: std::sync::OnceLock<std::sync::Mutex<HashSet<&'static str>>> =
-        std::sync::OnceLock::new();
-    if id.is_empty() {
-        return "";
-    }
-    let mut values = VALUES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(value) = values.get(id) {
-        return value;
-    }
-    let value: &'static str = Box::leak(id.to_owned().into_boxed_str());
-    values.insert(value);
-    value
-}
-
 impl ReactiveAutomations {
     /// Every room, as the service last reported them.
     pub(crate) fn rooms(&self) -> &[RoomState] {
@@ -502,20 +482,21 @@ impl ReactiveAutomations {
                 let _ = panel.update(cx, |panel, cx| panel.toggle_room_lead_list(cx));
             })
         };
-        let on_select = Rc::new(move |value: &'static str, _: &mut Window, cx: &mut App| {
-            let _ = panel.update(cx, |panel, cx| panel.choose_room_lead(value, cx));
+        let on_select = Rc::new(move |value: &str, _: &mut Window, cx: &mut App| {
+            let value = value.to_owned();
+            let _ = panel.update(cx, |panel, cx| panel.choose_room_lead(&value, cx));
         });
         let lead = dropdown(
             LEAD_DROPDOWN,
             ROOM_LEAD,
-            dialog.form.lead.as_deref().map_or("", lead_value),
+            dialog.form.lead.as_deref().unwrap_or(""),
             vec![DropdownGroup {
                 label: None,
                 mark: None,
                 options: lead_choices(&dialog.form, bruhs)
                     .into_iter()
                     .map(|(id, name)| DropdownOption {
-                        value: lead_value(&id),
+                        value: id.into(),
                         label: name,
                         description: None,
                     })
@@ -633,19 +614,5 @@ impl ReactiveAutomations {
                     )
                 }),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::lead_value;
-
-    #[test]
-    fn a_lead_value_is_kept_once_per_id() {
-        let first = lead_value("agent-1");
-        let again = lead_value(&String::from("agent-1"));
-        assert_eq!(first, "agent-1");
-        assert!(std::ptr::eq(first, again), "the same id reuses its value");
-        assert_eq!(lead_value(""), "");
     }
 }

@@ -99,24 +99,24 @@ impl Workspace {
             for &level in levels {
                 let label = crate::views::chat::kiro::effort_label(level);
                 if Some(level) == effective {
-                    checked.push(if scoped && selected.effort.is_none() {
+                    checked.push(SharedString::from(if scoped && selected.effort.is_none() {
                         "inherit-effort"
                     } else {
                         level
-                    });
+                    }));
                     summary.push(label.to_owned());
                 }
                 if Some(level) == default_level {
-                    defaults.push(level);
+                    defaults.push(SharedString::from(level));
                 }
                 options.push(DropdownOption {
-                    value: level,
+                    value: level.into(),
                     label: label.into(),
                     description: None,
                 });
             }
             groups.push(DropdownGroup {
-                label: Some("Reasoning"),
+                label: Some("Reasoning".into()),
                 mark: None,
                 options,
             });
@@ -132,32 +132,32 @@ impl Workspace {
                 options.push(inherit("inherit-agent"));
             }
             if effective.is_none() {
-                checked.push(if scoped {
+                checked.push(SharedString::from(if scoped {
                     "inherit-agent"
                 } else {
                     "agent-default"
-                });
+                }));
                 summary.push("Provider default".into());
             }
             if agents.current.is_none() && !scoped {
                 options.push(DropdownOption {
-                    value: "agent-default",
+                    value: "agent-default".into(),
                     label: "Provider default".into(),
                     description: None,
                 });
             }
             for a in &agents.choices {
-                let key = bruhs_ui::dropdown::saved_option_value(&format!("agent={}", a.value));
+                let key = SharedString::from(format!("agent={}", a.value));
                 if Some(&a.value) == effective {
                     checked.push(if scoped && selected.agent.is_none() {
-                        "inherit-agent"
+                        SharedString::from("inherit-agent")
                     } else {
-                        key
+                        key.clone()
                     });
                     summary.push(a.name.clone());
                 }
                 if agents.current.as_ref() == Some(&a.value) {
-                    defaults.push(key);
+                    defaults.push(key.clone());
                 }
                 options.push(DropdownOption {
                     value: key,
@@ -166,12 +166,12 @@ impl Workspace {
                 });
             }
             groups.push(DropdownGroup {
-                label: Some("Agent"),
+                label: Some("Agent".into()),
                 mark: None,
                 options,
             });
         }
-        let Some((&first, others)) = checked.split_first() else {
+        let Some((first, others)) = checked.split_first() else {
             return picker;
         };
         let id = if fallback {
@@ -183,7 +183,7 @@ impl Workspace {
         let control = bruhs_ui::dropdown::Dropdown::new(
             id,
             "Model options",
-            first,
+            first.as_ref(),
             groups,
             self.settings_listbox(id),
             toggle,
@@ -261,7 +261,7 @@ impl Workspace {
 
 fn inherit(value: &'static str) -> DropdownOption {
     DropdownOption {
-        value,
+        value: value.into(),
         label: "Use environment default".into(),
         description: None,
     }

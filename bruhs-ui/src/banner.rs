@@ -81,7 +81,11 @@ impl BannerTone {
             },
             Self::Neutral => BannerPalette {
                 bg: theme::longan_800().opacity(if strip { 0.90 } else { 0.72 }),
-                border: gpui::white().opacity(if strip { 0.12 } else { 0.10 }),
+                border: if strip {
+                    theme::ring_floating()
+                } else {
+                    theme::ring_card()
+                },
                 icon: theme::rambutan_400(),
                 title: theme::rambutan_100(),
                 detail: theme::rambutan_400(),

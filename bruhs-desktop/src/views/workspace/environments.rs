@@ -371,7 +371,7 @@ impl Workspace {
                 detail.push_str(message);
             }
             rows.push(self.settings_row(
-                role_settings_ui::project_value(&format!("settings-environment-{id}")),
+                format!("settings-environment-{id}"),
                 name,
                 detail,
                 controls.into_any_element(),

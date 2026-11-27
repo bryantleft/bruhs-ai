@@ -518,7 +518,7 @@ enum Overlay {
     Welcome,
     Settings {
         /// Id of the settings dropdown whose listbox is open, if any.
-        open_dropdown: Option<&'static str>,
+        open_dropdown: Option<SharedString>,
     },
     TaskCreate {
         menu: Option<TaskCreateMenu>,

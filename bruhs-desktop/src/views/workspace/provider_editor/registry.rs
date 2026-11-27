@@ -413,7 +413,7 @@ impl Workspace {
             });
         });
         let entity = cx.weak_entity();
-        let select = std::rc::Rc::new(move |value: &'static str, w: &mut Window, cx: &mut App| {
+        let select = std::rc::Rc::new(move |value: &str, w: &mut Window, cx: &mut App| {
             let entry = if value == "local" {
                 Entry::Local
             } else {
@@ -424,7 +424,7 @@ impl Workspace {
         let options = [("registry", "ACP Registry"), ("local", "Local command")]
             .into_iter()
             .map(|(value, label)| DropdownOption {
-                value,
+                value: value.into(),
                 label: label.into(),
                 description: None,
             })

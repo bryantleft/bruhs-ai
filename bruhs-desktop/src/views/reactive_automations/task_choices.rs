@@ -4,7 +4,7 @@ use crate::views::model_browser::{self, Browser, Favorites, FAVORITES};
 pub(in crate::views) type ToggleFavorite = Rc<dyn Fn(&str, &mut App)>;
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::delivery::writer_catalog::WriterCatalog;
-use bruhs_ui::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
+use bruhs_ui::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TaskField {
@@ -148,9 +148,9 @@ impl TaskPickerState {
 const TYPED: &str = "\0typed";
 const CURRENT: &str = "\0current";
 
-fn option(key: &'static str, label: &str, detail: Option<&str>) -> DropdownOption {
+fn option(key: impl Into<SharedString>, label: &str, detail: Option<&str>) -> DropdownOption {
     DropdownOption {
-        value: key,
+        value: key.into(),
         label: label.into(),
         description: detail.map(str::to_owned),
     }
@@ -407,20 +407,19 @@ impl ReactiveAutomations {
         if state.open != Some(TaskField::Thread) || value(&state.search, cx).trim().is_empty() {
             options.push(option("new_thread", "New thread each run", None));
         }
-        let mut key = "";
+        let mut key = SharedString::from("");
         let mut selection = HashMap::new();
         for (i, choice) in choices.into_iter().enumerate() {
-            // A bounded set of row keys; thread IDs themselves are never interned.
-            let row = saved_option_value(&format!("destination-{i}"));
+            let row = SharedString::from(format!("destination-{i}"));
             if selected.is_some_and(|c| c.thread_id == choice.thread_id) {
-                key = row
+                key = row.clone();
             }
             let title = if choice.title.trim().is_empty() {
                 "Untitled thread"
             } else {
                 &choice.title
             };
-            options.push(option(row, title, None));
+            options.push(option(row.clone(), title, None));
             selection.insert(row, choice);
         }
         let toggle = cx.weak_entity();
@@ -429,7 +428,7 @@ impl ReactiveAutomations {
         let picker = Dropdown::new(
             "task-destination-thread",
             "Destination thread",
-            key,
+            key.as_ref(),
             vec![DropdownGroup {
                 label: None,
                 mark: None,
@@ -536,11 +535,11 @@ impl ReactiveAutomations {
             let options: Vec<_> = models
                 .iter()
                 .filter(|m| m.provider == provider)
-                .map(|m| option(saved_option_value(&m.id), &m.label, None))
+                .map(|m| option(m.id.clone(), &m.label, None))
                 .collect();
             if !options.is_empty() {
                 groups.push(DropdownGroup {
-                    label: Some(crate::views::workspace::provider_label(provider)),
+                    label: Some(crate::views::workspace::provider_label(provider).into()),
                     mark: Some(crate::views::workspace::provider_mark(provider, cx)),
                     options,
                 });
@@ -572,14 +571,14 @@ impl ReactiveAutomations {
                 || !groups.iter().any(|g| {
                     g.options
                         .iter()
-                        .any(|option| option.matches_search(g.label, query))
+                        .any(|option| option.matches_search(g.label.as_deref(), query))
                 }))
         {
             extra.push(option(TYPED, &format!("Use model “{query}”"), Some(query)));
         }
         if !extra.is_empty() {
             groups.push(DropdownGroup {
-                label: Some("Custom"),
+                label: Some("Custom".into()),
                 mark: None,
                 options: extra,
             });

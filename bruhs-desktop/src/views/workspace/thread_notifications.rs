@@ -101,7 +101,7 @@ impl Workspace {
         let options = modes
             .into_iter()
             .map(|(_, value, label)| DropdownOption {
-                value,
+                value: value.into(),
                 label: self.ui_language().text(label).into(),
                 description: None,
             })

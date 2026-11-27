@@ -4,11 +4,10 @@ use super::{
     code_fence::{language, Fence, LANGUAGES},
     TextareaState,
 };
-use crate::dropdown::{saved_option_value, Dropdown, DropdownGroup, DropdownOption, Listbox};
+use crate::dropdown::{Dropdown, DropdownGroup, DropdownOption, Listbox};
 use gpui::*;
 use std::rc::Rc;
 
-// Dropdown keys are static. Keep arbitrary names in the label and document only.
 const CUSTOM: &str = " ";
 
 pub(super) fn header(
@@ -26,17 +25,17 @@ pub(super) fn header(
     let label = current.map_or(tag, |l| l.label);
     let content = if interactive {
         let query = state.language_query(start);
-        let id = saved_option_value(&format!("composer-code-language-{index}"));
+        let id = SharedString::from(format!("composer-code-language-{index}"));
         let choices = if query.is_some() {
             let custom = current.is_none().then(|| DropdownOption {
-                value: CUSTOM,
+                value: CUSTOM.into(),
                 label: tag.to_owned(),
                 description: None,
             });
             custom
                 .into_iter()
                 .chain(LANGUAGES.iter().map(|l| DropdownOption {
-                    value: l.id,
+                    value: l.id.into(),
                     label: l.label.to_owned(),
                     description: None,
                 }))

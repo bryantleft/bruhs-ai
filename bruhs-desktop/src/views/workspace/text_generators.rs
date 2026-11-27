@@ -4,7 +4,6 @@ use bruhs_core::secret_sources::{validate_reference, SecretReference};
 mod dialog;
 use crate::app_state::spawn_tokio;
 use bruhs_core::text_generators::{self as api, Draft, Generator, Preset};
-use bruhs_ui::dropdown::saved_option_value;
 use uuid::Uuid;
 
 pub(super) struct GeneratorSettings {
@@ -144,13 +143,13 @@ impl Workspace {
             .iter()
             .filter(|g| g.enabled && !g.models.is_empty())
             .map(|g| DropdownGroup {
-                label: Some(saved_option_value(&g.label)),
+                label: Some(g.label.clone().into()),
                 mark: None,
                 options: g
                     .models
                     .iter()
                     .map(|model| DropdownOption {
-                        value: saved_option_value(&g.selection(&model.id)),
+                        value: g.selection(&model.id).into(),
                         label: model.name.clone(),
                         description: Some(model.id.clone()),
                     })
@@ -172,7 +171,7 @@ impl Workspace {
             options: defaults
                 .iter()
                 .map(|&(value, label)| DropdownOption {
-                    value,
+                    value: value.into(),
                     label: label.to_owned(),
                     description: None,
                 })
@@ -518,15 +517,17 @@ impl Workspace {
     }
     fn gen_button(
         &self,
-        id: &'static str,
+        id: impl Into<SharedString>,
         label: &'static str,
         primary: bool,
         cx: &Context<'_, Self>,
         action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
     ) -> AnyElement {
+        let id = id.into();
         let disabled = self.generators.busy
-            || (id == "generator-connect"
+            || (id.as_ref() == "generator-connect"
                 && matches!(&self.generators.dialog,Some(Page::Edit(f)) if !f.can_connect(cx)));
+        let selector = id.clone();
         let button = web_button(
             id,
             if primary {
@@ -538,7 +539,7 @@ impl Workspace {
             ButtonState::disabled_if(disabled),
         )
         .aria_label(label)
-        .debug_selector(move || id.into())
+        .debug_selector(move || selector.into())
         .child(label);
         if disabled {
             button.into_any_element()
@@ -567,7 +568,7 @@ impl Workspace {
         }
         for g in &self.generators.rows {
             let row = g.clone();
-            let action = saved_option_value(&format!("generator-actions-{}", g.id));
+            let action = SharedString::from(format!("generator-actions-{}", g.id));
             let enabled = row.enabled;
             let control = div()
                 .flex()
@@ -585,10 +586,10 @@ impl Workspace {
                     cx,
                 )))
                 .child(settings_ui::switch(
-                    saved_option_value(&format!("generator-enabled-{}", g.id)),
+                    format!("generator-enabled-{}", g.id),
                     enabled,
                     self.generators.busy,
-                    saved_option_value(&format!("Enable {}", g.label)),
+                    format!("Enable {}", g.label),
                     cx,
                     move |ws, _, cx| {
                         let row = row.clone();
@@ -599,7 +600,7 @@ impl Workspace {
                     },
                 ));
             rows.push(self.settings_row(
-                saved_option_value(&format!("generator-row-{}", g.id)),
+                format!("generator-row-{}", g.id),
                 g.label.clone(),
                 g.url.clone(),
                 control.into_any_element(),

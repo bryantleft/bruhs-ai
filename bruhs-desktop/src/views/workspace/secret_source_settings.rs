@@ -438,7 +438,7 @@ impl SourceSettings {
                 AgentProvider::ALL
                     .into_iter()
                     .map(|p| DropdownOption {
-                        value: p.as_str(),
+                        value: p.as_str().into(),
                         label: p.label().into(),
                         description: None,
                     })
@@ -451,7 +451,7 @@ impl SourceSettings {
                     .sources
                     .iter()
                     .map(|(id, s)| DropdownOption {
-                        value: bruhs_ui::dropdown::saved_option_value(id),
+                        value: id.clone().into(),
                         label: s.name.clone(),
                         description: None,
                     })

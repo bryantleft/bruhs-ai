@@ -571,7 +571,7 @@ impl DiffPanelView {
 
     fn scope_groups(&self) -> Vec<DropdownGroup> {
         let mut options = vec![DropdownOption {
-            value: "working-tree",
+            value: "working-tree".into(),
             label: SCOPE_LABEL.to_string(),
             description: Some(format!(
                 "{} file{}",
@@ -580,10 +580,8 @@ impl DiffPanelView {
             )),
         }];
         for (i, turn) in self.turns.iter().enumerate() {
-            // Leak per-turn values: the dropdown wants `&'static str`; turns are few.
-            let value: &'static str = Box::leak(format!("turn-{i}").into_boxed_str());
             options.push(DropdownOption {
-                value,
+                value: format!("turn-{i}").into(),
                 label: turn.label.clone(),
                 description: Some(format!(
                     "{} file{}",

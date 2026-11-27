@@ -547,97 +547,161 @@ impl DatabasePanel {
                     ),
             );
         let grid_width = 156.0 + result.columns.len().to_f32_lossy() * 160.0;
+        let column_count = result.columns.len() + 1;
+        let row_count = result.rows.len() + 1;
         let header = div()
+            .id("db-result-header")
+            .debug_selector(|| "database-result-header".to_owned())
+            .role(Role::Row)
+            .aria_row_index(0)
             .min_w(px(grid_width))
             .flex()
-            .child(text("Select / row").w(px(156.0)).flex_shrink_0())
-            .children(result.columns.iter().map(|column| {
+            .child(
+                text("Select / row")
+                    .id("db-col-header-select")
+                    .role(Role::ColumnHeader)
+                    .aria_column_index(0)
+                    .aria_label("Select / row")
+                    .w(px(156.0))
+                    .flex_shrink_0(),
+            )
+            .children(result.columns.iter().enumerate().map(|(col_idx, column)| {
                 text(column.name.clone())
+                    .id(("db-col-header", col_idx))
+                    .debug_selector(move || format!("database-col-header-{col_idx}"))
+                    .role(Role::ColumnHeader)
+                    .aria_column_index(col_idx + 1)
+                    .aria_label(column.name.clone())
                     .w(px(160.0))
                     .flex_shrink_0()
                     .truncate()
             }));
-        rows =
-            rows.child(
-                div()
-                    .id("db-result-grid")
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scrollbar()
-                    .child(header)
-                    .child(
-                        uniform_list(
-                            "database-result-rows",
-                            result.rows.len(),
-                            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
-                                range
-                                    .map(|index| {
-                                        let Some(result) = &this.result else {
-                                            return div().into_any_element();
-                                        };
-                                        let Some(row) = result.rows.get(index) else {
-                                            return div().into_any_element();
-                                        };
-                                        div()
-                                            .h(px(40.0))
-                                            .min_w(px(
-                                                156.0 + result.columns.len().to_f32_lossy() * 160.0
-                                            ))
-                                            .flex()
-                                            .items_center()
-                                            .child(
-                                                control(
-                                                    ("db-select", index),
-                                                    format!(
-                                                        "{} row {}",
+        rows = rows.child(
+            div()
+                .id("db-result-grid")
+                .debug_selector(|| "database-result-table".to_owned())
+                .role(Role::Table)
+                .aria_label(format!(
+                    "Query results, {} rows, {} columns",
+                    result.rows.len(),
+                    column_count
+                ))
+                .aria_row_count(row_count)
+                .aria_column_count(column_count)
+                .w_full()
+                .min_w_0()
+                .overflow_x_scrollbar()
+                .child(
+                    div()
+                        .id("db-result-header-group")
+                        .role(Role::RowGroup)
+                        .child(header),
+                )
+                .child(
+                    uniform_list(
+                        "database-result-rows",
+                        result.rows.len(),
+                        cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                            range
+                                .map(|index| {
+                                    let Some(result) = &this.result else {
+                                        return div().into_any_element();
+                                    };
+                                    let Some(row) = result.rows.get(index) else {
+                                        return div().into_any_element();
+                                    };
+                                    div()
+                                        .id(("db-result-row", index))
+                                        .debug_selector(move || {
+                                            format!("database-result-row-{index}")
+                                        })
+                                        .role(Role::Row)
+                                        .aria_row_index(index + 1)
+                                        .h(px(40.0))
+                                        .min_w(px(
+                                            156.0 + result.columns.len().to_f32_lossy() * 160.0
+                                        ))
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .id(("db-row-actions", index))
+                                                .role(Role::Cell)
+                                                .aria_column_index(0)
+                                                .aria_label(format!("Select / row {}", index + 1))
+                                                .w(px(156.0))
+                                                .flex_shrink_0()
+                                                .flex()
+                                                .items_center()
+                                                .child(
+                                                    control(
+                                                        ("db-select", index),
+                                                        format!(
+                                                            "{} row {}",
+                                                            if this.selected.contains(&index) {
+                                                                "Deselect"
+                                                            } else {
+                                                                "Select"
+                                                            },
+                                                            index + 1
+                                                        ),
+                                                        false,
+                                                    )
+                                                    .role(Role::CheckBox)
+                                                    .aria_toggled(
                                                         if this.selected.contains(&index) {
-                                                            "Deselect"
+                                                            Toggled::True
                                                         } else {
-                                                            "Select"
+                                                            Toggled::False
                                                         },
-                                                        index + 1
-                                                    ),
-                                                    false,
+                                                    )
+                                                    .activate(cx, move |this, _, cx| {
+                                                        if !this.selected.remove(&index) {
+                                                            this.selected.insert(index);
+                                                        }
+                                                        cx.notify();
+                                                    }),
                                                 )
-                                                .role(Role::CheckBox)
-                                                .aria_toggled(if this.selected.contains(&index) {
-                                                    Toggled::True
-                                                } else {
-                                                    Toggled::False
+                                                .child(
+                                                    control(
+                                                        ("db-detail", index),
+                                                        format!("Row {}", index + 1),
+                                                        false,
+                                                    )
+                                                    .activate(cx, move |this, _, cx| {
+                                                        this.detail = Some(index);
+                                                        cx.notify();
+                                                    }),
+                                                ),
+                                        )
+                                        .children(row.iter().enumerate().map(|(col_idx, value)| {
+                                            let display =
+                                                value.clone().unwrap_or_else(|| "NULL".into());
+                                            let column_name = result
+                                                .columns
+                                                .get(col_idx)
+                                                .map_or("Column", |col| col.name.as_str());
+                                            text(display.clone())
+                                                .id(("db-cell", index * column_count + col_idx + 1))
+                                                .debug_selector(move || {
+                                                    format!("database-cell-{index}-{col_idx}")
                                                 })
-                                                .activate(cx, move |this, _, cx| {
-                                                    if !this.selected.remove(&index) {
-                                                        this.selected.insert(index);
-                                                    }
-                                                    cx.notify();
-                                                }),
-                                            )
-                                            .child(
-                                                control(
-                                                    ("db-detail", index),
-                                                    format!("Row {}", index + 1),
-                                                    false,
-                                                )
-                                                .activate(cx, move |this, _, cx| {
-                                                    this.detail = Some(index);
-                                                    cx.notify();
-                                                }),
-                                            )
-                                            .children(row.iter().map(|value| {
-                                                text(value.clone().unwrap_or_else(|| "NULL".into()))
-                                                    .w(px(160.0))
-                                                    .flex_shrink_0()
-                                                    .truncate()
-                                            }))
-                                            .into_any_element()
-                                    })
-                                    .collect::<Vec<_>>()
-                            }),
-                        )
-                        .h(px(240.0))
-                        .min_w(px(grid_width)),
-                    ),
-            );
+                                                .role(Role::Cell)
+                                                .aria_column_index(col_idx + 1)
+                                                .aria_label(format!("{column_name}: {display}"))
+                                                .w(px(160.0))
+                                                .flex_shrink_0()
+                                                .truncate()
+                                        }))
+                                        .into_any_element()
+                                })
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                    .h(px(240.0))
+                    .min_w(px(grid_width)),
+                ),
+        );
         if self.result_is_table {
             rows = rows.child(
                 div()
@@ -1052,6 +1116,18 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(attached.borrow().is_empty());
+        assert!(
+            cx.debug_bounds("database-result-table").is_some(),
+            "results container should mount as an accessible table"
+        );
+        assert!(
+            cx.debug_bounds("database-col-header-0").is_some(),
+            "column header should mount with table semantics"
+        );
+        assert!(
+            cx.debug_bounds("database-cell-0-0").is_some(),
+            "data cell should mount with row/column semantics"
+        );
         let select = cx
             .debug_bounds("database-Select row 1")
             .expect("row selection control");

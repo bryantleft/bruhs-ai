@@ -144,7 +144,7 @@ impl Workspace {
             options: SnoozeUnit::ALL
                 .into_iter()
                 .map(|unit| DropdownOption {
-                    value: unit.label(),
+                    value: unit.label().into(),
                     label: unit.label().into(),
                     description: None,
                 })
