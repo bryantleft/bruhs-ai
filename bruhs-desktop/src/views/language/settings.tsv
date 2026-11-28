@@ -115,3 +115,19 @@ Loading open-source notices…	Open-Source-Hinweise werden geladen…	Cargando a
 No licenses match that search.	Keine passenden Lizenzen gefunden.	Ninguna licencia coincide con la búsqueda.	Aucune licence ne correspond à cette recherche.	検索に一致するライセンスはありません。	검색과 일치하는 라이선스가 없습니다.	Nenhuma licença corresponde à pesquisa.	По этому запросу лицензии не найдены.	没有与搜索条件匹配的许可证。
 {count} notices	Hinweise: {count}	Avisos: {count}	Mentions : {count}	{count} 件の表記	고지 {count}개	Avisos: {count}	Уведомления: {count}	共 {count} 条声明
 {matched} of {total}	{matched} von {total}	{matched} de {total}	{matched} sur {total}	{total} 件中 {matched} 件	{total}개 중 {matched}개	{matched} de {total}	{matched} из {total}	{matched} / {total}
+Browser recording frame rate	Bildrate der Browser-Aufnahme	Velocidad de fotogramas de grabación	Fréquence d’images de l’enregistrement	ブラウザー録画フレームレート	브라우저 녹화 프레임 속도	Taxa de quadros da gravação	Частота кадров записи браузера	浏览器录制帧率
+Show key presses in recordings	Tastendrücke in Aufnahmen anzeigen	Mostrar pulsaciones en grabaciones	Afficher les touches dans les enregistrements	録画にキー入力を表示	녹화에 키 입력 표시	Mostrar teclas nas gravações	Показывать нажатия клавиш в записях	在录制中显示按键
+Show mouse presses in recordings	Mausklicks in Aufnahmen anzeigen	Mostrar clics en grabaciones	Afficher les clics dans les enregistrements	録画にマウス操作を表示	녹화에 마우스 클릭 표시	Mostrar cliques nas gravações	Показывать нажатия мыши в записях	在录制中显示鼠标点击
+Auto-show floating preview	Schwebende Vorschau automatisch anzeigen	Mostrar vista previa flotante automáticamente	Afficher automatiquement l’aperçu flottant	フローティングプレビューを自動表示	플로팅 미리보기 자동 표시	Mostrar visualização flutuante automaticamente	Автоматически показывать плавающий предпросмотр	自动显示悬浮预览
+Guest links	Gast-Links	Enlaces de invitado	Liens invités	ゲストリンク	게스트 링크	Links de convidado	Гостевые ссылки	访客链接
+Linked environments	Verknüpfte Umgebungen	Entornos vinculados	Environnements liés	リンクされた環境	연결된 환경	Ambientes vinculados	Связанные окружения	已关联环境
+This machine	Dieser Computer	Este equipo	Cette machine	このコンピューター	이 컴퓨터	Esta máquina	Этот компьютер	本机
+Environment icon	Umgebungssymbol	Icono del entorno	Icône d’environnement	環境アイコン	환경 아이콘	Ícone do ambiente	Значок окружения	环境图标
+Require approval for new devices	Genehmigung für neue Geräte erforderlich	Requerir aprobación para nuevos dispositivos	Exiger l’approbation des nouveaux appareils	新しいデバイスの承認が必要	새 기기 승인 필요	Exigir aprovação para novos dispositivos	Требовать одобрение новых устройств	需要批准新设备
+Hold webhooks while offline	Webhooks offline zurückhalten	Retener webhooks sin conexión	Conserver les webhooks hors ligne	オフライン時に Webhook を保持	오프라인 시 웹훅 보류	Reter webhooks offline	Хранить вебхуки в офлайне	离线时暂存 Webhook
+Load balancing	Lastverteilung	Equilibrio de carga	Équilibrage de charge	負荷分散	부하 분산	Balanceamento de carga	Балансировка нагрузки	负载均衡
+Pull request sharing	Pull-Request-Freigabe	Compartir pull requests	Partage des pull requests	プルリクエストの共有	풀 리퀘스트 공유	Compartilhamento de pull requests	Общий доступ к PR	拉取请求共享
+Share favorite models	Favoritenmodelle teilen	Compartir modelos favoritos	Partager les modèles favoris	お気に入りモデルを共有	즐겨찾는 모델 공유	Compartilhar modelos favoritos	Делиться избранными моделями	共享收藏模型
+Use devices	Geräte verwenden	Usar dispositivos	Utiliser les appareils	デバイスを使用	기기 사용	Usar dispositivos	Использовать устройства	使用设备
+Device sources	Gerätequellen	Fuentes de dispositivos	Sources d’appareils	デバイスソース	기기 소스	Fontes de dispositivos	Источники устройств	设备来源
+Transcription environment	Transkriptionsumgebung	Entorno de transcripción	Environnement de transcription	文字起こし環境	전사 환경	Ambiente de transcrição	Среда транскрибации	转录环境

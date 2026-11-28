@@ -273,7 +273,11 @@ impl Workspace {
         let notification_thread = thread.clone();
         let panel = cx.new(|cx| Composer::new(peer, thread, draft, self.send_shortcut, window, cx));
         panel.update(cx, |panel, _| {
-            panel.favorite_models.clone_from(&self.favorite_models)
+            if self.environment_sharing.share_favorite_models {
+                panel.favorite_models.clone_from(&self.favorite_models);
+            } else {
+                panel.favorite_models.clear();
+            }
         });
         self.activate_sidebar_view(route.clone(), window, cx);
         panel
@@ -351,7 +355,11 @@ impl Workspace {
         let notification_thread = thread.clone();
         let panel = cx.new(|cx| Composer::new(peer, thread, None, self.send_shortcut, window, cx));
         panel.update(cx, |panel, _| {
-            panel.favorite_models.clone_from(&self.favorite_models)
+            if self.environment_sharing.share_favorite_models {
+                panel.favorite_models.clone_from(&self.favorite_models);
+            } else {
+                panel.favorite_models.clear();
+            }
         });
         let discovery = cx.subscribe_in(
             &panel,
@@ -637,7 +645,11 @@ impl Workspace {
     ) {
         if let Some(thread) = &self.linked_projects.project_thread {
             thread.panel.update(cx, |panel, cx| {
-                panel.favorite_models.clone_from(&self.favorite_models);
+                if self.environment_sharing.share_favorite_models {
+                    panel.favorite_models.clone_from(&self.favorite_models);
+                } else {
+                    panel.favorite_models.clear();
+                }
                 cx.notify();
             });
         }

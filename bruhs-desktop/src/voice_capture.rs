@@ -110,6 +110,8 @@ pub(crate) struct DictationPreferences {
     pub microphone_order: Vec<Option<String>>,
     pub shortcut_mode: ShortcutMode,
     pub destination: Destination,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcription_environment: Option<String>,
     pub cleanup: Cleanup,
     pub remote_model: String,
     pub openrouter_model: String,

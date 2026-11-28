@@ -3674,3 +3674,66 @@ fn t3_parity_settings_browser_labs_access_environments_and_devices_persist_acros
     assert_eq!(restored.device_preferences.policy.key(), "persistent");
     assert_eq!(restored.device_preferences.simlock_hosts.len(), 1);
 }
+
+#[gpui::test]
+fn t3_parity_batch2_voice_env_shared_favorites_builtin_presets_and_offline_webhooks(
+    cx: &mut gpui::TestAppContext,
+) {
+    use super::super::SettingsSection;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, w, cx| {
+        ws.open_settings(&OpenSettings, w, cx);
+
+        // Voice cross-environment transcription destination
+        ws.set_settings_section(SettingsSection::Voice, cx);
+        ws.select_settings_option("settings-voice-environment", "studio-host-1", w, cx);
+        assert_eq!(
+            ws.dictation_prefs.transcription_environment.as_deref(),
+            Some("studio-host-1")
+        );
+
+        // Environments shared favorite models toggle
+        ws.set_settings_section(SettingsSection::Environments, cx);
+        assert!(ws.environment_sharing.share_favorite_models);
+        ws.environment_sharing.share_favorite_models = false;
+        ws.sync_linked_model_favorites(cx);
+
+        // Scheduled tasks offline webhook toggle synced with Access
+        ws.set_settings_section(SettingsSection::ScheduledTasks, cx);
+        ws.access_preferences.hold_webhooks_while_offline = true;
+
+        // Named built-in provider instance preset pre-populates command & config dir env var
+        ws.set_settings_section(SettingsSection::Updates, cx);
+        ws.open_provider_editor(None, w, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "acp-preset-claude");
+    cx.run_until_parked();
+
+    let json = workspace.read_with(cx, |ws, cx| {
+        let (name, id, command, vars) = ws
+            .provider_editor
+            .as_ref()
+            .expect("provider editor remains open after preset")
+            .draft_summary(cx);
+        assert_eq!(name, "Claude Work");
+        assert_eq!(id, "claude-work");
+        assert_eq!(command, "claude");
+        assert!(vars.iter().any(|var| var == "CLAUDE_CONFIG_DIR"));
+        serde_json::to_vec(&ws.snapshot(cx)).expect("serialize persisted state")
+    });
+    let restored: super::super::PersistedWorkspaceState =
+        serde_json::from_slice(&json).expect("deserialize persisted state");
+    let mut dictation = restored.dictation_prefs.expect("dictation prefs persisted");
+    assert_eq!(
+        dictation.transcription_environment.as_deref(),
+        Some("studio-host-1")
+    );
+    assert!(!restored.environment_sharing.share_favorite_models);
+    assert!(restored.access_preferences.hold_webhooks_while_offline);
+
+    // Restoring dictation defaults clears remote transcription environment
+    dictation.restore_defaults();
+    assert!(dictation.transcription_environment.is_none());
+}

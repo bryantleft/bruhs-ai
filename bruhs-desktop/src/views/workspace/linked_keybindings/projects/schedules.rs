@@ -287,7 +287,26 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> Vec<AnyElement> {
         let links = &self.linked_projects;
-        let mut rows = vec![self.projects_scope_row(cx)];
+        let mut rows = vec![
+            self.projects_scope_row(cx),
+            self.settings_row(
+                "settings-scheduled-hold-webhooks",
+                "Hold webhooks while offline",
+                "Keep webhook requests for up to 24 hours while this environment is offline.",
+                settings_ui::switch(
+                    "settings-scheduled-toggle-hold-webhooks",
+                    self.access_preferences.hold_webhooks_while_offline,
+                    false,
+                    "Hold webhooks while offline",
+                    cx,
+                    |this, _, cx| {
+                        this.access_preferences.hold_webhooks_while_offline =
+                            !this.access_preferences.hold_webhooks_while_offline;
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+        ];
         if let Some(message) = &links.editor_error {
             rows.push(
                 div()

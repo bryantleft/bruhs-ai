@@ -45,9 +45,11 @@ impl AccessPreferences {
     pub(super) const ICONS: &[(&str, &str)] = &[
         ("laptop", "Laptop"),
         ("desktop", "Desktop"),
-        ("studio", "Mac Studio / Mini"),
+        ("mac-mini", "Mac Mini"),
+        ("studio", "Mac Studio"),
         ("server", "Server"),
         ("cloud", "Cloud / VM"),
+        ("linux", "Linux"),
         ("terminal", "Terminal"),
     ];
 }

@@ -968,6 +968,12 @@ impl Workspace {
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist(cx);
             }
+            "settings-voice-environment" => {
+                self.dictation_prefs.transcription_environment =
+                    (value != "local").then(|| value.to_owned());
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist(cx);
+            }
             "settings-voice-shortcut-mode" => {
                 use crate::voice_capture::ShortcutMode;
                 self.dictation_prefs.shortcut_mode = match value {

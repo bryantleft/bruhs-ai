@@ -223,6 +223,50 @@ impl Workspace {
                 cx,
             )),
         )];
+        if destination != Destination::Off {
+            let mut env_options = vec![DropdownOption {
+                value: "local".into(),
+                label: "This computer".into(),
+                description: None,
+            }];
+            for (id, name, connected) in self.linked_projects.host_summaries() {
+                env_options.push(DropdownOption {
+                    value: id.into(),
+                    label: name,
+                    description: Some(if connected { "Connected" } else { "Offline" }.into()),
+                });
+            }
+            let current_env = self
+                .dictation_prefs
+                .transcription_environment
+                .as_deref()
+                .unwrap_or("local");
+            let env_id = "settings-voice-environment";
+            let (toggle, select) = self.settings_dropdown_handlers(env_id, cx);
+            transcription.push(
+                self.settings_row(
+                    "settings-row-voice-environment",
+                    "Transcription environment",
+                    "Choose which machine runs speech transcription for composer dictation.",
+                    settings_ui::control_column(
+                        bruhs_ui::dropdown::Dropdown::new(
+                            env_id,
+                            "Transcription environment",
+                            current_env,
+                            vec![DropdownGroup {
+                                label: None,
+                                mark: None,
+                                options: env_options,
+                            }],
+                            self.settings_listbox(env_id),
+                            toggle,
+                            select,
+                        )
+                        .into_any_element(),
+                    ),
+                ),
+            );
+        }
         transcription.extend(self.voice_cloud_rows(cx));
         if destination == Destination::Local {
             transcription.push(self.settings_row(

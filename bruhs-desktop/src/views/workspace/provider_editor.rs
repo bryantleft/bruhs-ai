@@ -136,6 +136,19 @@ impl ProviderEditor {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn draft_summary(&self, cx: &App) -> (String, String, String, Vec<String>) {
+        (
+            self.name.read(cx).value().to_string(),
+            self.id.read(cx).value().to_string(),
+            self.command.read(cx).value().to_string(),
+            self.variables
+                .iter()
+                .map(|row| row.name.read(cx).value().to_string())
+                .collect(),
+        )
+    }
+
     fn track_edits(&mut self, input: &Entity<InputState>, cx: &mut Context<'_, Workspace>) {
         let sub = cx.subscribe(input, |ws, input, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {

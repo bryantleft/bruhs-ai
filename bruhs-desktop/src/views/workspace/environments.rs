@@ -6,14 +6,31 @@ use bruhs_models::remote_hosts::{
 };
 use uuid::Uuid;
 
+fn default_share_favorite_models() -> bool {
+    true
+}
+
 /// Persisted load-balancing and pull-request sharing preferences across environments.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct EnvironmentSharingPrefs {
     pub load_balancing_enabled: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub load_balancing_weights: BTreeMap<String, u8>,
     pub pull_request_sharing: bool,
+    #[serde(default = "default_share_favorite_models")]
+    pub share_favorite_models: bool,
+}
+
+impl Default for EnvironmentSharingPrefs {
+    fn default() -> Self {
+        Self {
+            load_balancing_enabled: false,
+            load_balancing_weights: BTreeMap::new(),
+            pull_request_sharing: false,
+            share_favorite_models: true,
+        }
+    }
 }
 
 impl EnvironmentSharingPrefs {
@@ -578,6 +595,24 @@ impl Workspace {
                 |this, _, cx| {
                     this.environment_sharing.pull_request_sharing =
                         !this.environment_sharing.pull_request_sharing;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
+            "settings-environment-share-favorites",
+            "Share favorite models",
+            "Keep your starred models in sync across linked environments.",
+            settings_ui::switch(
+                "settings-toggle-share-favorites",
+                self.environment_sharing.share_favorite_models,
+                false,
+                "Share favorite models",
+                cx,
+                |this, _, cx| {
+                    this.environment_sharing.share_favorite_models =
+                        !this.environment_sharing.share_favorite_models;
+                    this.sync_linked_model_favorites(cx);
                     this.persist_and_notify(cx);
                 },
             ),

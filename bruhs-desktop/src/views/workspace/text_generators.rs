@@ -548,10 +548,21 @@ impl Workspace {
         }
     }
     pub(super) fn generators_card(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let hosts = self.linked_projects.host_summaries();
+        let scope_note = if hosts.is_empty() {
+            "Connect a model API on this computer for titles, commits, and voice cleanup."
+                .to_owned()
+        } else {
+            let connected = hosts.iter().filter(|(_, _, ok)| *ok).count();
+            format!(
+                "This computer · {connected} linked environment{} connected. Connect a model API for titles, commits, and voice cleanup.",
+                if connected == 1 { "" } else { "s" }
+            )
+        };
         let mut rows = vec![self.settings_row(
             "settings-row-text-generators",
             "Model API connections",
-            "Connect a model API for titles, commits, and voice cleanup.",
+            scope_note,
             self.gen_button("generator-add", "Add generator", false, cx, |ws, w, cx| {
                 ws.edit_generator(None, w, cx)
             }),

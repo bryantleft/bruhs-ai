@@ -283,15 +283,124 @@ impl Workspace {
         self.prepare_registry_provider(w, cx);
     }
 
+    fn select_builtin_instance_preset(
+        &mut self,
+        label: &'static str,
+        id: &'static str,
+        command: &'static str,
+        env_var: &'static str,
+        w: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.choose_registry_entry(Entry::Local, w, cx);
+        let Some(e) = self.provider_editor.as_mut() else {
+            return;
+        };
+        if e.busy || e.original.is_some() {
+            return;
+        }
+        e.name.update(cx, |f, cx| f.set_value(label, w, cx));
+        e.id.update(cx, |f, cx| f.set_value(id, w, cx));
+        e.suggested_id = id.to_owned();
+        e.command.update(cx, |f, cx| f.set_value(command, w, cx));
+        if !e
+            .variables
+            .iter()
+            .any(|row| row.name.read(cx).value().trim() == env_var)
+        {
+            let row = environment::VariableRow::new(
+                env_var,
+                Some(&AcpVariable::Plain {
+                    value: String::new(),
+                }),
+                w,
+                cx,
+            );
+            let name_input = row.name.clone();
+            let value_input = row.value.clone();
+            e.variables.push(row);
+            e.track_edits(&name_input, cx);
+            e.track_edits(&value_input, cx);
+        }
+        e.error = None;
+        cx.notify();
+    }
+
     pub(super) fn provider_source_choices(&self, wide: bool, cx: &Context<'_, Self>) -> AnyElement {
         let Some(e) = self.provider_editor.as_ref() else {
             return div().into_any_element();
         };
+        let mut presets = div().flex().flex_wrap().gap_2();
+        for (key, title, default_label, default_id, command, env_var) in [
+            (
+                "claude",
+                "Claude",
+                "Claude Work",
+                "claude-work",
+                "claude",
+                "CLAUDE_CONFIG_DIR",
+            ),
+            (
+                "codex",
+                "Codex",
+                "Codex Work",
+                "codex-work",
+                "codex",
+                "CODEX_HOME",
+            ),
+            (
+                "cursor",
+                "Cursor",
+                "Cursor Work",
+                "cursor-work",
+                "cursor-agent",
+                "CURSOR_CONFIG_DIR",
+            ),
+            (
+                "grok",
+                "Grok",
+                "Grok Work",
+                "grok-work",
+                "grok",
+                "XAI_API_KEY",
+            ),
+            (
+                "opencode",
+                "OpenCode",
+                "OpenCode Work",
+                "opencode-work",
+                "opencode",
+                "OPENCODE_CONFIG_DIR",
+            ),
+        ] {
+            let selector = format!("acp-preset-{key}");
+            presets = presets.child(editor_button(
+                selector,
+                title,
+                WebButtonVariant::Outline,
+                e.busy,
+                cx,
+                move |ws, w, cx| {
+                    ws.select_builtin_instance_preset(
+                        default_label,
+                        default_id,
+                        command,
+                        env_var,
+                        w,
+                        cx,
+                    );
+                },
+            ));
+        }
         let mut body = div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_sm().child("Provider"));
+            .child(div().text_sm().child("Provider"))
+            .child(hint(
+                "Add a named account or isolated instance for a built-in provider.",
+            ))
+            .child(presets);
         body = body.child(div().flex().child(editor_button(
             "acp-more-providers",
             if e.kiro.expanded {
