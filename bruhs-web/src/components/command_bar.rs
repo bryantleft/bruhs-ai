@@ -37,6 +37,7 @@ enum ActionId {
     NewWhiteboard,
     NavMeetings,
     NavPeople,
+    NavUsage,
     NavSearch,
     NavTerminal,
     OpenProject,
@@ -167,6 +168,12 @@ const ACTIONS: &[Action] = &[
         group: "Navigate",
         label: "People",
         hint: "meeting profiles",
+    },
+    Action {
+        id: ActionId::NavUsage,
+        group: "Navigate",
+        label: "Usage",
+        hint: "rate limits, spend & tokens",
     },
     Action {
         id: ActionId::NavSearch,
@@ -477,6 +484,7 @@ mod tests {
                 "Whiteboards",
                 "New whiteboard",
                 "People",
+                "Usage",
                 "Search",
                 "Terminal",
                 "Choose project folder",
@@ -952,6 +960,7 @@ pub fn CommandBar() -> impl IntoView {
             }
             ActionId::NavMeetings => set_active_view.set(AppView::Meetings),
             ActionId::NavPeople => set_active_view.set(AppView::People),
+            ActionId::NavUsage => set_active_view.set(AppView::Usage),
             ActionId::NavSearch => set_active_view.set(AppView::Search),
             ActionId::NavTerminal => set_active_view.set(AppView::Terminal),
             ActionId::OpenSystemTerminal => {

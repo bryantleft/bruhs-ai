@@ -74,6 +74,7 @@ impl Workspace {
                 self.refresh_linked_projects(true, cx);
             }
             AppView::Settings => self.open_settings(&OpenSettings, window, cx),
+            AppView::Usage => self.open_usage_dashboard(window, cx),
             view => self.activate_sidebar_view(view, window, cx),
         }
     }

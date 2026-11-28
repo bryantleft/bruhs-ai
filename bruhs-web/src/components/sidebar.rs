@@ -2079,6 +2079,7 @@ pub fn Sidebar() -> impl IntoView {
                             </Show>
                         </div>
                         <div class="flex shrink-0 items-center gap-0.5">
+                            {nav_icon(AppView::Usage, "activity", "Usage")}
                             {nav_icon(AppView::Settings, "settings", "Settings")}
                         </div>
                     </div>

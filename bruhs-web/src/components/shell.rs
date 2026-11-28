@@ -28,6 +28,7 @@ use crate::components::tasks_page::TasksPage;
 use crate::components::terminal_page::TerminalPage;
 use crate::components::terminal_panel::open_terminal_session;
 use crate::components::today_page::TodayPage;
+use crate::components::usage_page::UsagePage;
 use crate::components::workspace_focus::{listen_to_workspace_keys, WorkspaceFocus};
 use crate::state::{
     activate_thread, new_thread_in_context, toggle_pinned, toggle_settled, ActiveProjectSignal,
@@ -1045,6 +1046,7 @@ pub fn Shell() -> impl IntoView {
                     AppView::Whiteboards{board_id}=>view!{<crate::whiteboard::ui::Whiteboards requested=board_id/>}.into_any(),
                     AppView::Meetings => view! { <MeetingsPage /> }.into_any(),
                     AppView::People => view! { <PeoplePage /> }.into_any(),
+                    AppView::Usage => view! { <UsagePage /> }.into_any(),
                     AppView::Settings => view! { <SettingsPage /> }.into_any(),
                     AppView::MeetingDetail { meeting_id } => view! { <MeetingDetailPage meeting_id=meeting_id /> }.into_any(),
                     AppView::MeetingNoteDetail { note_id } => view! { <super::meeting_note_detail::MeetingNoteDetail note_id=note_id /> }.into_any(),

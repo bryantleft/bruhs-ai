@@ -152,6 +152,51 @@ pub async fn service_connection(
 ) -> Result<bruhs_models::connections::ServiceConnection, ApiError> {
     get_json(&format!("/api/connections/{}", provider.id())).await
 }
+
+/// Token spend, model/project totals, daily history, and cached rate limits.
+pub async fn usage_snapshot() -> Result<bruhs_models::agent_extensions::UsageSnapshot, ApiError> {
+    get_json("/api/agent-extensions/usage").await
+}
+
+/// Force a fresh provider usage/quota read and return the updated snapshot.
+pub async fn refresh_usage() -> Result<bruhs_models::agent_extensions::UsageSnapshot, ApiError> {
+    send_json(
+        Method::POST,
+        "/api/agent-extensions/usage/refresh",
+        None::<&()>,
+    )
+    .await
+}
+
+/// Live quota pools across this computer, configured usage hubs, and linked environments.
+pub async fn usage_pools(
+    environment: Option<&str>,
+    provider: Option<&str>,
+) -> Result<bruhs_models::agent_extensions::UsageLimitSnapshot, ApiError> {
+    let mut query = Vec::new();
+    if let Some(env) = environment.filter(|value| !value.is_empty()) {
+        query.push(format!("environment={}", segment(env)));
+    }
+    if let Some(prov) = provider.filter(|value| !value.is_empty()) {
+        query.push(format!("provider={}", segment(prov)));
+    }
+    let path = if query.is_empty() {
+        "/api/agent-extensions/usage/pools".to_string()
+    } else {
+        format!("/api/agent-extensions/usage/pools?{}", query.join("&"))
+    };
+    get_json(&path).await
+}
+
+/// Redeem a confirmed reset credit on a usage hub pool account.
+pub async fn redeem_usage_credit(handle: uuid::Uuid) -> Result<String, ApiError> {
+    send_json(
+        Method::POST,
+        &format!("/api/agent-extensions/usage/pools/reset/{handle}"),
+        Some(&()),
+    )
+    .await
+}
 pub async fn connect_service(
     provider: bruhs_models::connections::ServiceProvider,
     login: &bruhs_models::connections::ConnectionLogin,

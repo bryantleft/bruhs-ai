@@ -83,6 +83,7 @@ pub mod timeline;
 pub mod timeline_view;
 pub mod today_page;
 pub mod updates;
+pub mod usage_page;
 pub mod vault_settings;
 pub mod voice_enroll;
 pub mod whisper_model_settings;

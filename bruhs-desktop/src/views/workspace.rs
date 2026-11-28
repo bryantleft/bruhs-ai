@@ -4063,7 +4063,7 @@ impl Workspace {
             AppView::Booking { slug } => {
                 self.render_booking_page(slug, Self::narrower_than(window, SM_BREAKPOINT_PX), cx)
             }
-            AppView::Settings => self.render_web_only_view(cx),
+            AppView::Settings | AppView::Usage => self.render_web_only_view(cx),
         }
     }
 

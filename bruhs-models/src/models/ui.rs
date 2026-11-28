@@ -40,6 +40,7 @@ pub enum AppView {
     },
     Meetings,
     People,
+    Usage,
     Settings,
     /// Full-width routed detail view for a single meeting.
     MeetingDetail {
@@ -229,6 +230,7 @@ impl AppView {
             "/whiteboards" => Self::Whiteboards { board_id: None },
             "/meetings" => Self::Meetings,
             "/people" => Self::People,
+            "/usage" => Self::Usage,
             "/search" => Self::Search,
             "/terminal" => Self::Terminal,
             "/settings" => Self::Settings,
@@ -250,6 +252,7 @@ impl AppView {
             Self::Whiteboards { .. } => "whiteboards",
             Self::Meetings => "meetings",
             Self::People => "people",
+            Self::Usage => "usage",
             Self::Settings => "settings",
             Self::MeetingDetail { .. } => "meeting_detail",
             Self::MeetingNoteDetail { .. } => "meeting_note_detail",
@@ -442,6 +445,7 @@ mod tests {
             },
             AppView::Meetings,
             AppView::People,
+            AppView::Usage,
             AppView::Settings,
             AppView::MeetingDetail {
                 meeting_id: "m-1".into(),
