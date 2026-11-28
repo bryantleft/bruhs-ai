@@ -12,6 +12,46 @@ use bruhs_core::mobile::{
 use bruhs_models::{mobile::*, num::ToFloatLossy};
 use std::time::Duration;
 
+fn default_environment_icon() -> String {
+    "laptop".into()
+}
+
+fn default_require_approval() -> bool {
+    true
+}
+
+/// Persisted environment identity and device approval preferences for Settings → Access.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct AccessPreferences {
+    #[serde(default = "default_environment_icon")]
+    pub environment_icon: String,
+    #[serde(default = "default_require_approval")]
+    pub require_device_approval: bool,
+    pub hold_webhooks_while_offline: bool,
+}
+
+impl Default for AccessPreferences {
+    fn default() -> Self {
+        Self {
+            environment_icon: default_environment_icon(),
+            require_device_approval: default_require_approval(),
+            hold_webhooks_while_offline: false,
+        }
+    }
+}
+
+impl AccessPreferences {
+    pub(super) const ICONS: &[(&str, &str)] = &[
+        ("laptop", "Laptop"),
+        ("desktop", "Desktop"),
+        ("studio", "Mac Studio / Mini"),
+        ("server", "Server"),
+        ("cloud", "Cloud / VM"),
+        ("terminal", "Terminal"),
+    ];
+}
+
 enum Connection {
     Off,
     Starting(uuid::Uuid),

@@ -3580,3 +3580,97 @@ async fn language_switch_localizes_search_survives_restart_and_resets(
     assert_no_rendered_bounds(cx, "reset-language");
     saved(&workspace, cx).await;
 }
+
+#[gpui::test]
+fn t3_parity_settings_browser_labs_access_environments_and_devices_persist_across_relaunch(
+    cx: &mut gpui::TestAppContext,
+) {
+    use super::super::SettingsSection;
+    let (workspace, cx, _, _) = thread_menu_workspace(cx);
+    workspace.update_in(cx, |ws, w, cx| {
+        ws.open_settings(&OpenSettings, w, cx);
+        // Track 1: Browser recording & floating preview
+        ws.set_settings_section(SettingsSection::Browser, cx);
+        ws.select_settings_option("settings-browser-recording-frame-rate", "60", w, cx);
+        let prefs = cx.default_global::<crate::views::browser_preferences::BrowserPreferences>();
+        prefs.recording_show_key_presses = true;
+        prefs.recording_show_mouse_presses = true;
+        prefs.auto_show_floating_preview = false;
+        let saved_browser = ws
+            .snapshot(cx)
+            .browser_preferences
+            .expect("browser recording settings persisted");
+        assert_eq!(saved_browser.effective_recording_frame_rate(), 60);
+        assert!(saved_browser.recording_show_key_presses);
+        assert!(saved_browser.recording_show_mouse_presses);
+        assert!(!saved_browser.auto_show_floating_preview);
+        assert_eq!(saved_browser.recording_preferences().frame_rate, 60);
+
+        // Track 2: Labs + Access identity
+        ws.set_settings_section(SettingsSection::Labs, cx);
+        ws.labs_flags.guest_links = false;
+        ws.labs_flags.simlock_hosts = true;
+        ws.set_settings_section(SettingsSection::Access, cx);
+        ws.select_settings_option("settings-environment-icon", "studio", w, cx);
+        ws.access_preferences.require_device_approval = false;
+        ws.access_preferences.hold_webhooks_while_offline = true;
+
+        // Track 3: Connections load balancing & pull request sharing
+        ws.set_settings_section(SettingsSection::Environments, cx);
+        ws.environment_sharing.load_balancing_enabled = true;
+        ws.environment_sharing.step_weight("local".into(), 50);
+        ws.environment_sharing.pull_request_sharing = true;
+        assert_eq!(ws.environment_sharing.weight_for("local"), 150);
+        assert_eq!(
+            ws.environment_sharing
+                .select_weighted_target(&[("local", 0.5), ("remote", 0.6)])
+                .as_deref(),
+            Some("local")
+        );
+
+        // Track 4: Devices durable policy & Simlock source
+        ws.set_settings_section(SettingsSection::Devices, cx);
+        ws.select_settings_option("settings-device-policy", "persistent", w, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "device-add-simlock");
+    cx.run_until_parked();
+    workspace.update_in(cx, |ws, w, cx| {
+        ws.simlock_label_input
+            .update(cx, |input, cx| input.set_value("Lab Studio", w, cx));
+        ws.simlock_origin_input.update(cx, |input, cx| {
+            input.set_value("https://gateway.example.ts.net:4700", w, cx)
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "device-save-simlock");
+    cx.run_until_parked();
+
+    // Verify full snapshot JSON round-trips cleanly.
+    let json = workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.device_preferences.simlock_hosts.len(), 1);
+        assert_eq!(ws.device_preferences.simlock_hosts[0].label, "Lab Studio");
+        serde_json::to_vec(&ws.snapshot(cx)).expect("serialize persisted state")
+    });
+    let restored: super::super::PersistedWorkspaceState =
+        serde_json::from_slice(&json).expect("deserialize persisted state");
+    assert_eq!(
+        restored
+            .browser_preferences
+            .as_ref()
+            .expect("browser prefs")
+            .recording_frame_rate,
+        60
+    );
+    assert!(!restored.labs_flags.guest_links);
+    assert!(restored.labs_flags.simlock_hosts);
+    assert_eq!(restored.access_preferences.environment_icon, "studio");
+    assert!(!restored.access_preferences.require_device_approval);
+    assert!(restored.access_preferences.hold_webhooks_while_offline);
+    assert!(restored.environment_sharing.load_balancing_enabled);
+    assert!(restored.environment_sharing.pull_request_sharing);
+    assert_eq!(restored.device_preferences.policy.key(), "persistent");
+    assert_eq!(restored.device_preferences.simlock_hosts.len(), 1);
+}

@@ -1,6 +1,31 @@
 //! Project folder layout for the native thread sidebar.
 use super::*;
 
+fn default_true() -> bool {
+    true
+}
+
+/// Experimental feature switches shown in Settings → Labs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct LabsFlags {
+    #[serde(default = "default_true")]
+    pub guest_links: bool,
+    #[serde(default = "default_true")]
+    pub linked_environments: bool,
+    pub simlock_hosts: bool,
+}
+
+impl Default for LabsFlags {
+    fn default() -> Self {
+        Self {
+            guest_links: true,
+            linked_environments: true,
+            simlock_hosts: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(super) struct Folders {
@@ -121,6 +146,38 @@ impl Workspace {
         }
         let mut rows = vec![folder.into_any_element()];
         rows.push(self.settings_row(
+            "labs-guest-links",
+            "Guest links",
+            "Share a thread with a guest who watches it live in a browser and sends messages you approve. Turning it off stops new guest links.",
+            settings_ui::switch(
+                "labs-enable-guest-links",
+                self.labs_flags.guest_links,
+                false,
+                "Guest links",
+                cx,
+                |this, _, cx| {
+                    this.labs_flags.guest_links = !this.labs_flags.guest_links;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
+            "labs-linked-environments",
+            "Linked environments",
+            "Connect other machines over SSH or HTTPS so agents can inspect checkouts, run scheduled tasks, and share conversations across hosts.",
+            settings_ui::switch(
+                "labs-enable-linked-environments",
+                self.labs_flags.linked_environments,
+                false,
+                "Linked environments",
+                cx,
+                |this, _, cx| {
+                    this.labs_flags.linked_environments = !this.labs_flags.linked_environments;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
             "labs-suggest-next",
             "Suggest next prompt",
             bruhs_models::logic::prompt_suggestion::SUGGESTION_HELP,
@@ -134,6 +191,22 @@ impl Workspace {
                     this.set_task_models(cx, |models| {
                         models.prompt_suggestions = !models.prompt_suggestions
                     });
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
+            "labs-simlock-hosts",
+            "Simlock device hosts (alpha)",
+            "Let the Device panel lease simulators and emulators from your own Simlock pool, added in Devices. An alpha that may change or break.",
+            settings_ui::switch(
+                "labs-enable-simlock-hosts",
+                self.labs_flags.simlock_hosts,
+                false,
+                "Simlock device hosts (alpha)",
+                cx,
+                |this, _, cx| {
+                    this.labs_flags.simlock_hosts = !this.labs_flags.simlock_hosts;
+                    this.persist_and_notify(cx);
                 },
             ),
         ));

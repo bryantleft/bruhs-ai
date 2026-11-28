@@ -718,6 +718,8 @@ impl Workspace {
             || self.select_cleanup(id, value, cx)
             || self.select_voice_runtime(id, value, cx)
             || self.select_project_default(id, value, cx)
+            || self.select_device_option(id, value, cx)
+            || self.select_access_option(id, value, cx)
         {
             self.set_settings_open_dropdown(None);
             return;
@@ -945,7 +947,8 @@ impl Workspace {
             "settings-browser-search-engine"
             | "settings-browser-zoom"
             | "settings-browser-appearance"
-            | "settings-browser-link-target" => {
+            | "settings-browser-link-target"
+            | "settings-browser-recording-frame-rate" => {
                 self.change_browser_preference(id, value, cx);
             }
             "settings-voice-destination" => {
@@ -3026,6 +3029,15 @@ impl Workspace {
         if !self.updates.read(cx).enabled {
             changed.push("Check for updates");
         }
+        if self.access_preferences != Default::default() {
+            changed.push("Sharing & access");
+        }
+        if self.device_preferences.policy != Default::default() {
+            changed.push("Device access policy");
+        }
+        if self.environment_sharing != Default::default() {
+            changed.push("Environment sharing");
+        }
         changed
     }
 
@@ -3098,6 +3110,9 @@ impl Workspace {
                         this.updates
                             .update(cx, |updates, cx| updates.set_enabled(true, cx));
                     }
+                    this.access_preferences = Default::default();
+                    this.device_preferences.policy = Default::default();
+                    this.environment_sharing = Default::default();
                     this.set_zoom(crate::zoom::DEFAULT, window, cx);
                 });
             }
@@ -3385,6 +3400,7 @@ impl Workspace {
                 return container
                     .flex()
                     .flex_col()
+                    .child(self.render_access_identity_card(cx))
                     .child(self.render_mobile(cx))
                     .child(self.render_trusted_folders(cx))
                     .into_any_element();

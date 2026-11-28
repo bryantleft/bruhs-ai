@@ -183,6 +183,15 @@ impl Workspace {
                     prefs.zoom_percent = percent;
                 }
             }
+            "settings-browser-recording-frame-rate"
+                if BrowserPreferences::FRAME_RATES
+                    .iter()
+                    .any(|(key, _)| *key == value) =>
+            {
+                if let Ok(fps) = value.parse() {
+                    prefs.recording_frame_rate = fps;
+                }
+            }
             _ => return,
         }
         self.persist_and_notify(cx);
@@ -267,6 +276,70 @@ impl Workspace {
                 )),
             ));
         }
+        let recording = prefs.recording_preferences();
+        rows.push(self.settings_row(
+            "desktop-settings-row-browser-recording-frame-rate",
+            "Browser recording frame rate",
+            "Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother.",
+            settings_ui::control_column(self.choice_control(
+                "settings-browser-recording-frame-rate",
+                "Browser recording frame rate",
+                &recording.frame_rate.to_string(),
+                BrowserPreferences::FRAME_RATES,
+                cx,
+            )),
+        ));
+        rows.push(self.settings_row(
+            "desktop-settings-row-browser-recording-key-presses",
+            "Show key presses in recordings",
+            "Show pressed keys and shortcuts in new recordings. Password fields are excluded.",
+            settings_ui::switch(
+                "settings-browser-recording-key-presses",
+                recording.show_key_presses,
+                false,
+                "Show key presses in recordings",
+                cx,
+                |this, _, cx| {
+                    let prefs = cx.default_global::<BrowserPreferences>();
+                    prefs.recording_show_key_presses = !prefs.recording_show_key_presses;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
+            "desktop-settings-row-browser-recording-mouse-presses",
+            "Show mouse presses in recordings",
+            "Highlight mouse presses and held buttons in new recordings.",
+            settings_ui::switch(
+                "settings-browser-recording-mouse-presses",
+                recording.show_mouse_presses,
+                false,
+                "Show mouse presses in recordings",
+                cx,
+                |this, _, cx| {
+                    let prefs = cx.default_global::<BrowserPreferences>();
+                    prefs.recording_show_mouse_presses = !prefs.recording_show_mouse_presses;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        rows.push(self.settings_row(
+            "desktop-settings-row-browser-auto-show-floating-preview",
+            "Auto-show floating preview",
+            "Show the floating preview when an agent opens a browser or device unless the agent says otherwise.",
+            settings_ui::switch(
+                "settings-browser-auto-show-floating-preview",
+                recording.auto_show_floating_preview,
+                false,
+                "Auto-show floating preview",
+                cx,
+                |this, _, cx| {
+                    let prefs = cx.default_global::<BrowserPreferences>();
+                    prefs.auto_show_floating_preview = !prefs.auto_show_floating_preview;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
         rows
     }
 }

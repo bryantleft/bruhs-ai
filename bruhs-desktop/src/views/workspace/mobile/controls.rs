@@ -49,6 +49,109 @@ impl Activate for Stateful<Div> {
     }
 }
 impl Workspace {
+    pub(in crate::views::workspace) fn select_access_option(
+        &mut self,
+        id: &str,
+        value: &str,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        if id != "settings-environment-icon" {
+            return false;
+        }
+        if AccessPreferences::ICONS.iter().any(|(k, _)| *k == value) {
+            self.access_preferences.environment_icon = value.to_owned();
+            self.persist_and_notify(cx);
+        }
+        true
+    }
+
+    pub(in crate::views::workspace) fn render_access_identity_card(
+        &self,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let tailscale_origin = self.mobile.origin.read(cx).value().trim().to_owned();
+        let tailscale_configured = tailscale_origin.contains(".ts.net");
+        let tailscale_action = control(
+            "access-tailscale-template",
+            if tailscale_configured {
+                "Using Tailscale"
+            } else {
+                "Use Tailscale Serve"
+            },
+            tailscale_configured || !matches!(self.mobile.connection, Connection::Off),
+        )
+        .activate(cx, |this, window, cx| {
+            this.mobile.proxy = true;
+            this.mobile.origin.update(cx, |input, cx| {
+                input.set_value("https://this-machine.tailnet.ts.net", window, cx)
+            });
+            cx.notify();
+        });
+        let rows = vec![
+            self.settings_row(
+                "settings-access-environment-icon",
+                "Environment icon",
+                "Glyph shown beside this machine in environment lists and linked sidebars.",
+                settings_ui::control_column(self.choice_control(
+                    "settings-environment-icon",
+                    "Environment icon",
+                    &self.access_preferences.environment_icon,
+                    AccessPreferences::ICONS,
+                    cx,
+                )),
+            ),
+            self.settings_row(
+                "settings-access-require-approval",
+                "Require approval for new devices",
+                "The device has to be approved here before it can connect again.",
+                settings_ui::switch(
+                    "settings-toggle-require-device-approval",
+                    self.access_preferences.require_device_approval,
+                    false,
+                    "Require approval for new devices",
+                    cx,
+                    |this, _, cx| {
+                        this.access_preferences.require_device_approval =
+                            !this.access_preferences.require_device_approval;
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "settings-access-hold-webhooks",
+                "Hold webhooks while offline",
+                "Keep webhook requests for up to 24 hours while this environment is offline.",
+                settings_ui::switch(
+                    "settings-toggle-hold-webhooks-offline",
+                    self.access_preferences.hold_webhooks_while_offline,
+                    false,
+                    "Hold webhooks while offline",
+                    cx,
+                    |this, _, cx| {
+                        this.access_preferences.hold_webhooks_while_offline =
+                            !this.access_preferences.hold_webhooks_while_offline;
+                        this.persist_and_notify(cx);
+                    },
+                ),
+            ),
+            self.settings_row(
+                "settings-access-tailscale",
+                "Tailscale HTTPS",
+                if tailscale_configured {
+                    format!("Configured with {tailscale_origin} over loopback proxy.")
+                } else {
+                    "Expose phone access over your tailnet using Tailscale Serve and MagicDNS."
+                        .into()
+                },
+                tailscale_action.into_any_element(),
+            ),
+        ];
+        div()
+            .mb_3()
+            .child(self.settings_card("This machine", "", rows))
+            .into_any_element()
+    }
+
     pub(in crate::views::workspace) fn render_mobile(
         &self,
         cx: &Context<'_, Self>,

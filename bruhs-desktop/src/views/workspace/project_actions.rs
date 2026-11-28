@@ -315,7 +315,10 @@ impl Workspace {
                 cx,
             )
         });
-        if action.auto_open_preview {
+        if action.auto_open_preview
+            && crate::views::browser_preferences::BrowserPreferences::get(cx)
+                .auto_show_floating_preview
+        {
             if let Some(url) = action.preview_url.as_deref() {
                 self.show_action_preview(url, window, cx);
             }

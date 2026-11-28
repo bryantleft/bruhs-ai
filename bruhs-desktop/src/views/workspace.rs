@@ -1054,6 +1054,14 @@ struct PersistedWorkspaceState {
     /// Missing means the Working section is on.
     sidebar_working_section: Option<bool>,
     labs_sidebar: labs::Folders,
+    #[serde(default)]
+    labs_flags: labs::LabsFlags,
+    #[serde(default)]
+    access_preferences: mobile::AccessPreferences,
+    #[serde(default)]
+    environment_sharing: environments::EnvironmentSharingPrefs,
+    #[serde(default)]
+    device_preferences: device_settings::DevicePreferences,
     #[serde(skip_serializing_if = "Option::is_none")]
     thread_notifications: Option<thread_notifications::NotificationSettings>,
     confirm_thread_archive: Option<bool>,
@@ -1659,6 +1667,12 @@ pub struct Workspace {
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     labs_sidebar: labs::Folders,
+    labs_flags: labs::LabsFlags,
+    access_preferences: mobile::AccessPreferences,
+    environment_sharing: environments::EnvironmentSharingPrefs,
+    device_preferences: device_settings::DevicePreferences,
+    simlock_label_input: Entity<InputState>,
+    simlock_origin_input: Entity<InputState>,
     thread_notifications: thread_notifications::NotificationSettings,
     confirm_thread_archive: bool,
     confirm_thread_unpin: bool,
@@ -2930,6 +2944,27 @@ impl Workspace {
                 .as_ref()
                 .map(|s| s.labs_sidebar.clone())
                 .unwrap_or_default(),
+            labs_flags: persisted
+                .as_ref()
+                .map(|s| s.labs_flags.clone())
+                .unwrap_or_default(),
+            access_preferences: persisted
+                .as_ref()
+                .map(|s| s.access_preferences.clone())
+                .unwrap_or_default(),
+            environment_sharing: persisted
+                .as_ref()
+                .map(|s| s.environment_sharing.clone())
+                .unwrap_or_default(),
+            device_preferences: persisted
+                .as_ref()
+                .map(|s| s.device_preferences.clone())
+                .unwrap_or_default(),
+            simlock_label_input: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Host label (e.g. Mac Studio)")),
+            simlock_origin_input: cx.new(|cx| {
+                InputState::new(window, cx).placeholder("https://gateway.example.ts.net:4700")
+            }),
             sidebar_working_section: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_working_section)

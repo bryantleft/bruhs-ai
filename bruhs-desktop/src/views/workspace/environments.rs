@@ -6,6 +6,55 @@ use bruhs_models::remote_hosts::{
 };
 use uuid::Uuid;
 
+/// Persisted load-balancing and pull-request sharing preferences across environments.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct EnvironmentSharingPrefs {
+    pub load_balancing_enabled: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub load_balancing_weights: BTreeMap<String, u8>,
+    pub pull_request_sharing: bool,
+}
+
+impl EnvironmentSharingPrefs {
+    pub(super) fn weight_for(&self, key: &str) -> u8 {
+        self.load_balancing_weights
+            .get(key)
+            .copied()
+            .unwrap_or(100)
+            .clamp(10, 200)
+    }
+
+    pub(super) fn step_weight(&mut self, key: String, delta: i16) {
+        let next =
+            u8::try_from((i16::from(self.weight_for(&key)) + delta).clamp(10, 200)).unwrap_or(100);
+        if next == 100 {
+            self.load_balancing_weights.remove(&key);
+        } else {
+            self.load_balancing_weights.insert(key, next);
+        }
+    }
+
+    /// Pick the candidate environment with the highest weighted free-capacity score.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "used by shared-project thread placement and load-balancing tests"
+        )
+    )]
+    pub(super) fn select_weighted_target(&self, candidates: &[(&str, f32)]) -> Option<String> {
+        candidates
+            .iter()
+            .max_by(|(a_id, a_free), (b_id, b_free)| {
+                let a_score = (*a_free).max(0.0) * f32::from(self.weight_for(a_id));
+                let b_score = (*b_free).max(0.0) * f32::from(self.weight_for(b_id));
+                a_score.total_cmp(&b_score)
+            })
+            .map(|(id, _)| (*id).to_owned())
+    }
+}
+
 const FIELDS: [&str; 6] = [
     "Name",
     "SSH alias or user@host",
@@ -440,6 +489,99 @@ impl Workspace {
                 ),
             );
         }
+        rows.push(self.settings_row(
+            "settings-environment-load-balancing",
+            "Load balancing",
+            "New threads in shared projects start on the machine with the most free CPU and memory, weighted by each machine's preference.",
+            settings_ui::switch(
+                "settings-toggle-load-balancing",
+                self.environment_sharing.load_balancing_enabled,
+                false,
+                "Automatically balance load",
+                cx,
+                |this, _, cx| {
+                    this.environment_sharing.load_balancing_enabled =
+                        !this.environment_sharing.load_balancing_enabled;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
+        if self.environment_sharing.load_balancing_enabled {
+            let mut targets: Vec<(String, String)> = vec![("local".into(), "This computer".into())];
+            for (id, name, _connected) in self.linked_projects.host_summaries() {
+                targets.push((id, name));
+            }
+            for (key, label) in targets {
+                let weight = self.environment_sharing.weight_for(&key);
+                let dec_key = key.clone();
+                let inc_key = key.clone();
+                let controls = div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .child(on_press_view(
+                        web_button(
+                            SharedString::from(format!("lb-weight-dec-{key}")),
+                            WebButtonVariant::Outline,
+                            WebButtonSize::Small,
+                            ButtonState::disabled_if(weight <= 10),
+                        )
+                        .aria_label(format!("Decrease weight for {label}"))
+                        .child("−"),
+                        cx,
+                        move |this, _, cx| {
+                            this.environment_sharing.step_weight(dec_key.clone(), -10);
+                            this.persist_and_notify(cx);
+                        },
+                    ))
+                    .child(
+                        div()
+                            .min_w(px(44.0))
+                            .text_center()
+                            .text_xs()
+                            .text_color(theme::rambutan_200())
+                            .child(format!("{weight}%")),
+                    )
+                    .child(on_press_view(
+                        web_button(
+                            SharedString::from(format!("lb-weight-inc-{key}")),
+                            WebButtonVariant::Outline,
+                            WebButtonSize::Small,
+                            ButtonState::disabled_if(weight >= 200),
+                        )
+                        .aria_label(format!("Increase weight for {label}"))
+                        .child("+"),
+                        cx,
+                        move |this, _, cx| {
+                            this.environment_sharing.step_weight(inc_key.clone(), 10);
+                            this.persist_and_notify(cx);
+                        },
+                    ));
+                rows.push(self.settings_row(
+                    format!("settings-lb-weight-{key}"),
+                    format!("Preference weight · {label}"),
+                    "Relative preference when balancing new shared-project threads (10% to 200%).",
+                    controls.into_any_element(),
+                ));
+            }
+        }
+        rows.push(self.settings_row(
+            "settings-environment-pr-sharing",
+            "Pull request sharing",
+            "Share pull request status, review guides, and branch links for shared repositories across linked environments.",
+            settings_ui::switch(
+                "settings-toggle-pr-sharing",
+                self.environment_sharing.pull_request_sharing,
+                false,
+                "Pull request sharing",
+                cx,
+                |this, _, cx| {
+                    this.environment_sharing.pull_request_sharing =
+                        !this.environment_sharing.pull_request_sharing;
+                    this.persist_and_notify(cx);
+                },
+            ),
+        ));
         rows.extend(self.project_environment_rows(cx));
         rows.extend(self.shortcut_environment_rows(cx));
         rows

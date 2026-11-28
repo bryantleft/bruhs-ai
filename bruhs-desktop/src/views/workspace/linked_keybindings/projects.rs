@@ -93,6 +93,12 @@ impl LinkedProjects {
             watch: None,
         }
     }
+    pub(in crate::views::workspace) fn host_summaries(&self) -> Vec<(String, String, bool)> {
+        self.hosts
+            .iter()
+            .map(|h| (h.credential.to_string(), h.name(), h.problem.is_none()))
+            .collect()
+    }
     pub(in crate::views::workspace) fn checkouts(
         &self,
     ) -> impl Iterator<Item = (uuid::Uuid, String, &Checkout)> {

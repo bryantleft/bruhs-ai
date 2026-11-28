@@ -85,12 +85,28 @@ pub(crate) struct BrowserProfile {
     pub name: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RecordingPreferences {
+    pub frame_rate: u8,
+    pub show_key_presses: bool,
+    pub show_mouse_presses: bool,
+    pub auto_show_floating_preview: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PagePreferences {
     pub appearance: BrowserAppearance,
     pub zoom_percent: Option<u16>,
     pub viewport: Option<(u16, u16)>,
     pub profile: Option<uuid::Uuid>,
+}
+
+fn default_recording_frame_rate() -> u8 {
+    30
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +118,12 @@ pub(crate) struct BrowserPreferences {
     pub zoom_percent: u16,
     pub viewport: BrowserViewport,
     pub appearance: BrowserAppearance,
+    #[serde(default = "default_recording_frame_rate")]
+    pub recording_frame_rate: u8,
+    pub recording_show_key_presses: bool,
+    pub recording_show_mouse_presses: bool,
+    #[serde(default = "default_true")]
+    pub auto_show_floating_preview: bool,
     pub profiles: Vec<BrowserProfile>,
     pub default_profile: Option<uuid::Uuid>,
 }
@@ -115,6 +137,10 @@ impl Default for BrowserPreferences {
             zoom_percent: 100,
             viewport: Default::default(),
             appearance: Default::default(),
+            recording_frame_rate: default_recording_frame_rate(),
+            recording_show_key_presses: false,
+            recording_show_mouse_presses: false,
+            auto_show_floating_preview: true,
             profiles: Vec::new(),
             default_profile: None,
         }
@@ -124,6 +150,15 @@ impl Default for BrowserPreferences {
 impl Global for BrowserPreferences {}
 
 impl BrowserPreferences {
+    pub const FRAME_RATES: &[(&str, &str)] = &[("30", "30 fps"), ("60", "60 fps")];
+
+    pub fn effective_recording_frame_rate(&self) -> u8 {
+        match self.recording_frame_rate {
+            60 => 60,
+            _ => 30,
+        }
+    }
+
     pub fn restore_defaults(&mut self) {
         let profiles = std::mem::take(&mut self.profiles);
         *self = Self {
@@ -136,6 +171,15 @@ impl BrowserPreferences {
         let mut defaults = self.clone();
         defaults.restore_defaults();
         self != &defaults
+    }
+
+    pub fn recording_preferences(&self) -> RecordingPreferences {
+        RecordingPreferences {
+            frame_rate: self.effective_recording_frame_rate(),
+            show_key_presses: self.recording_show_key_presses,
+            show_mouse_presses: self.recording_show_mouse_presses,
+            auto_show_floating_preview: self.auto_show_floating_preview,
+        }
     }
 
     pub fn page_settings(&self) -> PagePreferences {
