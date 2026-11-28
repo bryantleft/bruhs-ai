@@ -31,14 +31,19 @@ use crate::state::{
 use crate::ui::BrailleBruh;
 use crate::ui::{Breadcrumb, BreadcrumbSep, Dropdown, DropdownOption, Icon, Switch};
 
+mod environment_parity;
 mod trusted_folders;
+use environment_parity::{load_labs_flags, DevicesSettings, EnvironmentsSettings, LabsSettings};
 use trusted_folders::TrustedFolders;
 
 /// `(id, icon, label)` for the section nav, in page order.
-pub const SECTIONS: [(&str, &str, &str); 14] = [
+pub const SECTIONS: [(&str, &str, &str); 17] = [
     ("general", "settings", "General"),
     ("updates", "download", "Updates"),
     ("beta", "activity", "Beta"),
+    ("environments", "server", "Environments"),
+    ("devices", "smartphone", "Devices"),
+    ("labs", "zap", "Labs"),
     ("vault", "shield", "Vault"),
     ("trusted-folders", "shield", SETTINGS_TITLE),
     ("apps", "globe", "Apps"),
@@ -630,6 +635,7 @@ fn AboutSettings() -> impl IntoView {
 pub fn SettingsPage() -> impl IntoView {
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let (current, set_current) = signal(SECTIONS[0].0.to_string());
+    let labs_flags = RwSignal::new(load_labs_flags());
     let content_ref = NodeRef::<Div>::new();
     // The Vault and Apps sections refresh each other (final review BC M4).
     CredentialSync::provide();
@@ -793,6 +799,9 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="beta" title="Beta">
                             <BetaSettings />
                         </SettingsSection>
+                        <EnvironmentsSettings />
+                        <DevicesSettings labs=labs_flags />
+                        <LabsSettings labs=labs_flags />
                         <SettingsSection id="vault" title=VAULT_TITLE description=VAULT_DESCRIPTION>
                             <VaultSettings />
                         </SettingsSection>
@@ -853,17 +862,20 @@ mod tests {
 
     #[test]
     fn nav_and_shortcut_tables_are_well_formed() {
-        assert_eq!(SECTIONS.len(), 14);
+        assert_eq!(SECTIONS.len(), 17);
         assert_eq!(SECTIONS[1].0, "updates");
+        assert_eq!(SECTIONS[3].0, "environments");
+        assert_eq!(SECTIONS[4].0, "devices");
+        assert_eq!(SECTIONS[5].0, "labs");
         assert_eq!(
-            SECTIONS[3],
+            SECTIONS[6],
             ("vault", "shield", bruhs_models::vault::VAULT_TITLE)
         );
         assert_eq!(
-            SECTIONS[5],
+            SECTIONS[8],
             ("apps", "globe", bruhs_models::apps::APPS_TITLE)
         );
-        assert_eq!(SECTIONS[12].2, "Keybindings");
+        assert_eq!(SECTIONS[15].2, "Keybindings");
         let rules = bruhs_models::logic::keybindings::default_keybindings();
         assert!(rules.iter().all(|rule| {
             !rule.command.is_empty()

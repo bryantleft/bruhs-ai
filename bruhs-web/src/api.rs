@@ -197,6 +197,110 @@ pub async fn redeem_usage_credit(handle: uuid::Uuid) -> Result<String, ApiError>
     )
     .await
 }
+
+/// Durable device policy, Simlock remote hosts, and active device leases.
+pub async fn simlock_snapshot(
+) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ApiError> {
+    get_json("/api/local-tools/devices/simlock").await
+}
+
+pub async fn simlock_set_policy(
+    policy: bruhs_models::environment_parity::DeviceAccessPolicy,
+) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ApiError> {
+    send_json(
+        Method::PUT,
+        "/api/local-tools/devices/policy",
+        Some(&bruhs_models::environment_parity::DevicePolicyUpdate { policy }),
+    )
+    .await
+}
+
+pub async fn simlock_upsert_host(
+    spec: &bruhs_models::environment_parity::SimlockHostSpec,
+) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ApiError> {
+    send_json(
+        Method::POST,
+        "/api/local-tools/devices/simlock/hosts",
+        Some(spec),
+    )
+    .await
+}
+
+pub async fn simlock_remove_host(
+    id: uuid::Uuid,
+) -> Result<bruhs_models::environment_parity::SimlockPoolSnapshot, ApiError> {
+    send_json(
+        Method::DELETE,
+        &format!("/api/local-tools/devices/simlock/hosts/{id}"),
+        None::<&()>,
+    )
+    .await
+}
+
+pub async fn simlock_probe_host(
+    id: uuid::Uuid,
+) -> Result<bruhs_models::environment_parity::SimlockProbeResult, ApiError> {
+    send_json(
+        Method::POST,
+        &format!("/api/local-tools/devices/simlock/hosts/{id}/probe"),
+        None::<&()>,
+    )
+    .await
+}
+
+pub async fn simlock_release_lease(id: uuid::Uuid) -> Result<(), ApiError> {
+    let _: serde_json::Value = send_json(
+        Method::DELETE,
+        &format!("/api/local-tools/devices/simlock/leases/{id}"),
+        None::<&()>,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Managed cloud relay preferences and held offline webhook mailbox.
+pub async fn relay_snapshot() -> Result<bruhs_models::environment_parity::RelaySnapshot, ApiError> {
+    get_json("/api/local-tools/relay").await
+}
+
+pub async fn relay_update(
+    config: &bruhs_models::environment_parity::RelayConfig,
+) -> Result<bruhs_models::environment_parity::RelaySnapshot, ApiError> {
+    send_json(Method::PUT, "/api/local-tools/relay", Some(config)).await
+}
+
+pub async fn relay_flush_webhooks(
+) -> Result<bruhs_models::environment_parity::FlushWebhooksResponse, ApiError> {
+    send_json(
+        Method::POST,
+        "/api/local-tools/relay/webhooks/flush",
+        None::<&()>,
+    )
+    .await
+}
+
+/// Windows Subsystem for Linux (WSL) backend status and lifecycle controls.
+pub async fn wsl_status() -> Result<bruhs_models::environment_parity::WslBackendStatus, ApiError> {
+    get_json("/api/local-tools/wsl").await
+}
+
+pub async fn wsl_update_config(
+    config: &bruhs_models::environment_parity::WslBackendConfig,
+) -> Result<bruhs_models::environment_parity::WslBackendStatus, ApiError> {
+    send_json(Method::PUT, "/api/local-tools/wsl", Some(config)).await
+}
+
+pub async fn wsl_control(
+    action: bruhs_models::environment_parity::WslAction,
+    distro: Option<String>,
+) -> Result<bruhs_models::environment_parity::WslBackendStatus, ApiError> {
+    send_json(
+        Method::POST,
+        "/api/local-tools/wsl/control",
+        Some(&serde_json::json!({ "action": action, "distro": distro })),
+    )
+    .await
+}
 pub async fn connect_service(
     provider: bruhs_models::connections::ServiceProvider,
     login: &bruhs_models::connections::ConnectionLogin,

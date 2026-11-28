@@ -175,14 +175,19 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
 
     view! {
         <div class=format!(
-            "pointer-events-auto flex w-full min-w-0 max-w-[360px] shrink-0 items-center gap-2.5 rounded-[10px] bg-longan-900/95 inset-ring shadow-md pl-3 pr-2 py-2 text-body-sm text-rambutan-100 {ring_class}"
+            "pointer-events-auto flex w-full min-w-0 max-w-[360px] shrink-0 items-start gap-2.5 rounded-[10px] bg-longan-900/95 inset-ring shadow-md pl-3 pr-2 py-2 text-body-sm text-rambutan-100 {ring_class}"
         )>
-            <span class=format!("shrink-0 text-label {icon_class}") aria-hidden="true">{icon}</span>
+            <span
+                class=format!("inline-flex h-[1.4em] shrink-0 items-center text-label leading-none {icon_class}")
+                aria-hidden="true"
+            >
+                {icon}
+            </span>
             <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
             {action.map(|action| view! {
                 <button
                     type="button"
-                    class="bruhs-control -my-1 min-h-control shrink-0 rounded-seed px-2 text-label-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-persimmon-500 cursor-pointer"
+                    class="bruhs-control -mt-1.5 min-h-control shrink-0 rounded-seed px-2 text-label-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-persimmon-500 cursor-pointer"
                     on:click=move |_| {
                         action.run.run(());
                         on_dismiss_action(id_for_action.clone());
@@ -194,7 +199,7 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
             <button
                 type="button"
                 aria-label="Dismiss notification"
-                class="bruhs-control -mr-2 -my-1 min-h-control min-w-control shrink-0 rounded-seed opacity-60 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-opacity cursor-pointer"
+                class="bruhs-control -mr-1 -mt-1.5 inline-flex min-h-control min-w-control shrink-0 items-center justify-center rounded-seed opacity-60 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-opacity cursor-pointer"
                 on:click=move |_| on_dismiss_btn(id_for_dismiss.clone())
             >
                 "×"
